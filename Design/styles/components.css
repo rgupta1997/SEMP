@@ -1,0 +1,216 @@
+/* ============================================================
+   SPORTAGON — Base + Component styles
+   ============================================================ */
+
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Archivo+Expanded:wght@600;700;800;900&display=swap");
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
+  font-family: var(--font-ui);
+  background: var(--surface-base);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "ss01", "cv01";
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+#root { height: 100%; }
+
+.tnum { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--font-mono); }
+
+::selection { background: color-mix(in oklch, var(--brand-500) 30%, transparent); }
+
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+input, select, textarea { font-family: inherit; }
+a { color: inherit; text-decoration: none; }
+
+:focus-visible { outline: none; box-shadow: var(--ring-focus); border-radius: var(--r-sm); }
+
+/* —— Scrollbars —— */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ============================ TYPE ============================ */
+.eyebrow {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.13em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.display-xl { font-family: var(--font-display); font-weight: 800; font-size: clamp(40px, 6vw, 64px); line-height: 0.96; letter-spacing: -0.02em; }
+.display-lg { font-family: var(--font-display); font-weight: 800; font-size: 40px; line-height: 1; letter-spacing: -0.015em; }
+.h1 { font-size: 28px; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; }
+.h2 { font-size: 21px; font-weight: 700; line-height: 1.2; letter-spacing: -0.015em; }
+.h3 { font-size: 16px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; }
+.body { font-size: 15px; font-weight: 400; }
+.sm { font-size: 13px; font-weight: 500; }
+.xs { font-size: 12px; font-weight: 600; }
+.text-secondary { color: var(--text-secondary); }
+.text-muted { color: var(--text-muted); }
+.text-brand { color: var(--brand-600); }
+.dark .text-brand { color: var(--brand-500); }
+
+/* ============================ BUTTON ============================ */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font-weight: 600; font-size: 14px; line-height: 1;
+  border-radius: var(--r-md);
+  padding: 0 16px; height: calc(40px * var(--density));
+  white-space: nowrap; user-select: none;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+              box-shadow var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), border-color var(--dur-fast);
+  border: 1px solid transparent;
+}
+.btn:active { transform: translateY(0.5px) scale(0.99); }
+.btn:disabled { opacity: 0.5; pointer-events: none; }
+.btn-primary { background: var(--brand-600); color: var(--text-on-brand); box-shadow: var(--shadow-xs); }
+.btn-primary:hover { background: var(--brand-700); }
+.dark .btn-primary { background: var(--brand-500); }
+.dark .btn-primary:hover { background: var(--brand-400); }
+.btn-secondary { background: var(--surface-raised); color: var(--text-primary); border-color: var(--border-default); box-shadow: var(--shadow-xs); }
+.btn-secondary:hover { background: var(--surface-sunken); border-color: var(--border-strong); }
+.btn-outline { background: transparent; color: var(--text-primary); border-color: var(--border-default); }
+.btn-outline:hover { background: var(--surface-sunken); }
+.btn-ghost { background: transparent; color: var(--text-secondary); }
+.btn-ghost:hover { background: var(--surface-sunken); color: var(--text-primary); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover { filter: brightness(0.93); }
+.btn-live { background: var(--live); color: #fff; }
+.btn-live:hover { filter: brightness(1.05); }
+.btn-sm { height: calc(32px * var(--density)); font-size: 13px; padding: 0 12px; border-radius: var(--r-sm); }
+.btn-lg { height: calc(48px * var(--density)); font-size: 15px; padding: 0 22px; }
+.btn-xl { height: calc(60px * var(--density)); font-size: 17px; padding: 0 28px; border-radius: var(--r-lg); }
+.btn-icon { padding: 0; width: calc(40px * var(--density)); }
+.btn-icon.btn-sm { width: calc(32px * var(--density)); }
+.btn-block { width: 100%; }
+
+/* ============================ BADGE ============================ */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em;
+  padding: 3px 9px; border-radius: var(--r-full); line-height: 1.4;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.badge-neutral { background: var(--surface-sunken); color: var(--text-secondary); border-color: var(--border-subtle); }
+.badge-brand   { background: color-mix(in oklch, var(--brand-500) 12%, transparent); color: var(--brand-700); }
+.dark .badge-brand { color: var(--brand-400); }
+.badge-success { background: var(--success-bg); color: var(--success); }
+.badge-warning { background: var(--warning-bg); color: color-mix(in oklch, var(--warning) 80%, #000 20%); }
+.dark .badge-warning { color: var(--warning); }
+.badge-danger  { background: var(--danger-bg); color: var(--danger); }
+.badge-info    { background: var(--info-bg); color: var(--info); }
+.badge-live {
+  background: var(--live); color: #fff; border: none;
+  box-shadow: 0 0 0 0 var(--live-glow);
+  animation: livePulse 2s var(--ease) infinite;
+}
+.badge-live .dot { background: #fff; animation: liveDot 1.2s ease-in-out infinite; }
+@keyframes livePulse { 0% { box-shadow: 0 0 0 0 var(--live-glow); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@keyframes liveDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .badge-live { animation: none; } .badge-live .dot { animation: none; } }
+
+/* ============================ CARD ============================ */
+.card {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+.card-pad { padding: calc(20px * var(--density)); }
+.card-hover { transition: box-shadow var(--dur-base) var(--ease), transform var(--dur-base) var(--ease), border-color var(--dur-base); cursor: pointer; }
+.card-hover:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); border-color: var(--border-default); }
+
+/* ============================ STAT CARD ============================ */
+.stat { display: flex; flex-direction: column; gap: 6px; }
+.stat-value { font-family: var(--font-display); font-weight: 800; font-size: 30px; line-height: 1; letter-spacing: -0.02em; }
+.stat-label { font-size: 12.5px; font-weight: 600; color: var(--text-muted); }
+.stat-delta { font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 3px; }
+.stat-delta.up { color: var(--success); }
+.stat-delta.down { color: var(--danger); }
+
+/* ============================ AVATAR ============================ */
+.avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; font-weight: 700; color: #fff; flex: none;
+  background: var(--brand-500); font-size: 13px; overflow: hidden;
+}
+.avatar-sm { width: 28px; height: 28px; font-size: 11px; }
+.avatar-md { width: 36px; height: 36px; font-size: 13px; }
+.avatar-lg { width: 48px; height: 48px; font-size: 16px; }
+
+/* Team crest */
+.crest {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r-md); font-weight: 800; color: #fff; flex: none;
+  font-family: var(--font-display); letter-spacing: -0.02em;
+}
+
+/* ============================ TABS ============================ */
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border-subtle); overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  position: relative; padding: 11px 14px; font-size: 14px; font-weight: 600;
+  color: var(--text-muted); white-space: nowrap;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color var(--dur-fast) var(--ease);
+}
+.tab:hover { color: var(--text-secondary); }
+.tab.active { color: var(--brand-600); border-bottom-color: var(--brand-600); }
+.dark .tab.active { color: var(--brand-500); border-bottom-color: var(--brand-500); }
+.tab-count { margin-left: 6px; font-size: 11px; padding: 1px 6px; border-radius: 99px; background: var(--surface-sunken); color: var(--text-muted); }
+.tab.active .tab-count { background: color-mix(in oklch, var(--brand-500) 16%, transparent); color: var(--brand-700); }
+
+/* ============================ SEGMENTED ============================ */
+.segmented { display: inline-flex; background: var(--surface-sunken); border-radius: var(--r-md); padding: 3px; gap: 2px; }
+.segmented button {
+  padding: 6px 14px; font-size: 13px; font-weight: 600; border-radius: calc(var(--r-md) - 3px);
+  color: var(--text-muted); transition: all var(--dur-fast) var(--ease);
+}
+.segmented button.active { background: var(--surface-raised); color: var(--text-primary); box-shadow: var(--shadow-xs); }
+
+/* ============================ INPUT ============================ */
+.field { display: flex; flex-direction: column; gap: 6px; }
+.label { font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
+.input, .select {
+  height: calc(40px * var(--density)); padding: 0 12px; font-size: 14px;
+  background: var(--surface-raised); color: var(--text-primary);
+  border: 1px solid var(--border-default); border-radius: var(--r-md);
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+  width: 100%;
+}
+.input:focus, .select:focus { border-color: var(--brand-500); box-shadow: var(--ring-focus); outline: none; }
+.input::placeholder { color: var(--text-muted); }
+
+/* ============================ MISC ============================ */
+.divider { height: 1px; background: var(--border-subtle); border: none; }
+.kbd {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  padding: 2px 6px; border-radius: 6px; background: var(--surface-sunken);
+  border: 1px solid var(--border-default); color: var(--text-secondary);
+  box-shadow: 0 1px 0 var(--border-default);
+}
+.skeleton { background: linear-gradient(90deg, var(--surface-sunken) 25%, var(--border-subtle) 50%, var(--surface-sunken) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: var(--r-sm); }
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+.scroll-y { overflow-y: auto; }
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Entrance — opacity stays 1 always (paused iframes can strand opacity:0);
+   only a subtle transform animates in when motion is welcome. */
+@keyframes fadeUp { from { transform: translateY(10px); } to { transform: none; } }
+.fade-up { opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .fade-up { animation: fadeUp var(--dur-slow) var(--ease-out); }
+}
+
+/* Score tick — transform only, never hide the digit */
+@keyframes tick { 0% { transform: translateY(35%); } 100% { transform: none; } }
+.tick { animation: tick var(--dur-base) var(--ease-out); }

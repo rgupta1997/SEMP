@@ -1,0 +1,19 @@
+{
+  "name": "semp",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @semp/api & npm run dev --workspace @semp/web",
+    "dev:api": "npm run dev --workspace @semp/api",
+    "dev:web": "npm run dev --workspace @semp/web",
+    "build": "npm run build --workspace @semp/shared && npm run build --workspace @semp/api && npm run build --workspace @semp/web",
+    "prisma:pull": "npm run prisma:pull --workspace @semp/api",
+    "prisma:generate": "npm run prisma:generate --workspace @semp/api",
+    "seed": "npm run seed --workspace @semp/api",
+    "test": "npm run test --workspace @semp/api"
+  }
+}

@@ -1,0 +1,31 @@
+/* ============================================================
+   SPORTAGON — Match cards & rows (compact scoring surface)
+   ============================================================ */
+
+.msc { position: relative; padding: 14px; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+.msc-accent { position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+.msc-live { border-color: color-mix(in oklch, var(--live) 35%, var(--border-subtle)); }
+.msc-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.msc-sport { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.msc-tour { font-weight: 700; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msc-round { font-size: 11.5px; color: var(--text-muted); font-weight: 600; }
+.msc-teams { display: flex; flex-direction: column; gap: 8px; }
+.msc-team { display: flex; align-items: center; gap: 10px; }
+.msc-name { flex: 1; font-weight: 700; font-size: 15px; }
+.msc-score { font-family: var(--font-display); font-weight: 800; font-size: 24px; letter-spacing: -.02em; }
+.msc-team.lost { opacity: .5; }
+.msc-team.lost .msc-score { font-weight: 700; }
+.msc-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid var(--border-subtle); }
+.msc-meta { font-size: 12px; font-weight: 600; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.msc-cta { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 700; color: var(--brand-600); }
+.dark .msc-cta { color: var(--brand-400); }
+
+/* slim row */
+.mrow { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-raised); border: 1px solid var(--border-subtle); text-align: left; transition: background var(--dur-fast), border-color var(--dur-fast); }
+.mrow:hover { border-color: var(--border-default); background: var(--surface-base); }
+.mrow-live { border-left: 3px solid var(--live); }
+.mrow-teams { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mrow-t { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-weight: 700; font-size: 14px; }
+.mrow-t.lost { opacity: .5; }
+.mrow-s { font-family: var(--font-display); font-weight: 800; font-size: 16px; }
+.mrow-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: none; }

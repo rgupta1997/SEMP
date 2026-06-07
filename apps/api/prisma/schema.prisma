@@ -1,0 +1,380 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model disciplines {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sport_id               String                   @db.Uuid
+  name                   String                   @db.VarChar
+  description            String?                  @db.VarChar
+  entry_type             String                   @default("team") @db.VarChar
+  squad_min              Int                      @default(1) @db.SmallInt
+  squad_max              Int                      @default(15) @db.SmallInt
+  display_order          Int                      @default(0)
+  sports                 sports                   @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tournament_disciplines tournament_disciplines[]
+
+  @@index([sport_id], map: "idx_disciplines_sport_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model event_institutions {
+  id                                          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id                                    String       @db.Uuid
+  institution_id                              String       @db.Uuid
+  status                                      String       @default("pending") @db.VarChar
+  applied_by                                  String       @db.Uuid
+  reviewed_by                                 String?      @db.Uuid
+  rejection_note                              String?
+  applied_at                                  DateTime     @default(now()) @db.Timestamptz(6)
+  reviewed_at                                 DateTime?    @db.Timestamptz(6)
+  users_event_institutions_applied_byTousers  users        @relation("event_institutions_applied_byTousers", fields: [applied_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  events                                      events       @relation(fields: [event_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  institutions                                institutions @relation(fields: [institution_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_event_institutions_reviewed_byTousers users?       @relation("event_institutions_reviewed_byTousers", fields: [reviewed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  teams                                       teams[]
+
+  @@unique([event_id, institution_id])
+  @@index([applied_by], map: "idx_event_institutions_applied_by")
+  @@index([event_id], map: "idx_event_institutions_event_id")
+  @@index([institution_id], map: "idx_event_institutions_institution_id")
+  @@index([reviewed_by], map: "idx_event_institutions_reviewed_by")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model events {
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name               String               @db.VarChar
+  slug               String               @unique @db.VarChar
+  description        String?
+  venue              String?              @db.VarChar
+  start_date         DateTime             @db.Date
+  end_date           DateTime             @db.Date
+  status             String               @default("draft") @db.VarChar
+  created_at         DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime             @default(now()) @db.Timestamptz(6)
+  event_institutions event_institutions[]
+  event_officials    event_officials[]
+  sponsors           sponsors[]
+  teams              teams[]
+  tournaments        tournaments[]
+  user_event_roles   user_event_roles[]
+  venues             venues[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model fixtures {
+  id                                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tournament_discipline_id             String                 @db.Uuid
+  home_team_id                         String?                @db.Uuid
+  away_team_id                         String?                @db.Uuid
+  venue_ground_id                      String?                @db.Uuid
+  round                                String?                @db.VarChar
+  pool_number                          Int?                   @db.SmallInt
+  bracket_position                     Int?
+  scheduled_at                         DateTime?              @db.Timestamptz(6)
+  duration_minutes                     Int?
+  status                               String                 @default("scheduled") @db.VarChar
+  official_id                          String?                @db.Uuid
+  notes                                String?
+  created_at                           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at                           DateTime               @default(now()) @db.Timestamptz(6)
+  home_score                           Int?
+  away_score                           Int?
+  winner_team_id                       String?                @db.Uuid
+  live_state                           Json                   @default("{}")
+  live_log                             Json                   @default("[]")
+  teams_fixtures_away_team_idToteams   teams?                 @relation("fixtures_away_team_idToteams", fields: [away_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  teams_fixtures_home_team_idToteams   teams?                 @relation("fixtures_home_team_idToteams", fields: [home_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                                users?                 @relation(fields: [official_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tournament_disciplines               tournament_disciplines @relation(fields: [tournament_discipline_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  venue_grounds                        venue_grounds?         @relation(fields: [venue_ground_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  teams_fixtures_winner_team_idToteams teams?                 @relation("fixtures_winner_team_idToteams", fields: [winner_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([away_team_id], map: "idx_fixtures_away_team_id")
+  @@index([home_team_id], map: "idx_fixtures_home_team_id")
+  @@index([official_id], map: "idx_fixtures_official_id")
+  @@index([tournament_discipline_id], map: "idx_fixtures_tournament_discipline_id")
+  @@index([venue_ground_id], map: "idx_fixtures_venue_ground_id")
+  @@index([winner_team_id], map: "idx_fixtures_winner_team_id")
+}
+
+model institutions {
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name               String               @db.VarChar
+  short_name         String?              @db.VarChar
+  code               String?              @unique @db.VarChar
+  logo_url           String?
+  city               String?              @db.VarChar
+  status             Boolean?
+  country            String               @default("India") @db.VarChar
+  created_at         DateTime             @default(now()) @db.Timestamptz(6)
+  event_institutions event_institutions[]
+  teams              teams[]
+  users              users[]
+}
+
+model permissions {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code       String   @unique @db.VarChar
+  label      String   @db.VarChar
+  rules      Json[]   @default([])
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model roles {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String             @unique @db.VarChar
+  description      String?            @db.VarChar
+  permission_ids   String[]           @default([]) @db.Uuid
+  created_at       DateTime           @default(now()) @db.Timestamptz(6)
+  user_event_roles user_event_roles[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model sponsors {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id      String   @db.Uuid
+  name          String   @db.VarChar
+  logo_url      String?
+  tier          String   @default("community") @db.VarChar
+  website_url   String?
+  display_order Int      @default(0)
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+  events        events   @relation(fields: [event_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([event_id], map: "idx_sponsors_event_id")
+}
+
+model sports {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String              @db.VarChar
+  icon              String?             @db.VarChar
+  created_at        DateTime            @default(now()) @db.Timestamptz(6)
+  disciplines       disciplines[]
+  teams             teams[]
+  tournament_sports tournament_sports[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model team_members {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  team_id       String   @db.Uuid
+  user_id       String   @db.Uuid
+  role          String   @default("player") @db.VarChar
+  jersey_number Int?     @db.SmallInt
+  is_active     Boolean  @default(true)
+  joined_at     DateTime @default(now()) @db.Timestamptz(6)
+  teams         teams    @relation(fields: [team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users         users    @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([team_id, user_id])
+  @@index([team_id], map: "idx_team_members_team_id")
+  @@index([user_id], map: "idx_team_members_user_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model teams {
+  id                                      String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id                                String                  @db.Uuid
+  sport_id                                String                  @db.Uuid
+  institution_id                          String                  @db.Uuid
+  event_institution_id                    String                  @db.Uuid
+  tournament_discipline_id                String?                 @db.Uuid
+  name                                    String                  @db.VarChar
+  status                                  String                  @default("forming") @db.VarChar
+  invite_token                            String?                 @unique @db.VarChar
+  created_at                              DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at                              DateTime                @default(now()) @db.Timestamptz(6)
+  fixtures_fixtures_away_team_idToteams   fixtures[]              @relation("fixtures_away_team_idToteams")
+  fixtures_fixtures_home_team_idToteams   fixtures[]              @relation("fixtures_home_team_idToteams")
+  fixtures_fixtures_winner_team_idToteams fixtures[]              @relation("fixtures_winner_team_idToteams")
+  team_members                            team_members[]
+  events                                  events                  @relation(fields: [event_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  event_institutions                      event_institutions      @relation(fields: [event_institution_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  institutions                            institutions            @relation(fields: [institution_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sports                                  sports                  @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tournament_disciplines                  tournament_disciplines? @relation(fields: [tournament_discipline_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([event_id], map: "idx_teams_event_id")
+  @@index([event_institution_id], map: "idx_teams_event_institution_id")
+  @@index([institution_id], map: "idx_teams_institution_id")
+  @@index([sport_id], map: "idx_teams_sport_id")
+  @@index([tournament_discipline_id], map: "idx_teams_tournament_discipline_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model tournament_disciplines {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tournament_sport_id String              @db.Uuid
+  discipline_id       String?             @db.Uuid
+  format_id           String?             @db.Uuid
+  format_config       Json                @default("{}")
+  venue_id            String?             @db.Uuid
+  rulebook_url        String?
+  entry_type          String?             @db.VarChar
+  squad_min           Int?                @db.SmallInt
+  squad_max           Int?                @db.SmallInt
+  status              String              @default("upcoming") @db.VarChar
+  display_order       Int                 @default(0)
+  created_at          DateTime            @default(now()) @db.Timestamptz(6)
+  fixtures            fixtures[]
+  teams               teams[]
+  disciplines         disciplines?        @relation(fields: [discipline_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tournament_formats  tournament_formats? @relation(fields: [format_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tournament_sports   tournament_sports   @relation(fields: [tournament_sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  venues              venues?             @relation(fields: [venue_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([tournament_sport_id, discipline_id])
+  @@index([discipline_id], map: "idx_tournament_disciplines_discipline_id")
+  @@index([format_id], map: "idx_tournament_disciplines_format_id")
+  @@index([tournament_sport_id], map: "idx_tournament_disciplines_tournament_sport_id")
+  @@index([venue_id], map: "idx_tournament_disciplines_venue_id")
+}
+
+model tournament_formats {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                   String                   @unique @db.VarChar
+  description            String?                  @db.VarChar
+  config                 Json                     @default("{}")
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  tournament_disciplines tournament_disciplines[]
+  tournament_sports      tournament_sports[]
+}
+
+model tournament_sports {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tournament_id          String                   @db.Uuid
+  sport_id               String                   @db.Uuid
+  format_id              String                   @db.Uuid
+  format_config          Json                     @default("{}")
+  display_order          Int                      @default(0)
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  tournament_disciplines tournament_disciplines[]
+  tournament_formats     tournament_formats       @relation(fields: [format_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sports                 sports                   @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tournaments            tournaments              @relation(fields: [tournament_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([tournament_id, sport_id])
+  @@index([format_id], map: "idx_tournament_sports_format_id")
+  @@index([sport_id], map: "idx_tournament_sports_sport_id")
+  @@index([tournament_id], map: "idx_tournament_sports_tournament_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model tournaments {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id          String              @db.Uuid
+  name              String              @db.VarChar
+  description       String?
+  status            String              @default("draft") @db.VarChar
+  created_at        DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime            @default(now()) @db.Timestamptz(6)
+  tournament_sports tournament_sports[]
+  events            events              @relation(fields: [event_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([event_id], map: "idx_tournaments_event_id")
+}
+
+model user_event_roles {
+  id                                        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                                   String   @db.Uuid
+  event_id                                  String   @db.Uuid
+  role_id                                   String   @db.Uuid
+  assigned_by                               String?  @db.Uuid
+  assigned_at                               DateTime @default(now()) @db.Timestamptz(6)
+  users_user_event_roles_assigned_byTousers users?   @relation("user_event_roles_assigned_byTousers", fields: [assigned_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  events                                    events   @relation(fields: [event_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  roles                                     roles    @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_user_event_roles_user_idTousers     users    @relation("user_event_roles_user_idTousers", fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([user_id, event_id, role_id])
+  @@index([assigned_by], map: "idx_user_event_roles_assigned_by")
+  @@index([event_id], map: "idx_user_event_roles_event_id")
+  @@index([role_id], map: "idx_user_event_roles_role_id")
+  @@index([user_id], map: "idx_user_event_roles_user_id")
+}
+
+model users {
+  id                                                       String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                                                     String               @db.VarChar
+  email                                                    String               @unique @db.VarChar
+  phone                                                    String?              @db.VarChar
+  avatar_url                                               String?
+  is_active                                                Boolean              @default(true)
+  created_at                                               DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at                                               DateTime             @default(now()) @db.Timestamptz(6)
+  password_hash                                            String?
+  is_super_admin                                           Boolean              @default(false)
+  institution_id                                           String?              @db.Uuid
+  account_type                                             String               @default("participant") @db.VarChar
+  event_institutions_event_institutions_applied_byTousers  event_institutions[] @relation("event_institutions_applied_byTousers")
+  event_institutions_event_institutions_reviewed_byTousers event_institutions[] @relation("event_institutions_reviewed_byTousers")
+  event_officials_event_officials_assigned_byTousers       event_officials[]    @relation("event_officials_assigned_byTousers")
+  event_officials_event_officials_user_idTousers           event_officials[]    @relation("event_officials_user_idTousers")
+  fixtures                                                 fixtures[]
+  team_members                                             team_members[]
+  user_event_roles_user_event_roles_assigned_byTousers     user_event_roles[]   @relation("user_event_roles_assigned_byTousers")
+  user_event_roles_user_event_roles_user_idTousers         user_event_roles[]   @relation("user_event_roles_user_idTousers")
+  institutions                                             institutions?        @relation(fields: [institution_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([institution_id], map: "idx_users_institution_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model venue_grounds {
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venue_id      String     @db.Uuid
+  name          String     @db.VarChar
+  ground_type   String?    @db.VarChar
+  capacity      Int?
+  display_order Int        @default(0)
+  is_active     Boolean    @default(true)
+  created_at    DateTime   @default(now()) @db.Timestamptz(6)
+  fixtures      fixtures[]
+  venues        venues     @relation(fields: [venue_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([venue_id], map: "idx_venue_grounds_venue_id")
+}
+
+model venues {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id               String                   @db.Uuid
+  name                   String                   @db.VarChar
+  address                String?
+  city                   String?                  @db.VarChar
+  country                String                   @default("India") @db.VarChar
+  latitude               Decimal?                 @db.Decimal
+  longitude              Decimal?                 @db.Decimal
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  tournament_disciplines tournament_disciplines[]
+  venue_grounds          venue_grounds[]
+  events                 events                   @relation(fields: [event_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([event_id], map: "idx_venues_event_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model event_officials {
+  id                                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id                                 String   @db.Uuid
+  user_id                                  String   @db.Uuid
+  assigned_by                              String?  @db.Uuid
+  assigned_at                              DateTime @default(now()) @db.Timestamptz(6)
+  is_active                                Boolean  @default(true)
+  notes                                    String?
+  users_event_officials_assigned_byTousers users?   @relation("event_officials_assigned_byTousers", fields: [assigned_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  events                                   events   @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_event_officials_user_idTousers     users    @relation("event_officials_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([event_id, user_id])
+  @@index([event_id], map: "idx_event_officials_event_id")
+  @@index([user_id], map: "idx_event_officials_user_id")
+}

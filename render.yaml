@@ -1,0 +1,23 @@
+# Render Blueprint — SEMP backend (Express + Prisma, run with tsx).
+# Usage: push this repo to GitHub, then in Render → New + → Blueprint → pick the repo.
+# Set DATABASE_URL and WEB_ORIGIN in the dashboard (JWT_SECRET is generated for you).
+services:
+  - type: web
+    name: semp-api
+    runtime: node
+    plan: free
+    rootDir: .
+    # --include=dev so tsx + prisma (devDependencies) are available for generate/runtime.
+    buildCommand: npm install --include=dev && npm run prisma:generate --workspace @semp/api
+    startCommand: npm run start --workspace @semp/api
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false            # Supabase connection string (port 5432 direct, or 6543 pooler + ?pgbouncer=true)
+      - key: JWT_SECRET
+        generateValue: true    # Render generates a strong secret
+      - key: WEB_ORIGIN
+        sync: false            # your Netlify URL, e.g. https://your-app.netlify.app (comma-separate for multiple)
+      - key: NODE_VERSION
+        value: "20"

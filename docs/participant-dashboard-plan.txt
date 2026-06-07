@@ -1,0 +1,234 @@
+PARTICIPANT DASHBOARD PLAN
+Cross-Event View (with Drill-Down)
+==================================
+
+Overview
+--------
+Design and implement a cross-event participant dashboard with drill-down navigation.
+Summary loads fast on landing; clicking events, teams, or matches fetches full detail
+on demand with responsive layouts and loading states.
+
+Participants see ALL events they played in (Mumbai, Bangalore, different organisers).
+Organisers, officials, and institutions remain event-scoped only.
+
+
+CURRENT STATE
+-------------
+- apps/web/src/pages/participant/ProfilePage.tsx shows basic info
+- Fetches fixtures per team (N+1 requests)
+- No event drill-down, no match detail page, no cross-event career stats
+- /me/teams API already returns teams across all events (good foundation)
+- Need summary + detail endpoints for responsive UX
+
+
+DESIGN PRINCIPLE: PROGRESSIVE LOADING
+-------------------------------------
+Do NOT load everything in one giant payload on landing.
+
+1. Landing (/me)           - fast summary: stats, event cards, last 5 matches
+2. Click event card        - navigate to /me/events/:eventId, fetch full event data
+3. Click match row         - navigate to /me/matches/:fixtureId, fetch match detail
+4. Click team in event     - scroll/expand to team section or /me/events/:eventId/teams/:teamId
+
+Every click shows immediate feedback (skeleton/spinner) while data loads.
+TanStack Query caches results so back-navigation is instant.
+
+
+DATA FLOW
+---------
+Landing /me
+  GET /me/dashboard -> Stats + event cards + recent 5 matches
+
+Click Event
+  Navigate /me/events/:id -> GET /me/events/:id -> Teams, all matches, standings, disciplines
+
+Click Match
+  Navigate /me/matches/:id -> GET /me/matches/:id -> Score, venue, roster, round context
+
+
+INFORMATION ARCHITECTURE
+------------------------
+
+Landing Dashboard (/me)
++------------------+  +--------------------------------------+
+|  PLAYER CARD     |  |  CAREER STATS: Events | Matches | W-L-D |
+|  - Avatar        |  +--------------------------------------+
+|  - Name          |
+|  - Institution   |  MY EVENTS (clickable cards)
+|  - Email/Phone   |  +----------------------+  +----------------------+
++------------------+  | Genesis '26          |  | TechFest Bangalore   |  <- click
+                      | Mumbai · ONGOING      |  | Feb 2026 · COMPLETED |
+                      | 2 sports · 5 matches  |  | 1 sport · 3 matches  |
+                      +----------------------+  +----------------------+
+
+                      RECENT MATCHES (clickable rows)     [All matches ->]
+                      Genesis '26 · Cricket · W 3-2 vs IITB    Mar 15  -> click
+                      Genesis '26 · Football · L 1-4 vs DJSCE  Mar 16
+
+
+Event Detail (/me/events/:eventId)
+Full page (not a modal) — works on mobile and desktop.
+
+Tabs:
+  - Overview   — event info, dates, venue, institution, personal stats in this event
+  - My Teams   — all teams user played for (sport, discipline, role, jersey, roster)
+  - My Matches — all fixtures for user's teams, filterable by sport/status
+  - Standings  — read-only standings (prefer via /me/events/:id for access control)
+
+Responsive:
+  - Desktop: horizontal tabs, full-width match table
+  - Mobile: scrollable tabs, match rows stack as cards
+
+
+Match Detail (/me/matches/:fixtureId)
+  <- Back to event
+  Genesis '26 · Cricket T20
+  Round 1 · Mar 15, 10:00 AM
+
+  VJTI Mumbai    3  -  2  IITB
+  [WON]
+
+  Venue: Ground A, Main Stadium
+  Your team: VJTI Strikers
+  Your role: Player #7
+  Teammates: ...
+
+Only accessible if user is on home_team_id or away_team_id (enforced server-side).
+
+
+BACKEND API PLAN
+----------------
+All endpoints in apps/api/src/modules/iam/me.routes.ts
+Scoped to req.user.id — never accept arbitrary user IDs.
+
+
+1. GET /me/dashboard (summary — fast)
+   Returns landing page data only:
+
+   {
+     stats: { total_events, total_matches, wins, losses, draws };
+     events: [{
+       id, name, slug, status, start_date, end_date, venue, city,
+       team_count, match_count, win_count,
+       sports: string[]   // e.g. ["Cricket", "Football"]
+     }];
+     recent_matches: MatchSummary[];  // last 5
+   }
+
+   Implementation:
+   - Query team_members -> teams -> aggregate events
+   - Query fixtures where home_team_id or away_team_id in user's team IDs
+   - Compute W/L/D from winner_team_id and scores
+
+
+2. GET /me/events/:eventId (detail — on click)
+   Verify user has team_member row for a team in this event. Else 404.
+
+   {
+     event: { id, name, slug, status, start_date, end_date, venue, city, description };
+     stats: { matches, wins, losses, draws };  // scoped to this event
+     teams: [{
+       id, name, sport, discipline, role, jersey_number, status,
+       roster: [{ name, role, jersey_number }]
+     }];
+     matches: MatchSummary[];
+     standings?: StandingsRow[];
+   }
+
+
+3. GET /me/matches/:fixtureId (detail — on click)
+   Verify user is on home_team_id or away_team_id. Else 403.
+
+   {
+     fixture: {
+       id, round, status, scheduled_at, duration_minutes, notes,
+       home_score, away_score, result: 'won' | 'lost' | 'draw' | 'pending',
+       venue: { ground, venue_name, city },
+       sport, discipline, tournament, event: { id, name },
+       my_team: { id, name, institution },
+       opponent: { id, name, institution },
+       my_role, jersey_number,
+       teammates: [{ name, role, jersey_number }]
+     }
+   }
+
+
+4. GET /me/matches (full list page)
+   Query params: ?event_id=&status=&sort=date_desc
+   Returns MatchSummary[] with total count
+
+
+FRONTEND PLAN
+-------------
+
+Routes (apps/web/src/App.tsx):
+  /me                              -> ParticipantDashboard
+  /me/events/:eventId              -> ParticipantEventPage
+  /me/matches                      -> ParticipantMatchesPage
+  /me/matches/:fixtureId           -> ParticipantMatchPage
+
+Navigation (apps/web/src/components/AppShell.tsx):
+  participant:
+    Dashboard    /me
+    All matches  /me/matches
+
+Components:
+  ParticipantDashboard   pages/participant/ParticipantDashboard.tsx   Landing
+  ParticipantEventPage   pages/participant/ParticipantEventPage.tsx   Event drill-down
+  ParticipantMatchesPage pages/participant/ParticipantMatchesPage.tsx Full match list
+  ParticipantMatchPage   pages/participant/ParticipantMatchPage.tsx   Match detail
+  EventCard              components/participant/EventCard.tsx         Clickable -> /me/events/:id
+  MatchRow               components/participant/MatchRow.tsx          Clickable -> /me/matches/:id
+  CareerStats            components/participant/CareerStats.tsx       Stat tiles
+
+Responsive & Loading UX:
+  - Event cards: grid-cols-1 sm:grid-cols-2 lg:grid-cols-3, entire card clickable
+  - Match rows: table on desktop, stacked cards on mobile
+  - Loading: Spinner + skeleton per section (not full-page unless first load)
+  - Caching: TanStack Query via useApi — staleTime 30s summary, 60s detail
+  - Back nav: breadcrumb Dashboard > Event > Match detail
+  - Empty states: "You haven't participated in any events yet"
+
+Access control:
+  Serve standings through /me/events/:id (preferred) rather than raw /events/:id/standings
+
+
+ROLE DATA SCOPE
+---------------
+Organizer       - Only their events
+Institution     - Only their institution's enrollments
+Official        - Only events they're assigned to
+Participant     - ALL events they played in, across any organizer, with full drill-down
+
+
+IMPLEMENTATION TODOS
+--------------------
+[ ] Create GET /me/dashboard — lightweight summary (stats + event cards + recent matches)
+[ ] Create GET /me/events/:eventId — full event participation detail
+[ ] Create GET /me/matches/:fixtureId — single match detail scoped to participant's team
+[ ] Build ParticipantDashboard with CareerStats, EventsGrid, RecentMatches
+[ ] Build ParticipantEventPage — tabs: Overview, Teams, Matches, Standings
+[ ] Build ParticipantMatchPage — full match card
+[ ] Add routes and participant nav in App.tsx and AppShell.tsx
+
+
+FILES TO CREATE/MODIFY
+----------------------
+apps/api/src/modules/iam/me.routes.ts
+  Add /me/dashboard, /me/events/:id, /me/matches, /me/matches/:id
+
+apps/web/src/pages/participant/ParticipantDashboard.tsx   (new, replace ProfilePage)
+apps/web/src/pages/participant/ParticipantEventPage.tsx   (new)
+apps/web/src/pages/participant/ParticipantMatchesPage.tsx (new)
+apps/web/src/pages/participant/ParticipantMatchPage.tsx   (new)
+apps/web/src/components/participant/*.tsx                   (new)
+apps/web/src/App.tsx                                        (routes)
+apps/web/src/components/AppShell.tsx                        (nav)
+apps/web/src/pages/participant/ProfilePage.tsx              (remove or redirect to /me)
+
+
+SEED / DEMO CONSIDERATION
+-------------------------
+Existing seed creates players in one event (Genesis '26).
+Optional: add a second completed event with the same player on a team to demo
+multi-event dashboard — not required for v1 but useful for testing.

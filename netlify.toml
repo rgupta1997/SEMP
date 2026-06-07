@@ -1,0 +1,15 @@
+# Netlify config — SEMP frontend (Vite static build from the monorepo).
+# Set VITE_API_URL in Netlify UI → Site settings → Environment variables to your
+# Render API URL, e.g. https://semp-api.onrender.com  (no trailing slash, no /api).
+[build]
+  command = "npm install && npm run build --workspace @semp/web"
+  publish = "apps/web/dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA fallback: every client-side route serves index.html so deep links work.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
