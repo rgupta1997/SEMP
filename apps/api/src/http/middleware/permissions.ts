@@ -78,8 +78,8 @@ export function makeGuards(prisma: Prisma) {
     throw new ForbiddenError('Organiser account required');
   };
 
-  // ---- guard: managing a specific team — institution staff (POC) of the owning
-  // institution, or the team's captain / vice-captain, or super ----
+  // ---- guard: managing a specific team — the institution POC of the owning
+  // institution, the team's own captain / vice-captain, or super ----
   const teamManager: RequestHandler = asyncHandler(async (req, _res, next) => {
     const u = req.user!;
     if (u.isSuperAdmin) return next();
@@ -91,17 +91,18 @@ export function makeGuards(prisma: Prisma) {
       },
     });
     if (!team) throw new NotFoundError('Team');
-    // Institution staff (POC) of the owning institution.
+    // Institution POC of the owning institution.
     if (u.accountType === 'institution' && team.institution_id && team.institution_id === u.institutionId) return next();
-    // Captain / vice-captain of this specific team.
+    // The team's own captain / vice-captain.
     if (team.team_members.some((m) => m.role === 'captain' || m.role === 'vice_captain')) return next();
-    throw new ForbiddenError('Only the team captain or an institution admin can manage this team');
+    throw new ForbiddenError('Only the team captain or an institution point of contact can manage this team');
   });
 
-  // ---- guard: creating teams for your own institution ----
+  // ---- guard: creating teams — the institution POC of your own institution ----
   const teamCreate: RequestHandler = (req, _res, next) => {
     const u = req.user!;
     if (u.isSuperAdmin) return next();
+    if (u.accountType !== 'institution') throw new ForbiddenError('Only an institution point of contact can create teams');
     const ids: string[] = Array.isArray(req.body?.teams)
       ? req.body.teams.map((t: any) => t?.institution_id)
       : [req.body?.institution_id];
@@ -127,8 +128,8 @@ export function makeGuards(prisma: Prisma) {
   const enrollSelf: RequestHandler = (req, _res, next) => {
     const u = req.user!;
     if (u.isSuperAdmin) return next();
-    if (req.body?.institution_id && req.body.institution_id === u.institutionId) return next();
-    throw new ForbiddenError('You can only enroll your own institution');
+    if (u.accountType === 'institution' && req.body?.institution_id && req.body.institution_id === u.institutionId) return next();
+    throw new ForbiddenError('Only an institution point of contact can enroll your institution');
   };
 
   // ---- guard: recording a fixture result — assigned official, organiser, or super ----

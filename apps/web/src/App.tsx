@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth, type AppRole } from './lib/auth';
 import { AppShell, roleHome } from './components/AppShell';
-import { Spinner } from './components/ui';
+import { Spinner, ToastProvider } from './components/ui';
 import { AuthPage } from './pages/AuthPage';
 
 import { EventsListPage } from './pages/organiser/EventsListPage';
@@ -32,6 +32,8 @@ import { ParticipantDashboard } from './pages/participant/ParticipantDashboard';
 import { ParticipantEventPage } from './pages/participant/ParticipantEventPage';
 import { ParticipantMatchesPage } from './pages/participant/ParticipantMatchesPage';
 import { ParticipantMatchPage } from './pages/participant/ParticipantMatchPage';
+import { DesignShowcase } from './pages/DesignShowcase';
+import { NotificationsPage } from './pages/NotificationsPage';
 import { PlatformResource } from './pages/platform/PlatformResource';
 import { PlatformOverview } from './pages/platform/PlatformOverview';
 import { PlatformUsersPage } from './pages/platform/PlatformUsersPage';
@@ -55,6 +57,7 @@ const ORG: AppRole[] = ['organiser', 'system'];
 const INST: AppRole[] = ['institution', 'system'];
 const OFFICIAL: AppRole[] = ['official', 'system'];
 const SYSTEM: AppRole[] = ['system'];
+const PARTICIPANT: AppRole[] = ['participant', 'system'];
 
 function AuthenticatedRoutes() {
   return (
@@ -91,11 +94,18 @@ function AuthenticatedRoutes() {
         <Route path="/official" element={<RequireRole roles={OFFICIAL}><OfficialFixturesPage /></RequireRole>} />
         <Route path="/official/score/:fixtureId" element={<RequireRole roles={OFFICIAL}><MatchConsolePage /></RequireRole>} />
 
-        {/* Participant — every authenticated user is at least a participant */}
-        <Route path="/me" element={<ParticipantDashboard />} />
-        <Route path="/me/events/:eventId" element={<ParticipantEventPage />} />
-        <Route path="/me/matches" element={<ParticipantMatchesPage />} />
-        <Route path="/me/matches/:fixtureId" element={<ParticipantMatchPage />} />
+        {/* Participant — only participant accounts (and captains, who hold the
+            participant role too); officials / organisers / POCs are redirected. */}
+        <Route path="/me" element={<RequireRole roles={PARTICIPANT}><ParticipantDashboard /></RequireRole>} />
+        <Route path="/me/events/:eventId" element={<RequireRole roles={PARTICIPANT}><ParticipantEventPage /></RequireRole>} />
+        <Route path="/me/matches" element={<RequireRole roles={PARTICIPANT}><ParticipantMatchesPage /></RequireRole>} />
+        <Route path="/me/matches/:fixtureId" element={<RequireRole roles={PARTICIPANT}><ParticipantMatchPage /></RequireRole>} />
+
+        {/* Notifications — global feed, open to any authenticated user */}
+        <Route path="/notifications" element={<NotificationsPage />} />
+
+        {/* Design system reference — open to any authenticated user */}
+        <Route path="/design" element={<DesignShowcase />} />
 
         {/* Catch all - redirect to role home */}
         <Route path="*" element={<HomeRedirect />} />
@@ -119,7 +129,9 @@ function AppRoutes() {
 export function App() {
   return (
     <BrowserRouter>
-      <AppRoutes />
+      <ToastProvider>
+        <AppRoutes />
+      </ToastProvider>
     </BrowserRouter>
   );
 }

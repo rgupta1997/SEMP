@@ -1,7 +1,24 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi, useTableControls, fmtDateRange } from '../../lib/hooks';
-import { Button, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, SortDirButton, Spinner, StatusBadge } from '../../components/ui';
+import { Button, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, StatusBadge } from '../../components/ui';
+
+// Placeholder grid shown while events load.
+function EventGridSkeleton() {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <Card key={i} className="overflow-hidden">
+          <Skeleton className="h-24 w-full" rounded="rounded-none" />
+          <div className="space-y-2 p-4">
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
 
 interface Event { id: string; name: string; slug: string; status: string; venue?: string; start_date: string; end_date: string; description?: string }
 
@@ -35,7 +52,7 @@ export function EventsListPage() {
         <Button onClick={() => navigate('/events/new')}>+ Create event</Button>
       </PageHeader>
 
-      {isLoading ? <Spinner /> : events.length === 0 ? (
+      {isLoading ? <EventGridSkeleton /> : events.length === 0 ? (
         <EmptyState icon="◆" title="No events yet" description="Create your first event to build tournaments, open registration and run match day."
           action={<Button onClick={() => navigate('/events/new')}>+ Create event</Button>} />
       ) : (

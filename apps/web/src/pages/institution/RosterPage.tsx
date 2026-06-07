@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { TEAM_MEMBER_ROLE } from '@semp/shared';
+import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
-import { Avatar, BackButton, Badge, Button, Card, CardBody, CardHeader, Checkbox, Field, Input, Modal, Select, Spinner, StatusBadge, Tabs, Textarea } from '../../components/ui';
+import { Avatar, BackButton, Badge, Button, Card, CardBody, CardHeader, Checkbox, Field, Input, Modal, Progress, Select, Spinner, StatusBadge, Tabs, Textarea, toast } from '../../components/ui';
 
 interface BulkResult { added: number; skipped: { label: string; reason: string }[]; total: number }
 
@@ -260,8 +261,8 @@ function BulkAddMembersModal({ teamId, institutionId, existingUserIds, remaining
 export function RosterPage() {
   const { teamId } = useParams();
   const navigate = useNavigate();
+  const { ctx } = useAuth();
   const { can } = usePermissions();
-  const canManage = can('roster.manage');
   const path = `/teams/${teamId}`;
   const { data: team, isLoading } = useApi<any>(path);
   const institutionId = team?.institution_id ?? team?.institutions?.id;
@@ -278,6 +279,9 @@ export function RosterPage() {
 
   if (isLoading || !team) return <Spinner />;
   const members = team.team_members ?? [];
+  // A team's own captain / vice-captain may edit it; so may the institution POC.
+  const isMyCaptain = members.some((m: any) => m.user_id === ctx?.user.id && (m.role === 'captain' || m.role === 'vice_captain'));
+  const canManage = can('roster.manage') || isMyCaptain;
   const locked = team.status === 'roster_locked';
   const hasDiscipline = !!team.tournament_discipline_id;
   const rules = team.entry_rules ?? { entry_type: 'team', squad_min: 1, squad_max: 15 };
@@ -316,7 +320,7 @@ export function RosterPage() {
             <Button variant="outline" onClick={() => setEditing(true)}>Edit team</Button>
           )}
           {!locked && canManage && hasDiscipline && (
-            <Button onClick={() => lock.mutate(undefined, { onError: (e: any) => alert(e.message) })} disabled={lock.isPending || belowMin} title={belowMin ? `Need at least ${rules.squad_min} players` : undefined}>Lock roster</Button>
+            <Button onClick={() => lock.mutate(undefined, { onSuccess: () => toast.success('Roster locked'), onError: (e: any) => toast.error(e.message) })} disabled={lock.isPending || belowMin} title={belowMin ? `Need at least ${rules.squad_min} players` : undefined}>Lock roster</Button>
           )}
         </div>
       </div>
@@ -337,6 +341,15 @@ export function RosterPage() {
           subtitle={locked ? 'Roster is locked' : !hasDiscipline ? 'Link a discipline draw via Edit team to add players' : belowMin ? `Add at least ${rules.squad_min - activeCount} more to lock` : 'Add players to complete your squad'}
           action={!locked && canManage && hasDiscipline && <Button size="sm" variant="subtle" disabled={atMax} title={atMax ? 'Squad is full' : undefined} onClick={() => setAdding(true)}>+ Add players</Button>} />
         <CardBody>
+          {hasDiscipline && (
+            <Progress
+              value={activeCount}
+              max={rules.squad_max}
+              tone={atMax ? 'rose' : belowMin ? 'amber' : 'brand'}
+              label={`Squad fill (min ${rules.squad_min})`}
+              className="mb-4"
+            />
+          )}
           {members.length === 0 ? (
             <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">No players yet. Add members to get started.</p>
           ) : (
@@ -353,7 +366,7 @@ export function RosterPage() {
                   <div className="flex items-center gap-2">
                     {!locked && canManage ? (
                       <Select value={m.role} disabled={updateMember.isPending}
-                        onChange={(e) => updateMember.mutate({ memberId: m.id, role: e.target.value }, { onError: (err: any) => alert(err.message) })}
+                        onChange={(e) => updateMember.mutate({ memberId: m.id, role: e.target.value }, { onError: (err: any) => toast.error(err.message) })}
                         aria-label="Member role">
                         {TEAM_MEMBER_ROLE.map((r) => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
                       </Select>

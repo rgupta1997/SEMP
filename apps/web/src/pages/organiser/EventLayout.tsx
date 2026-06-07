@@ -1,7 +1,7 @@
 import { Outlet, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateRange } from '../../lib/hooks';
-import { BackButton, Button, Spinner, StatusBadge } from '../../components/ui';
+import { BackButton, Button, Spinner, StatusBadge, toast } from '../../components/ui';
 
 export interface EventDetail {
   id: string; name: string; slug: string; status: string;
@@ -43,7 +43,7 @@ export function EventLayout() {
         </div>
         {next && (
           <Button
-            onClick={() => statusMut.mutate(next.to, { onError: (e: any) => alert(e.message) })}
+            onClick={() => statusMut.mutate(next.to, { onSuccess: () => toast.success('Event status updated'), onError: (e: any) => toast.error(e.message) })}
             disabled={statusMut.isPending}
           >
             {statusMut.isPending ? 'Updating…' : next.label} →

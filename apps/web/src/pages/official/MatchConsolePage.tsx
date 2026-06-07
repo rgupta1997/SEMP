@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
-import { Button, Card, CardBody, CardHeader, EmptyState, Input, Spinner, StatusBadge, Textarea, BackButton, cn } from '../../components/ui';
+import { Button, Card, CardBody, CardHeader, EmptyState, Input, Spinner, StatusBadge, Textarea, BackButton, cn, toast } from '../../components/ui';
 import { awayTeam, disciplineLabel, eventLabel, homeTeam, teamLabel, venueLabel } from './fixtureHelpers';
 import {
   headline, hydrate, reduce, sportDef, subLine,
@@ -71,7 +71,7 @@ function LiveConsole({ fixture, fixtureId, def, live, onDone }:
     const h = headline(def, s);
     const winner_team_id = !done || h.a === h.b ? null : h.a > h.b ? fixture.home_team_id : fixture.away_team_id;
     persist.mutate({ live_state: s, live_log: l, home_score: h.a, away_score: h.b, status: st, winner_team_id },
-      { onError: (e: any) => alert(e.message) });
+      { onError: (e: any) => toast.error(e.message) });
   };
 
   const dispatch = (action: Action) => {
@@ -240,7 +240,7 @@ function SecondaryStatus({ fixtureId, status, label, variant, onDone }:
   const mut = useApiMutation(() => api('PATCH', `/fixtures/${fixtureId}/live`, { status }), ['/me/officiating']);
   return (
     <Button variant={variant} className="w-full justify-start" disabled={mut.isPending}
-      onClick={() => mut.mutate(undefined, { onSuccess: onDone, onError: (e: any) => alert(e.message) })}>
+      onClick={() => mut.mutate(undefined, { onSuccess: onDone, onError: (e: any) => toast.error(e.message) })}>
       {label}
     </Button>
   );
@@ -262,7 +262,7 @@ function ManualResult({ fixture, fixtureId, onDone }: { fixture: any; fixtureId:
   const submit = (status: 'live' | 'completed') => {
     const winner_team_id = hs != null && as != null && hs !== as ? (hs > as ? fixture.home_team_id : fixture.away_team_id) : null;
     saveResult.mutate({ home_score: hs, away_score: as, winner_team_id, status, notes: notes || undefined },
-      { onSuccess: status === 'completed' ? onDone : undefined, onError: (e: any) => alert(e.message) });
+      { onSuccess: status === 'completed' ? onDone : undefined, onError: (e: any) => toast.error(e.message) });
   };
 
   return (

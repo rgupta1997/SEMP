@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   ACCOUNT_TYPE, ENTRY_TYPE, ENROLLMENT_STATUS, EVENT_STATUS, FIXTURE_STATUS, GROUND_TYPE,
+  NOTIFICATION_AUDIENCE, NOTIFICATION_REACTIONS,
   SPONSOR_TIER, TEAM_MEMBER_ROLE, TEAM_STATUS, TOURNAMENT_DISCIPLINE_STATUS,
   TOURNAMENT_STATUS,
 } from './enums.js';
@@ -323,6 +324,20 @@ export const fixtureResultSchema = z.object({
   winner_team_id: uuid.nullable().optional(),
   status: z.enum(FIXTURE_STATUS).optional(),
   notes: z.string().optional(),
+});
+
+// ---------- Notifications ----------
+// Push a manual notification. type is fixed server-side ('manual'); sender is the
+// authenticated user; lifecycle/approval notifications are produced by hooks, not
+// this endpoint.
+export const createNotificationSchema = z.object({
+  event_id: uuid,
+  title: z.string().min(1).max(200),
+  body: z.string().max(4000).optional(),
+  audience: z.enum(NOTIFICATION_AUDIENCE).default('all'),
+});
+export const reactNotificationSchema = z.object({
+  reaction: z.enum(NOTIFICATION_REACTIONS),
 });
 
 export { ENROLLMENT_STATUS };

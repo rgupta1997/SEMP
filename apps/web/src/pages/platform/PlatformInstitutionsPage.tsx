@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
-import { Badge, Button, Card, EmptyState, ListToolbar, Pagination, SearchInput, Spinner } from '../../components/ui';
+import { Badge, Button, Card, EmptyState, ListToolbar, Pagination, SearchInput, Spinner, toast } from '../../components/ui';
 import { InstitutionFormModal, type InstitutionFormBody } from '../../components/InstitutionFormModal';
 
 interface Institution {
@@ -41,7 +41,7 @@ export function PlatformInstitutionsPage() {
       ) : (
         <Card className="overflow-hidden">
           <table className="min-w-full divide-y divide-slate-100 dark:divide-slate-800 text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase text-slate-500">
+            <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
               <tr>
                 <th className="px-4 py-2">Name</th>
                 <th className="px-4 py-2">Code</th>
@@ -60,7 +60,7 @@ export function PlatformInstitutionsPage() {
                   <td className="px-4 py-2 text-right whitespace-nowrap">
                     <Button size="sm" variant="ghost" onClick={() => setEditing(i)}>Edit</Button>
                     <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
-                      onClick={() => { if (confirm(`Delete ${i.name}?`)) del.mutate(i.id, { onError: (e: any) => alert(e.message) }); }}>
+                      onClick={() => { if (confirm(`Delete ${i.name}?`)) del.mutate(i.id, { onError: (e: any) => toast.error(e.message) }); }}>
                       Delete
                     </Button>
                   </td>

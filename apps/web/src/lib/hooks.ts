@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from './api';
 
 // GET list/item with the path as the cache key.
@@ -11,19 +11,19 @@ export function useApi<T = any>(path: string | null, enabled = true) {
   });
 }
 
-// Mutation that invalidates the given query keys (paths) on success.
+// Mutation that refreshes the given query keys (paths) on success. Invalidation is
+// declared via `meta` so the global MutationCache (main.tsx) performs it — that way
+// it still runs if this component unmounts before the request resolves (e.g. an
+// action that navigates away). An empty list means "refresh everything".
 export function useApiMutation<TBody = any, TRes = any>(
   fn: (body: TBody) => Promise<TRes>,
   invalidate: (string | null)[] = [],
   onSuccess?: (res: TRes) => void,
 ) {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
-    onSuccess: (res) => {
-      invalidate.filter(Boolean).forEach((p) => qc.invalidateQueries({ queryKey: [p] }));
-      onSuccess?.(res);
-    },
+    meta: { invalidate: invalidate.filter(Boolean) as string[] },
+    onSuccess: (res) => { onSuccess?.(res); },
   });
 }
 

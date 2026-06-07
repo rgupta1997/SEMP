@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button, Field, Input, Modal, Toggle } from './ui';
 
 export interface InstitutionFormBody {
@@ -27,6 +28,7 @@ function generatePassword(): string {
 }
 
 export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubmit }: InstitutionFormModalProps) {
+  const qc = useQueryClient();
   const isEdit = mode === 'edit';
   const [name, setName] = useState(initial?.name ?? '');
   const [shortName, setShortName] = useState(initial?.short_name ?? '');
@@ -63,6 +65,7 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
     setBusy(true);
     try {
       await onSubmit(body);
+      qc.invalidateQueries(); // refresh institution lists
       onClose();
     } catch (e: any) {
       setError(e?.message ?? 'Could not save');

@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useAuth } from '../../lib/auth';
+import { usePermissions } from '../../lib/permissions';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation } from '../../lib/hooks';
-import { Avatar, Badge, Button, Card, CardBody, CardHeader, EmptyState, ListToolbar, PageHeader, SearchInput, Spinner } from '../../components/ui';
+import { Avatar, Badge, Button, Card, CardBody, CardHeader, EmptyState, ListToolbar, PageHeader, SearchInput, Spinner, toast } from '../../components/ui';
 import { BulkImportModal } from '../../components/BulkImportModal';
 import { UserFormModal, type UserFormBody } from '../../components/UserFormModal';
 
@@ -19,8 +20,8 @@ const PARTICIPANT_IMPORT_FIELDS = [
   { key: 'phone', label: 'Phone', aliases: ['mobile', 'contact'] },
 ];
 
-function PersonRow({ person, onEdit, onDeactivate, onMakePoc }:
-  { person: Person; onEdit: () => void; onDeactivate: () => void; onMakePoc?: () => void }) {
+function PersonRow({ person, canManage, onEdit, onDeactivate, onMakePoc }:
+  { person: Person; canManage: boolean; onEdit: () => void; onDeactivate: () => void; onMakePoc?: () => void }) {
   return (
     <div className={`flex items-center justify-between px-5 py-3 ${person.is_active ? '' : 'opacity-50'}`}>
       <div className="flex items-center gap-3">
@@ -30,21 +31,24 @@ function PersonRow({ person, onEdit, onDeactivate, onMakePoc }:
           <div className="text-xs text-slate-500 dark:text-slate-400">{person.email}{person.phone ? ` · ${person.phone}` : ''}</div>
         </div>
       </div>
-      <div className="flex items-center gap-1">
-        {onMakePoc && person.is_active && (
-          <Button size="sm" variant="outline" onClick={onMakePoc}>Make POC</Button>
-        )}
-        <Button size="sm" variant="ghost" onClick={onEdit}>Edit</Button>
-        {person.is_active && (
-          <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400" onClick={onDeactivate}>Deactivate</Button>
-        )}
-      </div>
+      {canManage && (
+        <div className="flex items-center gap-1">
+          {onMakePoc && person.is_active && (
+            <Button size="sm" variant="outline" onClick={onMakePoc}>Make POC</Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={onEdit}>Edit</Button>
+          {person.is_active && (
+            <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400" onClick={onDeactivate}>Deactivate</Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 export function PocsPage() {
   const { ctx } = useAuth();
+  const canManage = usePermissions().can('team.manage'); // POC only; captains view-only
   const institutionId = ctx?.institution?.id ?? ctx?.user.institution_id ?? '';
   const usersPath = institutionId ? `/users?institution_id=${institutionId}` : null;
   const { data: users = [], isLoading } = useApi<Person[]>(usersPath);
@@ -65,8 +69,8 @@ export function PocsPage() {
   return (
     <div>
       <PageHeader title="Points of contact" subtitle="Manage your institution's contacts and create participant logins.">
-        <Button variant="outline" onClick={() => setImporting(true)}>↑ Import participants</Button>
-        <Button onClick={() => setCreating(true)}>+ Add participant</Button>
+        {canManage && <Button variant="outline" onClick={() => setImporting(true)}>↑ Import participants</Button>}
+        {canManage && <Button onClick={() => setCreating(true)}>+ Add participant</Button>}
       </PageHeader>
 
       {users.length > 0 && (
@@ -83,7 +87,7 @@ export function PocsPage() {
               {pocs.length === 0 ? (
                 <p className="px-5 py-6 text-center text-sm text-slate-400 dark:text-slate-500">No contacts yet.</p>
               ) : pocs.map((u) => (
-                <PersonRow key={u.id} person={u} onEdit={() => setEditing(u)}
+                <PersonRow key={u.id} person={u} canManage={canManage} onEdit={() => setEditing(u)}
                   onDeactivate={() => { if (confirm(`Deactivate ${u.name}?`)) deactivate.mutate(u.id); }} />
               ))}
             </CardBody>
@@ -94,10 +98,10 @@ export function PocsPage() {
             <CardBody className="divide-y divide-slate-100 dark:divide-slate-800 p-0">
               {participants.length === 0 ? (
                 <EmptyState icon="👥" title="No participants yet" description="Add or import participant logins so they can be added to teams."
-                  action={<Button onClick={() => setCreating(true)}>+ Add participant</Button>} />
+                  action={canManage ? <Button onClick={() => setCreating(true)}>+ Add participant</Button> : undefined} />
               ) : participants.map((u) => (
-                <PersonRow key={u.id} person={u} onEdit={() => setEditing(u)}
-                  onMakePoc={() => { if (confirm(`Make ${u.name} a point of contact? They'll be able to administer your institution's teams and people, and will no longer appear as a participant.`)) promote.mutate(u.id, { onError: (e: any) => alert(e.message) }); }}
+                <PersonRow key={u.id} person={u} canManage={canManage} onEdit={() => setEditing(u)}
+                  onMakePoc={() => { if (confirm(`Make ${u.name} a point of contact? They'll be able to administer your institution's teams and people, and will no longer appear as a participant.`)) promote.mutate(u.id, { onSuccess: () => toast.success(`${u.name} is now a point of contact`), onError: (e: any) => toast.error(e.message) }); }}
                   onDeactivate={() => { if (confirm(`Deactivate ${u.name}?`)) deactivate.mutate(u.id); }} />
               ))}
             </CardBody>

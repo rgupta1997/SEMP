@@ -6,6 +6,7 @@ import { useFilterBar, FilterProvider } from '../lib/filters';
 import { useApi } from '../lib/hooks';
 import { useTheme } from '../lib/theme';
 import { Avatar, cn } from './ui';
+import { NotificationBell } from './NotificationBell';
 
 interface NavItem { to: string; label: string; icon: string; end?: boolean }
 interface NavGroup { group: string; items: NavItem[] }
@@ -23,8 +24,12 @@ export function roleHome(role: AppRole): string {
 function navFor(role: AppRole, isSuperAdmin: boolean): NavGroup[] {
   switch (role) {
     case 'system':
-      // System Admin: only platform master data management
+      // System Admin: full organiser control over every event, plus platform master data.
       return [{
+        group: 'Events', items: [
+          { to: '/events', label: 'Events', icon: '◆' },
+        ],
+      }, {
         group: 'Platform Master Data', items: [
           { to: '/platform/sports', label: 'Sports', icon: '🏅' },
           { to: '/platform/disciplines', label: 'Disciplines', icon: '▦' },
@@ -222,6 +227,7 @@ export function AppShell() {
           <HeaderFilters />
           <div className="flex items-center gap-2 sm:gap-4">
             <RoleSwitcher />
+            <NotificationBell />
             <button
               onClick={toggle}
               className="grid h-9 w-9 place-items-center rounded-lg text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"

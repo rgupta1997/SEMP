@@ -3,9 +3,10 @@ import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { usePageFilters } from '../../lib/filters';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
-import { Badge, Button, Card, EmptyState, Field, Modal, Segmented, Select, Spinner, StatusBadge } from '../../components/ui';
+import { Badge, Button, Card, EmptyState, Field, Modal, Segmented, Select, Spinner, StatusBadge, toast } from '../../components/ui';
 import { Bracket, fixtureStatusLabel } from '../../components/Bracket';
 import { RoundRobinGrid } from '../../components/RoundRobinGrid';
+import { ScheduleTimeline } from '../../components/ScheduleTimeline';
 
 interface Ground { id: string; name: string; venues?: { name?: string } }
 interface Official { id: string; name: string; account_type: string }
@@ -55,7 +56,7 @@ function ScheduleModal({ fixture, drawPath, grounds, officials, teamName, onClos
             venue_ground_id: groundId || null,
             scheduled_at: when ? new Date(when).toISOString() : null,
             official_id: officialId || null,
-          }, { onError: (e: any) => alert(e.message) })}>
+          }, { onSuccess: () => toast.success('Schedule saved'), onError: (e: any) => toast.error(e.message) })}>
           {save.isPending ? 'Saving…' : 'Save schedule'}
         </Button>
       </div>
@@ -100,7 +101,7 @@ function DrawCard({ td, sportName, formatLabel, teamName, grounds, officials }:
             />
           )}
           <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={generate.isPending}
-            onClick={() => generate.mutate(undefined, { onError: (e: any) => alert(e.message) })}>
+            onClick={() => generate.mutate(undefined, { onSuccess: () => toast.success('Draw generated'), onError: (e: any) => toast.error(e.message) })}>
             {generate.isPending ? 'Generating…' : fixtures.length ? 'Regenerate' : 'Generate draw'}
           </Button>
         </div>
@@ -166,6 +167,8 @@ function SportBlock({ ts, sportName, formatName, teamName, grounds, officials }:
 
 export function SchedulePage() {
   const { eventId } = useEvent();
+  const [topView, setTopView] = useState<'manage' | 'timeline'>('manage');
+  const { data: allFixtures = [] } = useApi<any[]>(topView === 'timeline' ? `/events/${eventId}/fixtures` : null);
   const { data: tournaments = [] } = useApi<any[]>(`/tournaments?event_id=${eventId}`);
   const [tournamentId, setTournamentId] = useState('');
   const active = tournamentId || tournaments[0]?.id || '';
@@ -193,14 +196,23 @@ export function SchedulePage() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-4">
-        <label className="flex items-center gap-2 text-sm">
-          <span className="font-semibold text-slate-600 dark:text-slate-300">Tournament</span>
-          <Select value={active} onChange={(e) => setTournamentId(e.target.value)} className="w-56">
-            {tournaments.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </Select>
-        </label>
+        <Segmented
+          value={topView}
+          onChange={setTopView}
+          options={[{ value: 'manage', label: 'Fixtures' }, { value: 'timeline', label: 'Timeline' }]}
+        />
+        {topView === 'manage' && (
+          <label className="flex items-center gap-2 text-sm">
+            <span className="font-semibold text-slate-600 dark:text-slate-300">Tournament</span>
+            <Select value={active} onChange={(e) => setTournamentId(e.target.value)} className="w-56">
+              {tournaments.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </Select>
+          </label>
+        )}
       </div>
-      {tsports.length === 0 ? (
+      {topView === 'timeline' ? (
+        <ScheduleTimeline fixtures={allFixtures} />
+      ) : tsports.length === 0 ? (
         <EmptyState icon="⚑" title="No sports configured" description="Add sports & disciplines in Setup, then come back to generate fixtures." />
       ) : (
         <div className="space-y-6">

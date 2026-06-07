@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { downloadCsvTemplate, matrixToRows, parseDelimitedText, readFileToMatrix, type ImportColumn } from '../lib/import';
 import { Button, Modal, Tabs, Textarea } from './ui';
 
@@ -25,6 +26,7 @@ export function BulkImportModal<R>({
   title, fields, templateName, sampleRow, submitLabel = 'Import',
   extraControls, onClose, onSubmit, renderResult,
 }: BulkImportModalProps<R>) {
+  const qc = useQueryClient();
   const [tab, setTab] = useState('file');
   const [paste, setPaste] = useState('');
   const [matrix, setMatrix] = useState<string[][] | null>(null);
@@ -69,6 +71,7 @@ export function BulkImportModal<R>({
     setBusy(true);
     try {
       setResult(await onSubmit(valid));
+      qc.invalidateQueries(); // refresh the lists the import populated
     } catch (e: any) {
       setError(e?.message ?? 'Import failed');
     } finally {
@@ -133,7 +136,7 @@ export function BulkImportModal<R>({
           </div>
           <div className="max-h-60 overflow-auto rounded-xl border border-slate-200 dark:border-slate-800">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase text-slate-500">
+              <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
                 <tr>
                   {fields.map((f) => <th key={f.key} className="px-3 py-2">{f.label}</th>)}
                   <th className="px-3 py-2">Status</th>

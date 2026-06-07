@@ -54,18 +54,15 @@ function rolesFor(ctx: AuthContext): AppRole[] {
     // Super admins can preview every shell.
     return [...ROLE_PRIORITY];
   }
-  // A POC (institution account) administers their institution and never plays;
-  // they are deliberately kept out of the participant shell.
-  const isPoc = ctx.user.account_type === 'institution';
+  // Each account type sees ONLY its own shell. There is no implicit "everyone is a
+  // participant" rule, so organisers, officials and POCs never get the participant
+  // view. The one exception: a participant who captains a team additionally gets the
+  // institution shell (to view their squad).
   const t = ctx.user.account_type as AppRole;
   if (['organiser', 'institution', 'official', 'participant'].includes(t)) set.add(t);
   if (ctx.event_roles.some((r) => r.role.name === 'Organiser')) set.add('organiser');
-  // The institution (admin) shell is for POCs (account_type 'institution', added
-  // above) and team captains only — NOT for every participant who merely belongs
-  // to an institution. Otherwise a POC-created participant could open the admin UI.
-  if (ctx.memberships.some((m) => m.role === 'captain' || m.role === 'vice_captain')) set.add('institution');
   if (ctx.event_roles.some((r) => r.role.name === 'Official')) set.add('official');
-  if (!isPoc) set.add('participant'); // every non-POC user is at least a participant
+  if (ctx.memberships.some((m) => m.role === 'captain' || m.role === 'vice_captain')) set.add('institution');
   return ROLE_PRIORITY.filter((r) => set.has(r));
 }
 

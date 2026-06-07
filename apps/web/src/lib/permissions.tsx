@@ -36,7 +36,9 @@ export function usePermissions() {
         return has('official');
       case 'team.manage':
       case 'roster.manage':
-        return isInstitutionStaff || isCaptain;
+        // Editing teams/rosters is the institution POC's job. Captains get a
+        // read-only view of their squad but cannot edit.
+        return isInstitutionStaff;
       case 'masterdata.manage':
         return false; // platform master data is system-admin only (covered by isSuper)
       default:

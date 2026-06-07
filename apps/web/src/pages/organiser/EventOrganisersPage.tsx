@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDate } from '../../lib/hooks';
-import { Avatar, Button, Card, EmptyState, Modal, SearchInput, Spinner } from '../../components/ui';
+import { Avatar, Button, Card, EmptyState, Modal, SearchInput, Spinner, toast } from '../../components/ui';
 import { UserFormModal, type UserFormBody } from '../../components/UserFormModal';
 
 interface RoleAssignment {
@@ -68,7 +68,7 @@ function AddOrganiserModal({ eventId, roleId, assignedIds, onClose }:
                 </div>
               </div>
               <Button size="sm" variant="outline" disabled={assign.isPending}
-                onClick={() => assign.mutate(u.id, { onSuccess: onClose, onError: (e: any) => alert(e.message) })}>
+                onClick={() => assign.mutate(u.id, { onSuccess: () => { toast.success(`${u.name} added as organiser`); onClose(); }, onError: (e: any) => toast.error(e.message) })}>
                 Add
               </Button>
             </div>

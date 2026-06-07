@@ -1,10 +1,11 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../lib/auth';
+import { usePermissions } from '../../lib/permissions';
 import { api } from '../../lib/api';
 import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
-import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, SortDirButton, Spinner, StatusBadge } from '../../components/ui';
+import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge } from '../../components/ui';
 
 function tournamentName(team: any): string | null {
   return team.tournament_disciplines?.tournament_sports?.tournaments?.name ?? null;
@@ -221,6 +222,8 @@ function CreateTeamModal({ approved, institutionId, defaultEnrollmentId, onClose
 
 export function TeamsPage() {
   const { ctx } = useAuth();
+  const { can } = usePermissions();
+  const canManage = can('team.manage'); // POC only; captains are read-only
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const institutionId = ctx?.institution?.id ?? ctx?.user.institution_id ?? '';
@@ -318,8 +321,8 @@ export function TeamsPage() {
         title={activeEvent ? `${activeEvent.events?.name ?? 'Event'} teams` : 'Teams'}
         subtitle={activeEvent ? 'Teams entered for this event.' : 'Enter and manage teams across your approved events.'}
       >
-        <Button variant="outline" onClick={() => setBulkCreating(true)} disabled={!canEnterTeams}>+ Enter multiple</Button>
-        <Button onClick={() => setCreating(true)} disabled={!canEnterTeams}>+ Enter a team</Button>
+        {canManage && <Button variant="outline" onClick={() => setBulkCreating(true)} disabled={!canEnterTeams}>+ Enter multiple</Button>}
+        {canManage && <Button onClick={() => setCreating(true)} disabled={!canEnterTeams}>+ Enter a team</Button>}
       </PageHeader>
 
       {approved.length === 0 && (
@@ -331,9 +334,19 @@ export function TeamsPage() {
         </p>
       )}
 
-      {isLoading ? <Spinner /> : teams.length === 0 && !eventId ? (
+      {isLoading ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Card key={i} className="space-y-3 p-4">
+              <div className="flex items-start justify-between"><Skeleton className="h-10 w-10" rounded="rounded-xl" /><Skeleton className="h-5 w-16" rounded="rounded-full" /></div>
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-3 w-1/2" />
+            </Card>
+          ))}
+        </div>
+      ) : teams.length === 0 && !eventId ? (
         <EmptyState icon="⚇" title="No teams yet" description="Enter a team for one of your approved events."
-          action={approved.length > 0 ? <Button onClick={() => setCreating(true)}>+ Enter a team</Button> : undefined} />
+          action={canManage && approved.length > 0 ? <Button onClick={() => setCreating(true)}>+ Enter a team</Button> : undefined} />
       ) : (
         <>
           <ListToolbar>
@@ -360,7 +373,7 @@ export function TeamsPage() {
               icon="⚇"
               title={eventId || tournamentFilter !== 'all' ? 'No teams match these filters' : 'No matching teams'}
               description={eventId ? 'Enter a team to participate in this event, or try a different filter.' : 'Try a different search or filter.'}
-              action={eventId && canEnterTeams && tournamentFilter === 'all' ? (
+              action={canManage && eventId && canEnterTeams && tournamentFilter === 'all' ? (
                 <div className="flex flex-wrap justify-center gap-2">
                   <Button onClick={() => setCreating(true)}>+ Enter a team</Button>
                   <Button variant="outline" onClick={() => setBulkCreating(true)}>+ Enter multiple</Button>

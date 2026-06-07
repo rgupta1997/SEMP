@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls, fmtDateTime } from '../../lib/hooks';
-import { Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, Modal, Pagination, SearchInput, SortDirButton, StatusBadge, Table } from '../../components/ui';
+import { Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, Modal, Pagination, SearchInput, SortDirButton, StatusBadge, Table, toast } from '../../components/ui';
 import { InstitutionFormModal, type InstitutionFormBody } from '../../components/InstitutionFormModal';
 
 export function ApprovalsPage() {
@@ -79,11 +79,11 @@ export function ApprovalsPage() {
 
       <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
         <Button size="sm" disabled={bulkReview.isPending}
-          onClick={() => bulkReview.mutate({ ids: [...selected], status: 'approved' }, { onError: (e: any) => alert(e.message) })}>
+          onClick={() => bulkReview.mutate({ ids: [...selected], status: 'approved' }, { onSuccess: () => toast.success(`${selected.size} approved`), onError: (e: any) => toast.error(e.message) })}>
           Approve selected
         </Button>
         <Button size="sm" variant="outline" disabled={bulkReview.isPending}
-          onClick={() => bulkReview.mutate({ ids: [...selected], status: 'rejected' }, { onError: (e: any) => alert(e.message) })}>
+          onClick={() => bulkReview.mutate({ ids: [...selected], status: 'rejected' }, { onSuccess: () => toast.success(`${selected.size} rejected`), onError: (e: any) => toast.error(e.message) })}>
           Reject selected
         </Button>
       </BulkBar>

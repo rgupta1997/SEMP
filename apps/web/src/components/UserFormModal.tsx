@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ACCOUNT_TYPE, type AccountType } from '@semp/shared';
 import { Button, Field, Input, Modal, Select } from './ui';
 
@@ -38,6 +39,7 @@ export function UserFormModal({
   title, mode = 'create', initial, accountTypes = ACCOUNT_TYPE,
   lockInstitutionId, institutions, submitLabel, onClose, onSubmit,
 }: UserFormModalProps) {
+  const qc = useQueryClient();
   const isEdit = mode === 'edit';
   const [name, setName] = useState(initial?.name ?? '');
   const [email, setEmail] = useState(initial?.email ?? '');
@@ -70,6 +72,7 @@ export function UserFormModal({
     setBusy(true);
     try {
       await onSubmit(body);
+      qc.invalidateQueries(); // refresh lists that reference users
       onClose();
     } catch (e: any) {
       setError(e?.message ?? 'Could not save');

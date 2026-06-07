@@ -105,7 +105,7 @@ export function EventParticipantsPage() {
                   </div>
                 </div>
                 <table className="min-w-full divide-y divide-slate-100 dark:divide-slate-800 text-sm">
-                  <thead className="bg-slate-50/50">
+                  <thead className="bg-slate-50/50 dark:bg-slate-800/60">
                     <tr>
                       <th className="px-4 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Player</th>
                       <th className="px-4 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Contact</th>
@@ -114,7 +114,7 @@ export function EventParticipantsPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
                     {members.map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-50/50">
+                      <tr key={p.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
                         <td className="px-4 py-2">
                           <div className="flex items-center gap-2">
                             <Avatar name={p.name} size={28} />

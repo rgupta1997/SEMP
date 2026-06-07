@@ -1,3 +1,4 @@
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type {
   ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes, ReactNode,
   SelectHTMLAttributes, TextareaHTMLAttributes,
@@ -30,7 +31,8 @@ export function Button({
   return (
     <button
       className={cn(
-        'inline-flex items-center justify-center font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap',
+        'inline-flex items-center justify-center font-semibold whitespace-nowrap transition-[background-color,border-color,color,box-shadow,transform] duration-150',
+        'active:translate-y-px active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:transform-none',
         variants[variant], sizes[size], className,
       )}
       {...p}
@@ -40,7 +42,7 @@ export function Button({
 
 /* ----------------------------- Inputs ----------------------------- */
 const fieldBase =
-  'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 transition-[border-color,box-shadow] focus:outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-400/25 disabled:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:bg-slate-900';
+  'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 transition-[border-color,box-shadow] focus:outline-none focus:border-brand-500 focus:ring-[3px] focus:ring-brand-500/20 disabled:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:bg-slate-900';
 
 export const Input = ({ className = '', ...p }: InputHTMLAttributes<HTMLInputElement>) =>
   <input className={cn('w-full', fieldBase, className)} {...p} />;
@@ -63,16 +65,23 @@ export const Textarea = ({ className = '', ...p }: TextareaHTMLAttributes<HTMLTe
 
 export const Field = ({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) => (
   <label className="block mb-4">
-    <span className="block text-xs font-semibold text-slate-600 mb-1.5">{label}</span>
+    <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">{label}</span>
     {children}
-    {hint && <span className="block text-xs text-slate-400 mt-1">{hint}</span>}
+    {hint && <span className="block text-xs text-slate-400 dark:text-slate-500 mt-1">{hint}</span>}
   </label>
 );
 
 /* ----------------------------- Card ----------------------------- */
-export function Card({ className = '', children, ...p }: HTMLAttributes<HTMLDivElement>) {
+export function Card({ className = '', children, interactive, ...p }: HTMLAttributes<HTMLDivElement> & { interactive?: boolean }) {
   return (
-    <div className={cn('rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900', className)} {...p}>
+    <div
+      className={cn(
+        'rounded-2xl border border-slate-200 bg-white shadow-sm transition-[box-shadow,transform,border-color] duration-200 dark:border-slate-800 dark:bg-slate-900',
+        interactive && 'cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md dark:hover:border-brand-500/40',
+        className,
+      )}
+      {...p}
+    >
       {children}
     </div>
   );
@@ -94,7 +103,7 @@ export const CardBody = ({ className = '', children }: { className?: string; chi
   <div className={cn('px-5 pb-5', className)}>{children}</div>;
 
 /* ----------------------------- Badge ----------------------------- */
-type BadgeTone = 'brand' | 'green' | 'amber' | 'rose' | 'slate' | 'violet';
+type BadgeTone = 'brand' | 'green' | 'amber' | 'rose' | 'slate' | 'violet' | 'info' | 'live';
 export function Badge({ tone = 'slate', className = '', children }: { tone?: BadgeTone; className?: string; children: ReactNode }) {
   const tones: Record<BadgeTone, string> = {
     brand: 'bg-brand-50 text-brand-700 ring-brand-200 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/30',
@@ -103,9 +112,13 @@ export function Badge({ tone = 'slate', className = '', children }: { tone?: Bad
     rose: 'bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:ring-rose-500/30',
     slate: 'bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-700/40 dark:text-slate-300 dark:ring-slate-600/40',
     violet: 'bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-500/15 dark:text-violet-300 dark:ring-violet-500/30',
+    info: 'bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-500/15 dark:text-sky-300 dark:ring-sky-500/30',
+    // Broadcast LIVE: solid red with a pulsing ring + blinking dot.
+    live: 'bg-[var(--live)] text-white ring-transparent animate-live',
   };
   return (
     <span className={cn('inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset', tones[tone], className)}>
+      {tone === 'live' && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />}
       {children}
     </span>
   );
@@ -116,8 +129,10 @@ export function Badge({ tone = 'slate', className = '', children }: { tone?: Bad
 // 'scheduled' status as "matched" without changing the stored value).
 export function StatusBadge({ status, label }: { status?: string | null; label?: ReactNode }) {
   const s = (status ?? '').toLowerCase();
+  // Live matches get the broadcast pulse treatment.
+  if (s === 'live') return <Badge tone="live">{label ?? 'LIVE'}</Badge>;
   const tone: BadgeTone =
-    ['approved', 'completed', 'active', 'ongoing', 'roster_locked', 'live'].includes(s) ? 'green'
+    ['approved', 'completed', 'active', 'ongoing', 'roster_locked'].includes(s) ? 'green'
     : ['pending', 'forming', 'upcoming', 'submitted', 'scheduled', 'draft'].includes(s) ? 'amber'
     : ['rejected', 'cancelled'].includes(s) ? 'rose'
     : ['registration_open'].includes(s) ? 'brand'
@@ -129,7 +144,7 @@ export function StatusBadge({ status, label }: { status?: string | null; label?:
 export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-slate-900/50 p-4 sm:p-6 backdrop-blur-sm" onClick={onClose}>
-      <div className={cn('mt-10 w-full rounded-2xl bg-white shadow-2xl dark:bg-slate-900', wide ? 'max-w-2xl' : 'max-w-lg')} onClick={(e) => e.stopPropagation()}>
+      <div className={cn('mt-10 w-full animate-fade-up rounded-[20px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900', wide ? 'max-w-2xl' : 'max-w-lg')} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700">
           <h3 className="text-lg font-semibold dark:text-slate-100">{title}</h3>
           <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">×</button>
@@ -158,7 +173,7 @@ export function StatCard({ label, value, hint, accent }: { label: string; value:
   return (
     <div className={cn('rounded-2xl border p-4', accent ? 'border-brand-200 bg-brand-50 dark:border-brand-500/30 dark:bg-brand-500/10' : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900')}>
       <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</div>
-      <div className={cn('mt-1 text-3xl font-bold tnum', accent ? 'text-brand-600 dark:text-brand-300' : 'text-slate-900 dark:text-slate-100')}>{value}</div>
+      <div className={cn('mt-1 text-3xl font-extrabold tracking-tight tnum', accent ? 'text-brand-600 dark:text-brand-300' : 'text-slate-900 dark:text-slate-100')}>{value}</div>
       {hint && <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{hint}</div>}
     </div>
   );
@@ -209,10 +224,10 @@ export function Stepper({ steps, current }: { steps: string[]; current: number }
             <span className={cn(
               'grid h-7 w-7 flex-none place-items-center rounded-full border text-xs font-bold',
               done ? 'border-brand-500 bg-brand-500 text-white'
-              : active ? 'border-brand-500 bg-brand-50 text-brand-600'
-              : 'border-slate-300 text-slate-400',
+              : active ? 'border-brand-500 bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300'
+              : 'border-slate-300 text-slate-400 dark:border-slate-700 dark:text-slate-500',
             )}>{done ? '✓' : i + 1}</span>
-            <span className={cn('text-sm font-semibold', active ? 'text-slate-900' : 'text-slate-500')}>{s}</span>
+            <span className={cn('text-sm font-semibold', active ? 'text-slate-900 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400')}>{s}</span>
           </li>
         );
       })}
@@ -404,7 +419,7 @@ export function Checkbox({ checked, indeterminate, onChange }: { checked: boolea
       ref={(el) => { if (el) el.indeterminate = !!indeterminate && !checked; }}
       onChange={(e) => onChange(e.target.checked)}
       onClick={(e) => e.stopPropagation()}
-      className="h-4 w-4 cursor-pointer rounded border-slate-300 text-brand-500 focus:ring-brand-400"
+      className="h-4 w-4 cursor-pointer rounded border-slate-300 text-brand-500 focus:ring-brand-400 dark:border-slate-600 dark:bg-slate-800"
     />
   );
 }
@@ -440,3 +455,130 @@ export const TR = ({ children, className = '', onClick }: { children: ReactNode;
   <tr className={cn('border-t border-slate-100 dark:border-slate-800', onClick && 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50', className)} onClick={onClick}>{children}</tr>;
 export const TD = ({ children, className = '' }: { children?: ReactNode; className?: string }) =>
   <td className={cn('px-4 py-3 align-middle', className)}>{children}</td>;
+
+/* ----------------------------- Progress ----------------------------- */
+type ProgressTone = 'brand' | 'green' | 'amber' | 'rose' | 'slate';
+const PROGRESS_FILL: Record<ProgressTone, string> = {
+  brand: 'bg-brand-500', green: 'bg-emerald-500', amber: 'bg-amber-500', rose: 'bg-rose-500', slate: 'bg-slate-400',
+};
+
+// Linear progress bar. Pass `label` to show a name + percentage row above it.
+export function Progress({
+  value, max = 100, tone = 'brand', label, className = '',
+}: { value: number; max?: number; tone?: ProgressTone; label?: ReactNode; className?: string }) {
+  const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
+  return (
+    <div className={className}>
+      {label != null && (
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{label}</span>
+          <span className="font-mono text-xs font-bold text-slate-800 dark:text-slate-100">{Math.round(pct)}%</span>
+        </div>
+      )}
+      <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+        <div className={cn('h-full rounded-full transition-[width] duration-500', PROGRESS_FILL[tone])} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// Segmented step progress (e.g. "3 / 5 steps"). Filled segments use the brand colour.
+export function ProgressSteps({ total, current, label, className = '' }: { total: number; current: number; label?: ReactNode; className?: string }) {
+  return (
+    <div className={className}>
+      {label != null && (
+        <div className="mb-1.5 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+          <span>{label}</span>
+          <span className="font-semibold text-brand-600 dark:text-brand-300">{current} / {total} steps</span>
+        </div>
+      )}
+      <div className="flex gap-1">
+        {Array.from({ length: total }).map((_, i) => (
+          <div key={i} className={cn('h-1.5 flex-1 rounded-full', i < current ? 'bg-brand-500' : 'bg-slate-200 dark:bg-slate-800')} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------- Skeleton ----------------------------- */
+// Shimmer placeholder. Size/shape via className, e.g. <Skeleton className="h-3 w-1/2" />.
+export function Skeleton({ className = '', rounded = 'rounded-md' }: { className?: string; rounded?: string }) {
+  return <div className={cn('skeleton', rounded, className)} aria-hidden />;
+}
+
+/* ----------------------------- Toast ----------------------------- */
+export type ToastType = 'success' | 'info' | 'warning' | 'error';
+interface ToastItem { id: number; type: ToastType; title: string; message?: string }
+
+const TOAST_META: Record<ToastType, { icon: string; bar: string; text: string }> = {
+  success: { icon: '✓', bar: 'border-l-emerald-500', text: 'text-emerald-600 dark:text-emerald-400' },
+  info:    { icon: 'ℹ', bar: 'border-l-brand-500',   text: 'text-brand-600 dark:text-brand-300' },
+  warning: { icon: '⚠', bar: 'border-l-amber-500',   text: 'text-amber-600 dark:text-amber-400' },
+  error:   { icon: '✕', bar: 'border-l-rose-600',    text: 'text-rose-600 dark:text-rose-400' },
+};
+
+// Presentational toast (also used standalone). Left accent bar encodes the type.
+export function Toast({ type, title, message, onClose }: { type: ToastType; title: string; message?: string; onClose?: () => void }) {
+  const m = TOAST_META[type];
+  return (
+    <div className={cn('flex items-start gap-3 rounded-xl border-l-4 bg-white px-3.5 py-3 shadow-md dark:bg-slate-900', m.bar)} role="status">
+      <span className={cn('mt-0.5 flex-none text-sm', m.text)} aria-hidden>{m.icon}</span>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-bold text-slate-900 dark:text-slate-100">{title}</div>
+        {message && <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{message}</div>}
+      </div>
+      {onClose && (
+        <button onClick={onClose} aria-label="Dismiss" className="flex-none text-base leading-none text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">×</button>
+      )}
+    </div>
+  );
+}
+
+interface ToastApi { push: (toast: { type?: ToastType; title: string; message?: string }) => void }
+const ToastContext = createContext<ToastApi | null>(null);
+
+// Hook to fire toasts from anywhere under <ToastProvider>.
+export function useToast(): ToastApi {
+  const ctx = useContext(ToastContext);
+  if (!ctx) throw new Error('useToast must be used within a ToastProvider');
+  return ctx;
+}
+
+// Module-level emitter so non-hook code (mutation callbacks, helpers) can fire
+// toasts via `toast.error(...)` — registered by the mounted ToastProvider.
+let emit: ToastApi['push'] | null = null;
+export const toast = {
+  show: (t: { type?: ToastType; title: string; message?: string }) => emit?.(t),
+  success: (title: string, message?: string) => emit?.({ type: 'success', title, message }),
+  error: (title?: string, message?: string) => emit?.({ type: 'error', title: title || 'Something went wrong', message }),
+  info: (title: string, message?: string) => emit?.({ type: 'info', title, message }),
+  warning: (title: string, message?: string) => emit?.({ type: 'warning', title, message }),
+};
+
+// Provides the toast API and renders the bottom-right stack. Auto-dismiss after 5s.
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const remove = useCallback((id: number) => setToasts((s) => s.filter((t) => t.id !== id)), []);
+  const push = useCallback<ToastApi['push']>((t) => {
+    const id = Date.now() + Math.random();
+    setToasts((s) => [...s, { id, type: t.type ?? 'info', title: t.title, message: t.message }]);
+    setTimeout(() => remove(id), 5000);
+  }, [remove]);
+
+  // Expose the emitter to module-level `toast.*` helpers.
+  useEffect(() => { emit = push; return () => { if (emit === push) emit = null; }; }, [push]);
+
+  return (
+    <ToastContext.Provider value={{ push }}>
+      {children}
+      <div className="pointer-events-none fixed bottom-4 right-4 z-[600] flex w-[min(92vw,360px)] flex-col gap-2">
+        {toasts.map((t) => (
+          <div key={t.id} className="pointer-events-auto animate-fade-up">
+            <Toast type={t.type} title={t.title} message={t.message} onClose={() => remove(t.id)} />
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+}

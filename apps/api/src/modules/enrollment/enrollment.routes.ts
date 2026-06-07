@@ -5,6 +5,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError, BusinessRuleError } from '../../shared/errors.js';
+import { createNotification } from '../notifications/audience.js';
 
 export function makeEnrollmentRouter(prisma: Prisma): Router {
   const router = Router();
@@ -53,7 +54,10 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
 
   // Approve / reject an enrollment (stamps reviewer + timestamp).
   router.patch('/event-institutions/:id', enrollmentOrganiser, validateBody(reviewEnrollmentSchema), asyncHandler(async (req, res) => {
-    const existing = await prisma.event_institutions.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.event_institutions.findUnique({
+      where: { id: req.params.id },
+      include: { institutions: { select: { name: true, short_name: true } }, events: { select: { name: true } } },
+    });
     if (!existing) throw new NotFoundError('Enrollment');
     const row = await prisma.event_institutions.update({
       where: { id: req.params.id },
@@ -64,6 +68,20 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
         reviewed_at: new Date(),
       },
     });
+
+    // An approval is announced to everyone in the event.
+    if (req.body.status === 'approved' && existing.status !== 'approved') {
+      const instName = existing.institutions?.short_name || existing.institutions?.name || 'An institution';
+      await createNotification(prisma, {
+        event_id: existing.event_id,
+        sender_id: req.user!.id,
+        type: 'enrollment_approved',
+        audience: 'all',
+        title: `${instName} has joined the event`,
+        body: `${existing.institutions?.name ?? instName} has been approved to participate${existing.events?.name ? ` in ${existing.events.name}` : ''}.`,
+      });
+    }
+
     res.json(row);
   }));
 

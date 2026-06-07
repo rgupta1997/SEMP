@@ -3,7 +3,7 @@ import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
 import { EVENT_STATUS } from '@semp/shared';
-import { Button, Card, CardBody, CardHeader, Field, Input, StatusBadge, Textarea } from '../../components/ui';
+import { Button, Card, CardBody, CardHeader, Field, Input, Progress, StatusBadge, Textarea, toast } from '../../components/ui';
 
 export function EventSettingsPage() {
   const { event, eventId } = useEvent();
@@ -35,7 +35,7 @@ export function EventSettingsPage() {
           <div className="flex items-center justify-end gap-3">
             {saved && <span className="text-sm font-medium text-emerald-600">Saved ✓</span>}
             <Button disabled={save.isPending}
-              onClick={() => save.mutate({ name, venue: venue || undefined, description: description || undefined, start_date: startDate, end_date: endDate }, { onError: (e: any) => alert(e.message) })}>
+              onClick={() => save.mutate({ name, venue: venue || undefined, description: description || undefined, start_date: startDate, end_date: endDate }, { onSuccess: () => toast.success('Event saved'), onError: (e: any) => toast.error(e.message) })}>
               {save.isPending ? 'Saving…' : 'Save changes'}
             </Button>
           </div>
@@ -46,6 +46,7 @@ export function EventSettingsPage() {
         <CardHeader title="Lifecycle" subtitle="Where this event is in its journey" />
         <CardBody>
           <div className="mb-4 flex items-center gap-2"><span className="text-sm text-slate-500 dark:text-slate-400">Current</span><StatusBadge status={event.status} /></div>
+          <Progress value={EVENT_STATUS.indexOf(event.status as typeof EVENT_STATUS[number]) + 1} max={EVENT_STATUS.length} className="mb-4" />
           <ol className="space-y-2">
             {EVENT_STATUS.map((s, i) => {
               const idx = EVENT_STATUS.indexOf(event.status as any);

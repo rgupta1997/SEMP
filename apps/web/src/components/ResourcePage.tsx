@@ -5,7 +5,7 @@ import { useTableControls } from '../lib/hooks';
 import { usePermissions } from '../lib/permissions';
 import type { FieldDef, ResourceConfig } from '../lib/resources';
 import { EVENT_STATUS_OPTIONS } from '../lib/resources';
-import { BulkBar, Button, Checkbox, Field, Input, ListToolbar, Modal, Pagination, SearchInput, Select, Textarea } from './ui';
+import { BulkBar, Button, Checkbox, Field, Input, ListToolbar, Modal, Pagination, SearchInput, Select, Textarea, toast } from './ui';
 
 function RelationSelect({ field, value, onChange }: { field: FieldDef; value: string; onChange: (v: string) => void }) {
   const { path, labelKey, nullable } = field.relation!;
@@ -146,7 +146,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
   const bulkDel = useMutation({
     mutationFn: async (ids: string[]) => { await Promise.all(ids.map((id) => api('DELETE', `${config.path}/${id}`))); },
     onSuccess: () => { qc.invalidateQueries({ queryKey: [config.path] }); setSelected(new Set()); },
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toast.error(e.message),
   });
   const selectable = !config.noDelete && canManage;
   const cols = useMemo(() => config.columns, [config]);
@@ -178,7 +178,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
   const statusMut = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) => api('PATCH', `${config.path}/${id}/status`, { status }),
     onSuccess: () => qc.invalidateQueries({ queryKey: [config.path] }),
-    onError: (e: any) => alert(e.message),
+    onError: (e: any) => toast.error(e.message),
   });
 
   return (
@@ -190,7 +190,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
           {canManage && <Button onClick={() => setCreating(true)}>+ Add</Button>}
         </ListToolbar>
       </div>
-      {isLoading && <p className="text-gray-500">Loading…</p>}
+      {isLoading && <p className="text-slate-500 dark:text-slate-400">Loading…</p>}
       {error && <p className="text-red-600">{(error as any).message}</p>}
       {selectable && (
         <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
@@ -202,7 +202,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
       )}
       <div className="bg-white dark:bg-slate-900 rounded-lg shadow overflow-auto">
         <table className="w-full text-sm">
-          <thead className="bg-gray-100 text-left">
+          <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-slate-500 dark:text-slate-400">
             <tr>
               {selectable && <th className="px-3 py-2 w-px"><Checkbox checked={allSelected} indeterminate={someSelected && !allSelected} onChange={toggleAll} /></th>}
               {cols.map((c) => (
@@ -218,7 +218,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
           </thead>
           <tbody>
             {rows.map((row: any) => (
-              <tr key={row.id} className={`border-t hover:bg-gray-50 ${selected.has(row.id) ? 'bg-brand-50/50' : ''}`}>
+              <tr key={row.id} className={`border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 ${selected.has(row.id) ? 'bg-brand-50/50 dark:bg-brand-500/10' : ''}`}>
                 {selectable && <td className="px-3 py-2"><Checkbox checked={selected.has(row.id)} onChange={() => toggle(row.id)} /></td>}
                 {cols.map((c) => <td key={c.key} className="px-3 py-2">{cell(row[c.key])}</td>)}
                 <td className="px-3 py-2 whitespace-nowrap flex gap-1 items-center">
@@ -235,7 +235,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
               </tr>
             ))}
             {t.total === 0 && !isLoading && (
-              <tr><td colSpan={cols.length + (selectable ? 2 : 1)} className="px-3 py-6 text-center text-gray-400">{data.length === 0 ? 'No records' : 'No matches for your search'}</td></tr>
+              <tr><td colSpan={cols.length + (selectable ? 2 : 1)} className="px-3 py-6 text-center text-slate-400 dark:text-slate-500">{data.length === 0 ? 'No records' : 'No matches for your search'}</td></tr>
             )}
           </tbody>
         </table>

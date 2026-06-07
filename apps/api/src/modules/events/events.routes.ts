@@ -6,6 +6,22 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError } from '../../shared/errors.js';
 import { assertEventTransition } from './domain/event-lifecycle.js';
+import { createNotification } from '../notifications/audience.js';
+
+// Human-readable lifecycle notification copy per target status. Returned undefined
+// for statuses we don't announce (e.g. back to draft).
+function lifecycleMessage(status: EventStatus): { title: string; body: string } | undefined {
+  switch (status) {
+    case 'registration_open':
+      return { title: 'Registration is open', body: 'This event is now open for institution registration.' };
+    case 'ongoing':
+      return { title: 'The event is now live', body: 'Matches are underway — good luck to all teams.' };
+    case 'completed':
+      return { title: 'The event has concluded', body: 'Thanks for taking part. Final standings are available.' };
+    default:
+      return undefined;
+  }
+}
 
 export function makeEventsRouter(prisma: Prisma): Router {
   const router = Router();
@@ -103,6 +119,20 @@ export function makeEventsRouter(prisma: Prisma): Router {
     if (!event) throw new NotFoundError('Event');
     assertEventTransition(event.status as EventStatus, req.body.status as EventStatus);
     const updated = await prisma.events.update({ where: { id: req.params.id }, data: { status: req.body.status } });
+
+    // Lifecycle announcement → institutions + captains only.
+    const msg = lifecycleMessage(req.body.status as EventStatus);
+    if (msg) {
+      await createNotification(prisma, {
+        event_id: updated.id,
+        sender_id: req.user!.id,
+        type: 'event_lifecycle',
+        audience: 'institutions_captains',
+        title: msg.title,
+        body: msg.body,
+      });
+    }
+
     res.json(updated);
   }));
 
@@ -118,6 +148,39 @@ export function makeEventsRouter(prisma: Prisma): Router {
       orderBy: { display_order: 'asc' },
     });
     res.json(draws);
+  }));
+
+  // All fixtures across the event, flattened with team / ground / sport names —
+  // powers the schedule timeline (Gantt) view.
+  router.get('/:id/fixtures', asyncHandler(async (req, res) => {
+    const fixtures = await prisma.fixtures.findMany({
+      where: { tournament_disciplines: { tournament_sports: { tournaments: { event_id: req.params.id } } } },
+      include: {
+        teams_fixtures_home_team_idToteams: { select: { id: true, name: true } },
+        teams_fixtures_away_team_idToteams: { select: { id: true, name: true } },
+        venue_grounds: { select: { id: true, name: true, venues: { select: { name: true } } } },
+        tournament_disciplines: {
+          select: {
+            disciplines: { select: { name: true } },
+            tournament_sports: { select: { sports: { select: { name: true, icon: true } } } },
+          },
+        },
+      },
+      orderBy: [{ scheduled_at: 'asc' }, { created_at: 'asc' }],
+    });
+    res.json(fixtures.map((f) => ({
+      id: f.id,
+      status: f.status,
+      round: f.round,
+      scheduled_at: f.scheduled_at,
+      duration_minutes: f.duration_minutes,
+      ground: f.venue_grounds ? { id: f.venue_grounds.id, name: f.venue_grounds.name, venue: f.venue_grounds.venues?.name ?? null } : null,
+      sport: f.tournament_disciplines?.tournament_sports?.sports?.name ?? null,
+      sport_icon: f.tournament_disciplines?.tournament_sports?.sports?.icon ?? null,
+      discipline: f.tournament_disciplines?.disciplines?.name ?? null,
+      home: f.teams_fixtures_home_team_idToteams,
+      away: f.teams_fixtures_away_team_idToteams,
+    })));
   }));
 
   // All grounds across the event's venues — used to schedule fixtures to a ground.

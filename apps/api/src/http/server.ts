@@ -24,6 +24,7 @@ import { makeEnrollmentRouter } from '../modules/enrollment/enrollment.routes.js
 import { makeTeamsRouter } from '../modules/teams/teams.routes.js';
 import { makeVenuesRouter, makeVenueGroundsRouter } from '../modules/venues/venues.routes.js';
 import { makeFixturesRouter } from '../modules/fixtures/fixtures.routes.js';
+import { makeNotificationsRouter } from '../modules/notifications/notifications.routes.js';
 
 export function buildApp(prisma: Prisma) {
   const app = express();
@@ -54,6 +55,9 @@ export function buildApp(prisma: Prisma) {
 
   // ----- "Me"-scoped read endpoints (resolved from the authenticated user) -----
   api.use('/', makeMeRouter(prisma));
+
+  // ----- Notifications — global per-user feed + bell (visibility is event-scoped) -----
+  api.use('/', makeNotificationsRouter(prisma));
 
   // ----- Users — scoped create/edit + bulk import (see users.routes) -----
   api.use('/users', makeUsersRouter(prisma));

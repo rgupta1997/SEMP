@@ -80,7 +80,7 @@ export function PlatformUsersPage() {
       ) : (
         <Card className="overflow-hidden">
           <table className="min-w-full divide-y divide-slate-100 dark:divide-slate-800 text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase text-slate-500">
+            <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
               <tr>
                 <th className="px-4 py-2">Name</th>
                 <th className="px-4 py-2">Contact</th>
