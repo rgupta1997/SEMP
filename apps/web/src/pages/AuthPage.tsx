@@ -105,7 +105,7 @@ export function AuthPage() {
           </div>
 
           <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{mode === 'login' ? 'Welcome back' : 'Create your account'}</h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{mode === 'login' ? 'Sign in to your Sportagon workspace.' : 'Start hosting or join an event in minutes.'}</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{mode === 'login' ? 'Sign in to your SEMP workspace.' : 'Start hosting or join an event in minutes.'}</p>
 
           <form onSubmit={submit} className="mt-6 space-y-4">
             {mode === 'signup' && (
