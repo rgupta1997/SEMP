@@ -8,3 +8,5 @@ build/
 .DS_Store
 apps/api/src/infra/prisma/generated/
 supabase/.temp/
+LIVE_SIMULATION_TEST.md
+TESTING_GUIDE.md

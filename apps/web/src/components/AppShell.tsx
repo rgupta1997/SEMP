@@ -38,8 +38,7 @@ function navFor(role: AppRole, isSuperAdmin: boolean): NavGroup[] {
           { to: '/platform/roles', label: 'Roles & Permissions', icon: '⚿' },
         ],
       }, {
-        group: 'Platform Overview', items: [
-          { to: '/platform/overview', label: 'All Events', icon: '◆' },
+        group: 'Platform', items: [
           { to: '/platform/users', label: 'All Users', icon: '◍' },
         ],
       }];

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
-import { ENTRY_TYPE } from '@semp/shared';
+import { ENTRY_TYPE, TOURNAMENT_DISCIPLINE_STATUS } from '@semp/shared';
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, Select, StatusBadge } from '../../../components/ui';
 
 /* ----------------------------- Add sport modal ----------------------------- */
@@ -148,11 +148,79 @@ function AddDisciplineModal({ tournamentSport, venues, onClose }: { tournamentSp
   );
 }
 
+/* ----------------------------- Edit / delete discipline modal ----------------------------- */
+function EditDisciplineModal({ discipline, sportName, venues, path, onClose }:
+  { discipline: any; sportName: string; venues: any[]; path: string; onClose: () => void }) {
+  const [venueId, setVenueId] = useState(discipline.venue_id ?? '');
+  const [entryType, setEntryType] = useState(discipline.entry_type ?? 'team');
+  const [squadMin, setSquadMin] = useState(String(discipline.squad_min ?? 1));
+  const [squadMax, setSquadMax] = useState(String(discipline.squad_max ?? 15));
+  const [status, setStatus] = useState(discipline.status ?? 'upcoming');
+  const [error, setError] = useState<string | null>(null);
+
+  const update = useApiMutation((body: any) => api('PATCH', `/tournament-disciplines/${discipline.id}`, body), [path], onClose);
+  const remove = useApiMutation(() => api('DELETE', `/tournament-disciplines/${discipline.id}`), [path], onClose);
+
+  const save = () => {
+    setError(null);
+    update.mutate(
+      {
+        venue_id: venueId || null,
+        entry_type: entryType,
+        squad_min: Number(squadMin),
+        squad_max: Number(squadMax),
+        status,
+      },
+      { onError: (e: any) => setError(e.message) },
+    );
+  };
+
+  const name = discipline.disciplines?.name ?? sportName;
+  return (
+    <Modal title={`Edit draw · ${name}`} onClose={onClose}>
+      <Field label="Venue">
+        <Select value={venueId} onChange={(e) => setVenueId(e.target.value)}>
+          <option value="">— unassigned —</option>
+          {venues.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+        </Select>
+      </Field>
+      <div className="grid grid-cols-3 gap-x-3">
+        <Field label="Entry type">
+          <Select value={entryType} onChange={(e) => setEntryType(e.target.value)}>
+            {ENTRY_TYPE.map((t) => <option key={t} value={t}>{t}</option>)}
+          </Select>
+        </Field>
+        <Field label="Squad min"><Input type="number" value={squadMin} onChange={(e) => setSquadMin(e.target.value)} /></Field>
+        <Field label="Squad max"><Input type="number" value={squadMax} onChange={(e) => setSquadMax(e.target.value)} /></Field>
+      </div>
+      <Field label="Status">
+        <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+          {TOURNAMENT_DISCIPLINE_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+        </Select>
+      </Field>
+      {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+      <div className="mt-2 flex items-center justify-between">
+        <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
+          onClick={() => { if (confirm(`Delete the “${name}” draw? Its fixtures and team entries will be removed. This cannot be undone.`)) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
+          disabled={remove.isPending}>
+          {remove.isPending ? 'Deleting…' : 'Delete draw'}
+        </Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button disabled={update.isPending} onClick={save}>{update.isPending ? 'Saving…' : 'Save changes'}</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 /* ----------------------------- Tournament-sport card ----------------------------- */
 function SportRow({ ts, sportName, sportIcon, formatName, venues }: { ts: any; sportName: string; sportIcon?: string; formatName: string; venues: any[] }) {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
-  const { data: disciplines = [] } = useApi<any[]>(`/tournament-disciplines?tournament_sport_id=${ts.id}`);
+  const [editing, setEditing] = useState<any | null>(null);
+  const disciplinesPath = `/tournament-disciplines?tournament_sport_id=${ts.id}`;
+  const { data: disciplines = [] } = useApi<any[]>(disciplinesPath);
 
   return (
     <Card className="p-4">
@@ -180,18 +248,23 @@ function SportRow({ ts, sportName, sportIcon, formatName, venues }: { ts: any; s
               {disciplines.map((d) => {
                 const venue = venues.find((v) => v.id === d.venue_id);
                 return (
-                  <div key={d.id} className="flex items-center justify-between rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5">
+                  <button key={d.id} type="button" onClick={() => setEditing(d)}
+                    className="flex w-full items-center justify-between rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800">
                     <div className="text-sm">
                       <span className="font-medium text-slate-800 dark:text-slate-200">{d.disciplines?.name ?? sportName}</span>
                       <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">{d.entry_type} · {d.squad_min}-{d.squad_max} · {venue?.name ?? 'no venue'}</span>
                     </div>
-                    <StatusBadge status={d.status} />
-                  </div>
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={d.status} />
+                      <span className="text-xs font-medium text-slate-400 dark:text-slate-500">Edit</span>
+                    </div>
+                  </button>
                 );
               })}
             </div>
           )}
           {adding && <AddDisciplineModal tournamentSport={ts} venues={venues} onClose={() => setAdding(false)} />}
+          {editing && <EditDisciplineModal discipline={editing} sportName={sportName} venues={venues} path={disciplinesPath} onClose={() => setEditing(null)} />}
         </div>
       )}
     </Card>

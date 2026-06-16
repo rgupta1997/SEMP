@@ -1,9 +1,10 @@
 import { useState } from 'react';
+import { FIXTURE_STATUS } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { usePageFilters } from '../../lib/filters';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
-import { Badge, Button, Card, EmptyState, Field, Modal, Segmented, Select, Spinner, StatusBadge, toast } from '../../components/ui';
+import { Badge, Button, Card, EmptyState, Field, Input, Modal, Segmented, Select, Spinner, StatusBadge, toast } from '../../components/ui';
 import { Bracket, fixtureStatusLabel } from '../../components/Bracket';
 import { RoundRobinGrid } from '../../components/RoundRobinGrid';
 import { ScheduleTimeline } from '../../components/ScheduleTimeline';
@@ -19,20 +20,72 @@ function toLocalInput(d?: string | null): string {
   return new Date(date.getTime() - off * 60000).toISOString().slice(0, 16);
 }
 
-function ScheduleModal({ fixture, drawPath, grounds, officials, teamName, onClose }:
-  { fixture: any; drawPath: string; grounds: Ground[]; officials: Official[]; teamName: (id: string | null) => string; onClose: () => void }) {
-  const [groundId, setGroundId] = useState(fixture.venue_ground_id ?? '');
-  const [when, setWhen] = useState(toLocalInput(fixture.scheduled_at));
-  const [officialId, setOfficialId] = useState(fixture.official_id ?? '');
+// Create or edit a single fixture by hand. `fixture === null` ⇒ create mode for the
+// given draw; otherwise edit (teams / round / schedule / status) with a delete option.
+function FixtureModal({ fixture, tdId, drawPath, grounds, officials, teamName, onClose }:
+  { fixture: any | null; tdId: string; drawPath: string; grounds: Ground[]; officials: Official[]; teamName: (id: string | null) => string; onClose: () => void }) {
+  const isEdit = !!fixture;
+  const { data: teams = [] } = useApi<any[]>(`/teams?tournament_discipline_id=${tdId}`);
+  const [homeId, setHomeId] = useState(fixture?.home_team_id ?? '');
+  const [awayId, setAwayId] = useState(fixture?.away_team_id ?? '');
+  const [round, setRound] = useState(fixture?.round ?? '');
+  const [groundId, setGroundId] = useState(fixture?.venue_ground_id ?? '');
+  const [when, setWhen] = useState(toLocalInput(fixture?.scheduled_at));
+  const [officialId, setOfficialId] = useState(fixture?.official_id ?? '');
+  const [status, setStatus] = useState(fixture?.status ?? 'scheduled');
+  const [error, setError] = useState<string | null>(null);
 
   const save = useApiMutation(
-    (body: any) => api('PATCH', `/fixtures/${fixture.id}`, body),
+    (body: any) => (isEdit ? api('PATCH', `/fixtures/${fixture.id}`, body) : api('POST', '/fixtures', body)),
     [drawPath],
     onClose,
   );
+  const remove = useApiMutation(() => api('DELETE', `/fixtures/${fixture.id}`), [drawPath], onClose);
+
+  const submit = () => {
+    setError(null);
+    const body: any = {
+      home_team_id: homeId || null,
+      away_team_id: awayId || null,
+      round: round.trim(),
+      venue_ground_id: groundId || null,
+      scheduled_at: when ? new Date(when).toISOString() : null,
+      official_id: officialId || null,
+      status,
+    };
+    if (!isEdit) body.tournament_discipline_id = tdId;
+    save.mutate(body, { onSuccess: () => toast.success(isEdit ? 'Fixture saved' : 'Fixture added'), onError: (e: any) => setError(e.message) });
+  };
+
+  const title = isEdit ? `Edit · ${teamName(fixture.home_team_id)} vs ${teamName(fixture.away_team_id)}` : 'Add fixture';
+  const teamHint = teams.length === 0 ? 'No teams registered to this draw yet.' : undefined;
 
   return (
-    <Modal title={`Schedule · ${teamName(fixture.home_team_id)} vs ${teamName(fixture.away_team_id)}`} onClose={onClose}>
+    <Modal title={title} onClose={onClose}>
+      <div className="grid grid-cols-2 gap-x-3">
+        <Field label="Home team" hint={teamHint}>
+          <Select value={homeId} onChange={(e) => setHomeId(e.target.value)}>
+            <option value="">— TBD —</option>
+            {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </Select>
+        </Field>
+        <Field label="Away team">
+          <Select value={awayId} onChange={(e) => setAwayId(e.target.value)}>
+            <option value="">— TBD / bye —</option>
+            {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </Select>
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-x-3">
+        <Field label="Round" hint="e.g. Final, SF, Group A, Match 1">
+          <Input value={round} onChange={(e) => setRound(e.target.value)} placeholder="Match" />
+        </Field>
+        <Field label="Status">
+          <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+            {FIXTURE_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+          </Select>
+        </Field>
+      </div>
       <Field label="Ground / court">
         <Select value={groundId} onChange={(e) => setGroundId(e.target.value)}>
           <option value="">— unassigned —</option>
@@ -49,16 +102,21 @@ function ScheduleModal({ fixture, drawPath, grounds, officials, teamName, onClos
           {officials.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
         </Select>
       </Field>
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button disabled={save.isPending}
-          onClick={() => save.mutate({
-            venue_ground_id: groundId || null,
-            scheduled_at: when ? new Date(when).toISOString() : null,
-            official_id: officialId || null,
-          }, { onSuccess: () => toast.success('Schedule saved'), onError: (e: any) => toast.error(e.message) })}>
-          {save.isPending ? 'Saving…' : 'Save schedule'}
-        </Button>
+      {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+      <div className="mt-2 flex items-center justify-between">
+        {isEdit ? (
+          <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
+            onClick={() => { if (confirm('Delete this fixture? This cannot be undone.')) remove.mutate(undefined, { onSuccess: () => toast.success('Fixture deleted'), onError: (e: any) => setError(e.message) }); }}
+            disabled={remove.isPending}>
+            {remove.isPending ? 'Deleting…' : 'Delete'}
+          </Button>
+        ) : <span />}
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button disabled={save.isPending} onClick={submit}>
+            {save.isPending ? 'Saving…' : isEdit ? 'Save changes' : 'Add fixture'}
+          </Button>
+        </div>
       </div>
     </Modal>
   );
@@ -70,6 +128,7 @@ function DrawCard({ td, sportName, formatLabel, teamName, grounds, officials }:
   const { data: fixtures = [], isLoading } = useApi<any[]>(path);
   const generate = useApiMutation(() => api('POST', `/tournament-disciplines/${td.id}/fixtures/generate`, { params: {} }), [path]);
   const [editing, setEditing] = useState<any | null>(null);
+  const [creating, setCreating] = useState(false);
   const [view, setView] = useState<'list' | 'visual'>('visual');
 
   const hasBracket = fixtures.some((f) => f.bracket_position != null);
@@ -100,6 +159,7 @@ function DrawCard({ td, sportName, formatLabel, teamName, grounds, officials }:
               options={[{ value: 'visual', label: visualLabel }, { value: 'list', label: 'List' }]}
             />
           )}
+          <Button size="sm" variant="subtle" onClick={() => setCreating(true)}>+ Add fixture</Button>
           <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={generate.isPending}
             onClick={() => generate.mutate(undefined, { onSuccess: () => toast.success('Draw generated'), onError: (e: any) => toast.error(e.message) })}>
             {generate.isPending ? 'Generating…' : fixtures.length ? 'Regenerate' : 'Generate draw'}
@@ -127,14 +187,15 @@ function DrawCard({ td, sportName, formatLabel, teamName, grounds, officials }:
                 </span>
                 <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
                 {f.status !== 'bye' && (
-                  <Button size="sm" variant="ghost" onClick={() => setEditing(f)}>Schedule</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEditing(f)}>Edit</Button>
                 )}
               </div>
             ))}
           </div>
         )}
       </div>
-      {editing && <ScheduleModal fixture={editing} drawPath={path} grounds={grounds} officials={officials} teamName={teamName} onClose={() => setEditing(null)} />}
+      {editing && <FixtureModal fixture={editing} tdId={td.id} drawPath={path} grounds={grounds} officials={officials} teamName={teamName} onClose={() => setEditing(null)} />}
+      {creating && <FixtureModal fixture={null} tdId={td.id} drawPath={path} grounds={grounds} officials={officials} teamName={teamName} onClose={() => setCreating(false)} />}
     </Card>
   );
 }
