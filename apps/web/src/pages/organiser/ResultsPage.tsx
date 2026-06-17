@@ -25,15 +25,27 @@ interface ResultRow {
 const teamCode = (t: ResultRow['home']) =>
   (t?.organizations?.short_name || t?.name || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || '··';
 
-// The dark square chip used for each side of a match (e.g. "INF", "WIP").
+// The dark square chip used for each side of a match (e.g. "INF", "WIP"). When the
+// side isn't decided yet (knockout placeholder / bye), show a clear "TBD" chip so
+// the match still reads as a listed fixture instead of an empty row.
 function TeamChip({ team, winner }: { team: ResultRow['home']; winner?: boolean }) {
+  if (!team) {
+    return (
+      <span
+        className="grid h-9 min-w-9 place-items-center rounded-lg border border-dashed border-slate-300 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:border-slate-700 dark:text-slate-500"
+        title="To be decided"
+      >
+        TBD
+      </span>
+    );
+  }
   return (
     <span
       className={cn(
         'grid h-9 w-9 place-items-center rounded-lg text-[11px] font-bold tracking-tight',
         winner ? 'bg-brand-500 text-white' : 'bg-slate-900 text-slate-100 dark:bg-slate-800',
       )}
-      title={team?.name ?? 'TBD'}
+      title={team.name}
     >
       {teamCode(team)}
     </span>
