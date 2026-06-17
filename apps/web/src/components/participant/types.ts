@@ -44,8 +44,36 @@ export interface Achievement {
   award_name: string;
   date: string | null;
   championship: { id: string; name: string } | null;
+  tournament: { id: string; name: string } | null;
   sport: string | null;
+  discipline: string | null;
   opponent_team_name: string | null;
+  my_team_name: string | null;
+  round: string | null;
+  result: MatchResult;
+  fixture_id: string | null;
+}
+
+// One occurrence inside a grouped award (shown in the dashboard hover + details page).
+export interface AchievementInstance {
+  id: string;
+  championship: string | null;
+  tournament: string | null;
+  sport: string | null;
+  discipline: string | null;
+  opponent_team_name: string | null;
+  date: string | null;
+  fixture_id: string | null;
+}
+
+// Achievements collapsed by award name for the dashboard, so e.g. seven "Player of
+// the Match" awards read as a single "7 · Player of the Match" entry, with each
+// occurrence's championship / tournament / match revealed on hover.
+export interface AchievementGroup {
+  award_name: string;
+  count: number;
+  latest_date: string | null;
+  instances: AchievementInstance[];
 }
 
 export interface DashboardData {
