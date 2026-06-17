@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
-import { Button, Card, CardBody, CardHeader, EmptyState, Input, Spinner, StatusBadge, Textarea, BackButton, cn, toast } from '../../components/ui';
+import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Select, Spinner, StatusBadge, Textarea, BackButton, cn, toast } from '../../components/ui';
 import { awayTeam, disciplineLabel, eventInfo, eventLabel, homeTeam, teamLabel, venueLabel } from './fixtureHelpers';
 import {
   headline, hydrate, reduce, sportDef, subLine,
@@ -55,7 +55,80 @@ export function MatchConsolePage() {
       {def.archetype === 'time'
         ? <ManualResult fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} onDone={done} />
         : <LiveConsole key={fixtureId} fixture={fixture} fixtureId={fixtureId!} def={def} live={live} invalidate={invalidate} onDone={done} />}
+
+      <div className="mt-5">
+        <AwardsPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
+      </div>
     </div>
+  );
+}
+
+/* ----------------------------- Awards ----------------------------- */
+type AwardItem = { award_name: string; recipient_user_id: string };
+type AwardRow = AwardItem & { id: string; recipient_name: string | null };
+
+function rosterPeople(team: any): { id: string; name: string; team: string }[] {
+  return (team?.team_members ?? [])
+    .map((tm: any) => ({ id: tm.users?.id as string, name: tm.users?.name ?? '—', team: teamLabel(team) }))
+    .filter((p: { id?: string }) => !!p.id);
+}
+
+// Free-text awards with a recipient picked from the two teams' rosters. Replace-all
+// save; these surface as the recipient's achievements on their dashboard.
+function AwardsPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixtureId: string; invalidate: (string | null)[] }) {
+  const people = [...rosterPeople(homeTeam(fixture)), ...rosterPeople(awayTeam(fixture))];
+  const { data: existing } = useApi<AwardRow[]>(`/fixtures/${fixtureId}/awards`);
+  const [rows, setRows] = useState<AwardItem[]>([]);
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seeded.current && existing) {
+      setRows(existing.map((a) => ({ award_name: a.award_name, recipient_user_id: a.recipient_user_id })));
+      seeded.current = true;
+    }
+  }, [existing]);
+
+  const saveAwards = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/awards`, body), [`/fixtures/${fixtureId}/awards`, ...invalidate]);
+
+  const addRow = () => setRows((r) => [...r, { award_name: '', recipient_user_id: people[0]?.id ?? '' }]);
+  const update = (i: number, patch: Partial<AwardItem>) => setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  const remove = (i: number) => setRows((r) => r.filter((_, idx) => idx !== i));
+  const save = () => {
+    const awards = rows
+      .filter((r) => r.award_name.trim() && r.recipient_user_id)
+      .map((r) => ({ award_name: r.award_name.trim(), recipient_user_id: r.recipient_user_id }));
+    saveAwards.mutate({ awards }, { onSuccess: () => toast.success('Awards saved'), onError: (e: any) => toast.error(e.message) });
+  };
+
+  return (
+    <Card>
+      <CardHeader title="Awards" subtitle="Recognise players — e.g. Player of the Match. Multiple allowed." />
+      <CardBody className="space-y-3">
+        {people.length === 0 ? (
+          <p className="text-sm text-slate-400 dark:text-slate-500">No players on the team rosters yet — add players to a team to give awards.</p>
+        ) : (
+          <>
+            {rows.length === 0 && <p className="text-sm text-slate-400 dark:text-slate-500">No awards yet.</p>}
+            {rows.map((row, i) => (
+              <div key={i} className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                <Field label="Award">
+                  <Input value={row.award_name} onChange={(e) => update(i, { award_name: e.target.value })} placeholder="Player of the Match" />
+                </Field>
+                <Field label="Recipient">
+                  <Select value={row.recipient_user_id} onChange={(e) => update(i, { recipient_user_id: e.target.value })}>
+                    {people.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.team}</option>)}
+                  </Select>
+                </Field>
+                <Button variant="ghost" size="sm" className="mb-1" onClick={() => remove(i)}>Remove</Button>
+              </div>
+            ))}
+            <div className="flex items-center justify-between pt-1">
+              <Button variant="outline" size="sm" onClick={addRow}>+ Add award</Button>
+              <Button size="sm" disabled={saveAwards.isPending} onClick={save}>{saveAwards.isPending ? 'Saving…' : 'Save awards'}</Button>
+            </div>
+          </>
+        )}
+      </CardBody>
+    </Card>
   );
 }
 
@@ -85,11 +158,18 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
 
   const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
 
-  const save = (s: MatchState, l: LogEntry[], st: string, done = false, onSuccess?: () => void) => {
+  // `opts.winner` (when the key is present, even if null) overrides the derived
+  // winner — used by the cricket quick-result panel to declare a winner directly.
+  // `opts.notes` persists the final result text.
+  const save = (s: MatchState, l: LogEntry[], st: string, done = false, onSuccess?: () => void,
+    opts?: { winner?: string | null; notes?: string }) => {
     const h = headline(def, s);
-    const winner_team_id = !done || h.a === h.b ? null : h.a > h.b ? fixture.home_team_id : fixture.away_team_id;
-    persist.mutate({ live_state: s, live_log: l, home_score: h.a, away_score: h.b, status: st, winner_team_id },
-      { onSuccess, onError: (e: any) => toast.error(e.message) });
+    const winner_team_id = opts && 'winner' in opts
+      ? (opts.winner ?? null)
+      : (!done || h.a === h.b ? null : h.a > h.b ? fixture.home_team_id : fixture.away_team_id);
+    const body: Record<string, unknown> = { live_state: s, live_log: l, home_score: h.a, away_score: h.b, status: st, winner_team_id };
+    if (opts && opts.notes !== undefined) body.notes = opts.notes;
+    persist.mutate(body, { onSuccess, onError: (e: any) => toast.error(e.message) });
   };
 
   const dispatch = (action: Action) => {
@@ -119,6 +199,20 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
   // screen until a manual refresh.
   const signOff = () =>
     save(state, log, 'completed', true, () => { setStatus('completed'); setConfirming(false); onDone(); });
+
+  // Cricket: write runs/wickets straight into state (so live_state + headline stay
+  // consistent) and optionally declare the winner + final result text directly.
+  const applyQuick = (v: { runsA: number; wktA: number; runsB: number; wktB: number; winner: 'auto' | 'home' | 'away' | 'draw'; notes: string; complete: boolean }) => {
+    const ns: MatchState = { ...state, runsA: v.runsA, wktA: v.wktA, runsB: v.runsB, wktB: v.wktB };
+    setState(ns);
+    const st = v.complete ? 'completed' : status === 'scheduled' ? 'live' : status;
+    setStatus(st);
+    const opts: { winner?: string | null; notes?: string } = { notes: v.notes };
+    if (v.winner === 'home') opts.winner = fixture.home_team_id;
+    else if (v.winner === 'away') opts.winner = fixture.away_team_id;
+    else if (v.winner === 'draw') opts.winner = null;
+    save(ns, log, st, v.complete, v.complete ? () => { setStatus('completed'); onDone(); } : undefined, opts);
+  };
 
   const h = headline(def, state);
   const live_ = status === 'live';
@@ -199,6 +293,12 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
                 ))}
               </CardBody>
             </Card>
+
+            {def.archetype === 'cricket' && (
+              <CricketQuickResult key={`${state.runsA}-${state.wktA}-${state.runsB}-${state.wktB}`}
+                state={state} homeName={homeName} awayName={awayName}
+                currentNotes={fixture.notes ?? ''} pending={persist.isPending} onApply={applyQuick} />
+            )}
           </div>
         </div>
       )}
@@ -207,6 +307,7 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
         <Card><CardBody className="py-8 text-center">
           <div className="text-sm text-slate-500 dark:text-slate-400">Result recorded.</div>
           <div className="mt-1 text-2xl font-black tabular-nums text-slate-900 dark:text-slate-100">{homeName} {h.a} – {h.b} {awayName}</div>
+          {fixture.notes && <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">{fixture.notes}</div>}
           <div className="mt-4 flex justify-center gap-2">
             <Button variant="outline" onClick={() => setEditing(true)}>Edit result</Button>
             <Button onClick={onDone}>Back to matches</Button>
@@ -258,6 +359,64 @@ function CricketDeck({ def, dispatch }: { def: SportDef; dispatch: (a: Action) =
         <Button variant="outline" onClick={() => dispatch({ type: 'SWITCH_INNINGS' })}>Switch innings</Button>
       </div>
     </div>
+  );
+}
+
+// Cricket-only: enter runs + wickets for both teams directly, declare the winner
+// (or let it derive from runs), and write the final result text. Keyed by the live
+// score upstream so it re-seeds when ball-by-ball scoring changes the totals.
+function CricketQuickResult({ state, homeName, awayName, currentNotes, pending, onApply }:
+  { state: MatchState; homeName: string; awayName: string; currentNotes: string; pending: boolean;
+    onApply: (v: { runsA: number; wktA: number; runsB: number; wktB: number; winner: 'auto' | 'home' | 'away' | 'draw'; notes: string; complete: boolean }) => void }) {
+  const [rA, setRA] = useState(String(state.runsA ?? 0));
+  const [wA, setWA] = useState(String(state.wktA ?? 0));
+  const [rB, setRB] = useState(String(state.runsB ?? 0));
+  const [wB, setWB] = useState(String(state.wktB ?? 0));
+  const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>('auto');
+  const [notes, setNotes] = useState(currentNotes);
+
+  const num = (s: string) => Math.max(0, Math.floor(Number(s) || 0));
+  const vals = (complete: boolean) => ({ runsA: num(rA), wktA: num(wA), runsB: num(rB), wktB: num(wB), winner, notes, complete });
+
+  return (
+    <Card>
+      <CardHeader title="Quick result" subtitle="Enter the score directly or declare the winner." />
+      <CardBody className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="mb-1 truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</div>
+            <div className="flex gap-2">
+              <Input type="number" min={0} value={rA} onChange={(e) => setRA(e.target.value)} className="text-center" aria-label={`${homeName} runs`} />
+              <Input type="number" min={0} value={wA} onChange={(e) => setWA(e.target.value)} className="w-16 text-center" aria-label={`${homeName} wickets`} />
+            </div>
+            <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-400">runs · wkts</div>
+          </div>
+          <div>
+            <div className="mb-1 truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</div>
+            <div className="flex gap-2">
+              <Input type="number" min={0} value={rB} onChange={(e) => setRB(e.target.value)} className="text-center" aria-label={`${awayName} runs`} />
+              <Input type="number" min={0} value={wB} onChange={(e) => setWB(e.target.value)} className="w-16 text-center" aria-label={`${awayName} wickets`} />
+            </div>
+            <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-400">runs · wkts</div>
+          </div>
+        </div>
+        <Field label="Winner">
+          <Select value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
+            <option value="auto">Auto (from runs)</option>
+            <option value="home">{homeName}</option>
+            <option value="away">{awayName}</option>
+            <option value="draw">Tie / draw</option>
+          </Select>
+        </Field>
+        <Field label="Match result">
+          <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Home won by 25 runs" />
+        </Field>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" disabled={pending} onClick={() => onApply(vals(false))}>Apply (keep live)</Button>
+          <Button size="sm" disabled={pending} onClick={() => onApply(vals(true))}>Save &amp; complete</Button>
+        </div>
+      </CardBody>
+    </Card>
   );
 }
 

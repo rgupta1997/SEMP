@@ -39,8 +39,18 @@ export interface MatchSummary {
   result: MatchResult;
 }
 
+export interface Achievement {
+  id: string;
+  award_name: string;
+  date: string | null;
+  championship: { id: string; name: string } | null;
+  sport: string | null;
+  opponent_team_name: string | null;
+}
+
 export interface DashboardData {
   stats: CareerStatsData;
   championships: EventCardData[];
   recent_matches: MatchSummary[];
+  achievements: Achievement[];
 }
