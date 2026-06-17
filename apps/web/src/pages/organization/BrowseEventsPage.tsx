@@ -9,17 +9,17 @@ export function BrowseEventsPage() {
   const { ctx } = useAuth();
   const canManage = usePermissions().can('team.manage'); // POC only
   const navigate = useNavigate();
-  const institutionId = ctx?.institution?.id ?? ctx?.user.institution_id ?? null;
-  const { data: events = [], isLoading } = useApi<any[]>('/events');
+  const institutionId = ctx?.organization?.id ?? ctx?.user.organization_id ?? null;
+  const { data: championships = [], isLoading } = useApi<any[]>('/championships');
   const { data: enrollments = [] } = useApi<any[]>('/me/enrollments');
 
   const apply = useApiMutation(
-    (eventId: string) => api('POST', `/events/${eventId}/enroll`, { institution_id: institutionId }),
+    (eventId: string) => api('POST', `/championships/${eventId}/enroll`, { organization_id: institutionId }),
     ['/me/enrollments'],
   );
 
-  const statusFor = (eventId: string) => enrollments.find((e) => e.event_id === eventId)?.status as string | undefined;
-  const open = events.filter((e) => e.status === 'registration_open' || statusFor(e.id));
+  const statusFor = (eventId: string) => enrollments.find((e) => e.championship_id === eventId)?.status as string | undefined;
+  const open = championships.filter((e) => e.status === 'registration_open' || statusFor(e.id));
 
   const tc = useTableControls(open, {
     search: (e) => `${e.name} ${e.venue ?? ''}`,
@@ -29,21 +29,21 @@ export function BrowseEventsPage() {
   });
 
   if (!institutionId) {
-    return <EmptyState icon="🏛" title="No institution linked" description="Your account must be linked to an institution before you can apply to events." />;
+    return <EmptyState icon="🏛" title="No organization linked" description="Your account must be linked to an organization before you can apply to championships." />;
   }
 
   return (
     <div>
-      <PageHeader title="Browse events" subtitle="Apply to participate — once approved you can enter teams." />
+      <PageHeader title="Browse championships" subtitle="Apply to participate — once approved you can enter teams." />
       {open.length > 0 && (
         <ListToolbar>
-          <SearchInput value={tc.query} onChange={tc.setQuery} placeholder="Search events…" className="w-full sm:w-72" />
+          <SearchInput value={tc.query} onChange={tc.setQuery} placeholder="Search championships…" className="w-full sm:w-72" />
         </ListToolbar>
       )}
       {isLoading ? <Spinner /> : open.length === 0 ? (
-        <EmptyState icon="◆" title="No open events" description="Events appear here once an organiser opens registration. If you expect to see one, ask the organiser to click “Open registration” on the event." />
+        <EmptyState icon="◆" title="No open championships" description="Championships appear here once an organiser opens registration. If you expect to see one, ask the organiser to click “Open registration” on the championship." />
       ) : tc.total === 0 ? (
-        <EmptyState icon="◆" title="No matching events" description="Try a different search." />
+        <EmptyState icon="◆" title="No matching championships" description="Try a different search." />
       ) : (
         <>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -59,7 +59,7 @@ export function BrowseEventsPage() {
                 <p className="text-sm text-slate-500 dark:text-slate-400">{e.venue || 'Venue TBD'} · {fmtDateRange(e.start_date, e.end_date)}</p>
                 <div className="mt-4 flex-1" />
                 {status === 'approved' ? (
-                  <Button className="w-full" onClick={() => navigate(`/inst/teams?event=${e.id}`)}>
+                  <Button className="w-full" onClick={() => navigate(`/inst/teams?championship=${e.id}`)}>
                     Manage teams →
                   </Button>
                 ) : status ? (

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { loginSchema, registerSchema, signupSchema } from '@semp/shared';
+import { changePasswordSchema, loginSchema, registerSchema, signupSchema } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
@@ -18,8 +18,7 @@ function tokenFor(u: any): string {
     id: u.id,
     email: u.email,
     isSuperAdmin: u.is_super_admin,
-    accountType: u.account_type,
-    institutionId: u.institution_id ?? null,
+    organizationId: u.organization_id ?? null,
   });
 }
 
@@ -47,32 +46,18 @@ export function makeAuthRouter(prisma: Prisma): Router {
     res.status(201).json({ token: tokenFor(user), ...context });
   }));
 
-  // Self-serve sign up — picks an account type and (for institution accounts)
-  // joins or creates an institution.
+  // Self-serve sign up — every login is just a user. Hosting a championship,
+  // creating/joining an organization, or being assigned as an official are all
+  // separate actions taken after sign-up.
   router.post('/signup', validateBody(signupSchema), asyncHandler(async (req, res) => {
-    const { name, email, password, phone, account_type, institution_id, institution_name } = req.body;
+    const { name, email, password, phone } = req.body;
 
     const existing = await prisma.users.findUnique({ where: { email } });
     if (existing) throw new UnauthorizedError('An account with this email already exists');
 
-    let institutionId: string | null = null;
-    if (account_type === 'institution') {
-      if (institution_id) {
-        institutionId = institution_id;
-      } else if (institution_name) {
-        const inst = await prisma.institutions.create({ data: { name: institution_name, status: true } });
-        institutionId = inst.id;
-      }
-    }
-
     const password_hash = await bcrypt.hash(password, 10);
     const user = await prisma.users.create({
-      data: {
-        name, email, phone, password_hash,
-        is_super_admin: false,
-        account_type,
-        institution_id: institutionId,
-      },
+      data: { name, email, phone, password_hash, is_super_admin: false },
     });
     const context = await buildAuthContext(prisma, user);
     res.status(201).json({ token: tokenFor(user), ...context });
@@ -82,6 +67,28 @@ export function makeAuthRouter(prisma: Prisma): Router {
     const user = await prisma.users.findUnique({ where: { id: req.user!.id } });
     if (!user) throw new NotFoundError('User');
     const context = await buildAuthContext(prisma, user);
+    res.json(context);
+  }));
+
+  // Change your own password. Provisioned users (must_change_password) skip the
+  // current-password check — they just authenticated with the temporary one. A
+  // normal change requires the current password. Clears the must-change flag.
+  router.post('/change-password', requireAuth, validateBody(changePasswordSchema), asyncHandler(async (req, res) => {
+    const { current_password, new_password } = req.body as { current_password?: string; new_password: string };
+    const user = await prisma.users.findUnique({ where: { id: req.user!.id } });
+    if (!user || !user.password_hash) throw new UnauthorizedError('Invalid credentials');
+
+    if (!user.must_change_password) {
+      const ok = current_password ? await bcrypt.compare(current_password, user.password_hash) : false;
+      if (!ok) throw new UnauthorizedError('Current password is incorrect');
+    }
+
+    const password_hash = await bcrypt.hash(new_password, 10);
+    const updated = await prisma.users.update({
+      where: { id: user.id },
+      data: { password_hash, must_change_password: false },
+    });
+    const context = await buildAuthContext(prisma, updated);
     res.json(context);
   }));
 

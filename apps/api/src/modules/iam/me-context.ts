@@ -1,27 +1,36 @@
 import type { Prisma } from '../../infra/prisma.js';
 
-// Assembles the full authentication context the web app needs to decide which
-// role-shell to render and what the user can act on:
-//   - the public user record (incl. account_type + institution link)
-//   - the user's institution (if any)
-//   - event-scoped role assignments (user_event_roles)
+// Assembles the full authentication context the web app needs to render the
+// unified shell and decide what the user can act on:
+//   - the public user record
+//   - the user's home organization (optional) + every org they're a member of
+//   - championship-scoped role assignments (user_championship_roles)
 //   - team memberships (captain / player rows)
 export async function buildAuthContext(prisma: Prisma, user: any) {
   const { password_hash, ...publicUser } = user;
 
-  // These three reads are independent — run them together rather than serially,
-  // since this context is assembled on every login and every /me hit.
-  const [institution, eventRoleRows, memberships] = await Promise.all([
-    user.institution_id
-      ? prisma.institutions.findUnique({ where: { id: user.institution_id } })
+  // These reads are independent — run them together rather than serially, since
+  // this context is assembled on every login and every /me hit.
+  const [organization, orgMemberships, championshipRoleRows, officialRows, memberships] = await Promise.all([
+    user.organization_id
+      ? prisma.organizations.findUnique({ where: { id: user.organization_id } })
       : Promise.resolve(null),
-    prisma.user_event_roles.findMany({
+    prisma.organization_members.findMany({
+      where: { user_id: user.id },
+      include: { organizations: true },
+      orderBy: { joined_at: 'desc' },
+    }),
+    prisma.user_championship_roles.findMany({
       where: { user_id: user.id },
       include: {
-        events: { select: { id: true, name: true, slug: true, status: true } },
+        championships: { select: { id: true, name: true, slug: true, status: true } },
         roles: { select: { id: true, name: true } },
       },
       orderBy: { assigned_at: 'desc' },
+    }),
+    prisma.championship_officials.findMany({
+      where: { user_id: user.id, is_active: true },
+      select: { championship_id: true },
     }),
     prisma.team_members.findMany({
       where: { user_id: user.id, is_active: true },
@@ -29,8 +38,8 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
         teams: {
           include: {
             sports: { select: { id: true, name: true, icon: true } },
-            events: { select: { id: true, name: true, slug: true, status: true } },
-            institutions: { select: { id: true, name: true } },
+            championships: { select: { id: true, name: true, slug: true, status: true } },
+            organizations: { select: { id: true, name: true } },
           },
         },
       },
@@ -40,11 +49,20 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
 
   return {
     user: publicUser,
-    institution,
-    event_roles: eventRoleRows.map((r) => ({
+    organization,
+    organizations: orgMemberships.map((m) => ({
+      id: m.id,
+      organization_id: m.organization_id,
+      organization: m.organizations,
+      role: m.role,
+      status: m.status,
+      joined_at: m.joined_at,
+    })),
+    official_championship_ids: officialRows.map((o) => o.championship_id),
+    championship_roles: championshipRoleRows.map((r) => ({
       id: r.id,
-      event_id: r.event_id,
-      event: r.events,
+      championship_id: r.championship_id,
+      championship: r.championships,
       role: r.roles,
     })),
     memberships: memberships.map((m) => ({

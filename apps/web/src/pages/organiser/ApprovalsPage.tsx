@@ -7,7 +7,7 @@ import { InstitutionFormModal, type InstitutionFormBody } from '../../components
 
 export function ApprovalsPage() {
   const { eventId } = useEvent();
-  const path = `/events/${eventId}/enrollments`;
+  const path = `/championships/${eventId}/enrollments`;
   const { data: rows = [], isLoading } = useApi<any[]>(path);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
   const [rejecting, setRejecting] = useState<any | null>(null);
@@ -16,14 +16,14 @@ export function ApprovalsPage() {
   const [addingInst, setAddingInst] = useState(false);
 
   const review = useApiMutation(
-    ({ id, status, rejection_note }: any) => api('PATCH', `/event-institutions/${id}`, { status, rejection_note }),
+    ({ id, status, rejection_note }: any) => api('PATCH', `/championship-organizations/${id}`, { status, rejection_note }),
     [path],
     () => { setRejecting(null); setNote(''); },
   );
   // Bulk review runs the PATCHes in parallel then refetches once.
   const bulkReview = useApiMutation(
     async ({ ids, status }: { ids: string[]; status: string }) => {
-      await Promise.all(ids.map((id) => api('PATCH', `/event-institutions/${id}`, { status })));
+      await Promise.all(ids.map((id) => api('PATCH', `/championship-organizations/${id}`, { status })));
     },
     [path],
     () => setSelected(new Set()),
@@ -37,10 +37,10 @@ export function ApprovalsPage() {
   const statusFiltered = filter === 'all' ? rows : rows.filter((r) => r.status === filter);
 
   const t = useTableControls(statusFiltered, {
-    search: (r) => `${r.institutions?.name ?? ''} ${r.institutions?.code ?? ''} ${r.institutions?.city ?? ''}`,
+    search: (r) => `${r.organizations?.name ?? ''} ${r.organizations?.code ?? ''} ${r.organizations?.city ?? ''}`,
     sorts: {
       applied: (a, b) => new Date(a.applied_at).getTime() - new Date(b.applied_at).getTime(),
-      name: (a, b) => (a.institutions?.name ?? '').localeCompare(b.institutions?.name ?? ''),
+      name: (a, b) => (a.organizations?.name ?? '').localeCompare(b.organizations?.name ?? ''),
     },
     initialSort: 'applied',
     initialDir: 'desc',
@@ -68,12 +68,12 @@ export function ApprovalsPage() {
           </button>
         ))}
         <ListToolbar inline className="ml-auto flex-1 justify-end">
-          <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search institution…" className="w-full sm:w-56" />
+          <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search organization…" className="w-full sm:w-56" />
           <Button size="sm" variant="outline" onClick={() => t.setSortKey(t.sortKey === 'name' ? 'applied' : 'name')}>
             Sort: {t.sortKey === 'name' ? 'Name' : 'Applied'}
           </Button>
           <SortDirButton dir={t.dir} onToggle={() => t.setDir(t.dir === 'asc' ? 'desc' : 'asc')} />
-          <Button size="sm" onClick={() => setAddingInst(true)}>+ Add institution</Button>
+          <Button size="sm" onClick={() => setAddingInst(true)}>+ Add organization</Button>
         </ListToolbar>
       </div>
 
@@ -89,13 +89,13 @@ export function ApprovalsPage() {
       </BulkBar>
 
       {isLoading ? null : t.total === 0 ? (
-        <EmptyState icon="✓" title="Nothing here" description={t.query ? 'No institutions match your search.' : filter === 'pending' ? 'No institutions are waiting for approval.' : `No ${filter} institutions.`} />
+        <EmptyState icon="✓" title="Nothing here" description={t.query ? 'No organizations match your search.' : filter === 'pending' ? 'No organizations are waiting for approval.' : `No ${filter} organizations.`} />
       ) : (
         <Table>
           <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             <tr>
               <th className="px-4 py-3 w-px"><Checkbox checked={allSelected} indeterminate={selected.size > 0} onChange={toggleAll} /></th>
-              <th className="px-4 py-3">Institution</th>
+              <th className="px-4 py-3">Organization</th>
               <th className="px-4 py-3">Applied</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3 text-right">Actions</th>
@@ -107,10 +107,10 @@ export function ApprovalsPage() {
                 <td className="px-4 py-3"><Checkbox checked={selected.has(r.id)} onChange={() => toggle(r.id)} /></td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
-                    <Avatar name={r.institutions?.name} size={34} />
+                    <Avatar name={r.organizations?.name} size={34} />
                     <div>
-                      <div className="font-medium text-slate-800 dark:text-slate-200">{r.institutions?.name}</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">{[r.institutions?.code, r.institutions?.city].filter(Boolean).join(' · ') || '—'}</div>
+                      <div className="font-medium text-slate-800 dark:text-slate-200">{r.organizations?.name}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">{[r.organizations?.code, r.organizations?.city].filter(Boolean).join(' · ') || '—'}</div>
                     </div>
                   </div>
                 </td>
@@ -137,13 +137,13 @@ export function ApprovalsPage() {
       {addingInst && (
         <InstitutionFormModal
           onClose={() => setAddingInst(false)}
-          onSubmit={async (body: InstitutionFormBody) => { await api('POST', '/institutions', body); }}
+          onSubmit={(body: InstitutionFormBody) => api('POST', '/organizations', body)}
         />
       )}
 
       {rejecting && (
-        <Modal title={`Reject ${rejecting.institutions?.name}`} onClose={() => setRejecting(null)}>
-          <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Optionally tell the institution why so they can fix and reapply.</p>
+        <Modal title={`Reject ${rejecting.organizations?.name}`} onClose={() => setRejecting(null)}>
+          <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Optionally tell the organization why so they can fix and reapply.</p>
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Reason (optional)…"
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500" />
           <div className="mt-3 flex justify-end gap-2">

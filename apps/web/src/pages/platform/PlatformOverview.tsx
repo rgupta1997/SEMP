@@ -9,8 +9,8 @@ const STATUS_VARIANTS: Record<string, string> = {
 };
 
 export function PlatformOverview() {
-  const { data: events, isLoading } = useApi<any[]>('/events');
-  const list = events ?? [];
+  const { data: championships, isLoading } = useApi<any[]>('/championships');
+  const list = championships ?? [];
   const t = useTableControls(list, {
     search: (e) => `${e.name ?? ''} ${e.city ?? ''} ${e.status ?? ''}`,
     sorts: {
@@ -31,11 +31,11 @@ export function PlatformOverview() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Platform Overview</h1>
-        <p className="mt-1 text-slate-500 dark:text-slate-400">Read-only view of all events across the platform</p>
+        <p className="mt-1 text-slate-500 dark:text-slate-400">Read-only view of all championships across the platform</p>
       </div>
       {list.length > 0 && (
         <ListToolbar>
-          <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search events…" className="w-full sm:w-72" />
+          <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search championships…" className="w-full sm:w-72" />
         </ListToolbar>
       )}
 
@@ -44,7 +44,7 @@ export function PlatformOverview() {
           <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800 text-sm">
             <thead className="bg-slate-50 dark:bg-slate-800/60">
               <tr>
-                <th className="px-4 py-3 text-left font-semibold text-slate-700 dark:text-slate-300"><button type="button" onClick={() => t.toggleSort('name')} className="hover:text-slate-900">Event{sortIc('name')}</button></th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 dark:text-slate-300"><button type="button" onClick={() => t.toggleSort('name')} className="hover:text-slate-900">Championship{sortIc('name')}</button></th>
                 <th className="px-4 py-3 text-left font-semibold text-slate-700 dark:text-slate-300"><button type="button" onClick={() => t.toggleSort('status')} className="hover:text-slate-900">Status{sortIc('status')}</button></th>
                 <th className="px-4 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Location</th>
                 <th className="px-4 py-3 text-left font-semibold text-slate-700 dark:text-slate-300"><button type="button" onClick={() => t.toggleSort('start')} className="hover:text-slate-900">Dates{sortIc('start')}</button></th>
@@ -70,7 +70,7 @@ export function PlatformOverview() {
                 </tr>
               ))}
               {t.total === 0 && (
-                <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-400 dark:text-slate-500">No events match your search.</td></tr>
+                <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-400 dark:text-slate-500">No championships match your search.</td></tr>
               )}
             </tbody>
           </table>
@@ -78,7 +78,7 @@ export function PlatformOverview() {
         </Card>
       ) : (
         <Card className="p-8 text-center text-slate-500 dark:text-slate-400">
-          No events have been created yet.
+          No championships have been created yet.
         </Card>
       )}
 
@@ -86,8 +86,8 @@ export function PlatformOverview() {
         <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-300">
           <span className="text-lg">ℹ️</span>
           <span>
-            System Admin manages platform master data (Sports, Disciplines, Formats, Institutions, Roles). 
-            Event management is delegated to Organiser accounts who can only access their own events.
+            System Admin manages platform master data (Sports, Disciplines, Formats, Organizations, Roles). 
+            Championship management is delegated to Organiser accounts who can only access their own championships.
           </span>
         </div>
       </Card>

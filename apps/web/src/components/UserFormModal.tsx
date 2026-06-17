@@ -1,27 +1,24 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ACCOUNT_TYPE, type AccountType } from '@semp/shared';
 import { Button, Field, Input, Modal, Select } from './ui';
+import { CredentialsPanel, PhoneLookupNotice, type Credentials } from './userProvisioning';
 
 export interface UserFormBody {
   name: string;
   email: string;
   phone?: string;
   password?: string;
-  account_type?: AccountType;
-  institution_id?: string | null;
+  organization_id?: string | null;
 }
 
 interface UserFormModalProps {
   title?: string;
   mode?: 'create' | 'edit';
   initial?: Partial<UserFormBody>;
-  /** Restrict the account-type choices; a single value hides the selector. */
-  accountTypes?: readonly AccountType[];
-  /** Force the institution (hides the selector); use for POC-scoped creates. */
+  /** Force the organization (hides the selector); use for org-scoped creates. */
   lockInstitutionId?: string | null;
-  /** Institutions to choose from; omit to hide the selector. */
-  institutions?: { id: string; name: string }[];
+  /** Organizations to choose from; omit to hide the selector. */
+  organizations?: { id: string; name: string }[];
   submitLabel?: string;
   onClose: () => void;
   onSubmit: (body: UserFormBody) => Promise<unknown>;
@@ -36,8 +33,8 @@ function generatePassword(): string {
 }
 
 export function UserFormModal({
-  title, mode = 'create', initial, accountTypes = ACCOUNT_TYPE,
-  lockInstitutionId, institutions, submitLabel, onClose, onSubmit,
+  title, mode = 'create', initial,
+  lockInstitutionId, organizations, submitLabel, onClose, onSubmit,
 }: UserFormModalProps) {
   const qc = useQueryClient();
   const isEdit = mode === 'edit';
@@ -45,15 +42,14 @@ export function UserFormModal({
   const [email, setEmail] = useState(initial?.email ?? '');
   const [phone, setPhone] = useState(initial?.phone ?? '');
   const [password, setPassword] = useState('');
-  const [accountType, setAccountType] = useState<AccountType>(initial?.account_type ?? accountTypes[0]);
   const [institutionId, setInstitutionId] = useState(
-    lockInstitutionId ?? initial?.institution_id ?? '',
+    lockInstitutionId ?? initial?.organization_id ?? '',
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [creds, setCreds] = useState<Credentials | null>(null);
 
-  const showAccountType = !isEdit && accountTypes.length > 1;
-  const showInstitution = !lockInstitutionId && institutions !== undefined;
+  const showInstitution = !lockInstitutionId && organizations !== undefined;
 
   const submit = async () => {
     setError(null);
@@ -64,16 +60,18 @@ export function UserFormModal({
       email: email.trim(),
       phone: phone.trim() || undefined,
     };
-    // Account type is set at creation only; editing never silently reclassifies a user.
-    if (!isEdit) body.account_type = accountType;
     if (password) body.password = password;
-    if (lockInstitutionId) body.institution_id = lockInstitutionId;
-    else if (showInstitution) body.institution_id = institutionId || null;
+    if (lockInstitutionId) body.organization_id = lockInstitutionId;
+    else if (showInstitution) body.organization_id = institutionId || null;
     setBusy(true);
     try {
-      await onSubmit(body);
+      const res: any = await onSubmit(body);
       qc.invalidateQueries(); // refresh lists that reference users
-      onClose();
+      // If a new login was provisioned, surface its credentials to copy/share.
+      const c: Credentials | null = res?.temp_password
+        ? { name: res.name, email: res.email, phone: res.phone, password: res.temp_password }
+        : (res?.poc_credentials ?? null);
+      if (c) setCreds(c); else onClose();
     } catch (e: any) {
       setError(e?.message ?? 'Could not save');
     } finally {
@@ -81,23 +79,25 @@ export function UserFormModal({
     }
   };
 
+  if (creds) {
+    return (
+      <Modal title={title ?? 'User created'} onClose={onClose}>
+        <CredentialsPanel creds={creds} onDone={onClose} />
+      </Modal>
+    );
+  }
+
   return (
     <Modal title={title ?? (isEdit ? 'Edit user' : 'Add user')} onClose={onClose}>
       <Field label="Full name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rohan Kulkarni" /></Field>
       <Field label="Email"><Input type="email" value={email} disabled={isEdit} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" /></Field>
       <Field label="Phone"><Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Optional" /></Field>
-      {showAccountType && (
-        <Field label="Account type">
-          <Select value={accountType} onChange={(e) => setAccountType(e.target.value as AccountType)}>
-            {accountTypes.map((t) => <option key={t} value={t}>{t}</option>)}
-          </Select>
-        </Field>
-      )}
+      {!isEdit && <PhoneLookupNotice phone={phone} />}
       {showInstitution && (
-        <Field label="Institution">
+        <Field label="Organization">
           <Select value={institutionId} onChange={(e) => setInstitutionId(e.target.value)}>
             <option value="">— none —</option>
-            {institutions!.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+            {organizations!.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
           </Select>
         </Field>
       )}

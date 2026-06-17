@@ -25,22 +25,22 @@ function summarizeReactions(rows: { reaction: string; user_id: string }[], userI
 export function makeNotificationsRouter(prisma: Prisma): Router {
   const router = Router();
 
-  // ----- Global feed for the current user (across every event they belong to) -----
+  // ----- Global feed for the current user (across every championship they belong to) -----
   router.get('/notifications', asyncHandler(async (req, res) => {
     const user = req.user!;
     const scopes = await getUserEventScopes(prisma, user);
     const { take, skip } = parsePaging(req.query);
-    const eventId = typeof req.query.event_id === 'string' ? req.query.event_id : undefined;
+    const eventId = typeof req.query.championship_id === 'string' ? req.query.championship_id : undefined;
     const unreadOnly = req.query.unread === '1' || req.query.unread === 'true';
 
     const rows = await prisma.notifications.findMany({
       where: {
         ...visibilityWhere(scopes),
-        ...(eventId ? { event_id: eventId } : {}),
+        ...(eventId ? { championship_id: eventId } : {}),
         ...(unreadOnly ? { notification_reads: { none: { user_id: user.id } } } : {}),
       },
       include: {
-        events: { select: { id: true, name: true, slug: true } },
+        championships: { select: { id: true, name: true, slug: true } },
         users: { select: { id: true, name: true } }, // sender (nullable for system)
         notification_reactions: { select: { reaction: true, user_id: true } },
         notification_reads: { where: { user_id: user.id }, select: { id: true } },
@@ -57,7 +57,7 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
       title: n.title,
       body: n.body,
       created_at: n.created_at,
-      event: n.events ? { id: n.events.id, name: n.events.name, slug: n.events.slug } : null,
+      championship: n.championships ? { id: n.championships.id, name: n.championships.name, slug: n.championships.slug } : null,
       sender: n.users ? { id: n.users.id, name: n.users.name } : null,
       is_mine: n.sender_id === user.id,
       unread: n.notification_reads.length === 0,
@@ -75,33 +75,33 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
     res.json({ count });
   }));
 
-  // ----- Events the current user may post into (fills the compose dropdown) -----
-  router.get('/notifications/postable-events', asyncHandler(async (req, res) => {
+  // ----- Championships the current user may post into (fills the compose dropdown) -----
+  router.get('/notifications/postable-championships', asyncHandler(async (req, res) => {
     const scopes = await getUserEventScopes(prisma, req.user!);
     if (scopes.isSuper) {
-      const events = await prisma.events.findMany({
+      const championships = await prisma.championships.findMany({
         select: { id: true, name: true }, orderBy: { created_at: 'desc' },
       });
-      res.json(events);
+      res.json(championships);
       return;
     }
     const ids = [...scopes.postableEventIds];
     if (ids.length === 0) { res.json([]); return; }
-    const events = await prisma.events.findMany({
+    const championships = await prisma.championships.findMany({
       where: { id: { in: ids } }, select: { id: true, name: true }, orderBy: { name: 'asc' },
     });
-    res.json(events);
+    res.json(championships);
   }));
 
   // ----- Push a manual notification -----
   router.post('/notifications', validateBody(createNotificationSchema), asyncHandler(async (req, res) => {
     const user = req.user!;
     const scopes = await getUserEventScopes(prisma, user);
-    if (!canPostToEvent(scopes, req.body.event_id)) {
-      throw new ForbiddenError('You cannot post notifications for this event');
+    if (!canPostToEvent(scopes, req.body.championship_id)) {
+      throw new ForbiddenError('You cannot post notifications for this championship');
     }
     const n = await createNotification(prisma, {
-      event_id: req.body.event_id,
+      championship_id: req.body.championship_id,
       sender_id: user.id,
       type: 'manual',
       audience: req.body.audience,
@@ -144,7 +144,7 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
     const user = req.user!;
     const n = await prisma.notifications.findUnique({
       where: { id: req.params.id },
-      select: { id: true, event_id: true, audience: true, sender_id: true },
+      select: { id: true, championship_id: true, audience: true, sender_id: true },
     });
     if (!n) throw new NotFoundError('Notification');
 

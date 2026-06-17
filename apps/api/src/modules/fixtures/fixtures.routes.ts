@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createFixtureSchema, fixtureResultSchema, generateFixturesSchema, updateFixtureSchema } from '@semp/shared';
+import { createFixtureSchema, fixtureAwardsSchema, fixtureResultSchema, generateFixturesSchema, updateFixtureSchema } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { makeCrudRouter } from '../../http/crud.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -11,8 +11,8 @@ import { generateFixtures, type TeamRef } from './domain/generators/index.js';
 export function makeFixturesRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
-  // organiser of the event that owns this draw (from the :id tournament_discipline).
-  const drawOrganiser = guards.eventManager(async (req) => guards.resolvers.eventOfTournamentDiscipline(req.params.id));
+  // organiser of the championship that owns this draw (from the :id tournament_discipline).
+  const drawOrganiser = guards.championshipManager(async (req) => guards.resolvers.championshipOfTournamentDiscipline(req.params.id));
 
   // List fixtures for a discipline draw.
   router.get('/tournament-disciplines/:id/fixtures', asyncHandler(async (req, res) => {
@@ -111,7 +111,16 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     if ('home_score' in b) data.home_score = b.home_score ?? null;
     if ('away_score' in b) data.away_score = b.away_score ?? null;
     if ('winner_team_id' in b) data.winner_team_id = b.winner_team_id ?? null;
+    if ('notes' in b) data.notes = b.notes ?? null;
     if (b.status) data.status = b.status;
+    // A declared winner must be one of the two teams in this fixture.
+    if (b.winner_team_id != null) {
+      const fx = await prisma.fixtures.findUnique({ where: { id: req.params.id }, select: { home_team_id: true, away_team_id: true } });
+      if (!fx) throw new NotFoundError('Fixture');
+      if (b.winner_team_id !== fx.home_team_id && b.winner_team_id !== fx.away_team_id) {
+        throw new BusinessRuleError('Winner must be one of the two teams in this match');
+      }
+    }
     if (Object.keys(data).length > 0) {
       await prisma.fixtures.update({ where: { id: req.params.id }, data });
     }
@@ -131,6 +140,65 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     res.json({ ok: true, persisted });
   }));
 
+  // Full fixture detail for the scoring console. Same authorization as scoring
+  // (assigned official, organiser, or super) so the host can score any fixture in
+  // their championship — not just an official's assigned list. Shape mirrors the
+  // rows from GET /me/officiating so the console reads them interchangeably.
+  router.get('/fixtures/:id/scoring', guards.fixtureScorer, asyncHandler(async (req, res) => {
+    const fixture = await prisma.fixtures.findUnique({
+      where: { id: req.params.id },
+      include: {
+        teams_fixtures_home_team_idToteams: { include: { organizations: true, team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true } } } } } },
+        teams_fixtures_away_team_idToteams: { include: { organizations: true, team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true } } } } } },
+        tournament_disciplines: {
+          include: {
+            disciplines: true,
+            tournament_sports: { include: { sports: true, tournaments: { include: { championships: true } } } },
+          },
+        },
+        venue_grounds: { include: { venues: true } },
+      },
+    });
+    if (!fixture) throw new NotFoundError('Fixture');
+    res.json(fixture);
+  }));
+
+  // ---- Awards (player-of-the-match etc.) ----
+  // Free-text award name + a recipient who plays for one of the two teams. Read +
+  // replace-all write, both authorized like scoring. These surface as the
+  // recipient's "achievements" on their participant dashboard.
+  const awardView = (a: { id: string; award_name: string; recipient_user_id: string; users?: { name: string } | null }) =>
+    ({ id: a.id, award_name: a.award_name, recipient_user_id: a.recipient_user_id, recipient_name: a.users?.name ?? null });
+
+  router.get('/fixtures/:id/awards', guards.fixtureScorer, asyncHandler(async (req, res) => {
+    const rows = await prisma.fixture_awards.findMany({
+      where: { fixture_id: req.params.id },
+      include: { users: { select: { name: true } } },
+      orderBy: { created_at: 'asc' },
+    });
+    res.json(rows.map(awardView));
+  }));
+
+  router.patch('/fixtures/:id/awards', guards.fixtureScorer, validateBody(fixtureAwardsSchema), asyncHandler(async (req, res) => {
+    const fixtureId = req.params.id;
+    const fixture = await prisma.fixtures.findUnique({ where: { id: fixtureId } });
+    if (!fixture) throw new NotFoundError('Fixture');
+    const awards = req.body.awards as { award_name: string; recipient_user_id: string }[];
+    // Replace-all: wipe the fixture's awards then re-insert, atomically.
+    await prisma.$transaction([
+      prisma.fixture_awards.deleteMany({ where: { fixture_id: fixtureId } }),
+      ...(awards.length
+        ? [prisma.fixture_awards.createMany({ data: awards.map((a) => ({ fixture_id: fixtureId, award_name: a.award_name, recipient_user_id: a.recipient_user_id })) })]
+        : []),
+    ]);
+    const rows = await prisma.fixture_awards.findMany({
+      where: { fixture_id: fixtureId },
+      include: { users: { select: { name: true } } },
+      orderBy: { created_at: 'asc' },
+    });
+    res.json(rows.map(awardView));
+  }));
+
   router.patch('/fixtures/:id/result', guards.fixtureScorer, validateBody(fixtureResultSchema), asyncHandler(async (req, res) => {
     const fixture = await prisma.fixtures.findUnique({ where: { id: req.params.id } });
     if (!fixture) throw new NotFoundError('Fixture');
@@ -143,6 +211,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       if (home > away) winner = fixture.home_team_id;
       else if (away > home) winner = fixture.away_team_id;
       else winner = null; // draw
+    }
+    if (winner != null && winner !== fixture.home_team_id && winner !== fixture.away_team_id) {
+      throw new BusinessRuleError('Winner must be one of the two teams in this match');
     }
 
     const updated = await prisma.fixtures.update({
@@ -159,16 +230,16 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   }));
 
   // Plain CRUD for manual fixture edits / scheduling — writes require the organiser
-  // of the event that owns the fixture's draw.
+  // of the championship that owns the fixture's draw.
   router.use('/fixtures', makeCrudRouter(prisma.fixtures, {
     name: 'Fixture',
     createSchema: createFixtureSchema,
     updateSchema: updateFixtureSchema,
     listFilters: ['tournament_discipline_id'],
     orderBy: [{ pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
-    writeGuards: [guards.eventCrudGuard({
-      body: async (req) => guards.resolvers.eventOfTournamentDiscipline(req.body?.tournament_discipline_id),
-      byId: guards.resolvers.eventOfFixture,
+    writeGuards: [guards.championshipCrudGuard({
+      body: async (req) => guards.resolvers.championshipOfTournamentDiscipline(req.body?.tournament_discipline_id),
+      byId: guards.resolvers.championshipOfFixture,
     })],
   }));
 

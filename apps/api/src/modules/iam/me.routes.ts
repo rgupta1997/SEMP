@@ -8,12 +8,12 @@ import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 
 // Full include used whenever we hydrate a fixture into a MatchSummary / detail.
 const fixtureInclude = {
-  teams_fixtures_home_team_idToteams: { include: { institutions: true, sports: true } },
-  teams_fixtures_away_team_idToteams: { include: { institutions: true, sports: true } },
+  teams_fixtures_home_team_idToteams: { include: { organizations: true, sports: true } },
+  teams_fixtures_away_team_idToteams: { include: { organizations: true, sports: true } },
   tournament_disciplines: {
     include: {
       disciplines: true,
-      tournament_sports: { include: { sports: true, tournaments: { include: { events: true } } } },
+      tournament_sports: { include: { sports: true, tournaments: { include: { championships: true } } } },
     },
   },
   venue_grounds: { include: { venues: true } },
@@ -33,13 +33,13 @@ function resultFor(f: FixtureRow, myTeamIds: Set<string>): Result {
   return 'pending';
 }
 
-// Compact match shape used by the dashboard, event detail and the matches list.
+// Compact match shape used by the dashboard, championship detail and the matches list.
 function toMatchSummary(f: FixtureRow, myTeamIds: Set<string>) {
   const isHome = f.home_team_id != null && myTeamIds.has(f.home_team_id);
   const mine = isHome ? f.teams_fixtures_home_team_idToteams : f.teams_fixtures_away_team_idToteams;
   const opp = isHome ? f.teams_fixtures_away_team_idToteams : f.teams_fixtures_home_team_idToteams;
   const ts = f.tournament_disciplines?.tournament_sports;
-  const event = ts?.tournaments?.events;
+  const championship = ts?.tournaments?.championships;
   const myScore = isHome ? f.home_score : f.away_score;
   const oppScore = isHome ? f.away_score : f.home_score;
   return {
@@ -49,10 +49,10 @@ function toMatchSummary(f: FixtureRow, myTeamIds: Set<string>) {
     scheduled_at: f.scheduled_at,
     sport: mine?.sports?.name ?? ts?.sports?.name ?? null,
     discipline: f.tournament_disciplines?.disciplines?.name ?? null,
-    event: event ? { id: event.id, name: event.name, slug: event.slug } : null,
+    championship: championship ? { id: championship.id, name: championship.name, slug: championship.slug } : null,
     my_team: mine ? { id: mine.id, name: mine.name } : null,
     opponent: opp
-      ? { id: opp.id, name: opp.name, institution: opp.institutions?.short_name ?? opp.institutions?.name ?? null }
+      ? { id: opp.id, name: opp.name, organization: opp.organizations?.short_name ?? opp.organizations?.name ?? null }
       : null,
     my_score: myScore ?? null,
     opp_score: oppScore ?? null,
@@ -60,19 +60,19 @@ function toMatchSummary(f: FixtureRow, myTeamIds: Set<string>) {
   };
 }
 
-// Aggregate a points table (win = 3, draw = 1) by institution from completed fixtures.
+// Aggregate a points table (win = 3, draw = 1) by organization from completed fixtures.
 function buildStandings(fixtures: FixtureRow[]) {
-  type Row = { institution_id: string; institution: any; played: number; won: number; drawn: number; lost: number; points: number };
+  type Row = { organization_id: string; organization: any; played: number; won: number; drawn: number; lost: number; points: number };
   const table = new Map<string, Row>();
   const ensure = (inst: any): Row | null => {
     if (!inst) return null;
-    if (!table.has(inst.id)) table.set(inst.id, { institution_id: inst.id, institution: inst, played: 0, won: 0, drawn: 0, lost: 0, points: 0 });
+    if (!table.has(inst.id)) table.set(inst.id, { organization_id: inst.id, organization: inst, played: 0, won: 0, drawn: 0, lost: 0, points: 0 });
     return table.get(inst.id)!;
   };
   for (const f of fixtures) {
     if (f.status !== 'completed') continue;
-    const home = ensure(f.teams_fixtures_home_team_idToteams?.institutions);
-    const away = ensure(f.teams_fixtures_away_team_idToteams?.institutions);
+    const home = ensure(f.teams_fixtures_home_team_idToteams?.organizations);
+    const away = ensure(f.teams_fixtures_away_team_idToteams?.organizations);
     if (!home && !away) continue;
     if (home) home.played++;
     if (away) away.played++;
@@ -104,7 +104,7 @@ function tally(fixtures: FixtureRow[], myTeamIds: Set<string>) {
 export function makeMeRouter(prisma: Prisma): Router {
   const router = Router();
 
-  // Teams the current user belongs to (across all events), with sport + event + roster.
+  // Teams the current user belongs to (across all championships), with sport + championship + roster.
   router.get('/me/teams', asyncHandler(async (req, res) => {
     const memberships = await prisma.team_members.findMany({
       where: { user_id: req.user!.id, is_active: true },
@@ -112,8 +112,8 @@ export function makeMeRouter(prisma: Prisma): Router {
         teams: {
           include: {
             sports: true,
-            events: { select: { id: true, name: true, slug: true, status: true } },
-            institutions: { select: { id: true, name: true, short_name: true } },
+            championships: { select: { id: true, name: true, slug: true, status: true } },
+            organizations: { select: { id: true, name: true, short_name: true } },
             tournament_disciplines: { include: { disciplines: true } },
             team_members: { include: { users: { select: { id: true, name: true, email: true, phone: true } } } },
           },
@@ -124,29 +124,29 @@ export function makeMeRouter(prisma: Prisma): Router {
     res.json(memberships.map((m) => ({ membership_role: m.role, jersey_number: m.jersey_number, ...m.teams })));
   }));
 
-  // Enrollment status for the current user's institution, across events.
+  // Enrollment status for the current user's organization, across championships.
   router.get('/me/enrollments', asyncHandler(async (req, res) => {
-    const institutionId = req.user!.institutionId;
-    if (!institutionId) {
+    const organizationId = req.user!.organizationId;
+    if (!organizationId) {
       res.json([]);
       return;
     }
-    const rows = await prisma.event_institutions.findMany({
-      where: { institution_id: institutionId },
-      include: { events: { select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true } } },
+    const rows = await prisma.championship_organizations.findMany({
+      where: { organization_id: organizationId },
+      include: { championships: { select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true } } },
       orderBy: { applied_at: 'desc' },
     });
     res.json(rows);
   }));
 
-  // Fixtures the current user is assigned to officiate (only for events they're assigned to).
+  // Fixtures the current user is assigned to officiate (only for championships they're assigned to).
   router.get('/me/officiating', asyncHandler(async (req, res) => {
-    // Get events this official is assigned to
-    const officialEvents = await prisma.event_officials.findMany({
+    // Get championships this official is assigned to
+    const officialEvents = await prisma.championship_officials.findMany({
       where: { user_id: req.user!.id, is_active: true },
-      select: { event_id: true },
+      select: { championship_id: true },
     });
-    const eventIds = officialEvents.map((e) => e.event_id);
+    const eventIds = officialEvents.map((e) => e.championship_id);
 
     if (eventIds.length === 0) {
       res.json([]);
@@ -157,16 +157,16 @@ export function makeMeRouter(prisma: Prisma): Router {
       where: {
         official_id: req.user!.id,
         tournament_disciplines: {
-          tournament_sports: { tournaments: { event_id: { in: eventIds } } },
+          tournament_sports: { tournaments: { championship_id: { in: eventIds } } },
         },
       },
       include: {
-        teams_fixtures_home_team_idToteams: { include: { institutions: true } },
-        teams_fixtures_away_team_idToteams: { include: { institutions: true } },
+        teams_fixtures_home_team_idToteams: { include: { organizations: true } },
+        teams_fixtures_away_team_idToteams: { include: { organizations: true } },
         tournament_disciplines: {
           include: {
             disciplines: true,
-            tournament_sports: { include: { sports: true, tournaments: { include: { events: true } } } },
+            tournament_sports: { include: { sports: true, tournaments: { include: { championships: true } } } },
           },
         },
         venue_grounds: { include: { venues: true } },
@@ -177,11 +177,11 @@ export function makeMeRouter(prisma: Prisma): Router {
   }));
 
   // -------------------------------------------------------------------------
-  // Participant dashboard — cross-event career view with on-demand drill-down.
+  // Participant dashboard — cross-championship career view with on-demand drill-down.
   // -------------------------------------------------------------------------
 
   // Resolve the user's active team memberships once: returns the membership rows
-  // (with team + event + sport + discipline) plus a Set of team ids for matching.
+  // (with team + championship + sport + discipline) plus a Set of team ids for matching.
   async function loadMyTeams(userId: string) {
     const memberships = await prisma.team_members.findMany({
       where: { user_id: userId, is_active: true },
@@ -189,8 +189,8 @@ export function makeMeRouter(prisma: Prisma): Router {
         teams: {
           include: {
             sports: { select: { id: true, name: true, icon: true } },
-            events: { select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true } },
-            institutions: { select: { id: true, name: true, short_name: true } },
+            championships: { select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true } },
+            organizations: { select: { id: true, name: true, short_name: true } },
             tournament_disciplines: { include: { disciplines: { select: { id: true, name: true } } } },
           },
         },
@@ -200,12 +200,12 @@ export function makeMeRouter(prisma: Prisma): Router {
     return { memberships, teamIds };
   }
 
-  // GET /me/dashboard — fast landing summary: career stats, event cards, recent 5.
+  // GET /me/dashboard — fast landing summary: career stats, championship cards, recent 5.
   router.get('/me/dashboard', asyncHandler(async (req, res) => {
     const { memberships, teamIds } = await loadMyTeams(req.user!.id);
 
     if (teamIds.size === 0) {
-      res.json({ stats: { total_events: 0, total_matches: 0, wins: 0, losses: 0, draws: 0 }, events: [], recent_matches: [] });
+      res.json({ stats: { total_events: 0, total_matches: 0, wins: 0, losses: 0, draws: 0 }, championships: [], recent_matches: [], achievements: [] });
       return;
     }
 
@@ -216,7 +216,7 @@ export function makeMeRouter(prisma: Prisma): Router {
       orderBy: [{ scheduled_at: 'desc' }, { created_at: 'desc' }],
     });
 
-    // Group memberships by event to build event cards.
+    // Group memberships by championship to build championship cards.
     type EventCard = {
       id: string; name: string; slug: string; status: string;
       start_date: Date | null; end_date: Date | null; venue: string | null;
@@ -225,7 +225,7 @@ export function makeMeRouter(prisma: Prisma): Router {
     };
     const eventMap = new Map<string, EventCard>();
     for (const m of memberships) {
-      const ev = m.teams.events;
+      const ev = m.teams.championships;
       if (!ev) continue;
       let card = eventMap.get(ev.id);
       if (!card) {
@@ -242,16 +242,16 @@ export function makeMeRouter(prisma: Prisma): Router {
       if (m.teams.sports?.name) card._sports.add(m.teams.sports.name);
     }
 
-    // Attribute each fixture to its event card.
+    // Attribute each fixture to its championship card.
     for (const f of fixtures) {
-      const evId = f.tournament_disciplines?.tournament_sports?.tournaments?.events?.id;
+      const evId = f.tournament_disciplines?.tournament_sports?.tournaments?.championships?.id;
       const card = evId ? eventMap.get(evId) : undefined;
       if (!card) continue;
       card.match_count++;
       if (resultFor(f, teamIds) === 'won') card.win_count++;
     }
 
-    const events = [...eventMap.values()]
+    const championships = [...eventMap.values()]
       .map((c) => ({
         id: c.id, name: c.name, slug: c.slug, status: c.status,
         start_date: c.start_date, end_date: c.end_date, venue: c.venue,
@@ -263,14 +263,38 @@ export function makeMeRouter(prisma: Prisma): Router {
     const { wins, losses, draws } = tally(fixtures, teamIds);
     const recent_matches = fixtures.slice(0, 5).map((f) => toMatchSummary(f, teamIds));
 
+    // Achievements — awards this user has received, newest first, with match context.
+    const awardRows = await prisma.fixture_awards.findMany({
+      where: { recipient_user_id: req.user!.id },
+      include: { fixtures: { include: fixtureInclude } },
+      orderBy: { created_at: 'desc' },
+    });
+    const achievements = awardRows.map((a) => {
+      const f: FixtureRow = a.fixtures;
+      const ts = f?.tournament_disciplines?.tournament_sports;
+      const championship = ts?.tournaments?.championships;
+      const isHome = f?.home_team_id != null && teamIds.has(f.home_team_id);
+      const mine = isHome ? f?.teams_fixtures_home_team_idToteams : f?.teams_fixtures_away_team_idToteams;
+      const opp = isHome ? f?.teams_fixtures_away_team_idToteams : f?.teams_fixtures_home_team_idToteams;
+      return {
+        id: a.id,
+        award_name: a.award_name,
+        date: a.created_at,
+        championship: championship ? { id: championship.id, name: championship.name } : null,
+        sport: mine?.sports?.name ?? ts?.sports?.name ?? null,
+        opponent_team_name: opp?.name ?? null,
+      };
+    });
+
     res.json({
       stats: { total_events: eventMap.size, total_matches: fixtures.length, wins, losses, draws },
-      events,
+      championships,
       recent_matches,
+      achievements,
     });
   }));
 
-  // GET /me/matches — full match list, filterable by event/status.
+  // GET /me/matches — full match list, filterable by championship/status.
   router.get('/me/matches', asyncHandler(async (req, res) => {
     const { teamIds } = await loadMyTeams(req.user!.id);
     if (teamIds.size === 0) {
@@ -278,7 +302,7 @@ export function makeMeRouter(prisma: Prisma): Router {
       return;
     }
     const ids = [...teamIds];
-    const eventId = typeof req.query.event_id === 'string' ? req.query.event_id : undefined;
+    const eventId = typeof req.query.championship_id === 'string' ? req.query.championship_id : undefined;
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
 
     const fixtures = await prisma.fixtures.findMany({
@@ -286,7 +310,7 @@ export function makeMeRouter(prisma: Prisma): Router {
         OR: [{ home_team_id: { in: ids } }, { away_team_id: { in: ids } }],
         ...(status ? { status } : {}),
         ...(eventId
-          ? { tournament_disciplines: { tournament_sports: { tournaments: { event_id: eventId } } } }
+          ? { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: eventId } } } }
           : {}),
       },
       include: fixtureInclude,
@@ -305,14 +329,14 @@ export function makeMeRouter(prisma: Prisma): Router {
         ...fixtureInclude,
         teams_fixtures_home_team_idToteams: {
           include: {
-            institutions: true,
+            organizations: true,
             sports: true,
             team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true, phone: true } } } },
           },
         },
         teams_fixtures_away_team_idToteams: {
           include: {
-            institutions: true,
+            organizations: true,
             sports: true,
             team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true, phone: true } } } },
           },
@@ -335,7 +359,7 @@ export function makeMeRouter(prisma: Prisma): Router {
     const myTeamIds = new Set<string>([mine.id]);
 
     const ts = f.tournament_disciplines?.tournament_sports;
-    const event = ts?.tournaments?.events;
+    const championship = ts?.tournaments?.championships;
     const ground = f.venue_grounds;
 
     res.json({
@@ -355,9 +379,9 @@ export function makeMeRouter(prisma: Prisma): Router {
         sport: mine.sports?.name ?? ts?.sports?.name ?? null,
         discipline: f.tournament_disciplines?.disciplines?.name ?? null,
         tournament: ts?.tournaments?.name ?? null,
-        event: event ? { id: event.id, name: event.name, slug: event.slug } : null,
-        my_team: { id: mine.id, name: mine.name, institution: mine.institutions?.name ?? null },
-        opponent: opp ? { id: opp.id, name: opp.name, institution: opp.institutions?.name ?? null } : null,
+        championship: championship ? { id: championship.id, name: championship.name, slug: championship.slug } : null,
+        my_team: { id: mine.id, name: mine.name, organization: mine.organizations?.name ?? null },
+        opponent: opp ? { id: opp.id, name: opp.name, organization: opp.organizations?.name ?? null } : null,
         my_role: myMember?.role ?? null,
         jersey_number: myMember?.jersey_number ?? null,
         teammates: (mine.team_members ?? [])
@@ -367,23 +391,23 @@ export function makeMeRouter(prisma: Prisma): Router {
     });
   }));
 
-  // GET /me/events/:eventId — full participation detail for one event.
-  router.get('/me/events/:eventId', asyncHandler(async (req, res) => {
+  // GET /me/championships/:eventId — full participation detail for one championship.
+  router.get('/me/championships/:eventId', asyncHandler(async (req, res) => {
     const eventId = req.params.eventId;
     const { memberships, teamIds } = await loadMyTeams(req.user!.id);
 
-    const myMemberships = memberships.filter((m) => m.teams.events?.id === eventId);
-    if (myMemberships.length === 0) throw new NotFoundError('Event');
+    const myMemberships = memberships.filter((m) => m.teams.championships?.id === eventId);
+    if (myMemberships.length === 0) throw new NotFoundError('Championship');
 
-    const event = await prisma.events.findUnique({
+    const championship = await prisma.championships.findUnique({
       where: { id: eventId },
       select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true, description: true },
     });
-    if (!event) throw new NotFoundError('Event');
+    if (!championship) throw new NotFoundError('Championship');
 
     const myTeamIdsInEvent = new Set(myMemberships.map((m) => m.team_id));
 
-    // Rosters for the user's teams in this event.
+    // Rosters for the user's teams in this championship.
     const teamsWithRoster = await prisma.teams.findMany({
       where: { id: { in: [...myTeamIdsInEvent] } },
       include: {
@@ -409,7 +433,7 @@ export function makeMeRouter(prisma: Prisma): Router {
       };
     });
 
-    // All fixtures for the user's teams in this event.
+    // All fixtures for the user's teams in this championship.
     const fixtures = await prisma.fixtures.findMany({
       where: {
         OR: [{ home_team_id: { in: [...myTeamIdsInEvent] } }, { away_team_id: { in: [...myTeamIdsInEvent] } }],
@@ -421,20 +445,20 @@ export function makeMeRouter(prisma: Prisma): Router {
     const matches = fixtures.map((f) => toMatchSummary(f, teamIds));
     const { wins, losses, draws } = tally(fixtures, teamIds);
 
-    // Event-wide standings (read-only) — aggregated from all completed fixtures.
+    // Championship-wide standings (read-only) — aggregated from all completed fixtures.
     const eventFixtures = await prisma.fixtures.findMany({
       where: {
         status: 'completed',
-        tournament_disciplines: { tournament_sports: { tournaments: { event_id: eventId } } },
+        tournament_disciplines: { tournament_sports: { tournaments: { championship_id: eventId } } },
       },
       include: {
-        teams_fixtures_home_team_idToteams: { include: { institutions: true } },
-        teams_fixtures_away_team_idToteams: { include: { institutions: true } },
+        teams_fixtures_home_team_idToteams: { include: { organizations: true } },
+        teams_fixtures_away_team_idToteams: { include: { organizations: true } },
       },
     });
 
     res.json({
-      event,
+      championship,
       stats: { matches: fixtures.length, wins, losses, draws },
       teams,
       matches,

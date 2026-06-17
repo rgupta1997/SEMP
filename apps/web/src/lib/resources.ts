@@ -1,5 +1,5 @@
 import {
-  ENTRY_TYPE, EVENT_STATUS, FIXTURE_STATUS, GROUND_TYPE, SPONSOR_TIER,
+  ENTRY_TYPE, CHAMPIONSHIP_STATUS, FIXTURE_STATUS, GROUND_TYPE, SPONSOR_TIER,
   TOURNAMENT_DISCIPLINE_STATUS, TOURNAMENT_STATUS,
 } from '@semp/shared';
 
@@ -23,7 +23,7 @@ export interface ResourceConfig {
   fields: FieldDef[];
   noEdit?: boolean;
   noDelete?: boolean;
-  statusEndpoint?: boolean; // events: PATCH /:id/status with EVENT_STATUS
+  statusEndpoint?: boolean; // championships: PATCH /:id/status with CHAMPIONSHIP_STATUS
 }
 
 const sel = (options: readonly string[]) => ({ type: 'select' as const, options });
@@ -76,8 +76,8 @@ export const RESOURCES: Record<string, ResourceConfig> = {
       { name: 'config', label: 'Config template (JSON)', type: 'json', default: {} },
     ],
   },
-  institutions: {
-    key: 'institutions', title: 'Institutions', path: '/institutions',
+  organizations: {
+    key: 'organizations', title: 'Organizations', path: '/organizations',
     columns: [{ key: 'name', label: 'Name' }, { key: 'code', label: 'Code' }, { key: 'city', label: 'City' }],
     fields: [
       { name: 'name', label: 'Name' },
@@ -89,8 +89,8 @@ export const RESOURCES: Record<string, ResourceConfig> = {
       { name: 'status', label: 'Active', type: 'checkbox' },
     ],
   },
-  events: {
-    key: 'events', title: 'Events', path: '/events', statusEndpoint: true,
+  championships: {
+    key: 'championships', title: 'Championships', path: '/championships', statusEndpoint: true,
     columns: [{ key: 'name', label: 'Name' }, { key: 'slug', label: 'Slug' }, { key: 'status', label: 'Status' }, { key: 'start_date', label: 'Start' }],
     fields: [
       { name: 'name', label: 'Name' },
@@ -105,7 +105,7 @@ export const RESOURCES: Record<string, ResourceConfig> = {
     key: 'venues', title: 'Venues', path: '/venues',
     columns: [{ key: 'name', label: 'Name' }, { key: 'city', label: 'City' }],
     fields: [
-      { name: 'event_id', label: 'Event', ...rel('/events') },
+      { name: 'championship_id', label: 'Championship', ...rel('/championships') },
       { name: 'name', label: 'Name' },
       { name: 'address', label: 'Address' },
       { name: 'city', label: 'City' },
@@ -130,7 +130,7 @@ export const RESOURCES: Record<string, ResourceConfig> = {
     key: 'sponsors', title: 'Sponsors', path: '/sponsors',
     columns: [{ key: 'name', label: 'Name' }, { key: 'tier', label: 'Tier' }],
     fields: [
-      { name: 'event_id', label: 'Event', ...rel('/events') },
+      { name: 'championship_id', label: 'Championship', ...rel('/championships') },
       { name: 'name', label: 'Name' },
       { name: 'tier', label: 'Tier', ...sel(SPONSOR_TIER), default: 'community' },
       { name: 'website_url', label: 'Website URL' },
@@ -142,7 +142,7 @@ export const RESOURCES: Record<string, ResourceConfig> = {
     key: 'tournaments', title: 'Tournaments', path: '/tournaments',
     columns: [{ key: 'name', label: 'Name' }, { key: 'status', label: 'Status' }],
     fields: [
-      { name: 'event_id', label: 'Event', ...rel('/events') },
+      { name: 'championship_id', label: 'Championship', ...rel('/championships') },
       { name: 'name', label: 'Name' },
       { name: 'description', label: 'Description', type: 'textarea' },
       { name: 'status', label: 'Status', ...sel(TOURNAMENT_STATUS), default: 'draft' },
@@ -188,4 +188,4 @@ export const RESOURCES: Record<string, ResourceConfig> = {
 };
 
 export const FIXTURE_STATUS_OPTIONS = FIXTURE_STATUS;
-export const EVENT_STATUS_OPTIONS = EVENT_STATUS;
+export const CHAMPIONSHIP_STATUS_OPTIONS = CHAMPIONSHIP_STATUS;

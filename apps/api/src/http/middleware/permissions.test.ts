@@ -3,23 +3,30 @@ import type { RequestHandler } from 'express';
 import { makeGuards } from './permissions.js';
 
 // ---- test doubles -------------------------------------------------------
-interface User { id: string; isSuperAdmin: boolean; accountType: string; institutionId: string | null }
+interface User { id: string; isSuperAdmin: boolean; organizationId: string | null }
 
-const SUPER: User = { id: 'admin', isSuperAdmin: true, accountType: 'organiser', institutionId: null };
-const ORGANISER: User = { id: 'org1', isSuperAdmin: false, accountType: 'organiser', institutionId: null };
-const PARTICIPANT: User = { id: 'p1', isSuperAdmin: false, accountType: 'participant', institutionId: 'inst1' };
-const STAFF: User = { id: 's1', isSuperAdmin: false, accountType: 'institution', institutionId: 'inst1' };
+const SUPER: User = { id: 'admin', isSuperAdmin: true, organizationId: null };
+const ORGANISER: User = { id: 'org1', isSuperAdmin: false, organizationId: null };
+const PLAYER: User = { id: 'p1', isSuperAdmin: false, organizationId: 'org-a' };
+const OWNER: User = { id: 's1', isSuperAdmin: false, organizationId: 'org-a' };
 
+// `orgAdmins`: list of "<userId>|<orgId>" the fake treats as owner/admin members.
 function fakePrisma(over: {
-  organiserEventIds?: string[]; organiserUserId?: string;
+  organiserChampionshipIds?: string[]; organiserUserId?: string;
+  orgAdmins?: string[];
   team?: any; fixture?: any;
 } = {}): any {
+  const isAdmin = (userId: string, orgId: string) => (over.orgAdmins ?? []).includes(`${userId}|${orgId}`);
   return {
     roles: { findUnique: async () => ({ id: 'role-org' }) },
-    user_event_roles: {
+    user_championship_roles: {
       findFirst: async (args: any) =>
-        (over.organiserEventIds ?? []).includes(args.where.event_id) && args.where.user_id === over.organiserUserId
+        (over.organiserChampionshipIds ?? []).includes(args.where.championship_id) && args.where.user_id === over.organiserUserId
           ? { id: 'uer' } : null,
+    },
+    organization_members: {
+      findFirst: async (args: any) =>
+        isAdmin(args.where.user_id, args.where.organization_id) ? { id: 'om' } : null,
     },
     teams: { findUnique: async () => over.team ?? null },
     fixtures: { findUnique: async () => over.fixture ?? null },
@@ -36,87 +43,86 @@ function run(handler: RequestHandler, user: User, opts: { params?: any; body?: a
 }
 
 // ---- tests --------------------------------------------------------------
-describe('organiserAccount', () => {
-  const g = makeGuards(fakePrisma());
-  it('allows super admin', async () => expect((await run(g.organiserAccount, SUPER)).ok).toBe(true));
-  it('allows organiser accounts', async () => expect((await run(g.organiserAccount, ORGANISER)).ok).toBe(true));
-  it('denies participants', async () => {
-    const r = await run(g.organiserAccount, PARTICIPANT);
-    expect(r.ok).toBe(false);
-    expect(r.status).toBe(403);
-  });
-});
-
 describe('enrollSelf', () => {
-  const g = makeGuards(fakePrisma());
-  it('allows enrolling own institution', async () =>
-    expect((await run(g.enrollSelf, PARTICIPANT, { body: { institution_id: 'inst1' } })).ok).toBe(true));
-  it('denies enrolling another institution', async () =>
-    expect((await run(g.enrollSelf, PARTICIPANT, { body: { institution_id: 'inst2' } })).ok).toBe(false));
+  it('allows an owner/admin to enroll their org', async () => {
+    const g = makeGuards(fakePrisma({ orgAdmins: ['s1|org-a'] }));
+    expect((await run(g.enrollSelf, OWNER, { body: { organization_id: 'org-a' } })).ok).toBe(true);
+  });
+  it('denies a plain member', async () => {
+    const g = makeGuards(fakePrisma());
+    expect((await run(g.enrollSelf, PLAYER, { body: { organization_id: 'org-a' } })).ok).toBe(false);
+  });
 });
 
 describe('teamCreate', () => {
-  const g = makeGuards(fakePrisma());
-  it('allows creating for own institution', async () =>
-    expect((await run(g.teamCreate, PARTICIPANT, { body: { institution_id: 'inst1' } })).ok).toBe(true));
-  it('denies creating for another institution', async () =>
-    expect((await run(g.teamCreate, PARTICIPANT, { body: { institution_id: 'inst2' } })).ok).toBe(false));
-  it('allows bulk all-own-institution', async () =>
-    expect((await run(g.teamCreate, PARTICIPANT, { body: { teams: [{ institution_id: 'inst1' }, { institution_id: 'inst1' }] } })).ok).toBe(true));
-  it('denies bulk with a foreign institution', async () =>
-    expect((await run(g.teamCreate, PARTICIPANT, { body: { teams: [{ institution_id: 'inst1' }, { institution_id: 'inst2' }] } })).ok).toBe(false));
+  it('allows an owner/admin creating for their org', async () => {
+    const g = makeGuards(fakePrisma({ orgAdmins: ['s1|org-a'] }));
+    expect((await run(g.teamCreate, OWNER, { body: { organization_id: 'org-a' } })).ok).toBe(true);
+  });
+  it('denies creating for an org you do not administer', async () => {
+    const g = makeGuards(fakePrisma());
+    expect((await run(g.teamCreate, PLAYER, { body: { organization_id: 'org-a' } })).ok).toBe(false);
+  });
+  it('allows bulk all-own-org', async () => {
+    const g = makeGuards(fakePrisma({ orgAdmins: ['s1|org-a'] }));
+    expect((await run(g.teamCreate, OWNER, { body: { teams: [{ organization_id: 'org-a' }, { organization_id: 'org-a' }] } })).ok).toBe(true);
+  });
+  it('denies bulk with a foreign org', async () => {
+    const g = makeGuards(fakePrisma({ orgAdmins: ['s1|org-a'] }));
+    expect((await run(g.teamCreate, OWNER, { body: { teams: [{ organization_id: 'org-a' }, { organization_id: 'org-b' }] } })).ok).toBe(false);
+  });
 });
 
-describe('eventManager', () => {
+describe('championshipManager', () => {
   it('allows super admin', async () => {
     const g = makeGuards(fakePrisma());
-    expect((await run(g.eventManager(async () => 'e1'), SUPER)).ok).toBe(true);
+    expect((await run(g.championshipManager(async () => 'c1'), SUPER)).ok).toBe(true);
   });
-  it('allows the organiser of that event', async () => {
-    const g = makeGuards(fakePrisma({ organiserEventIds: ['e1'], organiserUserId: 'org1' }));
-    expect((await run(g.eventManager(async () => 'e1'), ORGANISER)).ok).toBe(true);
+  it('allows the organiser of that championship', async () => {
+    const g = makeGuards(fakePrisma({ organiserChampionshipIds: ['c1'], organiserUserId: 'org1' }));
+    expect((await run(g.championshipManager(async () => 'c1'), ORGANISER)).ok).toBe(true);
   });
-  it('denies an organiser of a different event', async () => {
-    const g = makeGuards(fakePrisma({ organiserEventIds: ['e2'], organiserUserId: 'org1' }));
-    const r = await run(g.eventManager(async () => 'e1'), ORGANISER);
+  it('denies an organiser of a different championship', async () => {
+    const g = makeGuards(fakePrisma({ organiserChampionshipIds: ['c2'], organiserUserId: 'org1' }));
+    const r = await run(g.championshipManager(async () => 'c1'), ORGANISER);
     expect(r.ok).toBe(false);
     expect(r.status).toBe(403);
   });
 });
 
 describe('teamManager', () => {
-  it('allows institution staff of the owning institution', async () => {
-    const g = makeGuards(fakePrisma({ team: { institution_id: 'inst1', team_members: [] } }));
-    expect((await run(g.teamManager, STAFF, { params: { id: 't1' } })).ok).toBe(true);
+  it('allows an owner/admin of the owning org', async () => {
+    const g = makeGuards(fakePrisma({ team: { organization_id: 'org-a', team_members: [] }, orgAdmins: ['s1|org-a'] }));
+    expect((await run(g.teamManager, OWNER, { params: { id: 't1' } })).ok).toBe(true);
   });
   it('allows the team captain', async () => {
-    const g = makeGuards(fakePrisma({ team: { institution_id: 'inst1', team_members: [{ role: 'captain' }] } }));
-    expect((await run(g.teamManager, PARTICIPANT, { params: { id: 't1' } })).ok).toBe(true);
+    const g = makeGuards(fakePrisma({ team: { organization_id: 'org-a', team_members: [{ role: 'captain' }] } }));
+    expect((await run(g.teamManager, PLAYER, { params: { id: 't1' } })).ok).toBe(true);
   });
   it('denies a non-captain player', async () => {
-    const g = makeGuards(fakePrisma({ team: { institution_id: 'inst1', team_members: [] } }));
-    expect((await run(g.teamManager, PARTICIPANT, { params: { id: 't1' } })).ok).toBe(false);
+    const g = makeGuards(fakePrisma({ team: { organization_id: 'org-a', team_members: [] } }));
+    expect((await run(g.teamManager, PLAYER, { params: { id: 't1' } })).ok).toBe(false);
   });
-  it('denies staff from another institution', async () => {
-    const g = makeGuards(fakePrisma({ team: { institution_id: 'inst2', team_members: [] } }));
-    expect((await run(g.teamManager, STAFF, { params: { id: 't1' } })).ok).toBe(false);
+  it('denies an admin of another org', async () => {
+    const g = makeGuards(fakePrisma({ team: { organization_id: 'org-b', team_members: [] }, orgAdmins: ['s1|org-a'] }));
+    expect((await run(g.teamManager, OWNER, { params: { id: 't1' } })).ok).toBe(false);
   });
 });
 
 describe('fixtureScorer', () => {
-  const fixture = { official_id: 'off1', tournament_disciplines: { tournament_sports: { tournaments: { event_id: 'e1' } } } };
+  const fixture = { official_id: 'off1', tournament_disciplines: { tournament_sports: { tournaments: { championship_id: 'c1' } } } };
   it('allows the assigned official', async () => {
     const g = makeGuards(fakePrisma({ fixture }));
-    const official: User = { id: 'off1', isSuperAdmin: false, accountType: 'official', institutionId: null };
+    const official: User = { id: 'off1', isSuperAdmin: false, organizationId: null };
     expect((await run(g.fixtureScorer, official, { params: { id: 'f1' } })).ok).toBe(true);
   });
-  it('allows the event organiser', async () => {
-    const g = makeGuards(fakePrisma({ fixture, organiserEventIds: ['e1'], organiserUserId: 'org1' }));
+  it('allows the championship organiser', async () => {
+    const g = makeGuards(fakePrisma({ fixture, organiserChampionshipIds: ['c1'], organiserUserId: 'org1' }));
     expect((await run(g.fixtureScorer, ORGANISER, { params: { id: 'f1' } })).ok).toBe(true);
   });
   it('denies an unrelated user', async () => {
     const g = makeGuards(fakePrisma({ fixture }));
-    const other: User = { id: 'x', isSuperAdmin: false, accountType: 'official', institutionId: null };
+    const other: User = { id: 'x', isSuperAdmin: false, organizationId: null };
     const r = await run(g.fixtureScorer, other, { params: { id: 'f1' } });
     expect(r.ok).toBe(false);
     expect(r.status).toBe(403);

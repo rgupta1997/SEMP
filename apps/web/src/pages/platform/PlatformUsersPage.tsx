@@ -1,7 +1,6 @@
-import { useMemo, useState } from 'react';
-import { ACCOUNT_TYPE } from '@semp/shared';
+import { useState } from 'react';
 import { api } from '../../lib/api';
-import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
+import { fmtDate, useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import {
   Avatar, Badge, Button, Card, EmptyState, Field, ListToolbar, Pagination,
   SearchInput, Select, Spinner,
@@ -11,8 +10,8 @@ import { UserFormModal, type UserFormBody } from '../../components/UserFormModal
 
 interface UserRow {
   id: string; name: string; email: string; phone?: string | null;
-  account_type: string; is_active: boolean; is_super_admin: boolean;
-  institutions?: { id: string; name: string } | null;
+  is_active: boolean; is_super_admin: boolean; created_at?: string | null;
+  organizations?: { id: string; name: string } | null;
 }
 
 interface ImportResult { created: number; matched: number; total: number }
@@ -21,16 +20,14 @@ const USER_IMPORT_FIELDS = [
   { key: 'name', label: 'Name', required: true },
   { key: 'email', label: 'Email', required: true, aliases: ['e-mail'] },
   { key: 'phone', label: 'Phone', aliases: ['mobile', 'contact'] },
-  { key: 'account_type', label: 'Account type', aliases: ['role', 'type'] },
 ];
 
 export function PlatformUsersPage() {
   const { data: users = [], isLoading } = useApi<UserRow[]>('/users');
-  const { data: institutions = [] } = useApi<{ id: string; name: string }[]>('/institutions');
-  const { data: events = [] } = useApi<{ id: string; name: string }[]>('/events');
+  const { data: organizations = [] } = useApi<{ id: string; name: string }[]>('/organizations');
+  const { data: championships = [] } = useApi<{ id: string; name: string }[]>('/championships');
   const { data: roles = [] } = useApi<{ id: string; name: string }[]>('/roles');
 
-  const [accountFilter, setAccountFilter] = useState('all');
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [editing, setEditing] = useState<UserRow | null>(null);
@@ -42,15 +39,11 @@ export function PlatformUsersPage() {
 
   const deactivate = useApiMutation((id: string) => api('DELETE', `/users/${id}`), ['/users']);
 
-  const filtered = useMemo(
-    () => (accountFilter === 'all' ? users : users.filter((u) => u.account_type === accountFilter)),
-    [users, accountFilter],
-  );
+  const filtered = users;
   const t = useTableControls(filtered, {
-    search: (u) => `${u.name} ${u.email} ${u.phone ?? ''} ${u.institutions?.name ?? ''}`,
+    search: (u) => `${u.name} ${u.email} ${u.phone ?? ''} ${u.organizations?.name ?? ''}`,
     sorts: {
       name: (a, b) => a.name.localeCompare(b.name),
-      account: (a, b) => a.account_type.localeCompare(b.account_type),
     },
     initialSort: 'name',
     pageSize: 15,
@@ -60,16 +53,12 @@ export function PlatformUsersPage() {
 
   return (
     <div>
-      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">All platform accounts — create, import, edit, map to events.</p>
+      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">All platform accounts — create, import, edit, map to championships.</p>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-xl font-semibold dark:text-slate-100">Users</h2>
         <ListToolbar inline>
           <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search users…" className="w-56" />
-          <Select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)}>
-            <option value="all">All types</option>
-            {ACCOUNT_TYPE.map((a) => <option key={a} value={a}>{a}</option>)}
-          </Select>
           <Button variant="outline" onClick={() => setImporting(true)}>↑ Import users</Button>
           <Button onClick={() => setCreating(true)}>+ Add user</Button>
         </ListToolbar>
@@ -84,8 +73,8 @@ export function PlatformUsersPage() {
               <tr>
                 <th className="px-4 py-2">Name</th>
                 <th className="px-4 py-2">Contact</th>
-                <th className="px-4 py-2">Account</th>
-                <th className="px-4 py-2">Institution</th>
+                <th className="px-4 py-2">Organization</th>
+                <th className="px-4 py-2">Joined</th>
                 <th className="px-4 py-2"></th>
               </tr>
             </thead>
@@ -104,8 +93,8 @@ export function PlatformUsersPage() {
                     <div>{u.email}</div>
                     {u.phone && <div className="text-xs text-slate-400 dark:text-slate-500">{u.phone}</div>}
                   </td>
-                  <td className="px-4 py-2"><Badge tone="slate">{u.account_type}</Badge></td>
-                  <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{u.institutions?.name ?? '—'}</td>
+                  <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{u.organizations?.name ?? '—'}</td>
+                  <td className="px-4 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{fmtDate(u.created_at)}</td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
                     <Button size="sm" variant="ghost" onClick={() => setEditing(u)}>Edit</Button>
                     {u.is_active && !u.is_super_admin && (
@@ -125,17 +114,17 @@ export function PlatformUsersPage() {
 
       {creating && (
         <UserFormModal
-          institutions={institutions}
+          organizations={organizations}
           onClose={() => setCreating(false)}
-          onSubmit={async (body: UserFormBody) => { await api('POST', '/users', body); }}
+          onSubmit={(body: UserFormBody) => api('POST', '/users', body)}
         />
       )}
 
       {editing && (
         <UserFormModal
           mode="edit"
-          initial={{ name: editing.name, email: editing.email, phone: editing.phone ?? '', account_type: editing.account_type as any, institution_id: editing.institutions?.id ?? null }}
-          institutions={institutions}
+          initial={{ name: editing.name, email: editing.email, phone: editing.phone ?? '', organization_id: editing.organizations?.id ?? null }}
+          organizations={organizations}
           onClose={() => setEditing(null)}
           onSubmit={async (body: UserFormBody) => { await api('PATCH', `/users/${editing.id}`, body); }}
         />
@@ -146,23 +135,23 @@ export function PlatformUsersPage() {
           title="Import users"
           fields={USER_IMPORT_FIELDS}
           templateName="users-template.csv"
-          sampleRow={['Aarav Mehta', 'aarav@example.com', '9800000001', 'participant']}
+          sampleRow={['Aarav Mehta', 'aarav@example.com', '9800000001']}
           submitLabel="Import"
           extraControls={(
             <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="Institution (optional)">
+              <Field label="Organization (optional)">
                 <Select value={mapInstitution} onChange={(e) => setMapInstitution(e.target.value)}>
                   <option value="">— none —</option>
-                  {institutions.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                  {organizations.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
                 </Select>
               </Field>
-              <Field label="Map to event (optional)">
+              <Field label="Map to championship (optional)">
                 <Select value={mapEvent} onChange={(e) => setMapEvent(e.target.value)}>
                   <option value="">— none —</option>
-                  {events.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                  {championships.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </Select>
               </Field>
-              <Field label="Event role">
+              <Field label="Championship role">
                 <Select value={mapRole} onChange={(e) => setMapRole(e.target.value)} disabled={!mapEvent}>
                   <option value="">— select —</option>
                   {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
@@ -181,10 +170,9 @@ export function PlatformUsersPage() {
               name: row.name,
               email: row.email,
               phone: row.phone || undefined,
-              account_type: ACCOUNT_TYPE.includes(row.account_type as any) ? row.account_type : 'participant',
             })),
-            institution_id: mapInstitution || undefined,
-            event_id: mapEvent || undefined,
+            organization_id: mapInstitution || undefined,
+            championship_id: mapEvent || undefined,
             role_id: mapEvent && mapRole ? mapRole : undefined,
           })}
         />

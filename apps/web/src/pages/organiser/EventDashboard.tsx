@@ -4,31 +4,32 @@ import { useApi } from '../../lib/hooks';
 import { Button, Card, CardBody, CardHeader, StatCard, StatusBadge } from '../../components/ui';
 
 export function EventDashboard() {
-  const { event, eventId } = useEvent();
-  const { data: tournaments = [] } = useApi<any[]>(`/tournaments?event_id=${eventId}`);
-  const { data: teams = [] } = useApi<any[]>(`/teams?event_id=${eventId}`);
-  const { data: venues = [] } = useApi<any[]>(`/venues?event_id=${eventId}`);
-  const { data: enrollments = [] } = useApi<any[]>(`/events/${eventId}/enrollments`);
+  const { championship, eventId, canManage } = useEvent();
+  const { data: tournaments = [] } = useApi<any[]>(`/tournaments?championship_id=${eventId}`);
+  const { data: teams = [] } = useApi<any[]>(`/teams?championship_id=${eventId}`);
+  const { data: venues = [] } = useApi<any[]>(`/venues?championship_id=${eventId}`);
+  const { data: enrollments = [] } = useApi<any[]>(`/championships/${eventId}/enrollments`);
 
   const pending = enrollments.filter((e) => e.status === 'pending');
   const approved = enrollments.filter((e) => e.status === 'approved');
 
   const tasks: { label: string; to: string; tone: 'amber' | 'brand' }[] = [];
-  if (pending.length) tasks.push({ label: `${pending.length} institution${pending.length > 1 ? 's' : ''} awaiting approval`, to: `/events/${eventId}/approvals`, tone: 'amber' });
-  if (tournaments.length === 0) tasks.push({ label: 'No tournament yet — add one to start configuring sports', to: `/events/${eventId}/setup`, tone: 'brand' });
-  if (venues.length === 0) tasks.push({ label: 'No venues added yet', to: `/events/${eventId}/setup`, tone: 'brand' });
-  if (event.status === 'draft') tasks.push({ label: 'Event is in draft — open registration when setup is ready', to: `/events/${eventId}`, tone: 'brand' });
+  if (pending.length) tasks.push({ label: `${pending.length} organization${pending.length > 1 ? 's' : ''} awaiting approval`, to: `/championships/${eventId}/approvals`, tone: 'amber' });
+  if (tournaments.length === 0) tasks.push({ label: 'No tournament yet — add one to start configuring sports', to: `/championships/${eventId}/setup`, tone: 'brand' });
+  if (venues.length === 0) tasks.push({ label: 'No venues added yet', to: `/championships/${eventId}/setup`, tone: 'brand' });
+  if (championship.status === 'draft') tasks.push({ label: 'Championship is in draft — open registration when setup is ready', to: `/championships/${eventId}`, tone: 'brand' });
 
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Tournaments" value={tournaments.length} />
-        <StatCard label="Teams" value={teams.length} hint={`${approved.length} institutions approved`} />
+        <StatCard label="Teams" value={teams.length} hint={`${approved.length} organizations approved`} />
         <StatCard label="Pending approvals" value={pending.length} accent={pending.length > 0} hint="needs review" />
         <StatCard label="Venues" value={venues.length} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
+        {canManage && (
         <Card>
           <CardHeader title="Needs your attention" subtitle="Open items blocking progress" />
           <CardBody>
@@ -49,9 +50,10 @@ export function EventDashboard() {
             )}
           </CardBody>
         </Card>
+        )}
 
         <Card>
-          <CardHeader title="Tournaments" action={<Link to={`/events/${eventId}/setup`}><Button size="sm" variant="subtle">Manage</Button></Link>} />
+          <CardHeader title="Tournaments" action={canManage ? <Link to={`/championships/${eventId}/setup`}><Button size="sm" variant="subtle">Manage</Button></Link> : undefined} />
           <CardBody>
             {tournaments.length === 0 ? (
               <p className="text-sm text-slate-400 dark:text-slate-500">No tournaments yet.</p>

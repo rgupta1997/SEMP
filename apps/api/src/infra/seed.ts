@@ -189,10 +189,10 @@ async function main() {
 
   // ---- Roles ----
   const roleDefs = [
-    { name: 'Organiser', description: 'Runs the event', codes: ['P1'] },
+    { name: 'Organiser', description: 'Runs the championship', codes: ['P1'] },
     { name: 'Official', description: 'Scores matches', codes: ['P2', 'P4'] },
     { name: 'Captain', description: 'Leads a team', codes: ['P3', 'P4'] },
-    { name: 'POC', description: 'Institution point of contact', codes: ['P3', 'P4'] },
+    { name: 'POC', description: 'Organization point of contact', codes: ['P3', 'P4'] },
     { name: 'Participant', description: 'Plays', codes: ['P4'] },
   ];
   for (const r of roleDefs) {
@@ -237,36 +237,45 @@ async function main() {
   }
   console.log(`✓ ${Object.keys(sportMap).length} Sports, ${discCount} Disciplines`);
 
-  // ---- Institutions ----
-  const institutions: Array<{ id: string; short_name: string; name: string }> = [];
+  // ---- Organizations ----
+  const organizations: Array<{ id: string; short_name: string; name: string }> = [];
   for (const inst of INSTITUTIONS) {
-    let row = await prisma.institutions.findFirst({ where: { name: inst.name } });
-    if (!row) row = await prisma.institutions.create({ data: { name: inst.name, short_name: inst.short_name, code: inst.code, city: inst.city, status: true } });
-    institutions.push({ id: row.id, short_name: inst.short_name!, name: row.name });
+    let row = await prisma.organizations.findFirst({ where: { name: inst.name } });
+    if (!row) row = await prisma.organizations.create({ data: { name: inst.name, short_name: inst.short_name, code: inst.code, city: inst.city, status: true } });
+    organizations.push({ id: row.id, short_name: inst.short_name!, name: row.name });
   }
-  console.log(`✓ ${institutions.length} Institutions`);
+  console.log(`✓ ${organizations.length} Organizations`);
 
-  // ---- Users: Organiser ----
+  // Helper: ensure a user ↔ org membership with a given role (idempotent).
+  const ensureMember = (userId: string, organizationId: string, role: string) =>
+    prisma.organization_members.upsert({
+      where: { user_id_organization_id: { user_id: userId, organization_id: organizationId } },
+      update: { role, status: 'active' },
+      create: { user_id: userId, organization_id: organizationId, role },
+    });
+
+  // ---- Users: Organiser (a plain user who hosts the championship) ----
   const organiser = await prisma.users.upsert({
     where: { email: 'organiser@semp.local' },
-    update: { name: 'Olivia Organiser', password_hash: DEMO_PW_HASH, account_type: 'organiser' },
-    create: { email: 'organiser@semp.local', name: 'Olivia Organiser', password_hash: DEMO_PW_HASH, account_type: 'organiser', phone: '98000 00001' },
+    update: { name: 'Olivia Organiser', password_hash: DEMO_PW_HASH },
+    create: { email: 'organiser@semp.local', name: 'Olivia Organiser', password_hash: DEMO_PW_HASH, phone: '98000 00001' },
   });
   console.log(`✓ Organiser: organiser@semp.local`);
 
-  // ---- Users: POC per institution ----
-  const pocs: Array<{ id: string; institutionId: string; email: string }> = [];
-  for (let i = 0; i < institutions.length; i++) {
-    const inst = institutions[i];
+  // ---- Users: org owner ("POC") per organization ----
+  const pocs: Array<{ id: string; organizationId: string; email: string }> = [];
+  for (let i = 0; i < organizations.length; i++) {
+    const inst = organizations[i];
     const email = `poc@${inst.short_name.toLowerCase()}.local`;
     const user = await prisma.users.upsert({
       where: { email },
-      update: { name: `${inst.short_name} Captain`, password_hash: DEMO_PW_HASH, account_type: 'institution', institution_id: inst.id },
-      create: { email, name: `${inst.short_name} Captain`, password_hash: DEMO_PW_HASH, account_type: 'institution', institution_id: inst.id, phone: `98100 0000${i + 1}` },
+      update: { name: `${inst.short_name} Owner`, password_hash: DEMO_PW_HASH, organization_id: inst.id },
+      create: { email, name: `${inst.short_name} Owner`, password_hash: DEMO_PW_HASH, organization_id: inst.id, phone: `98100 0000${i + 1}` },
     });
-    pocs.push({ id: user.id, institutionId: inst.id, email });
+    await ensureMember(user.id, inst.id, 'owner');
+    pocs.push({ id: user.id, organizationId: inst.id, email });
   }
-  console.log(`✓ ${pocs.length} POCs: ${pocs.map((p) => p.email).join(', ')}`);
+  console.log(`✓ ${pocs.length} Org owners: ${pocs.map((p) => p.email).join(', ')}`);
 
   // ---- Users: Officials (one per 3 sports = ~10 officials) ----
   const officials: Array<{ id: string; email: string; sportIdx: number[] }> = [];
@@ -275,41 +284,42 @@ async function main() {
     const email = `official${i + 1}@semp.local`;
     const user = await prisma.users.upsert({
       where: { email },
-      update: { name: `Official ${i + 1}`, password_hash: DEMO_PW_HASH, account_type: 'official' },
-      create: { email, name: `Official ${i + 1}`, password_hash: DEMO_PW_HASH, account_type: 'official', phone: `98200 0000${i + 1}` },
+      update: { name: `Official ${i + 1}`, password_hash: DEMO_PW_HASH },
+      create: { email, name: `Official ${i + 1}`, password_hash: DEMO_PW_HASH, phone: `98200 0000${i + 1}` },
     });
     officials.push({ id: user.id, email, sportIdx: [i * 3, i * 3 + 1, i * 3 + 2].filter((x) => x < sportNames.length) });
   }
   console.log(`✓ ${officials.length} Officials: ${officials.map((o) => o.email).join(', ')}`);
 
-  // ---- Users: Players (20 per institution = 100 players) ----
+  // ---- Users: Players (20 per org = 100 players), each a member of their org ----
   const playersPerInst: Record<string, Array<{ id: string; email: string; name: string }>> = {};
   let playerIdx = 0;
-  for (const inst of institutions) {
+  for (const inst of organizations) {
     playersPerInst[inst.id] = [];
     for (let p = 1; p <= 20; p++) {
       const email = `player${p}@${inst.short_name.toLowerCase()}.local`;
       const name = randomName(playerIdx++);
       const user = await prisma.users.upsert({
         where: { email },
-        update: { name, password_hash: DEMO_PW_HASH, account_type: 'participant', institution_id: inst.id },
-        create: { email, name, password_hash: DEMO_PW_HASH, account_type: 'participant', institution_id: inst.id },
+        update: { name, password_hash: DEMO_PW_HASH, organization_id: inst.id },
+        create: { email, name, password_hash: DEMO_PW_HASH, organization_id: inst.id },
       });
+      await ensureMember(user.id, inst.id, 'member');
       playersPerInst[inst.id].push({ id: user.id, email, name });
     }
   }
-  console.log(`✓ ${playerIdx} Players (20 per institution)`);
+  console.log(`✓ ${playerIdx} Players (20 per organization)`);
 
   // ==========================================================================
   // EVENT: Genesis Sports Fest '26
   // ==========================================================================
-  let event = await prisma.events.findUnique({ where: { slug: 'genesis-26' } });
-  if (event) {
-    console.log('\n⚠️  Event genesis-26 already exists. Run `npm run reset:demo` first to rebuild.\n');
+  let championship = await prisma.championships.findUnique({ where: { slug: 'genesis-26' } });
+  if (championship) {
+    console.log('\n⚠️  Championship genesis-26 already exists. Run `npm run reset:demo` first to rebuild.\n');
     return;
   }
 
-  event = await prisma.events.create({
+  championship = await prisma.championships.create({
     data: {
       name: "Genesis Sports Fest '26",
       slug: 'genesis-26',
@@ -317,29 +327,29 @@ async function main() {
       venue: 'Mumbai University Grounds',
       start_date: new Date('2026-03-14'),
       end_date: new Date('2026-03-22'),
-      status: 'ongoing', // event is live
+      status: 'ongoing', // championship is live
     },
   });
-  console.log(`\n✓ Event: ${event.name} (${event.slug})`);
+  console.log(`\n✓ Championship: ${championship.name} (${championship.slug})`);
 
   // Organiser role assignment
   const organiserRole = await prisma.roles.findUnique({ where: { name: 'Organiser' } });
   if (organiserRole) {
-    await prisma.user_event_roles.create({ data: { event_id: event.id, user_id: organiser.id, role_id: organiserRole.id } });
+    await prisma.user_championship_roles.create({ data: { championship_id: championship.id, user_id: organiser.id, role_id: organiserRole.id } });
   }
 
-  // Assign officials to this event (event-scoped for multi-tenant isolation)
+  // Assign officials to this championship (championship-scoped for multi-tenant isolation)
   for (const official of officials) {
-    await prisma.event_officials.create({
-      data: { event_id: event.id, user_id: official.id, assigned_by: organiser.id },
+    await prisma.championship_officials.create({
+      data: { championship_id: championship.id, user_id: official.id, assigned_by: organiser.id },
     });
   }
-  console.log(`✓ ${officials.length} Officials assigned to event`);
+  console.log(`✓ ${officials.length} Officials assigned to championship`);
 
   // ---- Venues & Grounds ----
-  const venueMain = await prisma.venues.create({ data: { event_id: event.id, name: 'Main Stadium', city: 'Mumbai', address: 'Marine Lines' } });
-  const venueIndoor = await prisma.venues.create({ data: { event_id: event.id, name: 'Indoor Complex', city: 'Mumbai', address: 'Matunga' } });
-  const venuePool = await prisma.venues.create({ data: { event_id: event.id, name: 'Aquatic Center', city: 'Mumbai', address: 'Worli' } });
+  const venueMain = await prisma.venues.create({ data: { championship_id: championship.id, name: 'Main Stadium', city: 'Mumbai', address: 'Marine Lines' } });
+  const venueIndoor = await prisma.venues.create({ data: { championship_id: championship.id, name: 'Indoor Complex', city: 'Mumbai', address: 'Matunga' } });
+  const venuePool = await prisma.venues.create({ data: { championship_id: championship.id, name: 'Aquatic Center', city: 'Mumbai', address: 'Worli' } });
   const grounds: Record<string, string> = {};
   const groundDefs: Array<[string, string, string, number]> = [
     [venueMain.id, 'Ground A', 'field', 5000],
@@ -358,20 +368,20 @@ async function main() {
   }
   console.log(`✓ ${Object.keys(grounds).length} Grounds across 3 Venues`);
 
-  // ---- Institution Enrollments (all 5 approved) ----
+  // ---- Organization Enrollments (all 5 approved) ----
   const enrollments: Record<string, string> = {}; // inst.id -> enrollment.id
-  for (const inst of institutions) {
-    const poc = pocs.find((p) => p.institutionId === inst.id)!;
-    const ei = await prisma.event_institutions.create({
-      data: { event_id: event.id, institution_id: inst.id, applied_by: poc.id, status: 'approved', reviewed_by: organiser.id, reviewed_at: new Date() },
+  for (const inst of organizations) {
+    const poc = pocs.find((p) => p.organizationId === inst.id)!;
+    const ei = await prisma.championship_organizations.create({
+      data: { championship_id: championship.id, organization_id: inst.id, applied_by: poc.id, status: 'approved', reviewed_by: organiser.id, reviewed_at: new Date() },
     });
     enrollments[inst.id] = ei.id;
   }
-  console.log(`✓ ${Object.keys(enrollments).length} Institution enrollments (all approved)`);
+  console.log(`✓ ${Object.keys(enrollments).length} Organization enrollments (all approved)`);
 
   // ---- Tournament + Sports + Disciplines ----
   const tournament = await prisma.tournaments.create({
-    data: { event_id: event.id, name: 'Genesis Main Championship', description: 'Overall inter-college championship', status: 'active' },
+    data: { championship_id: championship.id, name: 'Genesis Main Championship', description: 'Overall inter-college championship', status: 'active' },
   });
 
   // Create tournament_sports and tournament_disciplines for first 8 sports (faster seeding)
@@ -413,16 +423,16 @@ async function main() {
   // ---- Teams & Rosters ----
   const teams: Array<{ id: string; instId: string; tdId: string; name: string }> = [];
   for (const td of tournamentDisciplines) {
-    // Each institution enters a team in each discipline
-    for (const inst of institutions) {
-      const poc = pocs.find((p) => p.institutionId === inst.id)!;
+    // Each organization enters a team in each discipline
+    for (const inst of organizations) {
+      const poc = pocs.find((p) => p.organizationId === inst.id)!;
       const teamName = `${inst.short_name} ${td.sportName}${td.discName !== td.sportName ? ' ' + td.discName : ''}`;
       const team = await prisma.teams.create({
         data: {
-          event_id: event.id,
+          championship_id: championship.id,
           sport_id: sportMap[td.sportName].id,
-          institution_id: inst.id,
-          event_institution_id: enrollments[inst.id],
+          organization_id: inst.id,
+          championship_organization_id: enrollments[inst.id],
           tournament_discipline_id: td.id,
           name: teamName,
           status: 'roster_locked',
@@ -517,7 +527,7 @@ async function main() {
 📊 Summary:
    - ${Object.keys(sportMap).length} Sports
    - ${discCount} Disciplines
-   - ${institutions.length} Institutions
+   - ${organizations.length} Organizations
    - ${pocs.length} POCs
    - ${officials.length} Officials
    - ${playerIdx} Players
@@ -529,13 +539,13 @@ async function main() {
    - admin@semp.local (super admin)
    - organiser@semp.local
 
-   Institution POCs:
+   Organization POCs:
 ${pocs.map((p) => `   - ${p.email}`).join('\n')}
 
    Officials:
 ${officials.map((o) => `   - ${o.email}`).join('\n')}
 
-   Sample Players (20 per institution):
+   Sample Players (20 per organization):
    - player1@vjti.local ... player20@vjti.local
    - player1@iitb.local ... player20@iitb.local
    - player1@djsce.local ... player20@djsce.local

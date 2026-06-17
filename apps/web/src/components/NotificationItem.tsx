@@ -44,14 +44,14 @@ export function NotificationItem({ n, compact = false }: { n: NotificationDto; c
                 {n.title}
               </div>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                {n.event && <span className="font-medium text-slate-600 dark:text-slate-300">{n.event.name}</span>}
-                {n.event && <span aria-hidden>·</span>}
+                {n.championship && <span className="font-medium text-slate-600 dark:text-slate-300">{n.championship.name}</span>}
+                {n.championship && <span aria-hidden>·</span>}
                 <span>{n.sender?.name ?? 'System'}</span>
                 <span aria-hidden>·</span>
                 <span>{fmtDateTime(n.created_at)}</span>
-                {n.audience === 'institutions_captains' && (
+                {n.audience === 'organizations_captains' && (
                   <span className="rounded-full bg-slate-100 px-1.5 py-px text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                    Institutions + captains
+                    Organizations + captains
                   </span>
                 )}
               </div>

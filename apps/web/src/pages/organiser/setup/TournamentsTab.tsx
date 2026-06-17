@@ -73,7 +73,7 @@ function TournamentModal({ tournament, path, onClose }: { tournament: any; path:
 }
 
 export function TournamentsTab({ eventId, onCreated }: { eventId: string; onCreated?: () => void }) {
-  const path = `/tournaments?event_id=${eventId}`;
+  const path = `/tournaments?championship_id=${eventId}`;
   const { data: tournaments = [], isLoading } = useApi<any[]>(path);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
@@ -120,7 +120,7 @@ export function TournamentsTab({ eventId, onCreated }: { eventId: string; onCrea
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
             <Button disabled={!name || create.isPending}
-              onClick={() => { setError(null); create.mutate({ event_id: eventId, name, description: description || undefined }, { onError: (e: any) => setError(e.message) }); }}>
+              onClick={() => { setError(null); create.mutate({ championship_id: eventId, name, description: description || undefined }, { onError: (e: any) => setError(e.message) }); }}>
               {create.isPending ? 'Saving…' : 'Create & continue →'}
             </Button>
           </div>

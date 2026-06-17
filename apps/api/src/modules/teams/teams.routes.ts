@@ -36,12 +36,12 @@ async function assertDisciplineForTeam(
   const td = await prisma.tournament_disciplines.findUnique({
     where: { id: disciplineId },
     include: {
-      tournament_sports: { include: { tournaments: { select: { event_id: true } } } },
+      tournament_sports: { include: { tournaments: { select: { championship_id: true } } } },
     },
   });
   if (!td) throw new NotFoundError('Discipline draw');
-  if (td.tournament_sports.tournaments.event_id !== eventId) {
-    throw new BusinessRuleError('Discipline does not belong to this event');
+  if (td.tournament_sports.tournaments.championship_id !== eventId) {
+    throw new BusinessRuleError('Discipline does not belong to this championship');
   }
   if (sportId && td.tournament_sports.sport_id !== sportId) {
     throw new BusinessRuleError('Discipline does not match the selected sport');
@@ -66,33 +66,37 @@ const teamDisciplineInclude = {
   },
 } as const;
 
-// Institution + its point(s) of contact (institution-account users). The POC is
-// surfaced on the team without ever being a team_member, so it never counts
+// Organization + its owners/admins (the "points of contact"). They are surfaced
+// on the team via the org membership, never as a team_member, so they never count
 // toward a squad.
-const institutionWithPocInclude = {
+const organizationWithOwnersInclude = {
   include: {
-    users: {
-      where: { account_type: 'institution', is_active: true },
-      select: { id: true, name: true, email: true, phone: true },
+    organization_members: {
+      where: { role: { in: ['owner', 'admin'] as string[] }, status: 'active' },
+      include: { users: { select: { id: true, name: true, email: true, phone: true } } },
     },
   },
-} as const;
+};
 
 // Every user column EXCEPT password_hash — safe to embed in any roster payload.
 // `include: { users: { select: publicUserSelect } }` would serialise the bcrypt hash straight to clients.
 const publicUserSelect = {
   id: true, name: true, email: true, phone: true, avatar_url: true,
   is_active: true, is_super_admin: true, account_type: true,
-  institution_id: true, created_at: true, updated_at: true,
+  organization_id: true, created_at: true, updated_at: true,
 } as const;
 
 export function makeTeamsRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
 
+  // An org owner/admin manages teams but never plays in them, so the creator is
+  // only auto-seeded as captain when they are NOT an admin of the owning org.
+  const isOrgAdmin = (userId: string, orgId: string) => guards.orgRole(userId, orgId, ['owner', 'admin']);
+
   router.get('/teams', asyncHandler(async (req, res) => {
     const where: Record<string, unknown> = {};
-    for (const k of ['event_id', 'tournament_discipline_id', 'institution_id', 'sport_id']) {
+    for (const k of ['championship_id', 'tournament_discipline_id', 'organization_id', 'sport_id']) {
       const val = coerceFilter(req.query[k]);
       if (val !== undefined) where[k] = val;
     }
@@ -100,9 +104,9 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     const rows = await prisma.teams.findMany({
       where,
       include: {
-        institutions: institutionWithPocInclude,
+        organizations: organizationWithOwnersInclude,
         sports: true,
-        events: { select: { id: true, name: true, slug: true, status: true } },
+        championships: { select: { id: true, name: true, slug: true, status: true } },
         tournament_disciplines: teamDisciplineInclude,
         team_members: { include: { users: { select: { id: true, name: true, email: true, phone: true } } } },
       },
@@ -117,7 +121,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   router.get('/teams/by-token/:token', asyncHandler(async (req, res) => {
     const team = await prisma.teams.findUnique({
       where: { invite_token: req.params.token },
-      include: { institutions: true, sports: true },
+      include: { organizations: true, sports: true },
     });
     if (!team) throw new NotFoundError('Team');
     res.json(team);
@@ -128,7 +132,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       where: { id: req.params.id },
       include: {
         team_members: { include: { users: { select: publicUserSelect } } },
-        institutions: institutionWithPocInclude, sports: true, events: { select: { id: true, name: true, slug: true, status: true } },
+        organizations: organizationWithOwnersInclude, sports: true, championships: { select: { id: true, name: true, slug: true, status: true } },
         tournament_disciplines: teamDisciplineInclude,
       },
     });
@@ -141,39 +145,38 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     res.json({ ...team, entry_rules });
   }));
 
-  // Create a team — requires the institution's enrollment to be approved.
+  // Create a team — requires the organization's enrollment to be approved.
   // The creating user is automatically enrolled as the team captain so the team
   // shows up in their "my teams" immediately (and survives a refresh).
   router.post('/teams', guards.teamCreate, validateBody(createTeamSchema), asyncHandler(async (req, res) => {
-    const ei = await prisma.event_institutions.findUnique({ where: { id: req.body.event_institution_id } });
+    const ei = await prisma.championship_organizations.findUnique({ where: { id: req.body.championship_organization_id } });
     if (!ei) throw new NotFoundError('Enrollment');
     if (ei.status !== 'approved') {
-      throw new BusinessRuleError('Institution enrollment is not approved for this event');
+      throw new BusinessRuleError('Organization enrollment is not approved for this championship');
     }
-    await assertDisciplineForTeam(prisma, req.body.tournament_discipline_id, req.body.event_id, req.body.sport_id);
+    await assertDisciplineForTeam(prisma, req.body.tournament_discipline_id, req.body.championship_id, req.body.sport_id);
     // Enforce one-team-per-discipline on create too (was only checked on PATCH), so a
     // double-submit / retry can't silently create a second team. The partial unique
     // index added in the DB migration is the race-proof backstop behind this.
     const dupe = await prisma.teams.findFirst({
       where: {
-        institution_id: req.body.institution_id,
-        event_id: req.body.event_id,
+        organization_id: req.body.organization_id,
+        championship_id: req.body.championship_id,
         tournament_discipline_id: req.body.tournament_discipline_id,
       },
       select: { id: true },
     });
-    if (dupe) throw new BusinessRuleError('Your institution already has a team in this discipline draw');
+    if (dupe) throw new BusinessRuleError('Your organization already has a team in this discipline draw');
     const creatorId = req.user!.id;
-    // A POC (institution account) manages teams but never plays in them, so they
-    // are not seeded onto the roster — they are surfaced via the institution link.
-    const seedCaptain = req.user!.accountType !== 'institution';
+    // An org owner/admin manages but never plays — they're surfaced via the org link.
+    const seedCaptain = !(await isOrgAdmin(creatorId, req.body.organization_id));
     const team = await prisma.$transaction(async (tx) => {
       const created = await tx.teams.create({
         data: {
-          event_id: req.body.event_id,
+          championship_id: req.body.championship_id,
           sport_id: req.body.sport_id,
-          institution_id: req.body.institution_id,
-          event_institution_id: req.body.event_institution_id,
+          organization_id: req.body.organization_id,
+          championship_organization_id: req.body.championship_organization_id,
           tournament_discipline_id: req.body.tournament_discipline_id,
           name: req.body.name,
           status: 'forming',
@@ -188,7 +191,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       }
       return tx.teams.findUnique({
         where: { id: created.id },
-        include: { team_members: { include: { users: { select: publicUserSelect } } }, institutions: true, sports: true },
+        include: { team_members: { include: { users: { select: publicUserSelect } } }, organizations: true, sports: true },
       });
     });
     res.status(201).json(team);
@@ -198,28 +201,28 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   // captain. All-or-nothing so a partial failure never leaves orphan teams.
   router.post('/teams/bulk', guards.teamCreate, validateBody(bulkCreateTeamsSchema), asyncHandler(async (req, res) => {
     const teams = req.body.teams as Array<{
-      event_id: string; sport_id: string; institution_id: string;
-      event_institution_id: string; tournament_discipline_id: string; name: string;
+      championship_id: string; sport_id: string; organization_id: string;
+      championship_organization_id: string; tournament_discipline_id: string; name: string;
     }>;
     for (const t of teams) {
-      await assertDisciplineForTeam(prisma, t.tournament_discipline_id, t.event_id, t.sport_id);
+      await assertDisciplineForTeam(prisma, t.tournament_discipline_id, t.championship_id, t.sport_id);
     }
     // Batch-load the referenced enrollments once instead of a findUnique per team.
-    const eiIds = [...new Set(teams.map((t) => t.event_institution_id))];
+    const eiIds = [...new Set(teams.map((t) => t.championship_organization_id))];
     const eiMap = new Map(
-      (await prisma.event_institutions.findMany({ where: { id: { in: eiIds } }, select: { id: true, status: true } }))
+      (await prisma.championship_organizations.findMany({ where: { id: { in: eiIds } }, select: { id: true, status: true } }))
         .map((e) => [e.id, e]),
     );
     // Reject duplicates against existing teams (one query) and within the batch itself.
-    const dupKey = (t: { institution_id: string; event_id: string; tournament_discipline_id: string | null }) =>
-      `${t.institution_id}|${t.event_id}|${t.tournament_discipline_id}`;
+    const dupKey = (t: { organization_id: string; championship_id: string; tournament_discipline_id: string | null }) =>
+      `${t.organization_id}|${t.championship_id}|${t.tournament_discipline_id}`;
     const existing = await prisma.teams.findMany({
-      where: { OR: teams.map((t) => ({ institution_id: t.institution_id, event_id: t.event_id, tournament_discipline_id: t.tournament_discipline_id })) },
-      select: { institution_id: true, event_id: true, tournament_discipline_id: true },
+      where: { OR: teams.map((t) => ({ organization_id: t.organization_id, championship_id: t.championship_id, tournament_discipline_id: t.tournament_discipline_id })) },
+      select: { organization_id: true, championship_id: true, tournament_discipline_id: true },
     });
     const seen = new Set(existing.map(dupKey));
     for (const t of teams) {
-      const ei = eiMap.get(t.event_institution_id);
+      const ei = eiMap.get(t.championship_organization_id);
       if (!ei) throw new NotFoundError('Enrollment');
       if (ei.status !== 'approved') throw new BusinessRuleError(`Enrollment not approved for "${t.name}"`);
       const k = dupKey(t);
@@ -227,23 +230,26 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       seen.add(k);
     }
     const creatorId = req.user!.id;
-    const seedCaptain = req.user!.accountType !== 'institution';
+    // Precompute which referenced orgs the creator administers — admins aren't seeded as captain.
+    const orgIds = [...new Set(teams.map((t) => t.organization_id))];
+    const adminOrgs = new Set<string>();
+    for (const oid of orgIds) if (await isOrgAdmin(creatorId, oid)) adminOrgs.add(oid);
     const created = await prisma.$transaction(async (tx) => {
       const out: any[] = [];
       for (const t of teams) {
         const team = await tx.teams.create({
           data: {
-            event_id: t.event_id,
+            championship_id: t.championship_id,
             sport_id: t.sport_id,
-            institution_id: t.institution_id,
-            event_institution_id: t.event_institution_id,
+            organization_id: t.organization_id,
+            championship_organization_id: t.championship_organization_id,
             tournament_discipline_id: t.tournament_discipline_id,
             name: t.name,
             status: 'forming',
             invite_token: randomBytes(16).toString('hex'),
           },
         });
-        if (seedCaptain) {
+        if (!adminOrgs.has(t.organization_id)) {
           await tx.team_members.create({ data: { team_id: team.id, user_id: creatorId, role: 'captain' } });
         }
         out.push(team);
@@ -264,18 +270,18 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       const td = await assertDisciplineForTeam(
         prisma,
         req.body.tournament_discipline_id,
-        team.event_id,
+        team.championship_id,
       );
       const duplicate = await prisma.teams.findFirst({
         where: {
-          institution_id: team.institution_id,
-          event_id: team.event_id,
+          organization_id: team.organization_id,
+          championship_id: team.championship_id,
           tournament_discipline_id: req.body.tournament_discipline_id,
           id: { not: team.id },
         },
       });
       if (duplicate) {
-        throw new BusinessRuleError('Your institution already has a team in this discipline draw');
+        throw new BusinessRuleError('Your organization already has a team in this discipline draw');
       }
       data.sport_id = td.tournament_sports.sport_id;
     }
@@ -284,9 +290,9 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       data,
       include: {
         team_members: { include: { users: { select: publicUserSelect } } },
-        institutions: true,
+        organizations: true,
         sports: true,
-        events: { select: { id: true, name: true, slug: true, status: true } },
+        championships: { select: { id: true, name: true, slug: true, status: true } },
         tournament_disciplines: teamDisciplineInclude,
       },
     });
@@ -343,7 +349,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   }));
 
   // Bulk roster import: accepts existing users and/or name+email rows. Emails are
-  // resolved (matched or auto-created under the team's institution). Validates the
+  // resolved (matched or auto-created under the team's organization). Validates the
   // whole batch against squad_max up front, then inserts atomically.
   router.post('/teams/:id/members/bulk', guards.teamManager, validateBody(bulkAddTeamMembersSchema), asyncHandler(async (req, res) => {
     const team = await prisma.teams.findUnique({ where: { id: req.params.id } });
@@ -372,8 +378,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
             name: row.name?.trim() || email.split('@')[0],
             email,
             password_hash: DEFAULT_IMPORT_PASSWORD_HASH,
-            account_type: 'participant',
-            institution_id: team.institution_id,
+            organization_id: team.organization_id,
           };
         });
       if (toCreate.length) {

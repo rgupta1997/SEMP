@@ -1,7 +1,7 @@
 // Enum unions mirroring the DB CHECK constraints. Arrays double as <select> options.
 
-export const EVENT_STATUS = ['draft', 'registration_open', 'ongoing', 'completed'] as const;
-export type EventStatus = (typeof EVENT_STATUS)[number];
+export const CHAMPIONSHIP_STATUS = ['draft', 'registration_open', 'ongoing', 'completed'] as const;
+export type ChampionshipStatus = (typeof CHAMPIONSHIP_STATUS)[number];
 
 export const TOURNAMENT_STATUS = ['draft', 'active', 'completed', 'cancelled'] as const;
 export type TournamentStatus = (typeof TOURNAMENT_STATUS)[number];
@@ -32,14 +32,17 @@ export type EntryType = (typeof ENTRY_TYPE)[number];
 export const ENROLLMENT_STATUS = ['pending', 'approved', 'rejected'] as const;
 export type EnrollmentStatus = (typeof ENROLLMENT_STATUS)[number];
 
-// Global account type — the user's default app shell. Event-scoped roles
-// (user_event_roles) refine capabilities per event; platform admins are flagged
-// by users.is_super_admin.
-export const ACCOUNT_TYPE = ['organiser', 'institution', 'official', 'participant'] as const;
-export type AccountType = (typeof ACCOUNT_TYPE)[number];
+// A user's role within an organization (membership is many-to-many). owner/admin
+// administer the org (teams, members, enrollment); captain leads a team; member /
+// alumni are participants. Replaces the old global `account_type`.
+export const ORGANIZATION_MEMBER_ROLE = ['owner', 'admin', 'captain', 'member', 'alumni'] as const;
+export type OrganizationMemberRole = (typeof ORGANIZATION_MEMBER_ROLE)[number];
 
-// The set of shells the UI can render. 'system' is reserved for super admins.
-export const APP_ROLE = ['system', 'organiser', 'institution', 'official', 'participant'] as const;
+// The set of shells the UI can render. Every login is a `user`; `system` is
+// reserved for platform super admins (is_super_admin). Capabilities are otherwise
+// derived per championship (user_championship_roles / championship_officials) and
+// per organization (organization_members).
+export const APP_ROLE = ['system', 'user'] as const;
 export type AppRole = (typeof APP_ROLE)[number];
 
 // ---------- Notifications ----------
@@ -48,17 +51,17 @@ export type AppRole = (typeof APP_ROLE)[number];
 export const NOTIFICATION_TYPE = ['manual', 'event_lifecycle', 'enrollment_approved'] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[number];
 
-// audience: who may see the notification. 'all' = every event-related user;
-// 'institutions_captains' = institution POCs + team captains/vice-captains only.
-export const NOTIFICATION_AUDIENCE = ['all', 'institutions_captains'] as const;
+// audience: who may see the notification. 'all' = every championship-related user;
+// 'organizations_captains' = organization owners/admins + team captains/vice-captains.
+export const NOTIFICATION_AUDIENCE = ['all', 'organizations_captains'] as const;
 export type NotificationAudience = (typeof NOTIFICATION_AUDIENCE)[number];
 
 // The fixed set of emoji reactions recipients may toggle on a notification.
 export const NOTIFICATION_REACTIONS = ['👍', '❤️', '🎉', '👏'] as const;
 export type NotificationReaction = (typeof NOTIFICATION_REACTIONS)[number];
 
-// Legal event status transitions (enforced by the EventLifecycle domain service).
-export const EVENT_STATUS_TRANSITIONS: Record<EventStatus, EventStatus[]> = {
+// Legal championship status transitions (enforced by the ChampionshipLifecycle domain service).
+export const CHAMPIONSHIP_STATUS_TRANSITIONS: Record<ChampionshipStatus, ChampionshipStatus[]> = {
   draft: ['registration_open'],
   registration_open: ['ongoing', 'draft'],
   ongoing: ['completed'],

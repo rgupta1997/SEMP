@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { useTableControls } from '../lib/hooks';
 import { usePermissions } from '../lib/permissions';
 import type { FieldDef, ResourceConfig } from '../lib/resources';
-import { EVENT_STATUS_OPTIONS } from '../lib/resources';
+import { CHAMPIONSHIP_STATUS_OPTIONS } from '../lib/resources';
 import { BulkBar, Button, Checkbox, Field, Input, ListToolbar, Modal, Pagination, SearchInput, Select, Textarea, toast } from './ui';
 
 function RelationSelect({ field, value, onChange }: { field: FieldDef; value: string; onChange: (v: string) => void }) {
@@ -225,7 +225,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
                   {config.statusEndpoint && canManage && (
                     <select className="border rounded text-xs px-1 py-0.5 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100" value={row.status}
                       onChange={(e) => statusMut.mutate({ id: row.id, status: e.target.value })}>
-                      {EVENT_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                      {CHAMPIONSHIP_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
                     </select>
                   )}
                   {!config.noEdit && canManage && <Button variant="ghost" onClick={() => setEditing(row)}>Edit</Button>}

@@ -17,32 +17,32 @@ const STATUS_OPTIONS = [
 export function ParticipantMatchesPage() {
   const [status, setStatus] = useState('');
 
-  // Event + Sport come from the shared header filter; peek event for the query + cascade.
+  // Championship + Sport come from the shared header filter; peek championship for the query + cascade.
   const { eventId } = useFilterBar();
 
   const qs = new URLSearchParams();
-  if (eventId) qs.set('event_id', eventId);
+  if (eventId) qs.set('championship_id', eventId);
   if (status) qs.set('status', status);
-  const path = `/me/matches${qs.toString() ? `?${qs}` : ''}`;
+  const path = `/profile/matches${qs.toString() ? `?${qs}` : ''}`;
   const { data, isLoading } = useApi<MatchesResponse>(path);
 
-  // Build the event + sport options from the unfiltered set (sport cascades on event).
-  const allMatches = useApi<MatchesResponse>('/me/matches').data?.matches ?? [];
+  // Build the championship + sport options from the unfiltered set (sport cascades on championship).
+  const allMatches = useApi<MatchesResponse>('/profile/matches').data?.matches ?? [];
   const eventOptions = useMemo(() => {
     const map = new Map<string, string>();
-    for (const m of allMatches) if (m.event) map.set(m.event.id, m.event.name);
+    for (const m of allMatches) if (m.championship) map.set(m.championship.id, m.championship.name);
     return [...map.entries()].map(([id, name]) => ({ id, name }));
   }, [allMatches]);
   const sportOptions = useMemo(() => {
     const set = new Set<string>();
     for (const m of allMatches) {
-      if (eventId && m.event?.id !== eventId) continue;
+      if (eventId && m.championship?.id !== eventId) continue;
       if (m.sport) set.add(m.sport);
     }
     return [...set].sort().map((name) => ({ id: name, name }));
   }, [allMatches, eventId]);
   const { sportId } = usePageFilters({
-    events: eventOptions.length ? eventOptions : undefined,
+    championships: eventOptions.length ? eventOptions : undefined,
     sports: sportOptions.length ? sportOptions : undefined,
   });
 
@@ -52,7 +52,7 @@ export function ParticipantMatchesPage() {
   );
 
   const t = useTableControls(matches, {
-    search: (m) => `${m.opponent?.name ?? ''} ${m.opponent?.institution ?? ''} ${m.sport ?? ''} ${m.event?.name ?? ''} ${m.round ?? ''}`,
+    search: (m) => `${m.opponent?.name ?? ''} ${m.opponent?.organization ?? ''} ${m.sport ?? ''} ${m.championship?.name ?? ''} ${m.round ?? ''}`,
     sorts: {
       date: (a, b) => new Date(a.scheduled_at ?? 0).getTime() - new Date(b.scheduled_at ?? 0).getTime(),
       opponent: (a, b) => (a.opponent?.name ?? '').localeCompare(b.opponent?.name ?? ''),
@@ -64,8 +64,8 @@ export function ParticipantMatchesPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="All matches" subtitle="Every match across your events.">
-        <BackButton to="/me" className="mb-0">Dashboard</BackButton>
+      <PageHeader title="All matches" subtitle="Every match across your championships.">
+        <BackButton to="/profile" className="mb-0">Dashboard</BackButton>
       </PageHeader>
 
       <ListToolbar>

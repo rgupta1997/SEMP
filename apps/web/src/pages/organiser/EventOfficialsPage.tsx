@@ -24,10 +24,10 @@ interface User {
 function AssignOfficialModal({ eventId, existingIds, onClose }: { eventId: string; existingIds: Set<string>; onClose: () => void }) {
   const [search, setSearch] = useState('');
   const [creating, setCreating] = useState(false);
-  const { data: users, isLoading } = useApi<User[]>('/users?account_type=official');
+  const { data: users, isLoading } = useApi<User[]>('/users');
   const assignMut = useApiMutation(
-    (userId: string) => api('POST', `/events/${eventId}/officials`, { user_id: userId }),
-    [`/events/${eventId}/officials`, '/users?account_type=official'],
+    (userId: string) => api('POST', `/championships/${eventId}/officials`, { user_id: userId }),
+    [`/championships/${eventId}/officials`, '/users'],
   );
 
   const available = users?.filter((u) => !existingIds.has(u.id) &&
@@ -39,20 +39,20 @@ function AssignOfficialModal({ eventId, existingIds, onClose }: { eventId: strin
     return (
       <UserFormModal
         title="New official"
-        accountTypes={['official']}
         submitLabel="Create & assign"
         onClose={() => setCreating(false)}
         onSubmit={async (body: UserFormBody) => {
           const u = await api<any>('POST', '/users', body);
           await assignMut.mutateAsync(u.id);
-          onClose();
+          // Return the created user so the modal can show its login to copy.
+          return u;
         }}
       />
     );
   }
 
   return (
-    <Modal title="Assign Official to Event" onClose={onClose}>
+    <Modal title="Assign Official to Championship" onClose={onClose}>
       <div className="space-y-4">
         <Input
           placeholder="Search officials by name or email..."
@@ -65,7 +65,7 @@ function AssignOfficialModal({ eventId, existingIds, onClose }: { eventId: strin
           <div className="grid h-20 place-items-center"><Spinner /></div>
         ) : available.length === 0 ? (
           <p className="text-center text-sm text-slate-500 dark:text-slate-400 py-4">
-            {search ? 'No matching officials found' : 'All officials are already assigned to this event'}
+            {search ? 'No matching officials found' : 'All officials are already assigned to this championship'}
           </p>
         ) : (
           <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 dark:border-slate-800">
@@ -104,11 +104,11 @@ function AssignOfficialModal({ eventId, existingIds, onClose }: { eventId: strin
 
 export function EventOfficialsPage() {
   const { eventId } = useEvent();
-  const { data: officials, isLoading } = useApi<Official[]>(`/events/${eventId}/officials`);
+  const { data: officials, isLoading } = useApi<Official[]>(`/championships/${eventId}/officials`);
   const [assigning, setAssigning] = useState(false);
   const removeMut = useApiMutation(
-    (officialId: string) => api('DELETE', `/events/${eventId}/officials/${officialId}`),
-    [`/events/${eventId}/officials`],
+    (officialId: string) => api('DELETE', `/championships/${eventId}/officials/${officialId}`),
+    [`/championships/${eventId}/officials`],
   );
 
   const list = officials ?? [];
@@ -133,7 +133,7 @@ export function EventOfficialsPage() {
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">Officials</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            {officials?.length || 0} officials assigned to this event
+            {officials?.length || 0} officials assigned to this championship
           </p>
         </div>
         <ListToolbar inline>
@@ -178,7 +178,7 @@ export function EventOfficialsPage() {
                       variant="ghost"
                       className="text-rose-600 dark:text-rose-400 hover:bg-rose-50 hover:text-rose-700"
                       onClick={() => {
-                        if (confirm(`Remove ${o.user.name} from this event?`)) {
+                        if (confirm(`Remove ${o.user.name} from this championship?`)) {
                           removeMut.mutate(o.id);
                         }
                       }}
@@ -203,7 +203,7 @@ export function EventOfficialsPage() {
           <div className="text-4xl mb-3">⚑</div>
           <div className="font-medium text-slate-700 dark:text-slate-300 mb-1">No officials assigned yet</div>
           <p className="text-sm mb-4">
-            Assign officials to this event so they can score matches and manage fixtures.
+            Assign officials to this championship so they can score matches and manage fixtures.
           </p>
           <Button onClick={() => setAssigning(true)}>+ Assign Official</Button>
         </Card>
@@ -213,8 +213,8 @@ export function EventOfficialsPage() {
         <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-300">
           <span className="text-lg">ℹ️</span>
           <span>
-            Officials assigned to this event will see this event's fixtures in their "My Matches" view and can score assigned matches.
-            Each event has its own set of officials for proper multi-tenant isolation.
+            Officials assigned to this championship will see this championship's fixtures in their "My Matches" view and can score assigned matches.
+            Each championship has its own set of officials for proper multi-tenant isolation.
           </span>
         </div>
       </Card>

@@ -4,19 +4,19 @@ import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { Badge, Button, Card, EmptyState, ListToolbar, Pagination, SearchInput, Spinner, toast } from '../../components/ui';
 import { InstitutionFormModal, type InstitutionFormBody } from '../../components/InstitutionFormModal';
 
-interface Institution {
+interface Organization {
   id: string; name: string; short_name?: string | null; code?: string | null;
   city?: string | null; country?: string | null; status?: boolean | null;
 }
 
 export function PlatformInstitutionsPage() {
-  const { data: institutions = [], isLoading } = useApi<Institution[]>('/institutions');
+  const { data: organizations = [], isLoading } = useApi<Organization[]>('/organizations');
   const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<Institution | null>(null);
+  const [editing, setEditing] = useState<Organization | null>(null);
 
-  const del = useApiMutation((id: string) => api('DELETE', `/institutions/${id}`), ['/institutions']);
+  const del = useApiMutation((id: string) => api('DELETE', `/organizations/${id}`), ['/organizations']);
 
-  const t = useTableControls(institutions, {
+  const t = useTableControls(organizations, {
     search: (i) => `${i.name} ${i.short_name ?? ''} ${i.code ?? ''} ${i.city ?? ''}`,
     sorts: { name: (a, b) => a.name.localeCompare(b.name) },
     initialSort: 'name',
@@ -27,17 +27,17 @@ export function PlatformInstitutionsPage() {
 
   return (
     <div>
-      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">Colleges and schools that can participate in events. Create one with a point of contact in a single step.</p>
+      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">Colleges and schools that can participate in championships. Create one with a point of contact in a single step.</p>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xl font-semibold dark:text-slate-100">Institutions</h2>
+        <h2 className="text-xl font-semibold dark:text-slate-100">Organizations</h2>
         <ListToolbar inline>
-          <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search institutions…" className="w-56" />
-          <Button onClick={() => setCreating(true)}>+ Add institution</Button>
+          <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search organizations…" className="w-56" />
+          <Button onClick={() => setCreating(true)}>+ Add organization</Button>
         </ListToolbar>
       </div>
 
-      {institutions.length === 0 ? (
-        <EmptyState icon="🏛" title="No institutions" description="Add an institution to get started." />
+      {organizations.length === 0 ? (
+        <EmptyState icon="🏛" title="No organizations" description="Add an organization to get started." />
       ) : (
         <Card className="overflow-hidden">
           <table className="min-w-full divide-y divide-slate-100 dark:divide-slate-800 text-sm">
@@ -75,7 +75,7 @@ export function PlatformInstitutionsPage() {
       {creating && (
         <InstitutionFormModal
           onClose={() => setCreating(false)}
-          onSubmit={async (body: InstitutionFormBody) => { await api('POST', '/institutions', body); }}
+          onSubmit={(body: InstitutionFormBody) => api('POST', '/organizations', body)}
         />
       )}
       {editing && (
@@ -84,10 +84,10 @@ export function PlatformInstitutionsPage() {
           initial={{ name: editing.name, short_name: editing.short_name ?? '', code: editing.code ?? '', city: editing.city ?? '', country: editing.country ?? 'India' }}
           onClose={() => setEditing(null)}
           onSubmit={async (body: InstitutionFormBody) => {
-            // Edits never touch the POC sub-form; send only institution fields.
-            const { poc, ...inst } = body;
-            void poc;
-            await api('PATCH', `/institutions/${editing.id}`, inst);
+            // Edits never touch the POC sub-form; send only organization fields.
+            const { owner, ...inst } = body;
+            void owner;
+            await api('PATCH', `/organizations/${editing.id}`, inst);
           }}
         />
       )}

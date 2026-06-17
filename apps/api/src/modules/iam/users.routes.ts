@@ -5,94 +5,113 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
-import { BusinessRuleError, ForbiddenError } from '../../shared/errors.js';
-
-// Shared default for provisioned logins — they can reset later. Matches the
-// roster bulk-import convention so demo accounts all share one password.
-const DEFAULT_PASSWORD = 'demo123';
+import { ForbiddenError } from '../../shared/errors.js';
+import { DEFAULT_PASSWORD, findUserByPhone, hashProvisionedPassword, maskEmail, maskPhone } from './users.helpers.js';
 
 // Fields safe to return to any caller (never the password hash).
 const PUBLIC_SELECT = {
   id: true, name: true, email: true, phone: true, is_active: true,
-  is_super_admin: true, account_type: true, institution_id: true, created_at: true,
-  institutions: { select: { id: true, name: true, short_name: true } },
+  is_super_admin: true, organization_id: true, created_at: true,
+  organizations: { select: { id: true, name: true, short_name: true } },
 } as const;
-
-type Actor = { id: string; isSuperAdmin: boolean; accountType: string; institutionId: string | null };
-
-// Resolve the account_type + institution a creator is allowed to set, throwing
-// when the actor isn't permitted to mint users at all.
-function resolveCreateScope(actor: Actor, accountType: string, institutionId: string | null) {
-  if (actor.isSuperAdmin) return { account_type: accountType, institution_id: institutionId };
-  if (actor.accountType === 'organiser') {
-    if (!['official', 'participant', 'institution'].includes(accountType)) {
-      throw new ForbiddenError('Organisers can only create officials, participants or institution contacts');
-    }
-    return { account_type: accountType, institution_id: institutionId };
-  }
-  if (actor.accountType === 'institution' && actor.institutionId) {
-    // A POC may only mint participant logins, always under their own institution.
-    if (accountType && accountType !== 'participant') {
-      throw new ForbiddenError('You can only create participant logins');
-    }
-    return { account_type: 'participant', institution_id: actor.institutionId };
-  }
-  throw new ForbiddenError('You are not allowed to create users');
-}
 
 export function makeUsersRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
 
+  // Which org may the actor provision users into? Super admins: any (or none).
+  // Otherwise the actor must own/administer the requested org.
+  async function assertCanProvision(actorId: string, isSuper: boolean, organizationId: string | null): Promise<string | null> {
+    if (isSuper) return organizationId;
+    if (organizationId && (await guards.orgRole(actorId, organizationId, ['owner', 'admin']))) return organizationId;
+    throw new ForbiddenError('You can only create users in an organization you own or administer');
+  }
+
   // List users — open to any authenticated caller (used by assign/roster pickers).
   router.get('/', asyncHandler(async (req, res) => {
-    const accountType = req.query.account_type as string | undefined;
-    const institutionId = req.query.institution_id as string | undefined;
+    const organizationId = req.query.organization_id as string | undefined;
     const rows = await prisma.users.findMany({
-      where: {
-        ...(accountType ? { account_type: accountType } : {}),
-        ...(institutionId ? { institution_id: institutionId } : {}),
-      },
+      where: { ...(organizationId ? { organization_id: organizationId } : {}) },
       select: PUBLIC_SELECT,
       orderBy: { created_at: 'desc' },
     });
     res.json(rows);
   }));
 
-  // Create a single login (official / participant / POC), scoped by the actor.
-  router.post('/', validateBody(createUserSchema), asyncHandler(async (req, res) => {
-    const actor = req.user! as Actor;
-    const scope = resolveCreateScope(actor, req.body.account_type, req.body.institution_id ?? null);
-
-    const existing = await prisma.users.findUnique({ where: { email: req.body.email }, select: { id: true } });
-    if (existing) throw new BusinessRuleError('A user with this email already exists');
-
-    const password_hash = await bcrypt.hash(req.body.password || DEFAULT_PASSWORD, 10);
-    const user = await prisma.users.create({
-      data: {
-        name: req.body.name,
-        email: req.body.email,
-        phone: req.body.phone ?? null,
-        password_hash,
-        account_type: scope.account_type,
-        institution_id: scope.institution_id,
-      },
-      select: PUBLIC_SELECT,
-    });
-    res.status(201).json(user);
+  // Privacy-preserving lookup for the "find or create a POC/user" flows: only
+  // confirms a match once a full phone number is supplied, and never returns the
+  // unmasked phone/email. Used by the add-user pickers to dedupe by phone.
+  router.get('/lookup', asyncHandler(async (req, res) => {
+    const user = await findUserByPhone(prisma, req.query.phone as string | undefined);
+    if (!user) { res.json({ found: false }); return; }
+    res.json({ found: true, user: { id: user.id, name: user.name, phone: maskPhone(user.phone), email: maskEmail(user.email) } });
   }));
 
-  // Bulk import — match/create by email, optionally mapping each to an event role.
+  // Create a single login, scoped by the actor's org rights. Users are central:
+  // if the phone (or email) already belongs to someone, reuse them rather than
+  // creating a duplicate. A freshly created login must change its password on
+  // first sign-in, and its temporary password is returned once so the actor can
+  // share it.
+  router.post('/', validateBody(createUserSchema), asyncHandler(async (req, res) => {
+    const actor = req.user!;
+    const orgId = await assertCanProvision(actor.id, actor.isSuperAdmin, req.body.organization_id ?? null);
+
+    const existing = await findUserByPhone(prisma, req.body.phone)
+      ?? await prisma.users.findUnique({ where: { email: req.body.email }, select: { id: true } });
+
+    if (existing) {
+      const user = await prisma.$transaction(async (tx) => {
+        if (orgId) {
+          await tx.organization_members.upsert({
+            where: { user_id_organization_id: { user_id: existing.id, organization_id: orgId } },
+            update: {},
+            create: { user_id: existing.id, organization_id: orgId, role: 'member' },
+          });
+        }
+        return tx.users.findUnique({ where: { id: existing.id }, select: PUBLIC_SELECT });
+      });
+      res.status(200).json({ ...user, matched: true });
+      return;
+    }
+
+    const { tempPassword, password_hash } = await hashProvisionedPassword(req.body.password);
+    const user = await prisma.$transaction(async (tx) => {
+      const u = await tx.users.create({
+        data: {
+          name: req.body.name,
+          email: req.body.email,
+          phone: req.body.phone ?? null,
+          password_hash,
+          organization_id: orgId,
+          must_change_password: true,
+        },
+        select: PUBLIC_SELECT,
+      });
+      if (orgId) {
+        await tx.organization_members.upsert({
+          where: { user_id_organization_id: { user_id: u.id, organization_id: orgId } },
+          update: {},
+          create: { user_id: u.id, organization_id: orgId, role: 'member' },
+        });
+      }
+      return u;
+    });
+    res.status(201).json({ ...user, created: true, temp_password: tempPassword });
+  }));
+
+  // Bulk import — match/create by email, optionally mapping each to a championship role.
   router.post('/bulk', validateBody(bulkCreateUsersSchema), asyncHandler(async (req, res) => {
-    const actor = req.user! as Actor;
-    const { users, institution_id, event_id, role_id } = req.body as {
-      users: Array<{ name: string; email: string; phone?: string; account_type: string }>;
-      institution_id?: string | null; event_id?: string; role_id?: string;
+    const actor = req.user!;
+    const { users, organization_id, championship_id, role_id } = req.body as {
+      users: Array<{ name: string; email: string; phone?: string }>;
+      organization_id?: string | null; championship_id?: string; role_id?: string;
     };
 
-    // Validate the role mapping up front: the actor must organise the event.
-    if (event_id && role_id && !actor.isSuperAdmin && !(await guards.organisesEvent(actor.id, event_id))) {
-      throw new ForbiddenError('You do not manage this event');
+    const orgId = await assertCanProvision(actor.id, actor.isSuperAdmin, organization_id ?? null);
+
+    // Validate the role mapping up front: the actor must organise the championship.
+    if (championship_id && role_id && !actor.isSuperAdmin && !(await guards.organisesChampionship(actor.id, championship_id))) {
+      throw new ForbiddenError('You do not manage this championship');
     }
 
     const defaultHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
@@ -102,7 +121,6 @@ export function makeUsersRouter(prisma: Prisma): Router {
       const skipped: { label: string; reason: string }[] = [];
 
       for (const row of users) {
-        const scope = resolveCreateScope(actor, row.account_type, institution_id ?? null);
         let user = await tx.users.findUnique({ where: { email: row.email }, select: { id: true, name: true } });
         if (user) {
           matched++;
@@ -113,8 +131,8 @@ export function makeUsersRouter(prisma: Prisma): Router {
               email: row.email,
               phone: row.phone ?? null,
               password_hash: defaultHash,
-              account_type: scope.account_type,
-              institution_id: scope.institution_id,
+              organization_id: orgId,
+              must_change_password: true,
             },
             select: { id: true, name: true },
           });
@@ -122,11 +140,19 @@ export function makeUsersRouter(prisma: Prisma): Router {
           created++;
         }
 
-        if (event_id && role_id) {
-          await tx.user_event_roles.upsert({
-            where: { user_id_event_id_role_id: { user_id: user.id, event_id, role_id } },
+        if (orgId) {
+          await tx.organization_members.upsert({
+            where: { user_id_organization_id: { user_id: user.id, organization_id: orgId } },
             update: {},
-            create: { user_id: user.id, event_id, role_id, assigned_by: actor.id },
+            create: { user_id: user.id, organization_id: orgId, role: 'member' },
+          });
+        }
+
+        if (championship_id && role_id) {
+          await tx.user_championship_roles.upsert({
+            where: { user_id_championship_id_role_id: { user_id: user.id, championship_id, role_id } },
+            update: {},
+            create: { user_id: user.id, championship_id, role_id, assigned_by: actor.id },
           });
         }
       }
@@ -136,7 +162,7 @@ export function makeUsersRouter(prisma: Prisma): Router {
     res.status(201).json(result);
   }));
 
-  // Edit a user (super admin, or the institution POC of the target's institution).
+  // Edit a user (super admin, or an owner/admin of the target's organization).
   router.patch('/:id', guards.manageUser, validateBody(updateUserSchema), asyncHandler(async (req, res) => {
     const { password, ...rest } = req.body as Record<string, unknown> & { password?: string };
     const data: Record<string, unknown> = { ...rest };

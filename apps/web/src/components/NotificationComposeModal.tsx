@@ -7,12 +7,12 @@ import type { PostableEvent } from '../lib/notifications';
 import { Button, Field, Input, Modal, Segmented, Spinner, Textarea, toast } from './ui';
 
 // Compose + push a manual notification. Available to anyone the API lets post
-// (organisers / officials / captains / POCs) — the event dropdown is filled from
-// /notifications/postable-events, so it's empty (and this modal isn't reachable)
+// (organisers / officials / captains / POCs) — the championship dropdown is filled from
+// /notifications/postable-championships, so it's empty (and this modal isn't reachable)
 // for read-only users.
 export function NotificationComposeModal({ onClose, defaultEventId }: { onClose: () => void; defaultEventId?: string }) {
   const qc = useQueryClient();
-  const { data: events = [], isLoading } = useApi<PostableEvent[]>('/notifications/postable-events');
+  const { data: championships = [], isLoading } = useApi<PostableEvent[]>('/notifications/postable-championships');
   const [eventId, setEventId] = useState(defaultEventId ?? '');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -22,13 +22,13 @@ export function NotificationComposeModal({ onClose, defaultEventId }: { onClose:
 
   const submit = async () => {
     setError(null);
-    const chosen = eventId || (events.length === 1 ? events[0].id : '');
-    if (!chosen) { setError('Pick an event'); return; }
+    const chosen = eventId || (championships.length === 1 ? championships[0].id : '');
+    if (!chosen) { setError('Pick an championship'); return; }
     if (!title.trim()) { setError('A title is required'); return; }
     setBusy(true);
     try {
       await api('POST', '/notifications', {
-        event_id: chosen, title: title.trim(), body: body.trim() || undefined, audience,
+        championship_id: chosen, title: title.trim(), body: body.trim() || undefined, audience,
       });
       qc.invalidateQueries({
         predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('/notifications'),
@@ -44,18 +44,18 @@ export function NotificationComposeModal({ onClose, defaultEventId }: { onClose:
 
   return (
     <Modal title="New notification" onClose={onClose}>
-      {isLoading ? <Spinner /> : events.length === 0 ? (
-        <p className="text-sm text-slate-500 dark:text-slate-400">You don't have any events you can post to.</p>
+      {isLoading ? <Spinner /> : championships.length === 0 ? (
+        <p className="text-sm text-slate-500 dark:text-slate-400">You don't have any championships you can post to.</p>
       ) : (
         <>
-          <Field label="Event">
+          <Field label="Championship">
             <select
-              value={eventId || (events.length === 1 ? events[0].id : '')}
+              value={eventId || (championships.length === 1 ? championships[0].id : '')}
               onChange={(e) => setEventId(e.target.value)}
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-brand-500 focus:ring-[3px] focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             >
-              {events.length !== 1 && <option value="">Select an event…</option>}
-              {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+              {championships.length !== 1 && <option value="">Select an championship…</option>}
+              {championships.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
             </select>
           </Field>
 
@@ -72,8 +72,8 @@ export function NotificationComposeModal({ onClose, defaultEventId }: { onClose:
               value={audience}
               onChange={setAudience}
               options={[
-                { value: 'all', label: 'All event users' },
-                { value: 'institutions_captains', label: 'Institutions + captains' },
+                { value: 'all', label: 'All championship users' },
+                { value: 'organizations_captains', label: 'Organizations + captains' },
               ]}
             />
           </Field>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
-import { EVENT_NAV, eventNavPath, parseEventId } from '../lib/event-nav';
+import { parseEventId } from '../lib/championship-nav';
 import { useFilterBar, FilterProvider } from '../lib/filters';
 import { useApi } from '../lib/hooks';
 import { useTheme } from '../lib/theme';
@@ -12,60 +12,41 @@ interface NavItem { to: string; label: string; icon: string; end?: boolean }
 interface NavGroup { group: string; items: NavItem[] }
 
 export function roleHome(role: AppRole): string {
-  switch (role) {
-    case 'system': return '/platform/sports'; // System admin manages master data
-    case 'organiser': return '/events';
-    case 'institution': return '/inst';
-    case 'official': return '/official';
-    case 'participant': return '/me';
-  }
+  return role === 'system' ? '/platform/sports' : '/profile';
 }
 
-function navFor(role: AppRole, isSuperAdmin: boolean): NavGroup[] {
-  switch (role) {
-    case 'system':
-      // System Admin: full organiser control over every event, plus platform master data.
-      return [{
-        group: 'Events', items: [
-          { to: '/events', label: 'Events', icon: '◆' },
-        ],
-      }, {
-        group: 'Platform Master Data', items: [
-          { to: '/platform/sports', label: 'Sports', icon: '🏅' },
-          { to: '/platform/disciplines', label: 'Disciplines', icon: '▦' },
-          { to: '/platform/tournament-formats', label: 'Formats', icon: '⊟' },
-          { to: '/platform/institutions', label: 'Institutions', icon: '🏛' },
-          { to: '/platform/roles', label: 'Roles & Permissions', icon: '⚿' },
-        ],
-      }, {
-        group: 'Platform', items: [
-          { to: '/platform/users', label: 'All Users', icon: '◍' },
-        ],
-      }];
-    case 'organiser': {
-      // Organiser: only their events (multi-tenant isolated)
-      return [
-        { group: 'My Events', items: [{ to: '/events', label: 'Events', icon: '◆', end: false }] },
-      ];
-    }
-    case 'institution':
-      return [{ group: 'Institution', items: [
-        { to: '/inst', label: 'Overview', icon: '◎', end: true },
-        { to: '/inst/events', label: 'Browse events', icon: '◆' },
-        { to: '/inst/teams', label: 'Teams', icon: '⚇' },
-        { to: '/inst/students', label: 'Teams and members', icon: '👥' },
-        { to: '/inst/pocs', label: 'Points of contact', icon: '⚿' },
-      ] }];
-    case 'official':
-      return [{ group: 'Match day', items: [
-        { to: '/official', label: 'My matches', icon: '⚑', end: true },
-      ] }];
-    case 'participant':
-      return [{ group: 'Me', items: [
-        { to: '/me', label: 'Dashboard', icon: '◎', end: true },
-        { to: '/me/matches', label: 'All matches', icon: '⚑' },
-      ] }];
+function navFor(role: AppRole): NavGroup[] {
+  if (role === 'system') {
+    // System Admin: every championship, plus platform master data.
+    return [{
+      group: 'Championships', items: [
+        { to: '/discover', label: 'All championships', icon: '◆' },
+      ],
+    }, {
+      group: 'Platform Master Data', items: [
+        { to: '/platform/sports', label: 'Sports', icon: '🏅' },
+        { to: '/platform/disciplines', label: 'Disciplines', icon: '▦' },
+        { to: '/platform/tournament-formats', label: 'Formats', icon: '⊟' },
+        { to: '/platform/organizations', label: 'Organizations', icon: '🏛' },
+        { to: '/platform/roles', label: 'Roles & Permissions', icon: '⚿' },
+      ],
+    }, {
+      group: 'Platform', items: [
+        { to: '/platform/users', label: 'All Users', icon: '◍' },
+      ],
+    }];
   }
+  // Unified user shell — the same nav for everyone; what they can DO is derived
+  // per championship / per organization.
+  return [{
+    group: 'Sportagon', items: [
+      { to: '/profile', label: 'My Game', icon: '◎', end: true },
+      { to: '/organizations', label: 'Organizations', icon: '🏛' },
+      { to: '/discover', label: 'Discover', icon: '◈' },
+      { to: '/championships', label: 'Championships', icon: '🏆' },
+      { to: '/host', label: 'Host', icon: '＋' },
+    ],
+  }];
 }
 
 function RoleSwitcher() {
@@ -92,38 +73,31 @@ function RoleSwitcher() {
 
 const HEADER_SELECT = 'rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200';
 
-// Shared Sport filter — lives in the top header. Only shows when the current
-// page registers sports.
+// Shared Championship + Tournament + Sport filters — all live in the top header.
+// Each only shows when the current page registers options for that axis.
 function HeaderFilters() {
-  const { sportId, setSportId, config } = useFilterBar();
-  if (!config.sports) return null;
+  const { eventId, setEventId, tournamentId, setTournamentId, sportId, setSportId, config } = useFilterBar();
+  if (!config.championships && !config.tournaments && !config.sports) return null;
   return (
     <div className="order-last flex w-full items-center gap-2 sm:order-none sm:w-auto">
-      <select value={sportId} onChange={(e) => setSportId(e.target.value)} className={HEADER_SELECT} aria-label="Filter by sport">
-        <option value="">All sports</option>
-        {config.sports.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-      </select>
-    </div>
-  );
-}
-
-// Shared Event filter — lives in the sidebar (the shell). Only shows when the
-// current page registers events.
-function SidebarEventFilter() {
-  const { eventId, setEventId, config } = useFilterBar();
-  if (!config.events) return null;
-  return (
-    <div className="mb-5">
-      <div className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Event</div>
-      <select
-        value={eventId}
-        onChange={(e) => setEventId(e.target.value)}
-        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-2 text-sm font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-400"
-        aria-label="Filter by event"
-      >
-        <option value="">All events</option>
-        {config.events.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-      </select>
+      {config.championships && (
+        <select value={eventId} onChange={(e) => setEventId(e.target.value)} className={HEADER_SELECT} aria-label="Filter by championship">
+          <option value="">All championships</option>
+          {config.championships.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+      )}
+      {config.tournaments && (
+        <select value={tournamentId} onChange={(e) => setTournamentId(e.target.value)} className={HEADER_SELECT} aria-label="Filter by tournament">
+          {!config.tournamentRequired && <option value="">All tournaments</option>}
+          {config.tournaments.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+      )}
+      {config.sports && (
+        <select value={sportId} onChange={(e) => setSportId(e.target.value)} className={HEADER_SELECT} aria-label="Filter by sport">
+          <option value="">All sports</option>
+          {config.sports.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+      )}
     </div>
   );
 }
@@ -134,17 +108,21 @@ export function AppShell() {
   const { ctx, activeRole, logout } = useAuth();
   const { theme, toggle } = useTheme();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const eventId = ctx && (activeRole === 'organiser' || activeRole === 'system') ? parseEventId(pathname) : null;
-  const { data: event } = useApi<EventSummary>(eventId ? `/events/${eventId}` : null);
+  // Drop the current URL on sign-out so a stale deep link doesn't linger behind
+  // the login screen (and isn't restored on the next login).
+  const signOut = () => { logout(); navigate('/', { replace: true }); };
+
+  const eventId = ctx ? parseEventId(pathname) : null;
+  const { data: championship } = useApi<EventSummary>(eventId ? `/championships/${eventId}` : null);
 
   if (!ctx) return null;
 
-  const groups = navFor(activeRole, ctx.user.is_super_admin);
-  const subtitle = event?.name
-    ?? (activeRole === 'institution' && ctx.institution ? ctx.institution.name : ROLE_LABELS[activeRole]);
+  const groups = navFor(activeRole);
+  const subtitle = championship?.name ?? ROLE_LABELS[activeRole];
 
   return (
     <FilterProvider>
@@ -168,7 +146,6 @@ export function AppShell() {
           <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white md:hidden" aria-label="Close menu">✕</button>
         </div>
         <nav className="flex-1 overflow-y-auto px-3 py-4">
-          <SidebarEventFilter />
           {groups.map((g) => (
             <div key={g.group} className="mb-5">
               <div className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{g.group}</div>
@@ -189,27 +166,6 @@ export function AppShell() {
               ))}
             </div>
           ))}
-          {eventId && (
-            <div className="mb-5">
-              <div className="truncate px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500" title={event?.name}>
-                {event?.name ?? 'Event'}
-              </div>
-              {EVENT_NAV.map((it) => (
-                <NavLink
-                  key={it.segment || 'overview'}
-                  to={eventNavPath(eventId, it.segment)}
-                  end={it.end}
-                  onClick={() => setSidebarOpen(false)}
-                  className={({ isActive }) => cn(
-                    'mb-0.5 flex items-center rounded-lg px-2.5 py-2 text-sm font-medium transition-colors',
-                    isActive ? 'bg-brand-500 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white',
-                  )}
-                >
-                  {it.label}
-                </NavLink>
-              ))}
-            </div>
-          )}
         </nav>
         <div className="border-t border-slate-800 px-3 py-3 text-[11px] text-slate-500">
           Demo logins use password <span className="font-mono text-slate-400">demo123</span>
@@ -246,7 +202,7 @@ export function AppShell() {
                       <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{ctx.user.name}</div>
                       <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.email}</div>
                     </div>
-                    <button onClick={logout} className="w-full px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">Sign out</button>
+                    <button onClick={signOut} className="w-full px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">Sign out</button>
                   </div>
                 </>
               )}

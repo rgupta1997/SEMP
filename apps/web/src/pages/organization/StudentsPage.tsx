@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../../lib/auth';
 import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi } from '../../lib/hooks';
 import { Avatar, Badge, Card, CardBody, CardHeader, EmptyState, ListToolbar, PageHeader, SearchInput, Select, Spinner, StatCard } from '../../components/ui';
 
 function teamEvent(t: any): { id: string; name: string } | null {
-  return t.events?.id ? { id: t.events.id, name: t.events.name ?? 'Event' } : null;
+  return t.championships?.id ? { id: t.championships.id, name: t.championships.name ?? 'Championship' } : null;
 }
 function teamTournament(t: any): { id: string; name: string } | null {
   const tt = t.tournament_disciplines?.tournament_sports?.tournaments;
@@ -18,25 +18,26 @@ function teamSport(t: any): { id: string; name: string } | null {
 
 export function StudentsPage() {
   const { ctx } = useAuth();
-  const institutionId = ctx?.institution?.id ?? ctx?.user.institution_id ?? '';
-  const { data: teams = [], isLoading } = useApi<any[]>(institutionId ? `/teams?institution_id=${institutionId}` : null);
+  const { orgId } = useParams();
+  const institutionId = orgId ?? ctx?.organization?.id ?? ctx?.user.organization_id ?? '';
+  const { data: teams = [], isLoading } = useApi<any[]>(institutionId ? `/teams?organization_id=${institutionId}` : null);
   const [search, setSearch] = useState('');
   const [tournamentFilter, setTournamentFilter] = useState('all');
 
-  // Event lives in the shared header filter; peek it to drive the cascade below.
+  // Championship lives in the shared header filter; peek it to drive the cascade below.
   const { eventId } = useFilterBar();
 
-  // Distinct events across all of this institution's teams.
-  const events = useMemo(() => {
+  // Distinct championships across all of this organization's teams.
+  const championships = useMemo(() => {
     const m = new Map<string, string>();
     teams.forEach((t) => { const e = teamEvent(t); if (e) m.set(e.id, e.name); });
     return [...m].map(([id, name]) => ({ id, name }));
   }, [teams]);
 
-  // Reset the tournament drill-down whenever the header event changes.
+  // Reset the tournament drill-down whenever the header championship changes.
   useEffect(() => { setTournamentFilter('all'); }, [eventId]);
 
-  // Tournaments narrow to the selected event (cascading).
+  // Tournaments narrow to the selected championship (cascading).
   const tournaments = useMemo(() => {
     const m = new Map<string, string>();
     teams.forEach((t) => {
@@ -46,7 +47,7 @@ export function StudentsPage() {
     return [...m].map(([id, name]) => ({ id, name }));
   }, [teams, eventId]);
 
-  // Sports narrow to the selected event + tournament; published to the header.
+  // Sports narrow to the selected championship + tournament; published to the header.
   const sportOptions = useMemo(() => {
     const m = new Map<string, string>();
     teams.forEach((t) => {
@@ -57,7 +58,7 @@ export function StudentsPage() {
     return [...m].map(([id, name]) => ({ id, name }));
   }, [teams, eventId, tournamentFilter]);
   const { sportId } = usePageFilters({
-    events: events.length ? events : undefined,
+    championships: championships.length ? championships : undefined,
     sports: sportOptions.length ? sportOptions : undefined,
   });
 
@@ -68,7 +69,7 @@ export function StudentsPage() {
       if (tournamentFilter !== 'all' && teamTournament(t)?.id !== tournamentFilter) return false;
       if (sportId && teamSport(t)?.id !== sportId) return false;
       if (!q) return true;
-      const haystack = [t.name, t.sports?.name, t.events?.name, teamTournament(t)?.name, ...(t.team_members ?? []).map((m: any) => m.users?.name)]
+      const haystack = [t.name, t.sports?.name, t.championships?.name, teamTournament(t)?.name, ...(t.team_members ?? []).map((m: any) => m.users?.name)]
         .filter(Boolean).join(' ').toLowerCase();
       return haystack.includes(q);
     });
@@ -81,7 +82,7 @@ export function StudentsPage() {
 
   return (
     <div>
-      <PageHeader title="Teams and members" subtitle="Everyone representing your institution, grouped by team." />
+      <PageHeader title="Teams and members" subtitle="Everyone representing your organization, grouped by team." />
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <StatCard label="Teams" value={visible.length} />
         <StatCard label="Unique students" value={uniquePlayers.size} />
@@ -109,8 +110,8 @@ export function StudentsPage() {
             return (
               <Card key={t.id}>
                 <CardHeader
-                  title={<Link to={`/inst/teams/${t.id}`} className="hover:text-brand-600 dark:hover:text-brand-300">{t.name}</Link>}
-                  subtitle={[teamTournament(t)?.name, t.sports?.name, t.events?.name].filter(Boolean).join(' · ')}
+                  title={<Link to={`/organizations/${institutionId}/teams/${t.id}`} className="hover:text-brand-600 dark:hover:text-brand-300">{t.name}</Link>}
+                  subtitle={[teamTournament(t)?.name, t.sports?.name, t.championships?.name].filter(Boolean).join(' · ')}
                   action={<Badge tone="slate">{members.length} player{members.length === 1 ? '' : 's'}</Badge>}
                 />
                 <CardBody>

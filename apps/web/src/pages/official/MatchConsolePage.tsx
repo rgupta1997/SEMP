@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
-import { Button, Card, CardBody, CardHeader, EmptyState, Input, Spinner, StatusBadge, Textarea, BackButton, cn, toast } from '../../components/ui';
-import { awayTeam, disciplineLabel, eventLabel, homeTeam, teamLabel, venueLabel } from './fixtureHelpers';
+import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Select, Spinner, StatusBadge, Textarea, BackButton, cn, toast } from '../../components/ui';
+import { awayTeam, disciplineLabel, eventInfo, eventLabel, homeTeam, teamLabel, venueLabel } from './fixtureHelpers';
 import {
   headline, hydrate, reduce, sportDef, subLine,
   type Action, type LogEntry, type MatchState, type SportDef,
@@ -18,19 +18,34 @@ const SECONDARY: { status: string; label: string; variant: 'outline' | 'danger' 
 export function MatchConsolePage() {
   const { fixtureId } = useParams();
   const navigate = useNavigate();
-  const { data: fixtures = [], isLoading } = useApi<any[]>('/me/officiating');
+  const location = useLocation();
+  // Where to return when done — set by whoever opened the console (host Results
+  // tab passes its path); officials fall back to their matches list.
+  const back = (location.state as { from?: string } | null)?.from ?? '/officiating';
+  const backLabel = back === '/officiating' ? 'My matches' : 'Results';
+  // Single fixture, authorized for the assigned official OR the championship host.
+  const { data: fixture, isLoading } = useApi<any>(fixtureId ? `/fixtures/${fixtureId}/scoring` : null);
   const { data: live } = useApi<{ live_state: any; live_log: any[] }>(fixtureId ? `/fixtures/${fixtureId}/live` : null);
-  const fixture = fixtures.find((f) => f.id === fixtureId);
 
   if (isLoading) return <Spinner />;
-  if (!fixture) return <EmptyState icon="⚑" title="Match not found" description="This fixture is not assigned to you." action={<Button onClick={() => navigate('/official')}>Back to matches</Button>} />;
+  if (!fixture) return <EmptyState icon="⚑" title="Match not found" description="This fixture isn't available to you." action={<Button onClick={() => navigate(back)}>Back</Button>} />;
 
   const sportName = fixture.tournament_disciplines?.tournament_sports?.sports?.name;
   const def = sportDef(sportName);
+  // Refresh the official list AND the host's championship views (results table +
+  // live-computed standings) after any scoring change.
+  const evId = eventInfo(fixture)?.id;
+  const invalidate: (string | null)[] = [
+    '/me/officiating',
+    `/fixtures/${fixtureId}/scoring`,
+    evId ? `/championships/${evId}/fixtures` : null,
+    evId ? `/championships/${evId}/standings` : null,
+  ];
+  const done = () => navigate(back);
 
   return (
     <div>
-      <BackButton onClick={() => navigate('/official')}>My matches</BackButton>
+      <BackButton onClick={done}>{backLabel}</BackButton>
       <div className="mb-1 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-400">
         <span>{disciplineLabel(fixture)} {fixture.round ? `· ${fixture.round}` : ''}</span>
         <StatusBadge status={fixture.status} />
@@ -38,15 +53,88 @@ export function MatchConsolePage() {
       <div className="mb-4 text-sm text-slate-500 dark:text-slate-400">{eventLabel(fixture)} · {venueLabel(fixture)} · {fmtDateTime(fixture.scheduled_at)}</div>
 
       {def.archetype === 'time'
-        ? <ManualResult fixture={fixture} fixtureId={fixtureId!} onDone={() => navigate('/official')} />
-        : <LiveConsole key={fixtureId} fixture={fixture} fixtureId={fixtureId!} def={def} live={live} onDone={() => navigate('/official')} />}
+        ? <ManualResult fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} onDone={done} />
+        : <LiveConsole key={fixtureId} fixture={fixture} fixtureId={fixtureId!} def={def} live={live} invalidate={invalidate} onDone={done} />}
+
+      <div className="mt-5">
+        <AwardsPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
+      </div>
     </div>
   );
 }
 
+/* ----------------------------- Awards ----------------------------- */
+type AwardItem = { award_name: string; recipient_user_id: string };
+type AwardRow = AwardItem & { id: string; recipient_name: string | null };
+
+function rosterPeople(team: any): { id: string; name: string; team: string }[] {
+  return (team?.team_members ?? [])
+    .map((tm: any) => ({ id: tm.users?.id as string, name: tm.users?.name ?? '—', team: teamLabel(team) }))
+    .filter((p: { id?: string }) => !!p.id);
+}
+
+// Free-text awards with a recipient picked from the two teams' rosters. Replace-all
+// save; these surface as the recipient's achievements on their dashboard.
+function AwardsPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixtureId: string; invalidate: (string | null)[] }) {
+  const people = [...rosterPeople(homeTeam(fixture)), ...rosterPeople(awayTeam(fixture))];
+  const { data: existing } = useApi<AwardRow[]>(`/fixtures/${fixtureId}/awards`);
+  const [rows, setRows] = useState<AwardItem[]>([]);
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seeded.current && existing) {
+      setRows(existing.map((a) => ({ award_name: a.award_name, recipient_user_id: a.recipient_user_id })));
+      seeded.current = true;
+    }
+  }, [existing]);
+
+  const saveAwards = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/awards`, body), [`/fixtures/${fixtureId}/awards`, ...invalidate]);
+
+  const addRow = () => setRows((r) => [...r, { award_name: '', recipient_user_id: people[0]?.id ?? '' }]);
+  const update = (i: number, patch: Partial<AwardItem>) => setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  const remove = (i: number) => setRows((r) => r.filter((_, idx) => idx !== i));
+  const save = () => {
+    const awards = rows
+      .filter((r) => r.award_name.trim() && r.recipient_user_id)
+      .map((r) => ({ award_name: r.award_name.trim(), recipient_user_id: r.recipient_user_id }));
+    saveAwards.mutate({ awards }, { onSuccess: () => toast.success('Awards saved'), onError: (e: any) => toast.error(e.message) });
+  };
+
+  return (
+    <Card>
+      <CardHeader title="Awards" subtitle="Recognise players — e.g. Player of the Match. Multiple allowed." />
+      <CardBody className="space-y-3">
+        {people.length === 0 ? (
+          <p className="text-sm text-slate-400 dark:text-slate-500">No players on the team rosters yet — add players to a team to give awards.</p>
+        ) : (
+          <>
+            {rows.length === 0 && <p className="text-sm text-slate-400 dark:text-slate-500">No awards yet.</p>}
+            {rows.map((row, i) => (
+              <div key={i} className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                <Field label="Award">
+                  <Input value={row.award_name} onChange={(e) => update(i, { award_name: e.target.value })} placeholder="Player of the Match" />
+                </Field>
+                <Field label="Recipient">
+                  <Select value={row.recipient_user_id} onChange={(e) => update(i, { recipient_user_id: e.target.value })}>
+                    {people.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.team}</option>)}
+                  </Select>
+                </Field>
+                <Button variant="ghost" size="sm" className="mb-1" onClick={() => remove(i)}>Remove</Button>
+              </div>
+            ))}
+            <div className="flex items-center justify-between pt-1">
+              <Button variant="outline" size="sm" onClick={addRow}>+ Add award</Button>
+              <Button size="sm" disabled={saveAwards.isPending} onClick={save}>{saveAwards.isPending ? 'Saving…' : 'Save awards'}</Button>
+            </div>
+          </>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
 /* ----------------------------- Live console ----------------------------- */
-function LiveConsole({ fixture, fixtureId, def, live, onDone }:
-  { fixture: any; fixtureId: string; def: SportDef; live?: { live_state: any; live_log: any[] }; onDone: () => void }) {
+function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
+  { fixture: any; fixtureId: string; def: SportDef; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
   const homeName = teamLabel(homeTeam(fixture));
   const awayName = teamLabel(awayTeam(fixture));
 
@@ -55,6 +143,9 @@ function LiveConsole({ fixture, fixtureId, def, live, onDone }:
   const [history, setHistory] = useState<{ state: MatchState; log: LogEntry[] }[]>([]);
   const [status, setStatus] = useState<string>(fixture.status);
   const [confirming, setConfirming] = useState(false);
+  // Re-open a completed match for corrections. Revealing the scorer doesn't touch
+  // the server — the first scoring action (or re-sign-off) flips it back to live.
+  const [editing, setEditing] = useState(false);
   const seeded = useRef(false);
 
   useEffect(() => {
@@ -65,20 +156,27 @@ function LiveConsole({ fixture, fixtureId, def, live, onDone }:
     }
   }, [live]);
 
-  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), ['/me/officiating']);
+  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
 
-  const save = (s: MatchState, l: LogEntry[], st: string, done = false) => {
+  // `opts.winner` (when the key is present, even if null) overrides the derived
+  // winner — used by the cricket quick-result panel to declare a winner directly.
+  // `opts.notes` persists the final result text.
+  const save = (s: MatchState, l: LogEntry[], st: string, done = false, onSuccess?: () => void,
+    opts?: { winner?: string | null; notes?: string }) => {
     const h = headline(def, s);
-    const winner_team_id = !done || h.a === h.b ? null : h.a > h.b ? fixture.home_team_id : fixture.away_team_id;
-    persist.mutate({ live_state: s, live_log: l, home_score: h.a, away_score: h.b, status: st, winner_team_id },
-      { onError: (e: any) => toast.error(e.message) });
+    const winner_team_id = opts && 'winner' in opts
+      ? (opts.winner ?? null)
+      : (!done || h.a === h.b ? null : h.a > h.b ? fixture.home_team_id : fixture.away_team_id);
+    const body: Record<string, unknown> = { live_state: s, live_log: l, home_score: h.a, away_score: h.b, status: st, winner_team_id };
+    if (opts && opts.notes !== undefined) body.notes = opts.notes;
+    persist.mutate(body, { onSuccess, onError: (e: any) => toast.error(e.message) });
   };
 
   const dispatch = (action: Action) => {
     const { state: ns, entry } = reduce(def, state, action);
     setHistory((hh) => [...hh, { state, log }].slice(-50));
     const nlog = entry ? [entry, ...log].slice(0, 80) : log;
-    const st = status === 'scheduled' ? 'live' : status;
+    const st = status === 'scheduled' || status === 'completed' || status === 'confirmed' ? 'live' : status;
     setState(ns); setLog(nlog); setStatus(st);
     save(ns, nlog, st);
   };
@@ -94,7 +192,27 @@ function LiveConsole({ fixture, fixtureId, def, live, onDone }:
   };
 
   const goLive = () => { setStatus('live'); save(state, log, 'live'); };
-  const signOff = () => { setStatus('completed'); save(state, log, 'completed', true); setConfirming(false); onDone(); };
+  // Keep the confirm dialog open (showing a spinner) until the save resolves, then
+  // complete and return. Navigating only on success also lets the global mutation-
+  // cache invalidation mark /fixtures stale before the Results page remounts —
+  // returning eagerly raced the GET ahead of the PATCH and left the old score on
+  // screen until a manual refresh.
+  const signOff = () =>
+    save(state, log, 'completed', true, () => { setStatus('completed'); setConfirming(false); onDone(); });
+
+  // Cricket: write runs/wickets straight into state (so live_state + headline stay
+  // consistent) and optionally declare the winner + final result text directly.
+  const applyQuick = (v: { runsA: number; wktA: number; runsB: number; wktB: number; winner: 'auto' | 'home' | 'away' | 'draw'; notes: string; complete: boolean }) => {
+    const ns: MatchState = { ...state, runsA: v.runsA, wktA: v.wktA, runsB: v.runsB, wktB: v.wktB };
+    setState(ns);
+    const st = v.complete ? 'completed' : status === 'scheduled' ? 'live' : status;
+    setStatus(st);
+    const opts: { winner?: string | null; notes?: string } = { notes: v.notes };
+    if (v.winner === 'home') opts.winner = fixture.home_team_id;
+    else if (v.winner === 'away') opts.winner = fixture.away_team_id;
+    else if (v.winner === 'draw') opts.winner = null;
+    save(ns, log, st, v.complete, v.complete ? () => { setStatus('completed'); onDone(); } : undefined, opts);
+  };
 
   const h = headline(def, state);
   const live_ = status === 'live';
@@ -118,7 +236,7 @@ function LiveConsole({ fixture, fixtureId, def, live, onDone }:
         </div>
       </Card>
 
-      {!completed && (
+      {(!completed || editing) && (
         <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
           <Card>
             <CardHeader title="Scoring" subtitle={`${def.segLabel} ${def.archetype === 'cricket' ? state.inn : state.seg}${def.archetype !== 'cricket' ? ` of ${def.segMax}` : ''}`} />
@@ -147,10 +265,10 @@ function LiveConsole({ fixture, fixtureId, def, live, onDone }:
 
           <div className="space-y-5">
             <Card>
-              <CardHeader title="Event log" action={<Button size="sm" variant="ghost" disabled={history.length === 0} onClick={undo}>↶ Undo</Button>} />
+              <CardHeader title="Championship log" action={<Button size="sm" variant="ghost" disabled={history.length === 0} onClick={undo}>↶ Undo</Button>} />
               <CardBody>
                 {log.length === 0 ? (
-                  <p className="text-sm text-slate-400 dark:text-slate-500">No events yet — start scoring.</p>
+                  <p className="text-sm text-slate-400 dark:text-slate-500">No championships yet — start scoring.</p>
                 ) : (
                   <ul className="max-h-64 space-y-1.5 overflow-auto">
                     {log.map((e, i) => (
@@ -168,22 +286,32 @@ function LiveConsole({ fixture, fixtureId, def, live, onDone }:
             <Card>
               <CardHeader title="Match control" />
               <CardBody className="space-y-2">
-                {!live_ && <Button className="w-full justify-start" disabled={persist.isPending} onClick={goLive}>Start match (go live)</Button>}
+                {!live_ && !editing && <Button className="w-full justify-start" disabled={persist.isPending} onClick={goLive}>Start match (go live)</Button>}
                 <Button className="w-full justify-start" disabled={persist.isPending} onClick={() => setConfirming(true)}>✍ End match &amp; sign off</Button>
                 {SECONDARY.map((s) => (
-                  <SecondaryStatus key={s.status} fixtureId={fixtureId} status={s.status} label={s.label} variant={s.variant} onDone={onDone} />
+                  <SecondaryStatus key={s.status} fixtureId={fixtureId} status={s.status} label={s.label} variant={s.variant} invalidate={invalidate} onDone={onDone} />
                 ))}
               </CardBody>
             </Card>
+
+            {def.archetype === 'cricket' && (
+              <CricketQuickResult key={`${state.runsA}-${state.wktA}-${state.runsB}-${state.wktB}`}
+                state={state} homeName={homeName} awayName={awayName}
+                currentNotes={fixture.notes ?? ''} pending={persist.isPending} onApply={applyQuick} />
+            )}
           </div>
         </div>
       )}
 
-      {completed && (
+      {completed && !editing && (
         <Card><CardBody className="py-8 text-center">
           <div className="text-sm text-slate-500 dark:text-slate-400">Result recorded.</div>
           <div className="mt-1 text-2xl font-black tabular-nums text-slate-900 dark:text-slate-100">{homeName} {h.a} – {h.b} {awayName}</div>
-          <Button className="mt-4" onClick={onDone}>Back to matches</Button>
+          {fixture.notes && <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">{fixture.notes}</div>}
+          <div className="mt-4 flex justify-center gap-2">
+            <Button variant="outline" onClick={() => setEditing(true)}>Edit result</Button>
+            <Button onClick={onDone}>Back to matches</Button>
+          </div>
         </CardBody></Card>
       )}
 
@@ -194,8 +322,8 @@ function LiveConsole({ fixture, fixtureId, def, live, onDone }:
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">This completes the match and updates standings.</p>
             <div className="my-4 text-2xl font-black tabular-nums text-slate-900 dark:text-slate-100">{h.a} – {h.b}</div>
             <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={() => setConfirming(false)}>Cancel</Button>
-              <Button className="flex-1" disabled={persist.isPending} onClick={signOff}>Sign off</Button>
+              <Button variant="outline" className="flex-1" disabled={persist.isPending} onClick={() => setConfirming(false)}>Cancel</Button>
+              <Button className="flex-1" disabled={persist.isPending} onClick={signOff}>{persist.isPending ? 'Signing off…' : 'Sign off'}</Button>
             </div>
           </div>
         </div>
@@ -234,10 +362,68 @@ function CricketDeck({ def, dispatch }: { def: SportDef; dispatch: (a: Action) =
   );
 }
 
-function SecondaryStatus({ fixtureId, status, label, variant, onDone }:
-  { fixtureId: string; status: string; label: string; variant: 'outline' | 'danger'; onDone: () => void }) {
+// Cricket-only: enter runs + wickets for both teams directly, declare the winner
+// (or let it derive from runs), and write the final result text. Keyed by the live
+// score upstream so it re-seeds when ball-by-ball scoring changes the totals.
+function CricketQuickResult({ state, homeName, awayName, currentNotes, pending, onApply }:
+  { state: MatchState; homeName: string; awayName: string; currentNotes: string; pending: boolean;
+    onApply: (v: { runsA: number; wktA: number; runsB: number; wktB: number; winner: 'auto' | 'home' | 'away' | 'draw'; notes: string; complete: boolean }) => void }) {
+  const [rA, setRA] = useState(String(state.runsA ?? 0));
+  const [wA, setWA] = useState(String(state.wktA ?? 0));
+  const [rB, setRB] = useState(String(state.runsB ?? 0));
+  const [wB, setWB] = useState(String(state.wktB ?? 0));
+  const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>('auto');
+  const [notes, setNotes] = useState(currentNotes);
+
+  const num = (s: string) => Math.max(0, Math.floor(Number(s) || 0));
+  const vals = (complete: boolean) => ({ runsA: num(rA), wktA: num(wA), runsB: num(rB), wktB: num(wB), winner, notes, complete });
+
+  return (
+    <Card>
+      <CardHeader title="Quick result" subtitle="Enter the score directly or declare the winner." />
+      <CardBody className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="mb-1 truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</div>
+            <div className="flex gap-2">
+              <Input type="number" min={0} value={rA} onChange={(e) => setRA(e.target.value)} className="text-center" aria-label={`${homeName} runs`} />
+              <Input type="number" min={0} value={wA} onChange={(e) => setWA(e.target.value)} className="w-16 text-center" aria-label={`${homeName} wickets`} />
+            </div>
+            <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-400">runs · wkts</div>
+          </div>
+          <div>
+            <div className="mb-1 truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</div>
+            <div className="flex gap-2">
+              <Input type="number" min={0} value={rB} onChange={(e) => setRB(e.target.value)} className="text-center" aria-label={`${awayName} runs`} />
+              <Input type="number" min={0} value={wB} onChange={(e) => setWB(e.target.value)} className="w-16 text-center" aria-label={`${awayName} wickets`} />
+            </div>
+            <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-400">runs · wkts</div>
+          </div>
+        </div>
+        <Field label="Winner">
+          <Select value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
+            <option value="auto">Auto (from runs)</option>
+            <option value="home">{homeName}</option>
+            <option value="away">{awayName}</option>
+            <option value="draw">Tie / draw</option>
+          </Select>
+        </Field>
+        <Field label="Match result">
+          <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Home won by 25 runs" />
+        </Field>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" disabled={pending} onClick={() => onApply(vals(false))}>Apply (keep live)</Button>
+          <Button size="sm" disabled={pending} onClick={() => onApply(vals(true))}>Save &amp; complete</Button>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+function SecondaryStatus({ fixtureId, status, label, variant, invalidate, onDone }:
+  { fixtureId: string; status: string; label: string; variant: 'outline' | 'danger'; invalidate: (string | null)[]; onDone: () => void }) {
   // Go through /live (assigned-official authorized), not the organiser-only /fixtures/:id.
-  const mut = useApiMutation(() => api('PATCH', `/fixtures/${fixtureId}/live`, { status }), ['/me/officiating']);
+  const mut = useApiMutation(() => api('PATCH', `/fixtures/${fixtureId}/live`, { status }), invalidate);
   return (
     <Button variant={variant} className="w-full justify-start" disabled={mut.isPending}
       onClick={() => mut.mutate(undefined, { onSuccess: onDone, onError: (e: any) => toast.error(e.message) })}>
@@ -247,13 +433,13 @@ function SecondaryStatus({ fixtureId, status, label, variant, onDone }:
 }
 
 /* ----------------------------- Manual result (time/measured sports) ----------------------------- */
-function ManualResult({ fixture, fixtureId, onDone }: { fixture: any; fixtureId: string; onDone: () => void }) {
+function ManualResult({ fixture, fixtureId, invalidate, onDone }: { fixture: any; fixtureId: string; invalidate: (string | null)[]; onDone: () => void }) {
   const homeName = teamLabel(homeTeam(fixture));
   const awayName = teamLabel(awayTeam(fixture));
   const [home, setHome] = useState(fixture.home_score != null ? String(fixture.home_score) : '');
   const [away, setAway] = useState(fixture.away_score != null ? String(fixture.away_score) : '');
   const [notes, setNotes] = useState(fixture.notes ?? '');
-  const saveResult = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/result`, body), ['/me/officiating']);
+  const saveResult = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/result`, body), invalidate);
 
   const hs = home === '' ? null : Number(home);
   const as = away === '' ? null : Number(away);

@@ -12,7 +12,7 @@ const UNREAD_KEY = '/notifications/unread-count';
 const DRAWER_FEED = '/notifications?take=15';
 
 // Header bell + right-side drawer. Visible to every authenticated user; the feed
-// aggregates notifications from every event the user belongs to.
+// aggregates notifications from every championship the user belongs to.
 export function NotificationBell() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -26,7 +26,7 @@ export function NotificationBell() {
   const unread = countData?.count ?? 0;
 
   const { data: items = [], isLoading } = useApi<NotificationDto[]>(open ? DRAWER_FEED : null);
-  const { data: postable = [] } = useApi<PostableEvent[]>('/notifications/postable-events');
+  const { data: postable = [] } = useApi<PostableEvent[]>('/notifications/postable-championships');
   const canPost = postable.length > 0;
 
   // Clear the unread badge when the drawer opens (server records the read receipts).

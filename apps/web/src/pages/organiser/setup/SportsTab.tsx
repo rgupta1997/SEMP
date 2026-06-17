@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { ENTRY_TYPE, TOURNAMENT_DISCIPLINE_STATUS } from '@semp/shared';
+import { usePermissions } from '../../../lib/permissions';
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, Select, StatusBadge } from '../../../components/ui';
 
 /* ----------------------------- Add sport modal ----------------------------- */
 function AddSportModal({ tournamentId, onClose }: { tournamentId: string; onClose: () => void }) {
+  const { isSuper } = usePermissions();
   const { data: sports = [] } = useApi<any[]>('/sports');
   const { data: formats = [] } = useApi<any[]>('/tournament-formats');
   const [sportId, setSportId] = useState('');
@@ -45,7 +47,9 @@ function AddSportModal({ tournamentId, onClose }: { tournamentId: string; onClos
             <option value="">— select a sport —</option>
             {sports.map((s) => <option key={s.id} value={s.id}>{s.icon ? `${s.icon} ` : ''}{s.name}</option>)}
           </Select>
-          <button type="button" onClick={() => setCreatingNew(true)} className="mt-2 text-sm font-medium text-brand-600 dark:text-brand-300 hover:underline">+ Create a new sport</button>
+          {isSuper && (
+            <button type="button" onClick={() => setCreatingNew(true)} className="mt-2 text-sm font-medium text-brand-600 dark:text-brand-300 hover:underline">+ Create a new sport</button>
+          )}
         </Field>
       ) : (
         <div className="mb-4 rounded-xl border border-slate-200 dark:border-slate-800 p-3">
@@ -75,7 +79,7 @@ function AddSportModal({ tournamentId, onClose }: { tournamentId: string; onClos
 }
 
 /* ----------------------------- Add discipline modal ----------------------------- */
-function AddDisciplineModal({ tournamentSport, venues, onClose }: { tournamentSport: any; venues: any[]; onClose: () => void }) {
+function AddDisciplineModal({ tournamentSport, venues, formats, onClose }: { tournamentSport: any; venues: any[]; formats: any[]; onClose: () => void }) {
   const disciplinesPath = `/disciplines?sport_id=${tournamentSport.sport_id}`;
   const { data: disciplines = [] } = useApi<any[]>(disciplinesPath);
   const [disciplineId, setDisciplineId] = useState('');
@@ -83,7 +87,9 @@ function AddDisciplineModal({ tournamentSport, venues, onClose }: { tournamentSp
   const [entryType, setEntryType] = useState('team');
   const [squadMin, setSquadMin] = useState('1');
   const [squadMax, setSquadMax] = useState('15');
+  const [formatId, setFormatId] = useState(''); // '' = inherit the sport's format
   const [error, setError] = useState<string | null>(null);
+  const sportFormatName = formats.find((f) => f.id === tournamentSport.format_id)?.name;
 
   const add = useApiMutation(
     (body: any) => api('POST', '/tournament-disciplines', body),
@@ -91,7 +97,7 @@ function AddDisciplineModal({ tournamentSport, venues, onClose }: { tournamentSp
     onClose,
   );
 
-  // Pre-fill entry rules from the selected master discipline so the draw inherits
+  // Pre-fill entry rules from the selected master discipline so the discipline inherits
   // its defaults (organiser can still override below).
   const pickDiscipline = (id: string) => {
     setDisciplineId(id);
@@ -110,15 +116,16 @@ function AddDisciplineModal({ tournamentSport, venues, onClose }: { tournamentSp
         tournament_sport_id: tournamentSport.id,
         discipline_id: disciplineId || null,
         venue_id: venueId || null,
+        format_id: formatId || null,
         entry_type: entryType,
         squad_min: Number(squadMin), squad_max: Number(squadMax),
       });
-    } catch (e: any) { setError(e.message ?? 'Could not add draw'); }
+    } catch (e: any) { setError(e.message ?? 'Could not add discipline'); }
   };
 
   return (
-    <Modal title="Add discipline / draw" onClose={onClose}>
-      <Field label="Discipline" hint="Pick from platform master data, or leave blank for a whole-sport draw (e.g. Cricket).">
+    <Modal title="Add discipline" onClose={onClose}>
+      <Field label="Discipline" hint="Pick from platform master data, or leave blank for a whole-sport discipline (e.g. Cricket).">
         <Select value={disciplineId} onChange={(e) => pickDiscipline(e.target.value)}>
           <option value="">— whole sport (no sub-discipline) —</option>
           {disciplines.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -128,6 +135,12 @@ function AddDisciplineModal({ tournamentSport, venues, onClose }: { tournamentSp
         <Select value={venueId} onChange={(e) => setVenueId(e.target.value)}>
           <option value="">— unassigned —</option>
           {venues.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+        </Select>
+      </Field>
+      <Field label="Fixture format" hint="Override how this discipline's matches are drawn, or inherit the sport's format.">
+        <Select value={formatId} onChange={(e) => setFormatId(e.target.value)}>
+          <option value="">Same as sport{sportFormatName ? ` (${sportFormatName})` : ''}</option>
+          {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
         </Select>
       </Field>
       <div className="grid grid-cols-3 gap-x-3">
@@ -149,14 +162,16 @@ function AddDisciplineModal({ tournamentSport, venues, onClose }: { tournamentSp
 }
 
 /* ----------------------------- Edit / delete discipline modal ----------------------------- */
-function EditDisciplineModal({ discipline, sportName, venues, path, onClose }:
-  { discipline: any; sportName: string; venues: any[]; path: string; onClose: () => void }) {
+function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, formats, path, onClose }:
+  { discipline: any; sportName: string; sportFormatId?: string | null; venues: any[]; formats: any[]; path: string; onClose: () => void }) {
   const [venueId, setVenueId] = useState(discipline.venue_id ?? '');
   const [entryType, setEntryType] = useState(discipline.entry_type ?? 'team');
   const [squadMin, setSquadMin] = useState(String(discipline.squad_min ?? 1));
   const [squadMax, setSquadMax] = useState(String(discipline.squad_max ?? 15));
+  const [formatId, setFormatId] = useState(discipline.format_id ?? ''); // '' = inherit the sport's format
   const [status, setStatus] = useState(discipline.status ?? 'upcoming');
   const [error, setError] = useState<string | null>(null);
+  const sportFormatName = formats.find((f) => f.id === sportFormatId)?.name;
 
   const update = useApiMutation((body: any) => api('PATCH', `/tournament-disciplines/${discipline.id}`, body), [path], onClose);
   const remove = useApiMutation(() => api('DELETE', `/tournament-disciplines/${discipline.id}`), [path], onClose);
@@ -166,6 +181,7 @@ function EditDisciplineModal({ discipline, sportName, venues, path, onClose }:
     update.mutate(
       {
         venue_id: venueId || null,
+        format_id: formatId || null,
         entry_type: entryType,
         squad_min: Number(squadMin),
         squad_max: Number(squadMax),
@@ -177,11 +193,17 @@ function EditDisciplineModal({ discipline, sportName, venues, path, onClose }:
 
   const name = discipline.disciplines?.name ?? sportName;
   return (
-    <Modal title={`Edit draw · ${name}`} onClose={onClose}>
+    <Modal title={`Edit discipline · ${name}`} onClose={onClose}>
       <Field label="Venue">
         <Select value={venueId} onChange={(e) => setVenueId(e.target.value)}>
           <option value="">— unassigned —</option>
           {venues.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+        </Select>
+      </Field>
+      <Field label="Fixture format" hint="Changing this affects the next draw — regenerate on the Schedule tab to apply.">
+        <Select value={formatId} onChange={(e) => setFormatId(e.target.value)}>
+          <option value="">Same as sport{sportFormatName ? ` (${sportFormatName})` : ''}</option>
+          {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
         </Select>
       </Field>
       <div className="grid grid-cols-3 gap-x-3">
@@ -201,9 +223,48 @@ function EditDisciplineModal({ discipline, sportName, venues, path, onClose }:
       {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
       <div className="mt-2 flex items-center justify-between">
         <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
-          onClick={() => { if (confirm(`Delete the “${name}” draw? Its fixtures and team entries will be removed. This cannot be undone.`)) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
+          onClick={() => { if (confirm(`Delete the “${name}” discipline? Its fixtures and team entries will be removed. This cannot be undone.`)) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
           disabled={remove.isPending}>
-          {remove.isPending ? 'Deleting…' : 'Delete draw'}
+          {remove.isPending ? 'Deleting…' : 'Delete discipline'}
+        </Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button disabled={update.isPending} onClick={save}>{update.isPending ? 'Saving…' : 'Save changes'}</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ----------------------------- Edit / remove sport modal ----------------------------- */
+function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportName: string; formats: any[]; onClose: () => void }) {
+  const [formatId, setFormatId] = useState(ts.format_id ?? '');
+  const [error, setError] = useState<string | null>(null);
+  const path = `/tournament-sports?tournament_id=${ts.tournament_id}`;
+
+  const update = useApiMutation((body: any) => api('PATCH', `/tournament-sports/${ts.id}`, body), [path], onClose);
+  const remove = useApiMutation(() => api('DELETE', `/tournament-sports/${ts.id}`), [path], onClose);
+
+  const save = () => {
+    setError(null);
+    if (!formatId) { setError('Pick a fixture format'); return; }
+    update.mutate({ format_id: formatId }, { onError: (e: any) => setError(e.message) });
+  };
+
+  return (
+    <Modal title={`Edit sport · ${sportName}`} onClose={onClose}>
+      <Field label="Fixture format" hint="Changing this affects the next draw — regenerate on the Schedule tab to apply. Disciplines with their own format override are unaffected.">
+        <Select value={formatId} onChange={(e) => setFormatId(e.target.value)}>
+          <option value="">— select a format —</option>
+          {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+        </Select>
+      </Field>
+      {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+      <div className="mt-2 flex items-center justify-between">
+        <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
+          onClick={() => { if (confirm(`Remove “${sportName}” from this tournament? Its disciplines, fixtures and team entries will be removed. This cannot be undone.`)) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
+          disabled={remove.isPending}>
+          {remove.isPending ? 'Removing…' : 'Remove sport'}
         </Button>
         <div className="flex gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -215,12 +276,15 @@ function EditDisciplineModal({ discipline, sportName, venues, path, onClose }:
 }
 
 /* ----------------------------- Tournament-sport card ----------------------------- */
-function SportRow({ ts, sportName, sportIcon, formatName, venues }: { ts: any; sportName: string; sportIcon?: string; formatName: string; venues: any[] }) {
-  const [open, setOpen] = useState(false);
+function SportRow({ ts, sportName, sportIcon, formatName, formats, venues }: { ts: any; sportName: string; sportIcon?: string; formatName: string; formats: any[]; venues: any[] }) {
+  const [open, setOpen] = useState(true);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
+  const [editingSport, setEditingSport] = useState(false);
   const disciplinesPath = `/tournament-disciplines?tournament_sport_id=${ts.id}`;
   const { data: disciplines = [] } = useApi<any[]>(disciplinesPath);
+  // Effective format for a discipline: its own override, else the sport's.
+  const effectiveFormat = (d: any) => formats.find((f) => f.id === (d.format_id ?? ts.format_id))?.name;
 
   return (
     <Card className="p-4">
@@ -229,58 +293,66 @@ function SportRow({ ts, sportName, sportIcon, formatName, venues }: { ts: any; s
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-50 dark:bg-brand-500/10 text-lg">{sportIcon || '◇'}</span>
           <div>
             <div className="font-semibold text-slate-900 dark:text-slate-100">{sportName}</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">{formatName} · {disciplines.length} draw{disciplines.length === 1 ? '' : 's'}</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">{formatName} · {disciplines.length} discipline{disciplines.length === 1 ? '' : 's'}</div>
           </div>
         </div>
-        <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)}>{open ? 'Hide' : 'Manage'} draws</Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="subtle" onClick={() => setEditingSport(true)}>Edit sport</Button>
+          <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)}>{open ? 'Hide' : 'Manage'} disciplines</Button>
+        </div>
       </div>
 
       {open && (
         <div className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Disciplines / draws</span>
-            <Button size="sm" variant="subtle" onClick={() => setAdding(true)}>+ Add draw</Button>
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Disciplines</span>
+            <Button size="sm" variant="subtle" onClick={() => setAdding(true)}>+ Add discipline</Button>
           </div>
           {disciplines.length === 0 ? (
-            <p className="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-3 text-sm text-slate-400 dark:text-slate-500">No draws yet. Add one for a whole-sport draw or per sub-discipline.</p>
+            <p className="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-3 text-sm text-slate-400 dark:text-slate-500">No disciplines yet. Add one for a whole-sport discipline or per sub-discipline.</p>
           ) : (
             <div className="space-y-2">
               {disciplines.map((d) => {
                 const venue = venues.find((v) => v.id === d.venue_id);
                 return (
                   <button key={d.id} type="button" onClick={() => setEditing(d)}
-                    className="flex w-full items-center justify-between rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800">
+                    className="group flex w-full items-center justify-between rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800">
                     <div className="text-sm">
                       <span className="font-medium text-slate-800 dark:text-slate-200">{d.disciplines?.name ?? sportName}</span>
-                      <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">{d.entry_type} · {d.squad_min}-{d.squad_max} · {venue?.name ?? 'no venue'}</span>
+                      <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">{d.squad_min}-{d.squad_max} · {venue?.name ?? 'no venue'}</span>
                     </div>
                     <div className="flex items-center gap-2">
+                      {d.entry_type && <Badge tone="info">{d.entry_type}</Badge>}
+                      {effectiveFormat(d) && (
+                        <Badge tone={d.format_id ? 'violet' : 'slate'}>{effectiveFormat(d)}</Badge>
+                      )}
                       <StatusBadge status={d.status} />
-                      <span className="text-xs font-medium text-slate-400 dark:text-slate-500">Edit</span>
+                      <span className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700 transition group-hover:bg-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:group-hover:bg-brand-500/25">✎ Edit</span>
                     </div>
                   </button>
                 );
               })}
             </div>
           )}
-          {adding && <AddDisciplineModal tournamentSport={ts} venues={venues} onClose={() => setAdding(false)} />}
-          {editing && <EditDisciplineModal discipline={editing} sportName={sportName} venues={venues} path={disciplinesPath} onClose={() => setEditing(null)} />}
+          {adding && <AddDisciplineModal tournamentSport={ts} venues={venues} formats={formats} onClose={() => setAdding(false)} />}
+          {editing && <EditDisciplineModal discipline={editing} sportName={sportName} sportFormatId={ts.format_id} venues={venues} formats={formats} path={disciplinesPath} onClose={() => setEditing(null)} />}
         </div>
       )}
+      {editingSport && <EditSportModal ts={ts} sportName={sportName} formats={formats} onClose={() => setEditingSport(false)} />}
     </Card>
   );
 }
 
 /* ----------------------------- Tab ----------------------------- */
 export function SportsTab({ eventId }: { eventId: string }) {
-  const { data: tournaments = [] } = useApi<any[]>(`/tournaments?event_id=${eventId}`);
+  const { data: tournaments = [] } = useApi<any[]>(`/tournaments?championship_id=${eventId}`);
   const [tournamentId, setTournamentId] = useState('');
   const activeTournament = tournamentId || tournaments[0]?.id || '';
 
   const { data: tsports = [] } = useApi<any[]>(activeTournament ? `/tournament-sports?tournament_id=${activeTournament}` : null);
   const { data: sports = [] } = useApi<any[]>('/sports');
   const { data: formats = [] } = useApi<any[]>('/tournament-formats');
-  const { data: venues = [] } = useApi<any[]>(`/venues?event_id=${eventId}`);
+  const { data: venues = [] } = useApi<any[]>(`/venues?championship_id=${eventId}`);
   const [adding, setAdding] = useState(false);
 
   if (tournaments.length === 0) {
@@ -309,13 +381,13 @@ export function SportsTab({ eventId }: { eventId: string }) {
       ) : (
         <div className="grid gap-3">
           {tsports.map((ts) => (
-            <SportRow key={ts.id} ts={ts} sportName={sportName(ts.sport_id)} sportIcon={sportIcon(ts.sport_id)} formatName={formatName(ts.format_id)} venues={venues} />
+            <SportRow key={ts.id} ts={ts} sportName={sportName(ts.sport_id)} sportIcon={sportIcon(ts.sport_id)} formatName={formatName(ts.format_id)} formats={formats} venues={venues} />
           ))}
         </div>
       )}
 
       {adding && <AddSportModal tournamentId={activeTournament} onClose={() => setAdding(false)} />}
-      {venues.length === 0 && <Badge tone="amber" className="mt-4">Tip: add venues in the Venues tab to assign draws to grounds.</Badge>}
+      {venues.length === 0 && <Badge tone="amber" className="mt-4">Tip: add venues in the Venues tab to assign disciplines to grounds.</Badge>}
     </div>
   );
 }

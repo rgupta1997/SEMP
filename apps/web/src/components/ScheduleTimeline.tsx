@@ -1,174 +1,171 @@
 import { useMemo, useState } from 'react';
 import { fmtDate } from '../lib/hooks';
-import { Badge, EmptyState, Segmented } from './ui';
+import { Badge, Button, EmptyState, Modal, Segmented, StatusBadge, cn } from './ui';
 
-export interface TimelineFixture {
+export interface DisciplineRow {
+  id: string;            // tournament_discipline_id
+  sport: string;
+  discipline: string;
+  format?: string | null;
+  entry_type?: string | null;
+}
+export interface GridFixture {
   id: string;
+  tournament_discipline_id: string;
   status: string;
   round?: string | null;
   scheduled_at: string | null;
-  duration_minutes?: number | null;
-  ground?: { id: string; name: string; venue?: string | null } | null;
   sport?: string | null;
   sport_icon?: string | null;
-  discipline?: string | null;
   home?: { id: string; name: string } | null;
   away?: { id: string; name: string } | null;
 }
 
-// Known sport accent tokens (defined in index.css). Falls back to brand.
-const SPORT_KEYS = ['cricket', 'football', 'basketball', 'volleyball', 'tennis', 'badminton', 'athletics', 'swimming', 'hockey', 'tabletennis'];
-function sportColor(name?: string | null): string {
-  const k = (name ?? '').toLowerCase().replace(/[^a-z]/g, '');
-  const match = SPORT_KEYS.find((s) => k.includes(s));
-  return match ? `var(--sport-${match})` : 'var(--color-brand-500)';
+// Coarse scheduling slots (2-hour blocks) shown as columns.
+const SLOT_HOURS = [9, 11, 13, 15, 17];
+const pad = (n: number) => String(n).padStart(2, '0');
+const dayKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+function matchLabel(f: GridFixture): string {
+  if (f.home || f.away) return `${f.home?.name ?? 'TBD'} v ${f.away?.name ?? 'TBD'}`;
+  return f.round || 'Match';
 }
 
-const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const minutesOfDay = (d: Date) => d.getHours() * 60 + d.getMinutes();
-const PX_PER_MIN = 2.2;       // horizontal scale
-const LANE_LABEL_W = 150;     // px
-
-// Broadcast-style Gantt of an event's scheduled fixtures: ground lanes × time,
-// sport-coloured blocks, and a live "now" marker.
-export function ScheduleTimeline({ fixtures }: { fixtures: TimelineFixture[] }) {
-  const scheduled = useMemo(() => fixtures.filter((f) => f.scheduled_at && f.ground), [fixtures]);
-
-  const days = useMemo(() => {
-    const set = new Set<string>();
-    scheduled.forEach((f) => set.add(dayKey(new Date(f.scheduled_at!))));
-    return [...set].sort();
-  }, [scheduled]);
-
+// Discipline × time scheduler. Rows are the championship's disciplines; columns are
+// time slots. Tap an empty slot (managers only) to place one of that discipline's
+// unscheduled matches; scheduled matches render as blocks in their row + slot.
+export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, placing }: {
+  rows: DisciplineRow[];
+  fixtures: GridFixture[];
+  days: string[];
+  canManage: boolean;
+  onPlace: (fixtureId: string, day: string, hour: number) => void;
+  placing?: boolean;
+}) {
   const [day, setDay] = useState('');
   const activeDay = day && days.includes(day) ? day : days[0] ?? '';
+  const [slot, setSlot] = useState<{ row: DisciplineRow; hour: number } | null>(null);
 
-  const dayFixtures = useMemo(
-    () => scheduled.filter((f) => dayKey(new Date(f.scheduled_at!)) === activeDay),
-    [scheduled, activeDay],
-  );
+  const unscheduledCount = useMemo(() => fixtures.filter((f) => !f.scheduled_at).length, [fixtures]);
 
-  // Lanes = grounds with fixtures on this day, grouped by venue.
-  const lanes = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; venue?: string | null }>();
-    dayFixtures.forEach((f) => { if (f.ground) map.set(f.ground.id, f.ground); });
-    return [...map.values()].sort((a, b) => `${a.venue ?? ''}${a.name}`.localeCompare(`${b.venue ?? ''}${b.name}`));
-  }, [dayFixtures]);
+  const cellFixtures = (rowId: string, hour: number) =>
+    fixtures.filter((f) => {
+      if (f.tournament_discipline_id !== rowId || !f.scheduled_at) return false;
+      const d = new Date(f.scheduled_at);
+      if (dayKey(d) !== activeDay) return false;
+      const h = d.getHours();
+      return h >= hour && h < hour + 2;
+    });
 
-  // Time window: snap to the hour around the day's earliest/latest blocks.
-  const { startMin, spanMin, hours } = useMemo(() => {
-    if (dayFixtures.length === 0) return { startMin: 8 * 60, spanMin: 12 * 60, hours: [] as number[] };
-    let lo = Infinity, hi = -Infinity;
-    for (const f of dayFixtures) {
-      const s = minutesOfDay(new Date(f.scheduled_at!));
-      lo = Math.min(lo, s);
-      hi = Math.max(hi, s + (f.duration_minutes || 60));
-    }
-    const startH = Math.max(0, Math.floor(lo / 60) - 1);
-    const endH = Math.min(24, Math.ceil(hi / 60) + 1);
-    const hrs: number[] = [];
-    for (let h = startH; h <= endH; h++) hrs.push(h);
-    return { startMin: startH * 60, spanMin: (endH - startH) * 60, hours: hrs };
-  }, [dayFixtures]);
+  const rowUnscheduled = (rowId: string) => fixtures.filter((f) => f.tournament_discipline_id === rowId && !f.scheduled_at);
 
-  const gridWidth = spanMin * PX_PER_MIN;
-
-  // Live marker (only if the active day is today and within the window).
-  const now = new Date();
-  const nowMin = minutesOfDay(now);
-  const showNow = activeDay === dayKey(now) && nowMin >= startMin && nowMin <= startMin + spanMin;
-
-  if (scheduled.length === 0) {
-    return <EmptyState icon="⚑" title="Nothing scheduled yet" description="Generate draws and assign dates, times and grounds to see the timeline." />;
+  if (rows.length === 0) {
+    return <EmptyState icon="⚑" title="No disciplines yet" description="Add sports & disciplines in Setup before scheduling matches." />;
   }
 
   return (
-    <div className="space-y-4">
-      {days.length > 1 && (
-        <Segmented
-          value={activeDay}
-          onChange={setDay}
-          options={days.map((d) => ({ value: d, label: fmtDate(d) }))}
-        />
-      )}
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {days.length > 1 ? (
+          <Segmented value={activeDay} onChange={setDay} options={days.map((d) => ({ value: d, label: fmtDate(d) }))} />
+        ) : <div className="text-sm font-semibold text-slate-600 dark:text-slate-300">{activeDay ? fmtDate(activeDay) : 'Schedule'}</div>}
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Unscheduled: {unscheduledCount}</span>
+      </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <div style={{ minWidth: LANE_LABEL_W + gridWidth }}>
-          {/* Hour ruler */}
-          <div className="flex border-b border-slate-200 dark:border-slate-800">
-            <div className="flex-none border-r border-slate-200 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:border-slate-800" style={{ width: LANE_LABEL_W }}>
-              Venue · Ground
-            </div>
-            <div className="relative" style={{ width: gridWidth, height: 32 }}>
-              {hours.map((h) => (
-                <div key={h} className="absolute top-0 h-full border-l border-slate-100 dark:border-slate-800/80" style={{ left: (h * 60 - startMin) * PX_PER_MIN }}>
-                  <span className="absolute left-1 top-1.5 font-mono text-[11px] text-slate-400 dark:text-slate-500">{String(h).padStart(2, '0')}:00</span>
-                </div>
+      <div className="overflow-x-auto">
+        <div className="inline-block rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <table className="border-collapse">
+          <thead>
+            <tr className="border-b border-slate-200 dark:border-slate-800">
+              <th className="sticky left-0 z-10 bg-white px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:bg-slate-900 dark:text-slate-500" style={{ minWidth: 160 }}>
+                Discipline / time
+              </th>
+              {SLOT_HOURS.map((h) => (
+                <th key={h} className="px-3 py-2 text-center text-xs font-bold text-slate-500 dark:text-slate-400" style={{ minWidth: 150 }}>{pad(h)}:00</th>
               ))}
-            </div>
-          </div>
-
-          {/* Lanes */}
-          {lanes.map((lane) => {
-            const items = dayFixtures.filter((f) => f.ground?.id === lane.id);
-            return (
-              <div key={lane.id} className="flex border-b border-slate-100 last:border-0 dark:border-slate-800/60">
-                <div className="flex-none border-r border-slate-200 px-3 py-3 dark:border-slate-800" style={{ width: LANE_LABEL_W }}>
-                  <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{lane.name}</div>
-                  {lane.venue && <div className="truncate text-xs text-slate-400 dark:text-slate-500">{lane.venue}</div>}
-                </div>
-                <div className="relative" style={{ width: gridWidth, minHeight: 64 }}>
-                  {/* hour gridlines */}
-                  {hours.map((h) => (
-                    <div key={h} className="absolute top-0 h-full border-l border-slate-100 dark:border-slate-800/60" style={{ left: (h * 60 - startMin) * PX_PER_MIN }} />
-                  ))}
-                  {showNow && (
-                    <div className="absolute top-0 z-10 h-full w-px bg-[var(--live)]" style={{ left: (nowMin - startMin) * PX_PER_MIN }}>
-                      <span className="absolute -top-0.5 -left-1 h-2 w-2 rounded-full bg-[var(--live)]" />
-                    </div>
-                  )}
-                  {items.map((f) => {
-                    const s = minutesOfDay(new Date(f.scheduled_at!));
-                    const dur = Math.max(30, f.duration_minutes || 60);
-                    const color = sportColor(f.sport);
-                    const live = f.status === 'live';
-                    return (
-                      <div
-                        key={f.id}
-                        title={`${f.sport ?? ''}${f.discipline ? ' · ' + f.discipline : ''}\n${f.home?.name ?? 'TBD'} vs ${f.away?.name ?? 'TBD'}`}
-                        className="absolute top-2 overflow-hidden rounded-lg px-2 py-1 text-white shadow-sm"
-                        style={{
-                          left: (s - startMin) * PX_PER_MIN + 2,
-                          width: dur * PX_PER_MIN - 4,
-                          bottom: 8,
-                          background: `linear-gradient(180deg, color-mix(in oklch, ${color} 92%, white 8%), ${color})`,
-                          boxShadow: live ? '0 0 0 2px var(--live)' : undefined,
-                        }}
-                      >
-                        <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide opacity-90">
-                          <span>{f.sport_icon ?? '•'}</span>
-                          <span className="truncate">{f.round || f.discipline || f.sport}</span>
-                          {live && <span className="ml-auto rounded-full bg-white/25 px-1 text-[9px]">LIVE</span>}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800/60">
+                <td className="sticky left-0 z-10 bg-white px-3 py-3 align-top dark:bg-slate-900">
+                  <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{row.sport} · {row.discipline}</div>
+                  <div className="text-xs text-slate-400 dark:text-slate-500">{row.format ?? row.entry_type ?? ''}</div>
+                </td>
+                {SLOT_HOURS.map((h) => {
+                  const items = cellFixtures(row.id, h);
+                  return (
+                    <td key={h} className="p-1.5 align-top">
+                      {items.length > 0 ? (
+                        <div className="space-y-1">
+                          {items.map((f) => (
+                            <div key={f.id} className="flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-left dark:border-amber-500/30 dark:bg-amber-500/10">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                                  <span>{f.sport_icon ?? '•'}</span><span className="truncate">{f.round || 'Match'}</span>
+                                </div>
+                                <div className="truncate text-xs font-medium text-slate-700 dark:text-slate-200">{matchLabel(f)}</div>
+                              </div>
+                              {f.status !== 'scheduled' && <span className="shrink-0"><StatusBadge status={f.status} /></span>}
+                            </div>
+                          ))}
                         </div>
-                        <div className="truncate text-xs font-semibold">{f.home?.name ?? 'TBD'} v {f.away?.name ?? 'TBD'}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
+                      ) : canManage ? (
+                        <button
+                          type="button"
+                          onClick={() => setSlot({ row, hour: h })}
+                          className="grid h-14 w-full place-items-center rounded-lg border border-dashed border-slate-200 text-slate-300 transition hover:border-brand-300 hover:text-brand-500 dark:border-slate-700 dark:text-slate-600 dark:hover:border-brand-500/50"
+                          aria-label={`Schedule ${row.sport} ${row.discipline} at ${pad(h)}:00`}
+                        >
+                          +
+                        </button>
+                      ) : (
+                        <div className="h-14 rounded-lg border border-dashed border-slate-100 dark:border-slate-800/60" />
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
         </div>
       </div>
 
-      {/* Sport legend */}
-      <div className="flex flex-wrap gap-2">
-        {[...new Set(dayFixtures.map((f) => f.sport).filter(Boolean))].map((s) => (
-          <Badge key={s} tone="slate" className="gap-1.5">
-            <span className="h-2 w-2 rounded-full" style={{ background: sportColor(s) }} />{s}
-          </Badge>
-        ))}
-      </div>
+      {canManage && (
+        <p className="text-xs text-slate-400 dark:text-slate-500">
+          Columns = time, rows = discipline. Tap an empty slot to schedule an unscheduled match at the championship venue.
+        </p>
+      )}
+
+      {slot && (
+        <Modal title="Schedule a match" onClose={() => setSlot(null)}>
+          <p className="-mt-2 mb-3 text-sm text-slate-500 dark:text-slate-400">{slot.row.sport} · {slot.row.discipline} · {pad(slot.hour)}:00</p>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Unscheduled {slot.row.sport} · {slot.row.discipline}</div>
+          {rowUnscheduled(slot.row.id).length === 0 ? (
+            <p className="rounded-lg bg-slate-50 px-3 py-4 text-center text-sm text-slate-400 dark:bg-slate-800/60 dark:text-slate-500">
+              No unscheduled matches in this discipline. Generate the draw first, or all matches are already placed.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {rowUnscheduled(slot.row.id).map((f) => (
+                <div key={f.id} className={cn('flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-800', placing && 'opacity-60')}>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Badge tone="slate">{f.round || 'Match'}</Badge>
+                      <span className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">{matchLabel(f)}</span>
+                    </div>
+                  </div>
+                  <Button size="sm" variant="subtle" disabled={placing}
+                    onClick={() => { onPlace(f.id, activeDay, slot.hour); setSlot(null); }}>
+                    Place →
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }

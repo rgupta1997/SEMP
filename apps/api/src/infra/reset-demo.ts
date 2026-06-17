@@ -1,12 +1,12 @@
 // Deletes ALL demo data including seeded users (except admin), sports, disciplines,
-// institutions, and the genesis-26 event with everything hanging off it.
+// organizations, and the genesis-26 championship with everything hanging off it.
 // Run before seed to get a completely fresh start.
 import { prisma } from './prisma.js';
 
 async function main() {
   console.log('🧹 Cleaning demo data...\n');
 
-  // Step 1: Identify all demo users, institutions
+  // Step 1: Identify all demo users, organizations
   const demoEmailPatterns = ['@semp.local', '@vjti.local', '@iitb.local', '@djsce.local', '@spit.local', '@coep.local', '@sies.local'];
   const demoUsers = await prisma.users.findMany({
     where: {
@@ -18,16 +18,16 @@ async function main() {
   const userIds = demoUsers.map((u) => u.id);
 
   const instNames = ['VJTI Mumbai', 'IIT Bombay', 'DJ Sanghvi', 'SPIT Mumbai', 'COEP Pune', 'SIES College', 'Manipal Institute'];
-  const demoInsts = await prisma.institutions.findMany({ where: { name: { in: instNames } }, select: { id: true } });
+  const demoInsts = await prisma.organizations.findMany({ where: { name: { in: instNames } }, select: { id: true } });
   const instIds = demoInsts.map((i) => i.id);
 
-  // Step 2: Delete genesis-26 event data (most restrictive FKs)
-  const event = await prisma.events.findUnique({ where: { slug: 'genesis-26' } });
-  if (event) {
-    const eventId = event.id;
+  // Step 2: Delete genesis-26 championship data (most restrictive FKs)
+  const championship = await prisma.championships.findUnique({ where: { slug: 'genesis-26' } });
+  if (championship) {
+    const eventId = championship.id;
 
-    // Get all teams for this event first (need their IDs for fixture cleanup)
-    const teams = await prisma.teams.findMany({ where: { event_id: eventId }, select: { id: true } });
+    // Get all teams for this championship first (need their IDs for fixture cleanup)
+    const teams = await prisma.teams.findMany({ where: { championship_id: eventId }, select: { id: true } });
     const teamIds = teams.map((t) => t.id);
 
     // Delete ALL fixtures referencing these teams (handles partial seed state)
@@ -43,42 +43,47 @@ async function main() {
     console.log('  - Deleted team members');
 
     // Delete teams
-    await prisma.teams.deleteMany({ where: { event_id: eventId } });
+    await prisma.teams.deleteMany({ where: { championship_id: eventId } });
     console.log('  - Deleted teams');
 
-    // Delete event_officials
-    await prisma.event_officials.deleteMany({ where: { event_id: eventId } });
-    console.log('  - Deleted event officials');
+    // Delete championship_officials
+    await prisma.championship_officials.deleteMany({ where: { championship_id: eventId } });
+    console.log('  - Deleted championship officials');
 
     // Get tournament structure IDs
-    const tournaments = await prisma.tournaments.findMany({ where: { event_id: eventId }, select: { id: true } });
+    const tournaments = await prisma.tournaments.findMany({ where: { championship_id: eventId }, select: { id: true } });
     const tournamentIds = tournaments.map((t) => t.id);
     const tsports = await prisma.tournament_sports.findMany({ where: { tournament_id: { in: tournamentIds } }, select: { id: true } });
     const tsportIds = tsports.map((t) => t.id);
     const tdIds = (await prisma.tournament_disciplines.findMany({ where: { tournament_sport_id: { in: tsportIds } }, select: { id: true } })).map((t) => t.id);
-    
+
+    // Remove any fixtures still hanging off these disciplines (byes / null-team rows
+    // the team-based delete above doesn't catch) before deleting the disciplines.
+    if (tdIds.length > 0) {
+      await prisma.fixtures.deleteMany({ where: { tournament_discipline_id: { in: tdIds } } });
+    }
     await prisma.tournament_disciplines.deleteMany({ where: { id: { in: tdIds } } });
     await prisma.tournament_sports.deleteMany({ where: { id: { in: tsportIds } } });
-    await prisma.tournaments.deleteMany({ where: { event_id: eventId } });
+    await prisma.tournaments.deleteMany({ where: { championship_id: eventId } });
     console.log('  - Deleted tournament structure');
 
     // Venues
-    const venues = await prisma.venues.findMany({ where: { event_id: eventId }, select: { id: true } });
+    const venues = await prisma.venues.findMany({ where: { championship_id: eventId }, select: { id: true } });
     await prisma.venue_grounds.deleteMany({ where: { venue_id: { in: venues.map((v) => v.id) } } });
-    await prisma.venues.deleteMany({ where: { event_id: eventId } });
+    await prisma.venues.deleteMany({ where: { championship_id: eventId } });
     console.log('  - Deleted venues');
 
-    // Event-level entities
-    await prisma.sponsors.deleteMany({ where: { event_id: eventId } });
-    await prisma.user_event_roles.deleteMany({ where: { event_id: eventId } });
-    await prisma.event_institutions.deleteMany({ where: { event_id: eventId } });
-    await prisma.events.delete({ where: { id: eventId } });
-    console.log('✓ Event genesis-26 removed');
+    // Championship-level entities
+    await prisma.sponsors.deleteMany({ where: { championship_id: eventId } });
+    await prisma.user_championship_roles.deleteMany({ where: { championship_id: eventId } });
+    await prisma.championship_organizations.deleteMany({ where: { championship_id: eventId } });
+    await prisma.championships.delete({ where: { id: eventId } });
+    console.log('✓ Championship genesis-26 removed');
   }
 
-  // Step 3: Delete any remaining teams for demo institutions (from other events)
+  // Step 3: Delete any remaining teams for demo organizations (from other championships)
   if (instIds.length > 0) {
-    const remainingTeams = await prisma.teams.findMany({ where: { institution_id: { in: instIds } }, select: { id: true } });
+    const remainingTeams = await prisma.teams.findMany({ where: { organization_id: { in: instIds } }, select: { id: true } });
     if (remainingTeams.length > 0) {
       const rtIds = remainingTeams.map((t) => t.id);
       await prisma.fixtures.deleteMany({ where: { OR: [{ home_team_id: { in: rtIds } }, { away_team_id: { in: rtIds } }] } });
@@ -88,9 +93,9 @@ async function main() {
     }
   }
 
-  // Step 4: Delete any remaining event_institutions for demo institutions
+  // Step 4: Delete any remaining championship_organizations for demo organizations
   if (instIds.length > 0) {
-    await prisma.event_institutions.deleteMany({ where: { institution_id: { in: instIds } } });
+    await prisma.championship_organizations.deleteMany({ where: { organization_id: { in: instIds } } });
   }
 
   // Step 5: Clear officials from fixtures (don't delete fixtures, just unassign)
@@ -98,9 +103,31 @@ async function main() {
     await prisma.fixtures.updateMany({ where: { official_id: { in: userIds } }, data: { official_id: null } });
   }
 
-  // Step 6: Delete user roles
+  // Step 6: Delete user roles (rows owned by, or assigned by, a demo user)
   if (userIds.length > 0) {
-    await prisma.user_event_roles.deleteMany({ where: { user_id: { in: userIds } } });
+    await prisma.user_championship_roles.deleteMany({
+      where: { OR: [{ user_id: { in: userIds } }, { assigned_by: { in: userIds } }] },
+    });
+  }
+
+  // Step 6b: Delete enrollments that reference a demo user (applied_by is NOT NULL,
+  // reviewed_by NoAction) — both would otherwise block the user delete below.
+  if (userIds.length > 0) {
+    await prisma.championship_organizations.deleteMany({
+      where: { OR: [{ applied_by: { in: userIds } }, { reviewed_by: { in: userIds } }] },
+    });
+  }
+
+  // Step 6c: Drop org memberships for demo users (FK is cascade, but be explicit).
+  if (userIds.length > 0) {
+    await prisma.organization_members.deleteMany({ where: { user_id: { in: userIds } } });
+  }
+
+  // Step 6d: Drop official assignments referencing a demo user (assigned_by is NoAction).
+  if (userIds.length > 0) {
+    await prisma.championship_officials.deleteMany({
+      where: { OR: [{ user_id: { in: userIds } }, { assigned_by: { in: userIds } }] },
+    });
   }
 
   // Step 7: Delete remaining team_members for demo users
@@ -114,10 +141,12 @@ async function main() {
     console.log(`✓ Removed ${userIds.length} demo users`);
   }
 
-  // Step 9: Delete demo institutions
+  // Step 9: Delete demo organizations — first unlink any surviving users whose
+  // home org is one of these (users.organization_id FK is NoAction).
   if (instIds.length > 0) {
-    await prisma.institutions.deleteMany({ where: { id: { in: instIds } } });
-    console.log(`✓ Removed ${instIds.length} demo institutions`);
+    await prisma.users.updateMany({ where: { organization_id: { in: instIds } }, data: { organization_id: null } });
+    await prisma.organizations.deleteMany({ where: { id: { in: instIds } } });
+    console.log(`✓ Removed ${instIds.length} demo organizations`);
   }
 
   console.log('\n✅ Demo data cleanup complete. Run `npm run seed` to rebuild.');

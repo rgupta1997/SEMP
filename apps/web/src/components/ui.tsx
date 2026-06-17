@@ -55,7 +55,7 @@ export function Select({ className = '', ...p }: SelectHTMLAttributes<HTMLSelect
         className={cn(fieldBase, 'appearance-none pr-8', full ? 'w-full' : 'w-auto min-w-[9.5rem]', className)}
         {...p}
       />
-      <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 dark:text-slate-500" aria-hidden>▾</span>
+      <span className="pointer-championships-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 dark:text-slate-500" aria-hidden>▾</span>
     </div>
   );
 }
@@ -308,7 +308,7 @@ export function SearchInput({
 }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string; autoFocus?: boolean }) {
   return (
     <div className={cn('relative shrink-0', className.includes('w-full') ? 'w-full' : '', className)}>
-      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" aria-hidden>⌕</span>
+      <span className="pointer-championships-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" aria-hidden>⌕</span>
       <input
         value={value}
         autoFocus={autoFocus}
@@ -572,9 +572,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ push }}>
       {children}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-[600] flex w-[min(92vw,360px)] flex-col gap-2">
+      <div className="pointer-championships-none fixed bottom-4 right-4 z-[600] flex w-[min(92vw,360px)] flex-col gap-2">
         {toasts.map((t) => (
-          <div key={t.id} className="pointer-events-auto animate-fade-up">
+          <div key={t.id} className="pointer-championships-auto animate-fade-up">
             <Toast type={t.type} title={t.title} message={t.message} onClose={() => remove(t.id)} />
           </div>
         ))}
