@@ -35,6 +35,7 @@ import { ParticipantDashboard } from './pages/participant/ParticipantDashboard';
 import { ParticipantEventPage } from './pages/participant/ParticipantEventPage';
 import { ParticipantMatchesPage } from './pages/participant/ParticipantMatchesPage';
 import { ParticipantMatchPage } from './pages/participant/ParticipantMatchPage';
+import { ParticipantAchievementsPage } from './pages/participant/ParticipantAchievementsPage';
 import { DiscoverPage } from './pages/DiscoverPage';
 import { MyChampionshipsPage } from './pages/MyChampionshipsPage';
 import { HostPage } from './pages/HostPage';
@@ -66,6 +67,7 @@ function AuthenticatedRoutes() {
       <Route element={<AppShell />}>
         {/* Profile / My Game */}
         <Route path="/profile" element={<ParticipantDashboard />} />
+        <Route path="/profile/achievements" element={<ParticipantAchievementsPage />} />
         <Route path="/profile/matches" element={<ParticipantMatchesPage />} />
         <Route path="/profile/matches/:fixtureId" element={<ParticipantMatchPage />} />
         <Route path="/profile/championships/:championshipId" element={<ParticipantEventPage />} />

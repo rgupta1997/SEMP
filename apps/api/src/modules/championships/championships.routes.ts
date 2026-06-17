@@ -8,6 +8,19 @@ import { NotFoundError } from '../../shared/errors.js';
 import { assertChampionshipTransition } from './domain/championship-lifecycle.js';
 import { createNotification } from '../notifications/audience.js';
 
+// Prisma include that pulls just the sport names offered by a championship, plus a
+// helper that flattens them to a distinct, sorted `sports: string[]` and drops the
+// nested rows. Powers the sport filter on Discover / Championships.
+const championshipSportsInclude = {
+  tournaments: { select: { tournament_sports: { select: { sports: { select: { name: true } } } } } },
+} as const;
+function withSports(c: any) {
+  const set = new Set<string>();
+  for (const t of c.tournaments ?? []) for (const ts of t.tournament_sports ?? []) if (ts.sports?.name) set.add(ts.sports.name);
+  const { tournaments, ...rest } = c;
+  return { ...rest, sports: [...set].sort() };
+}
+
 // Human-readable lifecycle notification copy per target status. Returned undefined
 // for statuses we don't announce (e.g. back to draft).
 function lifecycleMessage(status: ChampionshipStatus): { title: string; body: string } | undefined {
@@ -34,8 +47,11 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // included). The "Host" and "Championships" views are derived from /mine.
   // -------------------------------------------------------------------------
   router.get('/', asyncHandler(async (_req, res) => {
-    const championships = await prisma.championships.findMany({ orderBy: { created_at: 'desc' } });
-    res.json(championships);
+    const championships = await prisma.championships.findMany({
+      orderBy: { created_at: 'desc' },
+      include: championshipSportsInclude,
+    });
+    res.json(championships.map(withSports));
   }));
 
   // -------------------------------------------------------------------------
@@ -79,8 +95,9 @@ export function makeEventsRouter(prisma: Prisma): Router {
     const championships = await prisma.championships.findMany({
       where: { id: { in: ids } },
       orderBy: { created_at: 'desc' },
+      include: championshipSportsInclude,
     });
-    res.json(championships.map((c) => ({ ...c, my_roles: [...(roles.get(c.id) ?? [])] })));
+    res.json(championships.map((c) => ({ ...withSports(c), my_roles: [...(roles.get(c.id) ?? [])] })));
   }));
 
   // GET single championship

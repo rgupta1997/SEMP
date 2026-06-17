@@ -42,7 +42,7 @@ function Detail({ label, value }: { label: string; value: ReactNode }) {
 
 export function ParticipantMatchPage() {
   const { fixtureId } = useParams();
-  const { data, isLoading, error } = useApi<MatchDetail>(`/profile/matches/${fixtureId}`);
+  const { data, isLoading, error } = useApi<MatchDetail>(`/me/matches/${fixtureId}`);
 
   if (isLoading) return <Spinner />;
   if (error || !data) {
@@ -57,7 +57,7 @@ export function ParticipantMatchPage() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         {f.championship ? (
-          <BackButton to={`/me/championships/${f.championship.id}`} className="mb-0">Back to championship</BackButton>
+          <BackButton to={`/profile/championships/${f.championship.id}`} className="mb-0">Back to championship</BackButton>
         ) : (
           <BackButton to="/profile/matches" className="mb-0">All matches</BackButton>
         )}
