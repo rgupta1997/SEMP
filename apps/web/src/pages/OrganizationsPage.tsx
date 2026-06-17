@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Landmark } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
@@ -28,7 +29,7 @@ export function OrganizationsPage() {
 
       {memberships.length === 0 ? (
         <EmptyState
-          icon="🏛"
+          icon={<Landmark size={24} />}
           title="You're not in any organizations yet"
           description="Create your own to enter teams and register for championships, or find one and request to join."
           action={(

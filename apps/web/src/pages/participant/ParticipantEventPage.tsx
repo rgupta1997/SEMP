@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Calendar, Trophy } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { useApi, fmtDateRange } from '../../lib/hooks';
 import {
@@ -27,6 +28,23 @@ interface EventDetail {
     organization_id: string; organization: any;
     played: number; won: number; drawn: number; lost: number; points: number;
   }[];
+}
+
+const RANK_COLORS = [
+  { bg: 'var(--gold-500)', color: '#3b1f00' },
+  { bg: 'var(--silver)', color: '#1e293b' },
+  { bg: 'var(--bronze)', color: '#fff7ed' },
+];
+
+function RankBadge({ pos }: { pos: number }) {
+  const c = RANK_COLORS[pos - 1];
+  if (!c) return <span className="font-bold tabular-nums text-slate-400 dark:text-slate-500">{pos}</span>;
+  return (
+    <span
+      className="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold"
+      style={{ background: c.bg, color: c.color }}
+    >{pos}</span>
+  );
 }
 
 export function ParticipantEventPage() {
@@ -124,7 +142,7 @@ export function ParticipantEventPage() {
 
       {tab === 'matches' && (
         matches.length === 0 ? (
-          <EmptyState icon="⚑" title="No matches yet" description="Fixtures appear here once your teams are drawn." />
+          <EmptyState icon={<Calendar size={24} />} title="No matches yet" description="Fixtures appear here once your teams are drawn." />
         ) : (
           <div className="space-y-2">
             {matches.map((m) => <MatchRow key={m.id} match={m} showEvent={false} />)}

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Users } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { ORGANIZATION_MEMBER_ROLE } from '@semp/shared';
 import { useAuth } from '../../lib/auth';
@@ -123,7 +124,7 @@ export function PocsPage() {
       )}
 
       {isLoading ? <Spinner /> : rosterMembers.length === 0 ? (
-        <EmptyState icon="👥" title="No members yet" description={canManage ? 'Add members so they can captain and play in teams.' : 'This organization has no members yet.'}
+        <EmptyState icon={<Users size={24} />} title="No members yet" description={canManage ? 'Add members so they can captain and play in teams.' : 'This organization has no members yet.'}
           action={canManage ? <Button onClick={() => setAdding(true)}>+ Add member</Button> : undefined} />
       ) : tc.total === 0 ? (
         <EmptyState icon="👥" title="No matching members" description="Try a different name, email or phone number." />

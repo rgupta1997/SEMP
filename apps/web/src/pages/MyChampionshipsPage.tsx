@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Trophy } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApi, useTableControls, fmtDateRange } from '../lib/hooks';
 import { Badge, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge } from '../components/ui';
@@ -92,7 +93,7 @@ export function MyChampionshipsPage() {
 
       {isLoading ? <Spinner /> : tc.total === 0 ? (
         <EmptyState
-          icon="🏆"
+          icon={<Trophy size={24} />}
           title={rows.length === 0 ? 'Nothing here yet' : 'No championships match'}
           description={rows.length === 0
             ? 'Join a team, get assigned as an official, or host your own — your championships will show up here.'

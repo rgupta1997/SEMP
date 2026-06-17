@@ -1,3 +1,4 @@
+import { Trophy } from 'lucide-react';
 import { fmtDate } from '../../lib/hooks';
 import type { AchievementGroup, AchievementInstance } from './types';
 
@@ -12,7 +13,7 @@ function instanceLine(it: AchievementInstance): string {
 }
 
 // A recognition the participant has earned, collapsed by award name and shown
-// count-first ("7 · 🏆 Player of the Match"). Hovering reveals each occurrence's
+// count-first ("7 · Player of the Match"). Hovering reveals each occurrence's
 // championship / tournament / match; the full breakdown also lives on the
 // dedicated achievements page.
 export function AchievementRow({ group }: { group: AchievementGroup }) {
@@ -21,7 +22,7 @@ export function AchievementRow({ group }: { group: AchievementGroup }) {
       <span className="grid h-8 min-w-[2rem] flex-none place-items-center rounded-lg bg-amber-200 px-2 text-sm font-bold tabular-nums text-amber-800 dark:bg-amber-500/30 dark:text-amber-100">
         {group.count}
       </span>
-      <span className="text-lg" aria-hidden>🏆</span>
+      <Trophy size={18} className="flex-none text-amber-600 dark:text-amber-400" aria-hidden />
       <span className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{group.award_name}</span>
       {group.latest_date && <span className="ml-auto flex-none text-xs text-slate-400 dark:text-slate-500">{fmtDate(group.latest_date)}</span>}
 

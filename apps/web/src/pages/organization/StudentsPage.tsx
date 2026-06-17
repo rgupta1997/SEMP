@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Users } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../../lib/auth';
 import { useFilterBar, usePageFilters } from '../../lib/filters';
@@ -107,9 +108,9 @@ export function StudentsPage() {
         </ListToolbar>
       )}
       {isLoading ? <Spinner /> : teams.length === 0 ? (
-        <EmptyState icon="👥" title="No squads yet" description="Enter teams and add players to see your contingent here." />
+        <EmptyState icon={<Users size={24} />} title="No squads yet" description="Enter teams and add players to see your contingent here." />
       ) : visible.length === 0 ? (
-        <EmptyState icon="👥" title="No matches" description="No teams or players match your filters." />
+        <EmptyState icon={<Users size={24} />} title="No matches" description="No teams or players match your filters." />
       ) : (
         <div className="space-y-4">
           {visible.map((t) => {

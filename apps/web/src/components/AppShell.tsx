@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Landmark, Medal, Menu, Moon, Sun, Trophy, X } from 'lucide-react';
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
 import { parseEventId } from '../lib/championship-nav';
 import { useFilterBar, FilterProvider } from '../lib/filters';
@@ -9,7 +10,7 @@ import { Avatar, cn } from './ui';
 import { BrandMark } from './BrandMark';
 import { NotificationBell } from './NotificationBell';
 
-interface NavItem { to: string; label: string; icon: string; end?: boolean }
+interface NavItem { to: string; label: string; icon: ReactNode; end?: boolean }
 interface NavGroup { group: string; items: NavItem[] }
 
 export function roleHome(role: AppRole): string {
@@ -25,10 +26,10 @@ function navFor(role: AppRole): NavGroup[] {
       ],
     }, {
       group: 'Platform Master Data', items: [
-        { to: '/platform/sports', label: 'Sports', icon: '🏅' },
+        { to: '/platform/sports', label: 'Sports', icon: <Medal size={16} /> },
         { to: '/platform/disciplines', label: 'Disciplines', icon: '▦' },
         { to: '/platform/tournament-formats', label: 'Formats', icon: '⊟' },
-        { to: '/platform/organizations', label: 'Organizations', icon: '🏛' },
+        { to: '/platform/organizations', label: 'Organizations', icon: <Landmark size={16} /> },
         { to: '/platform/roles', label: 'Roles & Permissions', icon: '⚿' },
       ],
     }, {
@@ -43,9 +44,9 @@ function navFor(role: AppRole): NavGroup[] {
   return [{
     group: 'Sportagon', items: [
       { to: '/profile', label: 'My Game', icon: '◎', end: true },
-      { to: '/organizations', label: 'Organizations', icon: '🏛' },
+      { to: '/organizations', label: 'Organizations', icon: <Landmark size={16} /> },
       { to: '/discover', label: 'Discover', icon: '◈' },
-      { to: '/championships', label: 'Championships', icon: '🏆' },
+      { to: '/championships', label: 'Championships', icon: <Trophy size={16} /> },
       { to: '/host', label: 'Host', icon: '＋' },
       { to: '/help', label: 'Help & guide', icon: '?' },
     ],
@@ -142,7 +143,7 @@ export function AppShell() {
       >
         <div className="flex items-center gap-2.5 border-b border-slate-800 px-5 py-4">
           <BrandMark variant="white" height={24} />
-          <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white md:hidden" aria-label="Close menu">✕</button>
+          <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white md:hidden" aria-label="Close menu"><X size={16} /></button>
         </div>
         <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
           {groups.map((g) => (
@@ -176,7 +177,7 @@ export function AppShell() {
       <div className="flex h-screen min-h-0 min-w-0 flex-col md:h-auto">
         <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex min-w-0 items-center gap-2">
-            <button onClick={() => setSidebarOpen(true)} className="grid h-9 w-9 place-items-center rounded-lg text-slate-600 hover:bg-slate-100 md:hidden dark:text-slate-300 dark:hover:bg-slate-800" aria-label="Open menu">☰</button>
+            <button onClick={() => setSidebarOpen(true)} className="grid h-9 w-9 place-items-center rounded-lg text-slate-600 hover:bg-slate-100 md:hidden dark:text-slate-300 dark:hover:bg-slate-800" aria-label="Open menu"><Menu size={18} /></button>
             <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{subtitle}</div>
           </div>
           <HeaderFilters />
@@ -188,7 +189,7 @@ export function AppShell() {
               className="grid h-9 w-9 place-items-center rounded-lg text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
               aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
               title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
-            >{theme === 'dark' ? '☀' : '☾'}</button>
+            >{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
             <div className="relative">
               <button onClick={() => setMenuOpen((o) => !o)} className="flex items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-slate-100 dark:hover:bg-slate-800">
                 <Avatar name={ctx.user.name} size={32} />

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Medal } from 'lucide-react';
 import { useEvent } from './EventLayout';
 import { usePageFilters } from '../../lib/filters';
 import { useApi, useTableControls } from '../../lib/hooks';
@@ -130,7 +131,9 @@ export function EventParticipantsPage() {
                         >
                           <div className="flex items-center gap-2.5">
                             <span className="w-4 text-slate-400 dark:text-slate-500">{isOpen ? '▾' : '▸'}</span>
-                            <span className="text-lg">{team.sport?.icon || '🏅'}</span>
+                            {team.sport?.icon
+                              ? <span className="text-lg leading-none">{team.sport.icon}</span>
+                              : <Medal size={18} className="text-slate-400 dark:text-slate-500" />}
                             <span className="font-medium text-slate-800 dark:text-slate-200">{team.team_name}</span>
                             {team.sport?.name && <span className="text-xs text-slate-400 dark:text-slate-500">{team.sport.name}</span>}
                           </div>

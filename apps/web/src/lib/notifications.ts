@@ -24,10 +24,10 @@ export interface NotificationDto {
 export interface PostableEvent { id: string; name: string }
 
 // Small visual hint per notification type for the feed.
-export function notificationMeta(type: NotificationType): { icon: string; label: string } {
+export function notificationMeta(type: NotificationType): { icon: 'megaphone' | 'check-circle-2' | 'bell'; label: string } {
   switch (type) {
-    case 'event_lifecycle': return { icon: '📣', label: 'Championship update' };
-    case 'enrollment_approved': return { icon: '✅', label: 'Approval' };
-    default: return { icon: '🔔', label: 'Announcement' };
+    case 'event_lifecycle': return { icon: 'megaphone', label: 'Championship update' };
+    case 'enrollment_approved': return { icon: 'check-circle-2', label: 'Approval' };
+    default: return { icon: 'bell', label: 'Announcement' };
   }
 }

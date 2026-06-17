@@ -4,6 +4,7 @@ import type {
   SelectHTMLAttributes, TextareaHTMLAttributes,
 } from 'react';
 import { Link } from 'react-router-dom';
+import { AlertTriangle, Check, ChevronLeft, Info, X } from 'lucide-react';
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
@@ -310,7 +311,7 @@ export function BackButton({
     'mb-4 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-700 dark:hover:text-white',
     className,
   );
-  const content = <><span className="text-base leading-none opacity-70" aria-hidden>←</span>{children}</>;
+  const content = <><ChevronLeft size={15} className="opacity-70" aria-hidden />{children}</>;
   if (to) return <Link to={to} className={cls}>{content}</Link>;
   return <button type="button" onClick={onClick} className={cls}>{content}</button>;
 }
@@ -553,11 +554,11 @@ export function Skeleton({ className = '', rounded = 'rounded-md' }: { className
 export type ToastType = 'success' | 'info' | 'warning' | 'error';
 interface ToastItem { id: number; type: ToastType; title: string; message?: string }
 
-const TOAST_META: Record<ToastType, { icon: string; bar: string; text: string }> = {
-  success: { icon: '✓', bar: 'border-l-emerald-500', text: 'text-emerald-600 dark:text-emerald-400' },
-  info:    { icon: 'ℹ', bar: 'border-l-brand-500',   text: 'text-brand-600 dark:text-brand-300' },
-  warning: { icon: '⚠', bar: 'border-l-amber-500',   text: 'text-amber-600 dark:text-amber-400' },
-  error:   { icon: '✕', bar: 'border-l-rose-600',    text: 'text-rose-600 dark:text-rose-400' },
+const TOAST_META: Record<ToastType, { icon: ReactNode; bar: string; text: string }> = {
+  success: { icon: <Check size={14} />,          bar: 'border-l-emerald-500', text: 'text-emerald-600 dark:text-emerald-400' },
+  info:    { icon: <Info size={14} />,           bar: 'border-l-brand-500',   text: 'text-brand-600 dark:text-brand-300' },
+  warning: { icon: <AlertTriangle size={14} />,  bar: 'border-l-amber-500',   text: 'text-amber-600 dark:text-amber-400' },
+  error:   { icon: <X size={14} />,             bar: 'border-l-rose-600',    text: 'text-rose-600 dark:text-rose-400' },
 };
 
 // Presentational toast (also used standalone). Left accent bar encodes the type.
@@ -571,7 +572,7 @@ export function Toast({ type, title, message, onClose }: { type: ToastType; titl
         {message && <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{message}</div>}
       </div>
       {onClose && (
-        <button onClick={onClose} aria-label="Dismiss" className="flex-none text-base leading-none text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">×</button>
+        <button onClick={onClose} aria-label="Dismiss" className="flex-none text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={14} /></button>
       )}
     </div>
   );

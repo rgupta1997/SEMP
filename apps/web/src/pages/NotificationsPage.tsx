@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Bell } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useApi } from '../lib/hooks';
@@ -50,7 +51,7 @@ export function NotificationsPage() {
         <div className="grid place-items-center py-16"><Spinner /></div>
       ) : visible.length === 0 ? (
         <EmptyState
-          icon="🔔"
+          icon={<Bell size={24} />}
           title="No notifications yet"
           description="Announcements and championship updates will show up here."
         />

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../../../lib/api';
+import { MapPin } from 'lucide-react';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Spinner } from '../../../components/ui';
 
@@ -82,7 +83,7 @@ export function VenuesTab({ eventId }: { eventId: string }) {
       </div>
 
       {venues.length === 0 ? (
-        <EmptyState icon="⌖" title="No venues" description="Add the venue(s) where this championship is played."
+        <EmptyState icon={<MapPin size={24} />} title="No venues" description="Add the venue(s) where this championship is played."
           action={<Button onClick={() => setOpen(true)}>+ Add venue</Button>} />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">

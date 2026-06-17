@@ -76,6 +76,13 @@ body {
 }
 .dark .skeleton { background-image: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%); }
 
+/* Participant identity banner — medal stat pips on the podium colours */
+.medal-pip { width: 9px; height: 9px; border-radius: 999px; }
+.medal-pip--gold   { background: var(--gold-500); opacity: 0.84; }
+.medal-pip--silver { background: var(--silver);   opacity: 0.84; }
+.medal-pip--bronze { background: var(--bronze);   opacity: 0.84; }
+.medal-tile { box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--gold-500) 39%, transparent); }
+
 /* LIVE badge — broadcast-red pulse ring (design system "Live" treatment) */
 @keyframes live-pulse {
   0%   { box-shadow: 0 0 0 0 var(--live-glow); }

@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { Trophy } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApi, fmtDate } from '../../lib/hooks';
 import { Badge, BackButton, Card, CardBody, CardHeader, EmptyState, PageHeader, Spinner, cn } from '../../components/ui';
@@ -38,13 +39,13 @@ export function ParticipantAchievementsPage() {
       </PageHeader>
 
       {isLoading ? <Spinner /> : groups.length === 0 ? (
-        <EmptyState icon="🏆" title="No achievements yet" description="Awards you receive from match officials will appear here." />
+        <EmptyState icon={<Trophy size={24} />} title="No achievements yet" description="Awards you receive from match officials will appear here." />
       ) : (
         <div className="space-y-4">
           {groups.map((g) => (
             <Card key={g.award_name}>
               <CardHeader
-                title={<span className="flex items-center gap-2"><span aria-hidden>🏆</span>{g.award_name}</span>}
+                title={<span className="flex items-center gap-2"><Trophy size={16} className="text-amber-500" aria-hidden />{g.award_name}</span>}
                 action={<Badge tone="amber">{g.items.length}×</Badge>}
               />
               <CardBody className="pt-0">
