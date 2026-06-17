@@ -4,16 +4,17 @@ import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDate } from '../../lib/hooks';
 import { Avatar, Button, Card, EmptyState, Modal, SearchInput, Spinner, toast } from '../../components/ui';
 import { UserFormModal, type UserFormBody } from '../../components/UserFormModal';
+import { EventOfficialsPage } from './EventOfficialsPage';
 
 interface RoleAssignment {
   id: string;
   assigned_at: string;
   roles: { id: string; name: string };
-  users_user_event_roles_user_idTousers: { id: string; name: string; email: string; phone?: string | null };
+  users_user_championship_roles_user_idTousers: { id: string; name: string; email: string; phone?: string | null };
 }
 
 // Pick an existing user (by name/email) or create a brand-new organiser login,
-// then grant them the event's Organiser role.
+// then grant them the championship's Organiser role.
 function AddOrganiserModal({ eventId, roleId, assignedIds, onClose }:
   { eventId: string; roleId: string; assignedIds: Set<string>; onClose: () => void }) {
   const [search, setSearch] = useState('');
@@ -21,8 +22,8 @@ function AddOrganiserModal({ eventId, roleId, assignedIds, onClose }:
   const { data: users = [], isLoading } = useApi<any[]>('/users');
 
   const assign = useApiMutation(
-    (userId: string) => api('POST', `/events/${eventId}/roles`, { user_id: userId, role_id: roleId }),
-    [`/events/${eventId}/roles`],
+    (userId: string) => api('POST', `/championships/${eventId}/roles`, { user_id: userId, role_id: roleId }),
+    [`/championships/${eventId}/roles`],
   );
 
   const candidates = useMemo(() => {
@@ -37,7 +38,6 @@ function AddOrganiserModal({ eventId, roleId, assignedIds, onClose }:
     return (
       <UserFormModal
         title="New organiser"
-        accountTypes={['organiser']}
         submitLabel="Create & add"
         onClose={() => setCreating(false)}
         onSubmit={async (body: UserFormBody) => {
@@ -85,13 +85,13 @@ function AddOrganiserModal({ eventId, roleId, assignedIds, onClose }:
 
 export function EventOrganisersPage() {
   const { eventId } = useEvent();
-  const { data: roles = [], isLoading } = useApi<RoleAssignment[]>(`/events/${eventId}/roles`);
+  const { data: roles = [], isLoading } = useApi<RoleAssignment[]>(`/championships/${eventId}/roles`);
   const { data: allRoles = [] } = useApi<any[]>('/roles');
   const [adding, setAdding] = useState(false);
 
   const organiserRoleId = allRoles.find((r) => r.name === 'Organiser')?.id;
   const organisers = roles.filter((r) => r.roles?.name === 'Organiser');
-  const assignedIds = new Set(organisers.map((r) => r.users_user_event_roles_user_idTousers?.id).filter(Boolean));
+  const assignedIds = new Set(organisers.map((r) => r.users_user_championship_roles_user_idTousers?.id).filter(Boolean));
 
   if (isLoading) return <div className="grid h-40 place-items-center"><Spinner /></div>;
 
@@ -100,13 +100,13 @@ export function EventOrganisersPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">Organising team</h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400">{organisers.length} organiser{organisers.length === 1 ? '' : 's'} on this event.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">{organisers.length} organiser{organisers.length === 1 ? '' : 's'} on this championship.</p>
         </div>
         <Button onClick={() => setAdding(true)} disabled={!organiserRoleId}>+ Add organiser</Button>
       </div>
 
       {organisers.length === 0 ? (
-        <EmptyState icon="⚿" title="No co-organisers yet" description="Add teammates so more than one person can run this event." />
+        <EmptyState icon="⚿" title="No co-organisers yet" description="Add teammates so more than one person can run this championship." />
       ) : (
         <Card className="overflow-hidden">
           <table className="min-w-full divide-y divide-slate-100 dark:divide-slate-800 text-sm">
@@ -119,7 +119,7 @@ export function EventOrganisersPage() {
             </thead>
             <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
               {organisers.map((r) => {
-                const u = r.users_user_event_roles_user_idTousers;
+                const u = r.users_user_championship_roles_user_idTousers;
                 return (
                   <tr key={r.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
                     <td className="px-4 py-2">
@@ -139,13 +139,17 @@ export function EventOrganisersPage() {
       )}
 
       <Card className="bg-slate-50 dark:bg-slate-800/60 p-4 text-sm text-slate-600 dark:text-slate-300">
-        Co-organisers share full control of this event — its setup, approvals, officials and schedule.
-        Need an institution in the master list? Add it from <span className="font-medium">Approvals</span>; add officials from the <span className="font-medium">Officials</span> tab.
+        Co-organisers share full control of this championship — its setup, approvals, officials and schedule.
+        Need an organization in the master list? Add it from <span className="font-medium">Approvals</span>; assign officials in the section below.
       </Card>
 
       {adding && organiserRoleId && (
         <AddOrganiserModal eventId={eventId} roleId={organiserRoleId} assignedIds={assignedIds} onClose={() => setAdding(false)} />
       )}
+
+      <div className="border-t border-slate-200 dark:border-slate-800 pt-8">
+        <EventOfficialsPage />
+      </div>
     </div>
   );
 }
