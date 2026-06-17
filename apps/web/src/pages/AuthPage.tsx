@@ -2,23 +2,25 @@ import { useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { Button, Input } from '../components/ui';
 
-// Seed accounts from `npm run seed` (password: demo123; admin: admin123).
+// Seed accounts from `npm run reset:all` (password: demo123; admin: admin123).
 // Temporary convenience panel — to be hidden before launch.
 const DEMO_GROUPS: { group: string; accounts: { email: string; label: string; pw?: string }[] }[] = [
   { group: 'Platform', accounts: [
     { email: 'admin@semp.local', label: 'System Admin', pw: 'admin123' },
   ] },
-  { group: 'Host & Official', accounts: [
-    { email: 'host@sportagon.test', label: 'Host / Organiser' },
-    { email: 'official@sportagon.test', label: 'Official' },
+  { group: 'Organisers & Officials', accounts: [
+    { email: 'organiser1@semp.local', label: 'Organiser' },
+    { email: 'official1@semp.local', label: 'Official' },
   ] },
   { group: 'Organization owners', accounts: [
-    { email: 'owner@sportagon.test', label: 'Owner · Infosys' },
-    { email: 'owner2@sportagon.test', label: 'Owner · Pune United FC' },
+    { email: 'owner@vjti.semp.local', label: 'Owner · VJTI (institution)' },
+    { email: 'owner@infy.semp.local', label: 'Owner · Infosys (corporate)' },
+    { email: 'owner@pufc.semp.local', label: 'Owner · Pune United FC (club)' },
   ] },
   { group: 'Players', accounts: [
-    { email: 'captain@sportagon.test', label: 'Captain · Infosys' },
-    { email: 'player@sportagon.test', label: 'Player · Infosys' },
+    { email: 'player1@vjti.semp.local', label: 'Player · VJTI (also organises)' },
+    { email: 'player2@infy.semp.local', label: 'Player · Infosys' },
+    { email: 'player29@vjti.semp.local', label: 'Player · VJTI (reset on login)' },
   ] },
 ];
 
