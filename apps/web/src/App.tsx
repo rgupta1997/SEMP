@@ -4,6 +4,7 @@ import { useAuth, type AppRole } from './lib/auth';
 import { AppShell, roleHome } from './components/AppShell';
 import { Spinner, ToastProvider } from './components/ui';
 import { AuthPage } from './pages/AuthPage';
+import { LandingPage } from './pages/LandingPage';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
 
 // Host / championship management (reachable by the championship's organiser)
@@ -46,6 +47,7 @@ import { PlatformResource } from './pages/platform/PlatformResource';
 import { PlatformOverview } from './pages/platform/PlatformOverview';
 import { PlatformUsersPage } from './pages/platform/PlatformUsersPage';
 import { PlatformInstitutionsPage } from './pages/platform/PlatformInstitutionsPage';
+import { PlatformDemoRequestsPage } from './pages/platform/PlatformDemoRequestsPage';
 
 function HomeRedirect() {
   const { activeRole } = useAuth();
@@ -103,6 +105,7 @@ function AuthenticatedRoutes() {
         {/* Platform (system admin only) */}
         <Route path="/platform/overview" element={<RequireRole roles={SYSTEM}><PlatformOverview /></RequireRole>} />
         <Route path="/platform/users" element={<RequireRole roles={SYSTEM}><PlatformUsersPage /></RequireRole>} />
+        <Route path="/platform/demo-requests" element={<RequireRole roles={SYSTEM}><PlatformDemoRequestsPage /></RequireRole>} />
         <Route path="/platform/organizations" element={<RequireRole roles={SYSTEM}><PlatformInstitutionsPage /></RequireRole>} />
         <Route path="/platform/:key" element={<RequireRole roles={SYSTEM}><PlatformResource /></RequireRole>} />
 
@@ -124,9 +127,13 @@ function AppRoutes() {
   useEffect(() => { if (justLoggedIn) clearJustLoggedIn(); }, [justLoggedIn, clearJustLoggedIn]);
 
   if (loading) return <div className="grid h-screen place-items-center"><Spinner /></div>;
+  // Logged out: a public marketing landing page at the root, with the sign-in
+  // screen at /login. Any other path falls through to the landing page.
   if (!ctx) return (
     <Routes>
-      <Route path="*" element={<AuthPage />} />
+      <Route path="/login" element={<AuthPage />} />
+      <Route path="/" element={<LandingPage />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
   // Provisioned logins must set their own password before they can use the app.

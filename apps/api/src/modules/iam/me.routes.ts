@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { readStandings } from '../standings/standings.service.js';
 
 // "Me"-scoped read endpoints — everything is resolved from the authenticated
 // user, never from a path/query id, so a participant can only ever see their own.
@@ -58,35 +59,6 @@ function toMatchSummary(f: FixtureRow, myTeamIds: Set<string>) {
     opp_score: oppScore ?? null,
     result: resultFor(f, myTeamIds),
   };
-}
-
-// Aggregate a points table (win = 3, draw = 1) by organization from completed fixtures.
-function buildStandings(fixtures: FixtureRow[]) {
-  type Row = { organization_id: string; organization: any; played: number; won: number; drawn: number; lost: number; points: number };
-  const table = new Map<string, Row>();
-  const ensure = (inst: any): Row | null => {
-    if (!inst) return null;
-    if (!table.has(inst.id)) table.set(inst.id, { organization_id: inst.id, organization: inst, played: 0, won: 0, drawn: 0, lost: 0, points: 0 });
-    return table.get(inst.id)!;
-  };
-  for (const f of fixtures) {
-    if (f.status !== 'completed') continue;
-    const home = ensure(f.teams_fixtures_home_team_idToteams?.organizations);
-    const away = ensure(f.teams_fixtures_away_team_idToteams?.organizations);
-    if (!home && !away) continue;
-    if (home) home.played++;
-    if (away) away.played++;
-    const draw = f.winner_team_id == null && f.home_score != null && f.away_score != null && f.home_score === f.away_score;
-    if (draw) {
-      if (home) { home.drawn++; home.points += 1; }
-      if (away) { away.drawn++; away.points += 1; }
-    } else if (f.winner_team_id) {
-      const homeWon = f.winner_team_id === f.home_team_id;
-      if (home) { if (homeWon) { home.won++; home.points += 3; } else { home.lost++; } }
-      if (away) { if (!homeWon) { away.won++; away.points += 3; } else { away.lost++; } }
-    }
-  }
-  return [...table.values()].sort((a, b) => b.points - a.points || b.won - a.won || a.lost - b.lost);
 }
 
 // Tally wins/losses/draws over a set of fixtures, from the user's perspective.
@@ -561,24 +533,16 @@ export function makeMeRouter(prisma: Prisma): Router {
     const matches = fixtures.map((f) => summariseLean(f, teamIds, teamMeta));
     const { wins, losses, draws } = tally(fixtures, teamIds);
 
-    // Championship-wide standings (read-only) — aggregated from all completed fixtures.
-    const eventFixtures = await prisma.fixtures.findMany({
-      where: {
-        status: 'completed',
-        tournament_disciplines: { tournament_sports: { tournaments: { championship_id: eventId } } },
-      },
-      include: {
-        teams_fixtures_home_team_idToteams: { include: { organizations: true } },
-        teams_fixtures_away_team_idToteams: { include: { organizations: true } },
-      },
-    });
+    // Championship-wide standings (read-only) — read the materialized championship-
+    // scope table maintained by the standings engine.
+    const standings = await readStandings(prisma, eventId, 'championship', null);
 
     res.json({
       championship,
       stats: { matches: fixtures.length, wins, losses, draws },
       teams,
       matches,
-      standings: buildStandings(eventFixtures),
+      standings,
     });
   }));
 

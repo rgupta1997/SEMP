@@ -14,7 +14,8 @@ services:
     autoDeploy: true
     envVars:
       - key: DATABASE_URL
-        sync: false            # Supabase connection string (port 5432 direct, or 6543 pooler + ?pgbouncer=true)
+        sync: false            # Supabase TRANSACTION pooler: ...pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=5
+                               # Do NOT use the session pooler (:5432 on the pooler host) — its 15-slot pool exhausts under Prisma's pool.
       - key: JWT_SECRET
         generateValue: true    # Render generates a strong secret
       - key: WEB_ORIGIN

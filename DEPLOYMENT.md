@@ -26,9 +26,15 @@ git push -u origin main
 Easiest path uses the committed `render.yaml`:
 1. Render → **New +** → **Blueprint** → connect the repo → Apply.
 2. It creates the `semp-api` web service. Fill the env vars it asks for:
-   - `DATABASE_URL` — your Supabase connection string. Use the **direct** connection
-     (`...supabase.co:5432/postgres`); or the pooler (`:6543`) with `?pgbouncer=true`
-     appended.
+   - `DATABASE_URL` — your Supabase connection string. Use the **transaction pooler**:
+     `postgresql://postgres.[REF]:[PW]@aws-0-[region].pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=5`
+     - `:6543` + `pgbouncer=true` → transaction mode (multiplexes many clients).
+     - `connection_limit=5` caps Prisma's own pool so overlapping redeploys stay in budget.
+     - **Do not** use the **session pooler** (`:5432` on the `...pooler.supabase.com` host):
+       its 15-slot pool is exhausted by Prisma's connection pool and you'll hit
+       `EMAXCONNSESSION: max clients reached in session mode`.
+     - The **direct** connection (`db.[REF].supabase.co:5432`) is for local
+       `prisma db pull` introspection and one-off seeds, not the running service.
    - `WEB_ORIGIN` — leave blank for now; set it in step 4.
    - `JWT_SECRET` — generated automatically.
 3. First deploy runs `npm install --include=dev && prisma generate`, then

@@ -1,6 +1,9 @@
 import { useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { Button, Input } from '../components/ui';
+import { BrandMark } from '../components/BrandMark';
+import { useTheme } from '../lib/theme';
 
 // Seed accounts from `npm run reset:all` (password: demo123; admin: admin123).
 // Temporary convenience panel — to be hidden before launch.
@@ -26,7 +29,12 @@ const DEMO_GROUPS: { group: string; accounts: { email: string; label: string; pw
 
 export function AuthPage() {
   const { login, signup } = useAuth();
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const { theme, toggle } = useTheme();
+  const location = useLocation();
+  // The landing page can deep-link here in signup mode (Sign up button); default is login.
+  const [mode, setMode] = useState<'login' | 'signup'>(
+    (location.state as { mode?: string } | null)?.mode === 'signup' ? 'signup' : 'login',
+  );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -61,33 +69,20 @@ export function AuthPage() {
   };
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-2">
-      {/* Brand panel */}
-      <div className="relative hidden flex-col justify-between overflow-hidden bg-slate-900 p-12 text-white lg:flex">
-        <div className="absolute -right-24 -top-24 h-96 w-96 rounded-full bg-brand-500/30 blur-3xl" />
-        <div className="absolute -bottom-24 -left-16 h-80 w-80 rounded-full bg-brand-700/30 blur-3xl" />
-        <div className="relative flex items-center gap-3">
-          <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-500 text-2xl font-black">S</span>
-          <span className="text-2xl font-bold">Sports Championship Management Platform</span>
-        </div>
-        <div className="relative max-w-md">
-          <h1 className="text-4xl font-bold leading-tight">Run your entire sports fest from one screen.</h1>
-          <p className="mt-4 text-lg text-slate-300">Championships, tournaments, rosters, approvals, fixtures and live standings — one platform that adapts to every role.</p>
-          <div className="mt-8 flex flex-wrap gap-2 text-sm">
-            {['Organisers', 'Organizations', 'Captains', 'Officials', 'Participants'].map((t) => (
-              <span key={t} className="rounded-full bg-white/10 px-3 py-1 font-medium">{t}</span>
-            ))}
-          </div>
-        </div>
-        <div className="relative text-sm text-slate-400">Sports Championship Management Platform</div>
-      </div>
-
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-800/60 p-6">
       {/* Form panel */}
-      <div className="flex items-center justify-center bg-slate-50 dark:bg-slate-800/60 p-6">
-        <div className="w-full max-w-md">
-          <div className="mb-6 flex items-center gap-3 lg:hidden">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-500 text-xl font-black text-white">S</span>
-            <span className="text-xl font-bold">Sportagon</span>
+      <div className="w-full max-w-md">
+          <div className="mb-6 flex items-center justify-between gap-3">
+            <BrandMark variant="auto" height={26} to="/" />
+            <div className="flex items-center gap-3">
+              <button
+                onClick={toggle}
+                className="grid h-9 w-9 place-items-center rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+              >{theme === 'dark' ? '☀' : '☾'}</button>
+              <Link to="/" className="text-sm font-semibold text-slate-500 hover:text-brand-600 dark:text-slate-400 dark:hover:text-brand-300">← Back to home</Link>
+            </div>
           </div>
 
           <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{mode === 'login' ? 'Welcome back' : 'Create your account'}</h2>
@@ -148,7 +143,6 @@ export function AuthPage() {
             <p className="mt-2 text-center text-[11px] text-slate-400 dark:text-slate-500">Password <span className="font-mono">demo123</span> · admin <span className="font-mono">admin123</span></p>
           </div>
         </div>
-      </div>
     </div>
   );
 }

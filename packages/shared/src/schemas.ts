@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import {
-  ENTRY_TYPE, ENROLLMENT_STATUS, CHAMPIONSHIP_STATUS, FIXTURE_STATUS, GROUND_TYPE,
+  DEMO_REQUEST_STATUS, ENTRY_TYPE, ENROLLMENT_STATUS, CHAMPIONSHIP_STATUS, FIXTURE_STATUS, GROUND_TYPE,
   NOTIFICATION_AUDIENCE, NOTIFICATION_REACTIONS, ORGANIZATION_MEMBER_ROLE,
-  SPONSOR_TIER, TEAM_MEMBER_ROLE, TEAM_STATUS, TOURNAMENT_DISCIPLINE_STATUS,
-  TOURNAMENT_STATUS,
+  SPONSOR_TIER, STANDINGS_RULE_SCOPE, STANDINGS_TIEBREAKER, TEAM_MEMBER_ROLE,
+  TEAM_STATUS, TOURNAMENT_DISCIPLINE_STATUS, TOURNAMENT_STATUS,
 } from './enums.js';
 
 const uuid = z.string().uuid();
@@ -371,5 +371,92 @@ export const createNotificationSchema = z.object({
 export const reactNotificationSchema = z.object({
   reaction: z.enum(NOTIFICATION_REACTIONS),
 });
+
+// ---------- Standings rules ----------
+// A typed, discriminated scoring rule. Stored as the `config` jsonb on a
+// standings_rules row and parsed by the recompute engine. One variant per scheme.
+
+// `participation` is awarded once to every organization that takes part in a
+// discipline (played ≥ 1 completed fixture), on top of the scheme's own points —
+// the classic "participation vs performance" split. Shared by every scheme.
+const participation = z.number().int().min(0).default(0);
+
+export const leaguePointsRuleSchema = z.object({
+  scheme: z.literal('league_points'),
+  win: z.number().int().min(0).default(3),
+  draw: z.number().int().min(0).default(1),
+  loss: z.number().int().min(0).default(0),
+  participation,
+  tiebreakers: z.array(z.enum(STANDINGS_TIEBREAKER)).min(1).default(['points', 'wins', 'lost']),
+});
+
+// points keyed by canonical placement (winner / runner_up / semi_finalist / …).
+// Missing placements score 0, so a partial map is fine.
+export const placementRuleSchema = z.object({
+  scheme: z.literal('placement'),
+  points: z.record(z.number().int().min(0)).default({ winner: 7, runner_up: 5, semi_finalist: 3, quarter_finalist: 1 }),
+  participation,
+});
+
+export const medalRuleSchema = z.object({
+  scheme: z.literal('medal'),
+  gold: z.number().int().min(0).default(5),
+  silver: z.number().int().min(0).default(3),
+  bronze: z.number().int().min(0).default(1),
+  participation,
+});
+
+export const standingsRuleSchema = z.discriminatedUnion('scheme', [
+  leaguePointsRuleSchema,
+  placementRuleSchema,
+  medalRuleSchema,
+]);
+export type StandingsRule = z.infer<typeof standingsRuleSchema>;
+
+// The implicit default applied when no standings_rules row matches — preserves the
+// historical behaviour (win = 3, draw = 1, loss = 0). Single source of truth shared
+// by the engine and the rules editor UI.
+export const DEFAULT_STANDINGS_RULE: StandingsRule = {
+  scheme: 'league_points',
+  win: 3,
+  draw: 1,
+  loss: 0,
+  participation: 0,
+  tiebreakers: ['points', 'wins', 'lost'],
+};
+
+// Upsert one scoping rule. scope_id is required for format/discipline rules and must
+// be empty for the championship default.
+export const upsertStandingsRuleSchema = z
+  .object({
+    scope_type: z.enum(STANDINGS_RULE_SCOPE),
+    scope_id: uuid.nullable().optional(),
+    config: standingsRuleSchema,
+  })
+  .refine((r) => (r.scope_type === 'championship' ? !r.scope_id : !!r.scope_id), {
+    message: 'scope_id is required for format/discipline rules and must be empty for the championship default',
+  });
+
+// ---------- Demo requests ("Book a demo" leads) ----------
+// Submitted from the public, unauthenticated landing page. Only name + email are
+// required; the rest help the team tailor the demo. `message` is trimmed/capped to
+// keep the capture endpoint from being abused as free storage.
+export const createDemoRequestSchema = z.object({
+  name: z.string().min(1).max(120),
+  email: z.string().email(),
+  organization: z.string().max(160).optional(),
+  role: z.string().max(80).optional(),
+  sport: z.string().max(120).optional(),
+  phone: z.string().max(40).optional(),
+  message: z.string().max(2000).optional(),
+});
+
+// Admin-only triage update — move a lead through its lifecycle and/or annotate it.
+export const updateDemoRequestSchema = z
+  .object({
+    status: z.enum(DEMO_REQUEST_STATUS).optional(),
+    message: z.string().max(2000).nullable().optional(),
+  })
+  .refine((d) => d.status !== undefined || d.message !== undefined, { message: 'Nothing to update' });
 
 export { ENROLLMENT_STATUS };

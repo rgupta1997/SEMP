@@ -1,19 +1,63 @@
+import { useMemo } from 'react';
 import { useEvent } from './EventLayout';
+import { usePageFilters } from '../../lib/filters';
 import { useApi } from '../../lib/hooks';
 import { Avatar, Badge, Card, CardBody, CardHeader, EmptyState, Spinner, StatCard, Table } from '../../components/ui';
 
 interface StandingRow {
-  organization_id: string; organization: any;
+  organization_id: string;
+  organization: { id: string; name: string; short_name?: string | null; logo_url?: string | null } | null;
   played: number; won: number; drawn: number; lost: number; points: number;
+  detail: Record<string, number>;
+  rank: number | null;
 }
-interface StandingsResponse { standings: StandingRow[]; completed_matches: number }
+interface StandingsResponse { scope: string; scope_id: string | null; standings: StandingRow[]; completed_matches: number }
+
+// A draw row (subset of GET /:id/draws) — used only to source the tournament + sport
+// filter options (with their UUIDs, which the materialized scopes are keyed by).
+interface DrawRow {
+  tournament_sports: {
+    sports: { id: string; name: string } | null;
+    tournaments: { id: string; name: string } | null;
+  } | null;
+}
 
 const MEDAL = ['🥇', '🥈', '🥉'];
 
 export function StandingsPage() {
   const { eventId } = useEvent();
-  const { data, isLoading } = useApi<StandingsResponse>(`/championships/${eventId}/standings`);
+  const { data: draws = [] } = useApi<DrawRow[]>(`/championships/${eventId}/draws`);
+
+  const tournamentOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    draws.forEach((d) => { const t = d.tournament_sports?.tournaments; if (t) map.set(t.id, t.name); });
+    return [...map].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [draws]);
+  const sportOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    draws.forEach((d) => { const s = d.tournament_sports?.sports; if (s) map.set(s.id, s.name); });
+    return [...map].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [draws]);
+
+  const { tournamentId, sportId } = usePageFilters({
+    tournaments: tournamentOptions.length ? tournamentOptions : undefined,
+    sports: sportOptions.length ? sportOptions : undefined,
+  });
+
+  // Standings are materialized one scope at a time, so the header filters select a
+  // single scope (most specific wins): sport → tournament → whole championship.
+  const { scope, scopeId, scopeLabel } = useMemo(() => {
+    if (sportId) return { scope: 'sport', scopeId: sportId, scopeLabel: `Sport · ${sportOptions.find((s) => s.id === sportId)?.name ?? ''}` };
+    if (tournamentId) return { scope: 'tournament', scopeId: tournamentId, scopeLabel: `Tournament · ${tournamentOptions.find((t) => t.id === tournamentId)?.name ?? ''}` };
+    return { scope: 'championship', scopeId: null as string | null, scopeLabel: 'Whole championship' };
+  }, [sportId, tournamentId, sportOptions, tournamentOptions]);
+
+  const query = scopeId ? `?scope=${scope}&scopeId=${scopeId}` : `?scope=${scope}`;
+  const { data, isLoading } = useApi<StandingsResponse>(`/championships/${eventId}/standings${query}`);
   const rows = data?.standings ?? [];
+
+  // Show a medals column only when some discipline used the medal scheme.
+  const showMedals = rows.some((r) => r.detail && (r.detail.gold || r.detail.silver || r.detail.bronze));
 
   return (
     <div className="space-y-4">
@@ -24,7 +68,10 @@ export function StandingsPage() {
       </div>
 
       <Card>
-        <CardHeader title="Championship table" subtitle="Computed live from completed fixtures · win = 3, draw = 1" />
+        <CardHeader
+          title="Championship table"
+          subtitle={`${scopeLabel} · computed from completed fixtures, scored by each discipline's rule`}
+        />
         <CardBody>
           {isLoading ? <Spinner /> : rows.length === 0 ? (
             <EmptyState icon="🏆" title="No results yet" description="Standings populate as officials complete matches with scores." />
@@ -38,13 +85,14 @@ export function StandingsPage() {
                   <th className="px-3 py-3 text-center">W</th>
                   <th className="px-3 py-3 text-center">D</th>
                   <th className="px-3 py-3 text-center">L</th>
+                  {showMedals && <th className="px-3 py-3 text-center">Medals</th>}
                   <th className="px-4 py-3 text-center">Pts</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r, i) => (
                   <tr key={r.organization_id} className="border-t border-slate-100 dark:border-slate-800">
-                    <td className="px-4 py-3 text-lg">{MEDAL[i] ?? <span className="font-bold text-slate-400 dark:text-slate-500">{i + 1}</span>}</td>
+                    <td className="px-4 py-3 text-lg">{MEDAL[i] ?? <span className="font-bold text-slate-400 dark:text-slate-500">{r.rank ?? i + 1}</span>}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <Avatar name={r.organization?.name} size={30} />
@@ -55,6 +103,14 @@ export function StandingsPage() {
                     <td className="px-3 py-3 text-center font-semibold text-emerald-600">{r.won}</td>
                     <td className="px-3 py-3 text-center text-slate-500 dark:text-slate-400">{r.drawn}</td>
                     <td className="px-3 py-3 text-center text-rose-500">{r.lost}</td>
+                    {showMedals && (
+                      <td className="px-3 py-3 text-center text-sm tabular-nums">
+                        {(['gold', 'silver', 'bronze'] as const).map((m, mi) =>
+                          r.detail?.[m] ? <span key={m} className="mr-1.5 whitespace-nowrap">{MEDAL[mi]}{r.detail[m]}</span> : null,
+                        )}
+                        {!r.detail?.gold && !r.detail?.silver && !r.detail?.bronze && <span className="text-slate-300 dark:text-slate-600">—</span>}
+                      </td>
+                    )}
                     <td className="px-4 py-3 text-center"><Badge tone="brand">{r.points}</Badge></td>
                   </tr>
                 ))}

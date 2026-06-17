@@ -64,6 +64,8 @@ model championships {
   championship_organizations championship_organizations[]
   notifications              notifications[]
   sponsors                   sponsors[]
+  standings                  standings[]
+  standings_rules            standings_rules[]
   teams                      teams[]
   tournaments                tournaments[]
   user_championship_roles    user_championship_roles[]
@@ -121,6 +123,7 @@ model organizations {
   championship_invitations   championship_invitations[]
   championship_organizations championship_organizations[]
   organization_members       organization_members[]
+  standings                  standings[]
   teams                      teams[]
   users                      users[]
 }
@@ -341,6 +344,7 @@ model users {
   championship_officials_championship_officials_user_idTousers             championship_officials[]     @relation("championship_officials_user_idTousers")
   championship_organizations_championship_organizations_applied_byTousers  championship_organizations[] @relation("championship_organizations_applied_byTousers")
   championship_organizations_championship_organizations_reviewed_byTousers championship_organizations[] @relation("championship_organizations_reviewed_byTousers")
+  demo_requests                                                            demo_requests[]
   fixture_awards                                                           fixture_awards[]
   fixtures                                                                 fixtures[]
   notification_reactions                                                   notification_reactions[]
@@ -485,4 +489,59 @@ model fixture_awards {
 
   @@index([fixture_id], map: "idx_fixture_awards_fixture")
   @@index([recipient_user_id], map: "idx_fixture_awards_recipient")
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model standings {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  championship_id String        @db.Uuid
+  scope_type      String        @db.VarChar
+  scope_id        String?       @db.Uuid
+  organization_id String        @db.Uuid
+  played          Int           @default(0)
+  won             Int           @default(0)
+  drawn           Int           @default(0)
+  lost            Int           @default(0)
+  points          Int           @default(0)
+  detail          Json          @default("{}")
+  rank            Int?
+  computed_at     DateTime      @default(now()) @db.Timestamptz(6)
+  championships   championships @relation(fields: [championship_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([championship_id], map: "idx_standings_championship")
+  @@index([championship_id, scope_type, scope_id], map: "idx_standings_scope")
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model standings_rules {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  championship_id String        @db.Uuid
+  scope_type      String        @db.VarChar
+  scope_id        String?       @db.Uuid
+  config          Json          @default("{}")
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  championships   championships @relation(fields: [championship_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([championship_id], map: "idx_standings_rules_championship")
+}
+
+model demo_requests {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String   @db.VarChar
+  email        String   @db.VarChar
+  organization String?  @db.VarChar
+  role         String?  @db.VarChar
+  sport        String?  @db.VarChar
+  phone        String?  @db.VarChar
+  message      String?
+  status       String   @default("new") @db.VarChar
+  handled_by   String?  @db.Uuid
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @default(now()) @db.Timestamptz(6)
+  users        users?   @relation(fields: [handled_by], references: [id], onUpdate: NoAction)
+
+  @@index([created_at(sort: Desc)], map: "idx_demo_requests_created")
+  @@index([status], map: "idx_demo_requests_status")
 }

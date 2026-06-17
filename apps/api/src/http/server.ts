@@ -20,12 +20,14 @@ import { makeMeRouter } from '../modules/iam/me.routes.js';
 import { makeUsersRouter } from '../modules/iam/users.routes.js';
 import { makeOrganizationsRouter } from '../modules/iam/organizations.routes.js';
 import { makeEventsRouter } from '../modules/championships/championships.routes.js';
+import { makeStandingsRouter } from '../modules/standings/standings.routes.js';
 import { makeEnrollmentRouter } from '../modules/enrollment/enrollment.routes.js';
 import { makeInvitationsRouter } from '../modules/enrollment/invitations.routes.js';
 import { makeTeamsRouter } from '../modules/teams/teams.routes.js';
 import { makeVenuesRouter, makeVenueGroundsRouter } from '../modules/venues/venues.routes.js';
 import { makeFixturesRouter } from '../modules/fixtures/fixtures.routes.js';
 import { makeNotificationsRouter } from '../modules/notifications/notifications.routes.js';
+import { makeDemoRequestsRouter } from '../modules/marketing/demo-requests.routes.js';
 
 export function buildApp(prisma: Prisma) {
   const app = express();
@@ -48,6 +50,11 @@ export function buildApp(prisma: Prisma) {
 
   // Public auth routes
   api.use('/auth', makeAuthRouter(prisma));
+
+  // "Book a demo" leads — the POST is public (the landing page is unauthenticated);
+  // reads/triage inside the router are gated to super-admins. Mounted before the
+  // global requireAuth so anonymous visitors can submit.
+  api.use('/demo-requests', makeDemoRequestsRouter(prisma));
 
   // Everything below requires authentication.
   api.use(requireAuth);
@@ -90,6 +97,8 @@ export function buildApp(prisma: Prisma) {
 
   // ----- Phase 2: championship creation — setup-resource writes require the championship's organiser -----
   api.use('/championships', makeEventsRouter(prisma));
+  // Standings (materialized tables + scoring rules) — also under /championships/:id.
+  api.use('/championships', makeStandingsRouter(prisma));
   api.use('/venues', makeVenuesRouter(prisma));
   api.use('/venue-grounds', makeVenueGroundsRouter(prisma));
   api.use('/sponsors', makeCrudRouter(prisma.sponsors, {

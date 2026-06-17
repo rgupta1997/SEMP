@@ -6,6 +6,7 @@ import { useFilterBar, FilterProvider } from '../lib/filters';
 import { useApi } from '../lib/hooks';
 import { useTheme } from '../lib/theme';
 import { Avatar, cn } from './ui';
+import { BrandMark } from './BrandMark';
 import { NotificationBell } from './NotificationBell';
 
 interface NavItem { to: string; label: string; icon: string; end?: boolean }
@@ -33,6 +34,7 @@ function navFor(role: AppRole): NavGroup[] {
     }, {
       group: 'Platform', items: [
         { to: '/platform/users', label: 'All Users', icon: '◍' },
+        { to: '/platform/demo-requests', label: 'Demo Requests', icon: '✉' },
       ],
     }];
   }
@@ -138,11 +140,7 @@ export function AppShell() {
         )}
       >
         <div className="flex items-center gap-2.5 border-b border-slate-800 px-5 py-4">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-500 text-lg font-black text-white">S</span>
-          <div className="min-w-0">
-            <div className="text-lg font-bold leading-none text-white">Sportagon</div>
-            <div className="mt-1 text-[10px] uppercase tracking-[0.16em] text-slate-500">SEMP Platform</div>
-          </div>
+          <BrandMark variant="white" height={24} />
           <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white md:hidden" aria-label="Close menu">✕</button>
         </div>
         <nav className="flex-1 overflow-y-auto px-3 py-4">

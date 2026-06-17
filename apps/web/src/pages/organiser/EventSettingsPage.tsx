@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
 import { CHAMPIONSHIP_STATUS } from '@semp/shared';
 import { Button, Card, CardBody, CardHeader, Field, Input, Progress, StatusBadge, Textarea, toast } from '../../components/ui';
+import { StandingsRulesCard } from '../../components/StandingsRulesCard';
 
 export function EventSettingsPage() {
   const navigate = useNavigate();
@@ -72,6 +73,8 @@ export function EventSettingsPage() {
         </CardBody>
       </Card>
     </div>
+
+      <StandingsRulesCard eventId={eventId} />
 
       <Card className="border-rose-200 dark:border-rose-500/30">
         <CardHeader title="Danger zone" subtitle="Permanently delete this championship and everything in it" />

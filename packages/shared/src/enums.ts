@@ -60,6 +60,49 @@ export type NotificationAudience = (typeof NOTIFICATION_AUDIENCE)[number];
 export const NOTIFICATION_REACTIONS = ['👍', '❤️', '🎉', '👏'] as const;
 export type NotificationReaction = (typeof NOTIFICATION_REACTIONS)[number];
 
+// ---------- Standings ----------
+// The scoring scheme used to turn completed fixtures into a points table. Resolved
+// per discipline (see STANDINGS_RULE_SCOPE); the engine runs the matching strategy.
+//   league_points — points per win/draw/loss (the classic league table; default).
+//   placement     — knockout: points by how far a team advanced (winner, SF, …).
+//   medal         — top-3 organizations in a discipline earn gold/silver/bronze points.
+export const STANDINGS_SCHEME = ['league_points', 'placement', 'medal'] as const;
+export type StandingsScheme = (typeof STANDINGS_SCHEME)[number];
+
+// Ordered tiebreakers for the league_points scheme (applied left-to-right).
+export const STANDINGS_TIEBREAKER = ['points', 'wins', 'lost', 'head_to_head', 'score_diff'] as const;
+export type StandingsTiebreaker = (typeof STANDINGS_TIEBREAKER)[number];
+
+// Where an editable scoring rule applies. Resolution is most-specific-wins:
+// discipline → format → championship default → DEFAULT_STANDINGS_RULE.
+export const STANDINGS_RULE_SCOPE = ['championship', 'format', 'discipline'] as const;
+export type StandingsRuleScope = (typeof STANDINGS_RULE_SCOPE)[number];
+
+// Where a materialized standings table is aggregated / shown. championship is the
+// default view; tournament and sport are reachable via filters.
+export const STANDINGS_AGG_SCOPE = ['championship', 'tournament', 'sport'] as const;
+export type StandingsAggScope = (typeof STANDINGS_AGG_SCOPE)[number];
+
+// Canonical knockout placements the placement scheme can award points to. Derived
+// from the bracket round a team was eliminated in (or won, for `winner`).
+export const STANDINGS_PLACEMENT = [
+  'winner', 'runner_up', 'third_place', 'fourth_place', 'semi_finalist', 'quarter_finalist',
+] as const;
+export type StandingsPlacement = (typeof STANDINGS_PLACEMENT)[number];
+
+// ---------- Demo requests ----------
+// Triage state for a "Book a demo" lead captured from the public landing page.
+// 'new' on capture; an admin moves it through contacted → scheduled → closed.
+export const DEMO_REQUEST_STATUS = ['new', 'contacted', 'scheduled', 'closed'] as const;
+export type DemoRequestStatus = (typeof DEMO_REQUEST_STATUS)[number];
+
+// Self-described role a landing-page visitor picks in the demo form. Free-form on
+// the server (stored as text); this list just drives the <select> options.
+export const DEMO_REQUEST_ROLES = [
+  'Sports Secretary', 'PE Teacher', 'Sports Authority', 'Club / Academy', 'Other',
+] as const;
+export type DemoRequestRole = (typeof DEMO_REQUEST_ROLES)[number];
+
 // Legal championship status transitions (enforced by the ChampionshipLifecycle domain service).
 export const CHAMPIONSHIP_STATUS_TRANSITIONS: Record<ChampionshipStatus, ChampionshipStatus[]> = {
   draft: ['registration_open'],

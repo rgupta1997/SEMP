@@ -7,6 +7,17 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { generateFixtures, type TeamRef } from './domain/generators/index.js';
+import { recomputeStandingsForFixture } from '../standings/standings.service.js';
+
+// Rebuild standings after a fixture's score/status changes. Best-effort: the result
+// is already committed, so a recompute hiccup must not fail the scorer's request.
+async function refreshStandings(prisma: Prisma, fixtureId: string): Promise<void> {
+  try {
+    await recomputeStandingsForFixture(prisma, fixtureId);
+  } catch (err) {
+    console.error(`[standings] recompute failed for fixture ${fixtureId}:`, err);
+  }
+}
 
 export function makeFixturesRouter(prisma: Prisma): Router {
   const router = Router();
@@ -123,6 +134,8 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     }
     if (Object.keys(data).length > 0) {
       await prisma.fixtures.update({ where: { id: req.params.id }, data });
+      // Headline (score/status/winner) changed — refresh the championship's standings.
+      await refreshStandings(prisma, req.params.id);
     }
     let persisted = true;
     if ('live_state' in b || 'live_log' in b) {
@@ -226,6 +239,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         notes: req.body.notes ?? fixture.notes,
       },
     });
+    await refreshStandings(prisma, req.params.id);
     res.json(updated);
   }));
 

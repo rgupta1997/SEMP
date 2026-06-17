@@ -7,6 +7,7 @@ import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError } from '../../shared/errors.js';
 import { assertChampionshipTransition } from './domain/championship-lifecycle.js';
 import { createNotification } from '../notifications/audience.js';
+import { recomputeStandings } from '../standings/standings.service.js';
 
 // Prisma include that pulls just the sport names offered by a championship, plus a
 // helper that flattens them to a distinct, sorted `sports: string[]` and drops the
@@ -157,6 +158,13 @@ export function makeEventsRouter(prisma: Prisma): Router {
     assertChampionshipTransition(championship.status as ChampionshipStatus, req.body.status as ChampionshipStatus);
     const updated = await prisma.championships.update({ where: { id: req.params.id }, data: { status: req.body.status } });
 
+    // Freeze a final, accurate snapshot at the moment of completion (fixture-driven
+    // recomputes stop once a championship is completed).
+    if (req.body.status === 'completed') {
+      try { await recomputeStandings(prisma, updated.id); }
+      catch (err) { console.error(`[standings] final recompute failed for ${updated.id}:`, err); }
+    }
+
     // Lifecycle announcement → organizations + captains only.
     const msg = lifecycleMessage(req.body.status as ChampionshipStatus);
     if (msg) {
@@ -242,49 +250,9 @@ export function makeEventsRouter(prisma: Prisma): Router {
     res.json(grounds);
   }));
 
-  // Computed standings: a points table aggregated by organization from completed
-  // fixtures across the whole championship (win = 3, draw = 1, loss = 0).
-  router.get('/:id/standings', asyncHandler(async (req, res) => {
-    const fixtures = await prisma.fixtures.findMany({
-      where: {
-        status: 'completed',
-        tournament_disciplines: { tournament_sports: { tournaments: { championship_id: req.params.id } } },
-      },
-      include: {
-        teams_fixtures_home_team_idToteams: { include: { organizations: true } },
-        teams_fixtures_away_team_idToteams: { include: { organizations: true } },
-      },
-    });
-
-    type Row = { organization_id: string; organization: any; played: number; won: number; drawn: number; lost: number; points: number };
-    const table = new Map<string, Row>();
-    const ensure = (inst: any): Row | null => {
-      if (!inst) return null;
-      if (!table.has(inst.id)) table.set(inst.id, { organization_id: inst.id, organization: inst, played: 0, won: 0, drawn: 0, lost: 0, points: 0 });
-      return table.get(inst.id)!;
-    };
-
-    for (const f of fixtures) {
-      const home = ensure(f.teams_fixtures_home_team_idToteams?.organizations);
-      const away = ensure(f.teams_fixtures_away_team_idToteams?.organizations);
-      if (!home && !away) continue;
-      if (home) home.played++;
-      if (away) away.played++;
-
-      const draw = f.winner_team_id == null && f.home_score != null && f.away_score != null && f.home_score === f.away_score;
-      if (draw) {
-        if (home) { home.drawn++; home.points += 1; }
-        if (away) { away.drawn++; away.points += 1; }
-      } else if (f.winner_team_id) {
-        const homeWon = f.winner_team_id === f.home_team_id;
-        if (home) { if (homeWon) { home.won++; home.points += 3; } else { home.lost++; } }
-        if (away) { if (!homeWon) { away.won++; away.points += 3; } else { away.lost++; } }
-      }
-    }
-
-    const rows = [...table.values()].sort((a, b) => b.points - a.points || b.won - a.won || a.lost - b.lost);
-    res.json({ standings: rows, completed_matches: fixtures.length });
-  }));
+  // NOTE: standings (GET /:id/standings) and scoring rules now live in the
+  // standings module (standings.routes.ts), mounted under /championships. They read
+  // the materialized `standings` table rather than recomputing on every request.
 
   // -------------------------------------------------------------------------
   // EVENT PARTICIPANTS - users on teams in this championship (scoped view)
