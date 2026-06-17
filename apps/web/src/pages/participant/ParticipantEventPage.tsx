@@ -28,9 +28,11 @@ interface EventDetail {
 const MEDAL = ['🥇', '🥈', '🥉'];
 
 export function ParticipantEventPage() {
-  const { eventId } = useParams();
+  // Route is /profile/championships/:championshipId — must match the param name,
+  // otherwise this is undefined and the fetch 404s ("Championship not available").
+  const { championshipId } = useParams();
   const [tab, setTab] = useState('overview');
-  const { data, isLoading, error } = useApi<EventDetail>(`/me/championships/${eventId}`);
+  const { data, isLoading, error } = useApi<EventDetail>(`/me/championships/${championshipId}`);
 
   if (isLoading) return <Spinner />;
   if (error || !data) {
