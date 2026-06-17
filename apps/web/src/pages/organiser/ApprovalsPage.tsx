@@ -137,7 +137,7 @@ export function ApprovalsPage() {
       {addingInst && (
         <InstitutionFormModal
           onClose={() => setAddingInst(false)}
-          onSubmit={async (body: InstitutionFormBody) => { await api('POST', '/organizations', body); }}
+          onSubmit={(body: InstitutionFormBody) => api('POST', '/organizations', body)}
         />
       )}
 

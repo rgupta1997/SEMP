@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { loginSchema, registerSchema, signupSchema } from '@semp/shared';
+import { changePasswordSchema, loginSchema, registerSchema, signupSchema } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
@@ -67,6 +67,28 @@ export function makeAuthRouter(prisma: Prisma): Router {
     const user = await prisma.users.findUnique({ where: { id: req.user!.id } });
     if (!user) throw new NotFoundError('User');
     const context = await buildAuthContext(prisma, user);
+    res.json(context);
+  }));
+
+  // Change your own password. Provisioned users (must_change_password) skip the
+  // current-password check — they just authenticated with the temporary one. A
+  // normal change requires the current password. Clears the must-change flag.
+  router.post('/change-password', requireAuth, validateBody(changePasswordSchema), asyncHandler(async (req, res) => {
+    const { current_password, new_password } = req.body as { current_password?: string; new_password: string };
+    const user = await prisma.users.findUnique({ where: { id: req.user!.id } });
+    if (!user || !user.password_hash) throw new UnauthorizedError('Invalid credentials');
+
+    if (!user.must_change_password) {
+      const ok = current_password ? await bcrypt.compare(current_password, user.password_hash) : false;
+      if (!ok) throw new UnauthorizedError('Current password is incorrect');
+    }
+
+    const password_hash = await bcrypt.hash(new_password, 10);
+    const updated = await prisma.users.update({
+      where: { id: user.id },
+      data: { password_hash, must_change_password: false },
+    });
+    const context = await buildAuthContext(prisma, updated);
     res.json(context);
   }));
 

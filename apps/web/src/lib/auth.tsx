@@ -15,6 +15,8 @@ export interface AuthUser {
   avatar_url?: string | null;
   is_super_admin: boolean;
   organization_id: string | null;
+  // Set on admin-provisioned logins; forces a password reset on first sign-in.
+  must_change_password?: boolean;
 }
 
 export interface ChampionshipRef { id: string; name: string; slug: string; status: string }
@@ -40,6 +42,7 @@ interface AuthState {
   setActiveRole: (r: AppRole) => void;
   login: (email: string, password: string) => Promise<void>;
   signup: (body: SignupBody) => Promise<void>;
+  changePassword: (newPassword: string, currentPassword?: string) => Promise<void>;
   refresh: () => Promise<void>;
   logout: () => void;
   // True right after an explicit login/signup so the router can land on the
@@ -106,6 +109,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setJustLoggedIn(true);
   };
 
+  // Set a new password for the signed-in user. On a forced first-login reset the
+  // current password isn't required (they just authenticated). Returns the fresh
+  // context, which clears must_change_password.
+  const changePassword = async (newPassword: string, currentPassword?: string) => {
+    const c = await api<AuthContext>('POST', '/auth/change-password', {
+      new_password: newPassword,
+      ...(currentPassword ? { current_password: currentPassword } : {}),
+    });
+    applyContext(c);
+    // A forced first-login reset clears the gate; land on the role's home rather
+    // than whatever URL was active before, mirroring a fresh login.
+    setJustLoggedIn(true);
+  };
+
   const setActiveRole = (r: AppRole) => {
     localStorage.setItem(ACTIVE_ROLE_KEY, r);
     setActiveRoleState(r);
@@ -122,7 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const availableRoles = useMemo(() => (ctx ? rolesFor(ctx) : []), [ctx]);
 
   return (
-    <Ctx.Provider value={{ ctx, loading, availableRoles, activeRole, setActiveRole, login, signup, refresh, logout, justLoggedIn, clearJustLoggedIn: () => setJustLoggedIn(false) }}>
+    <Ctx.Provider value={{ ctx, loading, availableRoles, activeRole, setActiveRole, login, signup, changePassword, refresh, logout, justLoggedIn, clearJustLoggedIn: () => setJustLoggedIn(false) }}>
       {children}
     </Ctx.Provider>
   );

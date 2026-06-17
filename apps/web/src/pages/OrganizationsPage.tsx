@@ -39,9 +39,10 @@ export function OrganizationsPage() {
         <InstitutionFormModal
           onClose={() => setCreating(false)}
           onSubmit={async (body) => {
-            await api('POST', '/organizations', body);
+            const org = await api('POST', '/organizations', body);
             await refresh();
             toast.success('Organization created', 'You are now its owner.');
+            return org;
           }}
         />
       )}

@@ -5,11 +5,8 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
-import { BusinessRuleError, ForbiddenError } from '../../shared/errors.js';
-
-// Shared default for provisioned logins — they can reset later. Matches the
-// roster bulk-import convention so demo accounts all share one password.
-const DEFAULT_PASSWORD = 'demo123';
+import { ForbiddenError } from '../../shared/errors.js';
+import { DEFAULT_PASSWORD, findUserByPhone, hashProvisionedPassword, maskEmail, maskPhone } from './users.helpers.js';
 
 // Fields safe to return to any caller (never the password hash).
 const PUBLIC_SELECT = {
@@ -41,15 +38,43 @@ export function makeUsersRouter(prisma: Prisma): Router {
     res.json(rows);
   }));
 
-  // Create a single login, scoped by the actor's org rights.
+  // Privacy-preserving lookup for the "find or create a POC/user" flows: only
+  // confirms a match once a full phone number is supplied, and never returns the
+  // unmasked phone/email. Used by the add-user pickers to dedupe by phone.
+  router.get('/lookup', asyncHandler(async (req, res) => {
+    const user = await findUserByPhone(prisma, req.query.phone as string | undefined);
+    if (!user) { res.json({ found: false }); return; }
+    res.json({ found: true, user: { id: user.id, name: user.name, phone: maskPhone(user.phone), email: maskEmail(user.email) } });
+  }));
+
+  // Create a single login, scoped by the actor's org rights. Users are central:
+  // if the phone (or email) already belongs to someone, reuse them rather than
+  // creating a duplicate. A freshly created login must change its password on
+  // first sign-in, and its temporary password is returned once so the actor can
+  // share it.
   router.post('/', validateBody(createUserSchema), asyncHandler(async (req, res) => {
     const actor = req.user!;
     const orgId = await assertCanProvision(actor.id, actor.isSuperAdmin, req.body.organization_id ?? null);
 
-    const existing = await prisma.users.findUnique({ where: { email: req.body.email }, select: { id: true } });
-    if (existing) throw new BusinessRuleError('A user with this email already exists');
+    const existing = await findUserByPhone(prisma, req.body.phone)
+      ?? await prisma.users.findUnique({ where: { email: req.body.email }, select: { id: true } });
 
-    const password_hash = await bcrypt.hash(req.body.password || DEFAULT_PASSWORD, 10);
+    if (existing) {
+      const user = await prisma.$transaction(async (tx) => {
+        if (orgId) {
+          await tx.organization_members.upsert({
+            where: { user_id_organization_id: { user_id: existing.id, organization_id: orgId } },
+            update: {},
+            create: { user_id: existing.id, organization_id: orgId, role: 'member' },
+          });
+        }
+        return tx.users.findUnique({ where: { id: existing.id }, select: PUBLIC_SELECT });
+      });
+      res.status(200).json({ ...user, matched: true });
+      return;
+    }
+
+    const { tempPassword, password_hash } = await hashProvisionedPassword(req.body.password);
     const user = await prisma.$transaction(async (tx) => {
       const u = await tx.users.create({
         data: {
@@ -58,6 +83,7 @@ export function makeUsersRouter(prisma: Prisma): Router {
           phone: req.body.phone ?? null,
           password_hash,
           organization_id: orgId,
+          must_change_password: true,
         },
         select: PUBLIC_SELECT,
       });
@@ -70,7 +96,7 @@ export function makeUsersRouter(prisma: Prisma): Router {
       }
       return u;
     });
-    res.status(201).json(user);
+    res.status(201).json({ ...user, created: true, temp_password: tempPassword });
   }));
 
   // Bulk import — match/create by email, optionally mapping each to a championship role.
@@ -106,6 +132,7 @@ export function makeUsersRouter(prisma: Prisma): Router {
               phone: row.phone ?? null,
               password_hash: defaultHash,
               organization_id: orgId,
+              must_change_password: true,
             },
             select: { id: true, name: true },
           });

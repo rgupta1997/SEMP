@@ -116,7 +116,7 @@ export function PlatformUsersPage() {
         <UserFormModal
           organizations={organizations}
           onClose={() => setCreating(false)}
-          onSubmit={async (body: UserFormBody) => { await api('POST', '/users', body); }}
+          onSubmit={(body: UserFormBody) => api('POST', '/users', body)}
         />
       )}
 

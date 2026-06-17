@@ -6,6 +6,7 @@ import { usePermissions } from '../../lib/permissions';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation } from '../../lib/hooks';
 import { OrgTabs } from '../../components/OrgTabs';
+import { CredentialsPanel, PhoneLookupNotice, useUserLookup, type Credentials } from '../../components/userProvisioning';
 import { Avatar, Badge, Button, Card, CardBody, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, SearchInput, Select, Spinner, toast } from '../../components/ui';
 
 interface Member {
@@ -20,25 +21,52 @@ const ROLE_TONE: Record<string, 'brand' | 'green' | 'amber' | 'slate'> = {
 function AddMemberModal({ orgId, onClose }: { orgId: string; onClose: () => void }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [role, setRole] = useState('member');
   const [error, setError] = useState<string | null>(null);
+  const [creds, setCreds] = useState<Credentials | null>(null);
+  const { found } = useUserLookup(phone);
+
   const add = useApiMutation(
     (body: any) => api('POST', `/organizations/${orgId}/members`, body),
     [`/organizations/${orgId}/members`],
-    () => { toast.success('Member added'); onClose(); },
   );
+
   const submit = () => {
     setError(null);
-    if (!email.trim()) { setError('Email is required'); return; }
-    add.mutate({ name: name.trim() || undefined, email: email.trim(), role },
-      { onError: (e: any) => setError(e.message) });
+    const body: any = { role, phone: phone.trim() || undefined };
+    if (found) {
+      body.user_id = found.id; // assign the existing user, no new login
+    } else {
+      if (!email.trim()) { setError('Email is required to create a new member'); return; }
+      body.name = name.trim() || undefined;
+      body.email = email.trim();
+    }
+    add.mutate(body, {
+      onSuccess: (res: any) => {
+        toast.success('Member added');
+        if (res?.poc_credentials) setCreds(res.poc_credentials); else onClose();
+      },
+      onError: (e: any) => setError(e.message),
+    });
   };
+
+  if (creds) {
+    return <Modal title="Member added" onClose={onClose}><CredentialsPanel creds={creds} onDone={onClose} /></Modal>;
+  }
+
   return (
     <Modal title="Add member" onClose={onClose}>
-      <Field label="Full name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rohan Kulkarni" /></Field>
-      <Field label="Email" hint="An existing user is matched by email; a new one gets the default password (demo123).">
-        <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" />
+      <Field label="Phone" hint="We match an existing user by phone; if none, a new login is created.">
+        <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 …" />
       </Field>
+      <PhoneLookupNotice phone={phone} />
+      {!found && (
+        <>
+          <Field label="Full name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rohan Kulkarni" /></Field>
+          <Field label="Email"><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" /></Field>
+        </>
+      )}
       <Field label="Role">
         <Select value={role} onChange={(e) => setRole(e.target.value)}>
           {ORGANIZATION_MEMBER_ROLE.map((r) => <option key={r} value={r}>{r}</option>)}

@@ -44,7 +44,8 @@ function AssignOfficialModal({ eventId, existingIds, onClose }: { eventId: strin
         onSubmit={async (body: UserFormBody) => {
           const u = await api<any>('POST', '/users', body);
           await assignMut.mutateAsync(u.id);
-          onClose();
+          // Return the created user so the modal can show its login to copy.
+          return u;
         }}
       />
     );

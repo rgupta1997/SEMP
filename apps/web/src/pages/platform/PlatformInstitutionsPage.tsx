@@ -75,7 +75,7 @@ export function PlatformInstitutionsPage() {
       {creating && (
         <InstitutionFormModal
           onClose={() => setCreating(false)}
-          onSubmit={async (body: InstitutionFormBody) => { await api('POST', '/organizations', body); }}
+          onSubmit={(body: InstitutionFormBody) => api('POST', '/organizations', body)}
         />
       )}
       {editing && (

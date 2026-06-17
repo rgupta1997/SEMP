@@ -205,7 +205,7 @@ export function makeMeRouter(prisma: Prisma): Router {
     const { memberships, teamIds } = await loadMyTeams(req.user!.id);
 
     if (teamIds.size === 0) {
-      res.json({ stats: { total_events: 0, total_matches: 0, wins: 0, losses: 0, draws: 0 }, championships: [], recent_matches: [] });
+      res.json({ stats: { total_events: 0, total_matches: 0, wins: 0, losses: 0, draws: 0 }, championships: [], recent_matches: [], achievements: [] });
       return;
     }
 
@@ -263,10 +263,34 @@ export function makeMeRouter(prisma: Prisma): Router {
     const { wins, losses, draws } = tally(fixtures, teamIds);
     const recent_matches = fixtures.slice(0, 5).map((f) => toMatchSummary(f, teamIds));
 
+    // Achievements — awards this user has received, newest first, with match context.
+    const awardRows = await prisma.fixture_awards.findMany({
+      where: { recipient_user_id: req.user!.id },
+      include: { fixtures: { include: fixtureInclude } },
+      orderBy: { created_at: 'desc' },
+    });
+    const achievements = awardRows.map((a) => {
+      const f: FixtureRow = a.fixtures;
+      const ts = f?.tournament_disciplines?.tournament_sports;
+      const championship = ts?.tournaments?.championships;
+      const isHome = f?.home_team_id != null && teamIds.has(f.home_team_id);
+      const mine = isHome ? f?.teams_fixtures_home_team_idToteams : f?.teams_fixtures_away_team_idToteams;
+      const opp = isHome ? f?.teams_fixtures_away_team_idToteams : f?.teams_fixtures_home_team_idToteams;
+      return {
+        id: a.id,
+        award_name: a.award_name,
+        date: a.created_at,
+        championship: championship ? { id: championship.id, name: championship.name } : null,
+        sport: mine?.sports?.name ?? ts?.sports?.name ?? null,
+        opponent_team_name: opp?.name ?? null,
+      };
+    });
+
     res.json({
       stats: { total_events: eventMap.size, total_matches: fixtures.length, wins, losses, draws },
       championships,
       recent_matches,
+      achievements,
     });
   }));
 

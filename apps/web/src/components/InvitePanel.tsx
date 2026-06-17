@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
-import { Button, Card, Input, Spinner, StatusBadge, toast } from './ui';
+import { Avatar, Button, Card, Input, Spinner, StatusBadge, toast } from './ui';
 
 interface Invitation {
   id: string;
@@ -11,32 +11,104 @@ interface Invitation {
   organizations?: { id: string; name: string; short_name?: string | null } | null;
 }
 
-// Host-side invite manager: invite organizations to a championship by name + POC
-// mobile. Reused in the create wizard's Invite step and the Invite tab.
+interface Org { id: string; name: string; short_name?: string | null; city?: string | null }
+
+// Searchable picker over the master organization list (GET /organizations).
+function OrgPicker({ value, onChange }: { value: Org | null; onChange: (o: Org | null) => void }) {
+  const { data: orgs = [], isLoading } = useApi<Org[]>('/organizations');
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Close on any click/tap outside the picker, plus Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('pointerdown', onPointer); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return orgs
+      .filter((o) => !q
+        || o.name.toLowerCase().includes(q)
+        || (o.short_name ?? '').toLowerCase().includes(q)
+        || (o.city ?? '').toLowerCase().includes(q))
+      .slice(0, 50);
+  }, [orgs, query]);
+
+  const pick = (o: Org) => { onChange(o); setQuery(o.name); setOpen(false); };
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <Input
+        value={query}
+        onChange={(e) => { setQuery(e.target.value); onChange(null); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder="Search organizations…"
+      />
+      {open && (
+          <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+            {isLoading ? (
+              <div className="grid h-16 place-items-center"><Spinner /></div>
+            ) : results.length === 0 ? (
+              <p className="px-3 py-4 text-center text-sm text-slate-400 dark:text-slate-500">
+                {orgs.length === 0 ? 'No organizations in the master list yet.' : 'No organizations match your search.'}
+              </p>
+            ) : results.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => pick(o)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-700/60"
+              >
+                <Avatar name={o.name} size={28} />
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">
+                    {o.name}{o.short_name ? <span className="ml-1.5 text-slate-400 dark:text-slate-500">({o.short_name})</span> : null}
+                  </div>
+                  {o.city && <div className="truncate text-xs text-slate-400 dark:text-slate-500">{o.city}</div>}
+                </div>
+                {value?.id === o.id && <span className="ml-auto text-brand-600 dark:text-brand-300">✓</span>}
+              </button>
+            ))}
+          </div>
+      )}
+    </div>
+  );
+}
+
+// Host-side invite manager: pick an organization from the master list and add its
+// POC mobile. Reused in the create wizard's Invite step and the Invite tab.
 export function InvitePanel({ eventId }: { eventId: string }) {
   const path = `/championships/${eventId}/invitations`;
   const { data: invites = [], isLoading } = useApi<Invitation[]>(path);
-  const [orgName, setOrgName] = useState('');
+  const [org, setOrg] = useState<Org | null>(null);
   const [mobile, setMobile] = useState('');
 
-  const invite = useApiMutation((body: any) => api('POST', path, body), [path], () => { setOrgName(''); setMobile(''); });
+  const invite = useApiMutation((body: any) => api('POST', path, body), [path], () => { setOrg(null); setMobile(''); });
   const cancel = useApiMutation((id: string) => api('DELETE', `${path}/${id}`), [path]);
 
   const submit = () => {
-    if (!orgName.trim()) { toast.error('Enter an organization name'); return; }
+    if (!org) { toast.error('Pick an organization from the list'); return; }
     if (mobile.replace(/\D/g, '').length < 10) { toast.error('Enter a valid POC mobile number'); return; }
-    invite.mutate({ org_name: orgName.trim(), poc_mobile: mobile.trim() },
+    invite.mutate({ org_name: org.name, poc_mobile: mobile.trim() },
       { onSuccess: () => toast.success('Invitation sent'), onError: (e: any) => toast.error(e.message) });
   };
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-slate-500 dark:text-slate-400">Add each org and its POC mobile. They confirm and add their own teams — you don't enter rosters.</p>
+      <p className="text-sm text-slate-500 dark:text-slate-400">Pick each org from the master list and add its POC mobile. They confirm and add their own teams — you don't enter rosters.</p>
 
       <div className="flex flex-wrap items-end gap-2">
         <label className="min-w-[200px] flex-1">
           <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Organization</span>
-          <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="e.g. Acme Corp" />
+          <OrgPicker value={org} onChange={setOrg} />
         </label>
         <label className="min-w-[160px]">
           <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">POC mobile</span>

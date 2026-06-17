@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button, Field, Input, Modal, Select } from './ui';
+import { CredentialsPanel, PhoneLookupNotice, type Credentials } from './userProvisioning';
 
 export interface UserFormBody {
   name: string;
@@ -46,6 +47,7 @@ export function UserFormModal({
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [creds, setCreds] = useState<Credentials | null>(null);
 
   const showInstitution = !lockInstitutionId && organizations !== undefined;
 
@@ -63,9 +65,13 @@ export function UserFormModal({
     else if (showInstitution) body.organization_id = institutionId || null;
     setBusy(true);
     try {
-      await onSubmit(body);
+      const res: any = await onSubmit(body);
       qc.invalidateQueries(); // refresh lists that reference users
-      onClose();
+      // If a new login was provisioned, surface its credentials to copy/share.
+      const c: Credentials | null = res?.temp_password
+        ? { name: res.name, email: res.email, phone: res.phone, password: res.temp_password }
+        : (res?.poc_credentials ?? null);
+      if (c) setCreds(c); else onClose();
     } catch (e: any) {
       setError(e?.message ?? 'Could not save');
     } finally {
@@ -73,11 +79,20 @@ export function UserFormModal({
     }
   };
 
+  if (creds) {
+    return (
+      <Modal title={title ?? 'User created'} onClose={onClose}>
+        <CredentialsPanel creds={creds} onDone={onClose} />
+      </Modal>
+    );
+  }
+
   return (
     <Modal title={title ?? (isEdit ? 'Edit user' : 'Add user')} onClose={onClose}>
       <Field label="Full name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rohan Kulkarni" /></Field>
       <Field label="Email"><Input type="email" value={email} disabled={isEdit} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" /></Field>
       <Field label="Phone"><Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Optional" /></Field>
+      {!isEdit && <PhoneLookupNotice phone={phone} />}
       {showInstitution && (
         <Field label="Organization">
           <Select value={institutionId} onChange={(e) => setInstitutionId(e.target.value)}>

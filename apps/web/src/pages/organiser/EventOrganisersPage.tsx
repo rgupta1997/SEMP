@@ -43,7 +43,9 @@ function AddOrganiserModal({ eventId, roleId, assignedIds, onClose }:
         onSubmit={async (body: UserFormBody) => {
           const u = await api<any>('POST', '/users', body);
           await assign.mutateAsync(u.id);
-          onClose();
+          // Return the created user so the modal can show its login to copy; it
+          // closes itself (or shows the credentials panel for a new login).
+          return u;
         }}
       />
     );

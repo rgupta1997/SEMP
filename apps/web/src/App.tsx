@@ -4,6 +4,7 @@ import { useAuth, type AppRole } from './lib/auth';
 import { AppShell, roleHome } from './components/AppShell';
 import { Spinner, ToastProvider } from './components/ui';
 import { AuthPage } from './pages/AuthPage';
+import { ChangePasswordPage } from './pages/ChangePasswordPage';
 
 // Host / championship management (reachable by the championship's organiser)
 import { CreateEventWizard } from './pages/organiser/CreateEventWizard';
@@ -126,6 +127,8 @@ function AppRoutes() {
       <Route path="*" element={<AuthPage />} />
     </Routes>
   );
+  // Provisioned logins must set their own password before they can use the app.
+  if (ctx.user.must_change_password) return <ChangePasswordPage />;
   // After an explicit login/signup, bounce to the role's home so the previous
   // session's last-visited URL never renders. Initial token refresh skips this.
   if (justLoggedIn) return <Navigate to={roleHome(activeRole)} replace />;
