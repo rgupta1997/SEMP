@@ -92,6 +92,7 @@ model fixtures {
   winner_team_id                       String?                @db.Uuid
   live_state                           Json                   @default("{}")
   live_log                             Json                   @default("[]")
+  fixture_awards                       fixture_awards[]
   teams_fixtures_away_team_idToteams   teams?                 @relation("fixtures_away_team_idToteams", fields: [away_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   teams_fixtures_home_team_idToteams   teams?                 @relation("fixtures_home_team_idToteams", fields: [home_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users                                users?                 @relation(fields: [official_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -333,12 +334,14 @@ model users {
   is_super_admin                                                           Boolean                      @default(false)
   organization_id                                                          String?                      @db.Uuid
   account_type                                                             String?                      @default("participant") @db.VarChar
+  must_change_password                                                     Boolean                      @default(false)
   championship_invitations_championship_invitations_accepted_byTousers     championship_invitations[]   @relation("championship_invitations_accepted_byTousers")
   championship_invitations_championship_invitations_invited_byTousers      championship_invitations[]   @relation("championship_invitations_invited_byTousers")
   championship_officials_championship_officials_assigned_byTousers         championship_officials[]     @relation("championship_officials_assigned_byTousers")
   championship_officials_championship_officials_user_idTousers             championship_officials[]     @relation("championship_officials_user_idTousers")
   championship_organizations_championship_organizations_applied_byTousers  championship_organizations[] @relation("championship_organizations_applied_byTousers")
   championship_organizations_championship_organizations_reviewed_byTousers championship_organizations[] @relation("championship_organizations_reviewed_byTousers")
+  fixture_awards                                                           fixture_awards[]
   fixtures                                                                 fixtures[]
   notification_reactions                                                   notification_reactions[]
   notification_reads                                                       notification_reads[]
@@ -469,4 +472,17 @@ model championship_invitations {
 
   @@index([championship_id], map: "idx_championship_invitations_championship")
   @@index([poc_mobile], map: "idx_championship_invitations_mobile")
+}
+
+model fixture_awards {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fixture_id        String   @db.Uuid
+  recipient_user_id String   @db.Uuid
+  award_name        String   @db.VarChar(120)
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+  fixtures          fixtures @relation(fields: [fixture_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users             users    @relation(fields: [recipient_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([fixture_id], map: "idx_fixture_awards_fixture")
+  @@index([recipient_user_id], map: "idx_fixture_awards_recipient")
 }

@@ -21,6 +21,14 @@ export const registerSchema = z.object({
   phone: z.string().optional(),
 });
 
+// Change your own password. `current_password` is required for a normal change but
+// skipped on a forced first-login change (the user just authenticated with the
+// temporary password and may not know it as a "current" secret).
+export const changePasswordSchema = z.object({
+  current_password: z.string().optional(),
+  new_password: z.string().min(6),
+});
+
 // Self-serve sign up — every login is just a user. There is no account-type
 // choice: a user becomes an organiser by hosting a championship, a member by
 // joining/creating an organization, an official by being assigned to one.
@@ -120,11 +128,15 @@ export const updateOrganizationSchema = createOrganizationSchema.partial();
 export const createOrganizationWithOwnerSchema = createOrganizationSchema.extend({
   owner: z
     .object({
-      name: z.string().min(1),
-      email: z.string().email(),
+      // Either link an existing user (found by phone) ...
+      user_id: uuid.optional(),
+      // ... or provide details to create a new login.
+      name: z.string().min(1).optional(),
+      email: z.string().email().optional(),
       password: z.string().min(6).optional(),
       phone: z.string().optional(),
     })
+    .refine((o) => !!(o.user_id || (o.name && o.email)), { message: 'Provide an existing user or a name and email' })
     .optional(),
 });
 
@@ -133,8 +145,9 @@ export const addOrganizationMemberSchema = z.object({
   user_id: uuid.optional(),
   name: z.string().optional(),
   email: z.string().email().optional(),
+  phone: z.string().optional(),
   role: z.enum(ORGANIZATION_MEMBER_ROLE).default('member'),
-}).refine((m) => !!(m.user_id || m.email), { message: 'Provide a user or an email' });
+}).refine((m) => !!(m.user_id || m.email || m.phone), { message: 'Provide a user, a phone, or an email' });
 export const updateOrganizationMemberSchema = z.object({
   role: z.enum(ORGANIZATION_MEMBER_ROLE).optional(),
   status: z.enum(['active', 'past'] as const).optional(),
@@ -333,6 +346,16 @@ export const fixtureResultSchema = z.object({
   winner_team_id: uuid.nullable().optional(),
   status: z.enum(FIXTURE_STATUS).optional(),
   notes: z.string().optional(),
+});
+
+// Per-match awards entered by the scorer: free-text award name + a recipient who is
+// a player on one of the two competing teams. Saved with replace-all semantics.
+export const fixtureAwardSchema = z.object({
+  award_name: z.string().min(1).max(120),
+  recipient_user_id: uuid,
+});
+export const fixtureAwardsSchema = z.object({
+  awards: z.array(fixtureAwardSchema).max(50).default([]),
 });
 
 // ---------- Notifications ----------
