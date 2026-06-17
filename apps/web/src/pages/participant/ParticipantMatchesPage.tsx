@@ -23,11 +23,11 @@ export function ParticipantMatchesPage() {
   const qs = new URLSearchParams();
   if (eventId) qs.set('championship_id', eventId);
   if (status) qs.set('status', status);
-  const path = `/profile/matches${qs.toString() ? `?${qs}` : ''}`;
+  const path = `/me/matches${qs.toString() ? `?${qs}` : ''}`;
   const { data, isLoading } = useApi<MatchesResponse>(path);
 
   // Build the championship + sport options from the unfiltered set (sport cascades on championship).
-  const allMatches = useApi<MatchesResponse>('/profile/matches').data?.matches ?? [];
+  const allMatches = useApi<MatchesResponse>('/me/matches').data?.matches ?? [];
   const eventOptions = useMemo(() => {
     const map = new Map<string, string>();
     for (const m of allMatches) if (m.championship) map.set(m.championship.id, m.championship.name);
