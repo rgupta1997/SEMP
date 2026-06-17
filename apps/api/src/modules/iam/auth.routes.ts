@@ -67,6 +67,10 @@ export function makeAuthRouter(prisma: Prisma): Router {
     const user = await prisma.users.findUnique({ where: { id: req.user!.id } });
     if (!user) throw new NotFoundError('User');
     const context = await buildAuthContext(prisma, user);
+    // Identity/permissions are per-user and change (roles, must_change_password,
+    // org membership). Never let the browser cache or 304-revalidate it — always
+    // serve a fresh 200 so a stale context can't linger after those change.
+    res.set('Cache-Control', 'no-store');
     res.json(context);
   }));
 
