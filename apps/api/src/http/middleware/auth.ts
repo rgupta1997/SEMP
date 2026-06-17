@@ -8,8 +8,7 @@ export interface JwtPayload {
   sub: string;
   email: string;
   isSuperAdmin: boolean;
-  accountType: string;
-  institutionId: string | null;
+  organizationId: string | null;
 }
 
 export function signToken(user: AuthUser): string {
@@ -17,8 +16,7 @@ export function signToken(user: AuthUser): string {
     sub: user.id,
     email: user.email,
     isSuperAdmin: user.isSuperAdmin,
-    accountType: user.accountType,
-    institutionId: user.institutionId,
+    organizationId: user.organizationId,
   };
   return jwt.sign(payload, env.JWT_SECRET, { expiresIn: '7d' });
 }
@@ -33,8 +31,7 @@ export function parseAuth(req: Request, _res: Response, next: NextFunction): voi
         id: decoded.sub,
         email: decoded.email,
         isSuperAdmin: decoded.isSuperAdmin,
-        accountType: decoded.accountType ?? 'participant',
-        institutionId: decoded.institutionId ?? null,
+        organizationId: decoded.organizationId ?? null,
       };
     } catch {
       /* invalid token -> treated as anonymous */

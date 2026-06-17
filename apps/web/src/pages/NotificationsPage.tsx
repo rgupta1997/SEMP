@@ -10,11 +10,11 @@ import { Button, EmptyState, PageHeader, Select, Spinner } from '../components/u
 const FEED_KEY = '/notifications?take=100';
 const UNREAD_KEY = '/notifications/unread-count';
 
-// Full notification feed across every event the user belongs to.
+// Full notification feed across every championship the user belongs to.
 export function NotificationsPage() {
   const qc = useQueryClient();
   const { data: items = [], isLoading } = useApi<NotificationDto[]>(FEED_KEY);
-  const { data: postable = [] } = useApi<PostableEvent[]>('/notifications/postable-events');
+  const { data: postable = [] } = useApi<PostableEvent[]>('/notifications/postable-championships');
   const [eventId, setEventId] = useState('');
   const [composing, setComposing] = useState(false);
 
@@ -28,18 +28,18 @@ export function NotificationsPage() {
 
   const eventOptions = useMemo(() => {
     const map = new Map<string, string>();
-    for (const n of items) if (n.event) map.set(n.event.id, n.event.name);
+    for (const n of items) if (n.championship) map.set(n.championship.id, n.championship.name);
     return [...map.entries()].map(([id, name]) => ({ id, name }));
   }, [items]);
 
-  const visible = eventId ? items.filter((n) => n.event?.id === eventId) : items;
+  const visible = eventId ? items.filter((n) => n.championship?.id === eventId) : items;
 
   return (
     <div>
-      <PageHeader title="Notifications" subtitle="Updates from every event you're part of">
+      <PageHeader title="Notifications" subtitle="Updates from every championship you're part of">
         {eventOptions.length > 1 && (
-          <Select value={eventId} onChange={(e) => setEventId(e.target.value)} aria-label="Filter by event">
-            <option value="">All events</option>
+          <Select value={eventId} onChange={(e) => setEventId(e.target.value)} aria-label="Filter by championship">
+            <option value="">All championships</option>
             {eventOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
           </Select>
         )}
@@ -52,7 +52,7 @@ export function NotificationsPage() {
         <EmptyState
           icon="🔔"
           title="No notifications yet"
-          description="Announcements and event updates will show up here."
+          description="Announcements and championship updates will show up here."
         />
       ) : (
         <div className="mx-auto max-w-2xl space-y-2.5">

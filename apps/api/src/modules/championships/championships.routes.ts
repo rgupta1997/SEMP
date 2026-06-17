@@ -1,0 +1,381 @@
+import { Router } from 'express';
+import { createChampionshipSchema, updateChampionshipSchema, updateChampionshipStatusSchema, type ChampionshipStatus } from '@semp/shared';
+import type { Prisma } from '../../infra/prisma.js';
+import { asyncHandler } from '../../http/middleware/error.js';
+import { validateBody } from '../../http/middleware/validate.js';
+import { makeGuards } from '../../http/middleware/permissions.js';
+import { NotFoundError } from '../../shared/errors.js';
+import { assertChampionshipTransition } from './domain/championship-lifecycle.js';
+import { createNotification } from '../notifications/audience.js';
+
+// Human-readable lifecycle notification copy per target status. Returned undefined
+// for statuses we don't announce (e.g. back to draft).
+function lifecycleMessage(status: ChampionshipStatus): { title: string; body: string } | undefined {
+  switch (status) {
+    case 'registration_open':
+      return { title: 'Registration is open', body: 'This championship is now open for organization registration.' };
+    case 'ongoing':
+      return { title: 'The championship is now live', body: 'Matches are underway — good luck to all teams.' };
+    case 'completed':
+      return { title: 'The championship has concluded', body: 'Thanks for taking part. Final standings are available.' };
+    default:
+      return undefined;
+  }
+}
+
+export function makeEventsRouter(prisma: Prisma): Router {
+  const router = Router();
+  const guards = makeGuards(prisma);
+  // organiser of THIS championship (or super) — for mutations on /:id and its children.
+  const ownChampionship = guards.championshipManager(async (req) => req.params.id);
+
+  // -------------------------------------------------------------------------
+  // DISCOVER — every championship, open to any authenticated user (spectators
+  // included). The "Host" and "Championships" views are derived from /mine.
+  // -------------------------------------------------------------------------
+  router.get('/', asyncHandler(async (_req, res) => {
+    const championships = await prisma.championships.findMany({ orderBy: { created_at: 'desc' } });
+    res.json(championships);
+  }));
+
+  // -------------------------------------------------------------------------
+  // MINE — championships the user is involved in, each tagged with the roles
+  // they hold (organiser / official / player / member). Powers the
+  // "Championships" page and (filtered to organiser) the "Host" page.
+  // -------------------------------------------------------------------------
+  router.get('/mine', asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
+    const roles = new Map<string, Set<string>>();
+    const add = (id: string, role: string) => {
+      if (!roles.has(id)) roles.set(id, new Set());
+      roles.get(id)!.add(role);
+    };
+
+    const [orgRole, offRole] = await Promise.all([
+      prisma.roles.findUnique({ where: { name: 'Organiser' }, select: { id: true } }),
+      prisma.roles.findUnique({ where: { name: 'Official' }, select: { id: true } }),
+    ]);
+
+    const [championshipRoleRows, officialRows, memberRows, enrolledRows] = await Promise.all([
+      prisma.user_championship_roles.findMany({ where: { user_id: userId }, select: { championship_id: true, role_id: true } }),
+      prisma.championship_officials.findMany({ where: { user_id: userId, is_active: true }, select: { championship_id: true } }),
+      prisma.team_members.findMany({ where: { user_id: userId, is_active: true }, select: { teams: { select: { championship_id: true } } } }),
+      prisma.championship_organizations.findMany({
+        where: { organizations: { organization_members: { some: { user_id: userId, status: 'active' } } } },
+        select: { championship_id: true },
+      }),
+    ]);
+
+    for (const r of championshipRoleRows) {
+      if (offRole && r.role_id === offRole.id) add(r.championship_id, 'official');
+      else add(r.championship_id, 'organiser');
+    }
+    for (const o of officialRows) add(o.championship_id, 'official');
+    for (const m of memberRows) if (m.teams?.championship_id) add(m.teams.championship_id, 'player');
+    for (const e of enrolledRows) add(e.championship_id, 'member');
+
+    const ids = [...roles.keys()];
+    if (ids.length === 0) { res.json([]); return; }
+    const championships = await prisma.championships.findMany({
+      where: { id: { in: ids } },
+      orderBy: { created_at: 'desc' },
+    });
+    res.json(championships.map((c) => ({ ...c, my_roles: [...(roles.get(c.id) ?? [])] })));
+  }));
+
+  // GET single championship
+  router.get('/:id', asyncHandler(async (req, res) => {
+    const championship = await prisma.championships.findUnique({ where: { id: req.params.id } });
+    if (!championship) throw new NotFoundError('Championship');
+    res.json(championship);
+  }));
+
+  // CREATE championship — any authenticated user may host. Creator is auto-assigned Organiser.
+  router.post('/', validateBody(createChampionshipSchema), asyncHandler(async (req, res) => {
+    const championship = await prisma.championships.create({ data: req.body });
+    const organiserRole = await prisma.roles.findUnique({ where: { name: 'Organiser' } });
+    if (organiserRole) {
+      await prisma.user_championship_roles.create({
+        data: { championship_id: championship.id, user_id: req.user!.id, role_id: organiserRole.id },
+      });
+    }
+    res.status(201).json(championship);
+  }));
+
+  // UPDATE championship
+  router.patch('/:id', ownChampionship, validateBody(updateChampionshipSchema), asyncHandler(async (req, res) => {
+    const championship = await prisma.championships.update({ where: { id: req.params.id }, data: req.body });
+    res.json(championship);
+  }));
+
+  // DELETE championship — host (organiser) or super admin only, via ownChampionship.
+  // Most child FKs are ON DELETE NO ACTION in the DB, and every championship has at
+  // least the creator's organiser role row, so we remove dependents in dependency
+  // order inside one transaction. (officials, notifications and invitations cascade
+  // automatically through their own FKs.)
+  router.delete('/:id', ownChampionship, asyncHandler(async (req, res) => {
+    const id = req.params.id;
+    await prisma.$transaction([
+      // Fixtures sit at the bottom — they reference teams, grounds and disciplines.
+      prisma.fixtures.deleteMany({ where: { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: id } } } } }),
+      prisma.team_members.deleteMany({ where: { teams: { championship_id: id } } }),
+      prisma.teams.deleteMany({ where: { championship_id: id } }),
+      prisma.tournament_disciplines.deleteMany({ where: { tournament_sports: { tournaments: { championship_id: id } } } }),
+      prisma.tournament_sports.deleteMany({ where: { tournaments: { championship_id: id } } }),
+      prisma.tournaments.deleteMany({ where: { championship_id: id } }),
+      prisma.venue_grounds.deleteMany({ where: { venues: { championship_id: id } } }),
+      prisma.venues.deleteMany({ where: { championship_id: id } }),
+      prisma.championship_organizations.deleteMany({ where: { championship_id: id } }),
+      prisma.sponsors.deleteMany({ where: { championship_id: id } }),
+      prisma.user_championship_roles.deleteMany({ where: { championship_id: id } }),
+      prisma.championships.delete({ where: { id } }),
+    ]);
+    res.status(204).send();
+  }));
+
+  // Status transition (validated lifecycle) — defined before generic /:id routes.
+  router.patch('/:id/status', ownChampionship, validateBody(updateChampionshipStatusSchema), asyncHandler(async (req, res) => {
+    const championship = await prisma.championships.findUnique({ where: { id: req.params.id } });
+    if (!championship) throw new NotFoundError('Championship');
+    assertChampionshipTransition(championship.status as ChampionshipStatus, req.body.status as ChampionshipStatus);
+    const updated = await prisma.championships.update({ where: { id: req.params.id }, data: { status: req.body.status } });
+
+    // Lifecycle announcement → organizations + captains only.
+    const msg = lifecycleMessage(req.body.status as ChampionshipStatus);
+    if (msg) {
+      await createNotification(prisma, {
+        championship_id: updated.id,
+        sender_id: req.user!.id,
+        type: 'event_lifecycle',
+        audience: 'organizations_captains',
+        title: msg.title,
+        body: msg.body,
+      });
+    }
+
+    res.json(updated);
+  }));
+
+  // All draws (tournament_disciplines) across the championship, flattened with their
+  // sport/discipline/tournament names — powers team entry (single + bulk).
+  router.get('/:id/draws', asyncHandler(async (req, res) => {
+    const draws = await prisma.tournament_disciplines.findMany({
+      where: { tournament_sports: { tournaments: { championship_id: req.params.id } } },
+      include: {
+        disciplines: true,
+        tournament_sports: { include: { sports: true, tournaments: { select: { id: true, name: true } } } },
+      },
+      orderBy: { display_order: 'asc' },
+    });
+    res.json(draws);
+  }));
+
+  // All fixtures across the championship, flattened with team / ground / sport names —
+  // powers the schedule timeline (Gantt) view.
+  router.get('/:id/fixtures', asyncHandler(async (req, res) => {
+    const fixtures = await prisma.fixtures.findMany({
+      where: { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: req.params.id } } } },
+      include: {
+        teams_fixtures_home_team_idToteams: { select: { id: true, name: true, organizations: { select: { short_name: true, name: true } } } },
+        teams_fixtures_away_team_idToteams: { select: { id: true, name: true, organizations: { select: { short_name: true, name: true } } } },
+        venue_grounds: { select: { id: true, name: true, venues: { select: { name: true } } } },
+        tournament_disciplines: {
+          select: {
+            entry_type: true,
+            disciplines: { select: { name: true } },
+            tournament_sports: {
+              select: {
+                sports: { select: { name: true, icon: true } },
+                tournaments: { select: { id: true, name: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ scheduled_at: 'asc' }, { created_at: 'asc' }],
+    });
+    res.json(fixtures.map((f) => ({
+      id: f.id,
+      status: f.status,
+      round: f.round,
+      scheduled_at: f.scheduled_at,
+      duration_minutes: f.duration_minutes,
+      tournament_discipline_id: f.tournament_discipline_id,
+      entry_type: f.tournament_disciplines?.entry_type ?? null,
+      home_score: f.home_score,
+      away_score: f.away_score,
+      winner_team_id: f.winner_team_id,
+      ground: f.venue_grounds ? { id: f.venue_grounds.id, name: f.venue_grounds.name, venue: f.venue_grounds.venues?.name ?? null } : null,
+      sport: f.tournament_disciplines?.tournament_sports?.sports?.name ?? null,
+      sport_icon: f.tournament_disciplines?.tournament_sports?.sports?.icon ?? null,
+      tournament: f.tournament_disciplines?.tournament_sports?.tournaments ?? null,
+      discipline: f.tournament_disciplines?.disciplines?.name ?? null,
+      home: f.teams_fixtures_home_team_idToteams,
+      away: f.teams_fixtures_away_team_idToteams,
+    })));
+  }));
+
+  // All grounds across the championship's venues — used to schedule fixtures to a ground.
+  router.get('/:id/grounds', asyncHandler(async (req, res) => {
+    const grounds = await prisma.venue_grounds.findMany({
+      where: { venues: { championship_id: req.params.id } },
+      include: { venues: { select: { id: true, name: true } } },
+      orderBy: [{ venue_id: 'asc' }, { display_order: 'asc' }],
+    });
+    res.json(grounds);
+  }));
+
+  // Computed standings: a points table aggregated by organization from completed
+  // fixtures across the whole championship (win = 3, draw = 1, loss = 0).
+  router.get('/:id/standings', asyncHandler(async (req, res) => {
+    const fixtures = await prisma.fixtures.findMany({
+      where: {
+        status: 'completed',
+        tournament_disciplines: { tournament_sports: { tournaments: { championship_id: req.params.id } } },
+      },
+      include: {
+        teams_fixtures_home_team_idToteams: { include: { organizations: true } },
+        teams_fixtures_away_team_idToteams: { include: { organizations: true } },
+      },
+    });
+
+    type Row = { organization_id: string; organization: any; played: number; won: number; drawn: number; lost: number; points: number };
+    const table = new Map<string, Row>();
+    const ensure = (inst: any): Row | null => {
+      if (!inst) return null;
+      if (!table.has(inst.id)) table.set(inst.id, { organization_id: inst.id, organization: inst, played: 0, won: 0, drawn: 0, lost: 0, points: 0 });
+      return table.get(inst.id)!;
+    };
+
+    for (const f of fixtures) {
+      const home = ensure(f.teams_fixtures_home_team_idToteams?.organizations);
+      const away = ensure(f.teams_fixtures_away_team_idToteams?.organizations);
+      if (!home && !away) continue;
+      if (home) home.played++;
+      if (away) away.played++;
+
+      const draw = f.winner_team_id == null && f.home_score != null && f.away_score != null && f.home_score === f.away_score;
+      if (draw) {
+        if (home) { home.drawn++; home.points += 1; }
+        if (away) { away.drawn++; away.points += 1; }
+      } else if (f.winner_team_id) {
+        const homeWon = f.winner_team_id === f.home_team_id;
+        if (home) { if (homeWon) { home.won++; home.points += 3; } else { home.lost++; } }
+        if (away) { if (!homeWon) { away.won++; away.points += 3; } else { away.lost++; } }
+      }
+    }
+
+    const rows = [...table.values()].sort((a, b) => b.points - a.points || b.won - a.won || a.lost - b.lost);
+    res.json({ standings: rows, completed_matches: fixtures.length });
+  }));
+
+  // -------------------------------------------------------------------------
+  // EVENT PARTICIPANTS - users on teams in this championship (scoped view)
+  // -------------------------------------------------------------------------
+  router.get('/:id/participants', asyncHandler(async (req, res) => {
+    const teams = await prisma.teams.findMany({
+      where: { championship_id: req.params.id },
+      include: {
+        team_members: {
+          include: { users: { select: { id: true, name: true, email: true, phone: true, account_type: true } } },
+        },
+        organizations: { select: { id: true, name: true, short_name: true } },
+        sports: { select: { id: true, name: true, icon: true } },
+      },
+    });
+
+    // Flatten to unique participants with their team info
+    const seen = new Map<string, any>();
+    for (const team of teams) {
+      for (const member of team.team_members) {
+        if (!member.users) continue;
+        const existing = seen.get(member.users.id);
+        if (existing) {
+          existing.teams.push({ team_id: team.id, team_name: team.name, sport: team.sports, role: member.role, jersey_number: member.jersey_number });
+        } else {
+          seen.set(member.users.id, {
+            ...member.users,
+            organization: team.organizations,
+            teams: [{ team_id: team.id, team_name: team.name, sport: team.sports, role: member.role, jersey_number: member.jersey_number }],
+          });
+        }
+      }
+    }
+
+    res.json([...seen.values()]);
+  }));
+
+  // -------------------------------------------------------------------------
+  // EVENT OFFICIALS - officials assigned to this championship
+  // -------------------------------------------------------------------------
+  router.get('/:id/officials', asyncHandler(async (req, res) => {
+    const officials = await prisma.championship_officials.findMany({
+      where: { championship_id: req.params.id, is_active: true },
+      include: {
+        users_championship_officials_user_idTousers: { select: { id: true, name: true, email: true, phone: true, account_type: true } },
+        users_championship_officials_assigned_byTousers: { select: { id: true, name: true } },
+      },
+      orderBy: { assigned_at: 'desc' },
+    });
+    res.json(officials.map((o) => ({
+      id: o.id,
+      user: o.users_championship_officials_user_idTousers,
+      assigned_by: o.users_championship_officials_assigned_byTousers,
+      assigned_at: o.assigned_at,
+      notes: o.notes,
+    })));
+  }));
+
+  // Assign official to championship
+  router.post('/:id/officials', ownChampionship, asyncHandler(async (req, res) => {
+    const { user_id, notes } = req.body;
+    if (!user_id) throw new NotFoundError('user_id required');
+    
+    const existing = await prisma.championship_officials.findUnique({
+      where: { championship_id_user_id: { championship_id: req.params.id, user_id } },
+    });
+    if (existing) {
+      // Reactivate if inactive
+      const updated = await prisma.championship_officials.update({
+        where: { id: existing.id },
+        data: { is_active: true, notes },
+        include: { users_championship_officials_user_idTousers: { select: { id: true, name: true, email: true } } },
+      });
+      res.json({ ...updated, user: updated.users_championship_officials_user_idTousers });
+      return;
+    }
+
+    const official = await prisma.championship_officials.create({
+      data: { championship_id: req.params.id, user_id, assigned_by: req.user!.id, notes },
+      include: { users_championship_officials_user_idTousers: { select: { id: true, name: true, email: true } } },
+    });
+    res.status(201).json({ ...official, user: official.users_championship_officials_user_idTousers });
+  }));
+
+  // Remove official from championship
+  router.delete('/:id/officials/:officialId', ownChampionship, asyncHandler(async (req, res) => {
+    await prisma.championship_officials.update({
+      where: { id: req.params.officialId },
+      data: { is_active: false },
+    });
+    res.status(204).send();
+  }));
+
+  // -------------------------------------------------------------------------
+  // EVENT INSTITUTIONS (enrollments) - already exists via enrollment router
+  // but add a convenience read endpoint here
+  // -------------------------------------------------------------------------
+  router.get('/:id/organizations', asyncHandler(async (req, res) => {
+    const enrollments = await prisma.championship_organizations.findMany({
+      where: { championship_id: req.params.id },
+      include: {
+        organizations: true,
+        users_championship_organizations_applied_byTousers: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { applied_at: 'desc' },
+    });
+    res.json(enrollments);
+  }));
+
+  return router;
+}

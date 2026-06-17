@@ -8,7 +8,7 @@ import { MatchRow } from '../../components/participant/MatchRow';
 import type { MatchSummary } from '../../components/participant/types';
 
 interface EventDetail {
-  event: {
+  championship: {
     id: string; name: string; slug: string; status: string;
     start_date: string | null; end_date: string | null; venue: string | null; description: string | null;
   };
@@ -20,7 +20,7 @@ interface EventDetail {
   }[];
   matches: MatchSummary[];
   standings: {
-    institution_id: string; institution: any;
+    organization_id: string; organization: any;
     played: number; won: number; drawn: number; lost: number; points: number;
   }[];
 }
@@ -30,20 +30,20 @@ const MEDAL = ['🥇', '🥈', '🥉'];
 export function ParticipantEventPage() {
   const { eventId } = useParams();
   const [tab, setTab] = useState('overview');
-  const { data, isLoading, error } = useApi<EventDetail>(`/me/events/${eventId}`);
+  const { data, isLoading, error } = useApi<EventDetail>(`/me/championships/${eventId}`);
 
   if (isLoading) return <Spinner />;
   if (error || !data) {
-    return <EmptyState icon="◆" title="Event not available" description="This event doesn't exist or you didn't participate in it." />;
+    return <EmptyState icon="◆" title="Championship not available" description="This championship doesn't exist or you didn't participate in it." />;
   }
 
-  const { event, stats, teams, matches, standings } = data;
+  const { championship, stats, teams, matches, standings } = data;
 
   return (
     <div className="space-y-5">
-      <BackButton to="/me">Dashboard</BackButton>
-      <PageHeader title={event.name} subtitle={`${event.venue ? `${event.venue} · ` : ''}${fmtDateRange(event.start_date, event.end_date)}`}>
-        <StatusBadge status={event.status} />
+      <BackButton to="/profile">Dashboard</BackButton>
+      <PageHeader title={championship.name} subtitle={`${championship.venue ? `${championship.venue} · ` : ''}${fmtDateRange(championship.start_date, championship.end_date)}`}>
+        <StatusBadge status={championship.status} />
       </PageHeader>
 
       <Tabs
@@ -65,10 +65,10 @@ export function ParticipantEventPage() {
             <StatCard label="Losses" value={stats.losses} />
             <StatCard label="Draws" value={stats.draws} />
           </div>
-          {event.description && (
+          {championship.description && (
             <Card>
-              <CardHeader title="About this event" />
-              <CardBody className="pt-0 text-sm text-slate-600 dark:text-slate-300">{event.description}</CardBody>
+              <CardHeader title="About this championship" />
+              <CardBody className="pt-0 text-sm text-slate-600 dark:text-slate-300">{championship.description}</CardBody>
             </Card>
           )}
         </div>
@@ -126,7 +126,7 @@ export function ParticipantEventPage() {
             <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               <tr>
                 <th className="px-4 py-3">#</th>
-                <th className="px-4 py-3">Institution</th>
+                <th className="px-4 py-3">Organization</th>
                 <th className="px-3 py-3 text-center">P</th>
                 <th className="px-3 py-3 text-center">W</th>
                 <th className="px-3 py-3 text-center">D</th>
@@ -136,12 +136,12 @@ export function ParticipantEventPage() {
             </thead>
             <tbody>
               {standings.map((r, i) => (
-                <tr key={r.institution_id} className="border-t border-slate-100 dark:border-slate-800">
+                <tr key={r.organization_id} className="border-t border-slate-100 dark:border-slate-800">
                   <td className="px-4 py-3 text-lg">{MEDAL[i] ?? <span className="font-bold text-slate-400 dark:text-slate-500">{i + 1}</span>}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <Avatar name={r.institution?.name} size={30} />
-                      <span className="font-medium text-slate-800 dark:text-slate-200">{r.institution?.name}</span>
+                      <Avatar name={r.organization?.name} size={30} />
+                      <span className="font-medium text-slate-800 dark:text-slate-200">{r.organization?.name}</span>
                     </div>
                   </td>
                   <td className="px-3 py-3 text-center text-slate-600 dark:text-slate-300">{r.played}</td>

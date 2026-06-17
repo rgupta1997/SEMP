@@ -14,7 +14,7 @@ interface BulkImportModalProps<R> {
   templateName: string;          // downloaded file name, e.g. 'users-template.csv'
   sampleRow?: string[];          // example values aligned to `fields` order
   submitLabel?: string;
-  extraControls?: ReactNode;     // e.g. event/role mapping above the importer
+  extraControls?: ReactNode;     // e.g. championship/role mapping above the importer
   onClose: () => void;
   onSubmit: (rows: Record<string, string>[]) => Promise<R>;
   renderResult?: (res: R) => ReactNode;

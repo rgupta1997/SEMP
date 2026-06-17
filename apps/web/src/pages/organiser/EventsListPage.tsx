@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApi, useTableControls, fmtDateRange } from '../../lib/hooks';
 import { Button, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, StatusBadge } from '../../components/ui';
 
-// Placeholder grid shown while events load.
+// Placeholder grid shown while championships load.
 function EventGridSkeleton() {
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -20,18 +20,18 @@ function EventGridSkeleton() {
   );
 }
 
-interface Event { id: string; name: string; slug: string; status: string; venue?: string; start_date: string; end_date: string; description?: string }
+interface Championship { id: string; name: string; slug: string; status: string; venue?: string; start_date: string; end_date: string; description?: string }
 
 const STATUS_FILTERS = ['all', 'draft', 'registration_open', 'ongoing', 'completed', 'cancelled'];
 
 export function EventsListPage() {
   const navigate = useNavigate();
-  const { data: events = [], isLoading } = useApi<Event[]>('/events');
+  const { data: championships = [], isLoading } = useApi<Championship[]>('/championships');
   const [status, setStatus] = useState('all');
 
   const filtered = useMemo(
-    () => (status === 'all' ? events : events.filter((e) => e.status === status)),
-    [events, status],
+    () => (status === 'all' ? championships : championships.filter((e) => e.status === status)),
+    [championships, status],
   );
 
   const t = useTableControls(filtered, {
@@ -48,17 +48,17 @@ export function EventsListPage() {
 
   return (
     <div>
-      <PageHeader title="Events" subtitle="Every event you organise, from draft to wrapped up.">
-        <Button onClick={() => navigate('/events/new')}>+ Create event</Button>
+      <PageHeader title="Championships" subtitle="Every championship you organise, from draft to wrapped up.">
+        <Button onClick={() => navigate('/championships/new')}>+ Create championship</Button>
       </PageHeader>
 
-      {isLoading ? <EventGridSkeleton /> : events.length === 0 ? (
-        <EmptyState icon="◆" title="No events yet" description="Create your first event to build tournaments, open registration and run match day."
-          action={<Button onClick={() => navigate('/events/new')}>+ Create event</Button>} />
+      {isLoading ? <EventGridSkeleton /> : championships.length === 0 ? (
+        <EmptyState icon="◆" title="No championships yet" description="Create your first championship to build tournaments, open registration and run match day."
+          action={<Button onClick={() => navigate('/championships/new')}>+ Create championship</Button>} />
       ) : (
         <>
           <ListToolbar>
-            <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search events…" className="w-full sm:w-72" />
+            <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search championships…" className="w-full sm:w-72" />
             <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-auto">
               {STATUS_FILTERS.map((s) => <option key={s} value={s}>{s === 'all' ? 'All statuses' : s.replace(/_/g, ' ')}</option>)}
             </Select>
@@ -71,12 +71,12 @@ export function EventsListPage() {
           </ListToolbar>
 
           {t.total === 0 ? (
-            <EmptyState icon="◆" title="No matching events" description="Try a different search or status filter." />
+            <EmptyState icon="◆" title="No matching championships" description="Try a different search or status filter." />
           ) : (
             <>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {t.view.map((e) => (
-                  <Card key={e.id} className="cursor-pointer transition hover:border-brand-300 dark:hover:border-brand-500/50 hover:shadow-md" onClick={() => navigate(`/events/${e.id}`)}>
+                  <Card key={e.id} className="cursor-pointer transition hover:border-brand-300 dark:hover:border-brand-500/50 hover:shadow-md" onClick={() => navigate(`/championships/${e.id}`)}>
                     <div className="flex h-24 items-end justify-between rounded-t-2xl bg-gradient-to-br from-brand-500 to-brand-700 p-4">
                       <span className="grid h-11 w-11 place-items-center rounded-xl bg-white/20 text-xl font-black text-white">
                         {e.name.slice(0, 1)}

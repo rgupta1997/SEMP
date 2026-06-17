@@ -15,15 +15,15 @@ function tournamentName(team: any): string | null {
 
 function EditTeamModal({ team, institutionTeams, onClose }: { team: any; institutionTeams: any[]; onClose: () => void }) {
   const path = `/teams/${team.id}`;
-  const eventId = team.event_id;
-  const { data: tournaments = [] } = useApi<any[]>(`/tournaments?event_id=${eventId}`);
-  const { data: eventDraws = [] } = useApi<any[]>(`/events/${eventId}/draws`);
+  const eventId = team.championship_id;
+  const { data: tournaments = [] } = useApi<any[]>(`/tournaments?championship_id=${eventId}`);
+  const { data: eventDraws = [] } = useApi<any[]>(`/championships/${eventId}/draws`);
   const { data: sports = [] } = useApi<any[]>('/sports');
 
   const takenDrawIds = useMemo(
     () => new Set(
       institutionTeams
-        .filter((t) => t.event_id === eventId && t.id !== team.id)
+        .filter((t) => t.championship_id === eventId && t.id !== team.id)
         .map((t) => t.tournament_discipline_id)
         .filter(Boolean),
     ),
@@ -65,7 +65,7 @@ function EditTeamModal({ team, institutionTeams, onClose }: { team: any; institu
 
   const update = useApiMutation(
     (body: { name?: string; tournament_discipline_id?: string }) => api('PATCH', path, body),
-    [path, institutionTeams.length ? `/teams?institution_id=${team.institution_id}` : null].filter(Boolean) as string[],
+    [path, institutionTeams.length ? `/teams?organization_id=${team.organization_id}` : null].filter(Boolean) as string[],
   );
 
   const sportName = (id: string) => sports.find((s) => s.id === id)?.name ?? 'Sport';
@@ -73,7 +73,7 @@ function EditTeamModal({ team, institutionTeams, onClose }: { team: any; institu
   const submit = () => {
     setError(null);
     if (!name.trim()) { setError('Team name is required'); return; }
-    if (!activeDrawId) { setError('Select a discipline — ask the organiser to add draws in event setup'); return; }
+    if (!activeDrawId) { setError('Select a discipline — ask the organiser to add draws in championship setup'); return; }
     const body: { name: string; tournament_discipline_id?: string } = { name: name.trim() };
     if (activeDrawId !== team.tournament_discipline_id) body.tournament_discipline_id = activeDrawId;
     update.mutate(body, {
@@ -84,12 +84,12 @@ function EditTeamModal({ team, institutionTeams, onClose }: { team: any; institu
 
   return (
     <Modal title="Edit team" onClose={onClose}>
-      <Field label="Event">
-        <Input value={team.events?.name ?? 'Event'} disabled />
+      <Field label="Championship">
+        <Input value={team.championships?.name ?? 'Championship'} disabled />
       </Field>
       {eventDraws.length === 0 ? (
         <p className="mb-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
-          No disciplines are configured for this event yet. The organiser must add discipline draws in Setup before you can link this team.
+          No disciplines are configured for this championship yet. The organiser must add discipline draws in Setup before you can link this team.
         </p>
       ) : (
         <>
@@ -152,7 +152,7 @@ function parsePasted(text: string): { name?: string; email?: string; jersey_numb
 function BulkAddMembersModal({ teamId, institutionId, existingUserIds, remaining, onClose }:
   { teamId: string; institutionId?: string; existingUserIds: Set<string>; remaining: number; onClose: () => void }) {
   const [tab, setTab] = useState('roster');
-  const { data: users = [], isLoading } = useApi<any[]>(institutionId ? `/users?institution_id=${institutionId}` : '/users');
+  const { data: users = [], isLoading } = useApi<any[]>(institutionId ? `/users?organization_id=${institutionId}` : '/users');
   const candidates = useMemo(() => users.filter((u) => !existingUserIds.has(u.id)), [users, existingUserIds]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [paste, setPaste] = useState('');
@@ -201,7 +201,7 @@ function BulkAddMembersModal({ teamId, institutionId, existingUserIds, remaining
     <Modal title="Add players" onClose={onClose} wide>
       <div className="mb-4">
         <Tabs active={tab} onChange={setTab} tabs={[
-          { id: 'roster', label: 'From institution', badge: candidates.length || undefined },
+          { id: 'roster', label: 'From organization', badge: candidates.length || undefined },
           { id: 'paste', label: 'Paste list' },
         ]} />
       </div>
@@ -221,7 +221,7 @@ function BulkAddMembersModal({ teamId, institutionId, existingUserIds, remaining
 
       {tab === 'roster' ? (
         isLoading ? <Spinner /> : candidates.length === 0 ? (
-          <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">Everyone from this institution is already on the roster. Use “Paste list” to add new people.</p>
+          <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">Everyone from this organization is already on the roster. Use “Paste list” to add new people.</p>
         ) : (
           <div className="max-h-72 overflow-auto rounded-xl border border-slate-200 dark:border-slate-800">
             <label className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 px-4 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
@@ -242,7 +242,7 @@ function BulkAddMembersModal({ teamId, institutionId, existingUserIds, remaining
         <div>
           <Textarea rows={7} value={paste} onChange={(e) => setPaste(e.target.value)}
             placeholder={"One per line:\nAarav Mehta, aarav@vjti.local, 7\nRohan Kulkarni, rohan@vjti.local\nkiran@vjti.local"} />
-          <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">Format: <span className="font-medium">Name, email, jersey#</span> — email is required, name & jersey optional. New people are created under your institution. {parsed.length > 0 && <span className="text-brand-600 dark:text-brand-300">{parsed.length} row{parsed.length === 1 ? '' : 's'} detected.</span>}</p>
+          <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">Format: <span className="font-medium">Name, email, jersey#</span> — email is required, name & jersey optional. New people are created under your organization. {parsed.length > 0 && <span className="text-brand-600 dark:text-brand-300">{parsed.length} row{parsed.length === 1 ? '' : 's'} detected.</span>}</p>
         </div>
       )}
 
@@ -259,14 +259,14 @@ function BulkAddMembersModal({ teamId, institutionId, existingUserIds, remaining
 }
 
 export function RosterPage() {
-  const { teamId } = useParams();
+  const { teamId, orgId } = useParams();
   const navigate = useNavigate();
   const { ctx } = useAuth();
   const { can } = usePermissions();
   const path = `/teams/${teamId}`;
   const { data: team, isLoading } = useApi<any>(path);
-  const institutionId = team?.institution_id ?? team?.institutions?.id;
-  const { data: institutionTeams = [] } = useApi<any[]>(institutionId ? `/teams?institution_id=${institutionId}` : null);
+  const institutionId = team?.organization_id ?? team?.organizations?.id;
+  const { data: institutionTeams = [] } = useApi<any[]>(institutionId ? `/teams?organization_id=${institutionId}` : null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(false);
 
@@ -279,7 +279,7 @@ export function RosterPage() {
 
   if (isLoading || !team) return <Spinner />;
   const members = team.team_members ?? [];
-  // A team's own captain / vice-captain may edit it; so may the institution POC.
+  // A team's own captain / vice-captain may edit it; so may the organization POC.
   const isMyCaptain = members.some((m: any) => m.user_id === ctx?.user.id && (m.role === 'captain' || m.role === 'vice_captain'));
   const canManage = can('roster.manage') || isMyCaptain;
   const locked = team.status === 'roster_locked';
@@ -293,8 +293,8 @@ export function RosterPage() {
 
   return (
     <div>
-      <BackButton onClick={() => navigate(team.event_id ? `/inst/teams?event=${team.event_id}` : '/inst/teams')}>
-        {team.events?.name ? `${team.events.name} teams` : 'All teams'}
+      <BackButton onClick={() => navigate(`/organizations/${orgId ?? ''}/teams`)}>
+        {team.championships?.name ? `${team.championships.name} teams` : 'All teams'}
       </BackButton>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -303,14 +303,14 @@ export function RosterPage() {
             <div className="flex items-center gap-2"><h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{team.name}</h1><StatusBadge status={team.status} /></div>
             <p className="text-sm text-slate-500 dark:text-slate-400">
               {[tournamentName(team), team.sports?.name, team.tournament_disciplines?.disciplines?.name].filter(Boolean).join(' · ')}
-              {' · '}{team.institutions?.name}
+              {' · '}{team.organizations?.name}
             </p>
             <p className="text-xs text-slate-400 dark:text-slate-500">
-              {team.events?.name}{team.events?.name ? ' · ' : ''}{rules.entry_type} entry · squad {rules.squad_min}–{rules.squad_max} players
+              {team.championships?.name}{team.championships?.name ? ' · ' : ''}{rules.entry_type} entry · squad {rules.squad_min}–{rules.squad_max} players
             </p>
-            {(team.institutions?.users ?? []).length > 0 && (
+            {(team.organizations?.users ?? []).length > 0 && (
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Point of contact: {(team.institutions.users as any[]).map((u) => `${u.name}${u.phone ? ` (${u.phone})` : ''}`).join(', ')}
+                Point of contact: {(team.organizations.users as any[]).map((u) => `${u.name}${u.phone ? ` (${u.phone})` : ''}`).join(', ')}
               </p>
             )}
           </div>
@@ -328,7 +328,7 @@ export function RosterPage() {
       {!hasDiscipline && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
           <p>
-            This team is not linked to a discipline draw. Select one in Edit team — or ask the organiser to configure draws in event Setup. Players cannot be assigned until then.
+            This team is not linked to a discipline draw. Select one in Edit team — or ask the organiser to configure draws in championship Setup. Players cannot be assigned until then.
           </p>
           {!locked && canManage && (
             <Button size="sm" variant="outline" onClick={() => setEditing(true)}>Edit team</Button>
@@ -382,7 +382,7 @@ export function RosterPage() {
         </CardBody>
       </Card>
 
-      {adding && <BulkAddMembersModal teamId={teamId!} institutionId={team.institutions?.id ?? team.institution_id} existingUserIds={existingUserIds} remaining={remaining} onClose={() => setAdding(false)} />}
+      {adding && <BulkAddMembersModal teamId={teamId!} institutionId={team.organizations?.id ?? team.organization_id} existingUserIds={existingUserIds} remaining={remaining} onClose={() => setAdding(false)} />}
       {editing && <EditTeamModal team={team} institutionTeams={institutionTeams} onClose={() => setEditing(false)} />}
     </div>
   );

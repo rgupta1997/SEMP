@@ -181,7 +181,7 @@ export function Bracket({ fixtures, teamName, onSelect }:
 
       <div className="relative" style={{ width, height }}>
         {/* connector lines */}
-        <svg className="pointer-events-none absolute inset-0" width={width} height={height} aria-hidden>
+        <svg className="pointer-championships-none absolute inset-0" width={width} height={height} aria-hidden>
           {rounds.slice(1).map((ms, idx) => {
             const r = idx + 1;
             const childRight = colX(r - 1) + MATCH_W;

@@ -1,35 +1,28 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth, type SignupBody } from '../lib/auth';
+import { useAuth } from '../lib/auth';
 import { roleHome } from '../components/AppShell';
-import { Button, cn, Input } from '../components/ui';
+import { Button, Input } from '../components/ui';
 
 // Seed accounts from `npm run seed` (password: demo123; admin: admin123).
 // Temporary convenience panel — to be hidden before launch.
 const DEMO_GROUPS: { group: string; accounts: { email: string; label: string; pw?: string }[] }[] = [
   { group: 'Platform', accounts: [
     { email: 'admin@semp.local', label: 'System Admin', pw: 'admin123' },
-    { email: 'organiser@semp.local', label: 'Organiser' },
   ] },
-  { group: 'Officials', accounts: [
-    { email: 'official1@semp.local', label: 'Official 1' },
-    { email: 'official2@semp.local', label: 'Official 2' },
-    { email: 'official3@semp.local', label: 'Official 3' },
+  { group: 'Host & Official', accounts: [
+    { email: 'host@sportagon.test', label: 'Host / Organiser' },
+    { email: 'official@sportagon.test', label: 'Official' },
   ] },
-  { group: 'Institution POC / Captain', accounts: [
-    { email: 'poc@vjti.local', label: 'VJTI' },
-    { email: 'poc@iitb.local', label: 'IITB' },
-    { email: 'poc@djsce.local', label: 'DJSCE' },
-    { email: 'poc@spit.local', label: 'SPIT' },
-    { email: 'poc@coep.local', label: 'COEP' },
+  { group: 'Organization owners', accounts: [
+    { email: 'owner@sportagon.test', label: 'Owner · Infosys' },
+    { email: 'owner2@sportagon.test', label: 'Owner · Pune United FC' },
   ] },
   { group: 'Players', accounts: [
-    { email: 'player1@vjti.local', label: 'VJTI · Player 1' },
-    { email: 'player1@iitb.local', label: 'IITB · Player 1' },
+    { email: 'captain@sportagon.test', label: 'Captain · Infosys' },
+    { email: 'player@sportagon.test', label: 'Player · Infosys' },
   ] },
 ];
-
-type AccountType = SignupBody['account_type'];
 
 export function AuthPage() {
   const { login, signup, availableRoles } = useAuth();
@@ -38,16 +31,14 @@ export function AuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [accountType, setAccountType] = useState<AccountType>('organiser');
-  const [institutionName, setInstitutionName] = useState('');
+  const [phone, setPhone] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   // Redirect to home when user becomes authenticated
   useEffect(() => {
     if (availableRoles.length > 0) {
-      const primaryRole = availableRoles[0] ?? 'participant';
-      navigate(roleHome(primaryRole), { replace: true });
+      navigate(roleHome(availableRoles[0] ?? 'user'), { replace: true });
     }
   }, [availableRoles, navigate]);
 
@@ -58,7 +49,7 @@ export function AuthPage() {
       if (mode === 'login') {
         await login(email, password);
       } else {
-        await signup({ name, email, password, account_type: accountType, institution_name: accountType === 'institution' ? institutionName : undefined });
+        await signup({ name, email, password, phone: phone || undefined });
       }
       // Navigate happens via useEffect below after ctx updates
     } catch (err: any) {
@@ -82,18 +73,18 @@ export function AuthPage() {
         <div className="absolute -bottom-24 -left-16 h-80 w-80 rounded-full bg-brand-700/30 blur-3xl" />
         <div className="relative flex items-center gap-3">
           <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-500 text-2xl font-black">S</span>
-          <span className="text-2xl font-bold">Sports Event Management Platform</span>
+          <span className="text-2xl font-bold">Sports Championship Management Platform</span>
         </div>
         <div className="relative max-w-md">
           <h1 className="text-4xl font-bold leading-tight">Run your entire sports fest from one screen.</h1>
-          <p className="mt-4 text-lg text-slate-300">Events, tournaments, rosters, approvals, fixtures and live standings — one platform that adapts to every role.</p>
+          <p className="mt-4 text-lg text-slate-300">Championships, tournaments, rosters, approvals, fixtures and live standings — one platform that adapts to every role.</p>
           <div className="mt-8 flex flex-wrap gap-2 text-sm">
-            {['Organisers', 'Institutions', 'Captains', 'Officials', 'Participants'].map((t) => (
+            {['Organisers', 'Organizations', 'Captains', 'Officials', 'Participants'].map((t) => (
               <span key={t} className="rounded-full bg-white/10 px-3 py-1 font-medium">{t}</span>
             ))}
           </div>
         </div>
-        <div className="relative text-sm text-slate-400">Sports Event Management Platform</div>
+        <div className="relative text-sm text-slate-400">Sports Championship Management Platform</div>
       </div>
 
       {/* Form panel */}
@@ -105,38 +96,25 @@ export function AuthPage() {
           </div>
 
           <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{mode === 'login' ? 'Welcome back' : 'Create your account'}</h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{mode === 'login' ? 'Sign in to your SEMP workspace.' : 'Start hosting or join an event in minutes.'}</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{mode === 'login' ? 'Sign in to your SEMP workspace.' : 'Start hosting or join an championship in minutes.'}</p>
 
           <form onSubmit={submit} className="mt-6 space-y-4">
             {mode === 'signup' && (
-              <>
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">I am an…</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {([['organiser', 'Organiser'], ['institution', 'Institution']] as [AccountType, string][]).map(([v, l]) => (
-                      <button key={v} type="button" onClick={() => setAccountType(v)}
-                        className={cn('rounded-lg border px-3 py-2 text-sm font-semibold', accountType === v ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300' : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800')}>
-                        {l}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Full name</label>
-                  <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" required />
-                </div>
-                {accountType === 'institution' && (
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Institution name</label>
-                    <Input value={institutionName} onChange={(e) => setInstitutionName(e.target.value)} placeholder="e.g. VJTI Mumbai" required />
-                  </div>
-                )}
-              </>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Full name</label>
+                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" required />
+              </div>
             )}
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Email</label>
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required />
             </div>
+            {mode === 'signup' && (
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Phone number</label>
+                <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98000 00000" required />
+              </div>
+            )}
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Password</label>
               <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />

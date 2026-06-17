@@ -124,7 +124,7 @@ function GroundsPanel({ venueId }: { venueId: string }) {
 }
 
 function AddVenuesModal({ eventId, onClose }: { eventId: string; onClose: () => void }) {
-  const path = `/venues?event_id=${eventId}`;
+  const path = `/venues?championship_id=${eventId}`;
   const [tab, setTab] = useState('single');
   const [name, setName] = useState('');
   const [city, setCity] = useState('');
@@ -139,7 +139,7 @@ function AddVenuesModal({ eventId, onClose }: { eventId: string; onClose: () => 
 
   const submitSingle = () => {
     setError(null);
-    addOne.mutate({ event_id: eventId, name, address: address || undefined, city: city || undefined }, { onError: (e: any) => setError(e.message) });
+    addOne.mutate({ championship_id: eventId, name, address: address || undefined, city: city || undefined }, { onError: (e: any) => setError(e.message) });
   };
 
   const submitBulk = () => {
@@ -147,7 +147,7 @@ function AddVenuesModal({ eventId, onClose }: { eventId: string; onClose: () => 
     if (parsed.length === 0) { setError('Add at least one venue'); return; }
     addBulk.mutate({
       venues: parsed.map((v) => ({
-        event_id: eventId,
+        championship_id: eventId,
         name: v.name,
         city: v.city || undefined,
         address: v.address || undefined,
@@ -200,7 +200,7 @@ function AddVenuesModal({ eventId, onClose }: { eventId: string; onClose: () => 
 }
 
 export function VenuesTab({ eventId }: { eventId: string }) {
-  const path = `/venues?event_id=${eventId}`;
+  const path = `/venues?championship_id=${eventId}`;
   const { data: venues = [] } = useApi<any[]>(path);
   const [open, setOpen] = useState(false);
 

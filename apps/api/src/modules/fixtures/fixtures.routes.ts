@@ -11,8 +11,8 @@ import { generateFixtures, type TeamRef } from './domain/generators/index.js';
 export function makeFixturesRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
-  // organiser of the event that owns this draw (from the :id tournament_discipline).
-  const drawOrganiser = guards.eventManager(async (req) => guards.resolvers.eventOfTournamentDiscipline(req.params.id));
+  // organiser of the championship that owns this draw (from the :id tournament_discipline).
+  const drawOrganiser = guards.championshipManager(async (req) => guards.resolvers.championshipOfTournamentDiscipline(req.params.id));
 
   // List fixtures for a discipline draw.
   router.get('/tournament-disciplines/:id/fixtures', asyncHandler(async (req, res) => {
@@ -131,6 +131,29 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     res.json({ ok: true, persisted });
   }));
 
+  // Full fixture detail for the scoring console. Same authorization as scoring
+  // (assigned official, organiser, or super) so the host can score any fixture in
+  // their championship — not just an official's assigned list. Shape mirrors the
+  // rows from GET /me/officiating so the console reads them interchangeably.
+  router.get('/fixtures/:id/scoring', guards.fixtureScorer, asyncHandler(async (req, res) => {
+    const fixture = await prisma.fixtures.findUnique({
+      where: { id: req.params.id },
+      include: {
+        teams_fixtures_home_team_idToteams: { include: { organizations: true } },
+        teams_fixtures_away_team_idToteams: { include: { organizations: true } },
+        tournament_disciplines: {
+          include: {
+            disciplines: true,
+            tournament_sports: { include: { sports: true, tournaments: { include: { championships: true } } } },
+          },
+        },
+        venue_grounds: { include: { venues: true } },
+      },
+    });
+    if (!fixture) throw new NotFoundError('Fixture');
+    res.json(fixture);
+  }));
+
   router.patch('/fixtures/:id/result', guards.fixtureScorer, validateBody(fixtureResultSchema), asyncHandler(async (req, res) => {
     const fixture = await prisma.fixtures.findUnique({ where: { id: req.params.id } });
     if (!fixture) throw new NotFoundError('Fixture');
@@ -159,16 +182,16 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   }));
 
   // Plain CRUD for manual fixture edits / scheduling — writes require the organiser
-  // of the event that owns the fixture's draw.
+  // of the championship that owns the fixture's draw.
   router.use('/fixtures', makeCrudRouter(prisma.fixtures, {
     name: 'Fixture',
     createSchema: createFixtureSchema,
     updateSchema: updateFixtureSchema,
     listFilters: ['tournament_discipline_id'],
     orderBy: [{ pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
-    writeGuards: [guards.eventCrudGuard({
-      body: async (req) => guards.resolvers.eventOfTournamentDiscipline(req.body?.tournament_discipline_id),
-      byId: guards.resolvers.eventOfFixture,
+    writeGuards: [guards.championshipCrudGuard({
+      body: async (req) => guards.resolvers.championshipOfTournamentDiscipline(req.body?.tournament_discipline_id),
+      byId: guards.resolvers.championshipOfFixture,
     })],
   }));
 

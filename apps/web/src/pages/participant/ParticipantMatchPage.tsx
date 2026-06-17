@@ -22,9 +22,9 @@ interface MatchDetail {
     sport: string | null;
     discipline: string | null;
     tournament: string | null;
-    event: { id: string; name: string; slug: string } | null;
-    my_team: { id: string; name: string; institution: string | null };
-    opponent: { id: string; name: string; institution: string | null } | null;
+    championship: { id: string; name: string; slug: string } | null;
+    my_team: { id: string; name: string; organization: string | null };
+    opponent: { id: string; name: string; organization: string | null } | null;
     my_role: string | null;
     jersey_number: number | null;
     teammates: { name: string; phone: string | null; role: string; jersey_number: number | null }[];
@@ -42,7 +42,7 @@ function Detail({ label, value }: { label: string; value: ReactNode }) {
 
 export function ParticipantMatchPage() {
   const { fixtureId } = useParams();
-  const { data, isLoading, error } = useApi<MatchDetail>(`/me/matches/${fixtureId}`);
+  const { data, isLoading, error } = useApi<MatchDetail>(`/profile/matches/${fixtureId}`);
 
   if (isLoading) return <Spinner />;
   if (error || !data) {
@@ -56,10 +56,10 @@ export function ParticipantMatchPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        {f.event ? (
-          <BackButton to={`/me/events/${f.event.id}`} className="mb-0">Back to event</BackButton>
+        {f.championship ? (
+          <BackButton to={`/me/championships/${f.championship.id}`} className="mb-0">Back to championship</BackButton>
         ) : (
-          <BackButton to="/me/matches" className="mb-0">All matches</BackButton>
+          <BackButton to="/profile/matches" className="mb-0">All matches</BackButton>
         )}
         <StatusBadge status={f.status} />
       </div>
@@ -67,14 +67,14 @@ export function ParticipantMatchPage() {
       <Card>
         <CardBody className="pt-5">
           <div className="text-center text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-            {f.event?.name}{subtitle ? ` · ${subtitle}` : ''}
+            {f.championship?.name}{subtitle ? ` · ${subtitle}` : ''}
           </div>
           {f.round && <div className="mt-1 text-center text-sm text-slate-500 dark:text-slate-400">{f.round} · {fmtDateTime(f.scheduled_at)}</div>}
 
           <div className="mt-5 flex items-center justify-center gap-6">
             <div className="flex-1 text-right">
               <div className="font-bold text-slate-900 dark:text-slate-100">{f.my_team.name}</div>
-              {f.my_team.institution && <div className="text-xs text-slate-400 dark:text-slate-500">{f.my_team.institution}</div>}
+              {f.my_team.organization && <div className="text-xs text-slate-400 dark:text-slate-500">{f.my_team.organization}</div>}
             </div>
             <div className="flex items-center gap-3 text-3xl font-black tabular-nums text-slate-900 dark:text-slate-100">
               <span>{f.my_score ?? '–'}</span>
@@ -83,7 +83,7 @@ export function ParticipantMatchPage() {
             </div>
             <div className="flex-1 text-left">
               <div className="font-bold text-slate-900 dark:text-slate-100">{f.opponent?.name ?? 'TBD'}</div>
-              {f.opponent?.institution && <div className="text-xs text-slate-400 dark:text-slate-500">{f.opponent.institution}</div>}
+              {f.opponent?.organization && <div className="text-xs text-slate-400 dark:text-slate-500">{f.opponent.organization}</div>}
             </div>
           </div>
 

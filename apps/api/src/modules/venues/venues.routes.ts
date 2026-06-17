@@ -12,14 +12,14 @@ import { validateBody } from '../../http/middleware/validate.js';
 export function makeVenuesRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
-  const writeGuards = [guards.eventCrudGuard({
-    body: async (req) => req.body?.event_id,
-    byId: guards.resolvers.eventOfVenue,
+  const writeGuards = [guards.championshipCrudGuard({
+    body: async (req) => req.body?.championship_id,
+    byId: guards.resolvers.championshipOfVenue,
   })];
 
-  router.post('/bulk', guards.eventCrudGuard({
-    body: async (req) => req.body?.venues?.[0]?.event_id,
-    byId: guards.resolvers.eventOfVenue,
+  router.post('/bulk', guards.championshipCrudGuard({
+    body: async (req) => req.body?.venues?.[0]?.championship_id,
+    byId: guards.resolvers.championshipOfVenue,
   }), validateBody(bulkCreateVenuesSchema), asyncHandler(async (req, res) => {
     const created = await prisma.$transaction(async (tx) => {
       const out = [];
@@ -33,7 +33,7 @@ export function makeVenuesRouter(prisma: Prisma): Router {
 
   router.use(makeCrudRouter(prisma.venues, {
     name: 'Venue', createSchema: createVenueSchema, updateSchema: updateVenueSchema,
-    listFilters: ['event_id'], orderBy: { created_at: 'asc' }, writeGuards,
+    listFilters: ['championship_id'], orderBy: { created_at: 'asc' }, writeGuards,
   }));
 
   return router;
@@ -42,14 +42,14 @@ export function makeVenuesRouter(prisma: Prisma): Router {
 export function makeVenueGroundsRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
-  const writeGuards = [guards.eventCrudGuard({
-    body: async (req) => guards.resolvers.eventOfVenue(req.body?.venue_id),
-    byId: guards.resolvers.eventOfVenueGround,
+  const writeGuards = [guards.championshipCrudGuard({
+    body: async (req) => guards.resolvers.championshipOfVenue(req.body?.venue_id),
+    byId: guards.resolvers.championshipOfVenueGround,
   })];
 
-  router.post('/bulk', guards.eventCrudGuard({
-    body: async (req) => guards.resolvers.eventOfVenue(req.body?.grounds?.[0]?.venue_id),
-    byId: guards.resolvers.eventOfVenueGround,
+  router.post('/bulk', guards.championshipCrudGuard({
+    body: async (req) => guards.resolvers.championshipOfVenue(req.body?.grounds?.[0]?.venue_id),
+    byId: guards.resolvers.championshipOfVenueGround,
   }), validateBody(bulkCreateGroundsSchema), asyncHandler(async (req, res) => {
     const created = await prisma.$transaction(async (tx) => {
       const out = [];

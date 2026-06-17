@@ -10,7 +10,7 @@ export interface InstitutionFormBody {
   country?: string;
   logo_url?: string;
   status?: boolean;
-  poc?: { name: string; email: string; phone?: string; password?: string };
+  owner?: { name: string; email: string; phone?: string; password?: string };
 }
 
 interface InstitutionFormModalProps {
@@ -45,7 +45,7 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
 
   const submit = async () => {
     setError(null);
-    if (!name.trim()) { setError('Institution name is required'); return; }
+    if (!name.trim()) { setError('Organization name is required'); return; }
     const body: InstitutionFormBody = {
       name: name.trim(),
       short_name: shortName.trim() || undefined,
@@ -55,7 +55,7 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
     };
     if (!isEdit && withPoc) {
       if (!pocName.trim() || !pocEmail.trim()) { setError('Point-of-contact name and email are required'); return; }
-      body.poc = {
+      body.owner = {
         name: pocName.trim(),
         email: pocEmail.trim(),
         phone: pocPhone.trim() || undefined,
@@ -65,7 +65,7 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
     setBusy(true);
     try {
       await onSubmit(body);
-      qc.invalidateQueries(); // refresh institution lists
+      qc.invalidateQueries(); // refresh organization lists
       onClose();
     } catch (e: any) {
       setError(e?.message ?? 'Could not save');
@@ -75,7 +75,7 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
   };
 
   return (
-    <Modal title={isEdit ? 'Edit institution' : 'Add institution'} onClose={onClose} wide>
+    <Modal title={isEdit ? 'Edit organization' : 'Add organization'} onClose={onClose} wide>
       <div className="grid gap-x-4 sm:grid-cols-2">
         <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. VJTI" /></Field>
         <Field label="Short name"><Input value={shortName} onChange={(e) => setShortName(e.target.value)} placeholder="Optional" /></Field>
@@ -89,7 +89,7 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">Assign a point of contact</div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">Creates an institution login that can manage this institution's teams.</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Creates an organization login that can manage this organization's teams.</div>
             </div>
             <Toggle checked={withPoc} onChange={setWithPoc} />
           </div>
@@ -112,7 +112,7 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
       {error && <p className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
       <div className="mt-5 flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button disabled={busy} onClick={submit}>{busy ? 'Saving…' : (isEdit ? 'Save changes' : 'Create institution')}</Button>
+        <Button disabled={busy} onClick={submit}>{busy ? 'Saving…' : (isEdit ? 'Save changes' : 'Create organization')}</Button>
       </div>
     </Modal>
   );

@@ -4,12 +4,12 @@ import { ResourcePage } from '../../components/ResourcePage';
 import { EmptyState } from '../../components/ui';
 
 const SUBTITLES: Record<string, string> = {
-  sports: 'The master catalogue of sports available across all events.',
+  sports: 'The master catalogue of sports available across all championships.',
   disciplines: 'Sub-disciplines and their default entry & squad rules.',
   'tournament-formats': 'Fixture algorithms (knockout, league, …) reused by every tournament.',
-  institutions: 'Colleges and schools that can participate in events.',
+  organizations: 'Colleges and schools that can participate in championships.',
   users: 'All platform accounts and their roles.',
-  roles: 'Role definitions used for event-scoped permissions.',
+  roles: 'Role definitions used for championship-scoped permissions.',
 };
 
 export function PlatformResource() {

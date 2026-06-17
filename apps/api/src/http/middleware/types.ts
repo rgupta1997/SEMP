@@ -3,8 +3,7 @@ export interface AuthUser {
   id: string;
   email: string;
   isSuperAdmin: boolean;
-  accountType: string;
-  institutionId: string | null;
+  organizationId: string | null;
 }
 
 declare global {

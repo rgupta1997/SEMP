@@ -18,8 +18,7 @@ function tokenFor(u: any): string {
     id: u.id,
     email: u.email,
     isSuperAdmin: u.is_super_admin,
-    accountType: u.account_type,
-    institutionId: u.institution_id ?? null,
+    organizationId: u.organization_id ?? null,
   });
 }
 
@@ -47,32 +46,18 @@ export function makeAuthRouter(prisma: Prisma): Router {
     res.status(201).json({ token: tokenFor(user), ...context });
   }));
 
-  // Self-serve sign up — picks an account type and (for institution accounts)
-  // joins or creates an institution.
+  // Self-serve sign up — every login is just a user. Hosting a championship,
+  // creating/joining an organization, or being assigned as an official are all
+  // separate actions taken after sign-up.
   router.post('/signup', validateBody(signupSchema), asyncHandler(async (req, res) => {
-    const { name, email, password, phone, account_type, institution_id, institution_name } = req.body;
+    const { name, email, password, phone } = req.body;
 
     const existing = await prisma.users.findUnique({ where: { email } });
     if (existing) throw new UnauthorizedError('An account with this email already exists');
 
-    let institutionId: string | null = null;
-    if (account_type === 'institution') {
-      if (institution_id) {
-        institutionId = institution_id;
-      } else if (institution_name) {
-        const inst = await prisma.institutions.create({ data: { name: institution_name, status: true } });
-        institutionId = inst.id;
-      }
-    }
-
     const password_hash = await bcrypt.hash(password, 10);
     const user = await prisma.users.create({
-      data: {
-        name, email, phone, password_hash,
-        is_super_admin: false,
-        account_type,
-        institution_id: institutionId,
-      },
+      data: { name, email, phone, password_hash, is_super_admin: false },
     });
     const context = await buildAuthContext(prisma, user);
     res.status(201).json({ token: tokenFor(user), ...context });

@@ -109,7 +109,7 @@ export function DesignShowcase() {
       <Section title="Toasts — click to fire (bottom-right)">
         <Button variant="outline" onClick={() => toast.push({ type: 'success', title: 'Match signed off', message: 'Result recorded.' })}>Success</Button>
         <Button variant="outline" onClick={() => toast.push({ type: 'info', title: 'Draw generated', message: '48 fixtures created.' })}>Info</Button>
-        <Button variant="outline" onClick={() => toast.push({ type: 'warning', title: 'Approval pending', message: '3 institutions waiting.' })}>Warning</Button>
+        <Button variant="outline" onClick={() => toast.push({ type: 'warning', title: 'Approval pending', message: '3 organizations waiting.' })}>Warning</Button>
         <Button variant="outline" onClick={() => toast.push({ type: 'error', title: 'Save failed', message: 'Network error.' })}>Error</Button>
         <Toast type="success" title="Inline toast" message="Also usable standalone." />
       </Section>

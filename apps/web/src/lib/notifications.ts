@@ -14,7 +14,7 @@ export interface NotificationDto {
   title: string;
   body: string | null;
   created_at: string;
-  event: { id: string; name: string; slug: string } | null;
+  championship: { id: string; name: string; slug: string } | null;
   sender: { id: string; name: string } | null;
   is_mine: boolean;
   unread: boolean;
@@ -26,7 +26,7 @@ export interface PostableEvent { id: string; name: string }
 // Small visual hint per notification type for the feed.
 export function notificationMeta(type: NotificationType): { icon: string; label: string } {
   switch (type) {
-    case 'event_lifecycle': return { icon: '📣', label: 'Event update' };
+    case 'event_lifecycle': return { icon: '📣', label: 'Championship update' };
     case 'enrollment_approved': return { icon: '✅', label: 'Approval' };
     default: return { icon: '🔔', label: 'Announcement' };
   }

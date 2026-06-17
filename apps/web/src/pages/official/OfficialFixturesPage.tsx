@@ -10,7 +10,7 @@ export function OfficialFixturesPage() {
   const { data: fixtures = [], isLoading } = useApi<any[]>('/me/officiating');
   const [status, setStatus] = useState('all');
 
-  // Event + Sport come from the shared header filter; sport cascades on event.
+  // Championship + Sport come from the shared header filter; sport cascades on championship.
   const { eventId } = useFilterBar();
 
   const live = fixtures.filter((f) => f.status === 'live').length;
@@ -32,7 +32,7 @@ export function OfficialFixturesPage() {
     return [...set].sort().map((name) => ({ id: name, name }));
   }, [fixtures, eventId]);
   const { sportId } = usePageFilters({
-    events: eventOptions.length ? eventOptions : undefined,
+    championships: eventOptions.length ? eventOptions : undefined,
     sports: sportOptions.length ? sportOptions : undefined,
   });
 
@@ -66,7 +66,7 @@ export function OfficialFixturesPage() {
       ) : (
         <>
           <ListToolbar>
-            <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search teams, event, venue…" className="w-full sm:w-72" />
+            <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search teams, championship, venue…" className="w-full sm:w-72" />
             {statusOptions.length > 2 && (
               <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-auto">
                 {statusOptions.map((s) => <option key={s} value={s}>{s === 'all' ? 'All statuses' : String(s).replace(/_/g, ' ')}</option>)}
@@ -92,7 +92,7 @@ export function OfficialFixturesPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       <StatusBadge status={f.status} />
-                      <Button onClick={() => navigate(`/official/score/${f.id}`)}>Open console →</Button>
+                      <Button onClick={() => navigate(`/score/${f.id}`)}>Open console →</Button>
                     </div>
                   </Card>
                 ))}

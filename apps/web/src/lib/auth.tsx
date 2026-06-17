@@ -2,7 +2,10 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { useQueryClient } from '@tanstack/react-query';
 import { api, tokenStore } from './api';
 
-export type AppRole = 'system' | 'organiser' | 'institution' | 'official' | 'participant';
+// Every login is a `user`; `system` is the platform super-admin shell. There are
+// no per-account-type shells any more — what a user can do is derived per
+// championship (championship_roles) and per organization (organizations).
+export type AppRole = 'system' | 'user';
 
 export interface AuthUser {
   id: string;
@@ -11,19 +14,21 @@ export interface AuthUser {
   phone?: string | null;
   avatar_url?: string | null;
   is_super_admin: boolean;
-  account_type: string;
-  institution_id: string | null;
+  organization_id: string | null;
 }
 
-export interface EventRef { id: string; name: string; slug: string; status: string }
-export interface EventRole { id: string; event_id: string; event: EventRef; role: { id: string; name: string } }
+export interface ChampionshipRef { id: string; name: string; slug: string; status: string }
+export interface ChampionshipRole { id: string; championship_id: string; championship: ChampionshipRef; role: { id: string; name: string } }
 export interface Membership { id: string; team_id: string; role: string; jersey_number: number | null; team: any }
-export interface Institution { id: string; name: string; short_name?: string | null; code?: string | null; city?: string | null; logo_url?: string | null }
+export interface Organization { id: string; name: string; short_name?: string | null; code?: string | null; city?: string | null; logo_url?: string | null }
+export interface OrgMembership { id: string; organization_id: string; organization: Organization; role: string; status: string; joined_at: string }
 
 export interface AuthContext {
   user: AuthUser;
-  institution: Institution | null;
-  event_roles: EventRole[];
+  organization: Organization | null;
+  organizations: OrgMembership[];
+  official_championship_ids: string[];
+  championship_roles: ChampionshipRole[];
   memberships: Membership[];
 }
 
@@ -41,29 +46,14 @@ interface AuthState {
 
 export interface SignupBody {
   name: string; email: string; password: string; phone?: string;
-  account_type: 'organiser' | 'institution' | 'official' | 'participant';
-  institution_id?: string; institution_name?: string;
 }
 
-const ROLE_PRIORITY: AppRole[] = ['system', 'organiser', 'institution', 'official', 'participant'];
 const ACTIVE_ROLE_KEY = 'semp_active_role';
 
+// Super admins can toggle between the platform shell and the regular user shell;
+// everyone else only ever sees the user shell.
 function rolesFor(ctx: AuthContext): AppRole[] {
-  const set = new Set<AppRole>();
-  if (ctx.user.is_super_admin) {
-    // Super admins can preview every shell.
-    return [...ROLE_PRIORITY];
-  }
-  // Each account type sees ONLY its own shell. There is no implicit "everyone is a
-  // participant" rule, so organisers, officials and POCs never get the participant
-  // view. The one exception: a participant who captains a team additionally gets the
-  // institution shell (to view their squad).
-  const t = ctx.user.account_type as AppRole;
-  if (['organiser', 'institution', 'official', 'participant'].includes(t)) set.add(t);
-  if (ctx.event_roles.some((r) => r.role.name === 'Organiser')) set.add('organiser');
-  if (ctx.event_roles.some((r) => r.role.name === 'Official')) set.add('official');
-  if (ctx.memberships.some((m) => m.role === 'captain' || m.role === 'vice_captain')) set.add('institution');
-  return ROLE_PRIORITY.filter((r) => set.has(r));
+  return ctx.user.is_super_admin ? ['system', 'user'] : ['user'];
 }
 
 const Ctx = createContext<AuthState>(null as any);
@@ -73,7 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [ctx, setCtx] = useState<AuthContext | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeRole, setActiveRoleState] = useState<AppRole>('participant');
+  const [activeRole, setActiveRoleState] = useState<AppRole>('user');
 
   const applyContext = (c: AuthContext) => {
     setCtx(c);
@@ -131,8 +121,5 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export const ROLE_LABELS: Record<AppRole, string> = {
   system: 'System Admin',
-  organiser: 'Organiser',
-  institution: 'Institution',
-  official: 'Official',
-  participant: 'Participant',
+  user: 'My Workspace',
 };

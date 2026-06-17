@@ -31,9 +31,9 @@ export interface MatchSummary {
   scheduled_at: string | null;
   sport: string | null;
   discipline: string | null;
-  event: { id: string; name: string; slug: string } | null;
+  championship: { id: string; name: string; slug: string } | null;
   my_team: { id: string; name: string } | null;
-  opponent: { id: string; name: string; institution: string | null } | null;
+  opponent: { id: string; name: string; organization: string | null } | null;
   my_score: number | null;
   opp_score: number | null;
   result: MatchResult;
@@ -41,6 +41,6 @@ export interface MatchSummary {
 
 export interface DashboardData {
   stats: CareerStatsData;
-  events: EventCardData[];
+  championships: EventCardData[];
   recent_matches: MatchSummary[];
 }

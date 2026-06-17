@@ -6,7 +6,7 @@
 // is safe to drop into legacy list routes and gives the client a tool to page.
 //
 // coerceFilter: Express query values arrive as string | string[] | undefined. A
-// repeated param (?event_id=a&event_id=b) is an array, which Prisma would reject in
+// repeated param (?championship_id=a&championship_id=b) is an array, which Prisma would reject in
 // an equality `where`. Collapse to a single string so filters can't blow up a route.
 
 export const MAX_PAGE = 200;
