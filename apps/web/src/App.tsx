@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth, type AppRole } from './lib/auth';
 import { AppShell, roleHome } from './components/AppShell';
@@ -115,15 +115,21 @@ function AuthenticatedRoutes() {
 }
 
 function AppRoutes() {
-  const { ctx, loading } = useAuth();
+  const { ctx, loading, justLoggedIn, clearJustLoggedIn, activeRole } = useAuth();
+
+  // Consume the one-shot login flag once we've acted on it (below).
+  useEffect(() => { if (justLoggedIn) clearJustLoggedIn(); }, [justLoggedIn, clearJustLoggedIn]);
 
   if (loading) return <div className="grid h-screen place-items-center"><Spinner /></div>;
-
-  return ctx ? <AuthenticatedRoutes /> : (
+  if (!ctx) return (
     <Routes>
       <Route path="*" element={<AuthPage />} />
     </Routes>
   );
+  // After an explicit login/signup, bounce to the role's home so the previous
+  // session's last-visited URL never renders. Initial token refresh skips this.
+  if (justLoggedIn) return <Navigate to={roleHome(activeRole)} replace />;
+  return <AuthenticatedRoutes />;
 }
 
 export function App() {

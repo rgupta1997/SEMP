@@ -1,7 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import { useAuth } from '../lib/auth';
-import { roleHome } from '../components/AppShell';
 import { Button, Input } from '../components/ui';
 
 // Seed accounts from `npm run seed` (password: demo123; admin: admin123).
@@ -25,8 +23,7 @@ const DEMO_GROUPS: { group: string; accounts: { email: string; label: string; pw
 ];
 
 export function AuthPage() {
-  const { login, signup, availableRoles } = useAuth();
-  const navigate = useNavigate();
+  const { login, signup } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -35,12 +32,8 @@ export function AuthPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Redirect to home when user becomes authenticated
-  useEffect(() => {
-    if (availableRoles.length > 0) {
-      navigate(roleHome(availableRoles[0] ?? 'user'), { replace: true });
-    }
-  }, [availableRoles, navigate]);
+  // Redirect after auth is handled centrally in AppRoutes (it stays mounted across
+  // the unauthenticated -> authenticated switch, unlike this page).
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,7 +44,7 @@ export function AuthPage() {
       } else {
         await signup({ name, email, password, phone: phone || undefined });
       }
-      // Navigate happens via useEffect below after ctx updates
+      // AppRoutes redirects to the role's home once auth context updates.
     } catch (err: any) {
       setError(err.message ?? 'Something went wrong');
     } finally { setBusy(false); }
@@ -61,7 +54,7 @@ export function AuthPage() {
     setError(null); setBusy(true);
     try {
       await login(em, pw);
-      // Navigate happens via useEffect below after ctx updates
+      // AppRoutes redirects to the role's home once auth context updates.
     } catch (err: any) { setError(err.message ?? 'Login failed'); } finally { setBusy(false); }
   };
 

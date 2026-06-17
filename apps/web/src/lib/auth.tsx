@@ -42,6 +42,11 @@ interface AuthState {
   signup: (body: SignupBody) => Promise<void>;
   refresh: () => Promise<void>;
   logout: () => void;
+  // True right after an explicit login/signup so the router can land on the
+  // role's home instead of the previous session's last-visited URL. (Not set on
+  // initial token refresh, so deep links opened while signed in still work.)
+  justLoggedIn: boolean;
+  clearJustLoggedIn: () => void;
 }
 
 export interface SignupBody {
@@ -64,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ctx, setCtx] = useState<AuthContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeRole, setActiveRoleState] = useState<AppRole>('user');
+  const [justLoggedIn, setJustLoggedIn] = useState(false);
 
   const applyContext = (c: AuthContext) => {
     setCtx(c);
@@ -88,6 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(ACTIVE_ROLE_KEY);
     qc.clear(); // drop the previous user's cached queries so nothing leaks across sessions
     applyContext(res);
+    setJustLoggedIn(true);
   };
 
   const signup = async (body: SignupBody) => {
@@ -96,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(ACTIVE_ROLE_KEY);
     qc.clear();
     applyContext(res);
+    setJustLoggedIn(true);
   };
 
   const setActiveRole = (r: AppRole) => {
@@ -108,12 +116,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(ACTIVE_ROLE_KEY);
     qc.clear(); // wipe cached data so the next user starts clean
     setCtx(null);
+    setJustLoggedIn(false);
   };
 
   const availableRoles = useMemo(() => (ctx ? rolesFor(ctx) : []), [ctx]);
 
   return (
-    <Ctx.Provider value={{ ctx, loading, availableRoles, activeRole, setActiveRole, login, signup, refresh, logout }}>
+    <Ctx.Provider value={{ ctx, loading, availableRoles, activeRole, setActiveRole, login, signup, refresh, logout, justLoggedIn, clearJustLoggedIn: () => setJustLoggedIn(false) }}>
       {children}
     </Ctx.Provider>
   );

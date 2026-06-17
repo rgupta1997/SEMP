@@ -108,8 +108,13 @@ export function AppShell() {
   const { ctx, activeRole, logout } = useAuth();
   const { theme, toggle } = useTheme();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Drop the current URL on sign-out so a stale deep link doesn't linger behind
+  // the login screen (and isn't restored on the next login).
+  const signOut = () => { logout(); navigate('/', { replace: true }); };
 
   const eventId = ctx ? parseEventId(pathname) : null;
   const { data: championship } = useApi<EventSummary>(eventId ? `/championships/${eventId}` : null);
@@ -197,7 +202,7 @@ export function AppShell() {
                       <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{ctx.user.name}</div>
                       <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.email}</div>
                     </div>
-                    <button onClick={logout} className="w-full px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">Sign out</button>
+                    <button onClick={signOut} className="w-full px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">Sign out</button>
                   </div>
                 </>
               )}
