@@ -5,6 +5,7 @@ import {
   Avatar, BackButton, Badge, Card, CardBody, CardHeader, EmptyState, PageHeader, Spinner, StatCard, StatusBadge, Table, Tabs,
 } from '../../components/ui';
 import { MatchRow } from '../../components/participant/MatchRow';
+import { ChampionshipFixtures } from '../../components/participant/ChampionshipFixtures';
 import type { MatchSummary } from '../../components/participant/types';
 
 interface EventDetail {
@@ -28,9 +29,11 @@ interface EventDetail {
 const MEDAL = ['🥇', '🥈', '🥉'];
 
 export function ParticipantEventPage() {
-  const { eventId } = useParams();
+  // Route is /profile/championships/:championshipId — must match the param name,
+  // otherwise this is undefined and the fetch 404s ("Championship not available").
+  const { championshipId } = useParams();
   const [tab, setTab] = useState('overview');
-  const { data, isLoading, error } = useApi<EventDetail>(`/me/championships/${eventId}`);
+  const { data, isLoading, error } = useApi<EventDetail>(`/me/championships/${championshipId}`);
 
   if (isLoading) return <Spinner />;
   if (error || !data) {
@@ -53,6 +56,8 @@ export function ParticipantEventPage() {
           { id: 'overview', label: 'Overview' },
           { id: 'teams', label: 'My teams', badge: <Badge tone="slate">{teams.length}</Badge> },
           { id: 'matches', label: 'My matches', badge: <Badge tone="slate">{matches.length}</Badge> },
+          { id: 'schedule', label: 'Schedule' },
+          { id: 'results', label: 'Results' },
           { id: 'standings', label: 'Standings' },
         ]}
       />
@@ -117,6 +122,10 @@ export function ParticipantEventPage() {
           </div>
         )
       )}
+
+      {tab === 'schedule' && championshipId && <ChampionshipFixtures championshipId={championshipId} mode="schedule" />}
+
+      {tab === 'results' && championshipId && <ChampionshipFixtures championshipId={championshipId} mode="results" />}
 
       {tab === 'standings' && (
         standings.length === 0 ? (
