@@ -3,7 +3,6 @@ import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls, fmtDateTime } from '../../lib/hooks';
 import { Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, Modal, Pagination, SearchInput, SortDirButton, StatusBadge, Table, toast } from '../../components/ui';
-import { InstitutionFormModal, type InstitutionFormBody } from '../../components/InstitutionFormModal';
 
 export function ApprovalsPage() {
   const { eventId } = useEvent();
@@ -13,7 +12,6 @@ export function ApprovalsPage() {
   const [rejecting, setRejecting] = useState<any | null>(null);
   const [note, setNote] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [addingInst, setAddingInst] = useState(false);
 
   const review = useApiMutation(
     ({ id, status, rejection_note }: any) => api('PATCH', `/championship-organizations/${id}`, { status, rejection_note }),
@@ -73,7 +71,6 @@ export function ApprovalsPage() {
             Sort: {t.sortKey === 'name' ? 'Name' : 'Applied'}
           </Button>
           <SortDirButton dir={t.dir} onToggle={() => t.setDir(t.dir === 'asc' ? 'desc' : 'asc')} />
-          <Button size="sm" onClick={() => setAddingInst(true)}>+ Add organization</Button>
         </ListToolbar>
       </div>
 
@@ -133,13 +130,6 @@ export function ApprovalsPage() {
         </Table>
       )}
       {t.total > 0 && <Pagination page={t.page} pageCount={t.pageCount} total={t.total} pageSize={t.pageSize} onPage={t.setPage} />}
-
-      {addingInst && (
-        <InstitutionFormModal
-          onClose={() => setAddingInst(false)}
-          onSubmit={(body: InstitutionFormBody) => api('POST', '/organizations', body)}
-        />
-      )}
 
       {rejecting && (
         <Modal title={`Reject ${rejecting.organizations?.name}`} onClose={() => setRejecting(null)}>

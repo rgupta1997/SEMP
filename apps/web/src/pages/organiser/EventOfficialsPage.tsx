@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useEvent } from './EventLayout';
 import { useApi, useApiMutation, useTableControls, fmtDate } from '../../lib/hooks';
 import { api } from '../../lib/api';
-import { Card, Spinner, Button, Input, Avatar, Modal, SearchInput, Pagination, ListToolbar } from '../../components/ui';
-import { UserFormModal, type UserFormBody } from '../../components/UserFormModal';
+import { Card, Spinner, Button, Avatar, SearchInput, Pagination, ListToolbar } from '../../components/ui';
+import { PeoplePicker } from '../../components/PeoplePicker';
 
 interface Official {
   id: string;
@@ -21,84 +21,19 @@ interface User {
   account_type?: string;
 }
 
+// Assign officials by mobile/name, multi-select. A typed number with no existing
+// user gets an invite to join, auto-applied when they sign up with that number.
 function AssignOfficialModal({ eventId, existingIds, onClose }: { eventId: string; existingIds: Set<string>; onClose: () => void }) {
-  const [search, setSearch] = useState('');
-  const [creating, setCreating] = useState(false);
-  const { data: users, isLoading } = useApi<User[]>('/users');
-  const assignMut = useApiMutation(
-    (userId: string) => api('POST', `/championships/${eventId}/officials`, { user_id: userId }),
-    [`/championships/${eventId}/officials`, '/users'],
-  );
-
-  const available = users?.filter((u) => !existingIds.has(u.id) &&
-    (u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()))
-  ) ?? [];
-
-  // Create a brand-new official login (added to the master Users list) and assign it.
-  if (creating) {
-    return (
-      <UserFormModal
-        title="New official"
-        submitLabel="Create & assign"
-        onClose={() => setCreating(false)}
-        onSubmit={async (body: UserFormBody) => {
-          const u = await api<any>('POST', '/users', body);
-          await assignMut.mutateAsync(u.id);
-          // Return the created user so the modal can show its login to copy.
-          return u;
-        }}
-      />
-    );
-  }
-
+  const assignUser = async (userId: string) => { await api('POST', `/championships/${eventId}/officials`, { user_id: userId }); };
   return (
-    <Modal title="Assign Official to Championship" onClose={onClose}>
-      <div className="space-y-4">
-        <Input
-          placeholder="Search officials by name or email..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          autoFocus
-        />
-
-        {isLoading ? (
-          <div className="grid h-20 place-items-center"><Spinner /></div>
-        ) : available.length === 0 ? (
-          <p className="text-center text-sm text-slate-500 dark:text-slate-400 py-4">
-            {search ? 'No matching officials found' : 'All officials are already assigned to this championship'}
-          </p>
-        ) : (
-          <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 dark:border-slate-800">
-            {available.map((u) => (
-              <div key={u.id} className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-3 py-2 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-800/60">
-                <div className="flex items-center gap-2">
-                  <Avatar name={u.name} size={28} />
-                  <div>
-                    <div className="text-sm font-medium text-slate-800 dark:text-slate-200">{u.name}</div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">{u.email}</div>
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => assignMut.mutate(u.id, { onSuccess: onClose })}
-                  disabled={assignMut.isPending}
-                >
-                  Assign
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Don't see the official? Create their login here — it's added to the master Users list too.
-          </p>
-          <Button size="sm" variant="outline" onClick={() => setCreating(true)}>+ New official</Button>
-        </div>
-      </div>
-    </Modal>
+    <PeoplePicker
+      title="Assign officials"
+      subtitle="Search by mobile or name and pick officials. Unknown numbers get an invite to join."
+      excludeUserIds={existingIds}
+      invite={{ target_type: 'championship_official', target_id: eventId }}
+      onAssignUser={assignUser}
+      onClose={onClose}
+    />
   );
 }
 

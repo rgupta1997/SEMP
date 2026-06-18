@@ -29,6 +29,16 @@ const PLACEMENT_LABEL: Record<(typeof PLACEMENT_KEYS)[number], string> = {
   winner: 'Winner', runner_up: 'Runner-up', semi_finalist: 'Semi-finalist', quarter_finalist: 'Quarter-finalist',
 };
 
+// A compact, read-only summary of a saved rule — shown when the editor is frozen.
+function ruleSummary(rule: StandingsRule): string {
+  const parts: string[] = [SCHEME_LABEL[rule.scheme]];
+  if (rule.scheme === 'league_points') parts.push(`Win ${rule.win} · Draw ${rule.draw} · Loss ${rule.loss}`);
+  else if (rule.scheme === 'placement') parts.push(PLACEMENT_KEYS.map((k) => `${PLACEMENT_LABEL[k]} ${rule.points[k] ?? 0}`).join(' · '));
+  else if (rule.scheme === 'medal') parts.push(`Gold ${rule.gold} · Silver ${rule.silver} · Bronze ${rule.bronze}`);
+  if (rule.participation) parts.push(`Participation ${rule.participation}`);
+  return parts.join('  ·  ');
+}
+
 function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (n: number) => void }) {
   return (
     <label className="flex flex-col gap-1">
@@ -92,9 +102,11 @@ function RuleForm({ value, onChange }: { value: StandingsRule; onChange: (r: Sta
   );
 }
 
-// The championship-wide default rule.
-function DefaultRuleEditor({ eventId, initial }: { eventId: string; initial: StandingsRule }) {
+// The championship-wide default rule. Frozen (read-only summary) once a rule has
+// been saved; "Edit" re-opens the editor.
+function DefaultRuleEditor({ eventId, initial, saved }: { eventId: string; initial: StandingsRule; saved: boolean }) {
   const [rule, setRule] = useState<StandingsRule>(initial);
+  const [frozen, setFrozen] = useState(saved);
   const save = useApiMutation(
     (config: StandingsRule) => api('PUT', `/championships/${eventId}/standings-rules`, { scope_type: 'championship', config }),
     [], // recompute touches every scope — refresh all queries
@@ -105,13 +117,22 @@ function DefaultRuleEditor({ eventId, initial }: { eventId: string; initial: Sta
         <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">Championship default</span>
         <Badge tone="slate">applies unless overridden</Badge>
       </div>
-      <RuleForm value={rule} onChange={setRule} />
-      <div className="mt-3 flex justify-end">
-        <Button disabled={save.isPending}
-          onClick={() => save.mutate(rule, { onSuccess: () => toast.success('Default rule saved'), onError: (e: any) => toast.error(e.message) })}>
-          {save.isPending ? 'Saving…' : 'Save default'}
-        </Button>
-      </div>
+      {frozen ? (
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-slate-600 dark:text-slate-300">{ruleSummary(rule)}</p>
+          <Button variant="outline" onClick={() => setFrozen(false)}>Edit</Button>
+        </div>
+      ) : (
+        <>
+          <RuleForm value={rule} onChange={setRule} />
+          <div className="mt-3 flex justify-end">
+            <Button disabled={save.isPending}
+              onClick={() => save.mutate(rule, { onSuccess: () => { toast.success('Point system saved'); setFrozen(true); }, onError: (e: any) => toast.error(e.message) })}>
+              {save.isPending ? 'Saving…' : 'Save point system'}
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -121,6 +142,7 @@ function ScopeRuleEditor({ eventId, scopeType, option, override, fallback }: {
   eventId: string; scopeType: 'format' | 'discipline'; option: ScopeOption; override?: RuleRow; fallback: StandingsRule;
 }) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [rule, setRule] = useState<StandingsRule>(override?.config ?? fallback);
   const save = useApiMutation(
     (config: StandingsRule) => api('PUT', `/championships/${eventId}/standings-rules`, { scope_type: scopeType, scope_id: option.id, config }),
@@ -131,7 +153,10 @@ function ScopeRuleEditor({ eventId, scopeType, option, override, fallback }: {
     [],
   );
 
-  const expanded = open || !!override;
+  // A saved override shows as a frozen summary until "Edit"; an unsaved scope
+  // stays collapsed behind "Customize".
+  const frozen = !!override && !editing;
+  const showForm = editing || (!override && open);
   return (
     <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
       <div className="flex items-center justify-between gap-3">
@@ -139,21 +164,24 @@ function ScopeRuleEditor({ eventId, scopeType, option, override, fallback }: {
           <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{option.name}</span>
           {override ? <Badge tone="brand">override</Badge> : <Badge tone="slate">inherits default</Badge>}
         </div>
-        {!expanded && <Button variant="ghost" onClick={() => setOpen(true)}>Customize</Button>}
+        {frozen && <Button variant="outline" onClick={() => setEditing(true)}>Edit</Button>}
+        {!override && !open && <Button variant="ghost" onClick={() => setOpen(true)}>Customize</Button>}
       </div>
 
-      {expanded && (
+      {frozen && <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{ruleSummary(override!.config)}</p>}
+
+      {showForm && (
         <div className="mt-3">
           <RuleForm value={rule} onChange={setRule} />
           <div className="mt-3 flex justify-end gap-2">
             {override && (
               <Button variant="ghost" disabled={reset.isPending}
-                onClick={() => reset.mutate(undefined, { onSuccess: () => toast.success('Override removed'), onError: (e: any) => toast.error(e.message) })}>
+                onClick={() => reset.mutate(undefined, { onSuccess: () => { toast.success('Override removed'); setEditing(false); setOpen(false); }, onError: (e: any) => toast.error(e.message) })}>
                 {reset.isPending ? 'Removing…' : 'Reset to default'}
               </Button>
             )}
             <Button disabled={save.isPending}
-              onClick={() => save.mutate(rule, { onSuccess: () => toast.success('Override saved'), onError: (e: any) => toast.error(e.message) })}>
+              onClick={() => save.mutate(rule, { onSuccess: () => { toast.success('Override saved'); setEditing(false); setOpen(false); }, onError: (e: any) => toast.error(e.message) })}>
               {save.isPending ? 'Saving…' : 'Save override'}
             </Button>
           </div>
@@ -168,7 +196,7 @@ export function StandingsRulesCard({ eventId }: { eventId: string }) {
 
   if (isLoading || !data) {
     return (
-      <Card><CardHeader title="Scoring rules" /><CardBody><Spinner /></CardBody></Card>
+      <Card><CardHeader title="Point System" /><CardBody><Spinner /></CardBody></Card>
     );
   }
 
@@ -179,11 +207,11 @@ export function StandingsRulesCard({ eventId }: { eventId: string }) {
   return (
     <Card>
       <CardHeader
-        title="Scoring rules"
+        title="Point System"
         subtitle="How completed fixtures become standings points. Set a championship default, then override per format or discipline."
       />
       <CardBody className="space-y-5">
-        <DefaultRuleEditor key={JSON.stringify(defaultRule)} eventId={eventId} initial={defaultRule} />
+        <DefaultRuleEditor key={JSON.stringify(defaultRule)} eventId={eventId} initial={defaultRule} saved={!!championshipRule} />
 
         {data.formats.length > 0 && (
           <div className="space-y-2">

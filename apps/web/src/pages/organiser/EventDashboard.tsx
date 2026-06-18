@@ -22,7 +22,7 @@ export function EventDashboard() {
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Tournaments" value={tournaments.length} />
+        <StatCard label="Seasons" value={tournaments.length} />
         <StatCard label="Teams" value={teams.length} hint={`${approved.length} organizations approved`} />
         <StatCard label="Pending approvals" value={pending.length} accent={pending.length > 0} hint="needs review" />
         <StatCard label="Venues" value={venues.length} />
@@ -53,10 +53,10 @@ export function EventDashboard() {
         )}
 
         <Card>
-          <CardHeader title="Tournaments" action={canManage ? <Link to={`/championships/${eventId}/setup`}><Button size="sm" variant="subtle">Manage</Button></Link> : undefined} />
+          <CardHeader title="Seasons" action={canManage ? <Link to={`/championships/${eventId}/setup`}><Button size="sm" variant="subtle">Manage</Button></Link> : undefined} />
           <CardBody>
             {tournaments.length === 0 ? (
-              <p className="text-sm text-slate-400 dark:text-slate-500">No tournaments yet.</p>
+              <p className="text-sm text-slate-400 dark:text-slate-500">No seasons yet.</p>
             ) : (
               <div className="space-y-2">
                 {tournaments.map((t) => (
