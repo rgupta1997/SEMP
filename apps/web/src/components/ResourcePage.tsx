@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useTableControls } from '../lib/hooks';
 import { usePermissions } from '../lib/permissions';
@@ -67,7 +67,6 @@ function buildPayload(config: ResourceConfig, values: Record<string, any>, isEdi
 }
 
 function ResourceForm({ config, row, onClose }: { config: ResourceConfig; row: any | null; onClose: () => void }) {
-  const qc = useQueryClient();
   const isEdit = !!row;
   const [values, setValues] = useState(() => initialValues(config, row));
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +74,10 @@ function ResourceForm({ config, row, onClose }: { config: ResourceConfig; row: a
   const mut = useMutation({
     mutationFn: (payload: any) =>
       isEdit ? api('PATCH', `${config.path}/${row.id}`, payload) : api('POST', config.path, payload),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: [config.path] }); onClose(); },
+    // Prefix invalidation refreshes the list AND every parameterized read of this
+    // master (e.g. /disciplines?sport_id=…) wherever it's used in the app.
+    meta: { invalidate: [config.path] },
+    onSuccess: () => onClose(),
     onError: (e: any) => setError(e.message ?? 'Error'),
   });
 
@@ -131,7 +133,6 @@ function cell(v: any): string {
 }
 
 export function ResourcePage({ config }: { config: ResourceConfig }) {
-  const qc = useQueryClient();
   const { can } = usePermissions();
   const canManage = can('masterdata.manage');
   const [editing, setEditing] = useState<any | null>(null);
@@ -141,11 +142,12 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
 
   const del = useMutation({
     mutationFn: (id: string) => api('DELETE', `${config.path}/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [config.path] }),
+    meta: { invalidate: [config.path] },
   });
   const bulkDel = useMutation({
     mutationFn: async (ids: string[]) => { await Promise.all(ids.map((id) => api('DELETE', `${config.path}/${id}`))); },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: [config.path] }); setSelected(new Set()); },
+    meta: { invalidate: [config.path] },
+    onSuccess: () => setSelected(new Set()),
     onError: (e: any) => toast.error(e.message),
   });
   const selectable = !config.noDelete && canManage;
@@ -177,7 +179,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
   });
   const statusMut = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) => api('PATCH', `${config.path}/${id}/status`, { status }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [config.path] }),
+    meta: { invalidate: [config.path] },
     onError: (e: any) => toast.error(e.message),
   });
 

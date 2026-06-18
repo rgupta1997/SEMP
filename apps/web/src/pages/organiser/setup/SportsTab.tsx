@@ -4,14 +4,14 @@ import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { ENTRY_TYPE, TOURNAMENT_DISCIPLINE_STATUS } from '@semp/shared';
 import { usePermissions } from '../../../lib/permissions';
-import { Badge, Button, Card, EmptyState, Field, Input, Modal, Select, StatusBadge } from '../../../components/ui';
+import { Badge, Button, Card, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge } from '../../../components/ui';
 
 /* ----------------------------- Add sports modal ----------------------------- */
 // Tap sport tiles to select several at once; choose a fixture format for each,
 // then add them all. Super admins can also create a brand-new sport inline.
 function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournamentId: string; existingSportIds: Set<string>; onClose: () => void }) {
   const { isSuper } = usePermissions();
-  const { data: sports = [] } = useApi<any[]>('/sports');
+  const { data: sports = [], isLoading: sportsLoading } = useApi<any[]>('/sports');
   const { data: formats = [] } = useApi<any[]>('/tournament-formats');
   // sportId -> chosen format id ('' until picked). Presence = selected.
   const [selected, setSelected] = useState<Record<string, string>>({});
@@ -67,7 +67,9 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
     <Modal title="Add sports" onClose={onClose} wide>
       <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Tap the sports this season will run, then choose a fixture format for each.</p>
 
-      {available.length === 0 ? (
+      {sportsLoading ? (
+        <div className="grid place-items-center py-8"><Spinner label="Loading sports…" /></div>
+      ) : available.length === 0 ? (
         <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">Every sport is already in this season.</p>
       ) : (
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
@@ -152,7 +154,7 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, o
   const qc = useQueryClient();
   const tsPath = `/tournament-disciplines?tournament_sport_id=${tournamentSport.id}`;
   const disciplinesPath = `/disciplines?sport_id=${tournamentSport.sport_id}`;
-  const { data: disciplines = [] } = useApi<any[]>(disciplinesPath);
+  const { data: disciplines = [], isLoading: disciplinesLoading } = useApi<any[]>(disciplinesPath);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [venueId, setVenueId] = useState('');     // shared — applied to all
   const [formatId, setFormatId] = useState('');   // shared — applied to all ('' = inherit sport)
@@ -225,13 +227,15 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, o
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         <Tile id={WHOLE} title="Whole sport" subtitle="no sub-discipline" />
-        {disciplines.map((d) => (
+        {!disciplinesLoading && disciplines.map((d) => (
           <Tile key={d.id} id={d.id} title={d.name} subtitle={`${d.entry_type ?? 'team'} · squad ${d.squad_min ?? 1}–${d.squad_max ?? 15}`} />
         ))}
       </div>
-      {disciplines.length === 0 && (
+      {disciplinesLoading ? (
+        <div className="mt-2 grid place-items-center py-4"><Spinner label="Loading disciplines…" /></div>
+      ) : disciplines.length === 0 ? (
         <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">No sub-disciplines defined for this sport — add a whole-sport discipline above.</p>
-      )}
+      ) : null}
 
       {ids.length > 0 && (
         <div className="mt-4 space-y-3 border-t border-slate-100 pt-4 dark:border-slate-800">

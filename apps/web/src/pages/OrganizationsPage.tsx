@@ -121,11 +121,10 @@ function Section({ title, memberships }: { title: string; memberships: any[] }) 
               </div>
               <div className="flex flex-col items-end gap-2">
                 <Badge tone="brand">{m.role}</Badge>
-                {canManage && (
-                  <Link to={`/organizations/${m.organization_id}/teams`} className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300">
-                    Manage →
-                  </Link>
-                )}
+                {/* Owners/admins manage; members (and other roles) can still view the org's teams + members. */}
+                <Link to={`/organizations/${m.organization_id}/teams`} className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300">
+                  {canManage ? 'Manage →' : 'View →'}
+                </Link>
               </div>
             </Card>
           );

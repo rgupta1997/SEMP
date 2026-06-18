@@ -2,12 +2,26 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from './api';
 
+// Admin-managed reference data that changes rarely — cache it aggressively so the
+// many screens that read it (pickers, setup modals, badges) don't refetch on every
+// mount. Mutating these (super-admin CRUD) invalidates the base key, which refreshes
+// it; otherwise it survives ~30 min in cache.
+const MASTER_PREFIXES = ['/sports', '/disciplines', '/tournament-formats', '/roles', '/permissions'];
+const MASTER_STALE_MS = 30 * 60_000;
+function masterStaleTime(path: string | null): number | undefined {
+  if (!path) return undefined;
+  return MASTER_PREFIXES.some((m) => path === m || path.startsWith(`${m}?`) || path.startsWith(`${m}/`))
+    ? MASTER_STALE_MS
+    : undefined; // undefined → fall back to the global 30s default
+}
+
 // GET list/item with the path as the cache key.
 export function useApi<T = any>(path: string | null, enabled = true) {
   return useQuery<T>({
     queryKey: [path],
     queryFn: () => api('GET', path as string),
     enabled: enabled && path !== null,
+    staleTime: masterStaleTime(path),
   });
 }
 
