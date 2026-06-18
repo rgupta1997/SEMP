@@ -14,6 +14,8 @@ export interface AuthLike {
 
 export interface EventScopes {
   isSuper: boolean;
+  userId: string;                  // the user these scopes were built for (direct notifications)
+  adminOrgIds: Set<string>;        // orgs the user owns/administers (sees 'org_admins' audience)
   organiserEventIds: Set<string>;
   officialEventIds: Set<string>;
   captainEventIds: Set<string>;
@@ -37,7 +39,7 @@ export async function getUserEventScopes(prisma: Prisma, user: AuthLike): Promis
   if (user.isSuperAdmin) {
     const empty = new Set<string>();
     return {
-      isSuper: true,
+      isSuper: true, userId: user.id, adminOrgIds: empty,
       organiserEventIds: empty, officialEventIds: empty, captainEventIds: empty,
       participantEventIds: empty, pocEventIds: empty,
       allRelatedEventIds: empty, instCaptEventIds: empty, postableEventIds: empty,
@@ -50,7 +52,7 @@ export async function getUserEventScopes(prisma: Prisma, user: AuthLike): Promis
   ]);
   const roleIds = [orgRole?.id, offRole?.id].filter(Boolean) as string[];
 
-  const [eventRoleRows, officialRows, memberRows, pocRows] = await Promise.all([
+  const [eventRoleRows, officialRows, memberRows, pocRows, adminOrgRows] = await Promise.all([
     roleIds.length
       ? prisma.user_championship_roles.findMany({
           where: { user_id: user.id, role_id: { in: roleIds } },
@@ -63,7 +65,7 @@ export async function getUserEventScopes(prisma: Prisma, user: AuthLike): Promis
     }),
     prisma.team_members.findMany({
       where: { user_id: user.id, is_active: true },
-      select: { role: true, teams: { select: { championship_id: true } } },
+      select: { role: true, teams: { select: { team_entries: { select: { championship_id: true } } } } },
     }),
     // Championships the user can post to as an org admin: those any org they
     // own/administer is enrolled in.
@@ -76,6 +78,12 @@ export async function getUserEventScopes(prisma: Prisma, user: AuthLike): Promis
         },
       },
       select: { championship_id: true },
+    }),
+    // Orgs the user owns/administers — they see 'org_admins' notifications (e.g.
+    // someone requesting to join). Pending memberships don't count (status active).
+    prisma.organization_members.findMany({
+      where: { user_id: user.id, role: { in: ['owner', 'admin'] }, status: 'active' },
+      select: { organization_id: true },
     }),
   ]);
 
@@ -90,16 +98,17 @@ export async function getUserEventScopes(prisma: Prisma, user: AuthLike): Promis
   const captainEventIds = new Set<string>();
   const participantEventIds = new Set<string>();
   for (const m of memberRows) {
-    const evId = m.teams?.championship_id;
-    if (!evId) continue;
-    participantEventIds.add(evId);
-    if (m.role === 'captain' || m.role === 'vice_captain') captainEventIds.add(evId);
+    for (const entry of m.teams?.team_entries ?? []) {
+      participantEventIds.add(entry.championship_id);
+      if (m.role === 'captain' || m.role === 'vice_captain') captainEventIds.add(entry.championship_id);
+    }
   }
 
   const pocEventIds = new Set<string>(pocRows.map((r) => r.championship_id));
+  const adminOrgIds = new Set<string>(adminOrgRows.map((r) => r.organization_id));
 
   return {
-    isSuper: false,
+    isSuper: false, userId: user.id, adminOrgIds,
     organiserEventIds, officialEventIds, captainEventIds, participantEventIds, pocEventIds,
     allRelatedEventIds: union(organiserEventIds, officialEventIds, captainEventIds, participantEventIds, pocEventIds),
     instCaptEventIds: union(pocEventIds, captainEventIds),
@@ -110,9 +119,15 @@ export async function getUserEventScopes(prisma: Prisma, user: AuthLike): Promis
 // Can this user see a given notification? Mirrors the targeting rules.
 export function canSeeNotification(
   scopes: EventScopes,
-  n: { championship_id: string; audience: string },
+  n: { championship_id: string | null; audience: string; organization_id?: string | null; target_user_id?: string | null },
 ): boolean {
   if (scopes.isSuper) return true;
+  // Direct notification to a specific user (e.g. join request approved/declined).
+  if (n.target_user_id) return n.target_user_id === scopes.userId;
+  // Org-scoped notification (e.g. someone requested to join) → that org's admins.
+  if (n.audience === 'org_admins') return !!n.organization_id && scopes.adminOrgIds.has(n.organization_id);
+  // Championship-scoped notifications.
+  if (!n.championship_id) return false;
   if (n.audience === 'organizations_captains') return scopes.instCaptEventIds.has(n.championship_id);
   return scopes.allRelatedEventIds.has(n.championship_id);
 }
@@ -128,17 +143,22 @@ export function visibilityWhere(scopes: EventScopes): Record<string, unknown> {
   if (scopes.isSuper) return {};
   const all = [...scopes.allRelatedEventIds];
   const ic = [...scopes.instCaptEventIds];
+  const adminOrgs = [...scopes.adminOrgIds];
   const or: Record<string, unknown>[] = [];
   if (all.length) or.push({ audience: 'all', championship_id: { in: all } });
   if (ic.length) or.push({ audience: 'organizations_captains', championship_id: { in: ic } });
-  if (or.length === 0) return { id: { in: [] as string[] } }; // sees nothing
+  if (adminOrgs.length) or.push({ audience: 'org_admins', organization_id: { in: adminOrgs } });
+  // Direct notifications addressed to this user (always applicable).
+  or.push({ target_user_id: scopes.userId });
   return { OR: or };
 }
 
 // Shared insert helper — used by the manual-post route and the lifecycle/approval
 // hooks in championships/enrollment routers.
 export function createNotification(prisma: Prisma, data: {
-  championship_id: string;
+  championship_id?: string | null;
+  organization_id?: string | null;
+  target_user_id?: string | null;
   sender_id?: string | null;
   type: NotificationType;
   audience: NotificationAudience;
@@ -147,7 +167,9 @@ export function createNotification(prisma: Prisma, data: {
 }) {
   return prisma.notifications.create({
     data: {
-      championship_id: data.championship_id,
+      championship_id: data.championship_id ?? null,
+      organization_id: data.organization_id ?? null,
+      target_user_id: data.target_user_id ?? null,
       sender_id: data.sender_id ?? null,
       type: data.type,
       audience: data.audience,
