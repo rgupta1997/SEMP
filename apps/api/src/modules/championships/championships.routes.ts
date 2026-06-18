@@ -22,6 +22,36 @@ function withSports(c: any) {
   return { ...rest, sports: [...set].sort() };
 }
 
+// Mask a contact number for spectators: keep the last 3 digits, hide the rest.
+function maskPhone(phone?: string | null): string | null {
+  if (!phone) return phone ?? null;
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length <= 3) return '•••';
+  return '•'.repeat(digits.length - 3) + digits.slice(-3);
+}
+
+// Only two kinds of viewer may see real contact numbers for a championship:
+//   1. the organiser / organising team (a user_championship_roles "Organiser" row), or
+//   2. an owner of an organization enrolled in that championship.
+// Everyone else — officials, players, org admins/members, and spectators — gets
+// the phone masked.
+async function isChampionshipInsider(prisma: Prisma, userId: string, championshipId: string): Promise<boolean> {
+  const [organiser, enrolledOwner] = await Promise.all([
+    prisma.user_championship_roles.findFirst({
+      where: { user_id: userId, championship_id: championshipId, roles: { name: 'Organiser' } },
+      select: { id: true },
+    }),
+    prisma.championship_organizations.findFirst({
+      where: {
+        championship_id: championshipId,
+        organizations: { organization_members: { some: { user_id: userId, role: 'owner', status: 'active' } } },
+      },
+      select: { id: true },
+    }),
+  ]);
+  return !!(organiser || enrolledOwner);
+}
+
 // Human-readable lifecycle notification copy per target status. Returned undefined
 // for statuses we don't announce (e.g. back to draft).
 function lifecycleMessage(status: ChampionshipStatus): { title: string; body: string } | undefined {
@@ -76,7 +106,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
     const [championshipRoleRows, officialRows, memberRows, enrolledRows] = await Promise.all([
       prisma.user_championship_roles.findMany({ where: { user_id: userId }, select: { championship_id: true, role_id: true } }),
       prisma.championship_officials.findMany({ where: { user_id: userId, is_active: true }, select: { championship_id: true } }),
-      prisma.team_members.findMany({ where: { user_id: userId, is_active: true }, select: { teams: { select: { championship_id: true } } } }),
+      prisma.team_members.findMany({ where: { user_id: userId, is_active: true }, select: { teams: { select: { team_entries: { select: { championship_id: true } } } } } }),
       prisma.championship_organizations.findMany({
         where: { organizations: { organization_members: { some: { user_id: userId, status: 'active' } } } },
         select: { championship_id: true },
@@ -88,7 +118,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
       else add(r.championship_id, 'organiser');
     }
     for (const o of officialRows) add(o.championship_id, 'official');
-    for (const m of memberRows) if (m.teams?.championship_id) add(m.teams.championship_id, 'player');
+    for (const m of memberRows) for (const e of m.teams?.team_entries ?? []) add(e.championship_id, 'player');
     for (const e of enrolledRows) add(e.championship_id, 'member');
 
     const ids = [...roles.keys()];
@@ -136,8 +166,9 @@ export function makeEventsRouter(prisma: Prisma): Router {
     await prisma.$transaction([
       // Fixtures sit at the bottom — they reference teams, grounds and disciplines.
       prisma.fixtures.deleteMany({ where: { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: id } } } } }),
-      prisma.team_members.deleteMany({ where: { teams: { championship_id: id } } }),
-      prisma.teams.deleteMany({ where: { championship_id: id } }),
+      // Rosters are cross-championship now, so only their entries for this
+      // championship are removed — the teams + members survive for other events.
+      prisma.team_entries.deleteMany({ where: { championship_id: id } }),
       prisma.tournament_disciplines.deleteMany({ where: { tournament_sports: { tournaments: { championship_id: id } } } }),
       prisma.tournament_sports.deleteMany({ where: { tournaments: { championship_id: id } } }),
       prisma.tournaments.deleteMany({ where: { championship_id: id } }),
@@ -258,8 +289,9 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // EVENT PARTICIPANTS - users on teams in this championship (scoped view)
   // -------------------------------------------------------------------------
   router.get('/:id/participants', asyncHandler(async (req, res) => {
+    const insider = req.user!.isSuperAdmin || await isChampionshipInsider(prisma, req.user!.id, req.params.id);
     const teams = await prisma.teams.findMany({
-      where: { championship_id: req.params.id },
+      where: { team_entries: { some: { championship_id: req.params.id } } },
       include: {
         team_members: {
           include: { users: { select: { id: true, name: true, email: true, phone: true, account_type: true } } },
@@ -287,13 +319,16 @@ export function makeEventsRouter(prisma: Prisma): Router {
       }
     }
 
-    res.json([...seen.values()]);
+    const participants = [...seen.values()];
+    if (!insider) for (const p of participants) p.phone = maskPhone(p.phone);
+    res.json(participants);
   }));
 
   // -------------------------------------------------------------------------
   // EVENT OFFICIALS - officials assigned to this championship
   // -------------------------------------------------------------------------
   router.get('/:id/officials', asyncHandler(async (req, res) => {
+    const insider = req.user!.isSuperAdmin || await isChampionshipInsider(prisma, req.user!.id, req.params.id);
     const officials = await prisma.championship_officials.findMany({
       where: { championship_id: req.params.id, is_active: true },
       include: {
@@ -302,13 +337,16 @@ export function makeEventsRouter(prisma: Prisma): Router {
       },
       orderBy: { assigned_at: 'desc' },
     });
-    res.json(officials.map((o) => ({
-      id: o.id,
-      user: o.users_championship_officials_user_idTousers,
-      assigned_by: o.users_championship_officials_assigned_byTousers,
-      assigned_at: o.assigned_at,
-      notes: o.notes,
-    })));
+    res.json(officials.map((o) => {
+      const user = o.users_championship_officials_user_idTousers;
+      return {
+        id: o.id,
+        user: user && !insider ? { ...user, phone: maskPhone(user.phone) } : user,
+        assigned_by: o.users_championship_officials_assigned_byTousers,
+        assigned_at: o.assigned_at,
+        notes: o.notes,
+      };
+    }));
   }));
 
   // Assign official to championship

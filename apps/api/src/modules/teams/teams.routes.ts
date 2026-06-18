@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import {
   addTeamMemberSchema, bulkAddTeamMembersSchema, bulkCreateTeamsSchema,
-  createTeamSchema, joinTeamSchema, updateTeamMemberSchema, updateTeamSchema,
+  createTeamSchema, enterChampionshipsSchema, joinTeamSchema, updateTeamMemberSchema, updateTeamSchema,
 } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -11,22 +11,15 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { coerceFilter, parsePaging } from '../../http/paging.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
-import { resolveEntryRules } from '../tournaments/domain/entry-rules.js';
+import { resolveEntryRules, type EntryRules } from '../tournaments/domain/entry-rules.js';
 import { assertCanAddMember, assertCanLockRoster } from './domain/roster-policy.js';
 
 // Default password for auto-provisioned players from a bulk import. They can be
 // invited / reset later; precomputed once to keep the bulk loop cheap.
 const DEFAULT_IMPORT_PASSWORD_HASH = bcrypt.hashSync('demo123', 10);
 
-async function rulesForTeam(prisma: Prisma, tournamentDisciplineId: string | null) {
-  if (!tournamentDisciplineId) return resolveEntryRules({}, null);
-  const td = await prisma.tournament_disciplines.findUnique({
-    where: { id: tournamentDisciplineId },
-    include: { disciplines: true },
-  });
-  return resolveEntryRules(td ?? {}, td?.disciplines ?? null);
-}
-
+// Validate that a discipline draw belongs to the given championship and (optionally)
+// matches the team's sport. Returns the loaded draw.
 async function assertDisciplineForTeam(
   prisma: Prisma,
   disciplineId: string,
@@ -47,12 +40,6 @@ async function assertDisciplineForTeam(
     throw new BusinessRuleError('Discipline does not match the selected sport');
   }
   return td;
-}
-
-function assertTeamHasDiscipline(team: { tournament_discipline_id: string | null }) {
-  if (!team.tournament_discipline_id) {
-    throw new BusinessRuleError('Cannot manage this team until the organiser adds a discipline draw for it');
-  }
 }
 
 const teamDisciplineInclude = {
@@ -86,6 +73,62 @@ const publicUserSelect = {
   organization_id: true, created_at: true, updated_at: true,
 } as const;
 
+// Each championship a roster is entered into, with its draw + championship summary.
+const entryInclude = {
+  include: {
+    championships: { select: { id: true, name: true, slug: true, status: true } },
+    tournament_disciplines: teamDisciplineInclude,
+  },
+  orderBy: { created_at: 'asc' },
+} as const;
+
+const teamFullInclude = {
+  team_members: { include: { users: { select: publicUserSelect } } },
+  organizations: organizationWithOwnersInclude,
+  sports: true,
+  team_entries: entryInclude,
+} as const;
+
+// Per-entry rules from its discipline draw (defaults when no draw linked yet).
+function entryRules(entry: { tournament_disciplines?: any }): EntryRules {
+  return resolveEntryRules(entry.tournament_disciplines ?? {}, entry.tournament_disciplines?.disciplines ?? null);
+}
+
+// The roster is shared across all of a team's entries: adding is capped by the
+// most permissive squad_max among them (default 15 when standalone); each entry's
+// own [min, max] is enforced strictly at lock time.
+function looseAddRules(entries: Array<{ tournament_disciplines?: any }>): EntryRules {
+  if (entries.length === 0) return resolveEntryRules({}, null);
+  return { entry_type: 'team', squad_min: 1, squad_max: Math.max(...entries.map((e) => entryRules(e).squad_max)) };
+}
+
+// Attach per-entry rules + a roster-level loose rule used by the squad UI.
+function shapeTeam(team: any) {
+  const team_entries = (team.team_entries ?? []).map((e: any) => ({ ...e, entry_rules: entryRules(e) }));
+  const entry_rules = team_entries.length === 0
+    ? resolveEntryRules({}, null)
+    : {
+        entry_type: 'team' as const,
+        squad_min: Math.min(...team_entries.map((e: any) => e.entry_rules.squad_min)),
+        squad_max: Math.max(...team_entries.map((e: any) => e.entry_rules.squad_max)),
+      };
+  return { ...team, team_entries, entry_rules };
+}
+
+async function hydrateTeam(prisma: Prisma, id: string) {
+  const team = await prisma.teams.findUnique({ where: { id }, include: teamFullInclude });
+  if (!team) throw new NotFoundError('Team');
+  return shapeTeam(team);
+}
+
+// The shared roster is frozen only once every championship entry it has is locked.
+async function assertRosterEditable(prisma: Prisma, teamId: string) {
+  const entries = await prisma.team_entries.findMany({ where: { team_id: teamId }, select: { status: true } });
+  if (entries.length > 0 && entries.every((e) => e.status === 'roster_locked')) {
+    throw new BusinessRuleError('Every championship entry for this team is locked');
+  }
+}
+
 export function makeTeamsRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
@@ -96,25 +139,28 @@ export function makeTeamsRouter(prisma: Prisma): Router {
 
   router.get('/teams', asyncHandler(async (req, res) => {
     const where: Record<string, unknown> = {};
-    for (const k of ['championship_id', 'tournament_discipline_id', 'organization_id', 'sport_id']) {
+    for (const k of ['organization_id', 'sport_id']) {
       const val = coerceFilter(req.query[k]);
       if (val !== undefined) where[k] = val;
+    }
+    // championship_id / tournament_discipline_id now live on team_entries.
+    const champ = coerceFilter(req.query.championship_id);
+    const draw = coerceFilter(req.query.tournament_discipline_id);
+    if (champ !== undefined || draw !== undefined) {
+      where.team_entries = { some: {
+        ...(champ !== undefined ? { championship_id: champ } : {}),
+        ...(draw !== undefined ? { tournament_discipline_id: draw } : {}),
+      } };
     }
     const { take, skip } = parsePaging(req.query);
     const rows = await prisma.teams.findMany({
       where,
-      include: {
-        organizations: organizationWithOwnersInclude,
-        sports: true,
-        championships: { select: { id: true, name: true, slug: true, status: true } },
-        tournament_disciplines: teamDisciplineInclude,
-        team_members: { include: { users: { select: { id: true, name: true, email: true, phone: true } } } },
-      },
+      include: teamFullInclude,
       orderBy: { created_at: 'desc' },
       take,
       skip,
     });
-    res.json(rows);
+    res.json(rows.map(shapeTeam));
   }));
 
   // Resolve an invite token (public-ish within the app) -> team summary.
@@ -128,77 +174,135 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   }));
 
   router.get('/teams/:id', asyncHandler(async (req, res) => {
-    const team = await prisma.teams.findUnique({
-      where: { id: req.params.id },
-      include: {
-        team_members: { include: { users: { select: publicUserSelect } } },
-        organizations: organizationWithOwnersInclude, sports: true, championships: { select: { id: true, name: true, slug: true, status: true } },
-        tournament_disciplines: teamDisciplineInclude,
-      },
-    });
-    if (!team) throw new NotFoundError('Team');
-    // Resolve the effective squad rules so the roster UI can show limits + validate.
-    const entry_rules = resolveEntryRules(
-      team.tournament_disciplines ?? {},
-      team.tournament_disciplines?.disciplines ?? null,
-    );
-    res.json({ ...team, entry_rules });
+    res.json(await hydrateTeam(prisma, req.params.id));
   }));
 
-  // Create a team — requires the organization's enrollment to be approved.
-  // The creating user is automatically enrolled as the team captain so the team
-  // shows up in their "my teams" immediately (and survives a refresh).
+  // Create a team. A team is a standalone organization asset: name + sport + org
+  // are enough. Passing the championship fields enters it into one championship at
+  // creation (the old all-in-one flow); otherwise it's created unassigned and
+  // entered into championships later via /teams/:id/entries. The creating user is
+  // seeded as captain (unless they administer the org — admins manage, not play).
   router.post('/teams', guards.teamCreate, validateBody(createTeamSchema), asyncHandler(async (req, res) => {
-    const ei = await prisma.championship_organizations.findUnique({ where: { id: req.body.championship_organization_id } });
-    if (!ei) throw new NotFoundError('Enrollment');
-    if (ei.status !== 'approved') {
-      throw new BusinessRuleError('Organization enrollment is not approved for this championship');
-    }
-    await assertDisciplineForTeam(prisma, req.body.tournament_discipline_id, req.body.championship_id, req.body.sport_id);
-    // Enforce one-team-per-discipline on create too (was only checked on PATCH), so a
-    // double-submit / retry can't silently create a second team. The partial unique
-    // index added in the DB migration is the race-proof backstop behind this.
-    const dupe = await prisma.teams.findFirst({
-      where: {
-        organization_id: req.body.organization_id,
-        championship_id: req.body.championship_id,
-        tournament_discipline_id: req.body.tournament_discipline_id,
-      },
-      select: { id: true },
-    });
-    if (dupe) throw new BusinessRuleError('Your organization already has a team in this discipline draw');
+    const { name, sport_id, organization_id, championship_id, championship_organization_id, tournament_discipline_id } = req.body as {
+      name: string; sport_id: string; organization_id: string;
+      championship_id?: string; championship_organization_id?: string; tournament_discipline_id?: string;
+    };
     const creatorId = req.user!.id;
-    // An org owner/admin manages but never plays — they're surfaced via the org link.
-    const seedCaptain = !(await isOrgAdmin(creatorId, req.body.organization_id));
-    const team = await prisma.$transaction(async (tx) => {
-      const created = await tx.teams.create({
-        data: {
-          championship_id: req.body.championship_id,
-          sport_id: req.body.sport_id,
-          organization_id: req.body.organization_id,
-          championship_organization_id: req.body.championship_organization_id,
-          tournament_discipline_id: req.body.tournament_discipline_id,
-          name: req.body.name,
-          status: 'forming',
-          invite_token: randomBytes(16).toString('hex'),
-        },
-      });
-      // Seed the roster with the creator as captain (idempotent-safe: one row).
-      if (seedCaptain) {
-        await tx.team_members.create({
-          data: { team_id: created.id, user_id: creatorId, role: 'captain' },
-        });
+    const seedCaptain = !(await isOrgAdmin(creatorId, organization_id));
+
+    // Validate the optional "enter at create" inputs before opening a transaction.
+    let entryData: { championship_id: string; championship_organization_id: string; tournament_discipline_id: string } | null = null;
+    if (championship_organization_id) {
+      if (!championship_id || !tournament_discipline_id) {
+        throw new BusinessRuleError('Championship and discipline are required to enter a team into a championship');
       }
-      return tx.teams.findUnique({
-        where: { id: created.id },
-        include: { team_members: { include: { users: { select: publicUserSelect } } }, organizations: true, sports: true },
+      const ei = await prisma.championship_organizations.findUnique({ where: { id: championship_organization_id } });
+      if (!ei) throw new NotFoundError('Enrollment');
+      if (ei.status !== 'approved') throw new BusinessRuleError('Organization enrollment is not approved for this championship');
+      await assertDisciplineForTeam(prisma, tournament_discipline_id, championship_id, sport_id);
+      const dupe = await prisma.team_entries.findFirst({
+        where: { organization_id, championship_id, tournament_discipline_id },
+        select: { id: true },
       });
+      if (dupe) throw new BusinessRuleError('Your organization already has a team in this discipline draw');
+      entryData = { championship_id, championship_organization_id, tournament_discipline_id };
+    }
+
+    const created = await prisma.$transaction(async (tx) => {
+      const team = await tx.teams.create({
+        data: { sport_id, organization_id, name, status: 'forming', invite_token: randomBytes(16).toString('hex') },
+      });
+      if (seedCaptain) await tx.team_members.create({ data: { team_id: team.id, user_id: creatorId, role: 'captain' } });
+      if (entryData) {
+        await tx.team_entries.create({ data: { team_id: team.id, organization_id, ...entryData, status: 'forming' } });
+      }
+      return team;
     });
-    res.status(201).json(team);
+    res.status(201).json(await hydrateTeam(prisma, created.id));
   }));
 
-  // Bulk-create teams (one per selected discipline), each with the creator as
-  // captain. All-or-nothing so a partial failure never leaves orphan teams.
+  // Enter an existing roster into one or more championships at once. Each entry
+  // validates an approved enrollment + a draw that belongs to that championship and
+  // matches the team's sport. A roster joins each championship once, and no two
+  // teams of the same org may occupy the same draw.
+  router.post('/teams/:id/entries', guards.teamManager, validateBody(enterChampionshipsSchema), asyncHandler(async (req, res) => {
+    const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true, organization_id: true, sport_id: true } });
+    if (!team) throw new NotFoundError('Team');
+    const input = req.body.entries as Array<{ championship_organization_id: string; tournament_discipline_id: string }>;
+
+    const eiIds = [...new Set(input.map((e) => e.championship_organization_id))];
+    const eiMap = new Map(
+      (await prisma.championship_organizations.findMany({ where: { id: { in: eiIds } } })).map((e) => [e.id, e]),
+    );
+    const prepared = [] as Array<{ championship_id: string; championship_organization_id: string; tournament_discipline_id: string }>;
+    for (const e of input) {
+      const ei = eiMap.get(e.championship_organization_id);
+      if (!ei) throw new NotFoundError('Enrollment');
+      if (ei.organization_id !== team.organization_id) throw new BusinessRuleError('That enrollment belongs to a different organization');
+      if (ei.status !== 'approved') throw new BusinessRuleError('Organization enrollment is not approved for this championship');
+      await assertDisciplineForTeam(prisma, e.tournament_discipline_id, ei.championship_id, team.sport_id);
+      prepared.push({ championship_id: ei.championship_id, championship_organization_id: ei.id, tournament_discipline_id: e.tournament_discipline_id });
+    }
+
+    // One entry per championship for this team; one team per draw per org.
+    const champSeen = new Set((await prisma.team_entries.findMany({ where: { team_id: team.id }, select: { championship_id: true } })).map((e) => e.championship_id));
+    const drawTaken = new Set(
+      (await prisma.team_entries.findMany({
+        where: { organization_id: team.organization_id, tournament_discipline_id: { in: prepared.map((p) => p.tournament_discipline_id) }, team_id: { not: team.id } },
+        select: { tournament_discipline_id: true },
+      })).map((e) => e.tournament_discipline_id),
+    );
+    for (const p of prepared) {
+      if (champSeen.has(p.championship_id)) throw new BusinessRuleError('This team is already entered in one of the selected championships');
+      champSeen.add(p.championship_id);
+      if (drawTaken.has(p.tournament_discipline_id)) throw new BusinessRuleError('Your organization already has a team in one of the selected discipline draws');
+      drawTaken.add(p.tournament_discipline_id);
+    }
+
+    await prisma.$transaction(prepared.map((p) => prisma.team_entries.create({
+      data: { team_id: team.id, organization_id: team.organization_id, status: 'forming', ...p },
+    })));
+    res.status(201).json(await hydrateTeam(prisma, team.id));
+  }));
+
+  // Withdraw a roster from a championship. Allowed only while the entry is unlocked
+  // and the team has no fixtures in that championship's discipline draw.
+  router.delete('/teams/:id/entries/:entryId', guards.teamManager, asyncHandler(async (req, res) => {
+    const entry = await prisma.team_entries.findUnique({ where: { id: req.params.entryId } });
+    if (!entry || entry.team_id !== req.params.id) throw new NotFoundError('Team entry');
+    if (entry.status === 'roster_locked') throw new BusinessRuleError('Cannot withdraw a locked entry');
+    if (entry.tournament_discipline_id) {
+      const fixture = await prisma.fixtures.findFirst({
+        where: {
+          tournament_discipline_id: entry.tournament_discipline_id,
+          OR: [{ home_team_id: req.params.id }, { away_team_id: req.params.id }],
+        },
+        select: { id: true },
+      });
+      if (fixture) throw new BusinessRuleError('Cannot withdraw — this team already has fixtures in this championship');
+    }
+    await prisma.team_entries.delete({ where: { id: entry.id } });
+    res.status(204).send();
+  }));
+
+  // Lock a single championship entry (validates the shared roster against that
+  // entry's discipline rules). Other entries stay editable.
+  router.post('/teams/:id/entries/:entryId/lock', guards.teamManager, asyncHandler(async (req, res) => {
+    const entry = await prisma.team_entries.findUnique({
+      where: { id: req.params.entryId },
+      include: { tournament_disciplines: { include: { disciplines: true } } },
+    });
+    if (!entry || entry.team_id !== req.params.id) throw new NotFoundError('Team entry');
+    if (!entry.tournament_discipline_id) throw new BusinessRuleError('Link a discipline draw before locking this entry');
+    const count = await prisma.team_members.count({ where: { team_id: req.params.id, is_active: true } });
+    assertCanLockRoster(entryRules(entry), count);
+    await prisma.team_entries.update({ where: { id: entry.id }, data: { status: 'roster_locked' } });
+    res.json(await hydrateTeam(prisma, req.params.id));
+  }));
+
+  // Bulk-create teams (one roster + one championship entry per selected discipline),
+  // each with the creator as captain. All-or-nothing so a partial failure never
+  // leaves orphan teams.
   router.post('/teams/bulk', guards.teamCreate, validateBody(bulkCreateTeamsSchema), asyncHandler(async (req, res) => {
     const teams = req.body.teams as Array<{
       championship_id: string; sport_id: string; organization_id: string;
@@ -207,20 +311,19 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     for (const t of teams) {
       await assertDisciplineForTeam(prisma, t.tournament_discipline_id, t.championship_id, t.sport_id);
     }
-    // Batch-load the referenced enrollments once instead of a findUnique per team.
     const eiIds = [...new Set(teams.map((t) => t.championship_organization_id))];
     const eiMap = new Map(
       (await prisma.championship_organizations.findMany({ where: { id: { in: eiIds } }, select: { id: true, status: true } }))
         .map((e) => [e.id, e]),
     );
-    // Reject duplicates against existing teams (one query) and within the batch itself.
-    const dupKey = (t: { organization_id: string; championship_id: string; tournament_discipline_id: string | null }) =>
+    // Reject duplicate draw entries against existing entries (one query) and within the batch.
+    const dupKey = (t: { organization_id: string; championship_id: string; tournament_discipline_id: string }) =>
       `${t.organization_id}|${t.championship_id}|${t.tournament_discipline_id}`;
-    const existing = await prisma.teams.findMany({
+    const existing = await prisma.team_entries.findMany({
       where: { OR: teams.map((t) => ({ organization_id: t.organization_id, championship_id: t.championship_id, tournament_discipline_id: t.tournament_discipline_id })) },
       select: { organization_id: true, championship_id: true, tournament_discipline_id: true },
     });
-    const seen = new Set(existing.map(dupKey));
+    const seen = new Set(existing.map((e) => `${e.organization_id}|${e.championship_id}|${e.tournament_discipline_id}`));
     for (const t of teams) {
       const ei = eiMap.get(t.championship_organization_id);
       if (!ei) throw new NotFoundError('Enrollment');
@@ -230,7 +333,6 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       seen.add(k);
     }
     const creatorId = req.user!.id;
-    // Precompute which referenced orgs the creator administers — admins aren't seeded as captain.
     const orgIds = [...new Set(teams.map((t) => t.organization_id))];
     const adminOrgs = new Set<string>();
     for (const oid of orgIds) if (await isOrgAdmin(creatorId, oid)) adminOrgs.add(oid);
@@ -238,15 +340,13 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       const out: any[] = [];
       for (const t of teams) {
         const team = await tx.teams.create({
+          data: { sport_id: t.sport_id, organization_id: t.organization_id, name: t.name, status: 'forming', invite_token: randomBytes(16).toString('hex') },
+        });
+        await tx.team_entries.create({
           data: {
-            championship_id: t.championship_id,
-            sport_id: t.sport_id,
-            organization_id: t.organization_id,
-            championship_organization_id: t.championship_organization_id,
-            tournament_discipline_id: t.tournament_discipline_id,
-            name: t.name,
+            team_id: team.id, organization_id: t.organization_id, championship_id: t.championship_id,
+            championship_organization_id: t.championship_organization_id, tournament_discipline_id: t.tournament_discipline_id,
             status: 'forming',
-            invite_token: randomBytes(16).toString('hex'),
           },
         });
         if (!adminOrgs.has(t.organization_id)) {
@@ -260,64 +360,15 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   }));
 
   router.patch('/teams/:id', guards.teamManager, validateBody(updateTeamSchema), asyncHandler(async (req, res) => {
-    const team = await prisma.teams.findUnique({ where: { id: req.params.id } });
+    const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!team) throw new NotFoundError('Team');
-    if (team.status === 'roster_locked' && req.body.tournament_discipline_id !== undefined) {
-      throw new BusinessRuleError('Cannot change discipline after the roster is locked');
-    }
-    const data: Record<string, unknown> = { ...req.body };
-    if (req.body.tournament_discipline_id !== undefined) {
-      const td = await assertDisciplineForTeam(
-        prisma,
-        req.body.tournament_discipline_id,
-        team.championship_id,
-      );
-      const duplicate = await prisma.teams.findFirst({
-        where: {
-          organization_id: team.organization_id,
-          championship_id: team.championship_id,
-          tournament_discipline_id: req.body.tournament_discipline_id,
-          id: { not: team.id },
-        },
-      });
-      if (duplicate) {
-        throw new BusinessRuleError('Your organization already has a team in this discipline draw');
-      }
-      data.sport_id = td.tournament_sports.sport_id;
-    }
-    const updated = await prisma.teams.update({
-      where: { id: team.id },
-      data,
-      include: {
-        team_members: { include: { users: { select: publicUserSelect } } },
-        organizations: true,
-        sports: true,
-        championships: { select: { id: true, name: true, slug: true, status: true } },
-        tournament_disciplines: teamDisciplineInclude,
-      },
-    });
-    const entry_rules = resolveEntryRules(
-      updated.tournament_disciplines ?? {},
-      updated.tournament_disciplines?.disciplines ?? null,
-    );
-    res.json({ ...updated, entry_rules });
+    await prisma.teams.update({ where: { id: team.id }, data: { ...req.body } });
+    res.json(await hydrateTeam(prisma, team.id));
   }));
 
   router.delete('/teams/:id', guards.teamManager, asyncHandler(async (req, res) => {
     await prisma.teams.delete({ where: { id: req.params.id } });
     res.status(204).send();
-  }));
-
-  // Lock the roster (validates squad size against resolved entry rules).
-  router.post('/teams/:id/lock', guards.teamManager, asyncHandler(async (req, res) => {
-    const team = await prisma.teams.findUnique({ where: { id: req.params.id } });
-    if (!team) throw new NotFoundError('Team');
-    assertTeamHasDiscipline(team);
-    const count = await prisma.team_members.count({ where: { team_id: team.id, is_active: true } });
-    const rules = await rulesForTeam(prisma, team.tournament_discipline_id);
-    assertCanLockRoster(rules, count);
-    const updated = await prisma.teams.update({ where: { id: team.id }, data: { status: 'roster_locked' } });
-    res.json(updated);
   }));
 
   // ---- members ----
@@ -331,13 +382,19 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   }));
 
   async function addMember(prisma: Prisma, teamId: string, data: { user_id: string; role: string; jersey_number?: number }) {
-    const team = await prisma.teams.findUnique({ where: { id: teamId } });
+    const team = await prisma.teams.findUnique({
+      where: { id: teamId },
+      include: { team_entries: { include: { tournament_disciplines: { include: { disciplines: true } } } } },
+    });
     if (!team) throw new NotFoundError('Team');
-    assertTeamHasDiscipline(team);
-    if (team.status === 'roster_locked') throw new BusinessRuleError('Roster is locked');
+    const entries = team.team_entries;
+    // The roster can be built before any championship entry; it's frozen only once
+    // every entry it has is locked.
+    if (entries.length > 0 && entries.every((e) => e.status === 'roster_locked')) {
+      throw new BusinessRuleError('Every championship entry for this team is locked');
+    }
     const count = await prisma.team_members.count({ where: { team_id: teamId, is_active: true } });
-    const rules = await rulesForTeam(prisma, team.tournament_discipline_id);
-    assertCanAddMember(rules, count);
+    assertCanAddMember(looseAddRules(entries), count);
     return prisma.team_members.create({
       data: { team_id: teamId, user_id: data.user_id, role: data.role, jersey_number: data.jersey_number ?? null },
     });
@@ -350,13 +407,18 @@ export function makeTeamsRouter(prisma: Prisma): Router {
 
   // Bulk roster import: accepts existing users and/or name+email rows. Emails are
   // resolved (matched or auto-created under the team's organization). Validates the
-  // whole batch against squad_max up front, then inserts atomically.
+  // whole batch against the loose squad cap up front, then inserts atomically.
   router.post('/teams/:id/members/bulk', guards.teamManager, validateBody(bulkAddTeamMembersSchema), asyncHandler(async (req, res) => {
-    const team = await prisma.teams.findUnique({ where: { id: req.params.id } });
+    const team = await prisma.teams.findUnique({
+      where: { id: req.params.id },
+      include: { team_entries: { include: { tournament_disciplines: { include: { disciplines: true } } } } },
+    });
     if (!team) throw new NotFoundError('Team');
-    assertTeamHasDiscipline(team);
-    if (team.status === 'roster_locked') throw new BusinessRuleError('Roster is locked');
-    const rules = await rulesForTeam(prisma, team.tournament_discipline_id);
+    const entries = team.team_entries;
+    if (entries.length > 0 && entries.every((e) => e.status === 'roster_locked')) {
+      throw new BusinessRuleError('Every championship entry for this team is locked');
+    }
+    const rules = looseAddRules(entries);
 
     const result = await prisma.$transaction(async (tx) => {
       const rows = req.body.members as Array<{ user_id?: string; name?: string; email?: string; role: string; jersey_number?: number | null }>;
@@ -407,7 +469,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
         // onRoster also absorbs duplicates within the same batch (we add as we go).
         if (onRoster.has(userId)) { skipped.push({ label, reason: 'already on roster' }); continue; }
         if (count + 1 > rules.squad_max) {
-          throw new BusinessRuleError(`Squad limit reached: a ${rules.entry_type} draw allows at most ${rules.squad_max} members`);
+          throw new BusinessRuleError(`Squad limit reached: at most ${rules.squad_max} members`);
         }
         onRoster.add(userId);
         newMembers.push({ team_id: team.id, user_id: userId, role: row.role, jersey_number: row.jersey_number ?? null });
@@ -432,9 +494,9 @@ export function makeTeamsRouter(prisma: Prisma): Router {
 
   // Edit a roster row — promote to captain, change role, set a jersey number.
   router.patch('/teams/:id/members/:memberId', guards.teamManager, validateBody(updateTeamMemberSchema), asyncHandler(async (req, res) => {
-    const team = await prisma.teams.findUnique({ where: { id: req.params.id } });
+    const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!team) throw new NotFoundError('Team');
-    if (team.status === 'roster_locked') throw new BusinessRuleError('Roster is locked');
+    await assertRosterEditable(prisma, team.id);
     const member = await prisma.team_members.findFirst({ where: { id: req.params.memberId, team_id: team.id } });
     if (!member) throw new NotFoundError('Team member');
     const updated = await prisma.team_members.update({
@@ -446,9 +508,9 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   }));
 
   router.delete('/teams/:id/members/:memberId', guards.teamManager, asyncHandler(async (req, res) => {
-    const team = await prisma.teams.findUnique({ where: { id: req.params.id } });
+    const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!team) throw new NotFoundError('Team');
-    if (team.status === 'roster_locked') throw new BusinessRuleError('Roster is locked');
+    await assertRosterEditable(prisma, team.id);
     await prisma.team_members.delete({ where: { id: req.params.memberId } });
     res.status(204).send();
   }));

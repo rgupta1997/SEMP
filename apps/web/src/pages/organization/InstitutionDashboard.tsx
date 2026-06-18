@@ -3,8 +3,10 @@ import { useAuth } from '../../lib/auth';
 import { useApi } from '../../lib/hooks';
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, PageHeader, StatCard, StatusBadge } from '../../components/ui';
 
-function tournamentName(team: any): string | null {
-  return team.tournament_disciplines?.tournament_sports?.tournaments?.name ?? null;
+// A roster's championships come from its team_entries now.
+function teamChampSummary(team: any): string | null {
+  const names = (team.team_entries ?? []).map((e: any) => e.championships?.name).filter(Boolean);
+  return names.length ? names.join(', ') : null;
 }
 
 export function InstitutionDashboard() {
@@ -47,7 +49,7 @@ export function InstitutionDashboard() {
                       <span className="grid h-9 w-9 place-items-center rounded-lg bg-brand-50 dark:bg-brand-500/10 text-base">{t.sports?.icon ?? '◇'}</span>
                       <div>
                         <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{t.name}</div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400">{[tournamentName(t), t.sports?.name, t.championships?.name].filter(Boolean).join(' · ')}</div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">{[t.sports?.name, teamChampSummary(t) ?? 'Not entered'].filter(Boolean).join(' · ')}</div>
                       </div>
                     </div>
                     <StatusBadge status={t.status} />

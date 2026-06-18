@@ -97,7 +97,7 @@ export function ParticipantMatchPage() {
         <Card>
           <CardHeader title="Match details" />
           <CardBody className="pt-0">
-            <Detail label="Tournament" value={f.tournament} />
+            <Detail label="Season" value={f.tournament} />
             <Detail label="Venue" value={venue} />
             <Detail label="When" value={fmtDateTime(f.scheduled_at)} />
             <Detail label="Duration" value={f.duration_minutes ? `${f.duration_minutes} min` : null} />

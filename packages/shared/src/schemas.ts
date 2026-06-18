@@ -150,7 +150,7 @@ export const addOrganizationMemberSchema = z.object({
 }).refine((m) => !!(m.user_id || m.email || m.phone), { message: 'Provide a user, a phone, or an email' });
 export const updateOrganizationMemberSchema = z.object({
   role: z.enum(ORGANIZATION_MEMBER_ROLE).optional(),
-  status: z.enum(['active', 'past'] as const).optional(),
+  status: z.enum(['pending', 'active', 'past', 'rejected'] as const).optional(),
 });
 
 // ---------- Phase 2: championship creation ----------
@@ -250,27 +250,49 @@ export const reviewEnrollmentSchema = z.object({
 export const assignRoleSchema = z.object({ user_id: uuid, role_id: uuid });
 
 // ---------- Phase 3b: host → organization invitations ----------
-// Host invites an org by display name + the POC's mobile (neither need exist yet).
+// Host invites an organization by picking it from the master list; the request
+// goes straight to that org's owners/admins (no POC mobile number).
 export const createInvitationSchema = z.object({
-  org_name: z.string().min(1),
-  poc_mobile: z.string().min(5),
+  organization_id: uuid,
 });
-// The invited POC accepts, choosing which org they own/administer applies.
-export const acceptInvitationSchema = z.object({ organization_id: uuid });
+// Accepting needs no body — the invitation already names the organization, and
+// only its owners/admins can see it.
+
+// ---------- Phase 3c: invite a person by mobile to a role ----------
+// Add an org member / co-organiser / official by mobile number. If no user has
+// that number yet, the invite is auto-applied when they sign in with it.
+export const USER_INVITATION_TARGET = ['org_member', 'championship_organiser', 'championship_official'] as const;
+export const createUserInvitationSchema = z.object({
+  mobile: z.string().min(5),
+  target_type: z.enum(USER_INVITATION_TARGET),
+  target_id: uuid,
+  role: z.enum(ORGANIZATION_MEMBER_ROLE).optional(),
+});
 
 // ---------- Phase 4: teams ----------
+// Create a team. Only name + sport + org are required — a team is a standalone
+// organization asset. Pass the championship fields to enter it into a championship
+// at creation (the old all-in-one flow); otherwise enter it into championships
+// later via POST /teams/:id/entries (a roster can join many championships).
 export const createTeamSchema = z.object({
-  championship_id: uuid,
   sport_id: uuid,
   organization_id: uuid,
-  championship_organization_id: uuid,
-  tournament_discipline_id: uuid,
   name: z.string().min(1),
+  championship_id: uuid.optional(),
+  championship_organization_id: uuid.optional(),
+  tournament_discipline_id: uuid.optional(),
+});
+// Enter an existing roster into one or more championships at once. Each entry
+// names an approved enrollment + a discipline draw matching the team's sport.
+export const enterChampionshipsSchema = z.object({
+  entries: z.array(z.object({
+    championship_organization_id: uuid,
+    tournament_discipline_id: uuid,
+  })).min(1).max(50),
 });
 export const updateTeamSchema = z.object({
   name: z.string().min(1).optional(),
   status: z.enum(TEAM_STATUS).optional(),
-  tournament_discipline_id: uuid.optional(),
 });
 export const addTeamMemberSchema = z.object({
   user_id: uuid,

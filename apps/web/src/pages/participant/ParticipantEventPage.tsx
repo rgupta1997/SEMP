@@ -16,6 +16,7 @@ interface EventDetail {
   stats: { matches: number; wins: number; losses: number; draws: number };
   teams: {
     id: string; name: string; sport: string | null; discipline: string | null;
+    entry_type: string | null; squad_min: number | null; squad_max: number | null; format: string | null;
     role: string; jersey_number: number | null; status: string;
     roster: { name: string; role: string; jersey_number: number | null }[];
   }[];
@@ -91,6 +92,13 @@ export function ParticipantEventPage() {
                 action={<StatusBadge status={t.status} />}
               />
               <CardBody className="pt-0">
+                {(t.entry_type || t.squad_min != null || t.format) && (
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    {t.entry_type && <Badge tone="info">{t.entry_type}</Badge>}
+                    {t.squad_min != null && t.squad_max != null && <Badge tone="slate">squad {t.squad_min}–{t.squad_max}</Badge>}
+                    {t.format && <Badge tone="brand">{t.format}</Badge>}
+                  </div>
+                )}
                 <div className="mb-3 text-xs text-slate-500 dark:text-slate-400">
                   Your role: <span className="font-semibold text-slate-700 dark:text-slate-300">{t.role.replace(/_/g, ' ')}</span>
                   {t.jersey_number != null ? ` · #${t.jersey_number}` : ''}

@@ -1,4 +1,5 @@
 import type { Prisma } from '../../infra/prisma.js';
+import { applyUserInvitations } from './user-invitations.service.js';
 
 // Assembles the full authentication context the web app needs to render the
 // unified shell and decide what the user can act on:
@@ -8,6 +9,11 @@ import type { Prisma } from '../../infra/prisma.js';
 //   - team memberships (captain / player rows)
 export async function buildAuthContext(prisma: Prisma, user: any) {
   const { password_hash, ...publicUser } = user;
+
+  // Resolve any invitations addressed to this user's mobile before reading their
+  // memberships/roles, so a freshly-applied invite shows up immediately. Never
+  // throws (see the service) — sign-in must not depend on it succeeding.
+  await applyUserInvitations(prisma, user);
 
   // These reads are independent — run them together rather than serially, since
   // this context is assembled on every login and every /me hit.
@@ -38,8 +44,11 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
         teams: {
           include: {
             sports: { select: { id: true, name: true, icon: true } },
-            championships: { select: { id: true, name: true, slug: true, status: true } },
             organizations: { select: { id: true, name: true } },
+            team_entries: {
+              include: { championships: { select: { id: true, name: true, slug: true, status: true } } },
+              orderBy: { created_at: 'asc' },
+            },
           },
         },
       },

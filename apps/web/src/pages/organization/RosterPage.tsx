@@ -6,128 +6,33 @@ import { api } from '../../lib/api';
 import { useApi, useApiMutation } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
 import { Avatar, BackButton, Badge, Button, Card, CardBody, CardHeader, Checkbox, Field, Input, Modal, Progress, Select, Spinner, StatusBadge, Tabs, Textarea, toast } from '../../components/ui';
+import { EnterChampionshipsModal } from '../../components/EnterChampionshipsModal';
 
 interface BulkResult { added: number; skipped: { label: string; reason: string }[]; total: number }
 
-function tournamentName(team: any): string | null {
-  return team.tournament_disciplines?.tournament_sports?.tournaments?.name ?? null;
-}
-
-function EditTeamModal({ team, institutionTeams, onClose }: { team: any; institutionTeams: any[]; onClose: () => void }) {
+// Rename a team. Discipline + championship are managed per entry now, not here.
+function EditTeamModal({ team, onClose }: { team: any; onClose: () => void }) {
   const path = `/teams/${team.id}`;
-  const eventId = team.championship_id;
-  const { data: tournaments = [] } = useApi<any[]>(`/tournaments?championship_id=${eventId}`);
-  const { data: eventDraws = [] } = useApi<any[]>(`/championships/${eventId}/draws`);
-  const { data: sports = [] } = useApi<any[]>('/sports');
-
-  const takenDrawIds = useMemo(
-    () => new Set(
-      institutionTeams
-        .filter((t) => t.championship_id === eventId && t.id !== team.id)
-        .map((t) => t.tournament_discipline_id)
-        .filter(Boolean),
-    ),
-    [institutionTeams, eventId, team.id],
-  );
-  const availableDraws = useMemo(
-    () => eventDraws.filter((d) => !takenDrawIds.has(d.id) || d.id === team.tournament_discipline_id),
-    [eventDraws, takenDrawIds, team.tournament_discipline_id],
-  );
-
-  const currentTournamentId = team.tournament_disciplines?.tournament_sports?.tournaments?.id ?? '';
-  const [tournamentId, setTournamentId] = useState(currentTournamentId || '');
-  const activeTournament = tournamentId || currentTournamentId || tournaments[0]?.id || '';
-
-  const tsportsForTournament = useMemo(
-    () => [...new Map(
-      availableDraws
-        .filter((d) => (d.tournament_sports?.tournaments?.id ?? d.tournament_sports?.tournament_id) === activeTournament)
-        .map((d) => [d.tournament_sport_id, d.tournament_sports]),
-    ).values()].filter(Boolean),
-    [availableDraws, activeTournament],
-  );
-
-  const currentTsId = team.tournament_disciplines?.tournament_sport_id ?? '';
-  const [tsId, setTsId] = useState(currentTsId || '');
-  const ts = tsportsForTournament.find((t) => t.id === tsId)
-    ?? tsportsForTournament.find((t) => t.sport_id === team.sport_id)
-    ?? tsportsForTournament[0];
-
-  const sportDraws = useMemo(
-    () => (ts ? availableDraws.filter((d) => d.tournament_sport_id === ts.id) : []),
-    [availableDraws, ts],
-  );
-
-  const [drawId, setDrawId] = useState(team.tournament_discipline_id ?? '');
-  const activeDrawId = drawId || team.tournament_discipline_id || sportDraws[0]?.id || '';
   const [name, setName] = useState(team.name ?? '');
   const [error, setError] = useState<string | null>(null);
-
   const update = useApiMutation(
-    (body: { name?: string; tournament_discipline_id?: string }) => api('PATCH', path, body),
-    [path, institutionTeams.length ? `/teams?organization_id=${team.organization_id}` : null].filter(Boolean) as string[],
+    (body: { name: string }) => api('PATCH', path, body),
+    [path, `/teams?organization_id=${team.organization_id}`],
   );
-
-  const sportName = (id: string) => sports.find((s) => s.id === id)?.name ?? 'Sport';
 
   const submit = () => {
     setError(null);
     if (!name.trim()) { setError('Team name is required'); return; }
-    if (!activeDrawId) { setError('Select a discipline — ask the organiser to add draws in championship setup'); return; }
-    const body: { name: string; tournament_discipline_id?: string } = { name: name.trim() };
-    if (activeDrawId !== team.tournament_discipline_id) body.tournament_discipline_id = activeDrawId;
-    update.mutate(body, {
-      onSuccess: () => onClose(),
-      onError: (e: any) => setError(e.message),
-    });
+    update.mutate({ name: name.trim() }, { onSuccess: () => onClose(), onError: (e: any) => setError(e.message) });
   };
 
   return (
     <Modal title="Edit team" onClose={onClose}>
-      <Field label="Championship">
-        <Input value={team.championships?.name ?? 'Championship'} disabled />
-      </Field>
-      {eventDraws.length === 0 ? (
-        <p className="mb-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
-          No disciplines are configured for this championship yet. The organiser must add discipline draws in Setup before you can link this team.
-        </p>
-      ) : (
-        <>
-          {tournaments.length > 0 && (
-            <Field label="Tournament">
-              <Select value={activeTournament} onChange={(e) => { setTournamentId(e.target.value); setTsId(''); setDrawId(''); }} disabled={tournaments.length === 1}>
-                {tournaments.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </Select>
-            </Field>
-          )}
-          <Field label="Sport">
-            <Select value={ts?.id ?? ''} onChange={(e) => { setTsId(e.target.value); setDrawId(''); }}>
-              {tsportsForTournament.length === 0 && <option value="">No sports with disciplines</option>}
-              {tsportsForTournament.map((t) => <option key={t.id} value={t.id}>{sportName(t.sport_id)}</option>)}
-            </Select>
-          </Field>
-          <Field label="Discipline / draw" hint="Required — links this team to an organiser-configured draw.">
-            {sportDraws.length === 0 ? (
-              <p className="text-sm text-slate-500 dark:text-slate-400">No available disciplines for this sport.</p>
-            ) : (
-              <Select value={activeDrawId} onChange={(e) => setDrawId(e.target.value)}>
-                {sportDraws.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.disciplines?.name ?? sportName(ts!.sport_id)} ({d.entry_type})
-                  </option>
-                ))}
-              </Select>
-            )}
-          </Field>
-        </>
-      )}
       <Field label="Team name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
       {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button disabled={!name.trim() || !activeDrawId || eventDraws.length === 0 || update.isPending} onClick={submit}>
-          {update.isPending ? 'Saving…' : 'Save changes'}
-        </Button>
+        <Button disabled={!name.trim() || update.isPending} onClick={submit}>{update.isPending ? 'Saving…' : 'Save changes'}</Button>
       </div>
     </Modal>
   );
@@ -258,6 +163,11 @@ function BulkAddMembersModal({ teamId, institutionId, existingUserIds, remaining
   );
 }
 
+function entryDrawLabel(entry: any): string {
+  const disc = entry.tournament_disciplines;
+  return [disc?.tournament_sports?.tournaments?.name, disc?.disciplines?.name].filter(Boolean).join(' · ');
+}
+
 export function RosterPage() {
   const { teamId, orgId } = useParams();
   const navigate = useNavigate();
@@ -265,12 +175,12 @@ export function RosterPage() {
   const { can } = usePermissions();
   const path = `/teams/${teamId}`;
   const { data: team, isLoading } = useApi<any>(path);
-  const institutionId = team?.organization_id ?? team?.organizations?.id;
-  const { data: institutionTeams = [] } = useApi<any[]>(institutionId ? `/teams?organization_id=${institutionId}` : null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [entering, setEntering] = useState(false);
 
-  const lock = useApiMutation(() => api('POST', `/teams/${teamId}/lock`, {}), [path]);
+  const lockEntry = useApiMutation((entryId: string) => api('POST', `/teams/${teamId}/entries/${entryId}/lock`, {}), [path]);
+  const withdraw = useApiMutation((entryId: string) => api('DELETE', `/teams/${teamId}/entries/${entryId}`), [path]);
   const removeMember = useApiMutation((memberId: string) => api('DELETE', `/teams/${teamId}/members/${memberId}`), [path]);
   const updateMember = useApiMutation(
     ({ memberId, role }: { memberId: string; role: string }) => api('PATCH', `/teams/${teamId}/members/${memberId}`, { role }),
@@ -279,77 +189,112 @@ export function RosterPage() {
 
   if (isLoading || !team) return <Spinner />;
   const members = team.team_members ?? [];
+  const entries: any[] = team.team_entries ?? [];
   // A team's own captain / vice-captain may edit it; so may the organization POC.
   const isMyCaptain = members.some((m: any) => m.user_id === ctx?.user.id && (m.role === 'captain' || m.role === 'vice_captain'));
   const canManage = can('roster.manage') || isMyCaptain;
-  const locked = team.status === 'roster_locked';
-  const hasDiscipline = !!team.tournament_discipline_id;
+  // The roster is frozen only once every championship entry it has is locked.
+  const allLocked = entries.length > 0 && entries.every((e) => e.status === 'roster_locked');
   const rules = team.entry_rules ?? { entry_type: 'team', squad_min: 1, squad_max: 15 };
   const activeCount = members.filter((m: any) => m.is_active !== false).length;
   const belowMin = activeCount < rules.squad_min;
   const atMax = activeCount >= rules.squad_max;
   const existingUserIds = new Set<string>(members.map((m: any) => m.user_id).filter(Boolean));
   const remaining = Math.max(0, rules.squad_max - activeCount);
+  const pocs = (team.organizations?.organization_members ?? []).map((m: any) => m.users).filter(Boolean);
 
   return (
     <div>
-      <BackButton onClick={() => navigate(`/organizations/${orgId ?? ''}/teams`)}>
-        {team.championships?.name ? `${team.championships.name} teams` : 'All teams'}
-      </BackButton>
+      <BackButton onClick={() => navigate(`/organizations/${orgId ?? ''}/teams`)}>All teams</BackButton>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3">
           <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-50 dark:bg-brand-500/10 text-2xl">{team.sports?.icon ?? '◇'}</span>
           <div>
-            <div className="flex items-center gap-2"><h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{team.name}</h1><StatusBadge status={team.status} /></div>
+            <div className="flex items-center gap-2"><h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{team.name}</h1>{allLocked && <Badge tone="slate">locked</Badge>}</div>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              {[tournamentName(team), team.sports?.name, team.tournament_disciplines?.disciplines?.name].filter(Boolean).join(' · ')}
-              {' · '}{team.organizations?.name}
+              {[team.sports?.name, team.organizations?.name].filter(Boolean).join(' · ')}
             </p>
             <p className="text-xs text-slate-400 dark:text-slate-500">
-              {team.championships?.name}{team.championships?.name ? ' · ' : ''}{rules.entry_type} entry · squad {rules.squad_min}–{rules.squad_max} players
+              {entries.length === 0 ? 'Not entered into any championship yet' : `Entered in ${entries.length} championship${entries.length === 1 ? '' : 's'}`} · {activeCount} player{activeCount === 1 ? '' : 's'}
             </p>
-            {(team.organizations?.users ?? []).length > 0 && (
+            {pocs.length > 0 && (
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Point of contact: {(team.organizations.users as any[]).map((u) => `${u.name}${u.phone ? ` (${u.phone})` : ''}`).join(', ')}
+                Point of contact: {pocs.map((u: any) => `${u.name}${u.phone ? ` (${u.phone})` : ''}`).join(', ')}
               </p>
             )}
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!locked && canManage && (
-            <Button variant="outline" onClick={() => setEditing(true)}>Edit team</Button>
-          )}
-          {!locked && canManage && hasDiscipline && (
-            <Button onClick={() => lock.mutate(undefined, { onSuccess: () => toast.success('Roster locked'), onError: (e: any) => toast.error(e.message) })} disabled={lock.isPending || belowMin} title={belowMin ? `Need at least ${rules.squad_min} players` : undefined}>Lock roster</Button>
-          )}
+          {canManage && <Button onClick={() => setEntering(true)}>Enter championship(s)</Button>}
+          {!allLocked && canManage && <Button variant="outline" onClick={() => setEditing(true)}>Edit team</Button>}
         </div>
       </div>
 
-      {!hasDiscipline && (
+      {entries.length === 0 && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
-          <p>
-            This team is not linked to a discipline draw. Select one in Edit team — or ask the organiser to configure draws in championship Setup. Players cannot be assigned until then.
-          </p>
-          {!locked && canManage && (
-            <Button size="sm" variant="outline" onClick={() => setEditing(true)}>Edit team</Button>
-          )}
+          <p>This team isn’t in a championship yet. Build the squad now, then enter it into one or more championships when you’re ready to compete.</p>
+          {canManage && <Button size="sm" onClick={() => setEntering(true)}>Enter championship(s)</Button>}
         </div>
       )}
 
+      {/* Championship entries */}
+      <Card className="mb-6">
+        <CardHeader
+          title="Championships"
+          subtitle={entries.length === 0 ? 'Enter this team into a championship & discipline to compete.' : `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}`}
+          action={!allLocked && canManage && <Button size="sm" variant="subtle" onClick={() => setEntering(true)}>+ Enter championship</Button>}
+        />
+        <CardBody>
+          {entries.length === 0 ? (
+            <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">No championship entries yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {entries.map((e) => {
+                const er = e.entry_rules ?? rules;
+                const eLocked = e.status === 'roster_locked';
+                const belowMinE = activeCount < (er.squad_min ?? 1);
+                return (
+                  <div key={e.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-2.5">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{e.championships?.name ?? 'Championship'}</div>
+                      <div className="truncate text-xs text-slate-500 dark:text-slate-400">{entryDrawLabel(e) || 'No discipline'} · squad {er.squad_min}–{er.squad_max}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={e.status} />
+                      {!eLocked && canManage && (
+                        <>
+                          <Button size="sm" variant="ghost" disabled={lockEntry.isPending || belowMinE}
+                            title={belowMinE ? `Need at least ${er.squad_min} players` : undefined}
+                            onClick={() => lockEntry.mutate(e.id, { onSuccess: () => toast.success('Entry locked'), onError: (err: any) => toast.error(err.message) })}>
+                            Lock
+                          </Button>
+                          <button className="text-sm text-rose-500 hover:underline"
+                            onClick={() => { if (confirm('Withdraw this team from the championship?')) withdraw.mutate(e.id, { onSuccess: () => toast.success('Withdrawn'), onError: (err: any) => toast.error(err.message) }); }}>
+                            Withdraw
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardBody>
+      </Card>
+
       <Card>
         <CardHeader title={`Squad · ${activeCount}/${rules.squad_max}`}
-          subtitle={locked ? 'Roster is locked' : !hasDiscipline ? 'Link a discipline draw via Edit team to add players' : belowMin ? `Add at least ${rules.squad_min - activeCount} more to lock` : 'Add players to complete your squad'}
-          action={!locked && canManage && hasDiscipline && <Button size="sm" variant="subtle" disabled={atMax} title={atMax ? 'Squad is full' : undefined} onClick={() => setAdding(true)}>+ Add players</Button>} />
+          subtitle={allLocked ? 'Roster is locked — every entry is locked' : entries.length === 0 ? 'Add players now — squad limits apply per championship once entered' : belowMin ? `Add at least ${rules.squad_min - activeCount} more to lock` : 'Add players to complete your squad'}
+          action={!allLocked && canManage && <Button size="sm" variant="subtle" disabled={atMax} title={atMax ? 'Squad is full' : undefined} onClick={() => setAdding(true)}>+ Add players</Button>} />
         <CardBody>
-          {hasDiscipline && (
-            <Progress
-              value={activeCount}
-              max={rules.squad_max}
-              tone={atMax ? 'rose' : belowMin ? 'amber' : 'brand'}
-              label={`Squad fill (min ${rules.squad_min})`}
-              className="mb-4"
-            />
-          )}
+          <Progress
+            value={activeCount}
+            max={rules.squad_max}
+            tone={atMax ? 'rose' : belowMin ? 'amber' : 'brand'}
+            label={`Squad fill (min ${rules.squad_min})`}
+            className="mb-4"
+          />
           {members.length === 0 ? (
             <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">No players yet. Add members to get started.</p>
           ) : (
@@ -364,7 +309,7 @@ export function RosterPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {!locked && canManage ? (
+                    {!allLocked && canManage ? (
                       <Select value={m.role} disabled={updateMember.isPending}
                         onChange={(e) => updateMember.mutate({ memberId: m.id, role: e.target.value }, { onError: (err: any) => toast.error(err.message) })}
                         aria-label="Member role">
@@ -373,7 +318,7 @@ export function RosterPage() {
                     ) : (
                       <Badge tone={m.role === 'captain' ? 'brand' : 'slate'}>{m.role.replace(/_/g, ' ')}</Badge>
                     )}
-                    {!locked && canManage && <button onClick={() => { if (confirm('Remove member?')) removeMember.mutate(m.id); }} className="text-sm text-rose-500 hover:underline">Remove</button>}
+                    {!allLocked && canManage && <button onClick={() => { if (confirm('Remove member?')) removeMember.mutate(m.id); }} className="text-sm text-rose-500 hover:underline">Remove</button>}
                   </div>
                 </div>
               ))}
@@ -383,7 +328,8 @@ export function RosterPage() {
       </Card>
 
       {adding && <BulkAddMembersModal teamId={teamId!} institutionId={team.organizations?.id ?? team.organization_id} existingUserIds={existingUserIds} remaining={remaining} onClose={() => setAdding(false)} />}
-      {editing && <EditTeamModal team={team} institutionTeams={institutionTeams} onClose={() => setEditing(false)} />}
+      {editing && <EditTeamModal team={team} onClose={() => setEditing(false)} />}
+      {entering && <EnterChampionshipsModal team={team} onClose={() => setEntering(false)} />}
     </div>
   );
 }

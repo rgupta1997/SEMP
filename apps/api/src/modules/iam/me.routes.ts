@@ -73,41 +73,37 @@ function tally(fixtures: FixtureRow[], myTeamIds: Set<string>) {
   return { wins, losses, draws };
 }
 
-// Shallow fixture shape for the user's match views. A fixture's championship and
-// sport are derived from the user's own team (see buildTeamMeta), so we avoid the
-// expensive fixture → tournament_discipline → tournament_sport → tournament →
-// championship walk that `fixtureInclude` performs on every row. Only the
-// opponent's name/org and the discipline name still need to be fetched.
+// Fixture shape for the user's match views. A roster can now play across several
+// championships, so a fixture's championship + sport come from its own discipline
+// draw (not the team). Shape matches toMatchSummary so the same MatchRow renders it.
 const matchSelect = {
   id: true, round: true, status: true, scheduled_at: true,
   home_team_id: true, away_team_id: true, home_score: true, away_score: true, winner_team_id: true,
   teams_fixtures_home_team_idToteams: { select: { id: true, name: true, organizations: { select: { short_name: true, name: true } } } },
   teams_fixtures_away_team_idToteams: { select: { id: true, name: true, organizations: { select: { short_name: true, name: true } } } },
-  tournament_disciplines: { select: { disciplines: { select: { name: true } } } },
+  tournament_disciplines: {
+    select: {
+      disciplines: { select: { name: true } },
+      tournament_sports: {
+        select: {
+          sports: { select: { name: true } },
+          tournaments: { select: { championships: { select: { id: true, name: true, slug: true } } } },
+        },
+      },
+    },
+  },
 } as const;
 
-type TeamMeta = Map<string, { championship: any; sport: any; organization: any }>;
-
-// teamId -> { championship, sport, organization } from membership rows whose `teams`
-// include championships + sports + organizations (loadMyTeams / the dashboard load).
-function buildTeamMeta(memberships: Array<{ team_id: string; teams: any }>): TeamMeta {
-  const meta: TeamMeta = new Map();
-  for (const m of memberships) meta.set(m.team_id, { championship: m.teams.championships, sport: m.teams.sports, organization: m.teams.organizations });
-  return meta;
-}
-
-// MatchSummary built from a `matchSelect` row, attributing championship + sport via
-// teamMeta. Shape matches toMatchSummary so the same frontend MatchRow renders it.
-function summariseLean(f: FixtureRow, myTeamIds: Set<string>, teamMeta: TeamMeta) {
+// MatchSummary built from a `matchSelect` row.
+function summariseLean(f: FixtureRow, myTeamIds: Set<string>) {
   const isHome = f.home_team_id != null && myTeamIds.has(f.home_team_id);
-  const myTeamId = isHome ? f.home_team_id : f.away_team_id;
-  const meta = myTeamId ? teamMeta.get(myTeamId) : undefined;
   const mine = isHome ? f.teams_fixtures_home_team_idToteams : f.teams_fixtures_away_team_idToteams;
   const opp = isHome ? f.teams_fixtures_away_team_idToteams : f.teams_fixtures_home_team_idToteams;
-  const ev = meta?.championship;
+  const ts = f.tournament_disciplines?.tournament_sports;
+  const ev = ts?.tournaments?.championships;
   return {
     id: f.id, round: f.round, status: f.status, scheduled_at: f.scheduled_at,
-    sport: meta?.sport?.name ?? null,
+    sport: ts?.sports?.name ?? null,
     discipline: f.tournament_disciplines?.disciplines?.name ?? null,
     championship: ev ? { id: ev.id, name: ev.name, slug: ev.slug } : null,
     my_team: mine ? { id: mine.id, name: mine.name } : null,
@@ -118,9 +114,8 @@ function summariseLean(f: FixtureRow, myTeamIds: Set<string>, teamMeta: TeamMeta
   };
 }
 
-// fixture_awards select for the achievement views. championship + sport come from
-// teamMeta; only the tournament name, discipline, opponent and score live on the
-// fixture, so the include stays shallow (one extra hop for the tournament name).
+// fixture_awards select for the achievement views. championship + sport + tournament
+// all come from the fixture's own discipline draw (a roster spans championships).
 const awardSelect = {
   id: true, award_name: true, created_at: true,
   fixtures: {
@@ -132,7 +127,12 @@ const awardSelect = {
       tournament_disciplines: {
         select: {
           disciplines: { select: { name: true } },
-          tournament_sports: { select: { tournaments: { select: { id: true, name: true } } } },
+          tournament_sports: {
+            select: {
+              sports: { select: { name: true } },
+              tournaments: { select: { id: true, name: true, championships: { select: { id: true, name: true } } } },
+            },
+          },
         },
       },
     },
@@ -140,22 +140,21 @@ const awardSelect = {
 } as const;
 
 // One award with full match context, for grouping (dashboard) or listing (details page).
-function mapAward(a: any, myTeamIds: Set<string>, teamMeta: TeamMeta) {
+function mapAward(a: any, myTeamIds: Set<string>) {
   const f: FixtureRow = a.fixtures;
   const isHome = f?.home_team_id != null && myTeamIds.has(f.home_team_id);
-  const myTeamId = isHome ? f?.home_team_id : f?.away_team_id;
-  const meta = myTeamId ? teamMeta.get(myTeamId) : undefined;
   const mine = isHome ? f?.teams_fixtures_home_team_idToteams : f?.teams_fixtures_away_team_idToteams;
   const opp = isHome ? f?.teams_fixtures_away_team_idToteams : f?.teams_fixtures_home_team_idToteams;
-  const ev = meta?.championship;
-  const tournament = f?.tournament_disciplines?.tournament_sports?.tournaments ?? null;
+  const ts = f?.tournament_disciplines?.tournament_sports;
+  const ev = ts?.tournaments?.championships ?? null;
+  const tournament = ts?.tournaments ?? null;
   return {
     id: a.id,
     award_name: a.award_name,
     date: a.created_at,
     championship: ev ? { id: ev.id, name: ev.name } : null,
     tournament: tournament ? { id: tournament.id, name: tournament.name } : null,
-    sport: meta?.sport?.name ?? null,
+    sport: ts?.sports?.name ?? null,
     discipline: f?.tournament_disciplines?.disciplines?.name ?? null,
     opponent_team_name: opp?.name ?? null,
     my_team_name: mine?.name ?? null,
@@ -168,9 +167,8 @@ function mapAward(a: any, myTeamIds: Set<string>, teamMeta: TeamMeta) {
 export function makeMeRouter(prisma: Prisma): Router {
   const router = Router();
 
-  // Lean membership load shared by the dashboard + achievements: the user's teams
-  // with just their championship / sport / organization (enough to attribute
-  // fixtures and awards without the deep tournament chain).
+  // Membership load shared by the dashboard + achievements: the user's teams with
+  // their sport, organization, and the championships each roster is entered into.
   async function loadMembershipMeta(userId: string) {
     const memberships = await prisma.team_members.findMany({
       where: { user_id: userId, is_active: true },
@@ -178,17 +176,22 @@ export function makeMeRouter(prisma: Prisma): Router {
         team_id: true,
         teams: {
           select: {
-            championships: { select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true } },
             sports: { select: { id: true, name: true, icon: true } },
             organizations: { select: { id: true, name: true, short_name: true } },
+            team_entries: {
+              select: {
+                championships: { select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true } },
+              },
+            },
           },
         },
       },
     });
-    return { memberships, teamIds: new Set(memberships.map((m) => m.team_id)), teamMeta: buildTeamMeta(memberships) };
+    return { memberships, teamIds: new Set(memberships.map((m) => m.team_id)) };
   }
 
-  // Teams the current user belongs to (across all championships), with sport + championship + roster.
+  // Teams the current user belongs to, with sport + roster + the championships the
+  // roster is entered into (team_entries).
   router.get('/me/teams', asyncHandler(async (req, res) => {
     const memberships = await prisma.team_members.findMany({
       where: { user_id: req.user!.id, is_active: true },
@@ -196,9 +199,14 @@ export function makeMeRouter(prisma: Prisma): Router {
         teams: {
           include: {
             sports: true,
-            championships: { select: { id: true, name: true, slug: true, status: true } },
             organizations: { select: { id: true, name: true, short_name: true } },
-            tournament_disciplines: { include: { disciplines: true } },
+            team_entries: {
+              include: {
+                championships: { select: { id: true, name: true, slug: true, status: true } },
+                tournament_disciplines: { include: { disciplines: true, tournament_sports: { include: { tournaments: { select: { id: true, name: true } } } } } },
+              },
+              orderBy: { created_at: 'asc' },
+            },
             team_members: { include: { users: { select: { id: true, name: true, email: true, phone: true } } } },
           },
         },
@@ -265,7 +273,8 @@ export function makeMeRouter(prisma: Prisma): Router {
   // -------------------------------------------------------------------------
 
   // Resolve the user's active team memberships once: returns the membership rows
-  // (with team + championship + sport + discipline) plus a Set of team ids for matching.
+  // (with team + sport + the championships/disciplines each roster is entered into)
+  // plus a Set of team ids for matching.
   async function loadMyTeams(userId: string) {
     const memberships = await prisma.team_members.findMany({
       where: { user_id: userId, is_active: true },
@@ -273,9 +282,13 @@ export function makeMeRouter(prisma: Prisma): Router {
         teams: {
           include: {
             sports: { select: { id: true, name: true, icon: true } },
-            championships: { select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true } },
             organizations: { select: { id: true, name: true, short_name: true } },
-            tournament_disciplines: { include: { disciplines: { select: { id: true, name: true } } } },
+            team_entries: {
+              include: {
+                championships: { select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true } },
+                tournament_disciplines: { include: { disciplines: { select: { id: true, name: true } }, tournament_formats: { select: { name: true } } } },
+              },
+            },
           },
         },
       },
@@ -286,14 +299,11 @@ export function makeMeRouter(prisma: Prisma): Router {
 
   // GET /me/dashboard — fast landing summary: career stats, championship cards, recent 5.
   //
-  // Performance: a fixture's championship and sport are derived from the user's own
-  // team (which we already load with its championship/sport/org) via `teamMeta`,
-  // instead of walking fixture → tournament_discipline → tournament_sport →
-  // tournament → championship on every row. That deep include issued ~15 SQL
-  // round-trips per query against a high-latency DB; the shallow select below needs
-  // only the opponent's name/org and the discipline name.
+  // A roster can be entered into several championships, so each fixture's championship
+  // is taken from its own discipline draw (matchSelect walks that chain); the
+  // championship cards come from the team_entries the user's rosters hold.
   router.get('/me/dashboard', asyncHandler(async (req, res) => {
-    const { memberships, teamIds, teamMeta } = await loadMembershipMeta(req.user!.id);
+    const { memberships, teamIds } = await loadMembershipMeta(req.user!.id);
 
     if (teamIds.size === 0) {
       res.json({ stats: { total_events: 0, total_matches: 0, wins: 0, losses: 0, draws: 0 }, championships: [], recent_matches: [], achievements: [] });
@@ -307,7 +317,8 @@ export function makeMeRouter(prisma: Prisma): Router {
       orderBy: [{ scheduled_at: 'desc' }, { created_at: 'desc' }],
     });
 
-    // Championship cards from memberships; counts attributed via teamMeta.
+    // Championship cards from the rosters' entries; counts attributed by each
+    // fixture's own championship.
     type EventCard = {
       id: string; name: string; slug: string; status: string;
       start_date: Date | null; end_date: Date | null; venue: string | null;
@@ -316,19 +327,20 @@ export function makeMeRouter(prisma: Prisma): Router {
     };
     const eventMap = new Map<string, EventCard>();
     for (const m of memberships) {
-      const ev = m.teams.championships;
-      if (!ev) continue;
-      let card = eventMap.get(ev.id);
-      if (!card) {
-        card = { id: ev.id, name: ev.name, slug: ev.slug, status: ev.status, start_date: ev.start_date, end_date: ev.end_date, venue: ev.venue, team_count: 0, match_count: 0, win_count: 0, _sports: new Set() };
-        eventMap.set(ev.id, card);
+      for (const entry of m.teams.team_entries) {
+        const ev = entry.championships;
+        if (!ev) continue;
+        let card = eventMap.get(ev.id);
+        if (!card) {
+          card = { id: ev.id, name: ev.name, slug: ev.slug, status: ev.status, start_date: ev.start_date, end_date: ev.end_date, venue: ev.venue, team_count: 0, match_count: 0, win_count: 0, _sports: new Set() };
+          eventMap.set(ev.id, card);
+        }
+        card.team_count++;
+        if (m.teams.sports?.name) card._sports.add(m.teams.sports.name);
       }
-      card.team_count++;
-      if (m.teams.sports?.name) card._sports.add(m.teams.sports.name);
     }
     for (const f of fixtures) {
-      const myTeamId = f.home_team_id != null && teamIds.has(f.home_team_id) ? f.home_team_id : f.away_team_id;
-      const evId = myTeamId ? teamMeta.get(myTeamId)?.championship?.id : undefined;
+      const evId = f.tournament_disciplines?.tournament_sports?.tournaments?.championships?.id;
       const card = evId ? eventMap.get(evId) : undefined;
       if (!card) continue;
       card.match_count++;
@@ -345,7 +357,7 @@ export function makeMeRouter(prisma: Prisma): Router {
       .sort((a, b) => (b.start_date?.getTime() ?? 0) - (a.start_date?.getTime() ?? 0));
 
     const { wins, losses, draws } = tally(fixtures, teamIds);
-    const recent_matches = fixtures.slice(0, 5).map((f) => summariseLean(f, teamIds, teamMeta));
+    const recent_matches = fixtures.slice(0, 5).map((f) => summariseLean(f, teamIds));
 
     // Achievements — awards this user has received, newest first, with match context.
     const awardRows = await prisma.fixture_awards.findMany({
@@ -353,7 +365,7 @@ export function makeMeRouter(prisma: Prisma): Router {
       select: awardSelect,
       orderBy: { created_at: 'desc' },
     });
-    const achievements = awardRows.map((a) => mapAward(a, teamIds, teamMeta));
+    const achievements = awardRows.map((a) => mapAward(a, teamIds));
 
     res.json({
       stats: { total_events: eventMap.size, total_matches: fixtures.length, wins, losses, draws },
@@ -366,7 +378,7 @@ export function makeMeRouter(prisma: Prisma): Router {
   // GET /me/achievements — every award the user has received, newest first, with
   // full match context. Powers the dedicated achievements detail page.
   router.get('/me/achievements', asyncHandler(async (req, res) => {
-    const { teamIds, teamMeta } = await loadMembershipMeta(req.user!.id);
+    const { teamIds } = await loadMembershipMeta(req.user!.id);
     if (teamIds.size === 0) {
       res.json({ achievements: [] });
       return;
@@ -376,7 +388,7 @@ export function makeMeRouter(prisma: Prisma): Router {
       select: awardSelect,
       orderBy: { created_at: 'desc' },
     });
-    res.json({ achievements: awardRows.map((a) => mapAward(a, teamIds, teamMeta)) });
+    res.json({ achievements: awardRows.map((a) => mapAward(a, teamIds)) });
   }));
 
   // GET /me/matches — full match list, filterable by championship/status.
@@ -481,7 +493,10 @@ export function makeMeRouter(prisma: Prisma): Router {
     const eventId = req.params.eventId;
     const { memberships, teamIds } = await loadMyTeams(req.user!.id);
 
-    const myMemberships = memberships.filter((m) => m.teams.championships?.id === eventId);
+    // The user's rosters entered into this championship, paired with that entry.
+    const myMemberships = memberships
+      .map((m) => ({ m, entry: m.teams.team_entries.find((e) => e.championship_id === eventId) }))
+      .filter((x): x is { m: typeof x.m; entry: NonNullable<typeof x.entry> } => !!x.entry);
     if (myMemberships.length === 0) throw new NotFoundError('Championship');
 
     const championship = await prisma.championships.findUnique({
@@ -490,47 +505,50 @@ export function makeMeRouter(prisma: Prisma): Router {
     });
     if (!championship) throw new NotFoundError('Championship');
 
-    const myTeamIdsInEvent = new Set(myMemberships.map((m) => m.team_id));
+    const myTeamIdsInEvent = new Set(myMemberships.map((x) => x.m.team_id));
 
     // Rosters for the user's teams in this championship.
     const teamsWithRoster = await prisma.teams.findMany({
       where: { id: { in: [...myTeamIdsInEvent] } },
       include: {
         sports: { select: { name: true, icon: true } },
-        tournament_disciplines: { include: { disciplines: { select: { name: true } } } },
         team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true, phone: true } } } },
       },
     });
 
-    const teams = myMemberships.map((m) => {
+    const teams = myMemberships.map(({ m, entry }) => {
       const t = teamsWithRoster.find((x) => x.id === m.team_id);
+      const td = entry.tournament_disciplines;
       return {
         id: m.team_id,
         name: t?.name ?? m.teams.name,
         sport: t?.sports?.name ?? m.teams.sports?.name ?? null,
-        discipline: t?.tournament_disciplines?.disciplines?.name ?? m.teams.tournament_disciplines?.disciplines?.name ?? null,
+        discipline: td?.disciplines?.name ?? null,
+        entry_type: td?.entry_type ?? null,
+        squad_min: td?.squad_min ?? null,
+        squad_max: td?.squad_max ?? null,
+        format: td?.tournament_formats?.name ?? null,
         role: m.role,
         jersey_number: m.jersey_number,
-        status: t?.status ?? m.teams.status,
+        status: entry.status,
         roster: (t?.team_members ?? [])
           .map((tm) => ({ name: tm.users?.name ?? '—', phone: tm.users?.phone ?? null, role: tm.role, jersey_number: tm.jersey_number }))
           .sort((a, b) => (a.jersey_number ?? 999) - (b.jersey_number ?? 999)),
       };
     });
 
-    // All fixtures for the user's teams in this championship. Championship + sport
-    // come from the user's own team (teamMeta), so this uses the shallow matchSelect
-    // rather than the deep fixtureInclude.
-    const teamMeta = buildTeamMeta(memberships);
+    // Fixtures for the user's teams in THIS championship — a roster may also play
+    // in others, so filter by the fixture's championship via its discipline draw.
     const fixtures = await prisma.fixtures.findMany({
       where: {
         OR: [{ home_team_id: { in: [...myTeamIdsInEvent] } }, { away_team_id: { in: [...myTeamIdsInEvent] } }],
+        tournament_disciplines: { tournament_sports: { tournaments: { championship_id: eventId } } },
       },
       select: matchSelect,
       orderBy: [{ scheduled_at: 'desc' }, { created_at: 'desc' }],
     });
 
-    const matches = fixtures.map((f) => summariseLean(f, teamIds, teamMeta));
+    const matches = fixtures.map((f) => summariseLean(f, teamIds));
     const { wins, losses, draws } = tally(fixtures, teamIds);
 
     // Championship-wide standings (read-only) — read the materialized championship-

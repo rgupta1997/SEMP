@@ -555,12 +555,14 @@ async function main() {
     }
 
     // ---- Host → org invitations: one pending, one accepted ----
+    // Pending invite targets a real org not yet enrolled, so its owner sees it.
+    const pendingInviteOrg = activeOrgs[enrolledOrgs.length] ?? activeOrgs[activeOrgs.length - 1];
     await prisma.championship_invitations.create({
-      data: { championship_id: champ.id, org_name: 'Phoenix Sports Club', poc_mobile: `9${rint(700000000, 799999999)}`, status: 'pending', invited_by: hostId },
+      data: { championship_id: champ.id, org_name: pendingInviteOrg.name, status: 'pending', invited_by: hostId, organization_id: pendingInviteOrg.id },
     });
     const acceptedOrg = enrolledOrgs[0];
     await prisma.championship_invitations.create({
-      data: { championship_id: champ.id, org_name: acceptedOrg.name, poc_mobile: `9${rint(800000000, 899999999)}`, status: 'accepted', invited_by: hostId, organization_id: acceptedOrg.id, accepted_by: ownerByOrg[acceptedOrg.id], responded_at: new Date() },
+      data: { championship_id: champ.id, org_name: acceptedOrg.name, status: 'accepted', invited_by: hostId, organization_id: acceptedOrg.id, accepted_by: ownerByOrg[acceptedOrg.id], responded_at: new Date() },
     });
 
     // ---- Featured disciplines get teams + fixtures ----
@@ -582,10 +584,16 @@ async function main() {
         const teamStatus = c.status === 'registration_open' ? pickN([...TEAM_STATUS], oi) : 'roster_locked';
         const team = await prisma.teams.create({
           data: {
-            championship_id: champ.id, sport_id: sportMap[td.sportName].id, organization_id: orgId,
-            championship_organization_id: enrollByOrg[orgId], tournament_discipline_id: td.id,
+            sport_id: sportMap[td.sportName].id, organization_id: orgId,
             name: `${org.short} ${td.sportName}${td.discName && td.discName !== td.sportName ? ' ' + td.discName : ''}`,
             status: teamStatus, invite_token: token(),
+          },
+        });
+        await prisma.team_entries.create({
+          data: {
+            team_id: team.id, organization_id: orgId, championship_id: champ.id,
+            championship_organization_id: enrollByOrg[orgId], tournament_discipline_id: td.id,
+            status: teamStatus,
           },
         });
         totalTeams++;

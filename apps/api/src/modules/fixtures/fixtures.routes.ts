@@ -57,16 +57,17 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         ...(req.body.params as object),
       };
 
-      // Teams: explicit seed order, else all teams registered to this draw.
+      // Teams: explicit seed order, else all rosters entered into this draw.
       let teams: TeamRef[];
       if (req.body.team_ids?.length) {
         teams = req.body.team_ids.map((id: string) => ({ teamId: id }));
       } else {
-        const registered = await prisma.teams.findMany({
+        const registered = await prisma.team_entries.findMany({
           where: { tournament_discipline_id: td.id },
           orderBy: { created_at: 'asc' },
+          select: { team_id: true },
         });
-        teams = registered.map((t) => ({ teamId: t.id }));
+        teams = registered.map((e) => ({ teamId: e.team_id }));
       }
 
       const generated = generateFixtures(formatName, teams, params);
