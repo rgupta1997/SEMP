@@ -6,7 +6,6 @@ import { ConfirmProvider, Spinner, ToastProvider } from './components/ui';
 import { TourProvider } from './components/onboarding/Tour';
 import { HelpPage } from './pages/HelpPage';
 import { AuthPage } from './pages/AuthPage';
-import { LandingPage } from './pages/LandingPage';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
 
 // Host / championship management (reachable by the championship's organiser)
@@ -138,8 +137,8 @@ function AppRoutes() {
   // screen at /login. Any other path falls through to the landing page.
   if (!ctx) return (
     <Routes>
+      <Route path="/" element={<AuthPage />} />
       <Route path="/login" element={<AuthPage />} />
-      <Route path="/" element={<LandingPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

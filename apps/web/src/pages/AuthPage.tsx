@@ -4,19 +4,7 @@ import { useAuth } from '../lib/auth';
 import { BRAND } from '../lib/brand';
 import { useTheme } from '../lib/theme';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sportagon EOS — login / sign-up.
-//
-// Deliberately skinned to the public landing page (LandingPage.tsx), not the slate
-// app chrome: same palette (#004AAD blue, teal, navy), the Poppins / Hanken Grotesk
-// / JetBrains Mono type system, and the navy split-panel treatment from the "Book a
-// demo" section. This is the bridge from marketing → app, so it should feel like the
-// same brand. Form controls are styled locally (rather than the slate UI <Input> /
-// <Button>) because those track the brand-ramp blue, which differs from the landing's
-// #004AAD.
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Landing-page palette (kept in sync with LandingPage.tsx `C`).
+// Landing-page palette.
 const C = {
   blue: '#004AAD', blue8: '#013C8B', blue50: '#F1F6FE', teal: '#5CE1E6',
   teal6: '#159FA6', navy: '#0A1A33', fg2: '#374459', fg3: '#6E7E96',
@@ -88,7 +76,9 @@ export function AuthPage() {
   const location = useLocation();
   // The landing page can deep-link here in signup mode (Sign up button); default is login.
   const [mode, setMode] = useState<'login' | 'signup'>(
-    (location.state as { mode?: string } | null)?.mode === 'signup' ? 'signup' : 'login',
+    (location.state as { mode?: string } | null)?.mode === 'signup'
+      || new URLSearchParams(location.search).get('mode') === 'signup'
+      ? 'signup' : 'login',
   );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -123,7 +113,7 @@ export function AuthPage() {
     } catch (err: any) { setError(err.message ?? 'Login failed'); } finally { setBusy(false); }
   };
 
-  // Theme-aware tokens (mirrors LandingPage's `t`). Navy rail stays constant.
+  // Theme-aware tokens. Navy rail stays constant.
   const t = {
     formBg: dark ? '#070D18' : '#F7F9FC',
     fg: dark ? '#EAF0FA' : C.navy,
@@ -169,7 +159,7 @@ export function AuthPage() {
           </svg>
 
           {/* logo lockup */}
-          <a href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: 11, position: 'relative', width: 'fit-content' }}>
+          <a href={import.meta.env.VITE_LANDING_URL ?? '/'} style={{ display: 'inline-flex', alignItems: 'center', gap: 11, position: 'relative', width: 'fit-content' }}>
             <img src={BRAND.logo.white} alt={BRAND.name} style={{ height: 28, display: 'block' }} />
             <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, color: C.teal, letterSpacing: '.16em', padding: '3px 7px', border: `1px solid ${C.teal}66`, borderRadius: 6 }}>{BRAND.productBadge}</span>
           </a>
@@ -209,10 +199,10 @@ export function AuthPage() {
         </aside>
 
         {/* ===== RIGHT — form ===== */}
-        <main style={{ position: 'relative', display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: 'clamp(28px,5vh,64px) clamp(22px,5vw,56px)' }}>
+        <main style={{ position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 'clamp(28px,5vh,64px) clamp(22px,5vw,56px)' }}>
           {/* top bar: brand on mobile + theme toggle */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 28 }}>
-            <a href="/" className="mobileBrand" style={{ display: 'none', alignItems: 'center', gap: 10 }}>
+            <a href={import.meta.env.VITE_LANDING_URL ?? '/'} className="mobileBrand" style={{ display: 'none', alignItems: 'center', gap: 10 }}>
               <img src={dark ? BRAND.logo.white : BRAND.logo.blue} alt={BRAND.name} style={{ height: 26, display: 'block' }} />
               <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, color: C.teal6, letterSpacing: '.16em', padding: '3px 7px', border: '1px solid #BFE7E9', borderRadius: 6 }}>{BRAND.productBadge}</span>
             </a>
