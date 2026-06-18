@@ -25,6 +25,10 @@ interface ResultRow {
 const teamCode = (t: ResultRow['home']) =>
   (t?.organizations?.short_name || t?.name || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || '··';
 
+// Full label shown next to the chip — the organization's name, else the team name.
+const teamLabel = (t: ResultRow['home']) =>
+  t?.organizations?.name || t?.organizations?.short_name || t?.name || '';
+
 // The dark square chip used for each side of a match (e.g. "INF", "WIP"). When the
 // side isn't decided yet (knockout placeholder / bye), show a clear "TBD" chip so
 // the match still reads as a listed fixture instead of an empty row.
@@ -139,35 +143,49 @@ export function ResultsPage() {
                 const completed = f.status === 'completed' || f.status === 'confirmed';
                 const scored = !individual && f.home_score != null && f.away_score != null;
                 return (
-                  <Card key={f.id} interactive={canManage} onClick={() => open(f)} className="flex flex-wrap items-center gap-x-4 gap-y-2 p-3 sm:p-4">
-                    <div className="w-24 shrink-0 truncate text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400" title={f.round ?? undefined}>
+                  <Card key={f.id} interactive={canManage} onClick={() => open(f)} className="flex items-center gap-2 p-3 sm:gap-4 sm:p-4">
+                    <div className="w-10 shrink-0 truncate text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 sm:w-16" title={f.round ?? undefined}>
                       {f.round || '—'}
                     </div>
 
-                    {individual ? (
-                      <div className="flex flex-1 items-center gap-3">
-                        <span className="grid h-9 w-9 place-items-center rounded-lg bg-slate-900 text-slate-500 dark:bg-slate-800">··</span>
-                        <span className="text-slate-300 dark:text-slate-600">··</span>
-                        <span className="grid h-9 w-9 place-items-center rounded-lg bg-slate-900 text-slate-500 dark:bg-slate-800">··</span>
-                      </div>
-                    ) : (
-                      <div className="flex flex-1 items-center gap-3">
-                        <TeamChip team={f.home} winner={f.winner_team_id != null && f.winner_team_id === f.home?.id} />
-                        <span className="min-w-[3ch] text-center text-lg font-bold tabular-nums text-slate-800 dark:text-slate-100">
-                          {scored ? `${f.home_score}–${f.away_score}` : <span className="text-slate-300 dark:text-slate-600">··</span>}
-                        </span>
-                        <TeamChip team={f.away} winner={f.winner_team_id != null && f.winner_team_id === f.away?.id} />
-                      </div>
-                    )}
+                    {/* Centered match block: home (right-aligned) · score · away (left-aligned) */}
+                    <div className="flex flex-1 items-center justify-center gap-2 sm:gap-3">
+                      {individual ? (
+                        <>
+                          <div className="flex w-28 items-center justify-end gap-2 sm:w-44">
+                            <span className="grid h-9 w-9 place-items-center rounded-lg bg-slate-900 text-slate-500 dark:bg-slate-800">··</span>
+                          </div>
+                          <span className="w-16 shrink-0 text-center text-slate-300 dark:text-slate-600 sm:w-20">··</span>
+                          <div className="flex w-28 items-center gap-2 sm:w-44">
+                            <span className="grid h-9 w-9 place-items-center rounded-lg bg-slate-900 text-slate-500 dark:bg-slate-800">··</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex w-28 items-center justify-end gap-2 sm:w-44">
+                            {f.home && <span className="truncate text-right text-sm font-medium text-slate-700 dark:text-slate-200" title={teamLabel(f.home)}>{teamLabel(f.home)}</span>}
+                            <TeamChip team={f.home} winner={f.winner_team_id != null && f.winner_team_id === f.home?.id} />
+                          </div>
+                          <span className="w-16 shrink-0 whitespace-nowrap text-center text-lg font-bold tabular-nums text-slate-800 dark:text-slate-100 sm:w-20">
+                            {scored ? `${f.home_score}–${f.away_score}` : <span className="text-slate-300 dark:text-slate-600">··</span>}
+                          </span>
+                          <div className="flex w-28 items-center gap-2 sm:w-44">
+                            <TeamChip team={f.away} winner={f.winner_team_id != null && f.winner_team_id === f.away?.id} />
+                            {f.away && <span className="truncate text-sm font-medium text-slate-700 dark:text-slate-200" title={teamLabel(f.away)}>{teamLabel(f.away)}</span>}
+                          </div>
+                        </>
+                      )}
+                    </div>
 
-                    <div className="ml-auto flex items-center gap-3">
+                    {/* Fixed-width actions column so status + Edit/Record line up across rows */}
+                    <div className="flex w-28 shrink-0 items-center justify-end gap-2 sm:w-40 sm:gap-3">
                       {individual ? (
                         <StatusBadge status="" label="Individual" />
                       ) : (
                         <StatusBadge status={f.status} />
                       )}
                       {canManage && (
-                        <span className="text-sm font-semibold text-brand-600 dark:text-brand-300">
+                        <span className="w-16 shrink-0 text-right text-sm font-semibold text-brand-600 dark:text-brand-300">
                           {completed ? 'Edit' : 'Record →'}
                         </span>
                       )}

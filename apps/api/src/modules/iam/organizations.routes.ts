@@ -10,6 +10,7 @@ import { makeGuards } from '../../http/middleware/permissions.js';
 import { requireSuperAdmin } from '../../http/middleware/auth.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { findUserByPhone, hashProvisionedPassword } from './users.helpers.js';
+import { createNotification } from '../notifications/audience.js';
 
 // Organizations router: list/get are open reads. Any authenticated user can
 // create an organization (they become its first `owner`). Edits, deletes and
@@ -101,6 +102,49 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     res.status(204).send();
   }));
 
+  // ---- Self-service join requests ----
+  // Any signed-in user can request to join an org. A request is just an
+  // organization_members row with status 'pending' — it grants no access until an
+  // owner/admin approves (orgRole() requires status 'active'). The org's admins are
+  // notified via an 'org_admins' notification.
+  router.post('/:id/join', asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
+    const orgId = req.params.id;
+    const org = await prisma.organizations.findUnique({ where: { id: orgId }, select: { id: true, name: true } });
+    if (!org) throw new NotFoundError('Organization');
+
+    const existing = await prisma.organization_members.findUnique({
+      where: { user_id_organization_id: { user_id: userId, organization_id: orgId } },
+    });
+    if (existing?.status === 'active') throw new BusinessRuleError('You are already a member of this organization');
+    if (existing?.status === 'pending') { res.json(existing); return; } // idempotent
+
+    // No row yet, or a past/rejected one being re-opened.
+    const member = existing
+      ? await prisma.organization_members.update({ where: { id: existing.id }, data: { status: 'pending', role: 'member' } })
+      : await prisma.organization_members.create({ data: { user_id: userId, organization_id: orgId, role: 'member', status: 'pending' } });
+
+    const actor = await prisma.users.findUnique({ where: { id: userId }, select: { name: true, email: true } });
+    const who = actor?.name || actor?.email || 'Someone';
+    await createNotification(prisma, {
+      organization_id: orgId,
+      sender_id: userId,
+      type: 'org_join_request',
+      audience: 'org_admins',
+      title: `${who} requested to join ${org.name}`,
+      body: 'Review the request on your organization’s Members page.',
+    });
+    res.status(201).json(member);
+  }));
+
+  // Withdraw your own pending request.
+  router.delete('/:id/join', asyncHandler(async (req, res) => {
+    await prisma.organization_members.deleteMany({
+      where: { user_id: req.user!.id, organization_id: req.params.id, status: 'pending' },
+    });
+    res.json({ ok: true });
+  }));
+
   // ---- Members ----
   router.get('/:id/members', asyncHandler(async (req, res) => {
     const rows = await prisma.organization_members.findMany({
@@ -162,6 +206,48 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   router.delete('/:id/members/:memberId', orgAdmin, asyncHandler(async (req, res) => {
     await prisma.organization_members.deleteMany({ where: { id: req.params.memberId, organization_id: req.params.id } });
     res.status(204).send();
+  }));
+
+  // ---- Approve / decline a pending join request ----
+  // Resolve the org name once for the requester-facing notification.
+  async function orgName(id: string): Promise<string> {
+    return (await prisma.organizations.findUnique({ where: { id }, select: { name: true } }))?.name ?? 'the organization';
+  }
+
+  router.post('/:id/members/:memberId/approve', orgAdmin, asyncHandler(async (req, res) => {
+    const member = await prisma.organization_members.findFirst({
+      where: { id: req.params.memberId, organization_id: req.params.id },
+    });
+    if (!member) throw new NotFoundError('Member');
+    const updated = await prisma.organization_members.update({
+      where: { id: member.id },
+      data: { status: 'active' },
+      include: { users: { select: { id: true, name: true, email: true, phone: true } } },
+    });
+    await createNotification(prisma, {
+      target_user_id: member.user_id,
+      sender_id: req.user!.id,
+      type: 'org_join_approved',
+      audience: 'all', // ignored for direct notifications — target_user_id drives visibility
+      title: `You’ve been approved to join ${await orgName(req.params.id)}`,
+    });
+    res.json(updated);
+  }));
+
+  router.post('/:id/members/:memberId/decline', orgAdmin, asyncHandler(async (req, res) => {
+    const member = await prisma.organization_members.findFirst({
+      where: { id: req.params.memberId, organization_id: req.params.id },
+    });
+    if (!member) throw new NotFoundError('Member');
+    await prisma.organization_members.delete({ where: { id: member.id } });
+    await createNotification(prisma, {
+      target_user_id: member.user_id,
+      sender_id: req.user!.id,
+      type: 'org_join_declined',
+      audience: 'all', // ignored for direct notifications — target_user_id drives visibility
+      title: `Your request to join ${await orgName(req.params.id)} was declined`,
+    });
+    res.json({ ok: true });
   }));
 
   return router;

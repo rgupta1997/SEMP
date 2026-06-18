@@ -11,7 +11,7 @@ import { InvitePanel } from '../../components/InvitePanel';
 
 const slugify = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
-const STEPS = ['Championship profile', 'Venues & grounds', 'Sports & disciplines', 'Invite organizations', 'Open registration'];
+const STEPS = ['Championship profile', 'Venue', 'Seasons & sports', 'Invite organizations', 'Open registration'];
 
 export function CreateEventWizard() {
   const navigate = useNavigate();
@@ -31,25 +31,33 @@ export function CreateEventWizard() {
   const effectiveSlug = slugTouched ? slug : slugify(name);
 
   const create = useApiMutation((body: any) => api('POST', '/championships', body), ['/championships']);
+  const update = useApiMutation((body: any) => api('PATCH', `/championships/${eventId}`, body), ['/championships']);
   const openReg = useApiMutation(
     () => api('PATCH', `/championships/${eventId}/status`, { status: 'registration_open' }),
     ['/championships'],
   );
 
-  // Creating the draft also grants the creator the Organiser role; refresh auth
-  // so the setup steps below pass the organiser write-guards.
+  // Step 0 doubles as create + edit: the first save creates the draft (and grants
+  // the creator the Organiser role, so we refresh auth); returning here via Back
+  // edits the existing draft instead of creating a duplicate.
   const createDraft = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     if (!startDate || !endDate) { setError('Start and end dates are required'); return; }
-    create.mutate(
-      { name, slug: effectiveSlug, venue: venue || undefined, description: description || undefined, start_date: startDate, end_date: endDate },
-      {
+    const body = { name, slug: effectiveSlug, venue: venue || undefined, description: description || undefined, start_date: startDate, end_date: endDate };
+    if (eventId) {
+      update.mutate(body, {
+        onSuccess: () => setStep(1),
+        onError: (err: any) => setError(err.message ?? 'Could not save championship'),
+      });
+    } else {
+      create.mutate(body, {
         onSuccess: async (ev: any) => { await refresh(); setEventId(ev.id); setStep(1); },
         onError: (err: any) => setError(err.message ?? 'Could not create championship'),
-      },
-    );
+      });
+    }
   };
+  const savingDraft = create.isPending || update.isPending;
 
   const finish = (open: boolean) => {
     if (!open) { navigate(`/championships/${eventId}`); return; }
@@ -94,7 +102,7 @@ export function CreateEventWizard() {
               {error && <p className="mb-3 rounded-lg bg-rose-50 dark:bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">{error}</p>}
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="ghost" onClick={() => navigate('/championships')}>Cancel</Button>
-                <Button type="submit" disabled={create.isPending}>{create.isPending ? 'Creating…' : 'Create draft & continue →'}</Button>
+                <Button type="submit" disabled={savingDraft}>{savingDraft ? 'Saving…' : eventId ? 'Save & continue →' : 'Create draft & continue →'}</Button>
               </div>
             </form>
           </Card>
@@ -116,7 +124,7 @@ export function CreateEventWizard() {
             </div>
 
             <WizardFooter
-              onBack={() => setStep((s) => Math.max(1, s - 1))}
+              onBack={() => setStep((s) => Math.max(0, s - 1))}
               right={step < 4 ? (
                 <Button onClick={() => setStep((s) => s + 1)}>Next →</Button>
               ) : (
@@ -145,12 +153,12 @@ function WizardFooter({ onBack, right }: { onBack: () => void; right: ReactNode 
 // Final step — a quick count of what's been configured before going live.
 function ReviewStep({ eventId }: { eventId: string }) {
   const { data: tournaments = [] } = useApi<any[]>(`/tournaments?championship_id=${eventId}`);
-  const { data: grounds = [] } = useApi<any[]>(`/championships/${eventId}/grounds`);
+  const { data: venues = [] } = useApi<any[]>(`/venues?championship_id=${eventId}`);
   const { data: invites = [] } = useApi<any[]>(`/championships/${eventId}/invitations`);
 
   const rows = [
-    { label: 'Tournaments', value: tournaments.length },
-    { label: 'Grounds', value: grounds.length },
+    { label: 'Seasons', value: tournaments.length },
+    { label: 'Venue', value: venues.length },
     { label: 'Invitations sent', value: invites.length },
   ];
 

@@ -23,6 +23,7 @@ import { makeEventsRouter } from '../modules/championships/championships.routes.
 import { makeStandingsRouter } from '../modules/standings/standings.routes.js';
 import { makeEnrollmentRouter } from '../modules/enrollment/enrollment.routes.js';
 import { makeInvitationsRouter } from '../modules/enrollment/invitations.routes.js';
+import { makeUserInvitationsRouter } from '../modules/iam/user-invitations.routes.js';
 import { makeTeamsRouter } from '../modules/teams/teams.routes.js';
 import { makeVenuesRouter, makeVenueGroundsRouter } from '../modules/venues/venues.routes.js';
 import { makeFixturesRouter } from '../modules/fixtures/fixtures.routes.js';
@@ -125,6 +126,7 @@ export function buildApp(prisma: Prisma) {
   // ----- Phase 3: enrollment, invitations & role assignment -----
   api.use('/', makeEnrollmentRouter(prisma));
   api.use('/', makeInvitationsRouter(prisma));
+  api.use('/', makeUserInvitationsRouter(prisma));
 
   // ----- Phase 4: teams & rosters -----
   api.use('/', makeTeamsRouter(prisma));

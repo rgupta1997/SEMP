@@ -7,9 +7,12 @@ import './index.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    // staleTime 0 (default) + refetch-on-mount means navigating to a screen always
-    // pulls fresh data; refetch on focus keeps a left-open tab current.
-    queries: { retry: false, refetchOnWindowFocus: true },
+    // Keep recently-loaded data for 30s so navigating between screens (and back)
+    // serves the cache instantly instead of blocking on a refetch every time;
+    // anything older refetches quietly in the background while the cached view
+    // shows. Mutations still invalidate the relevant keys immediately (below), so
+    // edits are reflected at once. Master data is cached far longer (see useApi).
+    queries: { retry: false, refetchOnWindowFocus: true, staleTime: 30_000 },
   },
   // Refresh data after EVERY successful mutation — done globally so it fires even
   // when the component that triggered it has already navigated away (e.g. the match
@@ -18,8 +21,17 @@ const queryClient = new QueryClient({
   mutationCache: new MutationCache({
     onSuccess: (_data, _vars, _ctx, mutation) => {
       const keys = mutation.meta?.invalidate as string[] | undefined;
-      if (keys?.length) keys.forEach((k) => queryClient.invalidateQueries({ queryKey: [k] }));
-      else queryClient.invalidateQueries();
+      if (!keys?.length) { queryClient.invalidateQueries(); return; }
+      // Match by path PREFIX, not exact key, so invalidating a base path (e.g.
+      // '/disciplines') also refreshes its parameterized reads
+      // ('/disciplines?sport_id=…') and sub-paths. This is what keeps the
+      // aggressively-cached master data correct after any add/edit/delete.
+      queryClient.invalidateQueries({
+        predicate: (q) => {
+          const k = q.queryKey[0];
+          return typeof k === 'string' && keys.some((key) => k === key || k.startsWith(key));
+        },
+      });
     },
   }),
 });

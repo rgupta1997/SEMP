@@ -38,14 +38,16 @@ export function PhoneLookupNotice({ phone }: { phone: string }) {
 // Shown once after provisioning a new login, with a copy button so the actor can
 // send the details to the user for their first sign-in (they're forced to reset).
 export function CredentialsPanel({ creds, onDone }: { creds: Credentials; onDone: () => void }) {
+  const signInUrl = `${window.location.origin}/login`;
   const text = useMemo(() => [
     'Your Sportagon login',
     `Name: ${creds.name}`,
     `Email: ${creds.email}`,
     creds.phone ? `Phone: ${creds.phone}` : null,
     `Temporary password: ${creds.password}`,
+    `Sign in at: ${signInUrl}`,
     "You'll be asked to set your own password on first sign-in.",
-  ].filter(Boolean).join('\n'), [creds]);
+  ].filter(Boolean).join('\n'), [creds, signInUrl]);
 
   const copy = async () => {
     try { await navigator.clipboard.writeText(text); toast.success('Login details copied'); }

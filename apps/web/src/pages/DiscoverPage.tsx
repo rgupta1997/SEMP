@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useApi, useTableControls, fmtDateRange } from '../lib/hooks';
-import { Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge } from '../components/ui';
+import { useAuth } from '../lib/auth';
+import { usePermissions } from '../lib/permissions';
+import { api } from '../lib/api';
+import { useApi, useApiMutation, useTableControls, fmtDateRange } from '../lib/hooks';
+import { Button, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge, toast } from '../components/ui';
 
 interface Championship {
   id: string; name: string; slug: string; status: string;
@@ -16,9 +19,20 @@ const STATUS_LABELS: Record<string, string> = {
 // Discover — every championship on the platform, open to any signed-in user.
 // Searchable and filterable by sport / status so the list never dumps everything.
 export function DiscoverPage() {
+  const { ctx } = useAuth();
+  const canManage = usePermissions().can('team.manage'); // org owner/admin (POC)
+  const institutionId = ctx?.organization?.id ?? ctx?.user.organization_id ?? null;
   const { data: championships = [], isLoading } = useApi<Championship[]>('/championships');
+  const { data: enrollments = [] } = useApi<any[]>('/me/enrollments');
   const [sport, setSport] = useState('');
   const [status, setStatus] = useState('');
+
+  const apply = useApiMutation(
+    (eventId: string) => api('POST', `/championships/${eventId}/enroll`, { organization_id: institutionId }),
+    ['/me/enrollments'],
+  );
+  const enrollmentStatusFor = (eventId: string) =>
+    enrollments.find((e) => e.championship_id === eventId)?.status as string | undefined;
 
   const sportOptions = useMemo(() => {
     const set = new Set<string>();
@@ -88,6 +102,26 @@ export function DiscoverPage() {
                   </p>
                 )}
                 <div className="mt-4 flex-1" />
+                {(() => {
+                  const applied = enrollmentStatusFor(c.id);
+                  if (applied) {
+                    return (
+                      <div className="mb-2 flex items-center gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Your application</span>
+                        <StatusBadge status={applied} />
+                      </div>
+                    );
+                  }
+                  if (c.status === 'registration_open' && canManage && institutionId) {
+                    return (
+                      <Button className="mb-2 w-full" disabled={apply.isPending}
+                        onClick={() => apply.mutate(c.id, { onSuccess: () => toast.success('Application submitted', 'You can enter teams once approved.'), onError: (err: any) => toast.error(err.message) })}>
+                        {apply.isPending ? 'Applying…' : 'Apply to participate'}
+                      </Button>
+                    );
+                  }
+                  return null;
+                })()}
                 <Link to={`/championships/${c.id}`} className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300">View details →</Link>
               </Card>
             ))}

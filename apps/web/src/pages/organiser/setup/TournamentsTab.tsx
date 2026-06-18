@@ -1,15 +1,14 @@
 import { useState } from 'react';
-import { TOURNAMENT_STATUS } from '@semp/shared';
 import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
-import { Button, Card, EmptyState, Field, Input, Modal, Select, StatusBadge, Textarea } from '../../../components/ui';
+import { Button, Card, EmptyState, Field, Input, Modal, Textarea } from '../../../components/ui';
 
-// View + edit + delete a single tournament. Opens from a card ("clip").
+// View + edit + delete a single season. Opens from a card ("clip"). A season is
+// always live once created — there is no draft/publish lifecycle.
 function TournamentModal({ tournament, path, onClose }: { tournament: any; path: string; onClose: () => void }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(tournament.name ?? '');
   const [description, setDescription] = useState(tournament.description ?? '');
-  const [status, setStatus] = useState(tournament.status ?? 'draft');
   const [error, setError] = useState<string | null>(null);
 
   const update = useApiMutation(
@@ -27,22 +26,17 @@ function TournamentModal({ tournament, path, onClose }: { tournament: any; path:
     setError(null);
     if (!name.trim()) { setError('Name is required'); return; }
     update.mutate(
-      { name: name.trim(), description: description.trim() || undefined, status },
+      { name: name.trim(), description: description.trim() || undefined },
       { onError: (e: any) => setError(e.message) },
     );
   };
 
   return (
-    <Modal title={editing ? 'Edit tournament' : tournament.name} onClose={onClose}>
+    <Modal title={editing ? 'Edit season' : tournament.name} onClose={onClose}>
       {editing ? (
         <>
           <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
           <Field label="Description"><Textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
-          <Field label="Status">
-            <Select value={status} onChange={(e) => setStatus(e.target.value)}>
-              {TOURNAMENT_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </Select>
-          </Field>
           {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
@@ -51,7 +45,6 @@ function TournamentModal({ tournament, path, onClose }: { tournament: any; path:
         </>
       ) : (
         <>
-          <div className="mb-3 flex items-center gap-2"><StatusBadge status={tournament.status} /></div>
           <p className="text-sm text-slate-600 dark:text-slate-300">{tournament.description || 'No description.'}</p>
           <p className="mt-3 text-xs text-slate-400 dark:text-slate-500">Configure its sports & disciplines in the “Sports &amp; disciplines” tab.</p>
           {error && <p className="mt-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
@@ -90,21 +83,18 @@ export function TournamentsTab({ eventId, onCreated }: { eventId: string; onCrea
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <p className="text-sm text-slate-500 dark:text-slate-400">A tournament groups the sports & disciplines that share a championship table.</p>
-        <Button onClick={() => setOpen(true)}>+ Add tournament</Button>
+        <p className="text-sm text-slate-500 dark:text-slate-400">A season groups the sports & disciplines that share a championship table.</p>
+        <Button onClick={() => setOpen(true)}>+ Add season</Button>
       </div>
 
       {isLoading ? null : tournaments.length === 0 ? (
-        <EmptyState icon="⊟" title="No tournaments" description="Add a tournament, then configure the sports and disciplines inside it."
-          action={<Button onClick={() => setOpen(true)}>+ Add tournament</Button>} />
+        <EmptyState icon="⊟" title="No seasons" description="Add a season, then configure the sports and disciplines inside it."
+          action={<Button onClick={() => setOpen(true)}>+ Add season</Button>} />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {tournaments.map((t) => (
             <Card key={t.id} className="cursor-pointer p-4 transition hover:border-brand-300 dark:hover:border-brand-500/50 hover:shadow-md" onClick={() => setActive(t)}>
-              <div className="flex items-start justify-between">
-                <h3 className="font-semibold text-slate-900 dark:text-slate-100">{t.name}</h3>
-                <StatusBadge status={t.status} />
-              </div>
+              <h3 className="font-semibold text-slate-900 dark:text-slate-100">{t.name}</h3>
               {t.description && <p className="mt-1 line-clamp-2 text-sm text-slate-500 dark:text-slate-400">{t.description}</p>}
               <p className="mt-3 text-xs text-slate-400 dark:text-slate-500">Click to view, edit or remove.</p>
             </Card>
@@ -113,14 +103,14 @@ export function TournamentsTab({ eventId, onCreated }: { eventId: string; onCrea
       )}
 
       {open && (
-        <Modal title="New tournament" onClose={() => setOpen(false)}>
-          <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Main Championship" /></Field>
+        <Modal title="New season" onClose={() => setOpen(false)}>
+          <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Season 1" /></Field>
           <Field label="Description"><Textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
           {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
             <Button disabled={!name || create.isPending}
-              onClick={() => { setError(null); create.mutate({ championship_id: eventId, name, description: description || undefined }, { onError: (e: any) => setError(e.message) }); }}>
+              onClick={() => { setError(null); create.mutate({ championship_id: eventId, name, description: description || undefined, status: 'active' }, { onError: (e: any) => setError(e.message) }); }}>
               {create.isPending ? 'Saving…' : 'Create & continue →'}
             </Button>
           </div>

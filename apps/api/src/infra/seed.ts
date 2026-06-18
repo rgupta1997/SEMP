@@ -429,14 +429,21 @@ async function main() {
       const teamName = `${inst.short_name} ${td.sportName}${td.discName !== td.sportName ? ' ' + td.discName : ''}`;
       const team = await prisma.teams.create({
         data: {
-          championship_id: championship.id,
           sport_id: sportMap[td.sportName].id,
           organization_id: inst.id,
+          name: teamName,
+          status: 'forming',
+          invite_token: randomBytes(16).toString('hex'),
+        },
+      });
+      await prisma.team_entries.create({
+        data: {
+          team_id: team.id,
+          organization_id: inst.id,
+          championship_id: championship.id,
           championship_organization_id: enrollments[inst.id],
           tournament_discipline_id: td.id,
-          name: teamName,
           status: 'roster_locked',
-          invite_token: randomBytes(16).toString('hex'),
         },
       });
       teams.push({ id: team.id, instId: inst.id, tdId: td.id, name: teamName });

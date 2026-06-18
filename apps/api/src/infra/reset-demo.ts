@@ -26,9 +26,9 @@ async function main() {
   if (championship) {
     const eventId = championship.id;
 
-    // Get all teams for this championship first (need their IDs for fixture cleanup)
-    const teams = await prisma.teams.findMany({ where: { championship_id: eventId }, select: { id: true } });
-    const teamIds = teams.map((t) => t.id);
+    // Get all teams entered into this championship (need their IDs for fixture cleanup)
+    const entries = await prisma.team_entries.findMany({ where: { championship_id: eventId }, select: { team_id: true } });
+    const teamIds = [...new Set(entries.map((e) => e.team_id))];
 
     // Delete ALL fixtures referencing these teams (handles partial seed state)
     if (teamIds.length > 0) {
@@ -38,12 +38,16 @@ async function main() {
     }
     console.log('  - Deleted fixtures');
 
+    // Delete the championship entries (roster identities are wiped below for the demo)
+    await prisma.team_entries.deleteMany({ where: { championship_id: eventId } });
+    console.log('  - Deleted team entries');
+
     // Delete team members
     await prisma.team_members.deleteMany({ where: { team_id: { in: teamIds } } });
     console.log('  - Deleted team members');
 
     // Delete teams
-    await prisma.teams.deleteMany({ where: { championship_id: eventId } });
+    await prisma.teams.deleteMany({ where: { id: { in: teamIds } } });
     console.log('  - Deleted teams');
 
     // Delete championship_officials

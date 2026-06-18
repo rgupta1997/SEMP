@@ -144,7 +144,7 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
     const user = req.user!;
     const n = await prisma.notifications.findUnique({
       where: { id: req.params.id },
-      select: { id: true, championship_id: true, audience: true, sender_id: true },
+      select: { id: true, championship_id: true, audience: true, sender_id: true, organization_id: true, target_user_id: true },
     });
     if (!n) throw new NotFoundError('Notification');
 

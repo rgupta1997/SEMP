@@ -15,8 +15,8 @@ export function EventSetupPage() {
         active={tab}
         onChange={setTab}
         tabs={[
-          { id: 'tournaments', label: 'Tournaments' },
-          { id: 'venues', label: 'Venues & grounds' },
+          { id: 'tournaments', label: 'Seasons' },
+          { id: 'venues', label: 'Venue' },
           { id: 'sports', label: 'Sports & disciplines' },
           { id: 'invite', label: 'Invite' },
         ]}

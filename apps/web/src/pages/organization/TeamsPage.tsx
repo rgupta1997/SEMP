@@ -7,13 +7,19 @@ import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge } from '../../components/ui';
 import { OrgTabs } from '../../components/OrgTabs';
+import { EnterChampionshipsModal } from '../../components/EnterChampionshipsModal';
 
-function tournamentName(team: any): string | null {
-  return team.tournament_disciplines?.tournament_sports?.tournaments?.name ?? null;
-}
-
-function tournamentId(team: any): string | null {
-  return team.tournament_disciplines?.tournament_sports?.tournaments?.id ?? null;
+// A roster can be entered into several championships; these read its team_entries.
+function teamEntries(team: any): any[] { return team.team_entries ?? []; }
+function teamChampIds(team: any): string[] { return teamEntries(team).map((e: any) => e.championship_id); }
+function teamChampNames(team: any): string { return teamEntries(team).map((e: any) => e.championships?.name).filter(Boolean).join(' '); }
+function teamTournaments(team: any): { id: string; name: string }[] {
+  const map = new Map<string, string>();
+  for (const e of teamEntries(team)) {
+    const t = e.tournament_disciplines?.tournament_sports?.tournaments;
+    if (t?.id && t?.name) map.set(t.id, t.name);
+  }
+  return [...map.entries()].map(([id, name]) => ({ id, name }));
 }
 
 function drawLabel(d: any): string {
@@ -24,6 +30,17 @@ function drawLabel(d: any): string {
   return tournament ? `${tournament} · ${sportDisc}` : sportDisc;
 }
 
+// Discipline meta shown in team-entry pickers: squad range + (effective) format.
+function squadText(d: any): string {
+  const min = d.squad_min ?? d.disciplines?.squad_min ?? 1;
+  const max = d.squad_max ?? d.disciplines?.squad_max ?? 15;
+  return `squad ${min}–${max}`;
+}
+function drawFormatName(d: any, formats: any[]): string | null {
+  const id = d.format_id ?? d.tournament_sports?.format_id;
+  return formats.find((f) => f.id === id)?.name ?? null;
+}
+
 // Enter one team for every selected discipline in a single action.
 function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onClose }:
   { approved: any[]; organization: any; defaultEnrollmentId?: string; onClose: () => void }) {
@@ -32,11 +49,18 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
   const enrollment = approved.find((e) => e.id === enrollmentId);
   const eventId = enrollment?.championship_id;
   const { data: draws = [], isLoading } = useApi<any[]>(eventId ? `/championships/${eventId}/draws` : null);
+  const { data: formats = [] } = useApi<any[]>('/tournament-formats');
   const { data: existing = [] } = useApi<any[]>(organization?.id ? `/teams?organization_id=${organization.id}` : null);
 
   // Don't offer draws this organization has already entered for this championship.
   const takenDrawIds = useMemo(
-    () => new Set(existing.filter((t) => t.championship_id === eventId).map((t) => t.tournament_discipline_id).filter(Boolean)),
+    () => new Set(
+      existing
+        .flatMap((t: any) => (t.team_entries ?? []) as any[])
+        .filter((e) => e.championship_id === eventId)
+        .map((e) => e.tournament_discipline_id)
+        .filter(Boolean),
+    ),
     [existing, eventId],
   );
   const available = useMemo(() => draws.filter((d) => !takenDrawIds.has(d.id)), [draws, takenDrawIds]);
@@ -82,7 +106,7 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
       </Field>
       {eventId && tournamentNames.length > 0 && (
         <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
-          Tournament{tournamentNames.length > 1 ? 's' : ''}:{' '}
+          Season{tournamentNames.length > 1 ? 's' : ''}:{' '}
           <span className="font-semibold text-slate-700 dark:text-slate-200">{tournamentNames.join(', ')}</span>
         </p>
       )}
@@ -103,7 +127,7 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
               <Checkbox checked={selected.has(d.id)} onChange={() => toggle(d.id)} />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">{drawLabel(d)}</div>
-                <div className="truncate text-xs text-slate-400 dark:text-slate-500">{d.entry_type} · squad {d.squad_min ?? d.disciplines?.squad_min ?? 1}–{d.squad_max ?? d.disciplines?.squad_max ?? 15} · {short} {drawLabel(d).replace(' · ', ' ')}</div>
+                <div className="truncate text-xs text-slate-400 dark:text-slate-500">{d.entry_type} · {squadText(d)}{drawFormatName(d, formats) ? ` · ${drawFormatName(d, formats)}` : ''} · {short} {drawLabel(d).replace(' · ', ' ')}</div>
               </div>
             </label>
           ))}
@@ -121,31 +145,13 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
   );
 }
 
-function CreateTeamModal({ approved, institutionId, defaultEnrollmentId, onClose }: { approved: any[]; institutionId: string; defaultEnrollmentId?: string; onClose: () => void }) {
+// Create a team as a standalone organization asset — just a name and sport. It's
+// linked to a championship + discipline draw later via "Assign to championship".
+function CreateTeamModal({ institutionId, onClose }: { institutionId: string; onClose: () => void }) {
   const navigate = useNavigate();
-  const [enrollmentId, setEnrollmentId] = useState(defaultEnrollmentId ?? approved[0]?.id ?? '');
-  const enrollment = approved.find((e) => e.id === enrollmentId);
-  const eventId = enrollment?.championship_id;
-
-  const { data: tournaments = [] } = useApi<any[]>(eventId ? `/tournaments?championship_id=${eventId}` : null);
-  const { data: eventDraws = [] } = useApi<any[]>(eventId ? `/championships/${eventId}/draws` : null);
-  const [tournamentId, setTournamentId] = useState('');
-  const activeTournament = tournamentId || tournaments[0]?.id || '';
-  const { data: tsports = [] } = useApi<any[]>(activeTournament ? `/tournament-sports?tournament_id=${activeTournament}` : null);
   const { data: sports = [] } = useApi<any[]>('/sports');
-  const [tsId, setTsId] = useState('');
-  const ts = tsports.find((t) => t.id === tsId) ?? tsports.find((t) => eventDraws.some((d) => d.tournament_sport_id === t.id));
-  const sportDraws = useMemo(
-    () => (ts ? eventDraws.filter((d) => d.tournament_sport_id === ts.id) : []),
-    [eventDraws, ts],
-  );
-  const tsportsWithDraws = useMemo(
-    () => tsports.filter((t) => eventDraws.some((d) => d.tournament_sport_id === t.id)),
-    [tsports, eventDraws],
-  );
-  const [drawId, setDrawId] = useState('');
-  const activeDrawId = drawId || sportDraws[0]?.id || '';
   const [name, setName] = useState('');
+  const [sportId, setSportId] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const create = useApiMutation(
@@ -154,68 +160,27 @@ function CreateTeamModal({ approved, institutionId, defaultEnrollmentId, onClose
     (team: any) => navigate(`/organizations/${institutionId}/teams/${team.id}`),
   );
 
-  const sportName = (id: string) => sports.find((s) => s.id === id)?.name ?? 'Sport';
-
   const submit = () => {
     setError(null);
-    if (!enrollment || !ts) { setError('Select an championship and sport'); return; }
-    if (!activeDrawId) { setError('Select a discipline — ask the organiser to add draws in championship setup'); return; }
-    create.mutate({
-      championship_id: enrollment.championship_id,
-      organization_id: institutionId,
-      championship_organization_id: enrollment.id,
-      sport_id: ts.sport_id,
-      tournament_discipline_id: activeDrawId,
-      name,
-    }, { onError: (e: any) => setError(e.message) });
+    if (!name.trim()) { setError('Team name is required'); return; }
+    if (!sportId) { setError('Pick a sport'); return; }
+    create.mutate({ name: name.trim(), sport_id: sportId, organization_id: institutionId }, { onError: (e: any) => setError(e.message) });
   };
 
   return (
-    <Modal title="Enter a team" onClose={onClose}>
-      <Field label="Championship">
-        <Select value={enrollmentId} onChange={(e) => { setEnrollmentId(e.target.value); setTournamentId(''); setTsId(''); setDrawId(''); }}>
-          {approved.map((e) => <option key={e.id} value={e.id}>{e.championships?.name}</option>)}
-        </Select>
-      </Field>
-      {eventDraws.length === 0 ? (
-        <p className="mb-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
-          No disciplines are configured for this championship yet. The organiser must add discipline draws in Setup before you can enter teams.
-        </p>
-      ) : (
-        <>
-      {tournaments.length > 0 && (
-        <Field label="Tournament">
-          <Select value={activeTournament} onChange={(e) => { setTournamentId(e.target.value); setTsId(''); setDrawId(''); }} disabled={tournaments.length === 1}>
-            {tournaments.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </Select>
-        </Field>
-      )}
-      <Field label="Sport">
-        <Select value={ts?.id ?? ''} onChange={(e) => { setTsId(e.target.value); setDrawId(''); }}>
-          {tsportsWithDraws.length === 0 && <option value="">No sports with disciplines</option>}
-          {tsportsWithDraws.map((t) => <option key={t.id} value={t.id}>{sportName(t.sport_id)}</option>)}
-        </Select>
-      </Field>
-      <Field label="Discipline / draw" hint="Required — each team must be linked to an organiser-configured draw.">
-        {sportDraws.length === 0 ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400">No disciplines for this sport yet.</p>
-        ) : (
-          <Select value={activeDrawId} onChange={(e) => setDrawId(e.target.value)}>
-            {sportDraws.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.disciplines?.name ?? sportName(ts!.sport_id)} ({d.entry_type})
-              </option>
-            ))}
-          </Select>
-        )}
-      </Field>
-        </>
-      )}
+    <Modal title="Create team" onClose={onClose}>
+      <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Create a team for your organization, then assign it to a championship &amp; discipline when you’re ready.</p>
       <Field label="Team name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. VJTI Titans" /></Field>
+      <Field label="Sport">
+        <Select value={sportId} onChange={(e) => setSportId(e.target.value)}>
+          <option value="">— select a sport —</option>
+          {sports.map((s) => <option key={s.id} value={s.id}>{s.icon ? `${s.icon} ` : ''}{s.name}</option>)}
+        </Select>
+      </Field>
       {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button disabled={!name || !activeDrawId || eventDraws.length === 0 || create.isPending} onClick={submit}>{create.isPending ? 'Creating…' : 'Create team'}</Button>
+        <Button disabled={!name.trim() || !sportId || create.isPending} onClick={submit}>{create.isPending ? 'Creating…' : 'Create team'}</Button>
       </div>
     </Modal>
   );
@@ -243,6 +208,7 @@ export function TeamsPage() {
   const [tournamentFilter, setTournamentFilter] = useState('all');
   const [creating, setCreating] = useState(false);
   const [bulkCreating, setBulkCreating] = useState(false);
+  const [entering, setEntering] = useState<any | null>(null);
   const [status, setStatus] = useState('all');
 
   // Approved championships populate the shared header championship filter.
@@ -263,11 +229,7 @@ export function TeamsPage() {
       return eventTournaments.map((t) => ({ id: t.id, name: t.name }));
     }
     const map = new Map<string, string>();
-    for (const t of teams) {
-      const id = tournamentId(t);
-      const name = tournamentName(t);
-      if (id && name) map.set(id, name);
-    }
+    for (const t of teams) for (const x of teamTournaments(t)) map.set(x.id, x.name);
     return [...map.entries()].map(([id, name]) => ({ id, name }));
   }, [eventId, eventTournaments, teams]);
 
@@ -275,8 +237,8 @@ export function TeamsPage() {
   const sportOptions = useMemo(() => {
     const map = new Map<string, string>();
     for (const t of teams) {
-      if (eventId && t.championship_id !== eventId) continue;
-      if (tournamentFilter !== 'all' && tournamentId(t) !== tournamentFilter) continue;
+      if (eventId && !teamChampIds(t).includes(eventId)) continue;
+      if (tournamentFilter !== 'all' && !teamTournaments(t).some((x) => x.id === tournamentFilter)) continue;
       if (t.sport_id) map.set(t.sport_id, t.sports?.name ?? 'Sport');
     }
     return [...map.entries()].map(([id, name]) => ({ id, name }));
@@ -301,17 +263,17 @@ export function TeamsPage() {
   const statusOptions = useMemo(() => ['all', ...new Set(teams.map((t) => t.status).filter(Boolean))], [teams]);
   const filtered = useMemo(() => {
     let rows = teams;
-    if (eventId) rows = rows.filter((t) => t.championship_id === eventId);
-    if (tournamentFilter !== 'all') rows = rows.filter((t) => tournamentId(t) === tournamentFilter);
+    if (eventId) rows = rows.filter((t) => teamChampIds(t).includes(eventId));
+    if (tournamentFilter !== 'all') rows = rows.filter((t) => teamTournaments(t).some((x) => x.id === tournamentFilter));
     if (sportId) rows = rows.filter((t) => t.sport_id === sportId);
     if (status !== 'all') rows = rows.filter((t) => t.status === status);
     return rows;
   }, [teams, eventId, tournamentFilter, sportId, status]);
   const tc = useTableControls(filtered, {
-    search: (t) => `${t.name} ${t.sports?.name ?? ''} ${t.championships?.name ?? ''}`,
+    search: (t) => `${t.name} ${t.sports?.name ?? ''} ${teamChampNames(t)}`,
     sorts: {
       name: (a, b) => String(a.name).localeCompare(String(b.name)),
-      championship: (a, b) => String(a.championships?.name ?? '').localeCompare(String(b.championships?.name ?? '')),
+      championship: (a, b) => teamChampNames(a).localeCompare(teamChampNames(b)),
     },
     initialSort: 'name',
     pageSize: 12,
@@ -325,7 +287,7 @@ export function TeamsPage() {
         subtitle={activeEvent ? 'Teams entered for this championship.' : 'Enter and manage teams across your approved championships.'}
       >
         {canManage && <Button variant="outline" onClick={() => setBulkCreating(true)} disabled={!canEnterTeams}>+ Enter multiple</Button>}
-        {canManage && <Button onClick={() => setCreating(true)} disabled={!canEnterTeams}>+ Enter a team</Button>}
+        {canManage && <Button onClick={() => setCreating(true)}>+ Create team</Button>}
       </PageHeader>
 
       {approved.length === 0 && (
@@ -348,15 +310,15 @@ export function TeamsPage() {
           ))}
         </div>
       ) : teams.length === 0 && !eventId ? (
-        <EmptyState icon="⚇" title="No teams yet" description="Enter a team for one of your approved championships."
-          action={canManage && approved.length > 0 ? <Button onClick={() => setCreating(true)}>+ Enter a team</Button> : undefined} />
+        <EmptyState icon="⚇" title="No teams yet" description="Create a team for your organization, then assign it to a championship."
+          action={canManage ? <Button onClick={() => setCreating(true)}>+ Create team</Button> : undefined} />
       ) : (
         <>
           <ListToolbar>
             <SearchInput value={tc.query} onChange={tc.setQuery} placeholder="Search teams…" className="w-full sm:w-64" />
             {tournamentOptions.length > 0 && (
               <Select value={tournamentFilter} onChange={(e) => setTournamentFilter(e.target.value)} className="w-auto min-w-[11rem]">
-                <option value="all">All tournaments</option>
+                <option value="all">All seasons</option>
                 {tournamentOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </Select>
             )}
@@ -376,10 +338,10 @@ export function TeamsPage() {
               icon="⚇"
               title={eventId || tournamentFilter !== 'all' ? 'No teams match these filters' : 'No matching teams'}
               description={eventId ? 'Enter a team to participate in this championship, or try a different filter.' : 'Try a different search or filter.'}
-              action={canManage && eventId && canEnterTeams && tournamentFilter === 'all' ? (
+              action={canManage && tournamentFilter === 'all' ? (
                 <div className="flex flex-wrap justify-center gap-2">
-                  <Button onClick={() => setCreating(true)}>+ Enter a team</Button>
-                  <Button variant="outline" onClick={() => setBulkCreating(true)}>+ Enter multiple</Button>
+                  <Button onClick={() => setCreating(true)}>+ Create team</Button>
+                  {eventId && canEnterTeams && <Button variant="outline" onClick={() => setBulkCreating(true)}>+ Enter multiple</Button>}
                 </div>
               ) : undefined}
             />
@@ -393,10 +355,20 @@ export function TeamsPage() {
                       <StatusBadge status={t.status} />
                     </div>
                     <h3 className="mt-3 font-semibold text-slate-900 dark:text-slate-100">{t.name}</h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">
-                      {[tournamentName(t), t.sports?.name, t.championships?.name].filter(Boolean).join(' · ')}
-                    </p>
-                    <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">{t.team_members?.length ?? 0} member{(t.team_members?.length ?? 0) === 1 ? '' : 's'}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">{t.sports?.name}</p>
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {teamEntries(t).length === 0
+                        ? <span className="text-xs text-amber-600 dark:text-amber-400">Not entered yet</span>
+                        : teamEntries(t).map((e: any) => (
+                          <span key={e.id} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{e.championships?.name ?? 'Championship'}</span>
+                        ))}
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <p className="text-xs text-slate-400 dark:text-slate-500">{t.team_members?.length ?? 0} member{(t.team_members?.length ?? 0) === 1 ? '' : 's'}</p>
+                      {canManage && (
+                        <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setEntering(t); }}>Enter</Button>
+                      )}
+                    </div>
                   </Card>
                 ))}
               </div>
@@ -406,7 +378,8 @@ export function TeamsPage() {
         </>
       )}
 
-      {creating && institutionId && <CreateTeamModal approved={approved} institutionId={institutionId} defaultEnrollmentId={defaultEnrollmentId} onClose={() => setCreating(false)} />}
+      {creating && institutionId && <CreateTeamModal institutionId={institutionId} onClose={() => setCreating(false)} />}
+      {entering && <EnterChampionshipsModal team={entering} onClose={() => setEntering(null)} />}
       {bulkCreating && institutionId && <BulkCreateTeamsModal approved={approved} organization={ctx?.organization ?? { id: institutionId }} defaultEnrollmentId={defaultEnrollmentId} onClose={() => setBulkCreating(false)} />}
     </div>
   );

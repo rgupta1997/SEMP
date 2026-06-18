@@ -1,14 +1,11 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
-import { useAuth } from '../lib/auth';
 import { useApi, useApiMutation, fmtDateRange } from '../lib/hooks';
-import { Button, Card, Select, toast } from './ui';
+import { Button, Card, toast } from './ui';
 
 interface Invite {
   id: string;
   org_name: string;
-  poc_mobile: string;
+  organization_id: string;
   championship_id: string;
   championship_name: string;
   championship_status: string;
@@ -17,17 +14,13 @@ interface Invite {
   venue: string | null;
 }
 
-// Shown to a POC who's been invited to a championship (matched by their mobile).
-// Accepting applies the org they pick — it then appears in the host's Approvals.
+// Shown to an owner/admin of an organization that's been invited to a championship.
+// Accepting applies that org — it then appears in the host's Approvals.
 export function InvitationsInbox() {
-  const { ctx } = useAuth();
   const { data: invites = [] } = useApi<Invite[]>('/me/invitations');
-  const adminOrgs = (ctx?.organizations ?? []).filter((m) => m.role === 'owner' || m.role === 'admin');
-  const [orgFor, setOrgFor] = useState<Record<string, string>>({});
-  const orgId = (id: string) => orgFor[id] ?? adminOrgs[0]?.organization_id ?? '';
 
   const accept = useApiMutation(
-    ({ id, organization_id }: { id: string; organization_id: string }) => api('POST', `/invitations/${id}/accept`, { organization_id }),
+    (id: string) => api('POST', `/invitations/${id}/accept`),
     ['/me/invitations', '/championships/mine'],
   );
   const decline = useApiMutation((id: string) => api('POST', `/invitations/${id}/decline`), ['/me/invitations']);
@@ -49,28 +42,17 @@ export function InvitationsInbox() {
                 Invited as <span className="font-medium">{inv.org_name}</span> · {inv.venue || 'Venue TBD'} · {fmtDateRange(inv.start_date, inv.end_date)}
               </div>
             </div>
-            {adminOrgs.length === 0 ? (
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                <Link to="/organizations" className="font-semibold text-brand-600 hover:underline dark:text-brand-300">Create an organization</Link> to accept.
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                {adminOrgs.length > 1 && (
-                  <Select value={orgId(inv.id)} onChange={(e) => setOrgFor((m) => ({ ...m, [inv.id]: e.target.value }))} className="w-44">
-                    {adminOrgs.map((m) => <option key={m.organization_id} value={m.organization_id}>{m.organization?.name}</option>)}
-                  </Select>
-                )}
-                <Button size="sm" disabled={accept.isPending}
-                  onClick={() => accept.mutate({ id: inv.id, organization_id: orgId(inv.id) },
-                    { onSuccess: () => toast.success('Application sent — awaiting approval'), onError: (e: any) => toast.error(e.message) })}>
-                  Accept
-                </Button>
-                <Button size="sm" variant="ghost" disabled={decline.isPending}
-                  onClick={() => decline.mutate(inv.id, { onSuccess: () => toast.success('Invitation declined'), onError: (e: any) => toast.error(e.message) })}>
-                  Decline
-                </Button>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              <Button size="sm" disabled={accept.isPending}
+                onClick={() => accept.mutate(inv.id,
+                  { onSuccess: () => toast.success('Application sent — awaiting approval'), onError: (e: any) => toast.error(e.message) })}>
+                Accept
+              </Button>
+              <Button size="sm" variant="ghost" disabled={decline.isPending}
+                onClick={() => decline.mutate(inv.id, { onSuccess: () => toast.success('Invitation declined'), onError: (e: any) => toast.error(e.message) })}>
+                Decline
+              </Button>
+            </div>
           </div>
         ))}
       </div>
