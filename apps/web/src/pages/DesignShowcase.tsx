@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { BRAND } from '../lib/brand';
 import {
   Avatar, Badge, Button, Card, CardBody, CardHeader, Checkbox, EmptyState, Field, Input,
   Modal, PageHeader, Pagination, Progress, ProgressSteps, SearchInput, Segmented,
@@ -15,7 +16,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-// One-stop visual reference for the adopted Sportagon design system. Visit /design.
+// One-stop visual reference for the app design system. Visit /design.
 export function DesignShowcase() {
   const toast = useToast();
   const [modal, setModal] = useState(false);
@@ -28,7 +29,7 @@ export function DesignShowcase() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Design system" subtitle="Live reference for the adopted Sportagon UI kit — every element below is the real component." />
+      <PageHeader title="Design system" subtitle={`Live reference for the ${BRAND.name} UI kit — every element below is the real component.`} />
 
       <Section title="Buttons — variants × sizes × states">
         <Button>Primary</Button>

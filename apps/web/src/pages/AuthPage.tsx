@@ -1,6 +1,7 @@
 import { useState, type CSSProperties } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import { BRAND } from '../lib/brand';
 import { useTheme } from '../lib/theme';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -20,9 +21,9 @@ const C = {
   blue: '#004AAD', blue8: '#013C8B', blue50: '#F1F6FE', teal: '#5CE1E6',
   teal6: '#159FA6', navy: '#0A1A33', fg2: '#374459', fg3: '#6E7E96',
 };
-const POP = "'Poppins',sans-serif";
-const HANK = "'Hanken Grotesk',system-ui,sans-serif";
-const MONO = "'JetBrains Mono',monospace";
+const POP = "'Inter',ui-sans-serif,system-ui,sans-serif";
+const HANK = "'Inter',ui-sans-serif,system-ui,sans-serif";
+const MONO = "'JetBrains Mono',ui-monospace,monospace";
 
 // Seed accounts from `npm run reset:all` (password: demo123; admin: admin123).
 // Temporary convenience panel — to be hidden before launch.
@@ -152,7 +153,7 @@ export function AuthPage() {
 
   const heading = mode === 'login' ? 'Welcome back' : 'Create your account';
   const sub = mode === 'login'
-    ? 'Sign in to your Sportagon EOS workspace.'
+    ? `Sign in to your ${BRAND.name} ${BRAND.productBadge} workspace.`
     : 'Start hosting or join a championship in minutes.';
 
   return (
@@ -169,8 +170,8 @@ export function AuthPage() {
 
           {/* logo lockup */}
           <a href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: 11, position: 'relative', width: 'fit-content' }}>
-            <img src="/assets/sportagon-logo-white.png" alt="Sportagon" style={{ height: 28, display: 'block' }} />
-            <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, color: C.teal, letterSpacing: '.16em', padding: '3px 7px', border: `1px solid ${C.teal}66`, borderRadius: 6 }}>EOS</span>
+            <img src={BRAND.logo.white} alt={BRAND.name} style={{ height: 28, display: 'block' }} />
+            <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, color: C.teal, letterSpacing: '.16em', padding: '3px 7px', border: `1px solid ${C.teal}66`, borderRadius: 6 }}>{BRAND.productBadge}</span>
           </a>
 
           {/* headline + value props */}
@@ -212,8 +213,8 @@ export function AuthPage() {
           {/* top bar: brand on mobile + theme toggle */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 28 }}>
             <a href="/" className="mobileBrand" style={{ display: 'none', alignItems: 'center', gap: 10 }}>
-              <img src={dark ? '/assets/sportagon-logo-white.png' : '/assets/sportagon-logo-blue.png'} alt="Sportagon" style={{ height: 26, display: 'block' }} />
-              <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, color: C.teal6, letterSpacing: '.16em', padding: '3px 7px', border: '1px solid #BFE7E9', borderRadius: 6 }}>EOS</span>
+              <img src={dark ? BRAND.logo.white : BRAND.logo.blue} alt={BRAND.name} style={{ height: 26, display: 'block' }} />
+              <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, color: C.teal6, letterSpacing: '.16em', padding: '3px 7px', border: '1px solid #BFE7E9', borderRadius: 6 }}>{BRAND.productBadge}</span>
             </a>
             <span style={{ flex: 1 }} />
             <button onClick={toggle} className="iconbtn" style={iconBtnStyle}

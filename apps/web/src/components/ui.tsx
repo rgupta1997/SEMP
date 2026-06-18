@@ -4,7 +4,7 @@ import type {
   SelectHTMLAttributes, TextareaHTMLAttributes,
 } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, Check, ChevronLeft, Info, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, CircleDashed, Info, Search, X } from 'lucide-react';
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
@@ -56,7 +56,7 @@ export function Select({ className = '', ...p }: SelectHTMLAttributes<HTMLSelect
         className={cn(fieldBase, 'appearance-none pr-8', full ? 'w-full' : 'w-auto min-w-[9.5rem]', className)}
         {...p}
       />
-      <span className="pointer-championships-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 dark:text-slate-500" aria-hidden>▾</span>
+      <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" aria-hidden><ChevronDown size={14} /></span>
     </div>
   );
 }
@@ -77,8 +77,8 @@ export function Card({ className = '', children, interactive, ...p }: HTMLAttrib
   return (
     <div
       className={cn(
-        'rounded-2xl border border-slate-200 bg-white shadow-sm transition-[box-shadow,transform,border-color] duration-200 dark:border-slate-800 dark:bg-slate-900',
-        interactive && 'cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md dark:hover:border-brand-500/40',
+        'rounded-xl border border-slate-200 bg-white transition-[box-shadow,transform,border-color] duration-200 dark:border-slate-800 dark:bg-slate-900',
+        interactive && 'cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-sm dark:hover:border-brand-500/40',
         className,
       )}
       {...p}
@@ -134,10 +134,10 @@ export function StatusBadge({ status, label }: { status?: string | null; label?:
   if (s === 'live') return <Badge tone="live">{label ?? 'LIVE'}</Badge>;
   const tone: BadgeTone =
     ['approved', 'completed', 'active', 'ongoing', 'roster_locked'].includes(s) ? 'green'
-    : ['pending', 'forming', 'upcoming', 'submitted', 'scheduled', 'draft'].includes(s) ? 'amber'
-    : ['rejected', 'cancelled'].includes(s) ? 'rose'
-    : ['registration_open'].includes(s) ? 'brand'
-    : 'slate';
+      : ['pending', 'forming', 'upcoming', 'submitted', 'scheduled', 'draft'].includes(s) ? 'amber'
+        : ['rejected', 'cancelled'].includes(s) ? 'rose'
+          : ['registration_open'].includes(s) ? 'brand'
+            : 'slate';
   return <Badge tone={tone}>{label ?? (status ?? '—').replace(/_/g, ' ')}</Badge>;
 }
 
@@ -214,9 +214,9 @@ export function PageHeader({ title, subtitle, children }: { title: ReactNode; su
 /* ----------------------------- StatCard ----------------------------- */
 export function StatCard({ label, value, hint, accent }: { label: string; value: ReactNode; hint?: ReactNode; accent?: boolean }) {
   return (
-    <div className={cn('rounded-2xl border p-4', accent ? 'border-brand-200 bg-brand-50 dark:border-brand-500/30 dark:bg-brand-500/10' : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900')}>
-      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</div>
-      <div className={cn('mt-1 text-3xl font-extrabold tracking-tight tnum', accent ? 'text-brand-600 dark:text-brand-300' : 'text-slate-900 dark:text-slate-100')}>{value}</div>
+    <div className={cn('rounded-xl border p-4', accent ? 'border-brand-200 dark:border-brand-500/30' : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900')}>
+      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</div>
+      <div className={cn('mt-1.5 text-2xl font-bold tracking-tight tnum', accent ? 'text-brand-600 dark:text-brand-300' : 'text-slate-900 dark:text-slate-100')}>{value}</div>
       {hint && <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{hint}</div>}
     </div>
   );
@@ -267,9 +267,9 @@ export function Stepper({ steps, current }: { steps: string[]; current: number }
             <span className={cn(
               'grid h-7 w-7 flex-none place-items-center rounded-full border text-xs font-bold',
               done ? 'border-brand-500 bg-brand-500 text-white'
-              : active ? 'border-brand-500 bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300'
-              : 'border-slate-300 text-slate-400 dark:border-slate-700 dark:text-slate-500',
-            )}>{done ? '✓' : i + 1}</span>
+                : active ? 'border-brand-500 bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300'
+                  : 'border-slate-300 text-slate-400 dark:border-slate-700 dark:text-slate-500',
+            )}>{done ? <Check size={13} /> : i + 1}</span>
             <span className={cn('text-sm font-semibold', active ? 'text-slate-900 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400')}>{s}</span>
           </li>
         );
@@ -292,10 +292,10 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: 
 }
 
 /* ----------------------------- EmptyState ----------------------------- */
-export function EmptyState({ icon = '◎', title, description, action }: { icon?: ReactNode; title: string; description?: string; action?: ReactNode }) {
+export function EmptyState({ icon = <CircleDashed size={32} />, title, description, action }: { icon?: ReactNode; title: string; description?: string; action?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center dark:border-slate-700 dark:bg-slate-900">
-      <div className="mb-3 grid h-12 w-12 place-items-center rounded-xl bg-slate-100 text-2xl text-slate-400 dark:bg-slate-800 dark:text-slate-500">{icon}</div>
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white px-6 py-14 text-center dark:border-slate-700 dark:bg-slate-900">
+      <div className="mb-4 text-slate-300 dark:text-slate-600">{icon}</div>
       <h3 className="font-semibold text-slate-800 dark:text-slate-200">{title}</h3>
       {description && <p className="mt-1 max-w-sm text-sm text-slate-500 dark:text-slate-400">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
@@ -340,7 +340,7 @@ export function SortDirButton({ dir, onToggle }: { dir: 'asc' | 'desc'; onToggle
       title={dir === 'asc' ? 'Sort ascending' : 'Sort descending'}
       aria-label={dir === 'asc' ? 'Sort ascending' : 'Sort descending'}
     >
-      {dir === 'asc' ? '↑ Asc' : '↓ Desc'}
+      {dir === 'asc' ? <><ArrowUp size={13} /> Asc</> : <><ArrowDown size={13} /> Desc</>}
     </Button>
   );
 }
@@ -351,7 +351,7 @@ export function SearchInput({
 }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string; autoFocus?: boolean }) {
   return (
     <div className={cn('relative shrink-0', className.includes('w-full') ? 'w-full' : '', className)}>
-      <span className="pointer-championships-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" aria-hidden>⌕</span>
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" aria-hidden><Search size={14} /></span>
       <input
         value={value}
         autoFocus={autoFocus}
@@ -365,7 +365,7 @@ export function SearchInput({
           aria-label="Clear search"
           onClick={() => onChange('')}
           className="absolute right-2 top-1/2 -translate-y-1/2 grid h-5 w-5 place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
-        >×</button>
+        ><X size={12} /></button>
       )}
     </div>
   );
@@ -406,7 +406,7 @@ export function SortHeader({
         className={cn('inline-flex items-center gap-1 hover:text-slate-700 dark:hover:text-slate-200', active && 'text-slate-800 dark:text-slate-200')}
       >
         {label}
-        <span className="text-[10px] text-slate-400">{active ? (dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+        <span className="text-slate-400">{active ? (dir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />) : <ArrowUpDown size={11} />}</span>
       </button>
     </th>
   );
@@ -554,19 +554,19 @@ export function Skeleton({ className = '', rounded = 'rounded-md' }: { className
 export type ToastType = 'success' | 'info' | 'warning' | 'error';
 interface ToastItem { id: number; type: ToastType; title: string; message?: string }
 
-const TOAST_META: Record<ToastType, { icon: ReactNode; bar: string; text: string }> = {
-  success: { icon: <Check size={14} />,          bar: 'border-l-emerald-500', text: 'text-emerald-600 dark:text-emerald-400' },
-  info:    { icon: <Info size={14} />,           bar: 'border-l-brand-500',   text: 'text-brand-600 dark:text-brand-300' },
-  warning: { icon: <AlertTriangle size={14} />,  bar: 'border-l-amber-500',   text: 'text-amber-600 dark:text-amber-400' },
-  error:   { icon: <X size={14} />,             bar: 'border-l-rose-600',    text: 'text-rose-600 dark:text-rose-400' },
+const TOAST_META: Record<ToastType, { icon: ReactNode; chip: string }> = {
+  success: { icon: <Check size={13} />, chip: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400' },
+  info: { icon: <Info size={13} />, chip: 'bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300' },
+  warning: { icon: <AlertTriangle size={13} />, chip: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400' },
+  error: { icon: <X size={13} />, chip: 'bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400' },
 };
 
-// Presentational toast (also used standalone). Left accent bar encodes the type.
+// Presentational toast. Full border + small colored icon chip encodes the type.
 export function Toast({ type, title, message, onClose }: { type: ToastType; title: string; message?: string; onClose?: () => void }) {
   const m = TOAST_META[type];
   return (
-    <div className={cn('flex items-start gap-3 rounded-xl border-l-4 bg-white px-3.5 py-3 shadow-md dark:bg-slate-900', m.bar)} role="status">
-      <span className={cn('mt-0.5 flex-none text-sm', m.text)} aria-hidden>{m.icon}</span>
+    <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3.5 py-3 shadow-md dark:border-slate-800 dark:bg-slate-900" role="status">
+      <span className={cn('mt-0.5 flex-none rounded-md p-1', m.chip)} aria-hidden>{m.icon}</span>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-bold text-slate-900 dark:text-slate-100">{title}</div>
         {message && <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{message}</div>}
@@ -615,9 +615,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ push }}>
       {children}
-      <div className="pointer-championships-none fixed bottom-4 right-4 z-[600] flex w-[min(92vw,360px)] flex-col gap-2">
+      <div className="pointer-events-none fixed bottom-4 right-4 z-[600] flex w-[min(92vw,360px)] flex-col gap-2">
         {toasts.map((t) => (
-          <div key={t.id} className="pointer-championships-auto animate-fade-up">
+          <div key={t.id} className="pointer-events-auto animate-fade-up">
             <Toast type={t.type} title={t.title} message={t.message} onClose={() => remove(t.id)} />
           </div>
         ))}

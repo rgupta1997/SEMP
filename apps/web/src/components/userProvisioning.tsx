@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useApi } from '../lib/hooks';
+import { BRAND } from '../lib/brand';
 import { Button, Spinner, toast } from './ui';
 
 // Shared helpers for the "find an existing user by phone, or provision a new login"
@@ -40,7 +41,7 @@ export function PhoneLookupNotice({ phone }: { phone: string }) {
 export function CredentialsPanel({ creds, onDone }: { creds: Credentials; onDone: () => void }) {
   const signInUrl = `${window.location.origin}/login`;
   const text = useMemo(() => [
-    'Your Sportagon login',
+    `Your ${BRAND.name} login`,
     `Name: ${creds.name}`,
     `Email: ${creds.email}`,
     creds.phone ? `Phone: ${creds.phone}` : null,
