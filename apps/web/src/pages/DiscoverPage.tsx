@@ -21,7 +21,10 @@ const STATUS_LABELS: Record<string, string> = {
 export function DiscoverPage() {
   const { ctx } = useAuth();
   const canManage = usePermissions().can('team.manage'); // org owner/admin (POC)
-  const institutionId = ctx?.organization?.id ?? ctx?.user.organization_id ?? null;
+  const institutionId = ctx?.organization?.id
+    ?? ctx?.user.organization_id
+    ?? ctx?.organizations?.find((m) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin'))?.organization_id
+    ?? null;
   const { data: championships = [], isLoading } = useApi<Championship[]>('/championships');
   const { data: enrollments = [] } = useApi<any[]>('/me/enrollments');
   const [sport, setSport] = useState('');
