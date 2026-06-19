@@ -68,6 +68,11 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       await tx.organization_members.create({
         data: { user_id: req.user!.id, organization_id: org.id, role: 'owner' },
       });
+      // If the creator has no primary org yet, set it so their next JWT/context reflects the org.
+      await tx.users.updateMany({
+        where: { id: req.user!.id, organization_id: null },
+        data: { organization_id: org.id },
+      });
       if (owner) {
         if (!pocUserId) {
           if (!owner.name || !owner.email) throw new BusinessRuleError('Provide a name and email for the new POC');

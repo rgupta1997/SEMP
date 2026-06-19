@@ -17,14 +17,14 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
 
   // These reads are independent — run them together rather than serially, since
   // this context is assembled on every login and every /me hit.
-  const [organization, orgMemberships, championshipRoleRows, officialRows, memberships] = await Promise.all([
+  const [orgFromUser, orgMemberships, championshipRoleRows, officialRows, memberships] = await Promise.all([
     user.organization_id
       ? prisma.organizations.findUnique({ where: { id: user.organization_id } })
       : Promise.resolve(null),
     prisma.organization_members.findMany({
       where: { user_id: user.id },
       include: { organizations: true },
-      orderBy: { joined_at: 'desc' },
+      orderBy: { joined_at: 'asc' },
     }),
     prisma.user_championship_roles.findMany({
       where: { user_id: user.id },
@@ -55,6 +55,11 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
       orderBy: { joined_at: 'desc' },
     }),
   ]);
+
+  // If the user's primary org field is empty but they own/admin one, use the first.
+  const organization = orgFromUser
+    ?? orgMemberships.find((m) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin'))?.organizations
+    ?? null;
 
   return {
     user: publicUser,

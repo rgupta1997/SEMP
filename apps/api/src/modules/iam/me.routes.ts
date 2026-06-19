@@ -218,7 +218,16 @@ export function makeMeRouter(prisma: Prisma): Router {
 
   // Enrollment status for the current user's organization, across championships.
   router.get('/me/enrollments', asyncHandler(async (req, res) => {
-    const organizationId = req.user!.organizationId;
+    // JWT may lack organizationId if the user self-created an org after their last login.
+    // Fall back to their first active owner/admin membership derived from DB.
+    let organizationId = req.user!.organizationId;
+    if (!organizationId) {
+      const membership = await prisma.organization_members.findFirst({
+        where: { user_id: req.user!.id, role: { in: ['owner', 'admin'] }, status: 'active' },
+        orderBy: { joined_at: 'asc' },
+      });
+      organizationId = membership?.organization_id ?? null;
+    }
     if (!organizationId) {
       res.json([]);
       return;
