@@ -110,6 +110,11 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
             </div>
             <Toggle checked={withPoc} onChange={setWithPoc} />
           </div>
+          {!withPoc && (
+            <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700 dark:bg-sky-500/10 dark:text-sky-300">
+              No point of contact assigned — you'll be set as this organization's POC and owner. You can hand it off later from the Members page.
+            </p>
+          )}
           {withPoc && (
             <div className="mt-4 space-y-1">
               <Field label="POC phone"><Input value={pocPhone} onChange={(e) => setPocPhone(e.target.value)} placeholder="+91 …" /></Field>

@@ -2,6 +2,8 @@ import { Link } from 'react-router-dom';
 import { useEvent } from './EventLayout';
 import { useApi } from '../../lib/hooks';
 import { Button, Card, CardBody, CardHeader, StatCard, StatusBadge } from '../../components/ui';
+import { GettingStarted } from '../../components/onboarding/GettingStarted';
+import { useOrganiserOnboarding } from '../../lib/onboarding';
 
 export function EventDashboard() {
   const { championship, eventId, canManage } = useEvent();
@@ -13,6 +15,9 @@ export function EventDashboard() {
   const pending = enrollments.filter((e) => e.status === 'pending');
   const approved = enrollments.filter((e) => e.status === 'approved');
 
+  // Live "getting started" progress for this championship (organisers only).
+  const onboarding = useOrganiserOnboarding(eventId, championship.status, canManage);
+
   const tasks: { label: string; to: string; tone: 'amber' | 'brand' }[] = [];
   if (pending.length) tasks.push({ label: `${pending.length} organization${pending.length > 1 ? 's' : ''} awaiting approval`, to: `/championships/${eventId}/approvals`, tone: 'amber' });
   if (tournaments.length === 0) tasks.push({ label: 'No tournament yet — add one to start configuring sports', to: `/championships/${eventId}/setup`, tone: 'brand' });
@@ -21,6 +26,16 @@ export function EventDashboard() {
 
   return (
     <div className="space-y-6">
+      {canManage && (
+        <GettingStarted
+          title="Set up your championship"
+          subtitle="Work through these to take it from draft to open for registration."
+          state={onboarding}
+          storageKey={`onboarding-organiser-${eventId}`}
+          completeNote="That set up one season. If you want to run multiple tournaments (seasons), repeat these steps for each — add the season, then its sports, disciplines and venues."
+        />
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Seasons" value={tournaments.length} />
         <StatCard label="Teams" value={teams.length} hint={`${approved.length} organizations approved`} />

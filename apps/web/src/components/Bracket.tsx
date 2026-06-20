@@ -72,9 +72,9 @@ function MatchCard({ fixture, x, top, teamName, onSelect }:
   const decided = fixture.winner_team_id != null;
   const home = teamName(fixture.home_team_id);
   const away = isBye ? 'Bye' : teamName(fixture.away_team_id);
-  // Any real match can be scheduled — even a later-round slot whose teams are
-  // still TBD (you set the time / venue / official up front). Byes can't.
-  const clickable = !!onSelect && !isBye;
+  // Any match can be opened to edit — a real match to schedule it (even a later-round
+  // slot whose teams are still TBD), or a bye to adjust its teams/status or delete it.
+  const clickable = !!onSelect;
 
   const body = (
     <>
@@ -103,7 +103,7 @@ function MatchCard({ fixture, x, top, teamName, onSelect }:
     return (
       <button
         type="button"
-        title="Schedule this match"
+        title={isBye ? 'Edit this bye' : 'Schedule this match'}
         onClick={() => onSelect!(fixture)}
         className={cn(base, 'cursor-pointer text-left transition-colors hover:border-brand-400 hover:shadow focus:outline-none focus:ring-2 focus:ring-brand-400/40')}
         style={style}

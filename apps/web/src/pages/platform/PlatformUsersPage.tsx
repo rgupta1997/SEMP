@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api } from '../../lib/api';
 import { fmtDate, useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import {
-  Avatar, Badge, Button, Card, EmptyState, Field, ListToolbar, Pagination,
+  Avatar, Badge, Button, Card, confirmDialog, EmptyState, Field, ListToolbar, Pagination,
   SearchInput, Select, Spinner,
 } from '../../components/ui';
 import { BulkImportModal } from '../../components/BulkImportModal';
@@ -99,7 +99,7 @@ export function PlatformUsersPage() {
                     <Button size="sm" variant="ghost" onClick={() => setEditing(u)}>Edit</Button>
                     {u.is_active && !u.is_super_admin && (
                       <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
-                        onClick={() => { if (confirm(`Deactivate ${u.name}?`)) deactivate.mutate(u.id); }}>
+                        onClick={async () => { if (await confirmDialog({ title: 'Deactivate user', confirmLabel: 'Deactivate', message: `Deactivate ${u.name}?` })) deactivate.mutate(u.id); }}>
                         Deactivate
                       </Button>
                     )}

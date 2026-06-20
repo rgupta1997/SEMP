@@ -141,16 +141,58 @@ export function StatusBadge({ status, label }: { status?: string | null; label?:
 }
 
 /* ----------------------------- Modal ----------------------------- */
-export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+// The modal is capped to the viewport height: the header (and optional `footer`)
+// stay pinned while only the body scrolls. Put action buttons in `footer` so they
+// never scroll out of view. `size` overrides the default/`wide` width.
+const MODAL_WIDTHS = { lg: 'max-w-lg', xl: 'max-w-xl', '2xl': 'max-w-2xl', '3xl': 'max-w-3xl', '4xl': 'max-w-4xl' } as const;
+export function Modal({ title, onClose, children, footer, wide, size }:
+  { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; size?: keyof typeof MODAL_WIDTHS }) {
+  const maxW = size ? MODAL_WIDTHS[size] : wide ? 'max-w-2xl' : 'max-w-lg';
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-slate-900/50 p-4 sm:p-6 backdrop-blur-sm" onClick={onClose}>
-      <div className={cn('mt-10 w-full animate-fade-up rounded-[20px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900', wide ? 'max-w-2xl' : 'max-w-lg')} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700">
+      <div className={cn('mt-10 flex max-h-[calc(100vh-5rem)] w-full flex-col animate-fade-up rounded-[20px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900', maxW)} onClick={(e) => e.stopPropagation()}>
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700">
           <h3 className="text-lg font-semibold dark:text-slate-100">{title}</h3>
           <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">×</button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className="flex-1 overflow-y-auto p-5">{children}</div>
+        {footer && <div className="shrink-0 border-t border-slate-200 px-5 py-4 dark:border-slate-700">{footer}</div>}
       </div>
+    </div>
+  );
+}
+
+/* ----------------------------- Pills ----------------------------- */
+// Inline single-select chip group — a friendlier alternative to a <select> when
+// the choices are few and worth showing at a glance (e.g. picking a discipline).
+export function Pills({ value, onChange, options, ariaLabel }: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: ReactNode }[];
+  ariaLabel?: string;
+}) {
+  return (
+    <div role="radiogroup" aria-label={ariaLabel} className="flex flex-wrap gap-2">
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(o.value)}
+            className={cn(
+              'rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors',
+              active
+                ? 'border-brand-500 bg-brand-500 text-white shadow-sm'
+                : 'border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:bg-brand-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10',
+            )}
+          >
+            {o.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -580,5 +622,54 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         ))}
       </div>
     </ToastContext.Provider>
+  );
+}
+
+/* ----------------------------- Confirm dialog ----------------------------- */
+// In-app replacement for window.confirm. Call `confirmDialog(...)` from anywhere and
+// await the boolean — a string arg is treated as the message. Mirrors the `toast`
+// pattern: a module-level emitter registered by the mounted <ConfirmProvider>. Falls
+// back to window.confirm if the provider isn't mounted (e.g. in tests).
+export interface ConfirmOptions {
+  title?: string;
+  message?: ReactNode;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  tone?: 'danger' | 'primary';
+}
+let confirmEmit: ((opts: ConfirmOptions) => Promise<boolean>) | null = null;
+export function confirmDialog(opts: ConfirmOptions | string): Promise<boolean> {
+  const o = typeof opts === 'string' ? { message: opts } : opts;
+  if (confirmEmit) return confirmEmit(o);
+  return Promise.resolve(window.confirm(typeof o.message === 'string' ? o.message : o.title ?? 'Are you sure?'));
+}
+
+export function ConfirmProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<{ opts: ConfirmOptions; resolve: (v: boolean) => void } | null>(null);
+  const ask = useCallback((opts: ConfirmOptions) => new Promise<boolean>((resolve) => setState({ opts, resolve })), []);
+  useEffect(() => { confirmEmit = ask; return () => { if (confirmEmit === ask) confirmEmit = null; }; }, [ask]);
+
+  const settle = (value: boolean) => { state?.resolve(value); setState(null); };
+  const o = state?.opts;
+  const tone = o?.tone ?? 'danger';
+
+  return (
+    <>
+      {children}
+      {state && o && (
+        <Modal
+          title={o.title ?? 'Are you sure?'}
+          onClose={() => settle(false)}
+          footer={(
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => settle(false)}>{o.cancelLabel ?? 'Cancel'}</Button>
+              <Button variant={tone} onClick={() => settle(true)} autoFocus>{o.confirmLabel ?? 'Confirm'}</Button>
+            </div>
+          )}
+        >
+          <div className="text-sm text-slate-600 dark:text-slate-300">{o.message ?? 'This action cannot be undone.'}</div>
+        </Modal>
+      )}
+    </>
   );
 }

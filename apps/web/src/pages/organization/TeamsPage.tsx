@@ -7,7 +7,6 @@ import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge } from '../../components/ui';
 import { OrgTabs } from '../../components/OrgTabs';
-import { EnterChampionshipsModal } from '../../components/EnterChampionshipsModal';
 
 // A roster can be entered into several championships; these read its team_entries.
 function teamEntries(team: any): any[] { return team.team_entries ?? []; }
@@ -145,9 +144,10 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
   );
 }
 
-// Create a team as a standalone organization asset — just a name and sport. It's
-// linked to a championship + discipline draw later via "Assign to championship".
-function CreateTeamModal({ institutionId, onClose }: { institutionId: string; onClose: () => void }) {
+// Create a team as a standalone organization asset — just a name and sport. Rendered
+// inline (not a popup) so it sits right in the Teams list. It's entered into a
+// championship & discipline later from the team page.
+function InlineCreateTeam({ institutionId, onClose }: { institutionId: string; onClose: () => void }) {
   const navigate = useNavigate();
   const { data: sports = [] } = useApi<any[]>('/sports');
   const [name, setName] = useState('');
@@ -168,21 +168,29 @@ function CreateTeamModal({ institutionId, onClose }: { institutionId: string; on
   };
 
   return (
-    <Modal title="Create team" onClose={onClose}>
-      <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Create a team for your organization, then assign it to a championship &amp; discipline when you’re ready.</p>
-      <Field label="Team name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. VJTI Titans" /></Field>
-      <Field label="Sport">
-        <Select value={sportId} onChange={(e) => setSportId(e.target.value)}>
-          <option value="">— select a sport —</option>
-          {sports.map((s) => <option key={s.id} value={s.id}>{s.icon ? `${s.icon} ` : ''}{s.name}</option>)}
-        </Select>
-      </Field>
-      {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+    <Card className="mb-4 p-5 ring-1 ring-brand-200 dark:ring-brand-500/30">
+      <div className="mb-1 flex items-center justify-between">
+        <h3 className="font-semibold text-slate-900 dark:text-slate-100">Create a team</h3>
+        <button onClick={onClose} className="text-sm text-slate-500 hover:underline dark:text-slate-400">Cancel</button>
+      </div>
+      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">Add a team for your organization, then enter it into a championship &amp; pick a discipline when you’re ready.</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <label className="block flex-1">
+          <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Team name</span>
+          <Input value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder="e.g. VJTI Titans"
+            onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
+        </label>
+        <label className="block sm:w-56">
+          <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Sport</span>
+          <Select value={sportId} onChange={(e) => setSportId(e.target.value)}>
+            <option value="">— select a sport —</option>
+            {sports.map((s) => <option key={s.id} value={s.id}>{s.icon ? `${s.icon} ` : ''}{s.name}</option>)}
+          </Select>
+        </label>
         <Button disabled={!name.trim() || !sportId || create.isPending} onClick={submit}>{create.isPending ? 'Creating…' : 'Create team'}</Button>
       </div>
-    </Modal>
+      {error && <p className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+    </Card>
   );
 }
 
@@ -202,13 +210,14 @@ export function TeamsPage() {
     ? instTeams
     : myTeams.filter((t) => t.membership_role === 'captain' || t.membership_role === 'vice_captain');
   const isLoading = institutionId ? instLoading : myLoading;
-  const { data: enrollments = [] } = useApi<any[]>('/me/enrollments');
+  // Enrollments scoped to THIS org (a user may run several) so "Enter" uses the right
+  // approved enrollment — otherwise entering a team can pick another org's enrollment.
+  const { data: enrollments = [] } = useApi<any[]>(institutionId ? `/me/enrollments?organization_id=${institutionId}` : '/me/enrollments');
   const approved = enrollments.filter((e) => e.status === 'approved');
   const { eventId, setEventId } = useFilterBar();
   const [tournamentFilter, setTournamentFilter] = useState('all');
   const [creating, setCreating] = useState(false);
   const [bulkCreating, setBulkCreating] = useState(false);
-  const [entering, setEntering] = useState<any | null>(null);
   const [status, setStatus] = useState('all');
 
   // Approved championships populate the shared header championship filter.
@@ -249,6 +258,12 @@ export function TeamsPage() {
     const ev = searchParams.get('championship');
     if (ev) setEventId(ev);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Open the create-team panel straight from a deep link (?create=1), e.g. the
+  // getting-started checklist's "Create a team" step.
+  useEffect(() => {
+    if (searchParams.get('create') === '1') setCreating(true);
   }, [searchParams]);
 
   // Reset the tournament drill-down when the header championship changes.
@@ -298,6 +313,8 @@ export function TeamsPage() {
           No disciplines are configured for this championship yet. The organiser must add discipline draws in Setup before you can enter teams or assign players.
         </p>
       )}
+
+      {creating && institutionId && <InlineCreateTeam institutionId={institutionId} onClose={() => setCreating(false)} />}
 
       {isLoading ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -363,11 +380,8 @@ export function TeamsPage() {
                           <span key={e.id} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{e.championships?.name ?? 'Championship'}</span>
                         ))}
                     </div>
-                    <div className="mt-2 flex items-center justify-between gap-2">
+                    <div className="mt-2">
                       <p className="text-xs text-slate-400 dark:text-slate-500">{t.team_members?.length ?? 0} member{(t.team_members?.length ?? 0) === 1 ? '' : 's'}</p>
-                      {canManage && (
-                        <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setEntering(t); }}>Enter</Button>
-                      )}
                     </div>
                   </Card>
                 ))}
@@ -378,8 +392,6 @@ export function TeamsPage() {
         </>
       )}
 
-      {creating && institutionId && <CreateTeamModal institutionId={institutionId} onClose={() => setCreating(false)} />}
-      {entering && <EnterChampionshipsModal team={entering} onClose={() => setEntering(null)} />}
       {bulkCreating && institutionId && <BulkCreateTeamsModal approved={approved} organization={ctx?.organization ?? { id: institutionId }} defaultEnrollmentId={defaultEnrollmentId} onClose={() => setBulkCreating(false)} />}
     </div>
   );

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
-import { Badge, Button, Card, EmptyState, ListToolbar, Pagination, SearchInput, Spinner, toast } from '../../components/ui';
+import { Badge, Button, Card, confirmDialog, EmptyState, ListToolbar, Pagination, SearchInput, Spinner, toast } from '../../components/ui';
 import { InstitutionFormModal, type InstitutionFormBody } from '../../components/InstitutionFormModal';
 
 interface Organization {
@@ -60,7 +60,7 @@ export function PlatformInstitutionsPage() {
                   <td className="px-4 py-2 text-right whitespace-nowrap">
                     <Button size="sm" variant="ghost" onClick={() => setEditing(i)}>Edit</Button>
                     <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
-                      onClick={() => { if (confirm(`Delete ${i.name}?`)) del.mutate(i.id, { onError: (e: any) => toast.error(e.message) }); }}>
+                      onClick={async () => { if (await confirmDialog({ title: 'Delete institution', confirmLabel: 'Delete', message: `Delete ${i.name}?` })) del.mutate(i.id, { onError: (e: any) => toast.error(e.message) }); }}>
                       Delete
                     </Button>
                   </td>

@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../lib/auth';
-import { usePermissions } from '../lib/permissions';
 import { api } from '../lib/api';
-import { useApi, useApiMutation, useTableControls, fmtDateRange } from '../lib/hooks';
-import { Button, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge, toast } from '../components/ui';
+import { useApi, useTableControls, fmtDateRange } from '../lib/hooks';
+import { Button, Card, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge, toast } from '../components/ui';
 
 interface Championship {
   id: string; name: string; slug: string; status: string;
@@ -16,24 +16,91 @@ const STATUS_LABELS: Record<string, string> = {
   draft: 'Draft', registration_open: 'Registration open', ongoing: 'Live', completed: 'Completed',
 };
 
+// Apply to participate — pick which of your organizations to apply as, or create one
+// on the fly. Players with no organization land straight in "create" mode, so anyone
+// can apply directly to a championship.
+function ApplyModal({ championship, onClose }: { championship: Championship; onClose: () => void }) {
+  const { ctx, refresh } = useAuth();
+  const qc = useQueryClient();
+  const myOrgs = useMemo(
+    () => (ctx?.organizations ?? []).filter((m) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin')),
+    [ctx],
+  );
+  const [mode, setMode] = useState<'pick' | 'create'>(myOrgs.length ? 'pick' : 'create');
+  const [orgId, setOrgId] = useState(myOrgs[0]?.organization_id ?? '');
+  const [newName, setNewName] = useState('');
+  const [newCity, setNewCity] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      let applyOrgId = orgId;
+      if (mode === 'create') {
+        if (!newName.trim()) { setError('Organization name is required'); setBusy(false); return; }
+        const org: any = await api('POST', '/organizations', { name: newName.trim(), city: newCity || undefined });
+        applyOrgId = org.id;
+        await refresh(); // pick the new org up in context (so the user can manage it)
+      }
+      if (!applyOrgId) { setError('Pick an organization to apply as'); setBusy(false); return; }
+      await api('POST', `/championships/${championship.id}/enroll`, { organization_id: applyOrgId });
+      // Query keys are full URLs; refresh every /me/enrollments* variant (the Discover
+      // list uses ?scope=all) so the CTA flips to "Your application" immediately.
+      await qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('/me/enrollments') });
+      toast.success('Application submitted', 'You can enter teams once the organiser approves you.');
+      onClose();
+    } catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Modal title={`Participate in ${championship.name}`} onClose={onClose}>
+      <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Apply as one of your organizations, or create a new one to compete under.</p>
+      {myOrgs.length > 0 && (
+        <div className="mb-3 inline-flex rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+          {(['pick', 'create'] as const).map((m) => (
+            <button key={m} type="button" onClick={() => setMode(m)}
+              className={`rounded-md px-3 py-1.5 text-sm font-semibold ${mode === m ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400'}`}>
+              {m === 'pick' ? 'Existing organization' : 'New organization'}
+            </button>
+          ))}
+        </div>
+      )}
+      {mode === 'pick' ? (
+        <Field label="Apply as">
+          <Select value={orgId} onChange={(e) => setOrgId(e.target.value)}>
+            {myOrgs.map((m) => <option key={m.organization_id} value={m.organization_id}>{m.organization?.name}</option>)}
+          </Select>
+        </Field>
+      ) : (
+        <>
+          <Field label="Organization name"><Input value={newName} autoFocus onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Rohit Sports Club" /></Field>
+          <Field label="City (optional)"><Input value={newCity} onChange={(e) => setNewCity(e.target.value)} placeholder="Mumbai" /></Field>
+        </>
+      )}
+      {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button disabled={busy} onClick={submit}>{busy ? 'Submitting…' : 'Apply to participate'}</Button>
+      </div>
+    </Modal>
+  );
+}
+
 // Discover — every championship on the platform, open to any signed-in user.
 // Searchable and filterable by sport / status so the list never dumps everything.
+// Anyone can apply to participate via the per-card CTA (choosing or creating an org).
 export function DiscoverPage() {
-  const { ctx } = useAuth();
-  const canManage = usePermissions().can('team.manage'); // org owner/admin (POC)
-  const institutionId = ctx?.organization?.id
-    ?? ctx?.user.organization_id
-    ?? ctx?.organizations?.find((m) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin'))?.organization_id
-    ?? null;
   const { data: championships = [], isLoading } = useApi<Championship[]>('/championships');
-  const { data: enrollments = [] } = useApi<any[]>('/me/enrollments');
+  // scope=all so an application made under ANY of the user's orgs (incl. one just
+  // created via the apply flow) flips the card's CTA to "Your application".
+  const { data: enrollments = [] } = useApi<any[]>('/me/enrollments?scope=all');
   const [sport, setSport] = useState('');
   const [status, setStatus] = useState('');
+  const [applying, setApplying] = useState<Championship | null>(null);
 
-  const apply = useApiMutation(
-    (eventId: string) => api('POST', `/championships/${eventId}/enroll`, { organization_id: institutionId }),
-    ['/me/enrollments'],
-  );
   const enrollmentStatusFor = (eventId: string) =>
     enrollments.find((e) => e.championship_id === eventId)?.status as string | undefined;
 
@@ -115,12 +182,9 @@ export function DiscoverPage() {
                       </div>
                     );
                   }
-                  if (c.status === 'registration_open' && canManage && institutionId) {
+                  if (c.status === 'registration_open') {
                     return (
-                      <Button className="mb-2 w-full" disabled={apply.isPending}
-                        onClick={() => apply.mutate(c.id, { onSuccess: () => toast.success('Application submitted', 'You can enter teams once approved.'), onError: (err: any) => toast.error(err.message) })}>
-                        {apply.isPending ? 'Applying…' : 'Apply to participate'}
-                      </Button>
+                      <Button className="mb-2 w-full" onClick={() => setApplying(c)}>Apply to participate</Button>
                     );
                   }
                   return null;
@@ -132,6 +196,8 @@ export function DiscoverPage() {
           <Pagination page={tc.page} pageCount={tc.pageCount} total={tc.total} pageSize={tc.pageSize} onPage={tc.setPage} />
         </>
       )}
+
+      {applying && <ApplyModal championship={applying} onClose={() => setApplying(null)} />}
     </div>
   );
 }

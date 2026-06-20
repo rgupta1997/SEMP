@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useEvent } from './EventLayout';
 import { useApi, useApiMutation, useTableControls, fmtDate } from '../../lib/hooks';
 import { api } from '../../lib/api';
-import { Card, Spinner, Button, Avatar, SearchInput, Pagination, ListToolbar } from '../../components/ui';
+import { Card, Spinner, Button, Avatar, SearchInput, Pagination, ListToolbar, confirmDialog } from '../../components/ui';
 import { PeoplePicker } from '../../components/PeoplePicker';
 
 interface Official {
@@ -24,14 +24,16 @@ interface User {
 // Assign officials by mobile/name, multi-select. A typed number with no existing
 // user gets an invite to join, auto-applied when they sign up with that number.
 function AssignOfficialModal({ eventId, existingIds, onClose }: { eventId: string; existingIds: Set<string>; onClose: () => void }) {
-  const assignUser = async (userId: string) => { await api('POST', `/championships/${eventId}/officials`, { user_id: userId }); };
+  const assignUsers = async (userIds: string[]) => { await api('POST', `/championships/${eventId}/officials/bulk`, { user_ids: userIds }); };
   return (
     <PeoplePicker
       title="Assign officials"
       subtitle="Search by mobile or name and pick officials. Unknown numbers get an invite to join."
-      excludeUserIds={existingIds}
+      assignedUserIds={existingIds}
+      assignedLabel="Official"
       invite={{ target_type: 'championship_official', target_id: eventId }}
-      onAssignUser={assignUser}
+      invalidateKeys={[`/championships/${eventId}/officials`]}
+      onAssignUsers={assignUsers}
       onClose={onClose}
     />
   );
@@ -112,8 +114,8 @@ export function EventOfficialsPage() {
                       size="sm"
                       variant="ghost"
                       className="text-rose-600 dark:text-rose-400 hover:bg-rose-50 hover:text-rose-700"
-                      onClick={() => {
-                        if (confirm(`Remove ${o.user.name} from this championship?`)) {
+                      onClick={async () => {
+                        if (await confirmDialog({ title: 'Remove official', confirmLabel: 'Remove', message: `Remove ${o.user.name} from this championship?` })) {
                           removeMut.mutate(o.id);
                         }
                       }}

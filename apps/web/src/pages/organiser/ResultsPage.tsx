@@ -60,6 +60,16 @@ export function ResultsPage() {
   const { eventId, canManage } = useEvent();
   const navigate = useNavigate();
   const { data: fixtures = [], isLoading, isFetching } = useApi<ResultRow[]>(`/championships/${eventId}/fixtures`);
+  // Is this championship awarding custom (hand-entered) points anywhere? If so, the
+  // organiser is reminded to add points per result. Rules are organiser-only.
+  const { data: rulesData } = useApi<{ default: { scheme: string }; rules: { scope_type: string; config: { scheme: string } }[] }>(
+    canManage ? `/championships/${eventId}/standings-rules` : null,
+  );
+  const customActive = useMemo(() => {
+    if (!rulesData) return false;
+    const champ = rulesData.rules.find((r) => r.scope_type === 'championship');
+    return (champ?.config?.scheme ?? rulesData.default?.scheme) === 'custom' || rulesData.rules.some((r) => r.config?.scheme === 'custom');
+  }, [rulesData]);
 
   // Tournament + Sport filters live in the shared header; options come from the
   // fixtures present. Tournament sits first, defaulting to "All tournaments".
@@ -116,6 +126,12 @@ export function ResultsPage() {
             list visible but signals that the latest scores are being pulled. */}
         {isFetching && !isLoading && <Spinner label="Refreshing…" />}
       </div>
+
+      {customActive && canManage && (
+        <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+          <span className="font-semibold">Custom points are on.</span> Open a completed match to award each side its championship points — standings won’t update until you do.
+        </div>
+      )}
 
       {isLoading ? <Spinner /> : rows.length === 0 ? (
         <EmptyState

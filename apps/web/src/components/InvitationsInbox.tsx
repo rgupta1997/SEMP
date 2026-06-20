@@ -15,20 +15,25 @@ interface Invite {
 }
 
 // Shown to an owner/admin of an organization that's been invited to a championship.
-// Accepting applies that org — it then appears in the host's Approvals.
-export function InvitationsInbox() {
-  const { data: invites = [] } = useApi<Invite[]>('/me/invitations');
+// Accepting auto-approves that org for the championship. Pass `organizationId` to scope
+// the inbox to a single org (e.g. on that org's manage view); omit it for the global
+// "all your invitations" inbox.
+export function InvitationsInbox({ organizationId, className = '' }: { organizationId?: string; className?: string } = {}) {
+  const { data: allInvites = [] } = useApi<Invite[]>('/me/invitations');
+  const invites = organizationId ? allInvites.filter((i) => i.organization_id === organizationId) : allInvites;
 
   const accept = useApiMutation(
     (id: string) => api('POST', `/invitations/${id}/accept`),
-    ['/me/invitations', '/championships/mine'],
+    // Auto-approved on accept (the host invited them) — refresh enrollments too so the
+    // org immediately shows as approved and can enter teams.
+    ['/me/invitations', '/championships/mine', '/me/enrollments'],
   );
   const decline = useApiMutation((id: string) => api('POST', `/invitations/${id}/decline`), ['/me/invitations']);
 
   if (invites.length === 0) return null;
 
   return (
-    <Card className="border-brand-200 bg-brand-50/50 p-4 dark:border-brand-500/30 dark:bg-brand-500/5">
+    <Card className={`border-brand-200 bg-brand-50/50 p-4 dark:border-brand-500/30 dark:bg-brand-500/5 ${className}`}>
       <div className="mb-3 flex items-center gap-2">
         <span className="text-lg">✉️</span>
         <h2 className="font-semibold text-slate-900 dark:text-slate-100">You're invited{invites.length > 1 ? ` · ${invites.length}` : ''}</h2>
@@ -45,7 +50,7 @@ export function InvitationsInbox() {
             <div className="flex items-center gap-2">
               <Button size="sm" disabled={accept.isPending}
                 onClick={() => accept.mutate(inv.id,
-                  { onSuccess: () => toast.success('Application sent — awaiting approval'), onError: (e: any) => toast.error(e.message) })}>
+                  { onSuccess: () => toast.success('Joined the championship', 'You can enter teams now.'), onError: (e: any) => toast.error(e.message) })}>
                 Accept
               </Button>
               <Button size="sm" variant="ghost" disabled={decline.isPending}

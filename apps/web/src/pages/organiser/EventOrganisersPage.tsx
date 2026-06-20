@@ -17,14 +17,16 @@ interface RoleAssignment {
 // with no existing user gets an invite to join, auto-applied when they sign up.
 function AddOrganiserModal({ eventId, roleId, assignedIds, onClose }:
   { eventId: string; roleId: string; assignedIds: Set<string>; onClose: () => void }) {
-  const assignUser = async (userId: string) => { await api('POST', `/championships/${eventId}/roles`, { user_id: userId, role_id: roleId }); };
+  const assignUsers = async (userIds: string[]) => { await api('POST', `/championships/${eventId}/roles/bulk`, { user_ids: userIds, role_id: roleId }); };
   return (
     <PeoplePicker
       title="Add team members"
       subtitle="Search by mobile or name and pick people to co-organise. Unknown numbers get an invite to join."
-      excludeUserIds={assignedIds}
+      assignedUserIds={assignedIds}
+      assignedLabel="Organiser"
       invite={{ target_type: 'championship_organiser', target_id: eventId }}
-      onAssignUser={assignUser}
+      invalidateKeys={[`/championships/${eventId}/roles`]}
+      onAssignUsers={assignUsers}
       onClose={onClose}
     />
   );

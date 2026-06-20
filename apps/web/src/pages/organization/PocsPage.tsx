@@ -7,7 +7,7 @@ import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { OrgTabs } from '../../components/OrgTabs';
 import { PeoplePicker } from '../../components/PeoplePicker';
-import { Avatar, Badge, Button, Card, CardBody, EmptyState, Field, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, toast } from '../../components/ui';
+import { Avatar, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, toast } from '../../components/ui';
 
 interface Member {
   id: string; user_id: string; role: string; status: string;
@@ -20,14 +20,17 @@ const ROLE_TONE: Record<string, 'brand' | 'green' | 'amber' | 'slate'> = {
 
 // Add members by mobile/name (multi-select). A typed number with no existing user
 // gets an invitation to join, auto-applied when they sign up with that number.
-function AddMemberModal({ orgId, onClose }: { orgId: string; onClose: () => void }) {
+function AddMemberModal({ orgId, memberUserIds, onClose }: { orgId: string; memberUserIds: Set<string>; onClose: () => void }) {
   const [role, setRole] = useState('member');
-  const assignUser = async (userId: string) => { await api('POST', `/organizations/${orgId}/members`, { user_id: userId, role }); };
+  const assignUsers = async (userIds: string[]) => { await api('POST', `/organizations/${orgId}/members/bulk`, { user_ids: userIds, role }); };
   return (
     <PeoplePicker
       title="Add members"
       subtitle="Search by mobile or name and pick people to add. Unknown numbers get an invite to join."
+      assignedUserIds={memberUserIds}
+      assignedLabel="Member"
       invite={{ target_type: 'org_member', target_id: orgId, role }}
+      invalidateKeys={[`/organizations/${orgId}/members`]}
       roleControl={(
         <Field label="Role">
           <Select value={role} onChange={(e) => setRole(e.target.value)} className="w-44">
@@ -35,7 +38,7 @@ function AddMemberModal({ orgId, onClose }: { orgId: string; onClose: () => void
           </Select>
         </Field>
       )}
-      onAssignUser={assignUser}
+      onAssignUsers={assignUsers}
       onClose={onClose}
     />
   );
@@ -62,6 +65,8 @@ export function PocsPage() {
   // only active/past members belong in the roster list below.
   const pendingMembers = members.filter((m) => m.status === 'pending');
   const rosterMembers = members.filter((m) => m.status !== 'pending');
+  // Flag anyone already linked to the org (any status) in the add-member picker.
+  const memberUserIds = new Set(members.map((m) => m.user_id));
 
   // Search (name / email / phone) + pagination over the roster list.
   const tc = useTableControls(rosterMembers, {
@@ -141,7 +146,7 @@ export function PocsPage() {
                         {ORGANIZATION_MEMBER_ROLE.map((r) => <option key={r} value={r}>{r}</option>)}
                       </Select>
                       <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
-                        onClick={() => { if (confirm(`Remove ${m.users?.name ?? 'this member'} from the organization?`)) remove.mutate(m.id, { onError: (err: any) => toast.error(err.message) }); }}>
+                        onClick={async () => { if (await confirmDialog({ title: 'Remove member', confirmLabel: 'Remove', message: `Remove ${m.users?.name ?? 'this member'} from the organization?` })) remove.mutate(m.id, { onError: (err: any) => toast.error(err.message) }); }}>
                         Remove
                       </Button>
                     </div>
@@ -156,7 +161,7 @@ export function PocsPage() {
         </>
       )}
 
-      {adding && orgId && <AddMemberModal orgId={orgId} onClose={() => setAdding(false)} />}
+      {adding && orgId && <AddMemberModal orgId={orgId} memberUserIds={memberUserIds} onClose={() => setAdding(false)} />}
     </div>
   );
 }

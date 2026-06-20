@@ -15,6 +15,13 @@ const SECONDARY: { status: string; label: string; variant: 'outline' | 'danger' 
   { status: 'cancelled', label: 'Cancel match', variant: 'danger' },
 ];
 
+// Matches can only be recorded once the championship is under way (status
+// "ongoing"). Before that, scoring is blocked — these explain the current state.
+const NOT_STARTED_STATUS: Record<string, string> = {
+  draft: 'still in draft and hasn’t opened yet',
+  registration_open: 'open for registration but hasn’t started yet',
+};
+
 export function MatchConsolePage() {
   const { fixtureId } = useParams();
   const navigate = useNavigate();
@@ -43,6 +50,11 @@ export function MatchConsolePage() {
   ];
   const done = () => navigate(back);
 
+  // The championship must have started before any match can be recorded. Mirror the
+  // server rule in the UI so the official sees *why* — and can't waste effort scoring.
+  const champStatus = fixture.tournament_disciplines?.tournament_sports?.tournaments?.championships?.status;
+  const notStarted = champStatus === 'draft' || champStatus === 'registration_open';
+
   return (
     <div>
       <BackButton onClick={done}>{backLabel}</BackButton>
@@ -52,14 +64,79 @@ export function MatchConsolePage() {
       </div>
       <div className="mb-4 text-sm text-slate-500 dark:text-slate-400">{eventLabel(fixture)} · {venueLabel(fixture)} · {fmtDateTime(fixture.scheduled_at)}</div>
 
-      {def.archetype === 'time'
-        ? <ManualResult fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} onDone={done} />
-        : <LiveConsole key={fixtureId} fixture={fixture} fixtureId={fixtureId!} def={def} live={live} invalidate={invalidate} onDone={done} />}
+      {notStarted ? (
+        <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-500/10">
+          <CardBody className="space-y-3 py-8 text-center">
+            <div className="text-4xl" aria-hidden>⏳</div>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">This match can’t be recorded yet</h2>
+            <p className="mx-auto max-w-md text-sm text-slate-600 dark:text-slate-300">
+              <b>{eventLabel(fixture)}</b> is {NOT_STARTED_STATUS[champStatus] ?? 'not under way yet'}. A match can only be scored once its championship has started.
+            </p>
+            <p className="mx-auto max-w-md text-sm text-slate-500 dark:text-slate-400">
+              The organiser needs to move the championship to <b>Ongoing</b> (from the championship’s Settings). Once it’s started, reopen this match to record the result.
+            </p>
+            <div className="pt-1"><Button variant="outline" onClick={done}>Back to {backLabel.toLowerCase()}</Button></div>
+          </CardBody>
+        </Card>
+      ) : (
+        <>
+          {def.archetype === 'time'
+            ? <ManualResult fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} onDone={done} />
+            : <LiveConsole key={fixtureId} fixture={fixture} fixtureId={fixtureId!} def={def} live={live} invalidate={invalidate} onDone={done} />}
 
-      <div className="mt-5">
-        <AwardsPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
-      </div>
+          {fixture.point_scheme === 'custom' && (
+            <div className="mt-5">
+              <CustomPointsPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
+            </div>
+          )}
+
+          <div className="mt-5">
+            <AwardsPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
+          </div>
+        </>
+      )}
     </div>
+  );
+}
+
+/* ----------------------------- Custom championship points ----------------------------- */
+// Shown only when the draw's point system is "custom": the organiser awards
+// championship points to each side for this result. Saved to the fixture and fed
+// into standings. Current values come from the fixture's live_state.custom_points.
+function CustomPointsPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixtureId: string; invalidate: (string | null)[] }) {
+  const homeName = teamLabel(homeTeam(fixture));
+  const awayName = teamLabel(awayTeam(fixture));
+  const cp = fixture.live_state?.custom_points ?? {};
+  const [home, setHome] = useState(cp.home != null ? String(cp.home) : '');
+  const [away, setAway] = useState(cp.away != null ? String(cp.away) : '');
+  const save = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/points`, body), [`/fixtures/${fixtureId}/scoring`, ...invalidate]);
+
+  const num = (s: string) => (s === '' ? null : Math.max(0, Math.floor(Number(s) || 0)));
+  const submit = () => save.mutate(
+    { home_points: num(home), away_points: num(away) },
+    { onSuccess: () => toast.success('Championship points saved'), onError: (e: any) => toast.error(e.message) },
+  );
+
+  return (
+    <Card>
+      <CardHeader title="Championship points" subtitle="This championship awards custom points — enter the points each side earns from this result. They feed the standings." />
+      <CardBody>
+        <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-3">
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</span>
+            <Input type="number" min={0} value={home} onChange={(e) => setHome(e.target.value)} className="text-center text-lg font-bold" />
+          </label>
+          <span className="pb-2 text-sm font-semibold text-slate-400 dark:text-slate-500">pts</span>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</span>
+            <Input type="number" min={0} value={away} onChange={(e) => setAway(e.target.value)} className="text-center text-lg font-bold" />
+          </label>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <Button disabled={save.isPending} onClick={submit}>{save.isPending ? 'Saving…' : 'Save points'}</Button>
+        </div>
+      </CardBody>
+    </Card>
   );
 }
 

@@ -37,6 +37,9 @@ export function usePermissions() {
     isSuper || (id
       ? !!ctx?.organizations?.some((m) => m.organization_id === id && (m.role === 'owner' || m.role === 'admin'))
       : orgAdminAny);
+  // Owner-only actions (e.g. deleting the whole org). Admins manage day-to-day.
+  const isOrgOwner = (id?: string | null) =>
+    isSuper || (!!id && !!ctx?.organizations?.some((m) => m.organization_id === id && m.role === 'owner'));
 
   // The championship currently in the URL (if any) — lets the coarse capability
   // shim resolve against THIS championship, so management controls only show to
@@ -75,7 +78,7 @@ export function usePermissions() {
     }
   };
 
-  return { can, isSuper, isCaptain, organisesAny, orgAdminAny, isOfficialAny, canManageChampionship, canManageOrg, organisesChampionship };
+  return { can, isSuper, isCaptain, organisesAny, orgAdminAny, isOfficialAny, canManageChampionship, canManageOrg, isOrgOwner, organisesChampionship };
 }
 
 // Declarative action gate: renders children only if the capability is granted.

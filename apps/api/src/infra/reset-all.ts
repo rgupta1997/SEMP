@@ -29,7 +29,13 @@ const rint = (min: number, max: number) => min + Math.floor(Math.random() * (max
 // ----------------------------------------------------------------------------
 type DiscDef = { name: string; entry_type: string; squad_min: number; squad_max: number };
 const SPORTS_CONFIG: Array<{ name: string; icon: string; disciplines: DiscDef[] }> = [
-  { name: 'Cricket', icon: '🏏', disciplines: [{ name: 'T20', entry_type: 'team', squad_min: 11, squad_max: 15 }] },
+  { name: 'Cricket', icon: '🏏', disciplines: [
+    // Disciplines are categories (gender/age), not formats — T20 is a format, not a discipline.
+    { name: "Men's", entry_type: 'team', squad_min: 11, squad_max: 15 },
+    { name: "Women's", entry_type: 'team', squad_min: 11, squad_max: 15 },
+    { name: 'U-19', entry_type: 'team', squad_min: 11, squad_max: 15 },
+    { name: 'U-23', entry_type: 'team', squad_min: 11, squad_max: 15 },
+  ] },
   { name: 'Football', icon: '⚽', disciplines: [{ name: "Men's", entry_type: 'team', squad_min: 11, squad_max: 18 }] },
   { name: 'Basketball', icon: '🏀', disciplines: [
     { name: "Men's", entry_type: 'team', squad_min: 5, squad_max: 12 },

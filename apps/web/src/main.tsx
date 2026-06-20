@@ -12,7 +12,13 @@ const queryClient = new QueryClient({
     // anything older refetches quietly in the background while the cached view
     // shows. Mutations still invalidate the relevant keys immediately (below), so
     // edits are reflected at once. Master data is cached far longer (see useApi).
-    queries: { retry: false, refetchOnWindowFocus: true, staleTime: 30_000 },
+    //
+    // refetchOnWindowFocus is OFF on purpose: re-focusing the tab (which includes
+    // clicking into DevTools and back) must NOT refetch every active query — on a
+    // setup page that's dozens of revalidations for nothing. Data still refreshes
+    // when you navigate to a page (and it's stale) and after any mutation, which is
+    // all that's actually needed.
+    queries: { retry: false, refetchOnWindowFocus: false, staleTime: 30_000 },
   },
   // Refresh data after EVERY successful mutation — done globally so it fires even
   // when the component that triggered it has already navigated away (e.g. the match

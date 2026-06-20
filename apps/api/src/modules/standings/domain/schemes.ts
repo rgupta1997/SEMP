@@ -17,6 +17,9 @@ export interface SchemeFixture {
   home_score: number | null;
   away_score: number | null;
   winner_team_id: string | null;
+  // Organiser-entered championship points per side — used only by the 'custom' scheme.
+  home_points?: number | null;
+  away_points?: number | null;
 }
 
 export interface OrgTally {
@@ -158,6 +161,19 @@ function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule,
   return [...table.values()];
 }
 
+// Custom: no auto formula. Base P/W/L is tallied for the display columns (with zero
+// auto-points), then the organiser's hand-entered championship points per side are
+// added on. A side with no points entered simply contributes nothing.
+function customScheme(fixtures: SchemeFixture[]): OrgTally[] {
+  const table = leagueTally(fixtures, 0, 0, 0);
+  for (const f of fixtures) {
+    if (f.status !== 'completed') continue;
+    if (f.home_org_id && f.home_points != null) { const row = table.get(f.home_org_id); if (row) row.points += f.home_points; }
+    if (f.away_org_id && f.away_points != null) { const row = table.get(f.away_org_id); if (row) row.points += f.away_points; }
+  }
+  return [...table.values()];
+}
+
 function medalScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'medal' }>, decided: boolean): OrgTally[] {
   // Rank organizations within the discipline by a standard 3/1/0 win record, then
   // award gold/silver/bronze points to the top three — but only once the discipline
@@ -187,6 +203,7 @@ export function runScheme(fixtures: SchemeFixture[], rule: StandingsRule, decide
     case 'league_points': tallies = leaguePointsScheme(fixtures, rule); break;
     case 'placement': tallies = placementScheme(fixtures, rule, decided); break;
     case 'medal': tallies = medalScheme(fixtures, rule, decided); break;
+    case 'custom': tallies = customScheme(fixtures); break;
   }
   if (rule.participation > 0) {
     for (const t of tallies) {

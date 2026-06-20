@@ -216,24 +216,50 @@ export function makeMeRouter(prisma: Prisma): Router {
     res.json(memberships.map((m) => ({ membership_role: m.role, jersey_number: m.jersey_number, ...m.teams })));
   }));
 
-  // Enrollment status for the current user's organization, across championships.
+  // Enrollment status for the user's organization(s), across championships. Resolution:
+  //   ?organization_id=  → that specific org (must be an active member) — team entries
+  //                        must be scoped to THAT team's org.
+  //   ?scope=all         → EVERY org the user is an active member of, so an application
+  //                        made under any of their orgs (incl. one just created on the
+  //                        fly) shows up — used by Discover so the CTA flips correctly.
+  //   (none)             → their primary org (JWT, else first active owner/admin).
   router.get('/me/enrollments', asyncHandler(async (req, res) => {
-    // JWT may lack organizationId if the user self-created an org after their last login.
-    // Fall back to their first active owner/admin membership derived from DB.
-    let organizationId = req.user!.organizationId;
-    if (!organizationId) {
-      const membership = await prisma.organization_members.findFirst({
-        where: { user_id: req.user!.id, role: { in: ['owner', 'admin'] }, status: 'active' },
-        orderBy: { joined_at: 'asc' },
+    const requested = typeof req.query.organization_id === 'string' ? req.query.organization_id : null;
+    const scopeAll = req.query.scope === 'all';
+    let orgIds: string[] = [];
+    if (requested) {
+      // Only expose an org's enrollments to one of its active members (or a super admin).
+      const member = await prisma.organization_members.findFirst({
+        where: { user_id: req.user!.id, organization_id: requested, status: 'active' },
+        select: { id: true },
       });
-      organizationId = membership?.organization_id ?? null;
+      if (!member && !req.user!.isSuperAdmin) { res.json([]); return; }
+      orgIds = [requested];
+    } else if (scopeAll) {
+      const memberships = await prisma.organization_members.findMany({
+        where: { user_id: req.user!.id, status: 'active' },
+        select: { organization_id: true },
+      });
+      orgIds = [...new Set(memberships.map((m) => m.organization_id))];
+    } else {
+      // JWT may lack organizationId if the user self-created an org after their last login.
+      // Fall back to their first active owner/admin membership derived from DB.
+      let organizationId = req.user!.organizationId;
+      if (!organizationId) {
+        const membership = await prisma.organization_members.findFirst({
+          where: { user_id: req.user!.id, role: { in: ['owner', 'admin'] }, status: 'active' },
+          orderBy: { joined_at: 'asc' },
+        });
+        organizationId = membership?.organization_id ?? null;
+      }
+      orgIds = organizationId ? [organizationId] : [];
     }
-    if (!organizationId) {
+    if (orgIds.length === 0) {
       res.json([]);
       return;
     }
     const rows = await prisma.championship_organizations.findMany({
-      where: { organization_id: organizationId },
+      where: { organization_id: { in: orgIds } },
       include: { championships: { select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true } } },
       orderBy: { applied_at: 'desc' },
     });

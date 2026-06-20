@@ -6,7 +6,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { ForbiddenError } from '../../shared/errors.js';
-import { DEFAULT_PASSWORD, findUserByPhone, hashProvisionedPassword, maskEmail, maskPhone } from './users.helpers.js';
+import { DEFAULT_PASSWORD, findUserByPhone, hashProvisionedPassword, maskEmail, maskPhone, phoneLast10 } from './users.helpers.js';
 
 // Fields safe to return to any caller (never the password hash).
 const PUBLIC_SELECT = {
@@ -27,15 +27,51 @@ export function makeUsersRouter(prisma: Prisma): Router {
     throw new ForbiddenError('You can only create users in an organization you own or administer');
   }
 
-  // List users — open to any authenticated caller (used by assign/roster pickers).
+  // List/search users — open to any authenticated caller (used by assign/roster
+  // pickers). `q` matches name/email and, on its digits, phone; `limit` caps the
+  // result count so pickers can show just the first few by default.
   router.get('/', asyncHandler(async (req, res) => {
     const organizationId = req.query.organization_id as string | undefined;
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const take = req.query.limit ? Math.min(Math.max(Number(req.query.limit) || 0, 0), 100) : undefined;
+    const qDigits = q.replace(/\D/g, '');
+
+    // Phone is stored with formatting (e.g. "+91 98765 43210"), so a plain contains
+    // can't match a digits-only query. Resolve phone hits on the normalized form via
+    // a raw query, then fold the ids into the main filter (org scope is re-applied below).
+    let phoneIds: string[] = [];
+    if (qDigits.length >= 3) {
+      const hits = await prisma.$queryRaw<Array<{ id: string }>>`
+        select id from users
+        where regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') like ${`%${qDigits}%`}
+        limit 100`;
+      phoneIds = hits.map((r) => r.id);
+    }
+
     const rows = await prisma.users.findMany({
-      where: { ...(organizationId ? { organization_id: organizationId } : {}) },
+      where: {
+        ...(organizationId ? { organization_id: organizationId } : {}),
+        ...(q ? {
+          OR: [
+            { name: { contains: q, mode: 'insensitive' } },
+            { email: { contains: q, mode: 'insensitive' } },
+            ...(phoneIds.length ? [{ id: { in: phoneIds } }] : []),
+          ],
+        } : {}),
+      },
       select: PUBLIC_SELECT,
       orderBy: { created_at: 'desc' },
+      ...(take ? { take } : {}),
     });
-    res.json(rows);
+
+    // Privacy: when `mask` is set (the assign pickers), hide each phone except the
+    // one whose full number the searcher has typed correctly (last-10 exact match).
+    const mask = req.query.mask === '1' || req.query.mask === 'true';
+    const qLast10 = qDigits.length >= 10 ? qDigits.slice(-10) : '';
+    const out = mask
+      ? rows.map((u) => ({ ...u, phone: qLast10 && phoneLast10(u.phone) === qLast10 ? u.phone : maskPhone(u.phone) }))
+      : rows;
+    res.json(out);
   }));
 
   // Privacy-preserving lookup for the "find or create a POC/user" flows: only

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
-import { Button, Card, EmptyState, Field, Input, Modal, Spinner } from '../../../components/ui';
+import { Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Spinner } from '../../../components/ui';
 
 // Venues for a championship — name + address + city. Grounds/courts are
 // intentionally hidden for now (planned later); fixtures reference the venue.
@@ -51,7 +51,7 @@ function VenueModal({ eventId, path, venue, onClose }: { eventId: string; path: 
           {error && <p className="mt-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
           <div className="mt-5 flex items-center justify-between">
             <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
-              onClick={() => { if (confirm(`Delete “${venue.name}”? This cannot be undone.`)) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
+              onClick={async () => { if (await confirmDialog({ title: 'Delete venue', confirmLabel: 'Delete', message: `Delete “${venue.name}”? This cannot be undone.` })) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
               disabled={remove.isPending}>
               {remove.isPending ? 'Deleting…' : 'Delete'}
             </Button>

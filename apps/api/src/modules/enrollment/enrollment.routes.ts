@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { assignRoleSchema, enrollOrganizationSchema, reviewEnrollmentSchema } from '@semp/shared';
+import { assignRoleSchema, bulkAssignRoleSchema, enrollOrganizationSchema, reviewEnrollmentSchema } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
@@ -106,6 +106,21 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
       },
     });
     res.status(201).json(row);
+  }));
+
+  // Bulk-assign one role to several users at once (multi-select picker). Idempotent
+  // per (user, championship, role) like the single endpoint — one round-trip.
+  router.post('/championships/:eventId/roles/bulk', eventOrganiser, validateBody(bulkAssignRoleSchema), asyncHandler(async (req, res) => {
+    const { user_ids, role_id } = req.body as { user_ids: string[]; role_id: string };
+    const eventId = req.params.eventId;
+    const rows = await prisma.$transaction(
+      [...new Set(user_ids)].map((user_id) => prisma.user_championship_roles.upsert({
+        where: { user_id_championship_id_role_id: { user_id, championship_id: eventId, role_id } },
+        update: {},
+        create: { championship_id: eventId, user_id, role_id, assigned_by: req.user!.id },
+      })),
+    );
+    res.status(201).json(rows);
   }));
 
   // List championship-scoped role assignments.

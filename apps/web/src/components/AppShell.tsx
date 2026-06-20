@@ -47,6 +47,7 @@ function navFor(role: AppRole): NavGroup[] {
       { to: '/discover', label: 'Discover', icon: '◈' },
       { to: '/championships', label: 'Championships', icon: '🏆' },
       { to: '/host', label: 'Host', icon: '＋' },
+      { to: '/help', label: 'Help & guide', icon: '?' },
     ],
   }];
 }
@@ -143,7 +144,7 @@ export function AppShell() {
           <BrandMark variant="white" height={24} />
           <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white md:hidden" aria-label="Close menu">✕</button>
         </div>
-        <nav className="flex-1 overflow-y-auto px-3 py-4">
+        <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
           {groups.map((g) => (
             <div key={g.group} className="mb-5">
               <div className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{g.group}</div>
@@ -151,6 +152,7 @@ export function AppShell() {
                 <NavLink
                   key={it.to}
                   to={it.to}
+                  data-tour={`nav-${it.to}`}
                   end={it.end && !eventId}
                   onClick={() => setSidebarOpen(false)}
                   className={({ isActive }) => cn(
@@ -171,7 +173,7 @@ export function AppShell() {
       </aside>
 
       {/* Main */}
-      <div className="flex h-screen min-w-0 flex-col md:h-auto">
+      <div className="flex h-screen min-h-0 min-w-0 flex-col md:h-auto">
         <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex min-w-0 items-center gap-2">
             <button onClick={() => setSidebarOpen(true)} className="grid h-9 w-9 place-items-center rounded-lg text-slate-600 hover:bg-slate-100 md:hidden dark:text-slate-300 dark:hover:bg-slate-800" aria-label="Open menu">☰</button>
@@ -207,7 +209,7 @@ export function AppShell() {
             </div>
           </div>
         </header>
-        <main className="flex-1 overflow-auto bg-slate-100 p-4 sm:p-6 dark:bg-slate-950">
+        <main className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4 sm:p-6 dark:bg-slate-950">
           <div className={cn('mx-auto', !eventId && 'max-w-6xl')}>
             <Outlet />
           </div>

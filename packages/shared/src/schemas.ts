@@ -9,6 +9,23 @@ import {
 const uuid = z.string().uuid();
 const json = z.record(z.any());
 
+// A valid mobile is 10–15 digits (10-digit number, optionally a country code),
+// matching the phone lookup which keys off the last 10 digits. Used both as a
+// required field (create-a-login flows) and validated-when-present elsewhere.
+const PHONE_ERROR = 'Enter a valid mobile number (at least 10 digits)';
+const isValidPhone = (v: string) => {
+  const d = v.replace(/\D/g, '');
+  return d.length >= 10 && d.length <= 15;
+};
+const optionalPhone = z.string().refine(isValidPhone, PHONE_ERROR).optional();
+const nullableOptionalPhone = z.string().refine(isValidPhone, PHONE_ERROR).nullable().optional();
+// Required variant: a clear message when the field is missing/blank, and the
+// format message when something invalid is typed.
+const requiredPhone = z
+  .string({ required_error: 'Phone number is required', invalid_type_error: 'Phone number is required' })
+  .min(1, 'Phone number is required')
+  .refine(isValidPhone, PHONE_ERROR);
+
 // ---------- Auth ----------
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -18,7 +35,7 @@ export const registerSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
   password: z.string().min(6),
-  phone: z.string().optional(),
+  phone: requiredPhone,
 });
 
 // Change your own password. `current_password` is required for a normal change but
@@ -36,7 +53,7 @@ export const signupSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
   password: z.string().min(6),
-  phone: z.string().optional(),
+  phone: requiredPhone,
 });
 
 // ---------- Users (admin / organiser / org-owner managed) ----------
@@ -47,12 +64,12 @@ export const createUserSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
   password: z.string().min(6).optional(),
-  phone: z.string().optional(),
+  phone: requiredPhone,
   organization_id: uuid.nullable().optional(),
 });
 export const updateUserSchema = z.object({
   name: z.string().min(1).optional(),
-  phone: z.string().nullable().optional(),
+  phone: nullableOptionalPhone,
   is_active: z.boolean().optional(),
   organization_id: uuid.nullable().optional(),
   password: z.string().min(6).optional(),
@@ -64,7 +81,7 @@ export const updateUserSchema = z.object({
 const bulkUserRowSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
-  phone: z.string().optional(),
+  phone: optionalPhone,
 });
 export const bulkCreateUsersSchema = z.object({
   users: z.array(bulkUserRowSchema).min(1).max(500),
@@ -134,7 +151,7 @@ export const createOrganizationWithOwnerSchema = createOrganizationSchema.extend
       name: z.string().min(1).optional(),
       email: z.string().email().optional(),
       password: z.string().min(6).optional(),
-      phone: z.string().optional(),
+      phone: optionalPhone,
     })
     .refine((o) => !!(o.user_id || (o.name && o.email)), { message: 'Provide an existing user or a name and email' })
     .optional(),
@@ -145,9 +162,15 @@ export const addOrganizationMemberSchema = z.object({
   user_id: uuid.optional(),
   name: z.string().optional(),
   email: z.string().email().optional(),
-  phone: z.string().optional(),
+  phone: optionalPhone,
   role: z.enum(ORGANIZATION_MEMBER_ROLE).default('member'),
 }).refine((m) => !!(m.user_id || m.email || m.phone), { message: 'Provide a user, a phone, or an email' });
+// Bulk-add several existing users to an org in one request (multi-select picker).
+// Invite-by-phone/email creation stays on the single endpoint; this only takes ids.
+export const bulkAddOrganizationMembersSchema = z.object({
+  user_ids: z.array(uuid).min(1).max(200),
+  role: z.enum(ORGANIZATION_MEMBER_ROLE).default('member'),
+});
 export const updateOrganizationMemberSchema = z.object({
   role: z.enum(ORGANIZATION_MEMBER_ROLE).optional(),
   status: z.enum(['pending', 'active', 'past', 'rejected'] as const).optional(),
@@ -158,7 +181,8 @@ export const createChampionshipSchema = z.object({
   name: z.string().min(1),
   slug: z.string().min(1).regex(/^[a-z0-9-]+$/, 'lowercase letters, numbers, hyphens only'),
   description: z.string().optional(),
-  venue: z.string().optional(),
+  // The host city is required — it doubles as the championship's default venue.
+  venue: z.string().min(1, 'Host city is required'),
   start_date: z.coerce.date(),
   end_date: z.coerce.date(),
   status: z.enum(CHAMPIONSHIP_STATUS).optional(),
@@ -248,6 +272,10 @@ export const reviewEnrollmentSchema = z.object({
   rejection_note: z.string().optional(),
 });
 export const assignRoleSchema = z.object({ user_id: uuid, role_id: uuid });
+// Bulk-assign one championship role to several users at once (multi-select picker).
+export const bulkAssignRoleSchema = z.object({ user_ids: z.array(uuid).min(1).max(200), role_id: uuid });
+// Bulk-assign several users as championship officials at once (multi-select picker).
+export const bulkAssignOfficialsSchema = z.object({ user_ids: z.array(uuid).min(1).max(200), notes: z.string().optional() });
 
 // ---------- Phase 3b: host → organization invitations ----------
 // Host invites an organization by picking it from the master list; the request
@@ -283,12 +311,19 @@ export const createTeamSchema = z.object({
   tournament_discipline_id: uuid.optional(),
 });
 // Enter an existing roster into one or more championships at once. Each entry
-// names an approved enrollment + a discipline draw matching the team's sport.
+// names an approved enrollment; the discipline draw is OPTIONAL — a team can enter
+// a championship first and pick its discipline afterwards (chosen via
+// updateTeamEntrySchema). When given, the draw must match the team's sport.
 export const enterChampionshipsSchema = z.object({
   entries: z.array(z.object({
     championship_organization_id: uuid,
-    tournament_discipline_id: uuid,
+    tournament_discipline_id: uuid.nullable().optional(),
   })).min(1).max(50),
+});
+// Set (or change) the discipline draw of an existing championship entry — the
+// "choose your discipline once you're in" step. Pass null to clear it again.
+export const updateTeamEntrySchema = z.object({
+  tournament_discipline_id: uuid.nullable(),
 });
 export const updateTeamSchema = z.object({
   name: z.string().min(1).optional(),
@@ -370,6 +405,14 @@ export const fixtureResultSchema = z.object({
   notes: z.string().optional(),
 });
 
+// Championship points awarded per side for a single result, entered by the organiser
+// when the discipline uses the "custom" point system. Either side may be null/blank
+// until set; the standings engine sums whatever is present.
+export const fixturePointsSchema = z.object({
+  home_points: z.number().int().min(0).nullable().optional(),
+  away_points: z.number().int().min(0).nullable().optional(),
+});
+
 // Per-match awards entered by the scorer: free-text award name + a recipient who is
 // a player on one of the two competing teams. Saved with replace-all semantics.
 export const fixtureAwardSchema = z.object({
@@ -428,10 +471,18 @@ export const medalRuleSchema = z.object({
   participation,
 });
 
+// Custom points: no auto formula. The organiser awards championship points to each
+// side by hand on the Results page after a match; the engine simply sums them.
+export const customRuleSchema = z.object({
+  scheme: z.literal('custom'),
+  participation,
+});
+
 export const standingsRuleSchema = z.discriminatedUnion('scheme', [
   leaguePointsRuleSchema,
   placementRuleSchema,
   medalRuleSchema,
+  customRuleSchema,
 ]);
 export type StandingsRule = z.infer<typeof standingsRuleSchema>;
 

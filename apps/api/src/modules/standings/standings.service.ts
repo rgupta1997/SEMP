@@ -1,4 +1,4 @@
-import { DEFAULT_STANDINGS_RULE, standingsRuleSchema, type StandingsRule, type StandingsAggScope, type StandingsTiebreaker } from '@semp/shared';
+import { DEFAULT_STANDINGS_RULE, standingsRuleSchema, type StandingsRule, type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { accumulate, rankBy, runScheme, type OrgTally, type SchemeFixture } from './domain/schemes.js';
 
@@ -16,6 +16,30 @@ const bucketKey = (scope: StandingsAggScope, id: string | null) => `${scope}|${i
 function parseRule(config: unknown): StandingsRule {
   const parsed = standingsRuleSchema.safeParse(config);
   return parsed.success ? parsed.data : DEFAULT_STANDINGS_RULE;
+}
+
+// Resolve the effective scoring scheme for a single draw (most-specific wins:
+// discipline → format → championship default → built-in default). Shared with the
+// result-entry paths so they can tell whether a draw expects hand-entered custom
+// points (and remind the organiser when one is missing).
+export async function resolveSchemeForDraw(
+  prisma: Prisma, championshipId: string, disciplineId: string | null, formatId: string | null,
+): Promise<StandingsScheme> {
+  const ruleRows = await prisma.standings_rules.findMany({ where: { championship_id: championshipId } });
+  const byDiscipline = new Map<string, StandingsRule>();
+  const byFormat = new Map<string, StandingsRule>();
+  let championshipRule: StandingsRule | undefined;
+  for (const r of ruleRows) {
+    const rule = parseRule(r.config);
+    if (r.scope_type === 'discipline' && r.scope_id) byDiscipline.set(r.scope_id, rule);
+    else if (r.scope_type === 'format' && r.scope_id) byFormat.set(r.scope_id, rule);
+    else if (r.scope_type === 'championship') championshipRule = rule;
+  }
+  const rule =
+    (disciplineId ? byDiscipline.get(disciplineId) : undefined) ??
+    (formatId ? byFormat.get(formatId) : undefined) ??
+    championshipRule ?? DEFAULT_STANDINGS_RULE;
+  return rule.scheme;
 }
 
 // Rebuild every standings table for a championship from its completed fixtures.
@@ -59,7 +83,7 @@ export async function recomputeStandings(prisma: Prisma, championshipId: string)
         where: { status: 'completed' },
         select: {
           round: true, home_team_id: true, away_team_id: true,
-          home_score: true, away_score: true, winner_team_id: true,
+          home_score: true, away_score: true, winner_team_id: true, live_state: true,
           teams_fixtures_home_team_idToteams: { select: { organization_id: true } },
           teams_fixtures_away_team_idToteams: { select: { organization_id: true } },
         },
@@ -84,17 +108,22 @@ export async function recomputeStandings(prisma: Prisma, championshipId: string)
       (effectiveFormatId ? byFormat.get(effectiveFormatId) : undefined) ??
       defaultRule;
 
-    const fixtures: SchemeFixture[] = d.fixtures.map((f) => ({
-      status: 'completed',
-      round: f.round,
-      home_team_id: f.home_team_id,
-      away_team_id: f.away_team_id,
-      home_org_id: f.teams_fixtures_home_team_idToteams?.organization_id ?? null,
-      away_org_id: f.teams_fixtures_away_team_idToteams?.organization_id ?? null,
-      home_score: f.home_score,
-      away_score: f.away_score,
-      winner_team_id: f.winner_team_id,
-    }));
+    const fixtures: SchemeFixture[] = d.fixtures.map((f) => {
+      const cp = (f.live_state as any)?.custom_points ?? null;
+      return {
+        status: 'completed',
+        round: f.round,
+        home_team_id: f.home_team_id,
+        away_team_id: f.away_team_id,
+        home_org_id: f.teams_fixtures_home_team_idToteams?.organization_id ?? null,
+        away_org_id: f.teams_fixtures_away_team_idToteams?.organization_id ?? null,
+        home_score: f.home_score,
+        away_score: f.away_score,
+        winner_team_id: f.winner_team_id,
+        home_points: typeof cp?.home === 'number' ? cp.home : null,
+        away_points: typeof cp?.away === 'number' ? cp.away : null,
+      };
+    });
 
     // A discipline is "decided" once its final has been played, or once no fixtures
     // remain to be played. Until then placement/medal positions are withheld.

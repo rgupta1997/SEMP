@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createFixtureSchema, fixtureAwardsSchema, fixtureResultSchema, generateFixturesSchema, updateFixtureSchema } from '@semp/shared';
+import { createFixtureSchema, fixtureAwardsSchema, fixturePointsSchema, fixtureResultSchema, generateFixturesSchema, updateFixtureSchema } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { makeCrudRouter } from '../../http/crud.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -7,7 +7,27 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { generateFixtures, type TeamRef } from './domain/generators/index.js';
-import { recomputeStandingsForFixture } from '../standings/standings.service.js';
+import { recomputeStandingsForFixture, resolveSchemeForDraw } from '../standings/standings.service.js';
+import { createNotification } from '../notifications/audience.js';
+
+// A match can only be recorded once its championship is under way. Resolves the
+// owning championship from the fixture's draw and blocks scoring while it's still
+// in draft or registration — nothing should be played before the event starts.
+async function assertChampionshipStarted(prisma: Prisma, fixtureId: string): Promise<void> {
+  const fx = await prisma.fixtures.findUnique({
+    where: { id: fixtureId },
+    select: {
+      tournament_disciplines: {
+        select: { tournament_sports: { select: { tournaments: { select: { championships: { select: { status: true } } } } } } },
+      },
+    },
+  });
+  if (!fx) throw new NotFoundError('Fixture');
+  const status = fx.tournament_disciplines?.tournament_sports?.tournaments?.championships?.status;
+  if (status === 'draft' || status === 'registration_open') {
+    throw new BusinessRuleError('This championship hasn’t started yet — matches can be recorded once it’s set to ongoing.');
+  }
+}
 
 // Rebuild standings after a fixture's score/status changes. Best-effort: the result
 // is already committed, so a recompute hiccup must not fail the scorer's request.
@@ -16,6 +36,57 @@ async function refreshStandings(prisma: Prisma, fixtureId: string): Promise<void
     await recomputeStandingsForFixture(prisma, fixtureId);
   } catch (err) {
     console.error(`[standings] recompute failed for fixture ${fixtureId}:`, err);
+  }
+}
+
+// When a completed match belongs to a draw scored by the "custom" point system and
+// has no hand-entered points yet, nudge the championship's organiser(s) to add them.
+// Direct (target_user_id) notifications so only organisers are pinged. Best-effort —
+// never fails the result write.
+async function remindCustomPointsIfNeeded(prisma: Prisma, fixtureId: string, senderId: string): Promise<void> {
+  try {
+    const fx = await prisma.fixtures.findUnique({
+      where: { id: fixtureId },
+      select: {
+        status: true, live_state: true,
+        tournament_disciplines: {
+          select: {
+            discipline_id: true, format_id: true,
+            disciplines: { select: { name: true } },
+            tournament_sports: {
+              select: { format_id: true, sports: { select: { name: true } }, tournaments: { select: { championship_id: true } } },
+            },
+          },
+        },
+      },
+    });
+    if (!fx || fx.status !== 'completed') return;
+    const td = fx.tournament_disciplines;
+    const championshipId = td?.tournament_sports?.tournaments?.championship_id;
+    if (!championshipId) return;
+    const cp = (fx.live_state as any)?.custom_points;
+    if (cp && (typeof cp.home === 'number' || typeof cp.away === 'number')) return; // points already entered
+    const formatId = td?.format_id ?? td?.tournament_sports?.format_id ?? null;
+    const scheme = await resolveSchemeForDraw(prisma, championshipId, td?.discipline_id ?? null, formatId);
+    if (scheme !== 'custom') return;
+    const organiserRole = await prisma.roles.findUnique({ where: { name: 'Organiser' }, select: { id: true } });
+    if (!organiserRole) return;
+    const organisers = await prisma.user_championship_roles.findMany({
+      where: { championship_id: championshipId, role_id: organiserRole.id },
+      select: { user_id: true },
+    });
+    const label = [td?.tournament_sports?.sports?.name, td?.disciplines?.name].filter(Boolean).join(' · ') || 'a discipline';
+    await Promise.all(organisers.map((o) => createNotification(prisma, {
+      championship_id: championshipId,
+      target_user_id: o.user_id,
+      sender_id: senderId,
+      type: 'manual',
+      audience: 'all', // ignored for direct notifications — target_user_id drives visibility
+      title: 'A result needs championship points',
+      body: `A completed ${label} match still needs custom points. Open it on the Results page to award them.`,
+    })));
+  } catch (err) {
+    console.error(`[points] custom-points reminder failed for fixture ${fixtureId}:`, err);
   }
 }
 
@@ -116,6 +187,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   // typed client so standings stay correct; the JSON blobs go via raw SQL (no
   // client regeneration needed). Only the assigned official / organiser / super.
   router.patch('/fixtures/:id/live', guards.fixtureScorer, asyncHandler(async (req, res) => {
+    await assertChampionshipStarted(prisma, req.params.id);
     const b = req.body ?? {};
     // Only touch fields that were actually sent, so a status-only change (e.g.
     // walkover/postpone/cancel) doesn't clobber the score or live snapshot.
@@ -141,9 +213,11 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     let persisted = true;
     if ('live_state' in b || 'live_log' in b) {
       try {
+        // Preserve any organiser-entered custom_points — live scoring never sends
+        // them, so keep the existing value rather than wiping it.
         await prisma.$executeRaw`
           update fixtures
-          set live_state = ${JSON.stringify(b.live_state ?? {})}::jsonb,
+          set live_state = jsonb_set(${JSON.stringify(b.live_state ?? {})}::jsonb, '{custom_points}', coalesce(live_state -> 'custom_points', 'null'::jsonb), true),
               live_log = ${JSON.stringify(b.live_log ?? [])}::jsonb,
               updated_at = now()
           where id = ${req.params.id}::uuid`;
@@ -151,6 +225,8 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         persisted = false; // live_* columns not migrated yet — headline still saved
       }
     }
+    // Completing a custom-points match with no points yet → remind the organiser.
+    if (b.status === 'completed') await remindCustomPointsIfNeeded(prisma, req.params.id, req.user!.id);
     res.json({ ok: true, persisted });
   }));
 
@@ -174,7 +250,13 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       },
     });
     if (!fixture) throw new NotFoundError('Fixture');
-    res.json(fixture);
+    // The effective point system for this draw — drives the custom-points input on
+    // the console (shown only when the organiser chose "custom").
+    const tdx = fixture.tournament_disciplines;
+    const champId = tdx?.tournament_sports?.tournaments?.championships?.id;
+    const formatId = tdx?.format_id ?? tdx?.tournament_sports?.format_id ?? null;
+    const point_scheme = champId ? await resolveSchemeForDraw(prisma, champId, tdx?.discipline_id ?? null, formatId) : null;
+    res.json({ ...fixture, point_scheme });
   }));
 
   // ---- Awards (player-of-the-match etc.) ----
@@ -214,6 +296,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   }));
 
   router.patch('/fixtures/:id/result', guards.fixtureScorer, validateBody(fixtureResultSchema), asyncHandler(async (req, res) => {
+    await assertChampionshipStarted(prisma, req.params.id);
     const fixture = await prisma.fixtures.findUnique({ where: { id: req.params.id } });
     if (!fixture) throw new NotFoundError('Fixture');
 
@@ -241,7 +324,26 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       },
     });
     await refreshStandings(prisma, req.params.id);
+    if ((req.body.status ?? 'completed') === 'completed') await remindCustomPointsIfNeeded(prisma, req.params.id, req.user!.id);
     res.json(updated);
+  }));
+
+  // Award custom championship points for a result (the "custom" point system). Stored
+  // on the fixture's live_state JSON (no migration needed), merged in so live-scoring
+  // keys stay intact, then standings recompute.
+  router.patch('/fixtures/:id/points', guards.fixtureScorer, validateBody(fixturePointsSchema), asyncHandler(async (req, res) => {
+    await assertChampionshipStarted(prisma, req.params.id);
+    const fx = await prisma.fixtures.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!fx) throw new NotFoundError('Fixture');
+    const home = req.body.home_points ?? null;
+    const away = req.body.away_points ?? null;
+    await prisma.$executeRaw`
+      update fixtures
+      set live_state = jsonb_set(coalesce(live_state, '{}'::jsonb), '{custom_points}', ${JSON.stringify({ home, away })}::jsonb, true),
+          updated_at = now()
+      where id = ${req.params.id}::uuid`;
+    await refreshStandings(prisma, req.params.id);
+    res.json({ ok: true, home_points: home, away_points: away });
   }));
 
   // Plain CRUD for manual fixture edits / scheduling — writes require the organiser

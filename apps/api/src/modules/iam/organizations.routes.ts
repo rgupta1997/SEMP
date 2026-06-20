@@ -1,13 +1,12 @@
 import { Router } from 'express';
 import {
-  addOrganizationMemberSchema, createOrganizationWithOwnerSchema,
+  addOrganizationMemberSchema, bulkAddOrganizationMembersSchema, createOrganizationWithOwnerSchema,
   updateOrganizationMemberSchema, updateOrganizationSchema,
 } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
-import { requireSuperAdmin } from '../../http/middleware/auth.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { findUserByPhone, hashProvisionedPassword } from './users.helpers.js';
 import { createNotification } from '../notifications/audience.js';
@@ -27,8 +26,35 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     throw new ForbiddenError('Only an organization owner/admin can do this');
   });
 
-  router.get('/', asyncHandler(async (_req, res) => {
-    const rows = await prisma.organizations.findMany({ orderBy: { name: 'asc' } });
+  // super OR owner of the :id org. Deleting an organization is owner-only — admins
+  // manage day-to-day, but tearing down the whole org is the owner's call.
+  const orgOwner = asyncHandler(async (req, _res, next) => {
+    const u = req.user!;
+    if (u.isSuperAdmin) return next();
+    if (await guards.orgRole(u.id, req.params.id, ['owner'])) return next();
+    throw new ForbiddenError('Only the organization owner can delete it');
+  });
+
+  // List/search the master org list. `q` matches name/short_name/city/code (used by
+  // the invite picker's server-side typeahead); `limit` caps the result count so the
+  // picker can show just the first handful by default. No params → the full list.
+  router.get('/', asyncHandler(async (req, res) => {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const take = req.query.limit ? Math.min(Math.max(Number(req.query.limit) || 0, 0), 100) : undefined;
+    const rows = await prisma.organizations.findMany({
+      where: q
+        ? {
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { short_name: { contains: q, mode: 'insensitive' } },
+              { city: { contains: q, mode: 'insensitive' } },
+              { code: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : undefined,
+      orderBy: { name: 'asc' },
+      ...(take ? { take } : {}),
+    });
     res.json(rows);
   }));
 
@@ -102,8 +128,48 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     res.json(row);
   }));
 
-  router.delete('/:id', requireSuperAdmin, asyncHandler(async (req, res) => {
-    await prisma.organizations.delete({ where: { id: req.params.id } });
+  // Delete an organization (owner-only). Most of the org's data RESTRICTs the delete
+  // (teams, users' primary-org pointer, championship entries/enrollments/invitations),
+  // so we clear it in one transaction; members + standings cascade on their own.
+  // Completed/scored matches are protected — those results must be removed first, even
+  // with cascade — and a non-empty org needs an explicit ?cascade=true confirmation.
+  router.delete('/:id', orgOwner, asyncHandler(async (req, res) => {
+    const orgId = req.params.id;
+    const org = await prisma.organizations.findUnique({ where: { id: orgId }, select: { id: true } });
+    if (!org) throw new NotFoundError('Organization');
+    const cascade = req.query.cascade === 'true' || req.query.cascade === '1';
+
+    const teams = await prisma.teams.findMany({ where: { organization_id: orgId }, select: { id: true } });
+    const teamIds = teams.map((t) => t.id);
+    const fixtureWhere = teamIds.length
+      ? { OR: [{ home_team_id: { in: teamIds } }, { away_team_id: { in: teamIds } }, { winner_team_id: { in: teamIds } }] }
+      : null;
+
+    const [entryCount, enrollCount, playedCount] = await Promise.all([
+      prisma.team_entries.count({ where: { organization_id: orgId } }),
+      prisma.championship_organizations.count({ where: { organization_id: orgId } }),
+      fixtureWhere
+        ? prisma.fixtures.count({ where: { AND: [fixtureWhere, { OR: [{ status: { in: ['completed', 'walkover', 'bye'] } }, { home_score: { not: null } }, { away_score: { not: null } }] }] } })
+        : Promise.resolve(0),
+    ]);
+    if (playedCount > 0) {
+      throw new BusinessRuleError('This organization has teams with completed or scored matches — those results must be removed before it can be deleted.');
+    }
+    if ((teamIds.length > 0 || entryCount > 0 || enrollCount > 0) && !cascade) {
+      throw new BusinessRuleError('This organization still has teams or championship entries — confirm removal to delete it along with them.');
+    }
+
+    await prisma.$transaction([
+      ...(fixtureWhere ? [prisma.fixtures.deleteMany({ where: fixtureWhere })] : []),
+      ...(teamIds.length ? [prisma.team_members.deleteMany({ where: { team_id: { in: teamIds } } })] : []),
+      prisma.team_entries.deleteMany({ where: { organization_id: orgId } }),
+      prisma.teams.deleteMany({ where: { organization_id: orgId } }),
+      prisma.championship_invitations.deleteMany({ where: { organization_id: orgId } }),
+      prisma.championship_organizations.deleteMany({ where: { organization_id: orgId } }),
+      // Clear the now-dangling primary-org pointer on any user (their memberships cascade).
+      prisma.users.updateMany({ where: { organization_id: orgId }, data: { organization_id: null } }),
+      prisma.organizations.delete({ where: { id: orgId } }),
+    ]);
     res.status(204).send();
   }));
 
@@ -195,11 +261,44 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     res.status(201).json({ ...member, poc_credentials: credentials });
   }));
 
+  // Bulk-add several already-registered users in one request (multi-select picker).
+  // Each id is upserted to an active membership with the given role; re-adding an
+  // existing member just refreshes their role. One round-trip instead of N.
+  router.post('/:id/members/bulk', orgAdmin, validateBody(bulkAddOrganizationMembersSchema), asyncHandler(async (req, res) => {
+    const { user_ids, role } = req.body as { user_ids: string[]; role: string };
+    const orgId = req.params.id;
+    const members = await prisma.$transaction(
+      [...new Set(user_ids)].map((user_id) => prisma.organization_members.upsert({
+        where: { user_id_organization_id: { user_id, organization_id: orgId } },
+        update: { role, status: 'active' },
+        create: { user_id, organization_id: orgId, role },
+        include: { users: { select: { id: true, name: true, email: true, phone: true } } },
+      })),
+    );
+    res.status(201).json(members);
+  }));
+
+  // An org must always keep at least one active owner/admin. Throws if the given
+  // member is the last one and the change/removal would leave none — so an owner
+  // can't demote, deactivate or remove themselves into an unmanageable org.
+  async function assertNotLastAdmin(orgId: string, memberId: string): Promise<void> {
+    const others = await prisma.organization_members.count({
+      where: { organization_id: orgId, role: { in: ['owner', 'admin'] }, status: 'active', id: { not: memberId } },
+    });
+    if (others === 0) throw new BusinessRuleError('This is the organization’s only owner/admin — promote another member to owner first.');
+  }
+
   router.patch('/:id/members/:memberId', orgAdmin, validateBody(updateOrganizationMemberSchema), asyncHandler(async (req, res) => {
     const member = await prisma.organization_members.findFirst({
       where: { id: req.params.memberId, organization_id: req.params.id },
     });
     if (!member) throw new NotFoundError('Member');
+    const isAdmin = ['owner', 'admin'].includes(member.role);
+    const losesAdmin = isAdmin && (
+      (req.body.role !== undefined && !['owner', 'admin'].includes(req.body.role)) ||
+      (req.body.status !== undefined && req.body.status !== 'active')
+    );
+    if (losesAdmin) await assertNotLastAdmin(req.params.id, member.id);
     const updated = await prisma.organization_members.update({
       where: { id: member.id },
       data: req.body,
@@ -209,6 +308,11 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   }));
 
   router.delete('/:id/members/:memberId', orgAdmin, asyncHandler(async (req, res) => {
+    const member = await prisma.organization_members.findFirst({
+      where: { id: req.params.memberId, organization_id: req.params.id },
+      select: { id: true, role: true },
+    });
+    if (member && ['owner', 'admin'].includes(member.role)) await assertNotLastAdmin(req.params.id, member.id);
     await prisma.organization_members.deleteMany({ where: { id: req.params.memberId, organization_id: req.params.id } });
     res.status(204).send();
   }));

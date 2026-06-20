@@ -24,6 +24,13 @@ interface UserFormModalProps {
   onSubmit: (body: UserFormBody) => Promise<unknown>;
 }
 
+// A valid mobile is 10 digits (optionally a country code), matching the phone
+// lookup which keys off the last 10 digits.
+function isValidPhone(phone: string): boolean {
+  const digits = phone.replace(/\D/g, '');
+  return digits.length >= 10 && digits.length <= 15;
+}
+
 // Readable random password for provisioned logins.
 function generatePassword(): string {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -55,10 +62,12 @@ export function UserFormModal({
     setError(null);
     if (!name.trim()) { setError('Name is required'); return; }
     if (!isEdit && !email.trim()) { setError('Email is required'); return; }
+    if (!phone.trim()) { setError('Phone number is required'); return; }
+    if (!isValidPhone(phone)) { setError('Enter a valid mobile number (at least 10 digits)'); return; }
     const body: UserFormBody = {
       name: name.trim(),
       email: email.trim(),
-      phone: phone.trim() || undefined,
+      phone: phone.trim(),
     };
     if (password) body.password = password;
     if (lockInstitutionId) body.organization_id = lockInstitutionId;
@@ -91,7 +100,7 @@ export function UserFormModal({
     <Modal title={title ?? (isEdit ? 'Edit user' : 'Add user')} onClose={onClose}>
       <Field label="Full name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rohan Kulkarni" /></Field>
       <Field label="Email"><Input type="email" value={email} disabled={isEdit} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" /></Field>
-      <Field label="Phone"><Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Optional" /></Field>
+      <Field label="Phone" hint="Required — 10-digit mobile number"><Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit mobile number" /></Field>
       {!isEdit && <PhoneLookupNotice phone={phone} />}
       {showInstitution && (
         <Field label="Organization">

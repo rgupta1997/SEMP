@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createChampionshipSchema, updateChampionshipSchema, updateChampionshipStatusSchema, type ChampionshipStatus } from '@semp/shared';
+import { bulkAssignOfficialsSchema, createChampionshipSchema, updateChampionshipSchema, updateChampionshipStatusSchema, type ChampionshipStatus } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
@@ -98,12 +98,12 @@ export function makeEventsRouter(prisma: Prisma): Router {
       roles.get(id)!.add(role);
     };
 
-    const [orgRole, offRole] = await Promise.all([
+    // One round-trip, not two: the role lookups don't depend on the data queries, so
+    // fire all six together rather than awaiting the roles first (each sequential
+    // await is a full network round-trip to the remote pooler — ~700ms each).
+    const [orgRole, offRole, championshipRoleRows, officialRows, memberRows, enrolledRows] = await Promise.all([
       prisma.roles.findUnique({ where: { name: 'Organiser' }, select: { id: true } }),
       prisma.roles.findUnique({ where: { name: 'Official' }, select: { id: true } }),
-    ]);
-
-    const [championshipRoleRows, officialRows, memberRows, enrolledRows] = await Promise.all([
       prisma.user_championship_roles.findMany({ where: { user_id: userId }, select: { championship_id: true, role_id: true } }),
       prisma.championship_officials.findMany({ where: { user_id: userId, is_active: true }, select: { championship_id: true } }),
       prisma.team_members.findMany({ where: { user_id: userId, is_active: true }, select: { teams: { select: { team_entries: { select: { championship_id: true } } } } } }),
@@ -138,13 +138,26 @@ export function makeEventsRouter(prisma: Prisma): Router {
     res.json(championship);
   }));
 
-  // CREATE championship — any authenticated user may host. Creator is auto-assigned Organiser.
+  // CREATE championship — any authenticated user may host. Creator is auto-assigned
+  // Organiser, and a default season (named after the championship) is created so the
+  // organiser can jump straight to adding sports — they never have to make a season
+  // by hand (they can still rename/add more on the Seasons tab).
   router.post('/', validateBody(createChampionshipSchema), asyncHandler(async (req, res) => {
     const championship = await prisma.championships.create({ data: req.body });
     const organiserRole = await prisma.roles.findUnique({ where: { name: 'Organiser' } });
     if (organiserRole) {
       await prisma.user_championship_roles.create({
         data: { championship_id: championship.id, user_id: req.user!.id, role_id: organiserRole.id },
+      });
+    }
+    await prisma.tournaments.create({
+      data: { championship_id: championship.id, name: championship.name, status: 'active' },
+    });
+    // Seed a default venue from the host city so disciplines have a venue to assign
+    // right away (the organiser can rename it or add more on the Venues tab).
+    if (championship.venue) {
+      await prisma.venues.create({
+        data: { championship_id: championship.id, name: championship.venue, city: championship.venue },
       });
     }
     res.status(201).json(championship);
@@ -261,6 +274,15 @@ export function makeEventsRouter(prisma: Prisma): Router {
       home_score: f.home_score,
       away_score: f.away_score,
       winner_team_id: f.winner_team_id,
+      // Raw FK / position fields so the Schedule "Fixtures" view (DrawCard, bracket,
+      // grid, fixture editor) can render and edit straight from this one
+      // championship-wide list instead of a per-draw request each.
+      home_team_id: f.home_team_id,
+      away_team_id: f.away_team_id,
+      venue_ground_id: f.venue_ground_id,
+      official_id: f.official_id,
+      pool_number: f.pool_number,
+      bracket_position: f.bracket_position,
       ground: f.venue_grounds ? { id: f.venue_grounds.id, name: f.venue_grounds.name, venue: f.venue_grounds.venues?.name ?? null } : null,
       sport: f.tournament_disciplines?.tournament_sports?.sports?.name ?? null,
       sport_icon: f.tournament_disciplines?.tournament_sports?.sports?.icon ?? null,
@@ -286,42 +308,63 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // the materialized `standings` table rather than recomputing on every request.
 
   // -------------------------------------------------------------------------
-  // EVENT PARTICIPANTS - users on teams in this championship (scoped view)
+  // EVENT PARTICIPANTS - organizations → teams → players for this championship.
+  // Every APPROVED organization appears (even before it has created a team), and
+  // every entered team appears (even before it has players) so the host can see who
+  // has joined and who still needs to build a squad. Phones are masked for outsiders.
   // -------------------------------------------------------------------------
   router.get('/:id/participants', asyncHandler(async (req, res) => {
     const insider = req.user!.isSuperAdmin || await isChampionshipInsider(prisma, req.user!.id, req.params.id);
-    const teams = await prisma.teams.findMany({
-      where: { team_entries: { some: { championship_id: req.params.id } } },
-      include: {
-        team_members: {
-          include: { users: { select: { id: true, name: true, email: true, phone: true, account_type: true } } },
-        },
-        organizations: { select: { id: true, name: true, short_name: true } },
-        sports: { select: { id: true, name: true, icon: true } },
-      },
-    });
+    const mask = (p?: string | null) => (insider ? (p ?? null) : maskPhone(p));
 
-    // Flatten to unique participants with their team info
-    const seen = new Map<string, any>();
+    const [teams, approvedOrgs] = await Promise.all([
+      prisma.teams.findMany({
+        where: { team_entries: { some: { championship_id: req.params.id } } },
+        include: {
+          team_members: { include: { users: { select: { id: true, name: true, email: true, phone: true } } } },
+          organizations: { select: { id: true, name: true, short_name: true } },
+          sports: { select: { id: true, name: true, icon: true } },
+        },
+      }),
+      prisma.championship_organizations.findMany({
+        where: { championship_id: req.params.id, status: 'approved' },
+        include: { organizations: { select: { id: true, name: true, short_name: true } } },
+      }),
+    ]);
+
+    type OrgBucket = { orgId: string; org: { id: string; name: string; short_name: string | null } | null; teams: Map<string, any>; players: Set<string> };
+    const orgs = new Map<string, OrgBucket>();
+    const ensureOrg = (org: { id: string; name: string; short_name: string | null } | null): OrgBucket => {
+      const orgId = org?.id ?? 'unaffiliated';
+      let bucket = orgs.get(orgId);
+      if (!bucket) { bucket = { orgId, org, teams: new Map(), players: new Set() }; orgs.set(orgId, bucket); }
+      return bucket;
+    };
+
+    // Seed every approved org so it shows even with no teams yet.
+    for (const ao of approvedOrgs) if (ao.organizations) ensureOrg(ao.organizations);
+
     for (const team of teams) {
-      for (const member of team.team_members) {
-        if (!member.users) continue;
-        const existing = seen.get(member.users.id);
-        if (existing) {
-          existing.teams.push({ team_id: team.id, team_name: team.name, sport: team.sports, role: member.role, jersey_number: member.jersey_number });
-        } else {
-          seen.set(member.users.id, {
-            ...member.users,
-            organization: team.organizations,
-            teams: [{ team_id: team.id, team_name: team.name, sport: team.sports, role: member.role, jersey_number: member.jersey_number }],
-          });
-        }
-      }
+      const bucket = ensureOrg(team.organizations ?? null);
+      const players = team.team_members
+        .filter((m) => m.users)
+        .map((m) => {
+          bucket.players.add(m.users!.id);
+          return { id: m.users!.id, name: m.users!.name, email: m.users!.email, phone: mask(m.users!.phone), role: m.role, jersey_number: m.jersey_number };
+        });
+      bucket.teams.set(team.id, { team_id: team.id, team_name: team.name, sport: team.sports, players });
     }
 
-    const participants = [...seen.values()];
-    if (!insider) for (const p of participants) p.phone = maskPhone(p.phone);
-    res.json(participants);
+    const organizations = [...orgs.values()]
+      .map((b) => ({
+        orgId: b.orgId,
+        org: b.org,
+        playerCount: b.players.size,
+        teams: [...b.teams.values()].sort((a, b2) => a.team_name.localeCompare(b2.team_name)),
+      }))
+      .sort((a, b) => (a.org?.name ?? 'Unaffiliated').localeCompare(b.org?.name ?? 'Unaffiliated'));
+
+    res.json({ organizations });
   }));
 
   // -------------------------------------------------------------------------
@@ -373,6 +416,22 @@ export function makeEventsRouter(prisma: Prisma): Router {
       include: { users_championship_officials_user_idTousers: { select: { id: true, name: true, email: true } } },
     });
     res.status(201).json({ ...official, user: official.users_championship_officials_user_idTousers });
+  }));
+
+  // Bulk-assign several officials in one request (multi-select picker). Upserts each
+  // (championship, user): a previously-removed official is reactivated. One round-trip.
+  router.post('/:id/officials/bulk', ownChampionship, validateBody(bulkAssignOfficialsSchema), asyncHandler(async (req, res) => {
+    const { user_ids, notes } = req.body as { user_ids: string[]; notes?: string };
+    const championshipId = req.params.id;
+    const rows = await prisma.$transaction(
+      [...new Set(user_ids)].map((user_id) => prisma.championship_officials.upsert({
+        where: { championship_id_user_id: { championship_id: championshipId, user_id } },
+        update: { is_active: true, notes },
+        create: { championship_id: championshipId, user_id, assigned_by: req.user!.id, notes },
+        include: { users_championship_officials_user_idTousers: { select: { id: true, name: true, email: true } } },
+      })),
+    );
+    res.status(201).json(rows.map((o) => ({ ...o, user: o.users_championship_officials_user_idTousers })));
   }));
 
   // Remove official from championship

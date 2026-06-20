@@ -5,7 +5,7 @@ import { useTableControls } from '../lib/hooks';
 import { usePermissions } from '../lib/permissions';
 import type { FieldDef, ResourceConfig } from '../lib/resources';
 import { CHAMPIONSHIP_STATUS_OPTIONS } from '../lib/resources';
-import { BulkBar, Button, Checkbox, Field, Input, ListToolbar, Modal, Pagination, SearchInput, Select, Textarea, toast } from './ui';
+import { BulkBar, Button, Checkbox, confirmDialog, Field, Input, ListToolbar, Modal, Pagination, SearchInput, Select, Textarea, toast } from './ui';
 
 function RelationSelect({ field, value, onChange }: { field: FieldDef; value: string; onChange: (v: string) => void }) {
   const { path, labelKey, nullable } = field.relation!;
@@ -197,7 +197,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
       {selectable && (
         <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
           <Button size="sm" variant="danger" disabled={bulkDel.isPending}
-            onClick={() => { if (confirm(`Delete ${selected.size} ${config.title.toLowerCase()}?`)) bulkDel.mutate([...selected]); }}>
+            onClick={async () => { if (await confirmDialog({ title: 'Delete selected', confirmLabel: 'Delete', message: `Delete ${selected.size} ${config.title.toLowerCase()}?` })) bulkDel.mutate([...selected]); }}>
             Delete selected
           </Button>
         </BulkBar>
@@ -231,7 +231,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
                     </select>
                   )}
                   {!config.noEdit && canManage && <Button variant="ghost" onClick={() => setEditing(row)}>Edit</Button>}
-                  {!config.noDelete && canManage && <Button variant="danger" onClick={() => { if (confirm('Delete?')) del.mutate(row.id); }}>Del</Button>}
+                  {!config.noDelete && canManage && <Button variant="danger" onClick={async () => { if (await confirmDialog({ title: 'Delete', confirmLabel: 'Delete', message: 'Delete this item?' })) del.mutate(row.id); }}>Del</Button>}
                   {!canManage && <span className="text-xs text-slate-400 dark:text-slate-500">—</span>}
                 </td>
               </tr>

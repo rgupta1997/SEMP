@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useApi, fmtDateRange } from '../../lib/hooks';
 import {
-  Avatar, BackButton, Badge, Card, CardBody, CardHeader, EmptyState, PageHeader, Spinner, StatCard, StatusBadge, Table, Tabs,
+  BackButton, Badge, Card, CardBody, CardHeader, EmptyState, PageHeader, Spinner, StatCard, StatusBadge, Tabs,
 } from '../../components/ui';
 import { MatchRow } from '../../components/participant/MatchRow';
 import { ChampionshipFixtures } from '../../components/participant/ChampionshipFixtures';
+import { ChampionshipParticipants } from '../../components/participant/ChampionshipParticipants';
+import { ChampionshipStandings } from '../../components/participant/ChampionshipStandings';
 import type { MatchSummary } from '../../components/participant/types';
 
 interface EventDetail {
@@ -27,8 +29,6 @@ interface EventDetail {
   }[];
 }
 
-const MEDAL = ['🥇', '🥈', '🥉'];
-
 export function ParticipantEventPage() {
   // Route is /profile/championships/:championshipId — must match the param name,
   // otherwise this is undefined and the fetch 404s ("Championship not available").
@@ -41,7 +41,7 @@ export function ParticipantEventPage() {
     return <EmptyState icon="◆" title="Championship not available" description="This championship doesn't exist or you didn't participate in it." />;
   }
 
-  const { championship, stats, teams, matches, standings } = data;
+  const { championship, stats, teams, matches } = data;
 
   return (
     <div className="space-y-5">
@@ -57,6 +57,7 @@ export function ParticipantEventPage() {
           { id: 'overview', label: 'Overview' },
           { id: 'teams', label: 'My teams', badge: <Badge tone="slate">{teams.length}</Badge> },
           { id: 'matches', label: 'My matches', badge: <Badge tone="slate">{matches.length}</Badge> },
+          { id: 'participants', label: 'Participants' },
           { id: 'schedule', label: 'Schedule' },
           { id: 'results', label: 'Results' },
           { id: 'standings', label: 'Standings' },
@@ -131,47 +132,13 @@ export function ParticipantEventPage() {
         )
       )}
 
+      {tab === 'participants' && championshipId && <ChampionshipParticipants championshipId={championshipId} />}
+
       {tab === 'schedule' && championshipId && <ChampionshipFixtures championshipId={championshipId} mode="schedule" />}
 
       {tab === 'results' && championshipId && <ChampionshipFixtures championshipId={championshipId} mode="results" />}
 
-      {tab === 'standings' && (
-        standings.length === 0 ? (
-          <EmptyState icon="🏆" title="No results yet" description="Standings populate as matches are completed." />
-        ) : (
-          <Table>
-            <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              <tr>
-                <th className="px-4 py-3">#</th>
-                <th className="px-4 py-3">Organization</th>
-                <th className="px-3 py-3 text-center">P</th>
-                <th className="px-3 py-3 text-center">W</th>
-                <th className="px-3 py-3 text-center">D</th>
-                <th className="px-3 py-3 text-center">L</th>
-                <th className="px-4 py-3 text-center">Pts</th>
-              </tr>
-            </thead>
-            <tbody>
-              {standings.map((r, i) => (
-                <tr key={r.organization_id} className="border-t border-slate-100 dark:border-slate-800">
-                  <td className="px-4 py-3 text-lg">{MEDAL[i] ?? <span className="font-bold text-slate-400 dark:text-slate-500">{i + 1}</span>}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <Avatar name={r.organization?.name} size={30} />
-                      <span className="font-medium text-slate-800 dark:text-slate-200">{r.organization?.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 text-center text-slate-600 dark:text-slate-300">{r.played}</td>
-                  <td className="px-3 py-3 text-center font-semibold text-emerald-600">{r.won}</td>
-                  <td className="px-3 py-3 text-center text-slate-500 dark:text-slate-400">{r.drawn}</td>
-                  <td className="px-3 py-3 text-center text-rose-500">{r.lost}</td>
-                  <td className="px-4 py-3 text-center"><Badge tone="brand">{r.points}</Badge></td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )
-      )}
+      {tab === 'standings' && championshipId && <ChampionshipStandings championshipId={championshipId} />}
     </div>
   );
 }

@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { ENTRY_TYPE, TOURNAMENT_DISCIPLINE_STATUS } from '@semp/shared';
 import { usePermissions } from '../../../lib/permissions';
-import { Badge, Button, Card, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge } from '../../../components/ui';
+import { Badge, Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge, toast } from '../../../components/ui';
 
 /* ----------------------------- Add sports modal ----------------------------- */
 // Tap sport tiles to select several at once; choose a fixture format for each,
@@ -21,7 +21,8 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
   const [error, setError] = useState<string | null>(null);
 
   const available = sports.filter((s) => !existingSportIds.has(s.id));
-  const defaultFormat = formats[0]?.id ?? '';
+  // Default new sports to Knockout (organisers can still pick another format below).
+  const defaultFormat = (formats.find((f) => f.name === 'Knockout') ?? formats[0])?.id ?? '';
 
   const toggle = (id: string) => setSelected((m) => {
     const next = { ...m };
@@ -31,6 +32,17 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
   const setFormat = (id: string, fid: string) => setSelected((m) => ({ ...m, [id]: fid }));
   const setAllFormats = (fid: string) => setSelected((m) => Object.fromEntries(Object.keys(m).map((id) => [id, fid])));
   const selectedIds = Object.keys(selected);
+
+  // The format picker lives below the sport grid (often below the fold). When the
+  // first sport is tapped, scroll it into view so organisers don't miss this step.
+  const formatSectionRef = useRef<HTMLDivElement>(null);
+  const hadSelection = useRef(false);
+  useEffect(() => {
+    if (selectedIds.length > 0 && !hadSelection.current) {
+      formatSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    hadSelection.current = selectedIds.length > 0;
+  }, [selectedIds.length]);
 
   const createSport = useApiMutation((body: any) => api('POST', '/sports', body), ['/sports']);
   // Add every selected sport in parallel, then refetch this season's sports once.
@@ -64,7 +76,23 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
   const sportIcon = (id: string) => sports.find((s) => s.id === id)?.icon;
 
   return (
-    <Modal title="Add sports" onClose={onClose} wide>
+    <Modal
+      title="Add sports"
+      onClose={onClose}
+      size="4xl"
+      footer={(
+        <>
+          {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-500 dark:text-slate-400">{selectedIds.length} selected</span>
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={onClose}>Cancel</Button>
+              <Button onClick={submit} disabled={selectedIds.length === 0 || addSports.isPending}>{addSports.isPending ? 'Adding…' : `Add ${selectedIds.length || ''} sport${selectedIds.length === 1 ? '' : 's'}`}</Button>
+            </div>
+          </div>
+        </>
+      )}
+    >
       <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Tap the sports this season will run, then choose a fixture format for each.</p>
 
       {sportsLoading ? (
@@ -106,7 +134,14 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
       )}
 
       {selectedIds.length > 0 && (
-        <div className="mt-5 space-y-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+        <div className="mt-3 flex items-center justify-center gap-1.5 rounded-lg bg-brand-50 px-3 py-2 text-xs font-medium text-brand-700 dark:bg-brand-500/15 dark:text-brand-300">
+          <span aria-hidden className="animate-bounce">↓</span>
+          Next: choose a fixture format for each selected sport below
+        </div>
+      )}
+
+      {selectedIds.length > 0 && (
+        <div ref={formatSectionRef} className="mt-5 space-y-2 border-t border-slate-100 pt-4 dark:border-slate-800">
           <div className="flex items-center justify-between gap-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Fixture format per sport</div>
             {selectedIds.length > 1 && (
@@ -131,14 +166,6 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
         </div>
       )}
 
-      {error && <p className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
-      <div className="mt-5 flex items-center justify-between">
-        <span className="text-sm text-slate-500 dark:text-slate-400">{selectedIds.length} selected</span>
-        <div className="flex gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={submit} disabled={selectedIds.length === 0 || addSports.isPending}>{addSports.isPending ? 'Adding…' : `Add ${selectedIds.length || ''} sport${selectedIds.length === 1 ? '' : 's'}`}</Button>
-        </div>
-      </div>
     </Modal>
   );
 }
@@ -146,24 +173,68 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
 /* ----------------------------- Add discipline modal ----------------------------- */
 const WHOLE = '__whole__';
 
+// Squad size is a property of the entry type, not a free-form number: an individual
+// entry is one competitor, doubles is a pair. `fixed` types can't be edited; team /
+// relay keep sensible starting squads the organiser can still adjust.
+const SQUAD_BY_ENTRY: Record<string, { min: number; max: number; fixed: boolean }> = {
+  individual: { min: 1, max: 1, fixed: true },
+  doubles: { min: 2, max: 2, fixed: true },
+  relay: { min: 4, max: 4, fixed: false },
+  team: { min: 1, max: 15, fixed: false },
+};
+
 // Tap discipline tiles to add several at once. Venue + fixture format are chosen
 // once and applied to all selected ("copy for all"). Master disciplines keep their
 // own entry type + squad; the "Whole sport" tile (always available, so individual
 // or single-discipline sports work too) takes its own entry type + squad.
-function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, onClose }: { tournamentSport: any; existing?: any[]; venues: any[]; formats: any[]; onClose: () => void }) {
+function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, drawsPath, onClose }: { tournamentSport: any; existing?: any[]; venues: any[]; formats: any[]; drawsPath: string; onClose: () => void }) {
   const qc = useQueryClient();
-  const tsPath = `/tournament-disciplines?tournament_sport_id=${tournamentSport.id}`;
   const disciplinesPath = `/disciplines?sport_id=${tournamentSport.sport_id}`;
   const { data: disciplines = [], isLoading: disciplinesLoading } = useApi<any[]>(disciplinesPath);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [venueId, setVenueId] = useState('');     // shared — applied to all
+  const [venueId, setVenueId] = useState(venues[0]?.id ?? '');     // default to the first venue when one exists
   const [formatId, setFormatId] = useState('');   // shared — applied to all ('' = inherit sport)
   const [wholeEntry, setWholeEntry] = useState('individual');
   const [wholeMin, setWholeMin] = useState('1');
   const [wholeMax, setWholeMax] = useState('1');
+  const wholeSquadFixed = SQUAD_BY_ENTRY[wholeEntry]?.fixed ?? false;
+  const onWholeEntryChange = (v: string) => {
+    setWholeEntry(v);
+    const s = SQUAD_BY_ENTRY[v];
+    if (s) { setWholeMin(String(s.min)); setWholeMax(String(s.max)); }
+  };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sportFormatName = formats.find((f) => f.id === tournamentSport.format_id)?.name;
+
+  // Inline "create a new discipline" — this modal is organiser-scoped, so the option
+  // is only ever shown to the organiser. The new discipline is added to this sport's
+  // catalogue and auto-selected so it can be added in the same action.
+  const [creatingDisc, setCreatingDisc] = useState(false);
+  const [dName, setDName] = useState('');
+  const [dEntry, setDEntry] = useState('team');
+  const [dMin, setDMin] = useState('1');
+  const [dMax, setDMax] = useState('15');
+  const dSquadFixed = SQUAD_BY_ENTRY[dEntry]?.fixed ?? false;
+  // Selecting an entry type resets the squad to that type's natural size.
+  const onDEntryChange = (v: string) => {
+    setDEntry(v);
+    const s = SQUAD_BY_ENTRY[v];
+    if (s) { setDMin(String(s.min)); setDMax(String(s.max)); }
+  };
+  const createDiscipline = useApiMutation((body: any) => api('POST', '/disciplines', body), [disciplinesPath]);
+  const addNewDiscipline = async () => {
+    setError(null);
+    if (!dName.trim()) { setError('Discipline name required'); return; }
+    const min = Number(dMin), max = Number(dMax);
+    if (min > max) { setError('Squad min cannot exceed max'); return; }
+    try {
+      const d: any = await createDiscipline.mutateAsync({ sport_id: tournamentSport.sport_id, name: dName.trim(), entry_type: dEntry, squad_min: min, squad_max: max });
+      await qc.invalidateQueries({ queryKey: [disciplinesPath] });
+      setSelected((s) => new Set(s).add(d.id));
+      setCreatingDisc(false); setDName(''); setDEntry('team'); setDMin('1'); setDMax('15');
+    } catch (e: any) { setError(e.message ?? 'Could not create discipline'); }
+  };
 
   // Disciplines already added to this sport can't be added again (whole-sport = null draw).
   const addedIds = useMemo(() => new Set(existing.map((d) => d.discipline_id ?? WHOLE)), [existing]);
@@ -187,7 +258,7 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, o
 
     setBusy(true);
     const results = await Promise.allSettled(items.map((it) => api('POST', '/tournament-disciplines', it.body)));
-    await qc.invalidateQueries({ queryKey: [tsPath] });
+    await qc.invalidateQueries({ queryKey: [drawsPath] });
     const dupes: string[] = [];
     const others: string[] = [];
     results.forEach((r, i) => {
@@ -234,8 +305,40 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, o
       {disciplinesLoading ? (
         <div className="mt-2 grid place-items-center py-4"><Spinner label="Loading disciplines…" /></div>
       ) : disciplines.length === 0 ? (
-        <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">No sub-disciplines defined for this sport — add a whole-sport discipline above.</p>
+        <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">No sub-disciplines defined for this sport — add a whole-sport discipline above, or create one below.</p>
       ) : null}
+
+      {creatingDisc ? (
+        <div className="mt-3 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">New discipline</span>
+            <button type="button" onClick={() => setCreatingDisc(false)} className="text-sm text-slate-500 hover:underline dark:text-slate-400">cancel</button>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-[1fr_130px_80px_80px_auto] sm:items-end">
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Name</span>
+              <Input value={dName} onChange={(e) => setDName(e.target.value)} placeholder="e.g. U-19, Women's" />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Entry</span>
+              <Select value={dEntry} onChange={(e) => onDEntryChange(e.target.value)} className="w-full">
+                {ENTRY_TYPE.map((t) => <option key={t} value={t}>{t}</option>)}
+              </Select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Min</span>
+              <Input type="number" min={1} value={dMin} disabled={dSquadFixed} onChange={(e) => setDMin(e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Max</span>
+              <Input type="number" min={1} value={dMax} disabled={dSquadFixed} onChange={(e) => setDMax(e.target.value)} />
+            </label>
+            <Button variant="outline" onClick={addNewDiscipline} disabled={createDiscipline.isPending}>{createDiscipline.isPending ? 'Adding…' : 'Create'}</Button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setCreatingDisc(true)} className="mt-2 text-sm font-medium text-brand-600 hover:underline dark:text-brand-300">+ Create a new discipline</button>
+      )}
 
       {ids.length > 0 && (
         <div className="mt-4 space-y-3 border-t border-slate-100 pt-4 dark:border-slate-800">
@@ -257,12 +360,12 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, o
           {wholeSelected && (
             <div className="grid grid-cols-3 gap-x-3">
               <Field label="Whole-sport entry">
-                <Select value={wholeEntry} onChange={(e) => setWholeEntry(e.target.value)}>
+                <Select value={wholeEntry} onChange={(e) => onWholeEntryChange(e.target.value)}>
                   {ENTRY_TYPE.map((t) => <option key={t} value={t}>{t}</option>)}
                 </Select>
               </Field>
-              <Field label="Squad min"><Input type="number" value={wholeMin} onChange={(e) => setWholeMin(e.target.value)} /></Field>
-              <Field label="Squad max"><Input type="number" value={wholeMax} onChange={(e) => setWholeMax(e.target.value)} /></Field>
+              <Field label="Squad min"><Input type="number" min={1} value={wholeMin} disabled={wholeSquadFixed} onChange={(e) => setWholeMin(e.target.value)} /></Field>
+              <Field label="Squad max"><Input type="number" min={1} value={wholeMax} disabled={wholeSquadFixed} onChange={(e) => setWholeMax(e.target.value)} /></Field>
             </div>
           )}
         </div>
@@ -291,6 +394,12 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
   const [status, setStatus] = useState(discipline.status ?? 'upcoming');
   const [error, setError] = useState<string | null>(null);
   const sportFormatName = formats.find((f) => f.id === sportFormatId)?.name;
+  const squadFixed = SQUAD_BY_ENTRY[entryType]?.fixed ?? false;
+  const onEntryTypeChange = (v: string) => {
+    setEntryType(v);
+    const s = SQUAD_BY_ENTRY[v];
+    if (s) { setSquadMin(String(s.min)); setSquadMax(String(s.max)); }
+  };
 
   const update = useApiMutation((body: any) => api('PATCH', `/tournament-disciplines/${discipline.id}`, body), [path], onClose);
   const remove = useApiMutation(() => api('DELETE', `/tournament-disciplines/${discipline.id}`), [path], onClose);
@@ -327,12 +436,12 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
       </Field>
       <div className="grid grid-cols-3 gap-x-3">
         <Field label="Entry type">
-          <Select value={entryType} onChange={(e) => setEntryType(e.target.value)}>
+          <Select value={entryType} onChange={(e) => onEntryTypeChange(e.target.value)}>
             {ENTRY_TYPE.map((t) => <option key={t} value={t}>{t}</option>)}
           </Select>
         </Field>
-        <Field label="Squad min"><Input type="number" value={squadMin} onChange={(e) => setSquadMin(e.target.value)} /></Field>
-        <Field label="Squad max"><Input type="number" value={squadMax} onChange={(e) => setSquadMax(e.target.value)} /></Field>
+        <Field label="Squad min"><Input type="number" min={1} value={squadMin} disabled={squadFixed} onChange={(e) => setSquadMin(e.target.value)} /></Field>
+        <Field label="Squad max"><Input type="number" min={1} value={squadMax} disabled={squadFixed} onChange={(e) => setSquadMax(e.target.value)} /></Field>
       </div>
       <Field label="Status">
         <Select value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -342,7 +451,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
       {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
       <div className="mt-2 flex items-center justify-between">
         <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
-          onClick={() => { if (confirm(`Delete the “${name}” discipline? Its fixtures and team entries will be removed. This cannot be undone.`)) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
+          onClick={async () => { if (await confirmDialog({ title: 'Delete discipline', confirmLabel: 'Delete discipline', message: `Delete the “${name}” discipline? Its unplayed fixtures and team entries will be removed. A discipline with completed or scored matches can’t be deleted.` })) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
           disabled={remove.isPending}>
           {remove.isPending ? 'Deleting…' : 'Delete discipline'}
         </Button>
@@ -381,7 +490,7 @@ function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportNam
       {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
       <div className="mt-2 flex items-center justify-between">
         <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
-          onClick={() => { if (confirm(`Remove “${sportName}” from this season? Its disciplines, fixtures and team entries will be removed. This cannot be undone.`)) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
+          onClick={async () => { if (await confirmDialog({ title: 'Remove sport', confirmLabel: 'Remove sport', message: `Remove “${sportName}” from this season? Its disciplines, unplayed fixtures and team entries will be removed. A sport with completed or scored matches can’t be removed.` })) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
           disabled={remove.isPending}>
           {remove.isPending ? 'Removing…' : 'Remove sport'}
         </Button>
@@ -395,15 +504,21 @@ function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportNam
 }
 
 /* ----------------------------- Tournament-sport card ----------------------------- */
-function SportRow({ ts, sportName, sportIcon, formatName, formats, venues }: { ts: any; sportName: string; sportIcon?: string; formatName: string; formats: any[]; venues: any[] }) {
+function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws, drawsPath }: { ts: any; sportName: string; sportIcon?: string; formatName: string; formats: any[]; venues: any[]; draws: any[]; drawsPath: string }) {
   const [open, setOpen] = useState(true);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [editingSport, setEditingSport] = useState(false);
-  const disciplinesPath = `/tournament-disciplines?tournament_sport_id=${ts.id}`;
-  const { data: disciplines = [] } = useApi<any[]>(disciplinesPath);
+  const disciplines = draws; // this sport's draws, sliced from the championship-wide fetch
   // Effective format for a discipline: its own override, else the sport's.
   const effectiveFormat = (d: any) => formats.find((f) => f.id === (d.format_id ?? ts.format_id))?.name;
+
+  // Inline delete (also available inside the edit modals) so organisers can remove
+  // a sport or discipline straight from the list without opening it first.
+  const removeSport = useApiMutation(() => api('DELETE', `/tournament-sports/${ts.id}`), [`/tournament-sports?tournament_id=${ts.tournament_id}`, drawsPath]);
+  const removeDiscipline = useApiMutation((id: string) => api('DELETE', `/tournament-disciplines/${id}`), [drawsPath]);
+  const confirmRemoveSport = async () => { if (await confirmDialog({ title: 'Remove sport', confirmLabel: 'Remove sport', message: `Remove “${sportName}” from this season? Its disciplines, unplayed fixtures and team entries will be removed. A sport with completed or scored matches can’t be removed.` })) removeSport.mutate(undefined, { onError: (e: any) => toast.error(e.message) }); };
+  const confirmRemoveDiscipline = async (d: any) => { const name = d.disciplines?.name ?? sportName; if (await confirmDialog({ title: 'Delete discipline', confirmLabel: 'Delete discipline', message: `Delete the “${name}” discipline? Its unplayed fixtures and team entries will be removed. A discipline with completed or scored matches can’t be deleted.` })) removeDiscipline.mutate(d.id, { onError: (e: any) => toast.error(e.message) }); };
 
   return (
     <Card className="p-4">
@@ -417,6 +532,7 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues }: { t
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="subtle" onClick={() => setEditingSport(true)}>Edit sport</Button>
+          <Button size="md" variant="ghost" className="text-rose-600 hover:bg-rose-50 dark:text-white dark:hover:bg-rose-500/20" disabled={removeSport.isPending} onClick={confirmRemoveSport}>{removeSport.isPending ? 'Removing…' : 'Remove'}</Button>
           <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)}>{open ? 'Hide' : 'Manage'} disciplines</Button>
         </div>
       </div>
@@ -434,27 +550,30 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues }: { t
               {disciplines.map((d) => {
                 const venue = venues.find((v) => v.id === d.venue_id);
                 return (
-                  <button key={d.id} type="button" onClick={() => setEditing(d)}
-                    className="group flex w-full items-center justify-between rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800">
-                    <div className="text-sm">
-                      <span className="font-medium text-slate-800 dark:text-slate-200">{d.disciplines?.name ?? sportName}</span>
-                      <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">{d.squad_min}-{d.squad_max} · {venue?.name ?? 'no venue'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {d.entry_type && <Badge tone="info">{d.entry_type}</Badge>}
-                      {effectiveFormat(d) && (
-                        <Badge tone={d.format_id ? 'violet' : 'slate'}>{effectiveFormat(d)}</Badge>
-                      )}
-                      <StatusBadge status={d.status} />
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700 transition group-hover:bg-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:group-hover:bg-brand-500/25">✎ Edit</span>
-                    </div>
-                  </button>
+                  <div key={d.id} className="group flex w-full items-center justify-between rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 transition hover:bg-slate-100 dark:hover:bg-slate-800">
+                    <button type="button" onClick={() => setEditing(d)} className="flex flex-1 items-center justify-between gap-2 text-left">
+                      <div className="text-sm">
+                        <span className="font-medium text-slate-800 dark:text-slate-200">{d.disciplines?.name ?? sportName}</span>
+                        <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">{d.squad_min}-{d.squad_max} · {venue?.name ?? 'no venue'}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {d.entry_type && <Badge tone="info">{d.entry_type}</Badge>}
+                        {effectiveFormat(d) && (
+                          <Badge tone={d.format_id ? 'violet' : 'slate'}>{effectiveFormat(d)}</Badge>
+                        )}
+                        <StatusBadge status={d.status} />
+                        <span className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700 transition group-hover:bg-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:group-hover:bg-brand-500/25">✎ Edit</span>
+                      </div>
+                    </button>
+                    <button type="button" title="Delete discipline" disabled={removeDiscipline.isPending} onClick={() => confirmRemoveDiscipline(d)}
+                      className="ml-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-base text-rose-600 transition hover:bg-rose-50 dark:text-white dark:hover:bg-rose-500/20">🗑</button>
+                  </div>
                 );
               })}
             </div>
           )}
-          {adding && <AddDisciplineModal tournamentSport={ts} existing={disciplines} venues={venues} formats={formats} onClose={() => setAdding(false)} />}
-          {editing && <EditDisciplineModal discipline={editing} sportName={sportName} sportFormatId={ts.format_id} venues={venues} formats={formats} path={disciplinesPath} onClose={() => setEditing(null)} />}
+          {adding && <AddDisciplineModal tournamentSport={ts} existing={disciplines} venues={venues} formats={formats} drawsPath={drawsPath} onClose={() => setAdding(false)} />}
+          {editing && <EditDisciplineModal discipline={editing} sportName={sportName} sportFormatId={ts.format_id} venues={venues} formats={formats} path={drawsPath} onClose={() => setEditing(null)} />}
         </div>
       )}
       {editingSport && <EditSportModal ts={ts} sportName={sportName} formats={formats} onClose={() => setEditingSport(false)} />}
@@ -472,6 +591,10 @@ export function SportsTab({ eventId }: { eventId: string }) {
   const { data: sports = [] } = useApi<any[]>('/sports');
   const { data: formats = [] } = useApi<any[]>('/tournament-formats');
   const { data: venues = [] } = useApi<any[]>(`/venues?championship_id=${eventId}`);
+  // All discipline draws for the championship in ONE request (instead of one query
+  // per sport row); each SportRow gets the slice for its own tournament_sport.
+  const drawsPath = `/championships/${eventId}/draws`;
+  const { data: allDraws = [] } = useApi<any[]>(drawsPath);
   const [adding, setAdding] = useState(false);
 
   if (tournaments.length === 0) {
@@ -500,7 +623,8 @@ export function SportsTab({ eventId }: { eventId: string }) {
       ) : (
         <div className="grid gap-3">
           {tsports.map((ts) => (
-            <SportRow key={ts.id} ts={ts} sportName={sportName(ts.sport_id)} sportIcon={sportIcon(ts.sport_id)} formatName={formatName(ts.format_id)} formats={formats} venues={venues} />
+            <SportRow key={ts.id} ts={ts} sportName={sportName(ts.sport_id)} sportIcon={sportIcon(ts.sport_id)} formatName={formatName(ts.format_id)} formats={formats} venues={venues}
+              draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} drawsPath={drawsPath} />
           ))}
         </div>
       )}

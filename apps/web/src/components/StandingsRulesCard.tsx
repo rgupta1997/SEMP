@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DEFAULT_STANDINGS_RULE, STANDINGS_SCHEME, type StandingsRule, type StandingsScheme } from '@semp/shared';
+import { DEFAULT_STANDINGS_RULE, type StandingsRule, type StandingsScheme } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
 import { Badge, Button, Card, CardBody, CardHeader, Select, Spinner, toast } from './ui';
@@ -14,15 +14,27 @@ interface RulesResponse { default: StandingsRule; rules: RuleRow[]; formats: Sco
 
 const SCHEME_LABEL: Record<StandingsScheme, string> = {
   league_points: 'League points (W/D/L)',
-  placement: 'Placement (knockout)',
+  placement: 'Knockout',
   medal: 'Medals (top 3)',
+  custom: 'Custom points',
 };
 
 const SCHEME_DEFAULTS: Record<StandingsScheme, StandingsRule> = {
   league_points: DEFAULT_STANDINGS_RULE,
   placement: { scheme: 'placement', points: { winner: 7, runner_up: 5, semi_finalist: 3, quarter_finalist: 1 }, participation: 0 },
   medal: { scheme: 'medal', gold: 5, silver: 3, bronze: 1, participation: 0 },
+  custom: { scheme: 'custom', participation: 0 },
 };
+
+// Organisers pick one of exactly two point systems. Legacy league/medal rules still
+// compute, but the picker only offers these — and editing coerces anything else to
+// Knockout so the dropdown always shows a supported option.
+const POINT_SYSTEM_OPTIONS: { value: StandingsScheme; label: string }[] = [
+  { value: 'placement', label: 'Knockout' },
+  { value: 'custom', label: 'Custom points' },
+];
+const coerceScheme = (r: StandingsRule): StandingsRule =>
+  r.scheme === 'placement' || r.scheme === 'custom' ? r : SCHEME_DEFAULTS.placement;
 
 const PLACEMENT_KEYS = ['winner', 'runner_up', 'semi_finalist', 'quarter_finalist'] as const;
 const PLACEMENT_LABEL: Record<(typeof PLACEMENT_KEYS)[number], string> = {
@@ -52,52 +64,40 @@ function NumberField({ label, value, onChange }: { label: string; value: number;
   );
 }
 
-// One editable rule (scheme picker + scheme-specific point fields).
+// One editable rule (point-system picker + scheme-specific point fields). The picker
+// offers two options: Knockout (placement points) and Custom points (entered per
+// match). `value` is always coerced to one of these before it reaches here.
 function RuleForm({ value, onChange }: { value: StandingsRule; onChange: (r: StandingsRule) => void }) {
   return (
     <div className="space-y-3">
       <label className="flex flex-col gap-1">
-        <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Scheme</span>
+        <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Point system</span>
         <Select
           className="w-full max-w-xs"
-          value={value.scheme}
+          value={value.scheme === 'placement' || value.scheme === 'custom' ? value.scheme : 'placement'}
           // Preserve the participation point when switching schemes.
           onChange={(e) => onChange({ ...SCHEME_DEFAULTS[e.target.value as StandingsScheme], participation: value.participation })}
         >
-          {STANDINGS_SCHEME.map((s) => <option key={s} value={s}>{SCHEME_LABEL[s]}</option>)}
+          {POINT_SYSTEM_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
         </Select>
       </label>
 
       <div className="flex flex-wrap gap-4">
-        {value.scheme === 'league_points' && (
-          <>
-            <NumberField label="Win" value={value.win} onChange={(n) => onChange({ ...value, win: n })} />
-            <NumberField label="Draw" value={value.draw} onChange={(n) => onChange({ ...value, draw: n })} />
-            <NumberField label="Loss" value={value.loss} onChange={(n) => onChange({ ...value, loss: n })} />
-          </>
-        )}
         {value.scheme === 'placement' && PLACEMENT_KEYS.map((k) => (
           <NumberField
             key={k} label={PLACEMENT_LABEL[k]} value={value.points[k] ?? 0}
             onChange={(n) => onChange({ ...value, points: { ...value.points, [k]: n } })}
           />
         ))}
-        {value.scheme === 'medal' && (
-          <>
-            <NumberField label="Gold" value={value.gold} onChange={(n) => onChange({ ...value, gold: n })} />
-            <NumberField label="Silver" value={value.silver} onChange={(n) => onChange({ ...value, silver: n })} />
-            <NumberField label="Bronze" value={value.bronze} onChange={(n) => onChange({ ...value, bronze: n })} />
-          </>
-        )}
         {/* Awarded to every org that takes part, on top of the scheme above. */}
         <NumberField label="Participation" value={value.participation} onChange={(n) => onChange({ ...value, participation: n })} />
       </div>
 
-      {value.scheme !== 'league_points' && (
-        <p className="text-xs text-slate-400 dark:text-slate-500">
-          Position points are awarded once the discipline's final has been played. Participation counts as soon as an org plays.
-        </p>
-      )}
+      <p className="text-xs text-slate-400 dark:text-slate-500">
+        {value.scheme === 'custom'
+          ? 'Custom points: award championship points to each side after every result, from the Results page. A reminder is sent while a completed match still has no points.'
+          : "Knockout points are awarded by how far a team advances, once the discipline's final has been played. Participation counts as soon as an org plays."}
+      </p>
     </div>
   );
 }
@@ -105,7 +105,7 @@ function RuleForm({ value, onChange }: { value: StandingsRule; onChange: (r: Sta
 // The championship-wide default rule. Frozen (read-only summary) once a rule has
 // been saved; "Edit" re-opens the editor.
 function DefaultRuleEditor({ eventId, initial, saved }: { eventId: string; initial: StandingsRule; saved: boolean }) {
-  const [rule, setRule] = useState<StandingsRule>(initial);
+  const [rule, setRule] = useState<StandingsRule>(coerceScheme(initial));
   const [frozen, setFrozen] = useState(saved);
   const save = useApiMutation(
     (config: StandingsRule) => api('PUT', `/championships/${eventId}/standings-rules`, { scope_type: 'championship', config }),
@@ -143,7 +143,7 @@ function ScopeRuleEditor({ eventId, scopeType, option, override, fallback }: {
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [rule, setRule] = useState<StandingsRule>(override?.config ?? fallback);
+  const [rule, setRule] = useState<StandingsRule>(coerceScheme(override?.config ?? fallback));
   const save = useApiMutation(
     (config: StandingsRule) => api('PUT', `/championships/${eventId}/standings-rules`, { scope_type: scopeType, scope_id: option.id, config }),
     [],

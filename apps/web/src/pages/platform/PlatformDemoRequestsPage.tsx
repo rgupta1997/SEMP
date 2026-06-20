@@ -2,7 +2,7 @@ import { DEMO_REQUEST_STATUS, type DemoRequestStatus } from '@semp/shared';
 import { api } from '../../lib/api';
 import { fmtDateTime, useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import {
-  Badge, Button, Card, EmptyState, Pagination, SearchInput, Select, Spinner,
+  Badge, Button, Card, confirmDialog, EmptyState, Pagination, SearchInput, Select, Spinner,
 } from '../../components/ui';
 
 interface DemoRequest {
@@ -101,7 +101,7 @@ export function PlatformDemoRequestsPage() {
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
                     <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
-                      onClick={() => { if (confirm(`Delete the demo request from ${r.name}?`)) remove.mutate(r.id); }}>
+                      onClick={async () => { if (await confirmDialog({ title: 'Delete demo request', confirmLabel: 'Delete', message: `Delete the demo request from ${r.name}?` })) remove.mutate(r.id); }}>
                       Delete
                     </Button>
                   </td>

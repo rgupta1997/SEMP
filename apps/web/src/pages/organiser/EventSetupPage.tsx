@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useEvent } from './EventLayout';
 import { Tabs } from '../../components/ui';
 import { TournamentsTab } from './setup/TournamentsTab';
@@ -6,9 +7,18 @@ import { SportsTab } from './setup/SportsTab';
 import { VenuesTab } from './setup/VenuesTab';
 import { InvitePanel } from '../../components/InvitePanel';
 
+const TABS = ['tournaments', 'sports', 'venues', 'invite'] as const;
+
 export function EventSetupPage() {
   const { eventId } = useEvent();
-  const [tab, setTab] = useState('tournaments');
+  const [params] = useSearchParams();
+  // Deep links (e.g. the dashboard checklist) can target a tab with ?tab=invite.
+  const wanted = params.get('tab');
+  const [tab, setTab] = useState(() => (wanted && (TABS as readonly string[]).includes(wanted) ? wanted : 'sports'));
+  // Follow ?tab changes when already mounted (clicking another deep link).
+  useEffect(() => {
+    if (wanted && (TABS as readonly string[]).includes(wanted)) setTab(wanted);
+  }, [wanted]);
   return (
     <div>
       <Tabs
@@ -16,8 +26,8 @@ export function EventSetupPage() {
         onChange={setTab}
         tabs={[
           { id: 'tournaments', label: 'Seasons' },
-          { id: 'venues', label: 'Venue' },
           { id: 'sports', label: 'Sports & disciplines' },
+          { id: 'venues', label: 'Venue' },
           { id: 'invite', label: 'Invite' },
         ]}
       />

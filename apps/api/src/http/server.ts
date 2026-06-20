@@ -29,6 +29,7 @@ import { makeVenuesRouter, makeVenueGroundsRouter } from '../modules/venues/venu
 import { makeFixturesRouter } from '../modules/fixtures/fixtures.routes.js';
 import { makeNotificationsRouter } from '../modules/notifications/notifications.routes.js';
 import { makeDemoRequestsRouter } from '../modules/marketing/demo-requests.routes.js';
+import { BusinessRuleError } from '../shared/errors.js';
 
 export function buildApp(prisma: Prisma) {
   const app = express();
@@ -86,7 +87,11 @@ export function buildApp(prisma: Prisma) {
   }));
   api.use('/disciplines', makeCrudRouter(prisma.disciplines, {
     name: 'Discipline', createSchema: createDisciplineSchema, updateSchema: updateDisciplineSchema,
-    listFilters: ['sport_id'], orderBy: { display_order: 'asc' }, writeGuards: [requireSuperAdmin],
+    listFilters: ['sport_id'], orderBy: { display_order: 'asc' },
+    // Editing/deleting the master catalogue stays super-admin only, but any authed
+    // organiser may add a new discipline (e.g. an age/gender category) while setting
+    // up their championship — createGuards empty = just the global requireAuth.
+    writeGuards: [requireSuperAdmin], createGuards: [],
   }));
   api.use('/tournament-formats', makeCrudRouter(prisma.tournament_formats, {
     name: 'Tournament format', createSchema: createFormatSchema, updateSchema: updateFormatSchema,
@@ -112,15 +117,42 @@ export function buildApp(prisma: Prisma) {
     listFilters: ['championship_id'], orderBy: { created_at: 'desc' },
     writeGuards: [guards.championshipCrudGuard({ body: async (req) => req.body?.championship_id, byId: guards.resolvers.championshipOfTournament })],
   }));
+  // The FKs into a tournament_discipline (fixtures, team_entries) are NoAction, so
+  // deleting a setup-phase sport/discipline first clears what points at it. Removing
+  // fixtures cascades to fixture_awards; team_entries are enrollment links. standings
+  // hold only a loose scope_id (no FK) so they don't block.
+  const clearDisciplineRefs = async (disciplineIds: string[]) => {
+    if (disciplineIds.length === 0) return;
+    // Never silently wipe real results: block if any fixture has been played/scored.
+    const played = await prisma.fixtures.count({
+      where: {
+        tournament_discipline_id: { in: disciplineIds },
+        OR: [{ status: { in: ['completed', 'walkover', 'bye'] } }, { home_score: { not: null } }, { away_score: { not: null } }],
+      },
+    });
+    if (played > 0) throw new BusinessRuleError('There are completed or scored matches here — remove or void those results before deleting.');
+    await prisma.$transaction([
+      prisma.fixtures.deleteMany({ where: { tournament_discipline_id: { in: disciplineIds } } }),
+      prisma.team_entries.deleteMany({ where: { tournament_discipline_id: { in: disciplineIds } } }),
+    ]);
+  };
   api.use('/tournament-sports', makeCrudRouter(prisma.tournament_sports, {
     name: 'Tournament sport', createSchema: createTournamentSportSchema, updateSchema: updateTournamentSportSchema,
     listFilters: ['tournament_id', 'sport_id'], orderBy: { display_order: 'asc' },
     writeGuards: [guards.championshipCrudGuard({ body: async (req) => guards.resolvers.championshipOfTournament(req.body?.tournament_id), byId: guards.resolvers.championshipOfTournamentSport })],
+    beforeDelete: async (id) => {
+      const disciplines = await prisma.tournament_disciplines.findMany({ where: { tournament_sport_id: id }, select: { id: true } });
+      await clearDisciplineRefs(disciplines.map((d) => d.id));
+      await prisma.tournament_disciplines.deleteMany({ where: { tournament_sport_id: id } });
+    },
   }));
   api.use('/tournament-disciplines', makeCrudRouter(prisma.tournament_disciplines, {
     name: 'Tournament discipline', createSchema: createTournamentDisciplineSchema, updateSchema: updateTournamentDisciplineSchema,
     listFilters: ['tournament_sport_id', 'discipline_id'], orderBy: { display_order: 'asc' },
+    include: { disciplines: true }, // so the UI can show each discipline's own name
+
     writeGuards: [guards.championshipCrudGuard({ body: async (req) => guards.resolvers.championshipOfTournamentSport(req.body?.tournament_sport_id), byId: guards.resolvers.championshipOfTournamentDiscipline })],
+    beforeDelete: async (id) => { await clearDisciplineRefs([id]); },
   }));
 
   // ----- Phase 3: enrollment, invitations & role assignment -----

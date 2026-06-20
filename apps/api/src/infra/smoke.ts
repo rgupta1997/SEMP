@@ -34,7 +34,7 @@ async function main() {
 
   // Phase 2: championship creation
   const slug = `techfest-${Date.now()}`;
-  const championship = await api('POST', '/championships', { name: 'TechFest 2025', slug, start_date: '2025-10-01', end_date: '2025-10-05' });
+  const championship = await api('POST', '/championships', { name: 'TechFest 2025', slug, venue: 'Mumbai', start_date: '2025-10-01', end_date: '2025-10-05' });
   const venue = await api('POST', '/venues', { championship_id: championship.id, name: 'Gymkhana Sports Complex' });
   await api('POST', '/venue-grounds', { venue_id: venue.id, name: 'Court 1', ground_type: 'court' });
   await api('POST', '/sponsors', { championship_id: championship.id, name: 'Acme Corp', tier: 'gold' });

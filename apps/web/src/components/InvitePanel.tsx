@@ -14,12 +14,26 @@ interface Invitation {
 interface Org { id: string; name: string; short_name?: string | null; city?: string | null }
 
 // Searchable multi-select picker over the master organization list (GET /organizations).
-// Already-invited orgs can be hidden via `excludeIds`. Picked orgs show as removable chips.
+// Server-side typeahead: the first 10 orgs load by default, then the DB is queried as
+// the user types (debounced). Already-invited orgs can be hidden via `excludeIds`.
+// Picked orgs show as removable chips.
 function OrgPicker({ value, onChange, excludeIds }: { value: Org[]; onChange: (o: Org[]) => void; excludeIds?: Set<string> }) {
-  const { data: orgs = [], isLoading } = useApi<Org[]>('/organizations');
   const [query, setQuery] = useState('');
+  const [debounced, setDebounced] = useState('');
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  // Debounce typing so each keystroke doesn't hit the DB.
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  // No query → first 10 orgs; otherwise search the DB (capped so the dropdown stays light).
+  const path = debounced
+    ? `/organizations?q=${encodeURIComponent(debounced)}&limit=25`
+    : '/organizations?limit=10';
+  const { data: orgs = [], isFetching } = useApi<Org[]>(path);
 
   // Close on any click/tap outside the picker, plus Escape.
   useEffect(() => {
@@ -36,16 +50,9 @@ function OrgPicker({ value, onChange, excludeIds }: { value: Org[]; onChange: (o
   const selectedIds = useMemo(() => new Set(value.map((o) => o.id)), [value]);
 
   const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
     const exclude = excludeIds ?? new Set<string>();
-    return orgs
-      .filter((o) => !exclude.has(o.id))
-      .filter((o) => !q
-        || o.name.toLowerCase().includes(q)
-        || (o.short_name ?? '').toLowerCase().includes(q)
-        || (o.city ?? '').toLowerCase().includes(q))
-      .slice(0, 50);
-  }, [orgs, query, excludeIds]);
+    return orgs.filter((o) => !exclude.has(o.id));
+  }, [orgs, excludeIds]);
 
   // Toggle membership in the selection; keep the dropdown open so several can be picked.
   const toggle = (o: Org) =>
@@ -76,11 +83,11 @@ function OrgPicker({ value, onChange, excludeIds }: { value: Org[]; onChange: (o
       />
       {open && (
           <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
-            {isLoading ? (
+            {isFetching && results.length === 0 ? (
               <div className="grid h-16 place-items-center"><Spinner /></div>
             ) : results.length === 0 ? (
               <p className="px-3 py-4 text-center text-sm text-slate-400 dark:text-slate-500">
-                {orgs.length === 0 ? 'No organizations in the master list yet.' : 'No organizations match your search.'}
+                {debounced ? 'No organizations match your search.' : 'No organizations in the master list yet.'}
               </p>
             ) : results.map((o) => {
               const checked = selectedIds.has(o.id);

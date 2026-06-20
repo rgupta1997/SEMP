@@ -4,14 +4,16 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useApi, useApiMutation } from '../../lib/hooks';
 import { BackButton, Button, Card, Field, Input, Spinner, Stepper, Textarea, toast } from '../../components/ui';
-import { TournamentsTab } from './setup/TournamentsTab';
 import { SportsTab } from './setup/SportsTab';
-import { VenuesTab } from './setup/VenuesTab';
 import { InvitePanel } from '../../components/InvitePanel';
 
 const slugify = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
-const STEPS = ['Championship profile', 'Venue', 'Seasons & sports', 'Invite organizations', 'Open registration'];
+// Venue + a separate "Seasons" step are gone: the city captured below doubles as the
+// venue, and a default season is auto-created with the championship, so the organiser
+// goes straight from the profile to adding sports.
+const STEPS = ['Championship profile', 'Sports & disciplines', 'Invite organizations', 'Open registration'];
+const LAST_STEP = STEPS.length - 1;
 
 export function CreateEventWizard() {
   const navigate = useNavigate();
@@ -43,8 +45,9 @@ export function CreateEventWizard() {
   const createDraft = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!venue.trim()) { setError('Host city is required'); return; }
     if (!startDate || !endDate) { setError('Start and end dates are required'); return; }
-    const body = { name, slug: effectiveSlug, venue: venue || undefined, description: description || undefined, start_date: startDate, end_date: endDate };
+    const body = { name, slug: effectiveSlug, venue: venue.trim(), description: description || undefined, start_date: startDate, end_date: endDate };
     if (eventId) {
       update.mutate(body, {
         onSuccess: () => setStep(1),
@@ -97,7 +100,7 @@ export function CreateEventWizard() {
                 <Field label="Start date"><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} required /></Field>
                 <Field label="End date"><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} required /></Field>
               </div>
-              <Field label="Host city / venue"><Input value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="Mumbai" /></Field>
+              <Field label="Host city" hint="Required — used as your championship's default venue."><Input value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="Mumbai" required /></Field>
               <Field label="Description"><Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="A short summary of the championship…" /></Field>
               {error && <p className="mb-3 rounded-lg bg-rose-50 dark:bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">{error}</p>}
               <div className="flex justify-end gap-2">
@@ -112,20 +115,14 @@ export function CreateEventWizard() {
           <Card className="p-6">
             <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">{STEPS[step]}</h1>
             <div className="mt-6">
-              {step === 1 && <VenuesTab eventId={eventId} />}
-              {step === 2 && (
-                <div className="space-y-8">
-                  <TournamentsTab eventId={eventId} />
-                  <SportsTab eventId={eventId} />
-                </div>
-              )}
-              {step === 3 && <InvitePanel eventId={eventId} />}
-              {step === 4 && <ReviewStep eventId={eventId} />}
+              {step === 1 && <SportsTab eventId={eventId} />}
+              {step === 2 && <InvitePanel eventId={eventId} />}
+              {step === 3 && <ReviewStep eventId={eventId} />}
             </div>
 
             <WizardFooter
               onBack={() => setStep((s) => Math.max(0, s - 1))}
-              right={step < 4 ? (
+              right={step < LAST_STEP ? (
                 <Button onClick={() => setStep((s) => s + 1)}>Next →</Button>
               ) : (
                 <>
@@ -152,13 +149,13 @@ function WizardFooter({ onBack, right }: { onBack: () => void; right: ReactNode 
 
 // Final step — a quick count of what's been configured before going live.
 function ReviewStep({ eventId }: { eventId: string }) {
-  const { data: tournaments = [] } = useApi<any[]>(`/tournaments?championship_id=${eventId}`);
-  const { data: venues = [] } = useApi<any[]>(`/venues?championship_id=${eventId}`);
+  const { data: draws = [] } = useApi<any[]>(`/championships/${eventId}/draws`);
   const { data: invites = [] } = useApi<any[]>(`/championships/${eventId}/invitations`);
 
+  const sportCount = new Set(draws.map((d: any) => d.tournament_sports?.sport_id).filter(Boolean)).size;
   const rows = [
-    { label: 'Seasons', value: tournaments.length },
-    { label: 'Venue', value: venues.length },
+    { label: 'Sports', value: sportCount },
+    { label: 'Disciplines', value: draws.length },
     { label: 'Invitations sent', value: invites.length },
   ];
 

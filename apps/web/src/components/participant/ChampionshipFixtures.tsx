@@ -13,20 +13,24 @@ interface FixtureRow {
   away: { id: string; name: string } | null;
 }
 
-const SCHEDULE_STATUSES = new Set(['scheduled', 'live', 'postponed']);
 const RESULT_STATUSES = new Set(['completed', 'walkover', 'bye', 'cancelled']);
 
 function teamLabel(t: FixtureRow['home']) { return t?.name ?? 'TBD'; }
 
 // Read-only, whole-championship fixtures for the participant view — the same
 // schedule / results a spectator sees from Discover, so players can follow every
-// match (not just their own). `mode` splits upcoming vs concluded.
+// match (not just their own). `schedule` is the full fixture list (upcoming +
+// concluded); `results` narrows to matches that have concluded.
 export function ChampionshipFixtures({ championshipId, mode }: { championshipId: string; mode: 'schedule' | 'results' }) {
   const { data: all = [], isLoading } = useApi<FixtureRow[]>(`/championships/${championshipId}/fixtures`);
   const [sport, setSport] = useState('');
 
-  const wanted = mode === 'schedule' ? SCHEDULE_STATUSES : RESULT_STATUSES;
-  const inMode = useMemo(() => all.filter((f) => wanted.has(f.status)), [all, mode]);
+  // Schedule shows every fixture (the championship calendar); Results only those
+  // that have concluded.
+  const inMode = useMemo(
+    () => (mode === 'schedule' ? all : all.filter((f) => RESULT_STATUSES.has(f.status))),
+    [all, mode],
+  );
   const sportOptions = useMemo(
     () => [...new Set(inMode.map((f) => f.sport).filter(Boolean))].sort() as string[],
     [inMode],
@@ -53,8 +57,8 @@ export function ChampionshipFixtures({ championshipId, mode }: { championshipId:
     return (
       <EmptyState
         icon={mode === 'schedule' ? '⚑' : '🏁'}
-        title={mode === 'schedule' ? 'Nothing scheduled' : 'No results yet'}
-        description={mode === 'schedule' ? 'Upcoming matches will appear here once they are scheduled.' : 'Results appear here as matches are played.'}
+        title={mode === 'schedule' ? 'No fixtures yet' : 'No results yet'}
+        description={mode === 'schedule' ? 'Matches will appear here once the draw is generated.' : 'Results appear here as matches are played.'}
       />
     );
   }
@@ -94,8 +98,8 @@ export function ChampionshipFixtures({ championshipId, mode }: { championshipId:
                 <div className="flex flex-1 items-center justify-center gap-3 text-sm">
                   <span className={cn('min-w-[6rem] text-right', homeWon ? 'font-bold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-300')}>{teamLabel(f.home)}</span>
                   <span className="min-w-[3.5ch] text-center font-bold tabular-nums text-slate-800 dark:text-slate-100">
-                    {mode === 'results'
-                      ? (scored ? `${f.home_score}–${f.away_score}` : <span className="text-slate-300 dark:text-slate-600">v</span>)
+                    {scored
+                      ? `${f.home_score}–${f.away_score}`
                       : <span className="text-slate-300 dark:text-slate-600">v</span>}
                   </span>
                   <span className={cn('min-w-[6rem] text-left', awayWon ? 'font-bold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-300')}>{teamLabel(f.away)}</span>

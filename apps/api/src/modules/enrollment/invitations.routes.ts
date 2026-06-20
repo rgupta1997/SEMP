@@ -99,8 +99,9 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
   }));
 
   // Accept — the invitation already names the organization; only its owners/admins
-  // can accept. Creates a pending enrollment that surfaces in the host's Approvals
-  // queue (idempotent if already applied).
+  // can accept. Because the host explicitly invited this org, accepting enrolls them
+  // as APPROVED straight away — no second trip through the Approvals queue. Stamped
+  // as reviewed by the inviting organiser. Idempotent if already enrolled.
   router.post('/invitations/:id/accept', asyncHandler(async (req, res) => {
     const inv = await prisma.championship_invitations.findUnique({
       where: { id: req.params.id },
@@ -115,12 +116,14 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
 
     const enrollment = await prisma.championship_organizations.upsert({
       where: { championship_id_organization_id: { championship_id: inv.championship_id, organization_id: inv.organization_id } },
-      update: {},
+      update: { status: 'approved', reviewed_by: inv.invited_by, reviewed_at: new Date() },
       create: {
         championship_id: inv.championship_id,
         organization_id: inv.organization_id,
         applied_by: req.user!.id,
-        status: 'pending',
+        status: 'approved',
+        reviewed_by: inv.invited_by,
+        reviewed_at: new Date(),
       },
     });
     await prisma.championship_invitations.update({
@@ -132,10 +135,10 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
     await createNotification(prisma, {
       championship_id: inv.championship_id,
       sender_id: req.user!.id,
-      type: 'manual',
+      type: 'enrollment_approved',
       audience: 'all',
-      title: `${org?.short_name || org?.name || 'An organization'} accepted your invitation`,
-      body: `${org?.name ?? 'An organization'} applied to ${inv.championships?.name ?? 'the championship'} and is awaiting approval.`,
+      title: `${org?.short_name || org?.name || 'An organization'} has joined the championship`,
+      body: `${org?.name ?? 'An organization'} accepted the invitation to ${inv.championships?.name ?? 'the championship'} and can now enter teams.`,
     });
 
     res.status(201).json(enrollment);

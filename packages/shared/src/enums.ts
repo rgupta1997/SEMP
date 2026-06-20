@@ -72,7 +72,9 @@ export type NotificationReaction = (typeof NOTIFICATION_REACTIONS)[number];
 //   league_points — points per win/draw/loss (the classic league table; default).
 //   placement     — knockout: points by how far a team advanced (winner, SF, …).
 //   medal         — top-3 organizations in a discipline earn gold/silver/bronze points.
-export const STANDINGS_SCHEME = ['league_points', 'placement', 'medal'] as const;
+//   custom        — the organiser awards championship points per side, by hand, after
+//                   each result on the Results page (no auto formula).
+export const STANDINGS_SCHEME = ['league_points', 'placement', 'medal', 'custom'] as const;
 export type StandingsScheme = (typeof STANDINGS_SCHEME)[number];
 
 // Ordered tiebreakers for the league_points scheme (applied left-to-right).

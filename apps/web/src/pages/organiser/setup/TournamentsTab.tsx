@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
-import { Button, Card, EmptyState, Field, Input, Modal, Textarea } from '../../../components/ui';
+import { Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Textarea } from '../../../components/ui';
 
 // View + edit + delete a single season. Opens from a card ("clip"). A season is
 // always live once created — there is no draft/publish lifecycle.
@@ -50,7 +50,7 @@ function TournamentModal({ tournament, path, onClose }: { tournament: any; path:
           {error && <p className="mt-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
           <div className="mt-5 flex items-center justify-between">
             <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
-              onClick={() => { if (confirm(`Delete “${tournament.name}”? This cannot be undone.`)) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
+              onClick={async () => { if (await confirmDialog({ title: 'Delete season', confirmLabel: 'Delete', message: `Delete “${tournament.name}”? This cannot be undone.` })) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
               disabled={remove.isPending}>
               {remove.isPending ? 'Deleting…' : 'Delete'}
             </Button>

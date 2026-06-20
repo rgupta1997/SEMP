@@ -7,7 +7,15 @@ export function validateBody<T>(schema: ZodSchema<T>) {
   return (req: Request, _res: Response, next: NextFunction): void => {
     const result = schema.safeParse(req.body);
     if (!result.success) {
-      throw new ValidationError('Invalid request body', result.error.flatten());
+      // Surface the first field-level issue as the message so clients show a
+      // specific, actionable error (e.g. "Phone number is required") instead of
+      // a generic one. Full per-field details are still attached.
+      const issue = result.error.issues[0];
+      const field = issue?.path.join('.');
+      const message = issue
+        ? (field ? `${field}: ${issue.message}` : issue.message)
+        : 'Invalid request body';
+      throw new ValidationError(message, result.error.flatten());
     }
     req.body = result.data;
     next();

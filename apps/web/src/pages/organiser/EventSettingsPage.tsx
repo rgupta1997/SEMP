@@ -4,7 +4,7 @@ import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
 import { CHAMPIONSHIP_STATUS } from '@semp/shared';
-import { Button, Card, CardBody, CardHeader, Field, Input, Progress, StatusBadge, Textarea, toast } from '../../components/ui';
+import { Button, Card, CardBody, CardHeader, confirmDialog, Field, Input, Progress, StatusBadge, Textarea, toast } from '../../components/ui';
 import { StandingsRulesCard } from '../../components/StandingsRulesCard';
 
 export function EventSettingsPage() {
@@ -86,8 +86,8 @@ export function EventSettingsPage() {
             <Button
               variant="danger"
               disabled={remove.isPending}
-              onClick={() => {
-                if (confirm(`Delete “${championship.name}”? This permanently removes the championship and all of its data. This cannot be undone.`)) {
+              onClick={async () => {
+                if (await confirmDialog({ title: 'Delete championship', confirmLabel: 'Delete championship', message: `Delete “${championship.name}”? This permanently removes the championship and all of its data. This cannot be undone.` })) {
                   remove.mutate(undefined, { onError: (e: any) => toast.error(e.message) });
                 }
               }}

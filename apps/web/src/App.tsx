@@ -2,7 +2,9 @@ import { useEffect, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth, type AppRole } from './lib/auth';
 import { AppShell, roleHome } from './components/AppShell';
-import { Spinner, ToastProvider } from './components/ui';
+import { ConfirmProvider, Spinner, ToastProvider } from './components/ui';
+import { TourProvider } from './components/onboarding/Tour';
+import { HelpPage } from './pages/HelpPage';
 import { AuthPage } from './pages/AuthPage';
 import { LandingPage } from './pages/LandingPage';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
@@ -22,10 +24,12 @@ import { EventOrganisersPage } from './pages/organiser/EventOrganisersPage';
 
 // Organizations (multi-org membership + management)
 import { OrganizationsPage } from './pages/OrganizationsPage';
+import { OrgOverviewPage } from './pages/organization/OrgOverviewPage';
 import { TeamsPage } from './pages/organization/TeamsPage';
 import { RosterPage } from './pages/organization/RosterPage';
 import { StudentsPage } from './pages/organization/StudentsPage';
 import { PocsPage } from './pages/organization/PocsPage';
+import { InvitationsPage } from './pages/organization/InvitationsPage';
 
 // Officiating
 import { OfficialFixturesPage } from './pages/official/OfficialFixturesPage';
@@ -76,10 +80,12 @@ function AuthenticatedRoutes() {
 
         {/* Organizations */}
         <Route path="/organizations" element={<OrganizationsPage />} />
+        <Route path="/organizations/:orgId/overview" element={<OrgOverviewPage />} />
         <Route path="/organizations/:orgId/teams" element={<TeamsPage />} />
         <Route path="/organizations/:orgId/teams/:teamId" element={<RosterPage />} />
         <Route path="/organizations/:orgId/students" element={<StudentsPage />} />
         <Route path="/organizations/:orgId/members" element={<PocsPage />} />
+        <Route path="/organizations/:orgId/invitations" element={<InvitationsPage />} />
 
         {/* Discover + Championships + Host */}
         <Route path="/discover" element={<DiscoverPage />} />
@@ -109,8 +115,9 @@ function AuthenticatedRoutes() {
         <Route path="/platform/organizations" element={<RequireRole roles={SYSTEM}><PlatformInstitutionsPage /></RequireRole>} />
         <Route path="/platform/:key" element={<RequireRole roles={SYSTEM}><PlatformResource /></RequireRole>} />
 
-        {/* Notifications + design system — any authenticated user */}
+        {/* Notifications + help + design system — any authenticated user */}
         <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/help" element={<HelpPage />} />
         <Route path="/design" element={<DesignShowcase />} />
 
         {/* Catch all */}
@@ -148,7 +155,11 @@ export function App() {
   return (
     <BrowserRouter>
       <ToastProvider>
-        <AppRoutes />
+        <ConfirmProvider>
+          <TourProvider>
+            <AppRoutes />
+          </TourProvider>
+        </ConfirmProvider>
       </ToastProvider>
     </BrowserRouter>
   );

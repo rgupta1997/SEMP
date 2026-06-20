@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useApi, useTableControls, fmtDateRange } from '../lib/hooks';
 import { Badge, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge } from '../components/ui';
 import { InvitationsInbox } from '../components/InvitationsInbox';
@@ -24,7 +24,17 @@ const TABS = [
 
 // Championships the user is involved in — in any capacity (organiser / official /
 // player / org member). Filterable by status (tabs), sport and free-text search.
+// Where "View details" leads for a championship, based on the viewer's roles.
+function detailHref(c: MyChampionship): string {
+  if (c.my_roles.includes('organiser')) return `/championships/${c.id}`;
+  // Players get their personal participation view (teams / matches / stats).
+  if (c.my_roles.includes('player')) return `/profile/championships/${c.id}`;
+  // Everyone else (org members, officials) gets the read-only spectator view.
+  return `/championships/${c.id}`;
+}
+
 export function MyChampionshipsPage() {
+  const navigate = useNavigate();
   const { data: rows = [], isLoading } = useApi<MyChampionship[]>('/championships/mine');
   const [tab, setTab] = useState<string>('all');
   const [sport, setSport] = useState('');
@@ -92,7 +102,12 @@ export function MyChampionshipsPage() {
         <>
           <div className="space-y-3">
             {tc.view.map((c) => (
-              <Card key={c.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
+              <Card
+                key={c.id}
+                interactive
+                onClick={() => navigate(detailHref(c))}
+                className="flex flex-wrap items-center justify-between gap-3 p-4"
+              >
                 <div className="flex items-center gap-3">
                   <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-50 text-base font-black text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">{c.name.slice(0, 1)}</span>
                   <div>
@@ -106,15 +121,8 @@ export function MyChampionshipsPage() {
                 <div className="flex items-center gap-2">
                   {c.my_roles.map((r) => <Badge key={r} tone={ROLE_TONE[r] ?? 'slate'}>{r}</Badge>)}
                   <Link
-                    to={
-                      c.my_roles.includes('organiser')
-                        ? `/championships/${c.id}`
-                        : c.my_roles.includes('player')
-                          // Players get their personal participation view (teams / matches / stats).
-                          ? `/profile/championships/${c.id}`
-                          // Everyone else (org members, officials) gets the read-only spectator view.
-                          : `/championships/${c.id}`
-                    }
+                    to={detailHref(c)}
+                    onClick={(e) => e.stopPropagation()}
                     className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300"
                   >
                     View details →

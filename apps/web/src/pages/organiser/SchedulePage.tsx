@@ -4,7 +4,7 @@ import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { usePageFilters, useFilterBar } from '../../lib/filters';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
-import { Badge, Button, Card, EmptyState, Field, Input, Modal, Segmented, Select, Spinner, StatusBadge, toast } from '../../components/ui';
+import { Badge, Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Segmented, Select, Spinner, StatusBadge, toast } from '../../components/ui';
 import { Bracket, fixtureStatusLabel } from '../../components/Bracket';
 import { RoundRobinGrid } from '../../components/RoundRobinGrid';
 import { ScheduleTimeline } from '../../components/ScheduleTimeline';
@@ -106,7 +106,7 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, officials, teamName, o
       <div className="mt-2 flex items-center justify-between">
         {isEdit ? (
           <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
-            onClick={() => { if (confirm('Delete this fixture? This cannot be undone.')) remove.mutate(undefined, { onSuccess: () => toast.success('Fixture deleted'), onError: (e: any) => setError(e.message) }); }}
+            onClick={async () => { if (await confirmDialog({ title: 'Delete fixture', confirmLabel: 'Delete', message: 'Delete this fixture? This cannot be undone.' })) remove.mutate(undefined, { onSuccess: () => toast.success('Fixture deleted'), onError: (e: any) => setError(e.message) }); }}
             disabled={remove.isPending}>
             {remove.isPending ? 'Deleting…' : 'Delete'}
           </Button>
@@ -122,11 +122,13 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, officials, teamName, o
   );
 }
 
-function DrawCard({ td, sportName, formatLabel, teamName, grounds, officials, canManage }:
-  { td: any; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; grounds: Ground[]; officials: Official[]; canManage: boolean }) {
-  const path = `/tournament-disciplines/${td.id}/fixtures`;
-  const { data: fixtures = [], isLoading } = useApi<any[]>(path);
-  const generate = useApiMutation(() => api('POST', `/tournament-disciplines/${td.id}/fixtures/generate`, { params: {} }), [path]);
+function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, sportName, formatLabel, teamName, grounds, officials, canManage }:
+  { td: any; fixtures: any[]; fixturesLoading: boolean; fixturesPath: string; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; grounds: Ground[]; officials: Official[]; canManage: boolean }) {
+  // The championship-wide list is ordered by schedule; restore the per-draw
+  // pool → bracket order this card expects.
+  const fixtures = [...drawFixtures].sort((a, b) => (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0));
+  const isLoading = fixturesLoading;
+  const generate = useApiMutation(() => api('POST', `/tournament-disciplines/${td.id}/fixtures/generate`, { params: {} }), [fixturesPath]);
   const [editing, setEditing] = useState<any | null>(null);
   const [creating, setCreating] = useState(false);
   const [view, setView] = useState<'list' | 'visual'>('visual');
@@ -188,7 +190,7 @@ function DrawCard({ td, sportName, formatLabel, teamName, grounds, officials, ca
                   {officialName(f.official_id) ? ` · ${officialName(f.official_id)}` : ' · No official'}
                 </span>
                 <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
-                {canManage && f.status !== 'bye' && (
+                {canManage && (
                   <Button size="sm" variant="ghost" onClick={() => setEditing(f)}>Edit</Button>
                 )}
               </div>
@@ -196,15 +198,14 @@ function DrawCard({ td, sportName, formatLabel, teamName, grounds, officials, ca
           </div>
         )}
       </div>
-      {editing && <FixtureModal fixture={editing} tdId={td.id} drawPath={path} grounds={grounds} officials={officials} teamName={teamName} onClose={() => setEditing(null)} />}
-      {creating && <FixtureModal fixture={null} tdId={td.id} drawPath={path} grounds={grounds} officials={officials} teamName={teamName} onClose={() => setCreating(false)} />}
+      {editing && <FixtureModal fixture={editing} tdId={td.id} drawPath={fixturesPath} grounds={grounds} officials={officials} teamName={teamName} onClose={() => setEditing(null)} />}
+      {creating && <FixtureModal fixture={null} tdId={td.id} drawPath={fixturesPath} grounds={grounds} officials={officials} teamName={teamName} onClose={() => setCreating(false)} />}
     </Card>
   );
 }
 
-function SportBlock({ ts, sportName, formatName, teamName, grounds, officials, canManage }:
-  { ts: any; sportName: string; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; grounds: Ground[]; officials: Official[]; canManage: boolean }) {
-  const { data: draws = [] } = useApi<any[]>(`/tournament-disciplines?tournament_sport_id=${ts.id}`);
+function SportBlock({ ts, draws, allFixtures, fixturesLoading, fixturesPath, sportName, formatName, teamName, grounds, officials, canManage }:
+  { ts: any; draws: any[]; allFixtures: any[]; fixturesLoading: boolean; fixturesPath: string; sportName: string; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; grounds: Ground[]; officials: Official[]; canManage: boolean }) {
   if (draws.length === 0) return null;
   // Effective format: the draw's own format wins, else the sport's (matches the
   // generate route's fallback).
@@ -216,6 +217,9 @@ function SportBlock({ ts, sportName, formatName, teamName, grounds, officials, c
           <DrawCard
             key={td.id}
             td={td}
+            fixtures={allFixtures.filter((f) => f.tournament_discipline_id === td.id)}
+            fixturesLoading={fixturesLoading}
+            fixturesPath={fixturesPath}
             sportName={sportName}
             formatLabel={formatName(td.format_id) ?? formatName(ts.format_id)}
             teamName={teamName}
@@ -246,18 +250,23 @@ function buildDays(startISO?: string, endISO?: string): string[] {
 export function SchedulePage() {
   const { eventId, canManage, championship } = useEvent();
   const [topView, setTopView] = useState<'manage' | 'timeline'>('manage');
-  const { data: allFixtures = [], isLoading: timelineLoading } = useApi<any[]>(topView === 'timeline' ? `/championships/${eventId}/fixtures` : null);
-  const { data: timelineDraws = [] } = useApi<any[]>(topView === 'timeline' ? `/championships/${eventId}/draws` : null);
+  // One championship-wide fixtures request feeds the timeline AND every manage-view
+  // DrawCard (sliced per draw), instead of a fixtures request per draw.
+  const fixturesPath = `/championships/${eventId}/fixtures`;
+  const { data: allFixtures = [], isLoading: fixturesLoading } = useApi<any[]>(fixturesPath);
+  // All draws for the championship in one request — feeds the timeline rows and each
+  // manage-view SportBlock (replaces one disciplines query per sport).
+  const { data: allDraws = [] } = useApi<any[]>(`/championships/${eventId}/draws`);
   const place = useApiMutation(
     ({ fixtureId, whenIso }: { fixtureId: string; whenIso: string }) => api('PATCH', `/fixtures/${fixtureId}`, { scheduled_at: whenIso }),
     [`/championships/${eventId}/fixtures`],
   );
-  const { data: tournaments = [] } = useApi<any[]>(`/tournaments?championship_id=${eventId}`);
+  const { data: tournaments = [], isLoading: tournamentsLoading } = useApi<any[]>(`/tournaments?championship_id=${eventId}`);
   // Tournament lives in the shared header filter (single-select). '' before the
   // default kicks in, so fall back to the first tournament for data fetching.
   const { tournamentId } = useFilterBar();
   const active = tournamentId || tournaments[0]?.id || '';
-  const { data: tsports = [] } = useApi<any[]>(active ? `/tournament-sports?tournament_id=${active}` : null);
+  const { data: tsports = [], isLoading: tsportsLoading } = useApi<any[]>(active ? `/tournament-sports?tournament_id=${active}` : null);
   const { data: sports = [] } = useApi<any[]>('/sports');
   const { data: teams = [] } = useApi<any[]>(`/teams?championship_id=${eventId}`);
   const { data: grounds = [] } = useApi<Ground[]>(`/championships/${eventId}/grounds`);
@@ -272,7 +281,7 @@ export function SchedulePage() {
   const formatName = (id: string | null | undefined) => (id ? formats.find((f) => f.id === id)?.name ?? null : null);
 
   // Discipline rows + day tabs for the timeline scheduler.
-  const timelineRows = timelineDraws.map((d: any) => ({
+  const timelineRows = allDraws.map((d: any) => ({
     id: d.id,
     sport: d.tournament_sports?.sports?.name ?? 'Sport',
     discipline: d.disciplines?.name ?? d.tournament_sports?.sports?.name ?? 'Discipline',
@@ -299,6 +308,9 @@ export function SchedulePage() {
   });
   const visibleTsports = sportId ? tsports.filter((ts) => ts.sport_id === sportId) : tsports;
 
+  if (tournamentsLoading) {
+    return <div className="grid h-40 place-items-center"><Spinner /></div>;
+  }
   if (tournaments.length === 0) {
     return <EmptyState icon="⚑" title="No tournaments" description="Set up a tournament and its sports before generating fixtures." />;
   }
@@ -313,7 +325,7 @@ export function SchedulePage() {
         />
       </div>
       {topView === 'timeline' ? (
-        timelineLoading ? <div className="grid h-40 place-items-center"><Spinner /></div> : (
+        fixturesLoading ? <div className="grid h-40 place-items-center"><Spinner /></div> : (
           <ScheduleTimeline
             rows={timelineRows}
             fixtures={allFixtures}
@@ -323,11 +335,13 @@ export function SchedulePage() {
             onPlace={placeMatch}
           />
         )
+      ) : tsportsLoading ? (
+        <div className="grid h-40 place-items-center"><Spinner /></div>
       ) : tsports.length === 0 ? (
         <EmptyState icon="⚑" title="No sports configured" description="Add sports & disciplines in Setup, then come back to generate fixtures." />
       ) : (
         <div className="space-y-6">
-          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} grounds={grounds} officials={officials} canManage={canManage} />)}
+          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} fixturesPath={fixturesPath} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} grounds={grounds} officials={officials} canManage={canManage} />)}
         </div>
       )}
     </div>
