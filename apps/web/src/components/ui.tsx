@@ -3,6 +3,7 @@ import type {
   ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes, ReactNode,
   SelectHTMLAttributes, TextareaHTMLAttributes,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, CircleDashed, Info, Search, X } from 'lucide-react';
 import { titleCase } from '../lib/format';
@@ -152,9 +153,9 @@ const MODAL_WIDTHS = { lg: 'max-w-lg', xl: 'max-w-xl', '2xl': 'max-w-2xl', '3xl'
 export function Modal({ title, onClose, children, footer, wide, size }:
   { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; size?: keyof typeof MODAL_WIDTHS }) {
   const maxW = size ? MODAL_WIDTHS[size] : wide ? 'max-w-2xl' : 'max-w-lg';
-  return (
-    <div className="animate-backdrop fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-slate-900/50 p-4 sm:p-6 backdrop-blur-sm" onClick={onClose}>
-      <div className={cn('mt-10 flex max-h-[calc(100vh-5rem)] w-full flex-col animate-fade-up rounded-[20px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900', maxW)} onClick={(e) => e.stopPropagation()}>
+  return createPortal(
+    <div className="animate-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4 sm:p-6 backdrop-blur-sm" onClick={onClose}>
+      <div className={cn('flex max-h-full w-full flex-col animate-fade-up rounded-[20px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900', maxW)} onClick={(e) => e.stopPropagation()}>
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700">
           <h3 className="text-lg font-semibold dark:text-slate-100">{title}</h3>
           <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">×</button>
@@ -162,7 +163,8 @@ export function Modal({ title, onClose, children, footer, wide, size }:
         <div className="flex-1 overflow-y-auto p-5">{children}</div>
         {footer && <div className="shrink-0 border-t border-slate-200 px-5 py-4 dark:border-slate-700">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
