@@ -140,7 +140,7 @@ export function AppShell() {
         >
           <div className="flex items-center gap-2.5 border-b border-slate-800 px-4 py-3.5">
             <BrandMark variant="white" height={22} />
-            <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white md:hidden" aria-label="Close menu"><X size={16} /></button>
+            <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-[background-color,color,transform] duration-150 hover:bg-slate-800 hover:text-white active:scale-90 md:hidden" aria-label="Close menu"><X size={16} /></button>
           </div>
           <nav className="flex-1 overflow-y-auto px-3 py-4">
             {groups.map((g) => (
@@ -154,7 +154,7 @@ export function AppShell() {
                     end={it.end && !eventId}
                     onClick={() => setSidebarOpen(false)}
                     className={({ isActive }) => cn(
-                      'mb-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors',
+                      'mb-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-[background-color,color] duration-150',
                       isActive && !eventId ? 'bg-brand-500 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white',
                     )}
                   >
@@ -174,7 +174,7 @@ export function AppShell() {
         <div className="flex h-screen min-w-0 flex-col md:h-auto">
           <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 dark:border-slate-800 dark:bg-slate-900">
             <div className="flex min-w-0 items-center gap-2">
-              <button onClick={() => setSidebarOpen(true)} className="grid h-9 w-9 place-items-center rounded-lg text-slate-600 hover:bg-slate-100 md:hidden dark:text-slate-300 dark:hover:bg-slate-800" aria-label="Open menu"><Menu size={18} /></button>
+              <button onClick={() => setSidebarOpen(true)} className="grid h-9 w-9 place-items-center rounded-lg text-slate-600 transition-[background-color,transform] duration-150 hover:bg-slate-100 active:scale-90 md:hidden dark:text-slate-300 dark:hover:bg-slate-800" aria-label="Open menu"><Menu size={18} /></button>
               <div className="truncate text-sm font-medium text-slate-600 dark:text-slate-300">{subtitle}</div>
             </div>
             <HeaderFilters />
@@ -183,19 +183,19 @@ export function AppShell() {
               <NotificationBell />
               <button
                 onClick={toggle}
-                className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+                className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 transition-[background-color,transform] duration-150 hover:bg-slate-100 hover:scale-[1.08] active:scale-90 dark:text-slate-400 dark:hover:bg-slate-800"
                 aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
                 title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
               >{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button>
               <div className="relative">
-                <button onClick={() => setMenuOpen((o) => !o)} className="flex items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-slate-100 dark:hover:bg-slate-800">
+                <button onClick={() => setMenuOpen((o) => !o)} className="flex items-center gap-2 rounded-lg px-1.5 py-1 transition-[background-color,transform] duration-150 hover:bg-slate-100 active:scale-[0.97] dark:hover:bg-slate-800">
                   <Avatar name={ctx.user.name} size={30} />
                   <span className="hidden text-sm font-medium text-slate-700 sm:inline dark:text-slate-300">{ctx.user.name}</span>
                 </button>
                 {menuOpen && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                    <div className="absolute right-0 z-20 mt-2 w-52 rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+                    <div className="animate-dropdown absolute right-0 z-20 mt-2 w-52 rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
                       <div className="border-b border-slate-100 px-4 py-2.5 dark:border-slate-700">
                         <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{ctx.user.name}</div>
                         <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.email}</div>
@@ -208,7 +208,7 @@ export function AppShell() {
             </div>
           </header>
           <main className="flex-1 overflow-auto bg-slate-100 p-4 sm:p-6 dark:bg-slate-950">
-            <div className={cn('mx-auto', !eventId && 'max-w-6xl')}>
+            <div key={pathname} className={cn('mx-auto animate-page-enter', !eventId && 'max-w-6xl')}>
               <Outlet />
             </div>
           </main>

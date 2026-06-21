@@ -25,9 +25,9 @@ export function Button({
     subtle: 'bg-brand-50 text-brand-700 hover:bg-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:hover:bg-brand-500/25',
   };
   const sizes: Record<ButtonSize, string> = {
-    sm: 'px-2.5 py-1.5 text-xs rounded-lg gap-1.5',
-    md: 'px-3.5 py-2 text-sm rounded-lg gap-2',
-    lg: 'px-5 py-2.5 text-base rounded-xl gap-2',
+    sm: 'px-2.5 py-1.5 text-xs rounded gap-1.5',
+    md: 'px-3.5 py-2 text-sm rounded gap-2',
+    lg: 'px-5 py-2.5 text-base rounded-md gap-2',
   };
   return (
     <button
@@ -43,7 +43,7 @@ export function Button({
 
 /* ----------------------------- Inputs ----------------------------- */
 const fieldBase =
-  'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 transition-[border-color,box-shadow] focus:outline-none focus:border-brand-500 focus:ring-[3px] focus:ring-brand-500/20 disabled:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:bg-slate-900';
+  'rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 transition-[border-color,box-shadow] focus:outline-none focus:border-brand-500 focus:ring-[3px] focus:ring-brand-500/20 disabled:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:bg-slate-900';
 
 export const Input = ({ className = '', ...p }: InputHTMLAttributes<HTMLInputElement>) =>
   <input className={cn('w-full', fieldBase, className)} {...p} />;
@@ -77,7 +77,7 @@ export function Card({ className = '', children, interactive, ...p }: HTMLAttrib
   return (
     <div
       className={cn(
-        'rounded-xl border border-slate-200 bg-white transition-[box-shadow,transform,border-color] duration-200 dark:border-slate-800 dark:bg-slate-900',
+        'rounded-md border border-slate-200 bg-white transition-[box-shadow,transform,border-color] duration-200 dark:border-slate-800 dark:bg-slate-900',
         interactive && 'cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-sm dark:hover:border-brand-500/40',
         className,
       )}
@@ -150,7 +150,7 @@ export function Modal({ title, onClose, children, footer, wide, size }:
   { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; size?: keyof typeof MODAL_WIDTHS }) {
   const maxW = size ? MODAL_WIDTHS[size] : wide ? 'max-w-2xl' : 'max-w-lg';
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-slate-900/50 p-4 sm:p-6 backdrop-blur-sm" onClick={onClose}>
+    <div className="animate-backdrop fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-slate-900/50 p-4 sm:p-6 backdrop-blur-sm" onClick={onClose}>
       <div className={cn('mt-10 flex max-h-[calc(100vh-5rem)] w-full flex-col animate-fade-up rounded-[20px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900', maxW)} onClick={(e) => e.stopPropagation()}>
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700">
           <h3 className="text-lg font-semibold dark:text-slate-100">{title}</h3>
@@ -214,7 +214,7 @@ export function PageHeader({ title, subtitle, children }: { title: ReactNode; su
 /* ----------------------------- StatCard ----------------------------- */
 export function StatCard({ label, value, hint, accent }: { label: string; value: ReactNode; hint?: ReactNode; accent?: boolean }) {
   return (
-    <div className={cn('rounded-xl border p-4', accent ? 'border-brand-200 dark:border-brand-500/30' : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900')}>
+    <div className={cn('rounded-md border p-4', accent ? 'border-brand-200 dark:border-brand-500/30' : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900')}>
       <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</div>
       <div className={cn('mt-1.5 text-2xl font-bold tracking-tight tnum', accent ? 'text-brand-600 dark:text-brand-300' : 'text-slate-900 dark:text-slate-100')}>{value}</div>
       {hint && <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{hint}</div>}
@@ -245,7 +245,7 @@ export function Tabs({ tabs, active, onChange }: { tabs: { id: string; label: Re
           key={t.id}
           onClick={() => onChange(t.id)}
           className={cn(
-            '-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors',
+            '-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-[color,border-color] duration-200 ease-out',
             active === t.id ? 'border-brand-500 text-brand-600 dark:text-brand-300' : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200',
           )}
         >
@@ -294,7 +294,7 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: 
 /* ----------------------------- EmptyState ----------------------------- */
 export function EmptyState({ icon = <CircleDashed size={32} />, title, description, action }: { icon?: ReactNode; title: string; description?: string; action?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white px-6 py-14 text-center dark:border-slate-700 dark:bg-slate-900">
+    <div className="flex flex-col items-center justify-center rounded-md border border-dashed border-slate-200 bg-white px-6 py-14 text-center dark:border-slate-700 dark:bg-slate-900">
       <div className="mb-4 text-slate-300 dark:text-slate-600">{icon}</div>
       <h3 className="font-semibold text-slate-800 dark:text-slate-200">{title}</h3>
       {description && <p className="mt-1 max-w-sm text-sm text-slate-500 dark:text-slate-400">{description}</p>}
@@ -308,7 +308,7 @@ export function BackButton({
   to, onClick, children, className = '',
 }: { to?: string; onClick?: () => void; children: ReactNode; className?: string }) {
   const cls = cn(
-    'mb-4 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-700 dark:hover:text-white',
+    'mb-4 inline-flex items-center gap-1.5 rounded border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-700 dark:hover:text-white',
     className,
   );
   const content = <><ChevronLeft size={15} className="opacity-70" aria-hidden />{children}</>;
@@ -323,7 +323,7 @@ export function ListToolbar({ children, className = '', inline = false }: { chil
       'flex flex-wrap items-center gap-2',
       inline
         ? className
-        : cn('mb-4 rounded-xl border border-slate-200/80 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-900', className),
+        : cn('mb-4 rounded-md border border-slate-200/80 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-900', className),
     )}>
       {children}
     </div>
@@ -376,7 +376,7 @@ export function Segmented<T extends string>({
   options, value, onChange, size = 'md',
 }: { options: { value: T; label: ReactNode }[]; value: T; onChange: (v: T) => void; size?: 'sm' | 'md' }) {
   return (
-    <div className={cn('inline-flex rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800', size === 'sm' ? 'text-xs' : 'text-sm')}>
+    <div className={cn('inline-flex rounded bg-slate-100 p-0.5 dark:bg-slate-800', size === 'sm' ? 'text-xs' : 'text-sm')}>
       {options.map((o) => (
         <button
           key={o.value}
@@ -384,7 +384,7 @@ export function Segmented<T extends string>({
           aria-pressed={value === o.value}
           onClick={() => onChange(o.value)}
           className={cn(
-            'rounded-md px-3 py-1.5 font-semibold transition-colors',
+            'rounded-sm px-3 py-1.5 font-semibold transition-colors',
             value === o.value ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200',
           )}
         >{o.label}</button>
@@ -429,14 +429,14 @@ export function Pagination({
           type="button"
           onClick={() => onPage(page - 1)}
           disabled={page <= 0}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          className="rounded border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
         >Prev</button>
         <span className="px-2 text-slate-500 tnum dark:text-slate-400">Page {page + 1} / {pageCount}</span>
         <button
           type="button"
           onClick={() => onPage(page + 1)}
           disabled={page >= pageCount - 1}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          className="rounded border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
         >Next</button>
       </div>
     </div>
@@ -472,7 +472,7 @@ export function Checkbox({ checked, indeterminate, onChange }: { checked: boolea
 export function BulkBar({ count, children, onClear }: { count: number; children: ReactNode; onClear: () => void }) {
   if (count === 0) return null;
   return (
-    <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 dark:border-brand-500/30 dark:bg-brand-500/10">
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-brand-200 bg-brand-50 px-4 py-2.5 dark:border-brand-500/30 dark:bg-brand-500/10">
       <span className="text-sm font-semibold text-brand-700 dark:text-brand-300">{count} selected</span>
       <div className="flex items-center gap-2">
         {children}
@@ -485,7 +485,7 @@ export function BulkBar({ count, children, onClear }: { count: number; children:
 /* ----------------------------- Table ----------------------------- */
 export function Table({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-auto rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+    <div className="overflow-auto rounded-md border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
       <table className="w-full text-sm">{children}</table>
     </div>
   );
@@ -565,8 +565,8 @@ const TOAST_META: Record<ToastType, { icon: ReactNode; chip: string }> = {
 export function Toast({ type, title, message, onClose }: { type: ToastType; title: string; message?: string; onClose?: () => void }) {
   const m = TOAST_META[type];
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3.5 py-3 shadow-md dark:border-slate-800 dark:bg-slate-900" role="status">
-      <span className={cn('mt-0.5 flex-none rounded-md p-1', m.chip)} aria-hidden>{m.icon}</span>
+    <div className="flex items-start gap-3 rounded-md border border-slate-200 bg-white px-3.5 py-3 shadow-md dark:border-slate-800 dark:bg-slate-900" role="status">
+      <span className={cn('mt-0.5 flex-none rounded-sm p-1', m.chip)} aria-hidden>{m.icon}</span>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-bold text-slate-900 dark:text-slate-100">{title}</div>
         {message && <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{message}</div>}

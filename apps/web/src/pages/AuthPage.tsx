@@ -9,9 +9,9 @@ const C = {
   blue: '#004AAD', blue8: '#013C8B', blue50: '#F1F6FE', teal: '#5CE1E6',
   teal6: '#159FA6', navy: '#0A1A33', fg2: '#374459', fg3: '#6E7E96',
 };
-const POP = "'Inter',ui-sans-serif,system-ui,sans-serif";
-const HANK = "'Inter',ui-sans-serif,system-ui,sans-serif";
-const MONO = "'JetBrains Mono',ui-monospace,monospace";
+const POP = "'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif";
+const HANK = "'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif";
+const MONO = "'IBM Plex Mono',ui-monospace,monospace";
 
 // Seed accounts from `npm run reset:all` (password: demo123; admin: admin123).
 // Temporary convenience panel — to be hidden before launch.
@@ -131,12 +131,12 @@ export function AuthPage() {
     color: t.fg2, textTransform: 'uppercase', display: 'block', marginBottom: 7,
   };
   const inputStyle: CSSProperties = {
-    width: '100%', height: 46, border: `1px solid ${t.inputBorder}`, borderRadius: 10,
+    width: '100%', height: 46, border: `1px solid ${t.inputBorder}`, borderRadius: 4,
     padding: '0 14px', fontSize: 14.5, fontFamily: HANK, outline: 'none',
     background: t.inputBg, color: t.fg,
   };
   const iconBtnStyle: CSSProperties = {
-    display: 'grid', placeItems: 'center', width: 38, height: 38, borderRadius: 10,
+    display: 'grid', placeItems: 'center', width: 38, height: 38, borderRadius: 4,
     border: `1px solid ${t.line}`, background: 'transparent', color: t.fg2,
     cursor: 'pointer', fontSize: 16,
   };
@@ -183,7 +183,7 @@ export function AuthPage() {
           </div>
 
           {/* live mini scoreboard — broadcast personality, echoes the landing hero card */}
-          <div style={{ position: 'relative', background: '#11233E', border: '1px solid #1E3354', borderRadius: 14, padding: '14px 16px', maxWidth: 290 }}>
+          <div style={{ position: 'relative', background: '#11233E', border: '1px solid #1E3354', borderRadius: 6, padding: '14px 16px', maxWidth: 290 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontFamily: MONO, fontWeight: 700, fontSize: 9.5, letterSpacing: '.08em', color: C.teal, textTransform: 'uppercase' }}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#DE3A3A' }} />Live · Football SF
             </div>
@@ -245,10 +245,10 @@ export function AuthPage() {
               </div>
 
               {error && (
-                <p role="alert" style={{ borderRadius: 10, background: dark ? 'rgba(222,58,58,.12)' : '#FBE6E6', border: `1px solid ${dark ? 'rgba(222,58,58,.3)' : '#F3C9C9'}`, padding: '10px 13px', fontSize: 13.5, fontWeight: 600, color: dark ? '#F4A8A8' : '#B23636', margin: 0 }}>{error}</p>
+                <p role="alert" style={{ borderRadius: 4, background: dark ? 'rgba(222,58,58,.12)' : '#FBE6E6', border: `1px solid ${dark ? 'rgba(222,58,58,.3)' : '#F3C9C9'}`, padding: '10px 13px', fontSize: 13.5, fontWeight: 600, color: dark ? '#F4A8A8' : '#B23636', margin: 0 }}>{error}</p>
               )}
 
-              <button type="submit" disabled={busy} className="cta" style={{ height: 50, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, background: C.blue, color: '#fff', fontFamily: POP, fontWeight: 700, fontSize: 15.5, borderRadius: 12, border: 'none', boxShadow: '0 14px 30px -12px rgba(0,74,173,.55)' }}>
+              <button type="submit" disabled={busy} className="cta" style={{ height: 50, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, background: C.blue, color: '#fff', fontFamily: POP, fontWeight: 700, fontSize: 15.5, borderRadius: 6, border: 'none', boxShadow: '0 14px 30px -12px rgba(0,74,173,.55)' }}>
                 {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
                 {!busy && (
                   <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
@@ -274,7 +274,7 @@ export function AuthPage() {
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                       {g.accounts.map((d) => (
                         <button key={d.email} type="button" onClick={() => quick(d.email, d.pw ?? 'demo123')} disabled={busy}
-                          className="demoacct" style={{ display: 'flex', flexDirection: 'column', textAlign: 'left', border: `1px solid ${t.line}`, background: t.card, borderRadius: 10, padding: '9px 11px', cursor: 'pointer' }}>
+                          className="demoacct" style={{ display: 'flex', flexDirection: 'column', textAlign: 'left', border: `1px solid ${t.line}`, background: t.card, borderRadius: 4, padding: '9px 11px', cursor: 'pointer' }}>
                           <span style={{ fontSize: 13, fontWeight: 700, color: t.fg }}>{d.label}</span>
                           <span style={{ fontFamily: MONO, fontSize: 10.5, color: t.fg3, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.email}</span>
                         </button>
