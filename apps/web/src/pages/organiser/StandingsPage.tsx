@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useEvent } from './EventLayout';
 import { usePageFilters } from '../../lib/filters';
 import { useApi } from '../../lib/hooks';
-import { Avatar, Badge, Card, CardBody, CardHeader, EmptyState, Spinner, StatCard, Table } from '../../components/ui';
+import { Avatar, Badge, Card, CardBody, CardHeader, EmptyState, Spinner, StatCard, Table, cn } from '../../components/ui';
 
 interface StandingRow {
   organization_id: string;
@@ -92,7 +92,18 @@ export function StandingsPage() {
               <tbody>
                 {rows.map((r, i) => (
                   <tr key={r.organization_id} className="border-t border-slate-100 dark:border-slate-800">
-                    <td className="px-4 py-3 text-lg">{MEDAL[i] ?? <span className="font-bold text-slate-400 dark:text-slate-500">{r.rank ?? i + 1}</span>}</td>
+                    {/* Plain rank position (not a medal) — the points come from the
+                        discipline's point system; medals only show in the Medals column
+                        when a medal scheme is actually used. */}
+                    <td className="px-4 py-3">
+                      <span className={cn(
+                        'inline-grid h-7 w-7 place-items-center rounded-full text-sm font-bold tabular-nums',
+                        i === 0 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
+                          : i === 1 ? 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200'
+                          : i === 2 ? 'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300'
+                          : 'text-slate-400 dark:text-slate-500',
+                      )}>{r.rank ?? i + 1}</span>
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <Avatar name={r.organization?.name} size={30} />

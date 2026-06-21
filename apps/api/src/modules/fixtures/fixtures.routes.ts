@@ -119,6 +119,23 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       });
       if (!td) throw new NotFoundError('Tournament discipline');
 
+      // Regenerating wipes and rebuilds the draw — refuse if any fixture has already
+      // been played (completed/walkover/bye, or a score recorded). Discarding those
+      // would corrupt results and standings. Mirrors the cascade-delete safety rule.
+      const played = await prisma.fixtures.count({
+        where: {
+          tournament_discipline_id: td.id,
+          OR: [
+            { status: { in: ['completed', 'walkover', 'bye'] } },
+            { home_score: { not: null } },
+            { away_score: { not: null } },
+          ],
+        },
+      });
+      if (played > 0) {
+        throw new BusinessRuleError('This draw already has played matches — regenerating would erase those results. Edit fixtures individually instead.');
+      }
+
       const formatName = td.tournament_formats?.name ?? td.tournament_sports.tournament_formats?.name;
       if (!formatName) throw new BusinessRuleError('No format configured for this draw');
 
@@ -197,13 +214,20 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     if ('winner_team_id' in b) data.winner_team_id = b.winner_team_id ?? null;
     if ('notes' in b) data.notes = b.notes ?? null;
     if (b.status) data.status = b.status;
+    // Scoring a match (going live or completing) requires both teams to be known — a
+    // TBD bracket slot can't be played. Fetch once and reuse for the winner check.
+    let fxTeams: { home_team_id: string | null; away_team_id: string | null } | null = null;
+    const needsTeams = b.status === 'live' || b.status === 'completed';
+    if (needsTeams || b.winner_team_id != null) {
+      fxTeams = await prisma.fixtures.findUnique({ where: { id: req.params.id }, select: { home_team_id: true, away_team_id: true } });
+      if (!fxTeams) throw new NotFoundError('Fixture');
+    }
+    if (needsTeams && (!fxTeams!.home_team_id || !fxTeams!.away_team_id)) {
+      throw new BusinessRuleError('Both teams must be set before this match can go live or be scored.');
+    }
     // A declared winner must be one of the two teams in this fixture.
-    if (b.winner_team_id != null) {
-      const fx = await prisma.fixtures.findUnique({ where: { id: req.params.id }, select: { home_team_id: true, away_team_id: true } });
-      if (!fx) throw new NotFoundError('Fixture');
-      if (b.winner_team_id !== fx.home_team_id && b.winner_team_id !== fx.away_team_id) {
-        throw new BusinessRuleError('Winner must be one of the two teams in this match');
-      }
+    if (b.winner_team_id != null && b.winner_team_id !== fxTeams!.home_team_id && b.winner_team_id !== fxTeams!.away_team_id) {
+      throw new BusinessRuleError('Winner must be one of the two teams in this match');
     }
     if (Object.keys(data).length > 0) {
       await prisma.fixtures.update({ where: { id: req.params.id }, data });
@@ -299,6 +323,12 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     await assertChampionshipStarted(prisma, req.params.id);
     const fixture = await prisma.fixtures.findUnique({ where: { id: req.params.id } });
     if (!fixture) throw new NotFoundError('Fixture');
+
+    // A TBD slot can't be played — both teams must be set before recording a result.
+    const resultStatus = req.body.status ?? 'completed';
+    if ((resultStatus === 'live' || resultStatus === 'completed') && (!fixture.home_team_id || !fixture.away_team_id)) {
+      throw new BusinessRuleError('Both teams must be set before this match can go live or be scored.');
+    }
 
     const home = req.body.home_score ?? null;
     const away = req.body.away_score ?? null;

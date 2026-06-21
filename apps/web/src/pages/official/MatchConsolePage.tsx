@@ -54,6 +54,9 @@ export function MatchConsolePage() {
   // server rule in the UI so the official sees *why* — and can't waste effort scoring.
   const champStatus = fixture.tournament_disciplines?.tournament_sports?.tournaments?.championships?.status;
   const notStarted = champStatus === 'draft' || champStatus === 'registration_open';
+  // A match can't be scored until both sides are known — a TBD bracket slot (e.g. a
+  // final waiting on its semis) has no teams to score. Mirror the server rule here.
+  const missingTeams = !fixture.home_team_id || !fixture.away_team_id;
 
   return (
     <div>
@@ -74,6 +77,20 @@ export function MatchConsolePage() {
             </p>
             <p className="mx-auto max-w-md text-sm text-slate-500 dark:text-slate-400">
               The organiser needs to move the championship to <b>Ongoing</b> (from the championship’s Settings). Once it’s started, reopen this match to record the result.
+            </p>
+            <div className="pt-1"><Button variant="outline" onClick={done}>Back to {backLabel.toLowerCase()}</Button></div>
+          </CardBody>
+        </Card>
+      ) : missingTeams ? (
+        <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-500/10">
+          <CardBody className="space-y-3 py-8 text-center">
+            <div className="text-4xl" aria-hidden>🆚</div>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Both teams aren’t set yet</h2>
+            <p className="mx-auto max-w-md text-sm text-slate-600 dark:text-slate-300">
+              This match still has a <b>TBD</b> slot — it can’t go live or be scored until both teams are assigned.
+            </p>
+            <p className="mx-auto max-w-md text-sm text-slate-500 dark:text-slate-400">
+              The organiser sets the teams from the championship’s <b>Schedule → Fixtures</b> tab (edit the fixture). Once both sides are in, reopen this match to score it.
             </p>
             <div className="pt-1"><Button variant="outline" onClick={done}>Back to {backLabel.toLowerCase()}</Button></div>
           </CardBody>
@@ -220,6 +237,9 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
   const [history, setHistory] = useState<{ state: MatchState; log: LogEntry[] }[]>([]);
   const [status, setStatus] = useState<string>(fixture.status);
   const [confirming, setConfirming] = useState(false);
+  // Terminal actions (go live / sign off) track their own in-flight state so the
+  // per-tap score autosave (`persist.isPending`) never disables the match controls.
+  const [submitting, setSubmitting] = useState(false);
   // Re-open a completed match for corrections. Revealing the scorer doesn't touch
   // the server — the first scoring action (or re-sign-off) flips it back to live.
   const [editing, setEditing] = useState(false);
@@ -239,17 +259,19 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
   // winner — used by the cricket quick-result panel to declare a winner directly.
   // `opts.notes` persists the final result text.
   const save = (s: MatchState, l: LogEntry[], st: string, done = false, onSuccess?: () => void,
-    opts?: { winner?: string | null; notes?: string }) => {
+    opts?: { winner?: string | null; notes?: string }, onError?: () => void) => {
     const h = headline(def, s);
     const winner_team_id = opts && 'winner' in opts
       ? (opts.winner ?? null)
       : (!done || h.a === h.b ? null : h.a > h.b ? fixture.home_team_id : fixture.away_team_id);
     const body: Record<string, unknown> = { live_state: s, live_log: l, home_score: h.a, away_score: h.b, status: st, winner_team_id };
     if (opts && opts.notes !== undefined) body.notes = opts.notes;
-    persist.mutate(body, { onSuccess, onError: (e: any) => toast.error(e.message) });
+    persist.mutate(body, { onSuccess, onError: (e: any) => { onError?.(); toast.error(e.message); } });
   };
 
   const dispatch = (action: Action) => {
+    // Scoring is frozen once the final period is ended — ignore point taps until reopened.
+    if (state.ended && action.type === 'POINT') return;
     const { state: ns, entry } = reduce(def, state, action);
     setHistory((hh) => [...hh, { state, log }].slice(-50));
     const nlog = entry ? [entry, ...log].slice(0, 80) : log;
@@ -268,14 +290,24 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
     });
   };
 
-  const goLive = () => { setStatus('live'); save(state, log, 'live'); };
+  const goLive = () => {
+    setSubmitting(true); setStatus('live');
+    save(state, log, 'live', false,
+      () => setSubmitting(false),
+      undefined, () => setSubmitting(false));
+  };
   // Keep the confirm dialog open (showing a spinner) until the save resolves, then
   // complete and return. Navigating only on success also lets the global mutation-
   // cache invalidation mark /fixtures stale before the Results page remounts —
   // returning eagerly raced the GET ahead of the PATCH and left the old score on
-  // screen until a manual refresh.
-  const signOff = () =>
-    save(state, log, 'completed', true, () => { setStatus('completed'); setConfirming(false); onDone(); });
+  // screen until a manual refresh. `submitting` (not the autosave's pending flag)
+  // gates this so a slow background score-save can't lock the sign-off button.
+  const signOff = () => {
+    setSubmitting(true);
+    save(state, log, 'completed', true,
+      () => { setStatus('completed'); setConfirming(false); setSubmitting(false); onDone(); },
+      undefined, () => setSubmitting(false));
+  };
 
   // Cricket: write runs/wickets straight into state (so live_state + headline stay
   // consistent) and optionally declare the winner + final result text directly.
@@ -316,14 +348,14 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
       {(!completed || editing) && (
         <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
           <Card>
-            <CardHeader title="Scoring" subtitle={`${def.segLabel} ${def.archetype === 'cricket' ? state.inn : state.seg}${def.archetype !== 'cricket' ? ` of ${def.segMax}` : ''}`} />
+            <CardHeader title="Scoring" subtitle={`${def.segLabel} ${def.archetype === 'cricket' ? state.inn : state.seg}${def.archetype !== 'cricket' ? ` of ${def.segMax}` : ''}${state.ended ? ' · frozen' : ''}`} />
             <CardBody className="space-y-4">
               {def.archetype === 'cricket' ? (
                 <CricketDeck def={def} dispatch={dispatch} />
               ) : (
                 <div className="grid grid-cols-2 gap-3">
-                  <SideDeck name={homeName} side="A" def={def} dispatch={dispatch} />
-                  <SideDeck name={awayName} side="B" def={def} dispatch={dispatch} />
+                  <SideDeck name={homeName} side="A" def={def} dispatch={dispatch} disabled={state.ended} />
+                  <SideDeck name={awayName} side="B" def={def} dispatch={dispatch} disabled={state.ended} />
                 </div>
               )}
 
@@ -332,9 +364,21 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
                   End {def.segLabel.toLowerCase()} {state.seg} (award to leader)
                 </Button>
               )}
-              {def.archetype === 'points' && state.seg < def.segMax && (
+              {def.archetype === 'points' && state.seg < def.segMax && !state.ended && (
                 <Button variant="outline" className="w-full" onClick={() => dispatch({ type: 'NEXT_SEG' })}>
                   Advance to {def.segLabel} {state.seg + 1}
+                </Button>
+              )}
+              {/* Final period (points sports e.g. basketball): freeze scoring so the last
+                  period is recorded and accidental taps can't change the result. */}
+              {def.archetype === 'points' && state.seg >= def.segMax && !state.ended && (
+                <Button variant="outline" className="w-full" onClick={() => dispatch({ type: 'END_FINAL' })}>
+                  End {def.segLabel.toLowerCase()} {state.seg} &amp; freeze scoring
+                </Button>
+              )}
+              {def.archetype === 'points' && state.ended && (
+                <Button variant="ghost" className="w-full" onClick={() => dispatch({ type: 'REOPEN' })}>
+                  ↺ Reopen scoring
                 </Button>
               )}
             </CardBody>
@@ -363,8 +407,8 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
             <Card>
               <CardHeader title="Match control" />
               <CardBody className="space-y-2">
-                {!live_ && !editing && <Button className="w-full justify-start" disabled={persist.isPending} onClick={goLive}>Start match (go live)</Button>}
-                <Button className="w-full justify-start" disabled={persist.isPending} onClick={() => setConfirming(true)}>✍ End match &amp; sign off</Button>
+                {!live_ && !editing && <Button className="w-full justify-start" disabled={submitting} onClick={goLive}>Start match (go live)</Button>}
+                <Button className="w-full justify-start" onClick={() => setConfirming(true)}>✍ End match &amp; sign off</Button>
                 {SECONDARY.map((s) => (
                   <SecondaryStatus key={s.status} fixtureId={fixtureId} status={s.status} label={s.label} variant={s.variant} invalidate={invalidate} onDone={onDone} />
                 ))}
@@ -399,8 +443,8 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">This completes the match and updates standings.</p>
             <div className="my-4 text-2xl font-black tabular-nums text-slate-900 dark:text-slate-100">{h.a} – {h.b}</div>
             <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" disabled={persist.isPending} onClick={() => setConfirming(false)}>Cancel</Button>
-              <Button className="flex-1" disabled={persist.isPending} onClick={signOff}>{persist.isPending ? 'Signing off…' : 'Sign off'}</Button>
+              <Button variant="outline" className="flex-1" disabled={submitting} onClick={() => setConfirming(false)}>Cancel</Button>
+              <Button className="flex-1" disabled={submitting} onClick={signOff}>{submitting ? 'Signing off…' : 'Sign off'}</Button>
             </div>
           </div>
         </div>
@@ -409,13 +453,13 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
   );
 }
 
-function SideDeck({ name, side, def, dispatch }: { name: string; side: 'A' | 'B'; def: SportDef; dispatch: (a: Action) => void }) {
+function SideDeck({ name, side, def, dispatch, disabled }: { name: string; side: 'A' | 'B'; def: SportDef; dispatch: (a: Action) => void; disabled?: boolean }) {
   return (
     <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
       <div className="mb-2 truncate text-center text-sm font-semibold text-slate-700 dark:text-slate-300">{name}</div>
       <div className="grid gap-2">
         {def.pointButtons.map((p) => (
-          <Button key={p} className="w-full justify-center text-base" onClick={() => dispatch({ type: 'POINT', team: side, pts: p })}>+{p}</Button>
+          <Button key={p} className="w-full justify-center text-base" disabled={disabled} onClick={() => dispatch({ type: 'POINT', team: side, pts: p })}>+{p}</Button>
         ))}
       </div>
     </div>

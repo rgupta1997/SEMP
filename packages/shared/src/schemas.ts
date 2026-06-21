@@ -376,7 +376,7 @@ export const generateFixturesSchema = z.object({
   team_ids: z.array(uuid).optional(),
   params: json.default({}),
 });
-export const createFixtureSchema = z.object({
+const fixtureFields = z.object({
   tournament_discipline_id: uuid,
   home_team_id: uuid.nullable().optional(),
   away_team_id: uuid.nullable().optional(),
@@ -385,7 +385,7 @@ export const createFixtureSchema = z.object({
   pool_number: z.number().int().optional(),
   bracket_position: z.number().int().optional(),
   scheduled_at: z.coerce.date().nullable().optional(),
-  duration_minutes: z.number().int().optional(),
+  duration_minutes: z.number().int().min(1).nullable().optional(),
   status: z.enum(FIXTURE_STATUS).default('scheduled'),
   official_id: uuid.nullable().optional(),
   notes: z.string().optional(),
@@ -393,7 +393,12 @@ export const createFixtureSchema = z.object({
   away_score: z.number().int().min(0).nullable().optional(),
   winner_team_id: uuid.nullable().optional(),
 });
-export const updateFixtureSchema = createFixtureSchema.partial();
+// A team can never be scheduled against itself.
+const distinctTeams = (d: { home_team_id?: string | null; away_team_id?: string | null }) =>
+  !(d.home_team_id && d.away_team_id && d.home_team_id === d.away_team_id);
+const sameTeamError = { message: 'A team cannot play against itself', path: ['away_team_id'] };
+export const createFixtureSchema = fixtureFields.refine(distinctTeams, sameTeamError);
+export const updateFixtureSchema = fixtureFields.partial().refine(distinctTeams, sameTeamError);
 
 // Result entry from the official's match console: scores + optional winner +
 // a result note. Winner is derived from scores when omitted.

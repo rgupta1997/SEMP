@@ -45,6 +45,7 @@ export interface MatchState {
   segsA: number; segsB: number;      // periods/sets/games won (sets/rally)
   inn: number; batting: 'A' | 'B';   // cricket
   runsA: number; wktA: number; runsB: number; wktB: number;
+  ended?: boolean;                   // final period frozen (points archetype) — locks scoring until reopened
 }
 
 export interface LogEntry { t: string; team?: 'A' | 'B'; txt: string }
@@ -64,6 +65,8 @@ export function hydrate(raw: any): MatchState {
 export type Action =
   | { type: 'POINT'; team?: 'A' | 'B'; pts?: number; label?: string }
   | { type: 'NEXT_SEG' }
+  | { type: 'END_FINAL' }
+  | { type: 'REOPEN' }
   | { type: 'WICKET' }
   | { type: 'SWITCH_INNINGS' };
 
@@ -87,6 +90,19 @@ export function reduce(def: SportDef, s: MatchState, action: Action): { state: M
       ns.inn = Math.min(ns.inn + 1, def.segMax);
       ns.batting = ns.batting === 'A' ? 'B' : 'A';
       return { state: ns, entry: { t: `Inn ${ns.inn}`, txt: 'Innings change' } };
+    }
+    case 'END_FINAL': {
+      // Points archetype: snapshot the final period and freeze scoring. The running
+      // a/b totals stay (they ARE the headline), so this only records the breakdown
+      // and locks the deck until REOPEN.
+      ns.segScores.push([ns.a, ns.b]);
+      ns.ended = true;
+      return { state: ns, entry: { t: '', txt: `End ${def.segLabel} ${ns.seg}` } };
+    }
+    case 'REOPEN': {
+      // Undo END_FINAL: drop the snapshot we pushed and unlock scoring.
+      if (ns.ended) { ns.segScores.pop(); ns.ended = false; }
+      return { state: ns, entry: { t: '', txt: `Resume ${def.segLabel} ${ns.seg}` } };
     }
     case 'NEXT_SEG': {
       if (def.archetype === 'sets' || def.archetype === 'rally') {
