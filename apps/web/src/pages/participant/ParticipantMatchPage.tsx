@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { useParams } from 'react-router-dom';
 import { useApi, fmtDateTime } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import { BackButton, Card, CardBody, CardHeader, EmptyState, Spinner, StatusBadge } from '../../components/ui';
 import { ResultBadge } from '../../components/participant/ResultBadge';
 import type { MatchResult } from '../../components/participant/types';
@@ -102,7 +103,7 @@ export function ParticipantMatchPage() {
             <Detail label="When" value={fmtDateTime(f.scheduled_at)} />
             <Detail label="Duration" value={f.duration_minutes ? `${f.duration_minutes} min` : null} />
             <Detail label="Your team" value={f.my_team.name} />
-            <Detail label="Your role" value={[f.my_role?.replace(/_/g, ' '), f.jersey_number != null ? `#${f.jersey_number}` : null].filter(Boolean).join(' · ')} />
+            <Detail label="Your role" value={[titleCase(f.my_role), f.jersey_number != null ? `#${f.jersey_number}` : null].filter(Boolean).join(' · ')} />
             {f.notes && <Detail label="Notes" value={f.notes} />}
           </CardBody>
         </Card>
@@ -121,7 +122,7 @@ export function ParticipantMatchPage() {
                       {t.phone && <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">{t.phone}</span>}
                     </span>
                     <span className="text-slate-400 dark:text-slate-500">
-                      {t.role?.replace(/_/g, ' ')}{t.jersey_number != null ? ` · #${t.jersey_number}` : ''}
+                      {titleCase(t.role)}{t.jersey_number != null ? ` · #${t.jersey_number}` : ''}
                     </span>
                   </li>
                 ))}

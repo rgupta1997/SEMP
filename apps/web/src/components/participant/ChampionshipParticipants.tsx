@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useApi } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import { Avatar, Badge, Card, EmptyState, ListToolbar, SearchInput, Select, Spinner } from '../../components/ui';
 
 // Organizations → teams → players, as returned by GET /championships/:id/participants.
@@ -131,7 +132,7 @@ export function ChampionshipParticipants({ championshipId }: { championshipId: s
                               <span className="font-medium text-slate-800 dark:text-slate-200">{p.name}</span>
                             </div>
                             <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                              <span className="capitalize">{p.role.replace(/_/g, ' ')}</span>
+                              <span>{titleCase(p.role)}</span>
                               {p.jersey_number != null && <span className="text-slate-400 dark:text-slate-500">#{p.jersey_number}</span>}
                             </div>
                           </li>

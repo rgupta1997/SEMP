@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi, useTableControls, fmtDateRange } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import { Button, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, StatusBadge } from '../../components/ui';
 
 // Placeholder grid shown while championships load.
@@ -60,7 +61,7 @@ export function EventsListPage() {
           <ListToolbar>
             <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search championships…" className="w-full sm:w-72" />
             <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-auto">
-              {STATUS_FILTERS.map((s) => <option key={s} value={s}>{s === 'all' ? 'All statuses' : s.replace(/_/g, ' ')}</option>)}
+              {STATUS_FILTERS.map((s) => <option key={s} value={s}>{s === 'all' ? 'All statuses' : titleCase(s)}</option>)}
             </Select>
             <Select value={t.sortKey} onChange={(e) => t.setSortKey(e.target.value)} className="w-auto">
               <option value="start">Sort: Date</option>

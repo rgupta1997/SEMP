@@ -133,14 +133,15 @@ export function AppShell() {
 
         {/* Sidebar */}
         <aside
+          style={{ backgroundColor: 'var(--sidebar-bg)', borderColor: 'var(--sidebar-border)' }}
           className={cn(
-            'fixed inset-y-0 left-0 z-50 flex w-[240px] flex-col overflow-hidden border-r border-slate-800 bg-slate-900 text-slate-300 transition-transform duration-200 md:static md:z-auto md:translate-x-0 md:transition-none',
+            'fixed inset-y-0 left-0 z-50 flex w-[240px] flex-col overflow-hidden border-r text-slate-300 transition-transform duration-200 md:static md:z-auto md:translate-x-0 md:transition-none',
             sidebarOpen ? 'translate-x-0' : '-translate-x-full',
           )}
         >
-          <div className="flex items-center gap-2.5 border-b border-slate-800 px-4 py-3.5">
+          <div className="flex items-center gap-2.5 border-b px-4 py-3.5" style={{ borderColor: 'var(--sidebar-border)' }}>
             <BrandMark variant="white" height={22} />
-            <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-[background-color,color,transform] duration-150 hover:bg-slate-800 hover:text-white active:scale-90 md:hidden" aria-label="Close menu"><X size={16} /></button>
+            <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-[background-color,color,transform] duration-150 hover:bg-[var(--sidebar-active)] hover:text-white active:scale-90 md:hidden" aria-label="Close menu"><X size={16} /></button>
           </div>
           <nav className="flex-1 overflow-y-auto px-3 py-4">
             {groups.map((g) => (
@@ -155,7 +156,7 @@ export function AppShell() {
                     onClick={() => setSidebarOpen(false)}
                     className={({ isActive }) => cn(
                       'mb-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-[background-color,color] duration-150',
-                      isActive && !eventId ? 'bg-brand-500 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white',
+                      isActive && !eventId ? 'bg-[var(--sidebar-active)] text-white' : 'text-slate-400 hover:bg-[var(--sidebar-active)] hover:text-white',
                     )}
                   >
                     <span className="flex-none">{it.icon}</span>
@@ -165,7 +166,7 @@ export function AppShell() {
               </div>
             ))}
           </nav>
-          <div className="border-t border-slate-800 px-3 py-3 text-[11px] text-slate-600">
+          <div className="border-t px-3 py-3 text-[11px] text-slate-500" style={{ borderColor: 'var(--sidebar-border)' }}>
             Demo logins use password <span className="font-mono text-slate-500">demo123</span>
           </div>
         </aside>
@@ -207,7 +208,7 @@ export function AppShell() {
               </div>
             </div>
           </header>
-          <main className="flex-1 overflow-auto bg-slate-100 p-4 sm:p-6 dark:bg-slate-950">
+          <main className="flex-1 overflow-auto bg-[var(--canvas)] p-4 sm:p-6 dark:bg-slate-950">
             <div key={pathname} className={cn('mx-auto animate-page-enter', !eventId && 'max-w-6xl')}>
               <Outlet />
             </div>

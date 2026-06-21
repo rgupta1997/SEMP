@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Calendar, Trophy } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { useApi, fmtDateRange } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import {
   BackButton, Badge, Card, CardBody, CardHeader, EmptyState, PageHeader, Spinner, StatCard, StatusBadge, Tabs,
 } from '../../components/ui';
@@ -119,7 +120,7 @@ export function ParticipantEventPage() {
                   </div>
                 )}
                 <div className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-                  Your role: <span className="font-semibold text-slate-700 dark:text-slate-300">{t.role.replace(/_/g, ' ')}</span>
+                  Your role: <span className="font-semibold text-slate-700 dark:text-slate-300">{titleCase(t.role)}</span>
                   {t.jersey_number != null ? ` · #${t.jersey_number}` : ''}
                 </div>
                 {t.roster.length === 0 ? (
@@ -129,7 +130,7 @@ export function ParticipantEventPage() {
                     {t.roster.map((r, i) => (
                       <li key={i} className="flex items-center justify-between rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-sm">
                         <span className="font-medium text-slate-700 dark:text-slate-300">{r.name}</span>
-                        <span className="text-xs text-slate-400 dark:text-slate-500">{r.role.replace(/_/g, ' ')}{r.jersey_number != null ? ` · #${r.jersey_number}` : ''}</span>
+                        <span className="text-xs text-slate-400 dark:text-slate-500">{titleCase(r.role)}{r.jersey_number != null ? ` · #${r.jersey_number}` : ''}</span>
                       </li>
                     ))}
                   </ul>

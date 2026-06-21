@@ -4,6 +4,7 @@ import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
 import { CHAMPIONSHIP_STATUS } from '@semp/shared';
+import { titleCase } from '../../lib/format';
 import { Button, Card, CardBody, CardHeader, confirmDialog, Field, Input, Progress, StatusBadge, Textarea, toast } from '../../components/ui';
 import { StandingsRulesCard } from '../../components/StandingsRulesCard';
 
@@ -64,7 +65,7 @@ export function EventSettingsPage() {
               return (
                 <li key={s} className={`flex items-center gap-2 text-sm ${current ? 'font-semibold text-slate-900 dark:text-slate-100' : done ? 'text-slate-400 dark:text-slate-500' : 'text-slate-500 dark:text-slate-400'}`}>
                   <span className={`grid h-5 w-5 place-items-center rounded-full text-xs ${done || current ? 'bg-brand-500 text-white' : 'bg-slate-200 text-slate-500 dark:text-slate-400'}`}>{done ? '✓' : i + 1}</span>
-                  {s.replace(/_/g, ' ')}
+                  {titleCase(s)}
                 </li>
               );
             })}

@@ -31,7 +31,7 @@ const HEADER_H = 28; // round-label band above the columns
 // avoids clashing with the "Schedule" action button. Other statuses fall
 // through to StatusBadge's default rendering.
 export function fixtureStatusLabel(status?: string | null): string | undefined {
-  return status === 'scheduled' ? 'matched' : undefined;
+  return status === 'scheduled' ? 'Matched' : undefined;
 }
 
 // Human-friendly column heading from the generator's terse round labels.

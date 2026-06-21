@@ -5,6 +5,7 @@ import type {
 } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, CircleDashed, Info, Search, X } from 'lucide-react';
+import { titleCase } from '../lib/format';
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
@@ -77,8 +78,8 @@ export function Card({ className = '', children, interactive, ...p }: HTMLAttrib
   return (
     <div
       className={cn(
-        'rounded-md border border-slate-200 bg-white transition-[box-shadow,transform,border-color] duration-200 dark:border-slate-800 dark:bg-slate-900',
-        interactive && 'cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-sm dark:hover:border-brand-500/40',
+        'rounded-2xl border border-slate-200 bg-white shadow-[var(--card-shadow)] transition-[box-shadow,transform,border-color] duration-200 dark:border-slate-800 dark:bg-slate-900 dark:shadow-none',
+        interactive && 'cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md dark:hover:border-brand-500/40',
         className,
       )}
       {...p}
@@ -104,11 +105,12 @@ export const CardBody = ({ className = '', children }: { className?: string; chi
   <div className={cn('px-5 pb-5', className)}>{children}</div>;
 
 /* ----------------------------- Badge ----------------------------- */
-type BadgeTone = 'brand' | 'green' | 'amber' | 'rose' | 'slate' | 'violet' | 'info' | 'live';
+type BadgeTone = 'brand' | 'green' | 'teal' | 'amber' | 'rose' | 'slate' | 'violet' | 'info' | 'live';
 export function Badge({ tone = 'slate', className = '', children }: { tone?: BadgeTone; className?: string; children: ReactNode }) {
   const tones: Record<BadgeTone, string> = {
     brand: 'bg-brand-50 text-brand-700 ring-brand-200 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/30',
     green: 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/30',
+    teal: 'bg-teal-50 text-teal-700 ring-teal-200 dark:bg-teal-500/15 dark:text-teal-300 dark:ring-teal-500/30',
     amber: 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30',
     rose: 'bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:ring-rose-500/30',
     slate: 'bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-700/40 dark:text-slate-300 dark:ring-slate-600/40',
@@ -118,7 +120,7 @@ export function Badge({ tone = 'slate', className = '', children }: { tone?: Bad
     live: 'bg-[var(--live)] text-white ring-transparent animate-live',
   };
   return (
-    <span className={cn('inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset', tones[tone], className)}>
+    <span className={cn('inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset', tones[tone], className)}>
       {tone === 'live' && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />}
       {children}
     </span>
@@ -133,12 +135,13 @@ export function StatusBadge({ status, label }: { status?: string | null; label?:
   // Live matches get the broadcast pulse treatment.
   if (s === 'live') return <Badge tone="live">{label ?? 'LIVE'}</Badge>;
   const tone: BadgeTone =
-    ['approved', 'completed', 'active', 'ongoing', 'roster_locked'].includes(s) ? 'green'
+    s === 'completed' ? 'teal'
+      : ['approved', 'active', 'ongoing', 'roster_locked'].includes(s) ? 'green'
       : ['pending', 'forming', 'upcoming', 'submitted', 'scheduled', 'draft'].includes(s) ? 'amber'
         : ['rejected', 'cancelled'].includes(s) ? 'rose'
           : ['registration_open'].includes(s) ? 'brand'
             : 'slate';
-  return <Badge tone={tone}>{label ?? (status ?? '—').replace(/_/g, ' ')}</Badge>;
+  return <Badge tone={tone}>{label ?? (status ? titleCase(status) : '—')}</Badge>;
 }
 
 /* ----------------------------- Modal ----------------------------- */
@@ -212,12 +215,20 @@ export function PageHeader({ title, subtitle, children }: { title: ReactNode; su
 }
 
 /* ----------------------------- StatCard ----------------------------- */
-export function StatCard({ label, value, hint, accent }: { label: string; value: ReactNode; hint?: ReactNode; accent?: boolean }) {
+// Blue-gradient stat tile (dashboard design). The value is echoed as a large,
+// faint watermark in the corner, mirroring the mockup's `data-bg-number`.
+export function StatCard({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode; accent?: boolean }) {
   return (
-    <div className={cn('rounded-md border p-4', accent ? 'border-brand-200 dark:border-brand-500/30' : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900')}>
-      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</div>
-      <div className={cn('mt-1.5 text-2xl font-bold tracking-tight tnum', accent ? 'text-brand-600 dark:text-brand-300' : 'text-slate-900 dark:text-slate-100')}>{value}</div>
-      {hint && <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{hint}</div>}
+    <div
+      className="relative overflow-hidden rounded-2xl p-6 text-white shadow-[var(--card-shadow)]"
+      style={{ backgroundImage: 'linear-gradient(135deg, var(--stat-grad-from), var(--stat-grad-to))' }}
+    >
+      <div aria-hidden className="pointer-events-none absolute -bottom-5 -right-2 select-none text-[120px] font-extrabold leading-none tnum opacity-10">{value}</div>
+      <div className="relative">
+        <div className="text-sm font-medium opacity-90">{label}</div>
+        <div className="mt-3 text-4xl font-bold tracking-tight tnum">{value}</div>
+        {hint && <div className="mt-1 text-[13px] opacity-80">{hint}</div>}
+      </div>
     </div>
   );
 }
