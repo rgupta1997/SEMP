@@ -166,9 +166,6 @@ export function AppShell() {
               </div>
             ))}
           </nav>
-          <div className="border-t px-3 py-3 text-[11px] text-slate-500" style={{ borderColor: 'var(--sidebar-border)' }}>
-            Demo logins use password <span className="font-mono text-slate-500">demo123</span>
-          </div>
         </aside>
 
         {/* Main */}

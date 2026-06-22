@@ -110,7 +110,7 @@ export function UserFormModal({
           </Select>
         </Field>
       )}
-      <Field label={isEdit ? 'Reset password (optional)' : 'Password'} hint={isEdit ? 'Leave blank to keep the current password.' : 'Leave blank to use the default (demo123).'}>
+      <Field label={isEdit ? 'Reset password (optional)' : 'Password'} hint={isEdit ? 'Leave blank to keep the current password.' : 'Leave blank to auto-generate a temporary password to share.'}>
         <div className="flex gap-2">
           <Input value={password} onChange={(e) => setPassword(e.target.value)} placeholder={isEdit ? 'New password' : 'Optional'} />
           <Button type="button" variant="outline" onClick={() => setPassword(generatePassword())}>Generate</Button>

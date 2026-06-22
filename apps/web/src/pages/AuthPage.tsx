@@ -13,28 +13,6 @@ const POP = "'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif";
 const HANK = "'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif";
 const MONO = "'IBM Plex Mono',ui-monospace,monospace";
 
-// Seed accounts from `npm run reset:all` (password: demo123; admin: admin123).
-// Temporary convenience panel - to be hidden before launch.
-const DEMO_GROUPS: { group: string; accounts: { email: string; label: string; pw?: string }[] }[] = [
-  { group: 'Platform', accounts: [
-    { email: 'admin@semp.local', label: 'System Admin', pw: 'admin123' },
-  ] },
-  { group: 'Organisers & Officials', accounts: [
-    { email: 'organiser1@semp.local', label: 'Organiser' },
-    { email: 'official1@semp.local', label: 'Official' },
-  ] },
-  { group: 'Organization owners', accounts: [
-    { email: 'owner@vjti.semp.local', label: 'Owner · VJTI (institution)' },
-    { email: 'owner@infy.semp.local', label: 'Owner · Infosys (corporate)' },
-    { email: 'owner@pufc.semp.local', label: 'Owner · Pune United FC (club)' },
-  ] },
-  { group: 'Players', accounts: [
-    { email: 'player1@vjti.semp.local', label: 'Player · VJTI (also organises)' },
-    { email: 'player2@infy.semp.local', label: 'Player · Infosys' },
-    { email: 'player29@vjti.semp.local', label: 'Player · VJTI (reset on login)' },
-  ] },
-];
-
 const RAIL_POINTS = [
   'Set up a multi-sport championship in minutes',
   'Auto-generate clash-free fixtures across venues',
@@ -55,10 +33,6 @@ const css = (dark: boolean) => `
 .auth .switchlink:hover{color:${C.blue8}}
 .auth .iconbtn{transition:background .15s,border-color .15s,color .15s}
 .auth .iconbtn:hover{border-color:${C.blue};color:${C.blue}}
-.auth .demoacct{transition:border-color .15s,background .15s,transform .1s}
-.auth .demoacct:hover{border-color:${C.blue};background:${dark ? 'rgba(0,74,173,.14)' : C.blue50}}
-.auth .demoacct:active{transform:translateY(1px)}
-.auth .demoacct:disabled{opacity:.5;cursor:default}
 @keyframes authpop{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 .auth .pop{animation:authpop .5s cubic-bezier(.16,1,.3,1) both}
 @media (prefers-reduced-motion:reduce){.auth .pop{animation:none}}
@@ -103,14 +77,6 @@ export function AuthPage() {
     } catch (err: any) {
       setError(err.message ?? 'Something went wrong');
     } finally { setBusy(false); }
-  };
-
-  const quick = async (em: string, pw: string) => {
-    setError(null); setBusy(true);
-    try {
-      await login(em, pw);
-      // AppRoutes redirects to the role's home once auth context updates.
-    } catch (err: any) { setError(err.message ?? 'Login failed'); } finally { setBusy(false); }
   };
 
   // Theme-aware tokens. Navy rail stays constant.
@@ -263,30 +229,6 @@ export function AuthPage() {
                 {mode === 'login' ? 'Sign up' : 'Sign in'}
               </button>
             </p>
-
-            {/* ===== Demo logins (temporary) ===== */}
-            <div style={{ marginTop: 34, paddingTop: 26, borderTop: `1px solid ${t.line}` }}>
-              <div style={{ textAlign: 'center', fontFamily: MONO, fontSize: 10, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: t.fg3 }}>Demo logins · all roles (temporary)</div>
-              <div style={{ maxHeight: 264, overflow: 'auto', marginTop: 16, display: 'flex', flexDirection: 'column', gap: 14, paddingRight: 2 }}>
-                {DEMO_GROUPS.map((g) => (
-                  <div key={g.group}>
-                    <div style={{ fontFamily: MONO, fontSize: 9.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: t.fg3, marginBottom: 7 }}>{g.group}</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                      {g.accounts.map((d) => (
-                        <button key={d.email} type="button" onClick={() => quick(d.email, d.pw ?? 'demo123')} disabled={busy}
-                          className="demoacct" style={{ display: 'flex', flexDirection: 'column', textAlign: 'left', border: `1px solid ${t.line}`, background: t.card, borderRadius: 4, padding: '9px 11px', cursor: 'pointer' }}>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: t.fg }}>{d.label}</span>
-                          <span style={{ fontFamily: MONO, fontSize: 10.5, color: t.fg3, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.email}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <p style={{ textAlign: 'center', fontFamily: MONO, fontSize: 10.5, color: t.fg3, marginTop: 14 }}>
-                Password <span style={{ color: t.fg2, fontWeight: 700 }}>demo123</span> · admin <span style={{ color: t.fg2, fontWeight: 700 }}>admin123</span>
-              </p>
-            </div>
           </div>
         </main>
       </div>

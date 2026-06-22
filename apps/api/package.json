@@ -9,11 +9,6 @@
     "build": "tsc --noEmit",
     "prisma:pull": "prisma db pull",
     "prisma:generate": "prisma generate",
-    "seed": "tsx src/infra/seed.ts",
-    "reset:demo": "tsx src/infra/reset-demo.ts && tsx src/infra/seed.ts",
-    "reset:all": "tsx src/infra/reset-all.ts",
-    "reset:clean": "tsx src/infra/reset-clean.ts",
-    "smoke": "tsx src/infra/smoke.ts",
     "test": "vitest run"
   },
   "dependencies": {
