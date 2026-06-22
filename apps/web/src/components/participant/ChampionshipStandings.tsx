@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useApi } from '../../lib/hooks';
+import { Trophy } from 'lucide-react';
 import { Avatar, Badge, EmptyState, ListToolbar, Select, Spinner, Table } from '../../components/ui';
 
 // A draw row (subset of GET /:id/draws) — used only to source the tournament + sport
@@ -75,7 +76,7 @@ export function ChampionshipStandings({ championshipId }: { championshipId: stri
       )}
 
       {isLoading ? <Spinner /> : rows.length === 0 ? (
-        <EmptyState icon="🏆" title="No results yet" description="Standings populate as matches are completed." />
+        <EmptyState icon={<Trophy size={24} />} title="No results yet" description="Standings populate as matches are completed." />
       ) : (
         <Table>
           <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">

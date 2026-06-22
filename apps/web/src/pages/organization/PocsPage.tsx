@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { Users } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { ORGANIZATION_MEMBER_ROLE } from '@semp/shared';
 import { useAuth } from '../../lib/auth';
 import { usePermissions } from '../../lib/permissions';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import { OrgTabs } from '../../components/OrgTabs';
 import { PeoplePicker } from '../../components/PeoplePicker';
 import { Avatar, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, toast } from '../../components/ui';
@@ -34,7 +36,7 @@ function AddMemberModal({ orgId, memberUserIds, onClose }: { orgId: string; memb
       roleControl={(
         <Field label="Role">
           <Select value={role} onChange={(e) => setRole(e.target.value)} className="w-44">
-            {ORGANIZATION_MEMBER_ROLE.map((r) => <option key={r} value={r}>{r}</option>)}
+            {ORGANIZATION_MEMBER_ROLE.map((r) => <option key={r} value={r}>{titleCase(r)}</option>)}
           </Select>
         </Field>
       )}
@@ -123,7 +125,7 @@ export function PocsPage() {
       )}
 
       {isLoading ? <Spinner /> : rosterMembers.length === 0 ? (
-        <EmptyState icon="👥" title="No members yet" description={canManage ? 'Add members so they can captain and play in teams.' : 'This organization has no members yet.'}
+        <EmptyState icon={<Users size={24} />} title="No members yet" description={canManage ? 'Add members so they can captain and play in teams.' : 'This organization has no members yet.'}
           action={canManage ? <Button onClick={() => setAdding(true)}>+ Add member</Button> : undefined} />
       ) : tc.total === 0 ? (
         <EmptyState icon="👥" title="No matching members" description="Try a different name, email or phone number." />
@@ -143,7 +145,7 @@ export function PocsPage() {
                   {canManage ? (
                     <div className="flex items-center gap-2">
                       <Select value={m.role} onChange={(e) => setRole.mutate({ id: m.id, role: e.target.value }, { onError: (err: any) => toast.error(err.message) })} className="w-32">
-                        {ORGANIZATION_MEMBER_ROLE.map((r) => <option key={r} value={r}>{r}</option>)}
+                        {ORGANIZATION_MEMBER_ROLE.map((r) => <option key={r} value={r}>{titleCase(r)}</option>)}
                       </Select>
                       <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
                         onClick={async () => { if (await confirmDialog({ title: 'Remove member', confirmLabel: 'Remove', message: `Remove ${m.users?.name ?? 'this member'} from the organization?` })) remove.mutate(m.id, { onError: (err: any) => toast.error(err.message) }); }}>

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Calendar, Flag } from 'lucide-react';
 import { useApi, fmtDateTime } from '../../lib/hooks';
 import { Badge, Card, EmptyState, ListToolbar, Select, Spinner, StatusBadge, cn } from '../../components/ui';
 
@@ -56,9 +57,9 @@ export function ChampionshipFixtures({ championshipId, mode }: { championshipId:
   if (inMode.length === 0) {
     return (
       <EmptyState
-        icon={mode === 'schedule' ? '⚑' : '🏁'}
-        title={mode === 'schedule' ? 'No fixtures yet' : 'No results yet'}
-        description={mode === 'schedule' ? 'Matches will appear here once the draw is generated.' : 'Results appear here as matches are played.'}
+        icon={mode === 'schedule' ? <Calendar size={24} /> : <Flag size={24} />}
+        title={mode === 'schedule' ? 'Nothing scheduled' : 'No results yet'}
+        description={mode === 'schedule' ? 'Upcoming matches will appear here once they are scheduled.' : 'Results appear here as matches are played.'}
       />
     );
   }

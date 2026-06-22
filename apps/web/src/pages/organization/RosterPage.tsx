@@ -4,6 +4,7 @@ import { TEAM_MEMBER_ROLE } from '@semp/shared';
 import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import { usePermissions } from '../../lib/permissions';
 import { Avatar, BackButton, Badge, Button, Card, CardBody, CardHeader, Checkbox, confirmDialog, Field, Input, Modal, Pills, Progress, SearchInput, Select, Spinner, StatusBadge, Tabs, Textarea, toast } from '../../components/ui';
 import { EnterChampionshipsPanel } from '../../components/EnterChampionshipsModal';
@@ -514,10 +515,10 @@ export function RosterPage() {
                       <Select value={m.role} disabled={updateMember.isPending}
                         onChange={(e) => updateMember.mutate({ memberId: m.id, role: e.target.value }, { onError: (err: any) => toast.error(err.message) })}
                         aria-label="Member role">
-                        {TEAM_MEMBER_ROLE.map((r) => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
+                        {TEAM_MEMBER_ROLE.map((r) => <option key={r} value={r}>{titleCase(r)}</option>)}
                       </Select>
                     ) : (
-                      <Badge tone={m.role === 'captain' ? 'brand' : 'slate'}>{m.role.replace(/_/g, ' ')}</Badge>
+                      <Badge tone={m.role === 'captain' ? 'brand' : 'slate'}>{titleCase(m.role)}</Badge>
                     )}
                     {!allLocked && canManage && <button onClick={async () => { if (await confirmDialog({ title: 'Remove member', message: `Remove ${m.users?.name ?? 'this member'} from the squad?`, confirmLabel: 'Remove' })) removeMember.mutate(m.id, { onError: (err: any) => toast.error(err.message) }); }} className="text-sm text-rose-500 hover:underline">Remove</button>}
                   </div>

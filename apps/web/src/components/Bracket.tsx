@@ -31,7 +31,7 @@ const HEADER_H = 28; // round-label band above the columns
 // avoids clashing with the "Schedule" action button. Other statuses fall
 // through to StatusBadge's default rendering.
 export function fixtureStatusLabel(status?: string | null): string | undefined {
-  return status === 'scheduled' ? 'matched' : undefined;
+  return status === 'scheduled' ? 'Matched' : undefined;
 }
 
 // Human-friendly column heading from the generator's terse round labels.
@@ -181,7 +181,7 @@ export function Bracket({ fixtures, teamName, onSelect }:
 
       <div className="relative" style={{ width, height }}>
         {/* connector lines */}
-        <svg className="pointer-championships-none absolute inset-0" width={width} height={height} aria-hidden>
+        <svg className="pointer-events-none absolute inset-0" width={width} height={height} aria-hidden>
           {rounds.slice(1).map((ms, idx) => {
             const r = idx + 1;
             const childRight = colX(r - 1) + MATCH_W;

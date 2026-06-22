@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { BRAND } from '../lib/brand';
 import { Button, Field, Input, Modal, Toggle } from './ui';
 import { CredentialsPanel, PhoneLookupNotice, useUserLookup, type Credentials } from './userProvisioning';
 
@@ -106,7 +107,7 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">Assign a point of contact</div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">Enter the POC's phone — we reuse their login if they're already on Sportagon, otherwise we create one.</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Enter the POC's phone — we reuse their login if they're already on {BRAND.name}, otherwise we create one.</div>
             </div>
             <Toggle checked={withPoc} onChange={setWithPoc} />
           </div>

@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
+import { Medal } from 'lucide-react';
 import { useEvent } from './EventLayout';
 import { usePageFilters } from '../../lib/filters';
 import { useApi, useTableControls } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import { Card, Spinner, Badge, SearchInput, Pagination, Avatar, ListToolbar, Select } from '../../components/ui';
 
 // Organizations → teams → players, as returned by GET /championships/:id/participants.
@@ -130,7 +132,9 @@ export function EventParticipantsPage() {
                         >
                           <div className="flex items-center gap-2.5">
                             <span className="w-4 text-slate-400 dark:text-slate-500">{isOpen ? '▾' : '▸'}</span>
-                            <span className="text-lg">{team.sport?.icon || '🏅'}</span>
+                            {team.sport?.icon
+                              ? <span className="text-lg leading-none">{team.sport.icon}</span>
+                              : <Medal size={18} className="text-slate-400 dark:text-slate-500" />}
                             <span className="font-medium text-slate-800 dark:text-slate-200">{team.team_name}</span>
                             {team.sport?.name && <span className="text-xs text-slate-400 dark:text-slate-500">{team.sport.name}</span>}
                           </div>
@@ -162,7 +166,7 @@ export function EventParticipantsPage() {
                                     {p.phone && <div className="text-xs text-slate-400 dark:text-slate-500">{p.phone}</div>}
                                   </td>
                                   <td className="px-4 py-2 text-slate-600 dark:text-slate-300">
-                                    <span className="capitalize">{p.role.replace(/_/g, ' ')}</span>
+                                    <span>{titleCase(p.role)}</span>
                                     {p.jersey_number != null && <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">#{p.jersey_number}</span>}
                                   </td>
                                 </tr>

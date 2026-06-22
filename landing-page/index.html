@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sportagon EOS — Run the Whole Sports Meet</title>
+  <meta name="description" content="Sportagon EOS gives sports secretaries, PE teachers and associations one place to set up championships, register schools, auto-generate fixtures and publish live results — without a single spreadsheet." />
+  <!-- Open Graph -->
+  <meta property="og:type"        content="website" />
+  <meta property="og:title"       content="Sportagon EOS — Run the Whole Sports Meet" />
+  <meta property="og:description" content="One platform to set up championships, register schools, auto-generate fixtures and publish live results." />
+  <meta property="og:image"       content="assets/sportagon-logo-blue.png" />
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@700;800;900&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/styles.css" />
+  <!-- Apply saved theme before paint to prevent flash -->
+  <script>(function(){try{var t=localStorage.getItem('semp_theme');if(t==='dark'||(t!=='light'&&window.matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark')}catch(e){}})()</script>
+</head>
+<body>
+
+<!-- ===== NAV ================================================================= -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="#top" data-scroll="top" class="nav-logo" aria-label="Sportagon EOS home">
+      <img src="assets/sportagon-logo-blue.png" alt="Sportagon"
+           data-logo-light="assets/sportagon-logo-blue.png"
+           data-logo-dark="assets/sportagon-logo-white.png" />
+      <span class="nav-eos-badge">EOS</span>
+    </a>
+
+    <div class="nav-links" role="list">
+      <a href="#features" data-scroll="features" class="navlink" role="listitem">Features</a>
+      <a href="#flow"     data-scroll="flow"     class="navlink" role="listitem">How it works</a>
+      <a href="#personas" data-scroll="personas" class="navlink" role="listitem">Built for</a>
+      <a href="#benefits" data-scroll="benefits" class="navlink" role="listitem">Why EOS</a>
+    </div>
+
+    <div class="nav-actions">
+      <button id="theme-toggle" class="theme-btn" aria-label="Toggle colour theme" title="Toggle dark/light mode">☾</button>
+      <button class="nav-login-btn" data-action="login">Log in</button>
+      <button class="cta" data-action="signup">Sign up</button>
+    </div>
+  </div>
+</nav>
+
+<!-- ===== HERO ================================================================ -->
+<section id="top" class="hero">
+  <div class="hero-grid pop">
+    <!-- left copy -->
+    <div>
+      <span class="hero-eyebrow">One platform for every sports meet</span>
+      <h1 class="hero-title">
+        Run the whole meet. From entry forms to
+        <span class="hero-underline-wrap">
+          <span class="hero-underline">
+            <span class="hero-underline-bar" aria-hidden="true"></span>
+            <span class="hero-underline-text">medals</span>
+          </span>.
+        </span>
+      </h1>
+      <p class="hero-body">
+        Sportagon EOS gives sports secretaries, PE teachers and associations one place to set up championships, register schools, auto-generate fixtures and publish live results — without a single spreadsheet.
+      </p>
+      <div class="hero-actions">
+        <a href="#demo" data-scroll="demo" class="cta large">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+          Book a demo
+        </a>
+        <a href="#features" data-scroll="features" class="ghost-btn">See how it works</a>
+      </div>
+      <div class="hero-stats">
+        <div>
+          <div class="hero-stat-num">6</div>
+          <div class="hero-stat-label">core modules</div>
+        </div>
+        <div class="hero-stat-divider" aria-hidden="true"></div>
+        <div>
+          <div class="hero-stat-num">1</div>
+          <div class="hero-stat-label">console, every role</div>
+        </div>
+        <div class="hero-stat-divider" aria-hidden="true"></div>
+        <div>
+          <div class="hero-stat-num">0</div>
+          <div class="hero-stat-label">spreadsheets</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- right: product mock -->
+    <div class="mock-wrap">
+      <div class="mock-card">
+        <div class="mock-header">
+          <!-- Sportagon hexagon mark -->
+          <svg width="20" height="20" viewBox="0 0 100 100" aria-hidden="true">
+            <path d="M50 4 L89 27 V73 L50 96 L11 73 V27 Z" fill="#004AAD"/>
+            <path d="M61 38 q-11-7-20 0 q-7 6 0 12 q11 6 0 12 q-9 7-20 0" stroke="#5CE1E6" stroke-width="7" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span class="mock-header-title">SPORTAGON EOS</span>
+          <span class="mock-header-sub">DISTRICT GAMES '26</span>
+        </div>
+        <div class="mock-body">
+          <div class="mono-label">MEDAL TALLY · LIVE</div>
+          <div class="medal-rows">
+            <div class="medal-row hi">
+              <div class="medal-rank">1</div>
+              <div class="medal-name">St. Xavier's</div>
+              <div class="medal-counts">
+                <span class="gold">14</span> · <span class="silver">9</span> · <span class="bronze">7</span>
+              </div>
+            </div>
+            <div class="medal-row">
+              <div class="medal-rank">2</div>
+              <div class="medal-name">Greenwood High</div>
+              <div class="medal-counts">
+                <span class="gold">11</span> · <span class="silver">12</span> · <span class="bronze">6</span>
+              </div>
+            </div>
+            <div class="medal-row">
+              <div class="medal-rank">3</div>
+              <div class="medal-name">Oakridge Intl</div>
+              <div class="medal-counts">
+                <span class="gold">9</span> · <span class="silver">8</span> · <span class="bronze">10</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- floating live score badge -->
+      <div class="mock-live-badge">
+        <div class="live-label">
+          <span class="live-dot" aria-hidden="true"></span>
+          Live · Football SF
+        </div>
+        <div class="live-team">
+          <span class="live-team-name">Riverside FC</span>
+          <span class="live-team-score">2</span>
+        </div>
+        <div class="live-team">
+          <span class="live-team-name away">Hilltop Utd</span>
+          <span class="live-team-score away">1</span>
+        </div>
+      </div>
+
+      <!-- hex trophy badge -->
+      <div class="mock-hex-badge" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>
+          <path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>
+          <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>
+          <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== PERSONAS ============================================================ -->
+<section id="personas" class="personas-section">
+  <div class="personas-inner">
+    <p class="personas-eyebrow">Built for the people who run sport</p>
+    <div class="personas-grid">
+      <div class="persona-card">
+        <div class="persona-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <path d="M14 2v6h6"/><path d="M9 15h6"/><path d="M9 11h2"/>
+          </svg>
+        </div>
+        <h3 class="persona-title">Sports Secretaries</h3>
+        <p class="persona-body">Launch championships, approve entries and keep every sport on schedule from one console.</p>
+      </div>
+      <div class="persona-card">
+        <div class="persona-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/>
+            <path d="m2 9 10-4 10 4-10 4z"/>
+          </svg>
+        </div>
+        <h3 class="persona-title">PE Teachers</h3>
+        <p class="persona-body">Register your squads, assign captains and track every fixture and result for your school.</p>
+      </div>
+      <div class="persona-card">
+        <div class="persona-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/>
+            <path d="M9 9v.01"/><path d="M9 12v.01"/><path d="M9 15v.01"/>
+          </svg>
+        </div>
+        <h3 class="persona-title">Sports Authorities</h3>
+        <p class="persona-body">Oversee district meets with live standings, medal tallies and shareable reports for committees.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== FEATURES ============================================================ -->
+<section id="features" class="features-section">
+  <div class="features-inner">
+    <div style="max-width:680px">
+      <span class="section-eyebrow">The platform</span>
+      <h2 class="section-h2">Everything it takes to run a championship.</h2>
+      <p class="section-lead">Six modules, one continuous flow — pick one to see it in action.</p>
+    </div>
+
+    <div class="features-grid">
+      <!-- Feature list (left) -->
+      <div class="feature-list" role="tablist" aria-label="Platform features">
+
+        <!-- Feature 1: Championship Builder -->
+        <div class="feature-item" role="tab" aria-selected="false" data-crumb="CHAMPIONSHIP SETUP" tabindex="0">
+          <div class="feature-item-inner">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>
+                <path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>
+                <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>
+                <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+              </svg>
+            </div>
+            <div class="feature-meta">
+              <div class="feature-title-row">
+                <span class="feature-title">Championship Builder</span>
+                <span class="feature-step">STEP 01</span>
+              </div>
+              <p class="feature-teaser">One wizard to launch a full multi-sport meet.</p>
+              <p class="feature-detail">Pick your sports, set disciplines like Boys U14 or Girls U16, choose League, Knockout or Hybrid — and publish a draft in minutes.</p>
+              <div class="feature-tags">
+                <span class="feature-tag">Multi-sport</span>
+                <span class="feature-tag">Age categories</span>
+                <span class="feature-tag">League / KO / Hybrid</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 2: Registrations & Rosters -->
+        <div class="feature-item" role="tab" aria-selected="false" data-crumb="REGISTRATIONS" tabindex="0">
+          <div class="feature-item-inner">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+              </svg>
+            </div>
+            <div class="feature-meta">
+              <div class="feature-title-row">
+                <span class="feature-title">Registrations &amp; Rosters</span>
+                <span class="feature-step">STEP 02</span>
+              </div>
+              <p class="feature-teaser">Onboard every school, team and athlete.</p>
+              <p class="feature-detail">Open or invite-only entries, bulk CSV import, captain assignment and roster review — approve registrations with one tap.</p>
+              <div class="feature-tags">
+                <span class="feature-tag">Bulk CSV upload</span>
+                <span class="feature-tag">Captain assignment</span>
+                <span class="feature-tag">Roster review</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 3: Auto Fixtures -->
+        <div class="feature-item" role="tab" aria-selected="false" data-crumb="FIXTURES" tabindex="0">
+          <div class="feature-item-inner">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect width="18" height="18" x="3" y="4" rx="2"/>
+                <path d="M3 10h18"/><path d="M8 2v4"/><path d="M16 2v4"/><path d="m9 16 2 2 4-4"/>
+              </svg>
+            </div>
+            <div class="feature-meta">
+              <div class="feature-title-row">
+                <span class="feature-title">Auto Fixtures</span>
+                <span class="feature-step">STEP 03</span>
+              </div>
+              <p class="feature-teaser">Clash-free schedules in one click.</p>
+              <p class="feature-detail">Generate full fixtures across venues and grounds, auto-detect team clashes, fine-tune by hand, then publish and notify everyone instantly.</p>
+              <div class="feature-tags">
+                <span class="feature-tag">Auto-scheduling</span>
+                <span class="feature-tag">Conflict detection</span>
+                <span class="feature-tag">Publish &amp; notify</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 4: Match Centre -->
+        <div class="feature-item" role="tab" aria-selected="false" data-crumb="MATCH CENTRE" tabindex="0">
+          <div class="feature-item-inner">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+              </svg>
+            </div>
+            <div class="feature-meta">
+              <div class="feature-title-row">
+                <span class="feature-title">Match Centre</span>
+                <span class="feature-step">STEP 04</span>
+              </div>
+              <p class="feature-teaser">Live scores, results and walkovers — verified.</p>
+              <p class="feature-detail">Run each match from scheduled to completed, enter live scores, handle walkovers, and have organisers approve results before they go public.</p>
+              <div class="feature-tags">
+                <span class="feature-tag">Live score entry</span>
+                <span class="feature-tag">Result approval</span>
+                <span class="feature-tag">Walkovers</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 5: Standings & Medal Tally -->
+        <div class="feature-item" role="tab" aria-selected="false" data-crumb="STANDINGS" tabindex="0">
+          <div class="feature-item-inner">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="8" r="6"/>
+                <path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/>
+              </svg>
+            </div>
+            <div class="feature-meta">
+              <div class="feature-title-row">
+                <span class="feature-title">Standings &amp; Medal Tally</span>
+                <span class="feature-step">STEP 05</span>
+              </div>
+              <p class="feature-teaser">Points tables and medals update themselves.</p>
+              <p class="feature-detail">Every result rolls straight into configurable points tables and a championship-wide medal tally — no recalculating, no disputes.</p>
+              <div class="feature-tags">
+                <span class="feature-tag">Auto points table</span>
+                <span class="feature-tag">Medal tally</span>
+                <span class="feature-tag">Multi-sport</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 6: Notifications -->
+        <div class="feature-item" role="tab" aria-selected="false" data-crumb="BROADCASTS" tabindex="0">
+          <div class="feature-item-inner">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10.268 21a2 2 0 0 0 3.464 0"/>
+                <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>
+              </svg>
+            </div>
+            <div class="feature-meta">
+              <div class="feature-title-row">
+                <span class="feature-title">Notifications &amp; Broadcasts</span>
+                <span class="feature-step">STEP 06</span>
+              </div>
+              <p class="feature-teaser">Reach every participant with in-app alerts.</p>
+              <p class="feature-detail">Fixture and result updates fire into each participant's notification feed, and organisers can broadcast a message to everyone — or just captains — in seconds.</p>
+              <div class="feature-tags">
+                <span class="feature-tag">In-app feed</span>
+                <span class="feature-tag">Audience targeting</span>
+                <span class="feature-tag">Reactions</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /feature-list -->
+
+      <!-- Preview panel (right) -->
+      <div class="feature-preview-wrap">
+        <div class="feature-preview-card">
+          <!-- mock chrome header -->
+          <div class="mock-header">
+            <svg width="20" height="20" viewBox="0 0 100 100" aria-hidden="true">
+              <path d="M50 4 L89 27 V73 L50 96 L11 73 V27 Z" fill="#004AAD"/>
+              <path d="M61 38 q-11-7-20 0 q-7 6 0 12 q11 6 0 12 q-9 7-20 0" stroke="#5CE1E6" stroke-width="7" stroke-linecap="round" fill="none"/>
+            </svg>
+            <span class="mock-header-title">SPORTAGON EOS</span>
+            <span class="mock-header-sub" id="preview-crumb">CHAMPIONSHIP SETUP</span>
+          </div>
+
+          <!-- panels -->
+          <div class="preview-panels">
+
+            <!-- Panel 0: Championship Builder -->
+            <div class="preview-panel" role="tabpanel">
+              <div class="preview-body">
+                <div class="preview-mono">NEW CHAMPIONSHIP</div>
+                <div class="preview-input-box" style="margin-top:11px">
+                  <div class="preview-label">NAME</div>
+                  <div class="preview-value">District School Games 2026</div>
+                </div>
+                <div class="preview-label" style="margin-top:15px">SPORTS</div>
+                <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">
+                  <span class="pill-blue">Cricket ✓</span>
+                  <span class="pill-grey">Football</span>
+                  <span class="pill-grey">Athletics</span>
+                  <span class="pill-grey">Kabaddi</span>
+                </div>
+                <div class="preview-label" style="margin-top:15px">DISCIPLINES</div>
+                <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">
+                  <span class="pill-teal">Boys U14</span>
+                  <span class="pill-teal">Girls U16</span>
+                  <span class="pill-teal">Open</span>
+                </div>
+                <div class="preview-label" style="margin-top:15px">FORMAT</div>
+                <div style="display:flex;gap:7px;margin-top:8px">
+                  <span style="flex:1;text-align:center;font-size:12px;font-weight:600;color:#374459;background:#fff;border:1px solid #E1E7F0;padding:8px;border-radius:8px">League</span>
+                  <span style="flex:1;text-align:center;font-size:12px;font-weight:700;color:#004AAD;background:#EAF1FD;border:1px solid #BCD2F6;padding:8px;border-radius:8px">Knockout</span>
+                  <span style="flex:1;text-align:center;font-size:12px;font-weight:600;color:#374459;background:#fff;border:1px solid #E1E7F0;padding:8px;border-radius:8px">Hybrid</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;margin-top:17px">
+                  <div style="background:#004AAD;color:#fff;font-family:'Poppins',sans-serif;font-weight:700;font-size:13px;padding:10px 16px;border-radius:9px">Publish draft</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#9BA9BE">Step 1 of 4</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Panel 1: Registrations -->
+            <div class="preview-panel" role="tabpanel">
+              <div class="preview-body">
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                  <div class="preview-mono">PARTICIPATING SCHOOLS</div>
+                  <div style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:#004AAD;background:#EAF1FD;padding:6px 11px;border-radius:8px">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                    Import CSV
+                  </div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+                  <div class="preview-row">
+                    <div class="preview-avatar">SX</div>
+                    <div style="flex:1">
+                      <div class="preview-row-name">St. Xavier's</div>
+                      <div class="preview-row-sub">CRICKET · FOOTBALL · CAPT. A. RAO</div>
+                    </div>
+                    <span class="badge-ok">APPROVED</span>
+                  </div>
+                  <div class="preview-row">
+                    <div class="preview-avatar">GH</div>
+                    <div style="flex:1">
+                      <div class="preview-row-name">Greenwood High</div>
+                      <div class="preview-row-sub">ATHLETICS · CAPT. PENDING</div>
+                    </div>
+                    <span class="badge-pending">PENDING</span>
+                  </div>
+                  <div class="preview-row">
+                    <div class="preview-avatar">OR</div>
+                    <div style="flex:1">
+                      <div class="preview-row-name">Oakridge Intl</div>
+                      <div class="preview-row-sub">KABADDI · CAPT. M. SHAIKH</div>
+                    </div>
+                    <span class="badge-ok">APPROVED</span>
+                  </div>
+                </div>
+                <div class="preview-stat"><strong>24 teams</strong> · <strong>312 athletes</strong> registered</div>
+              </div>
+            </div>
+
+            <!-- Panel 2: Auto Fixtures -->
+            <div class="preview-panel" role="tabpanel">
+              <div class="preview-body">
+                <div class="preview-mono">FIXTURES · CRICKET</div>
+                <div class="preview-success">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                  <div class="preview-success-text">48 fixtures generated · <span style="color:#1E9E5A;font-weight:700">0 clashes</span></div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+                  <div class="fixture-row">
+                    <div class="fixture-date-block">
+                      <div class="fixture-day">SAT</div>
+                      <div class="fixture-num">12</div>
+                    </div>
+                    <div class="fixture-divider" aria-hidden="true"></div>
+                    <div class="fixture-match">
+                      <div class="fixture-match-name">St. Xavier's vs Oakridge</div>
+                      <div class="fixture-match-at">09:00 · GROUND A</div>
+                    </div>
+                    <span class="badge-round">R1</span>
+                  </div>
+                  <div class="fixture-row live-row">
+                    <div class="fixture-date-block">
+                      <div class="fixture-day">SAT</div>
+                      <div class="fixture-num">12</div>
+                    </div>
+                    <div class="fixture-divider" aria-hidden="true"></div>
+                    <div class="fixture-match">
+                      <div class="fixture-match-name">Greenwood vs Hilltop</div>
+                      <div class="fixture-match-at">11:30 · GROUND B</div>
+                    </div>
+                    <span class="badge-live"><span class="badge-live-dot" aria-hidden="true"></span>LIVE</span>
+                  </div>
+                  <div class="fixture-row">
+                    <div class="fixture-date-block">
+                      <div class="fixture-day">SUN</div>
+                      <div class="fixture-num">13</div>
+                    </div>
+                    <div class="fixture-divider" aria-hidden="true"></div>
+                    <div class="fixture-match">
+                      <div class="fixture-match-name">Oakridge vs Greenwood</div>
+                      <div class="fixture-match-at">10:00 · GROUND A</div>
+                    </div>
+                    <span class="badge-round">R2</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Panel 3: Match Centre -->
+            <div class="preview-panel" role="tabpanel">
+              <div class="preview-body">
+                <div class="preview-mono">MATCH CENTRE · FOOTBALL SF</div>
+                <div class="match-score-block">
+                  <div class="match-live-indicator">
+                    <span class="match-live-dot" aria-hidden="true"></span>LIVE · 67'
+                  </div>
+                  <div class="match-team-row">
+                    <span class="match-team-name">Riverside FC</span>
+                    <span class="match-team-score">2</span>
+                  </div>
+                  <div class="match-team-row away">
+                    <span class="match-team-name">Hilltop Utd</span>
+                    <span class="match-team-score">1</span>
+                  </div>
+                </div>
+                <div class="status-row">
+                  <span class="status-pill done">SCHEDULED ✓</span>
+                  <span class="status-arrow" aria-hidden="true">→</span>
+                  <span class="status-pill active-status">LIVE</span>
+                  <span class="status-arrow" aria-hidden="true">→</span>
+                  <span class="status-pill todo">COMPLETED</span>
+                </div>
+                <div class="approval-banner">
+                  <div class="approval-text">Result submitted — awaiting organiser approval</div>
+                  <div class="approval-btn">Approve</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Panel 4: Standings -->
+            <div class="preview-panel" role="tabpanel">
+              <div class="preview-body">
+                <div class="tabs-row">
+                  <span class="tab-pill inactive-tab">Points</span>
+                  <span class="tab-pill active-tab">Medal tally</span>
+                </div>
+                <div class="standings-table">
+                  <div class="standings-head">
+                    <span>SCHOOL</span><span>G</span><span>S</span><span>B</span><span>TOT</span>
+                  </div>
+                  <div class="standings-row">
+                    <span class="standings-name">St. Xavier's</span>
+                    <span class="gold">14</span><span class="silver">9</span><span class="bronze">7</span>
+                    <span class="standings-total">30</span>
+                  </div>
+                  <div class="standings-row">
+                    <span class="standings-name">Greenwood High</span>
+                    <span class="gold">11</span><span class="silver">12</span><span class="bronze">6</span>
+                    <span class="standings-total">29</span>
+                  </div>
+                  <div class="standings-row">
+                    <span class="standings-name">Oakridge Intl</span>
+                    <span class="gold">9</span><span class="silver">8</span><span class="bronze">10</span>
+                    <span class="standings-total">27</span>
+                  </div>
+                </div>
+                <div class="standings-updated">Updated live · last result 2 min ago</div>
+              </div>
+            </div>
+
+            <!-- Panel 5: Notifications -->
+            <div class="preview-panel" role="tabpanel">
+              <div class="preview-body">
+                <div class="preview-mono">BROADCAST</div>
+                <div class="broadcast-box">
+                  <p class="broadcast-msg">Round 2 fixtures are published. Check your match time and venue in the app.</p>
+                  <div class="broadcast-actions">
+                    <span class="broadcast-tag blue">
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg>
+                      In-app
+                    </span>
+                    <span class="broadcast-tag teal">All participants</span>
+                    <span style="flex:1"></span>
+                    <span class="broadcast-send-btn">Send to 312</span>
+                  </div>
+                </div>
+                <div class="delivered-header">DELIVERED</div>
+                <div class="delivered-list">
+                  <div class="delivered-item">
+                    <span class="delivered-dot" style="background:#1E9E5A" aria-hidden="true"></span>
+                    <div>
+                      <div class="delivered-title">Result published: Riverside 2–1 Hilltop</div>
+                      <div class="delivered-meta">2 MIN AGO · 312 RECIPIENTS</div>
+                    </div>
+                  </div>
+                  <div class="delivered-item">
+                    <span class="delivered-dot" style="background:#004AAD" aria-hidden="true"></span>
+                    <div>
+                      <div class="delivered-title">Fixture reminder: Cricket SF at 09:00</div>
+                      <div class="delivered-meta">1 HR AGO · 48 RECIPIENTS</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div><!-- /preview-panels -->
+        </div>
+      </div><!-- /feature-preview-wrap -->
+
+    </div><!-- /features-grid -->
+  </div>
+</section>
+
+<!-- ===== FLOW ================================================================ -->
+<section id="flow" class="flow-section">
+  <svg width="420" height="420" viewBox="0 0 100 100" style="position:absolute;right:-90px;top:-90px;opacity:.06" aria-hidden="true">
+    <path d="M50 4 L89 27 V73 L50 96 L11 73 V27 Z" fill="none" stroke="#fff" stroke-width="2"/>
+  </svg>
+  <div class="flow-inner">
+    <div style="max-width:660px">
+      <span class="flow-eyebrow">How it works</span>
+      <h2 class="flow-h2">From setup to standings in one flow.</h2>
+    </div>
+    <div class="flow-grid">
+      <div class="flow-card">
+        <div class="flow-hex">01</div>
+        <div class="flow-title">Create</div>
+        <p class="flow-body">Build the championship — sports, age categories and format.</p>
+      </div>
+      <div class="flow-card">
+        <div class="flow-hex">02</div>
+        <div class="flow-title">Register</div>
+        <p class="flow-body">Onboard schools, teams, athletes and captains. Bulk CSV ready.</p>
+      </div>
+      <div class="flow-card">
+        <div class="flow-hex">03</div>
+        <div class="flow-title">Schedule</div>
+        <p class="flow-body">Auto-generate clash-free fixtures, then publish to everyone.</p>
+      </div>
+      <div class="flow-card">
+        <div class="flow-hex">04</div>
+        <div class="flow-title">Play</div>
+        <p class="flow-body">Enter live scores and results; walkovers handled cleanly.</p>
+      </div>
+      <div class="flow-card">
+        <div class="flow-hex">05</div>
+        <div class="flow-title">Rank</div>
+        <p class="flow-body">Points tables and medal tally update the instant a result lands.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== BENEFITS ============================================================ -->
+<section id="benefits" class="benefits-section">
+  <div class="benefits-inner">
+    <div style="max-width:660px">
+      <span class="section-eyebrow">Why EOS</span>
+      <h2 class="benefits-h2">Less admin. Cleaner events. Happier committees.</h2>
+    </div>
+    <div class="benefits-grid">
+      <div class="benefit-card">
+        <div class="benefit-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </div>
+        <h3 class="benefit-title">Hours back every week</h3>
+        <p class="benefit-body">Auto-generated fixtures and standings replace nights of manual scheduling and tallying.</p>
+      </div>
+      <div class="benefit-card">
+        <div class="benefit-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/>
+            <path d="M3 9h18"/><path d="M3 15h18"/>
+          </svg>
+        </div>
+        <h3 class="benefit-title">No more spreadsheets</h3>
+        <p class="benefit-body">One source of truth for every school, team, fixture and result — no version chaos.</p>
+      </div>
+      <div class="benefit-card">
+        <div class="benefit-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </div>
+        <h3 class="benefit-title">Live transparency</h3>
+        <p class="benefit-body">Players, parents and authorities see results the moment they are entered and approved.</p>
+      </div>
+      <div class="benefit-card">
+        <div class="benefit-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
+            <path d="m9 12 2 2 4-4"/>
+          </svg>
+        </div>
+        <h3 class="benefit-title">Fair &amp; verified</h3>
+        <p class="benefit-body">Roster review and organiser result-approval keep every meet clean and disputes rare.</p>
+      </div>
+      <div class="benefit-card">
+        <div class="benefit-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="8" r="6"/>
+            <path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/>
+          </svg>
+        </div>
+        <h3 class="benefit-title">Multi-sport medal tally</h3>
+        <p class="benefit-body">District-level meets ranked automatically across every sport, all season long.</p>
+      </div>
+      <div class="benefit-card">
+        <div class="benefit-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </div>
+        <h3 class="benefit-title">Right view for every role</h3>
+        <p class="benefit-body">Organisers, officials, captains, POCs and players each get exactly the access they need — nothing more.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== DEMO FORM =========================================================== -->
+<section id="demo" class="demo-section">
+  <div class="demo-inner">
+    <div class="demo-card">
+      <!-- left navy rail -->
+      <div class="demo-rail">
+        <svg width="320" height="320" viewBox="0 0 100 100" style="position:absolute;right:-110px;bottom:-110px;opacity:.08" aria-hidden="true">
+          <path d="M50 4 L89 27 V73 L50 96 L11 73 V27 Z" fill="none" stroke="#fff" stroke-width="2"/>
+        </svg>
+        <span class="demo-rail-eyebrow">Book a demo</span>
+        <h2 class="demo-rail-h2">See Sportagon EOS on your next meet.</h2>
+        <p class="demo-rail-body">A 30-minute walkthrough, mapped to your sports and your format. No setup needed — just bring your committee.</p>
+        <div class="demo-rail-points">
+          <div class="demo-rail-point">
+            <span style="color:#5CE1E6;flex-shrink:0">
+              <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            </span>
+            <span class="demo-rail-point-text">Tailored to your championship format</span>
+          </div>
+          <div class="demo-rail-point">
+            <span style="color:#5CE1E6;flex-shrink:0">
+              <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            </span>
+            <span class="demo-rail-point-text">See fixtures auto-generate live</span>
+          </div>
+          <div class="demo-rail-point">
+            <span style="color:#5CE1E6;flex-shrink:0">
+              <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            </span>
+            <span class="demo-rail-point-text">Free pilot for your first event</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- right form -->
+      <div class="demo-form-col">
+        <!-- success state (hidden by default) -->
+        <div id="demo-success" class="form-success" style="display:none">
+          <div class="form-success-hex">
+            <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+          </div>
+          <div class="form-success-title">You're on the list.</div>
+          <p class="form-success-body">Thanks — our team will reach out within one working day to schedule your Sportagon EOS walkthrough.</p>
+        </div>
+
+        <!-- form (shown by default) -->
+        <div id="demo-form-wrap">
+          <form id="demo-form" novalidate>
+            <div class="form-grid">
+              <div>
+                <label for="demo-name" class="form-label">Full name</label>
+                <input id="demo-name" name="demo-name" type="text" class="form-input" placeholder="Akash Manglekar" autocomplete="name" />
+              </div>
+              <div>
+                <label for="demo-org" class="form-label">Organization / school</label>
+                <input id="demo-org" name="demo-org" type="text" class="form-input" placeholder="District Sports Council" autocomplete="organization" />
+              </div>
+              <div>
+                <label for="demo-role" class="form-label">Your role</label>
+                <select id="demo-role" name="demo-role" class="form-select">
+                  <option value="">Select role</option>
+                  <option value="Sports Secretary">Sports Secretary</option>
+                  <option value="PE Teacher">PE Teacher</option>
+                  <option value="Sports Authority">Sports Authority</option>
+                  <option value="Club / Academy">Club / Academy</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label for="demo-sport" class="form-label">Primary sport</label>
+                <input id="demo-sport" name="demo-sport" type="text" class="form-input" placeholder="Cricket, Football…" />
+              </div>
+              <div>
+                <label for="demo-email" class="form-label">Work email</label>
+                <input id="demo-email" name="demo-email" type="email" class="form-input" placeholder="you@council.in" autocomplete="email" />
+              </div>
+              <div>
+                <label for="demo-phone" class="form-label">Phone</label>
+                <input id="demo-phone" name="demo-phone" type="tel" class="form-input" placeholder="+91 98765 43210" autocomplete="tel" />
+              </div>
+            </div>
+            <div id="demo-error" class="form-error" role="alert"></div>
+            <button id="demo-submit" type="submit" class="form-submit-btn">
+              Book a demo
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            </button>
+            <p class="form-note">No spam. We'll only reach out about your demo.</p>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== FOOTER ============================================================== -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <img src="assets/sportagon-logo-white.png" alt="Sportagon" />
+        <p class="footer-brand-body">All sides of sport. One Sportagon. From grounds to glory — we power the game.</p>
+      </div>
+      <div>
+        <div class="footer-col-head">Product</div>
+        <div class="footer-links">
+          <a href="#features" data-scroll="features" class="footlink">Championship Builder</a>
+          <a href="#features" data-scroll="features" class="footlink">Registrations</a>
+          <a href="#features" data-scroll="features" class="footlink">Auto Fixtures</a>
+          <a href="#features" data-scroll="features" class="footlink">Match Centre</a>
+          <a href="#features" data-scroll="features" class="footlink">Standings &amp; Medals</a>
+        </div>
+      </div>
+      <div>
+        <div class="footer-col-head">Built for</div>
+        <div class="footer-links">
+          <a href="#personas" data-scroll="personas" class="footlink">Sports Secretaries</a>
+          <a href="#personas" data-scroll="personas" class="footlink">PE Teachers</a>
+          <a href="#personas" data-scroll="personas" class="footlink">Associations</a>
+          <a href="#personas" data-scroll="personas" class="footlink">Clubs &amp; Academies</a>
+        </div>
+      </div>
+      <div>
+        <div class="footer-col-head">Company</div>
+        <div class="footer-links">
+          <a href="#top" data-scroll="top" class="footlink">About</a>
+          <a href="#demo" data-scroll="demo" class="footlink">Contact</a>
+          <a href="#top" data-scroll="top" class="footlink">Privacy</a>
+          <a href="#top" data-scroll="top" class="footlink">Terms</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-divider" aria-hidden="true"></div>
+    <div class="footer-bottom">
+      <span class="footer-copy">© 2026 Sportagon. All rights reserved.</span>
+      <div class="footer-legal">
+        <a href="#top" data-scroll="top" class="footmuted">Privacy</a>
+        <a href="#top" data-scroll="top" class="footmuted">Terms</a>
+        <button class="footer-login-btn" data-action="login">Log in</button>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- Config — set your URLs here before deploying -->
+<script>
+  window.SEMP_APP_URL = 'https://app.sportagon.com';
+  window.SEMP_API_URL = 'https://api.sportagon.com';
+</script>
+<script src="assets/main.js" defer></script>
+</body>
+</html>

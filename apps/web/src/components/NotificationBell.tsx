@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Bell, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -45,7 +46,7 @@ export function NotificationBell() {
         aria-label={unread > 0 ? `Notifications (${unread} unread)` : 'Notifications'}
         title="Notifications"
       >
-        <span className="text-lg leading-none" aria-hidden>🔔</span>
+        <Bell size={18} aria-hidden />
         {unread > 0 && (
           <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-[16px] place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white">
             {unread > 99 ? '99+' : unread}
@@ -72,7 +73,7 @@ export function NotificationBell() {
               onClick={() => setOpen(false)}
               className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
               aria-label="Close"
-            >✕</button>
+            ><X size={16} /></button>
           </div>
         </div>
 
@@ -80,7 +81,7 @@ export function NotificationBell() {
           {isLoading ? (
             <div className="grid place-items-center py-10"><Spinner /></div>
           ) : items.length === 0 ? (
-            <EmptyState icon="🔔" title="No notifications" description="You're all caught up." />
+            <EmptyState icon={<Bell size={24} />} title="No notifications" description="You're all caught up." />
           ) : (
             items.map((n) => <NotificationItem key={n.id} n={n} compact />)
           )}

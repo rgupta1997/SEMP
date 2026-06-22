@@ -72,7 +72,7 @@ export function ParticipantDashboard() {
           {achievementGroups.length > 0 && (
             <section>
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Achievements</h2>
+                <h2 className="text-base font-bold uppercase tracking-wide text-slate-800 dark:text-slate-200">Achievements</h2>
                 <Link to="/profile/achievements" className="text-sm font-semibold text-brand-600 dark:text-brand-300 hover:text-brand-700 dark:hover:text-brand-200">All achievements →</Link>
               </div>
               <div className="space-y-2">
@@ -92,7 +92,7 @@ export function ParticipantDashboard() {
 
           <section>
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Recent matches</h2>
+              <h2 className="text-base font-bold uppercase tracking-wide text-slate-800 dark:text-slate-200">Recent matches</h2>
               <Link to="/profile/matches" className="text-sm font-semibold text-brand-600 dark:text-brand-300 hover:text-brand-700 dark:hover:text-brand-200">All matches →</Link>
             </div>
             {data.recent_matches.length === 0 ? (

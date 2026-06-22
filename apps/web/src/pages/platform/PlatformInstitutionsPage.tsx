@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Landmark } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { Badge, Button, Card, confirmDialog, EmptyState, ListToolbar, Pagination, SearchInput, Spinner, toast } from '../../components/ui';
@@ -37,7 +38,7 @@ export function PlatformInstitutionsPage() {
       </div>
 
       {organizations.length === 0 ? (
-        <EmptyState icon="🏛" title="No organizations" description="Add an organization to get started." />
+        <EmptyState icon={<Landmark size={24} />} title="No organizations" description="Add an organization to get started." />
       ) : (
         <Card className="overflow-hidden">
           <table className="min-w-full divide-y divide-slate-100 dark:divide-slate-800 text-sm">

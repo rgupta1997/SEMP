@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { Landmark } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import { usePermissions } from '../../lib/permissions';
 import { api } from '../../lib/api';
@@ -29,7 +30,7 @@ export function BrowseEventsPage() {
   });
 
   if (!institutionId) {
-    return <EmptyState icon="🏛" title="No organization linked" description="Your account must be linked to an organization before you can apply to championships." />;
+    return <EmptyState icon={<Landmark size={24} />} title="No organization linked" description="Your account must be linked to an organization before you can apply to championships." />;
   }
 
   return (

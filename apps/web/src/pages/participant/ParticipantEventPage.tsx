@@ -1,6 +1,8 @@
 import { useState } from 'react';
+import { Calendar, Trophy } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { useApi, fmtDateRange } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import {
   BackButton, Badge, Card, CardBody, CardHeader, EmptyState, PageHeader, Spinner, StatCard, StatusBadge, Tabs,
 } from '../../components/ui';
@@ -27,6 +29,23 @@ interface EventDetail {
     organization_id: string; organization: any;
     played: number; won: number; drawn: number; lost: number; points: number;
   }[];
+}
+
+const RANK_COLORS = [
+  { bg: 'var(--gold-500)', color: '#3b1f00' },
+  { bg: 'var(--silver)', color: '#1e293b' },
+  { bg: 'var(--bronze)', color: '#fff7ed' },
+];
+
+function RankBadge({ pos }: { pos: number }) {
+  const c = RANK_COLORS[pos - 1];
+  if (!c) return <span className="font-bold tabular-nums text-slate-400 dark:text-slate-500">{pos}</span>;
+  return (
+    <span
+      className="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold"
+      style={{ background: c.bg, color: c.color }}
+    >{pos}</span>
+  );
 }
 
 export function ParticipantEventPage() {
@@ -101,7 +120,7 @@ export function ParticipantEventPage() {
                   </div>
                 )}
                 <div className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-                  Your role: <span className="font-semibold text-slate-700 dark:text-slate-300">{t.role.replace(/_/g, ' ')}</span>
+                  Your role: <span className="font-semibold text-slate-700 dark:text-slate-300">{titleCase(t.role)}</span>
                   {t.jersey_number != null ? ` · #${t.jersey_number}` : ''}
                 </div>
                 {t.roster.length === 0 ? (
@@ -111,7 +130,7 @@ export function ParticipantEventPage() {
                     {t.roster.map((r, i) => (
                       <li key={i} className="flex items-center justify-between rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-sm">
                         <span className="font-medium text-slate-700 dark:text-slate-300">{r.name}</span>
-                        <span className="text-xs text-slate-400 dark:text-slate-500">{r.role.replace(/_/g, ' ')}{r.jersey_number != null ? ` · #${r.jersey_number}` : ''}</span>
+                        <span className="text-xs text-slate-400 dark:text-slate-500">{titleCase(r.role)}{r.jersey_number != null ? ` · #${r.jersey_number}` : ''}</span>
                       </li>
                     ))}
                   </ul>
@@ -124,7 +143,7 @@ export function ParticipantEventPage() {
 
       {tab === 'matches' && (
         matches.length === 0 ? (
-          <EmptyState icon="⚑" title="No matches yet" description="Fixtures appear here once your teams are drawn." />
+          <EmptyState icon={<Calendar size={24} />} title="No matches yet" description="Fixtures appear here once your teams are drawn." />
         ) : (
           <div className="space-y-2">
             {matches.map((m) => <MatchRow key={m.id} match={m} showEvent={false} />)}

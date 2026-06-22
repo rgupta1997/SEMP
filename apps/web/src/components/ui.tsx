@@ -3,7 +3,10 @@ import type {
   ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes, ReactNode,
   SelectHTMLAttributes, TextareaHTMLAttributes,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, CircleDashed, Info, Search, X } from 'lucide-react';
+import { titleCase } from '../lib/format';
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
@@ -24,9 +27,9 @@ export function Button({
     subtle: 'bg-brand-50 text-brand-700 hover:bg-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:hover:bg-brand-500/25',
   };
   const sizes: Record<ButtonSize, string> = {
-    sm: 'px-2.5 py-1.5 text-xs rounded-lg gap-1.5',
-    md: 'px-3.5 py-2 text-sm rounded-lg gap-2',
-    lg: 'px-5 py-2.5 text-base rounded-xl gap-2',
+    sm: 'px-2.5 py-1.5 text-xs rounded gap-1.5',
+    md: 'px-3.5 py-2 text-sm rounded gap-2',
+    lg: 'px-5 py-2.5 text-base rounded-md gap-2',
   };
   return (
     <button
@@ -42,7 +45,7 @@ export function Button({
 
 /* ----------------------------- Inputs ----------------------------- */
 const fieldBase =
-  'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 transition-[border-color,box-shadow] focus:outline-none focus:border-brand-500 focus:ring-[3px] focus:ring-brand-500/20 disabled:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:bg-slate-900';
+  'rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 transition-[border-color,box-shadow] focus:outline-none focus:border-brand-500 focus:ring-[3px] focus:ring-brand-500/20 disabled:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:bg-slate-900';
 
 export const Input = ({ className = '', ...p }: InputHTMLAttributes<HTMLInputElement>) =>
   <input className={cn('w-full', fieldBase, className)} {...p} />;
@@ -55,7 +58,7 @@ export function Select({ className = '', ...p }: SelectHTMLAttributes<HTMLSelect
         className={cn(fieldBase, 'appearance-none pr-8', full ? 'w-full' : 'w-auto min-w-[9.5rem]', className)}
         {...p}
       />
-      <span className="pointer-championships-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 dark:text-slate-500" aria-hidden>▾</span>
+      <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" aria-hidden><ChevronDown size={14} /></span>
     </div>
   );
 }
@@ -76,7 +79,7 @@ export function Card({ className = '', children, interactive, ...p }: HTMLAttrib
   return (
     <div
       className={cn(
-        'rounded-2xl border border-slate-200 bg-white shadow-sm transition-[box-shadow,transform,border-color] duration-200 dark:border-slate-800 dark:bg-slate-900',
+        'rounded-2xl border border-slate-200 bg-white shadow-[var(--card-shadow)] transition-[box-shadow,transform,border-color] duration-200 dark:border-slate-800 dark:bg-slate-900 dark:shadow-none',
         interactive && 'cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md dark:hover:border-brand-500/40',
         className,
       )}
@@ -103,11 +106,12 @@ export const CardBody = ({ className = '', children }: { className?: string; chi
   <div className={cn('px-5 pb-5', className)}>{children}</div>;
 
 /* ----------------------------- Badge ----------------------------- */
-type BadgeTone = 'brand' | 'green' | 'amber' | 'rose' | 'slate' | 'violet' | 'info' | 'live';
+type BadgeTone = 'brand' | 'green' | 'teal' | 'amber' | 'rose' | 'slate' | 'violet' | 'info' | 'live';
 export function Badge({ tone = 'slate', className = '', children }: { tone?: BadgeTone; className?: string; children: ReactNode }) {
   const tones: Record<BadgeTone, string> = {
     brand: 'bg-brand-50 text-brand-700 ring-brand-200 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/30',
     green: 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/30',
+    teal: 'bg-teal-50 text-teal-700 ring-teal-200 dark:bg-teal-500/15 dark:text-teal-300 dark:ring-teal-500/30',
     amber: 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30',
     rose: 'bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:ring-rose-500/30',
     slate: 'bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-700/40 dark:text-slate-300 dark:ring-slate-600/40',
@@ -117,7 +121,7 @@ export function Badge({ tone = 'slate', className = '', children }: { tone?: Bad
     live: 'bg-[var(--live)] text-white ring-transparent animate-live',
   };
   return (
-    <span className={cn('inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset', tones[tone], className)}>
+    <span className={cn('inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset', tones[tone], className)}>
       {tone === 'live' && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />}
       {children}
     </span>
@@ -132,12 +136,13 @@ export function StatusBadge({ status, label }: { status?: string | null; label?:
   // Live matches get the broadcast pulse treatment.
   if (s === 'live') return <Badge tone="live">{label ?? 'LIVE'}</Badge>;
   const tone: BadgeTone =
-    ['approved', 'completed', 'active', 'ongoing', 'roster_locked'].includes(s) ? 'green'
-    : ['pending', 'forming', 'upcoming', 'submitted', 'scheduled', 'draft'].includes(s) ? 'amber'
-    : ['rejected', 'cancelled'].includes(s) ? 'rose'
-    : ['registration_open'].includes(s) ? 'brand'
-    : 'slate';
-  return <Badge tone={tone}>{label ?? (status ?? '—').replace(/_/g, ' ')}</Badge>;
+    s === 'completed' ? 'teal'
+      : ['approved', 'active', 'ongoing', 'roster_locked'].includes(s) ? 'green'
+      : ['pending', 'forming', 'upcoming', 'submitted', 'scheduled', 'draft'].includes(s) ? 'amber'
+        : ['rejected', 'cancelled'].includes(s) ? 'rose'
+          : ['registration_open'].includes(s) ? 'brand'
+            : 'slate';
+  return <Badge tone={tone}>{label ?? (status ? titleCase(status) : '—')}</Badge>;
 }
 
 /* ----------------------------- Modal ----------------------------- */
@@ -148,9 +153,9 @@ const MODAL_WIDTHS = { lg: 'max-w-lg', xl: 'max-w-xl', '2xl': 'max-w-2xl', '3xl'
 export function Modal({ title, onClose, children, footer, wide, size }:
   { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; size?: keyof typeof MODAL_WIDTHS }) {
   const maxW = size ? MODAL_WIDTHS[size] : wide ? 'max-w-2xl' : 'max-w-lg';
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-slate-900/50 p-4 sm:p-6 backdrop-blur-sm" onClick={onClose}>
-      <div className={cn('mt-10 flex max-h-[calc(100vh-5rem)] w-full flex-col animate-fade-up rounded-[20px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900', maxW)} onClick={(e) => e.stopPropagation()}>
+  return createPortal(
+    <div className="animate-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4 sm:p-6 backdrop-blur-sm" onClick={onClose}>
+      <div className={cn('flex max-h-full w-full flex-col animate-fade-up rounded-[20px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900', maxW)} onClick={(e) => e.stopPropagation()}>
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700">
           <h3 className="text-lg font-semibold dark:text-slate-100">{title}</h3>
           <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">×</button>
@@ -158,7 +163,8 @@ export function Modal({ title, onClose, children, footer, wide, size }:
         <div className="flex-1 overflow-y-auto p-5">{children}</div>
         {footer && <div className="shrink-0 border-t border-slate-200 px-5 py-4 dark:border-slate-700">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -211,12 +217,20 @@ export function PageHeader({ title, subtitle, children }: { title: ReactNode; su
 }
 
 /* ----------------------------- StatCard ----------------------------- */
-export function StatCard({ label, value, hint, accent }: { label: string; value: ReactNode; hint?: ReactNode; accent?: boolean }) {
+// Blue-gradient stat tile (dashboard design). The value is echoed as a large,
+// faint watermark in the corner, mirroring the mockup's `data-bg-number`.
+export function StatCard({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode; accent?: boolean }) {
   return (
-    <div className={cn('rounded-2xl border p-4', accent ? 'border-brand-200 bg-brand-50 dark:border-brand-500/30 dark:bg-brand-500/10' : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900')}>
-      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</div>
-      <div className={cn('mt-1 text-3xl font-extrabold tracking-tight tnum', accent ? 'text-brand-600 dark:text-brand-300' : 'text-slate-900 dark:text-slate-100')}>{value}</div>
-      {hint && <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{hint}</div>}
+    <div
+      className="relative overflow-hidden rounded-2xl p-6 text-white shadow-[var(--card-shadow)]"
+      style={{ backgroundImage: 'linear-gradient(135deg, var(--stat-grad-from), var(--stat-grad-to))' }}
+    >
+      <div aria-hidden className="pointer-events-none absolute -bottom-5 -right-2 select-none text-[120px] font-extrabold leading-none tnum opacity-10">{value}</div>
+      <div className="relative">
+        <div className="text-sm font-medium opacity-90">{label}</div>
+        <div className="mt-3 text-4xl font-bold tracking-tight tnum">{value}</div>
+        {hint && <div className="mt-1 text-[13px] opacity-80">{hint}</div>}
+      </div>
     </div>
   );
 }
@@ -244,7 +258,7 @@ export function Tabs({ tabs, active, onChange }: { tabs: { id: string; label: Re
           key={t.id}
           onClick={() => onChange(t.id)}
           className={cn(
-            '-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors',
+            '-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-[color,border-color] duration-200 ease-out',
             active === t.id ? 'border-brand-500 text-brand-600 dark:text-brand-300' : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200',
           )}
         >
@@ -266,9 +280,9 @@ export function Stepper({ steps, current }: { steps: string[]; current: number }
             <span className={cn(
               'grid h-7 w-7 flex-none place-items-center rounded-full border text-xs font-bold',
               done ? 'border-brand-500 bg-brand-500 text-white'
-              : active ? 'border-brand-500 bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300'
-              : 'border-slate-300 text-slate-400 dark:border-slate-700 dark:text-slate-500',
-            )}>{done ? '✓' : i + 1}</span>
+                : active ? 'border-brand-500 bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300'
+                  : 'border-slate-300 text-slate-400 dark:border-slate-700 dark:text-slate-500',
+            )}>{done ? <Check size={13} /> : i + 1}</span>
             <span className={cn('text-sm font-semibold', active ? 'text-slate-900 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400')}>{s}</span>
           </li>
         );
@@ -291,10 +305,10 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: 
 }
 
 /* ----------------------------- EmptyState ----------------------------- */
-export function EmptyState({ icon = '◎', title, description, action }: { icon?: ReactNode; title: string; description?: string; action?: ReactNode }) {
+export function EmptyState({ icon = <CircleDashed size={32} />, title, description, action }: { icon?: ReactNode; title: string; description?: string; action?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center dark:border-slate-700 dark:bg-slate-900">
-      <div className="mb-3 grid h-12 w-12 place-items-center rounded-xl bg-slate-100 text-2xl text-slate-400 dark:bg-slate-800 dark:text-slate-500">{icon}</div>
+    <div className="flex flex-col items-center justify-center rounded-md border border-dashed border-slate-200 bg-white px-6 py-14 text-center dark:border-slate-700 dark:bg-slate-900">
+      <div className="mb-4 text-slate-300 dark:text-slate-600">{icon}</div>
       <h3 className="font-semibold text-slate-800 dark:text-slate-200">{title}</h3>
       {description && <p className="mt-1 max-w-sm text-sm text-slate-500 dark:text-slate-400">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
@@ -307,10 +321,10 @@ export function BackButton({
   to, onClick, children, className = '',
 }: { to?: string; onClick?: () => void; children: ReactNode; className?: string }) {
   const cls = cn(
-    'mb-4 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-700 dark:hover:text-white',
+    'mb-4 inline-flex items-center gap-1.5 rounded border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-700 dark:hover:text-white',
     className,
   );
-  const content = <><span className="text-base leading-none opacity-70" aria-hidden>←</span>{children}</>;
+  const content = <><ChevronLeft size={15} className="opacity-70" aria-hidden />{children}</>;
   if (to) return <Link to={to} className={cls}>{content}</Link>;
   return <button type="button" onClick={onClick} className={cls}>{content}</button>;
 }
@@ -322,7 +336,7 @@ export function ListToolbar({ children, className = '', inline = false }: { chil
       'flex flex-wrap items-center gap-2',
       inline
         ? className
-        : cn('mb-4 rounded-xl border border-slate-200/80 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-900', className),
+        : cn('mb-4 rounded-md border border-slate-200/80 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-900', className),
     )}>
       {children}
     </div>
@@ -339,7 +353,7 @@ export function SortDirButton({ dir, onToggle }: { dir: 'asc' | 'desc'; onToggle
       title={dir === 'asc' ? 'Sort ascending' : 'Sort descending'}
       aria-label={dir === 'asc' ? 'Sort ascending' : 'Sort descending'}
     >
-      {dir === 'asc' ? '↑ Asc' : '↓ Desc'}
+      {dir === 'asc' ? <><ArrowUp size={13} /> Asc</> : <><ArrowDown size={13} /> Desc</>}
     </Button>
   );
 }
@@ -350,7 +364,7 @@ export function SearchInput({
 }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string; autoFocus?: boolean }) {
   return (
     <div className={cn('relative shrink-0', className.includes('w-full') ? 'w-full' : '', className)}>
-      <span className="pointer-championships-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" aria-hidden>⌕</span>
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" aria-hidden><Search size={14} /></span>
       <input
         value={value}
         autoFocus={autoFocus}
@@ -364,7 +378,7 @@ export function SearchInput({
           aria-label="Clear search"
           onClick={() => onChange('')}
           className="absolute right-2 top-1/2 -translate-y-1/2 grid h-5 w-5 place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
-        >×</button>
+        ><X size={12} /></button>
       )}
     </div>
   );
@@ -375,7 +389,7 @@ export function Segmented<T extends string>({
   options, value, onChange, size = 'md',
 }: { options: { value: T; label: ReactNode }[]; value: T; onChange: (v: T) => void; size?: 'sm' | 'md' }) {
   return (
-    <div className={cn('inline-flex rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800', size === 'sm' ? 'text-xs' : 'text-sm')}>
+    <div className={cn('inline-flex rounded bg-slate-100 p-0.5 dark:bg-slate-800', size === 'sm' ? 'text-xs' : 'text-sm')}>
       {options.map((o) => (
         <button
           key={o.value}
@@ -383,7 +397,7 @@ export function Segmented<T extends string>({
           aria-pressed={value === o.value}
           onClick={() => onChange(o.value)}
           className={cn(
-            'rounded-md px-3 py-1.5 font-semibold transition-colors',
+            'rounded-sm px-3 py-1.5 font-semibold transition-colors',
             value === o.value ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200',
           )}
         >{o.label}</button>
@@ -405,7 +419,7 @@ export function SortHeader({
         className={cn('inline-flex items-center gap-1 hover:text-slate-700 dark:hover:text-slate-200', active && 'text-slate-800 dark:text-slate-200')}
       >
         {label}
-        <span className="text-[10px] text-slate-400">{active ? (dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+        <span className="text-slate-400">{active ? (dir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />) : <ArrowUpDown size={11} />}</span>
       </button>
     </th>
   );
@@ -428,14 +442,14 @@ export function Pagination({
           type="button"
           onClick={() => onPage(page - 1)}
           disabled={page <= 0}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          className="rounded border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
         >Prev</button>
         <span className="px-2 text-slate-500 tnum dark:text-slate-400">Page {page + 1} / {pageCount}</span>
         <button
           type="button"
           onClick={() => onPage(page + 1)}
           disabled={page >= pageCount - 1}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          className="rounded border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
         >Next</button>
       </div>
     </div>
@@ -471,7 +485,7 @@ export function Checkbox({ checked, indeterminate, onChange }: { checked: boolea
 export function BulkBar({ count, children, onClear }: { count: number; children: ReactNode; onClear: () => void }) {
   if (count === 0) return null;
   return (
-    <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 dark:border-brand-500/30 dark:bg-brand-500/10">
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-brand-200 bg-brand-50 px-4 py-2.5 dark:border-brand-500/30 dark:bg-brand-500/10">
       <span className="text-sm font-semibold text-brand-700 dark:text-brand-300">{count} selected</span>
       <div className="flex items-center gap-2">
         {children}
@@ -484,7 +498,7 @@ export function BulkBar({ count, children, onClear }: { count: number; children:
 /* ----------------------------- Table ----------------------------- */
 export function Table({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-auto rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+    <div className="overflow-auto rounded-md border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
       <table className="w-full text-sm">{children}</table>
     </div>
   );
@@ -553,25 +567,25 @@ export function Skeleton({ className = '', rounded = 'rounded-md' }: { className
 export type ToastType = 'success' | 'info' | 'warning' | 'error';
 interface ToastItem { id: number; type: ToastType; title: string; message?: string }
 
-const TOAST_META: Record<ToastType, { icon: string; bar: string; text: string }> = {
-  success: { icon: '✓', bar: 'border-l-emerald-500', text: 'text-emerald-600 dark:text-emerald-400' },
-  info:    { icon: 'ℹ', bar: 'border-l-brand-500',   text: 'text-brand-600 dark:text-brand-300' },
-  warning: { icon: '⚠', bar: 'border-l-amber-500',   text: 'text-amber-600 dark:text-amber-400' },
-  error:   { icon: '✕', bar: 'border-l-rose-600',    text: 'text-rose-600 dark:text-rose-400' },
+const TOAST_META: Record<ToastType, { icon: ReactNode; chip: string }> = {
+  success: { icon: <Check size={13} />, chip: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400' },
+  info: { icon: <Info size={13} />, chip: 'bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300' },
+  warning: { icon: <AlertTriangle size={13} />, chip: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400' },
+  error: { icon: <X size={13} />, chip: 'bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400' },
 };
 
-// Presentational toast (also used standalone). Left accent bar encodes the type.
+// Presentational toast. Full border + small colored icon chip encodes the type.
 export function Toast({ type, title, message, onClose }: { type: ToastType; title: string; message?: string; onClose?: () => void }) {
   const m = TOAST_META[type];
   return (
-    <div className={cn('flex items-start gap-3 rounded-xl border-l-4 bg-white px-3.5 py-3 shadow-md dark:bg-slate-900', m.bar)} role="status">
-      <span className={cn('mt-0.5 flex-none text-sm', m.text)} aria-hidden>{m.icon}</span>
+    <div className="flex items-start gap-3 rounded-md border border-slate-200 bg-white px-3.5 py-3 shadow-md dark:border-slate-800 dark:bg-slate-900" role="status">
+      <span className={cn('mt-0.5 flex-none rounded-sm p-1', m.chip)} aria-hidden>{m.icon}</span>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-bold text-slate-900 dark:text-slate-100">{title}</div>
         {message && <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{message}</div>}
       </div>
       {onClose && (
-        <button onClick={onClose} aria-label="Dismiss" className="flex-none text-base leading-none text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">×</button>
+        <button onClick={onClose} aria-label="Dismiss" className="flex-none text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={14} /></button>
       )}
     </div>
   );
@@ -614,9 +628,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ push }}>
       {children}
-      <div className="pointer-championships-none fixed bottom-4 right-4 z-[600] flex w-[min(92vw,360px)] flex-col gap-2">
+      <div className="pointer-events-none fixed bottom-4 right-4 z-[600] flex w-[min(92vw,360px)] flex-col gap-2">
         {toasts.map((t) => (
-          <div key={t.id} className="pointer-championships-auto animate-fade-up">
+          <div key={t.id} className="pointer-events-auto animate-fade-up">
             <Toast type={t.type} title={t.title} message={t.message} onClose={() => remove(t.id)} />
           </div>
         ))}

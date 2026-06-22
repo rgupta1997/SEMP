@@ -9,7 +9,7 @@ export function EventCard({ championship }: { championship: EventCardData }) {
   return (
     <Card
       onClick={() => navigate(`/profile/championships/${championship.id}`)}
-      className="cursor-pointer p-5 transition-shadow hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-400"
+      className="cursor-pointer p-6 transition-shadow hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-400"
     >
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-bold text-slate-900 dark:text-slate-100">{championship.name}</h3>

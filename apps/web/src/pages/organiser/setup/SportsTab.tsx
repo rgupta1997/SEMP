@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Medal } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
@@ -124,7 +125,7 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
             </div>
             <div className="grid grid-cols-[1fr_80px_auto] gap-2">
               <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Sport name" />
-              <Input value={newIcon} onChange={(e) => setNewIcon(e.target.value)} placeholder="🏀" />
+              <Input value={newIcon} onChange={(e) => setNewIcon(e.target.value)} placeholder="Icon" />
               <Button variant="outline" onClick={addNewSport} disabled={createSport.isPending}>{createSport.isPending ? 'Adding…' : 'Create'}</Button>
             </div>
           </div>
@@ -618,7 +619,7 @@ export function SportsTab({ eventId }: { eventId: string }) {
       </div>
 
       {tsports.length === 0 ? (
-        <EmptyState icon="🏅" title="No sports yet" description="Add the sports this season will run — each gets its own fixture format."
+        <EmptyState icon={<Medal size={24} />} title="No sports yet" description="Add the sports this tournament will run — each gets its own fixture format."
           action={<Button onClick={() => setAdding(true)}>+ Add sport</Button>} />
       ) : (
         <div className="grid gap-3">

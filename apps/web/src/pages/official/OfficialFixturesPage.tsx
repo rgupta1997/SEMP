@@ -4,6 +4,7 @@ import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useTableControls, fmtDateTime } from '../../lib/hooks';
 import { Button, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, StatCard, StatusBadge } from '../../components/ui';
 import { awayTeam, disciplineLabel, eventInfo, eventLabel, homeTeam, sportName, teamLabel, venueLabel } from './fixtureHelpers';
+import { titleCase } from '../../lib/format';
 
 export function OfficialFixturesPage() {
   const navigate = useNavigate();
@@ -69,7 +70,7 @@ export function OfficialFixturesPage() {
             <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search teams, championship, venue…" className="w-full sm:w-72" />
             {statusOptions.length > 2 && (
               <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-auto">
-                {statusOptions.map((s) => <option key={s} value={s}>{s === 'all' ? 'All statuses' : String(s).replace(/_/g, ' ')}</option>)}
+                {statusOptions.map((s) => <option key={s} value={s}>{s === 'all' ? 'All statuses' : titleCase(String(s))}</option>)}
               </Select>
             )}
           </ListToolbar>

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Users } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../../lib/auth';
 import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import { Avatar, Badge, Card, CardBody, CardHeader, EmptyState, ListToolbar, PageHeader, SearchInput, Select, Spinner, StatCard } from '../../components/ui';
 
 // A roster can be entered into several championships; read its team_entries.
@@ -107,9 +109,9 @@ export function StudentsPage() {
         </ListToolbar>
       )}
       {isLoading ? <Spinner /> : teams.length === 0 ? (
-        <EmptyState icon="👥" title="No squads yet" description="Enter teams and add players to see your contingent here." />
+        <EmptyState icon={<Users size={24} />} title="No squads yet" description="Enter teams and add players to see your contingent here." />
       ) : visible.length === 0 ? (
-        <EmptyState icon="👥" title="No matches" description="No teams or players match your filters." />
+        <EmptyState icon={<Users size={24} />} title="No matches" description="No teams or players match your filters." />
       ) : (
         <div className="space-y-4">
           {visible.map((t) => {
@@ -131,7 +133,7 @@ export function StudentsPage() {
                           <Avatar name={m.users?.name} size={32} />
                           <div className="min-w-0">
                             <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">{m.users?.name}{m.jersey_number != null && <span className="ml-1.5 text-slate-400 dark:text-slate-500">#{m.jersey_number}</span>}</div>
-                            <div className="truncate text-xs text-slate-500 dark:text-slate-400">{m.role.replace(/_/g, ' ')}{m.users?.phone ? ` · ${m.users.phone}` : ''}</div>
+                            <div className="truncate text-xs text-slate-500 dark:text-slate-400">{titleCase(m.role)}{m.users?.phone ? ` · ${m.users.phone}` : ''}</div>
                           </div>
                         </div>
                       ))}

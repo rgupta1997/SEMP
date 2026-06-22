@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../lib/auth';
+import { titleCase } from '../../lib/format';
 import { usePermissions } from '../../lib/permissions';
 import { api } from '../../lib/api';
 import { useFilterBar, usePageFilters } from '../../lib/filters';
@@ -341,7 +342,7 @@ export function TeamsPage() {
             )}
             {statusOptions.length > 2 && (
               <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-auto">
-                {statusOptions.map((s) => <option key={s} value={s}>{s === 'all' ? 'All statuses' : String(s).replace(/_/g, ' ')}</option>)}
+                {statusOptions.map((s) => <option key={s} value={s}>{s === 'all' ? 'All statuses' : titleCase(String(s))}</option>)}
               </Select>
             )}
             <Select value={tc.sortKey} onChange={(e) => tc.setSortKey(e.target.value)} className="w-auto">

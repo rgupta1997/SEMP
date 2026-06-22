@@ -1,9 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Bell, CheckCircle2, Megaphone } from 'lucide-react';
 import { NOTIFICATION_REACTIONS } from '@semp/shared';
 import { api } from '../lib/api';
 import { fmtDateTime } from '../lib/hooks';
 import { notificationMeta, type NotificationDto, type NotificationReactionSummary } from '../lib/notifications';
 import { cn } from './ui';
+
+const NOTIF_ICONS: Record<string, ReactNode> = {
+  'megaphone': <Megaphone size={15} />,
+  'check-circle-2': <CheckCircle2 size={15} />,
+  'bell': <Bell size={15} />,
+};
 
 // One notification card — shared by the bell drawer and the full page. Owns its own
 // reaction state so toggling is snappy without refetching the whole feed.
@@ -36,7 +43,7 @@ export function NotificationItem({ n, compact = false }: { n: NotificationDto; c
       n.unread ? 'border-brand-200 bg-brand-50/40 dark:border-brand-500/30 dark:bg-brand-500/5' : 'border-slate-200 dark:border-slate-800',
     )}>
       <div className="flex items-start gap-2.5">
-        <span className="mt-0.5 text-base leading-none" aria-hidden>{meta.icon}</span>
+        <span className="mt-0.5 flex-none text-slate-400 dark:text-slate-500" aria-hidden>{NOTIF_ICONS[meta.icon] ?? <Bell size={15} />}</span>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">

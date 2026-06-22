@@ -1,3 +1,4 @@
+import { Trophy } from 'lucide-react';
 import { fmtDate } from '../../lib/hooks';
 import type { AchievementGroup, AchievementInstance } from './types';
 
@@ -12,18 +13,18 @@ function instanceLine(it: AchievementInstance): string {
 }
 
 // A recognition the participant has earned, collapsed by award name and shown
-// count-first ("7 · 🏆 Player of the Match"). Hovering reveals each occurrence's
+// count-first ("7 · Player of the Match"). Hovering reveals each occurrence's
 // championship / tournament / match; the full breakdown also lives on the
 // dedicated achievements page.
 export function AchievementRow({ group }: { group: AchievementGroup }) {
   return (
-    <div className="group relative flex cursor-help items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
-      <span className="grid h-8 min-w-[2rem] flex-none place-items-center rounded-lg bg-amber-200 px-2 text-sm font-bold tabular-nums text-amber-800 dark:bg-amber-500/30 dark:text-amber-100">
+    <div className="group relative flex cursor-help items-center gap-4 rounded-2xl border border-[var(--gold-chip)] bg-[var(--gold-banner)] px-5 py-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+      <span className="grid h-10 min-w-[2.5rem] flex-none place-items-center rounded-lg bg-[var(--gold-chip)] px-2 text-sm font-bold tabular-nums text-[var(--gold-ink)] dark:bg-amber-500/30 dark:text-amber-100">
         {group.count}
       </span>
-      <span className="text-lg" aria-hidden>🏆</span>
-      <span className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{group.award_name}</span>
-      {group.latest_date && <span className="ml-auto flex-none text-xs text-slate-400 dark:text-slate-500">{fmtDate(group.latest_date)}</span>}
+      <Trophy size={20} className="flex-none text-[var(--gold-ink)] dark:text-amber-400" aria-hidden />
+      <span className="truncate text-base font-bold text-[var(--gold-ink-strong)] dark:text-amber-100">{group.award_name}</span>
+      {group.latest_date && <span className="ml-auto flex-none text-sm font-medium text-[var(--gold-ink)] dark:text-slate-500">{fmtDate(group.latest_date)}</span>}
 
       {/* Hover tooltip — per-occurrence meta (championship · tournament · match). */}
       <div

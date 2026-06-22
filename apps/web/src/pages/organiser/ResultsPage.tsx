@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { Flag } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useEvent } from './EventLayout';
 import { usePageFilters } from '../../lib/filters';
@@ -135,7 +136,7 @@ export function ResultsPage() {
 
       {isLoading ? <Spinner /> : rows.length === 0 ? (
         <EmptyState
-          icon="🏁"
+          icon={<Flag size={24} />}
           title={fixtures.length === 0 ? 'No fixtures yet' : 'No matches for this sport'}
           description={fixtures.length === 0
             ? (canManage ? 'Generate draws on the Schedule tab — matches appear here for scoring.' : 'Results will appear here once matches are scheduled and played.')
