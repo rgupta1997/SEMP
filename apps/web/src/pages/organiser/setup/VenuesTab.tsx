@@ -4,7 +4,7 @@ import { MapPin } from 'lucide-react';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Spinner } from '../../../components/ui';
 
-// Venues for a championship — name + address + city. Grounds/courts are
+// Venues for a championship - name + address + city. Grounds/courts are
 // intentionally hidden for now (planned later); fixtures reference the venue.
 // Each tab shows saved venues as read-only cards; click a card to view/edit/
 // delete, or "+ Add venue" to create another.
@@ -46,8 +46,8 @@ function VenueModal({ eventId, path, venue, onClose }: { eventId: string; path: 
       ) : (
         <>
           <dl className="space-y-2 text-sm">
-            <div><dt className="text-slate-400 dark:text-slate-500">Address</dt><dd className="text-slate-700 dark:text-slate-200">{venue.address || '—'}</dd></div>
-            <div><dt className="text-slate-400 dark:text-slate-500">City</dt><dd className="text-slate-700 dark:text-slate-200">{venue.city || '—'}</dd></div>
+            <div><dt className="text-slate-400 dark:text-slate-500">Address</dt><dd className="text-slate-700 dark:text-slate-200">{venue.address || '-'}</dd></div>
+            <div><dt className="text-slate-400 dark:text-slate-500">City</dt><dd className="text-slate-700 dark:text-slate-200">{venue.city || '-'}</dd></div>
           </dl>
           {error && <p className="mt-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
           <div className="mt-5 flex items-center justify-between">

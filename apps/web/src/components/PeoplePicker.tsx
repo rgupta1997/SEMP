@@ -15,7 +15,7 @@ const digits = (s: string) => s.replace(/\D/g, '');
 // people already assigned (`assignedUserIds`) are shown but flagged and not
 // re-selectable. For a typed number with no match, sends an invitation to join
 // (auto-applied on sign-up). `invalidateKeys` are the query paths refreshed after
-// an add/invite — falls back to a full refetch if none are given.
+// an add/invite - falls back to a full refetch if none are given.
 export function PeoplePicker({ title, subtitle, excludeUserIds, assignedUserIds, assignedLabel = 'Added', invite, roleControl, invalidateKeys, onAssignUsers, onClose }: {
   title: string;
   subtitle?: string;
@@ -69,7 +69,7 @@ export function PeoplePicker({ title, subtitle, excludeUserIds, assignedUserIds,
   };
 
   const toggle = (id: string) => {
-    if (assigned.has(id)) return; // already assigned — not selectable
+    if (assigned.has(id)) return; // already assigned - not selectable
     setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
 
@@ -111,7 +111,7 @@ export function PeoplePicker({ title, subtitle, excludeUserIds, assignedUserIds,
       )}
       {invited.length > 0 && (
         <p className="mt-2 text-xs text-emerald-600 dark:text-emerald-300">
-          Invited: {invited.join(', ')} — they’ll be added automatically when they sign up with that number.
+          Invited: {invited.join(', ')} - they’ll be added automatically when they sign up with that number.
         </p>
       )}
 

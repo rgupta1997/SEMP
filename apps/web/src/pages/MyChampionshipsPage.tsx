@@ -23,7 +23,7 @@ const TABS = [
   { key: 'completed', label: 'Completed' },
 ] as const;
 
-// Championships the user is involved in — in any capacity (organiser / official /
+// Championships the user is involved in - in any capacity (organiser / official /
 // player / org member). Filterable by status (tabs), sport and free-text search.
 // Where "View details" leads for a championship, based on the viewer's roles.
 function detailHref(c: MyChampionship): string {
@@ -65,7 +65,7 @@ export function MyChampionshipsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Where you're competing" subtitle="Every championship you're part of — across all your organizations." />
+      <PageHeader title="Where you're competing" subtitle="Every championship you're part of - across all your organizations." />
 
       <InvitationsInbox />
 
@@ -96,7 +96,7 @@ export function MyChampionshipsPage() {
           icon={<Trophy size={24} />}
           title={rows.length === 0 ? 'Nothing here yet' : 'No championships match'}
           description={rows.length === 0
-            ? 'Join a team, get assigned as an official, or host your own — your championships will show up here.'
+            ? 'Join a team, get assigned as an official, or host your own - your championships will show up here.'
             : 'Try a different status, sport or search term.'}
         />
       ) : (

@@ -53,7 +53,7 @@ export function buildApp(prisma: Prisma) {
   // Public auth routes
   api.use('/auth', makeAuthRouter(prisma));
 
-  // "Book a demo" leads — the POST is public (the landing page is unauthenticated);
+  // "Book a demo" leads - the POST is public (the landing page is unauthenticated);
   // reads/triage inside the router are gated to super-admins. Mounted before the
   // global requireAuth so anonymous visitors can submit.
   api.use('/demo-requests', makeDemoRequestsRouter(prisma));
@@ -66,13 +66,13 @@ export function buildApp(prisma: Prisma) {
   // ----- "Me"-scoped read endpoints (resolved from the authenticated user) -----
   api.use('/', makeMeRouter(prisma));
 
-  // ----- Notifications — global per-user feed + bell (visibility is championship-scoped) -----
+  // ----- Notifications - global per-user feed + bell (visibility is championship-scoped) -----
   api.use('/', makeNotificationsRouter(prisma));
 
-  // ----- Users — scoped create/edit + bulk import (see users.routes) -----
+  // ----- Users - scoped create/edit + bulk import (see users.routes) -----
   api.use('/users', makeUsersRouter(prisma));
 
-  // ----- Phase 1: platform setup (generic CRUD) — writes are super-admin only -----
+  // ----- Phase 1: platform setup (generic CRUD) - writes are super-admin only -----
   api.use('/permissions', makeCrudRouter(prisma.permissions, {
     name: 'Permission', createSchema: createPermissionSchema, updateSchema: updatePermissionSchema,
     orderBy: { code: 'asc' }, writeGuards: [requireSuperAdmin],
@@ -90,20 +90,20 @@ export function buildApp(prisma: Prisma) {
     listFilters: ['sport_id'], orderBy: { display_order: 'asc' },
     // Editing/deleting the master catalogue stays super-admin only, but any authed
     // organiser may add a new discipline (e.g. an age/gender category) while setting
-    // up their championship — createGuards empty = just the global requireAuth.
+    // up their championship - createGuards empty = just the global requireAuth.
     writeGuards: [requireSuperAdmin], createGuards: [],
   }));
   api.use('/tournament-formats', makeCrudRouter(prisma.tournament_formats, {
     name: 'Tournament format', createSchema: createFormatSchema, updateSchema: updateFormatSchema,
     orderBy: { name: 'asc' }, writeGuards: [requireSuperAdmin],
   }));
-  // Organizations — open reads; any user can create (becomes owner); member
+  // Organizations - open reads; any user can create (becomes owner); member
   // management requires an owner/admin (see organizations.routes).
   api.use('/organizations', makeOrganizationsRouter(prisma));
 
-  // ----- Phase 2: championship creation — setup-resource writes require the championship's organiser -----
+  // ----- Phase 2: championship creation - setup-resource writes require the championship's organiser -----
   api.use('/championships', makeEventsRouter(prisma));
-  // Standings (materialized tables + scoring rules) — also under /championships/:id.
+  // Standings (materialized tables + scoring rules) - also under /championships/:id.
   api.use('/championships', makeStandingsRouter(prisma));
   api.use('/venues', makeVenuesRouter(prisma));
   api.use('/venue-grounds', makeVenueGroundsRouter(prisma));
@@ -130,7 +130,7 @@ export function buildApp(prisma: Prisma) {
         OR: [{ status: { in: ['completed', 'walkover', 'bye'] } }, { home_score: { not: null } }, { away_score: { not: null } }],
       },
     });
-    if (played > 0) throw new BusinessRuleError('There are completed or scored matches here — remove or void those results before deleting.');
+    if (played > 0) throw new BusinessRuleError('There are completed or scored matches here - remove or void those results before deleting.');
     await prisma.$transaction([
       prisma.fixtures.deleteMany({ where: { tournament_discipline_id: { in: disciplineIds } } }),
       prisma.team_entries.deleteMany({ where: { tournament_discipline_id: { in: disciplineIds } } }),

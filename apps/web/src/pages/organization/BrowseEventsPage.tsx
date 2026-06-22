@@ -35,7 +35,7 @@ export function BrowseEventsPage() {
 
   return (
     <div>
-      <PageHeader title="Browse championships" subtitle="Apply to participate — once approved you can enter teams." />
+      <PageHeader title="Browse championships" subtitle="Apply to participate - once approved you can enter teams." />
       {open.length > 0 && (
         <ListToolbar>
           <SearchInput value={tc.query} onChange={tc.setQuery} placeholder="Search championships…" className="w-full sm:w-72" />
@@ -74,7 +74,7 @@ export function BrowseEventsPage() {
                     {apply.isPending ? 'Applying…' : 'Apply to participate'}
                   </Button>
                 ) : e.status === 'registration_open' ? (
-                  <Badge tone="brand">Open — your POC can apply</Badge>
+                  <Badge tone="brand">Open - your POC can apply</Badge>
                 ) : (
                   <Badge tone="slate">Registration closed</Badge>
                 )}
@@ -88,4 +88,4 @@ export function BrowseEventsPage() {
     </div>
   );
 }
-
+

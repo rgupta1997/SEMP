@@ -156,7 +156,7 @@ export function InvitePanel({ eventId }: { eventId: string }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-slate-500 dark:text-slate-400">Search the master list and send the request straight to the organizations. They confirm and add their own teams — you don't enter rosters.</p>
+      <p className="text-sm text-slate-500 dark:text-slate-400">Search the master list and send the request straight to the organizations. They confirm and add their own teams - you don't enter rosters.</p>
 
       <div className="flex flex-wrap items-end gap-2">
         <label className="min-w-[200px] flex-1">
@@ -170,7 +170,7 @@ export function InvitePanel({ eventId }: { eventId: string }) {
 
       {isLoading ? <Spinner /> : invites.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400 dark:border-slate-700 dark:text-slate-500">
-          No organizations yet. Add at least two to auto-generate fixtures — or invite them later.
+          No organizations yet. Add at least two to auto-generate fixtures - or invite them later.
         </div>
       ) : (
         <div className="space-y-2">

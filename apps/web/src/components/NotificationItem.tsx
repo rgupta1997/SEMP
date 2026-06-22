@@ -12,7 +12,7 @@ const NOTIF_ICONS: Record<string, ReactNode> = {
   'bell': <Bell size={15} />,
 };
 
-// One notification card — shared by the bell drawer and the full page. Owns its own
+// One notification card - shared by the bell drawer and the full page. Owns its own
 // reaction state so toggling is snappy without refetching the whole feed.
 export function NotificationItem({ n, compact = false }: { n: NotificationDto; compact?: boolean }) {
   const [reactions, setReactions] = useState<NotificationReactionSummary[]>(n.reactions);
@@ -72,7 +72,7 @@ export function NotificationItem({ n, compact = false }: { n: NotificationDto; c
             </p>
           )}
 
-          {/* Reaction bar — hidden for the author (they can't react to their own). */}
+          {/* Reaction bar - hidden for the author (they can't react to their own). */}
           {!n.is_mine && (
             <div className="mt-2 flex flex-wrap items-center gap-1">
               {NOTIFICATION_REACTIONS.map((emoji) => {

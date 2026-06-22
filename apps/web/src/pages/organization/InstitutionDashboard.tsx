@@ -105,7 +105,7 @@ export function InstitutionDashboard() {
         </Card>
       </div>
 
-      {!ctx?.organization && <Badge tone="amber">Your account is not linked to an organization yet — contact an organiser to be added.</Badge>}
+      {!ctx?.organization && <Badge tone="amber">Your account is not linked to an organization yet - contact an organiser to be added.</Badge>}
     </div>
   );
 }

@@ -114,7 +114,7 @@ function AuthenticatedRoutes() {
         <Route path="/platform/organizations" element={<RequireRole roles={SYSTEM}><PlatformInstitutionsPage /></RequireRole>} />
         <Route path="/platform/:key" element={<RequireRole roles={SYSTEM}><PlatformResource /></RequireRole>} />
 
-        {/* Notifications + help + design system — any authenticated user */}
+        {/* Notifications + help + design system - any authenticated user */}
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/help" element={<HelpPage />} />
         <Route path="/design" element={<DesignShowcase />} />

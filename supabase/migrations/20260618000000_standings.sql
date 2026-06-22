@@ -1,11 +1,11 @@
 -- Configurable, multi-level standings.
 --
 -- Two tables:
---   standings_rules — per-championship scoring rules. A row overrides the implicit
+--   standings_rules - per-championship scoring rules. A row overrides the implicit
 --     default for a scope (the whole championship, a format, or a discipline).
 --     Absence of a row means the engine falls back to DEFAULT_STANDINGS_RULE in
 --     code (league points 3/1/0), so existing championships need no backfill.
---   standings — materialized org-level points tables, rebuilt per championship
+--   standings - materialized org-level points tables, rebuilt per championship
 --     whenever a fixture is scored. Maintained at three aggregation scopes:
 --     championship (scope_id null), tournament (scope_id = tournaments.id) and
 --     sport (scope_id = sports.id).

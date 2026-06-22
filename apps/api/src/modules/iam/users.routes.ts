@@ -27,7 +27,7 @@ export function makeUsersRouter(prisma: Prisma): Router {
     throw new ForbiddenError('You can only create users in an organization you own or administer');
   }
 
-  // List/search users — open to any authenticated caller (used by assign/roster
+  // List/search users - open to any authenticated caller (used by assign/roster
   // pickers). `q` matches name/email and, on its digits, phone; `limit` caps the
   // result count so pickers can show just the first few by default.
   router.get('/', asyncHandler(async (req, res) => {
@@ -135,7 +135,7 @@ export function makeUsersRouter(prisma: Prisma): Router {
     res.status(201).json({ ...user, created: true, temp_password: tempPassword });
   }));
 
-  // Bulk import — match/create by email, optionally mapping each to a championship role.
+  // Bulk import - match/create by email, optionally mapping each to a championship role.
   router.post('/bulk', validateBody(bulkCreateUsersSchema), asyncHandler(async (req, res) => {
     const actor = req.user!;
     const { users, organization_id, championship_id, role_id } = req.body as {

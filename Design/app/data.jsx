@@ -1,5 +1,5 @@
 /* global window */
-// Sportagon — domain data: sports registry, teams, fixtures with live state.
+// Sportagon - domain data: sports registry, teams, fixtures with live state.
 
 // Sport registry. accent = CSS var; archetype drives the console + scoreboard renderers.
 const SPORTS = {
@@ -65,35 +65,35 @@ function seedMatches() {
       state: { a: 58, b: 54, seg: 3, clock: 412, running: false, foulsA: 6, foulsB: 8, toA: 3, toB: 2,
         segScores: [[21, 18], [16, 19], [21, 17]], bonus: { a: false, b: true } },
       log: [
-        { t: "Q3 02:14", team: "A", txt: "+2 — J. Rao (layup)", pts: 2 },
-        { t: "Q3 01:50", team: "B", txt: "+3 — A. Khan", pts: 3 },
-        { t: "Q3 01:32", team: "A", txt: "+1 — Free throw", pts: 1 },
+        { t: "Q3 02:14", team: "A", txt: "+2 - J. Rao (layup)", pts: 2 },
+        { t: "Q3 01:50", team: "B", txt: "+3 - A. Khan", pts: 3 },
+        { t: "Q3 01:32", team: "A", txt: "+1 - Free throw", pts: 1 },
       ],
     }),
     // ---- LIVE volleyball ----
     mk("volleyball", "DU", "VIT", {
       round: "Quarter-final", venue: "Indoor Stadium", court: "Court B", status: "live", official: "S. Iyer",
       state: { setsA: 1, setsB: 1, a: 19, b: 17, seg: 3, setScores: [[25, 20], [18, 25]], serving: "A" },
-      log: [ { t: "S3 19-17", team: "A", txt: "Point — ace (M. Singh)" }, { t: "S3 18-17", team: "B", txt: "Point — block" } ],
+      log: [ { t: "S3 19-17", team: "A", txt: "Point - ace (M. Singh)" }, { t: "S3 18-17", team: "B", txt: "Point - block" } ],
     }),
     // ---- LIVE football ----
     mk("football", "IITM", "NITT", {
       round: "Group A", venue: "Main Ground", court: "Pitch 1", status: "live", official: "P. Nair",
-      state: { a: 2, b: 1, seg: 2, minute: 67, running: true, scorersA: ["12' R. Das", "58' K. Patel"], scorersB: ["40' V. Reddy"], cardsA: [], cardsB: ["63' Yellow — S. Ali"] },
-      log: [ { t: "58'", team: "A", txt: "⚽ Goal — K. Patel" }, { t: "63'", team: "B", txt: "Yellow card — S. Ali" } ],
+      state: { a: 2, b: 1, seg: 2, minute: 67, running: true, scorersA: ["12' R. Das", "58' K. Patel"], scorersB: ["40' V. Reddy"], cardsA: [], cardsB: ["63' Yellow - S. Ali"] },
+      log: [ { t: "58'", team: "A", txt: "⚽ Goal - K. Patel" }, { t: "63'", team: "B", txt: "Yellow card - S. Ali" } ],
     }),
     // ---- LIVE cricket ----
     mk("cricket", "IITD", "SRM", {
       round: "League", venue: "Cricket Oval", court: "Main", status: "live", official: "A. Bose",
       state: { inn: 2, battingTeam: "B", a: 164, wA: 7, oversA: 20, b: 121, wB: 4, ballsB: 84,
         target: 165, rr: 8.64, thisOver: ["1", "4", "W", "0", "6"], striker: "N. Verma 38", nonStriker: "T. Roy 12", bowler: "G. Pillai 2-24" },
-      log: [ { t: "14.0", team: "B", txt: "SIX — N. Verma" }, { t: "13.3", team: "B", txt: "WICKET — c&b Pillai" } ],
+      log: [ { t: "14.0", team: "B", txt: "SIX - N. Verma" }, { t: "13.3", team: "B", txt: "WICKET - c&b Pillai" } ],
     }),
     // ---- LIVE badminton ----
     mk("badminton", "IITK", "MU", {
       round: "Round of 16", venue: "Indoor Stadium", court: "Court C", status: "live", official: "L. Menon",
       state: { gamesA: 1, gamesB: 0, a: 14, b: 11, seg: 2, gameScores: [[21, 18]], serving: "A" },
-      log: [ { t: "G2 14-11", team: "A", txt: "Point — smash" } ],
+      log: [ { t: "G2 14-11", team: "A", txt: "Point - smash" } ],
     }),
     // ---- scheduled / upcoming ----
     mk("tennis", "VIT", "BITS", { round: "Final", court: "Centre Court", status: "scheduled", startTime: "18:00", official: "R. Mehta",

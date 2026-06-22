@@ -1,5 +1,5 @@
 /* global React */
-// Sportagon — coherent outline icon set (1.75px stroke, 24px grid)
+// Sportagon - coherent outline icon set (1.75px stroke, 24px grid)
 const { createElement: h } = React;
 
 const PATHS = {

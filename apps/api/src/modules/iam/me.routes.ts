@@ -4,7 +4,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { readStandings } from '../standings/standings.service.js';
 
-// "Me"-scoped read endpoints — everything is resolved from the authenticated
+// "Me"-scoped read endpoints - everything is resolved from the authenticated
 // user, never from a path/query id, so a participant can only ever see their own.
 
 // Full include used whenever we hydrate a fixture into a MatchSummary / detail.
@@ -217,11 +217,11 @@ export function makeMeRouter(prisma: Prisma): Router {
   }));
 
   // Enrollment status for the user's organization(s), across championships. Resolution:
-  //   ?organization_id=  → that specific org (must be an active member) — team entries
+  //   ?organization_id=  → that specific org (must be an active member) - team entries
   //                        must be scoped to THAT team's org.
   //   ?scope=all         → EVERY org the user is an active member of, so an application
   //                        made under any of their orgs (incl. one just created on the
-  //                        fly) shows up — used by Discover so the CTA flips correctly.
+  //                        fly) shows up - used by Discover so the CTA flips correctly.
   //   (none)             → their primary org (JWT, else first active owner/admin).
   router.get('/me/enrollments', asyncHandler(async (req, res) => {
     const requested = typeof req.query.organization_id === 'string' ? req.query.organization_id : null;
@@ -304,7 +304,7 @@ export function makeMeRouter(prisma: Prisma): Router {
   }));
 
   // -------------------------------------------------------------------------
-  // Participant dashboard — cross-championship career view with on-demand drill-down.
+  // Participant dashboard - cross-championship career view with on-demand drill-down.
   // -------------------------------------------------------------------------
 
   // Resolve the user's active team memberships once: returns the membership rows
@@ -332,7 +332,7 @@ export function makeMeRouter(prisma: Prisma): Router {
     return { memberships, teamIds };
   }
 
-  // GET /me/dashboard — fast landing summary: career stats, championship cards, recent 5.
+  // GET /me/dashboard - fast landing summary: career stats, championship cards, recent 5.
   //
   // A roster can be entered into several championships, so each fixture's championship
   // is taken from its own discipline draw (matchSelect walks that chain); the
@@ -394,7 +394,7 @@ export function makeMeRouter(prisma: Prisma): Router {
     const { wins, losses, draws } = tally(fixtures, teamIds);
     const recent_matches = fixtures.slice(0, 5).map((f) => summariseLean(f, teamIds));
 
-    // Achievements — awards this user has received, newest first, with match context.
+    // Achievements - awards this user has received, newest first, with match context.
     const awardRows = await prisma.fixture_awards.findMany({
       where: { recipient_user_id: req.user!.id },
       select: awardSelect,
@@ -410,7 +410,7 @@ export function makeMeRouter(prisma: Prisma): Router {
     });
   }));
 
-  // GET /me/achievements — every award the user has received, newest first, with
+  // GET /me/achievements - every award the user has received, newest first, with
   // full match context. Powers the dedicated achievements detail page.
   router.get('/me/achievements', asyncHandler(async (req, res) => {
     const { teamIds } = await loadMembershipMeta(req.user!.id);
@@ -426,7 +426,7 @@ export function makeMeRouter(prisma: Prisma): Router {
     res.json({ achievements: awardRows.map((a) => mapAward(a, teamIds)) });
   }));
 
-  // GET /me/matches — full match list, filterable by championship/status.
+  // GET /me/matches - full match list, filterable by championship/status.
   router.get('/me/matches', asyncHandler(async (req, res) => {
     const { teamIds } = await loadMyTeams(req.user!.id);
     if (teamIds.size === 0) {
@@ -453,7 +453,7 @@ export function makeMeRouter(prisma: Prisma): Router {
     res.json({ matches, total: matches.length });
   }));
 
-  // GET /me/matches/:fixtureId — single match detail, scoped to the user's team.
+  // GET /me/matches/:fixtureId - single match detail, scoped to the user's team.
   router.get('/me/matches/:fixtureId', asyncHandler(async (req, res) => {
     const f: FixtureRow = await prisma.fixtures.findUnique({
       where: { id: req.params.fixtureId },
@@ -517,13 +517,13 @@ export function makeMeRouter(prisma: Prisma): Router {
         my_role: myMember?.role ?? null,
         jersey_number: myMember?.jersey_number ?? null,
         teammates: (mine.team_members ?? [])
-          .map((tm: any) => ({ name: tm.users?.name ?? '—', phone: tm.users?.phone ?? null, role: tm.role, jersey_number: tm.jersey_number }))
+          .map((tm: any) => ({ name: tm.users?.name ?? '-', phone: tm.users?.phone ?? null, role: tm.role, jersey_number: tm.jersey_number }))
           .sort((a: any, b: any) => (a.jersey_number ?? 999) - (b.jersey_number ?? 999)),
       },
     });
   }));
 
-  // GET /me/championships/:eventId — full participation detail for one championship.
+  // GET /me/championships/:eventId - full participation detail for one championship.
   router.get('/me/championships/:eventId', asyncHandler(async (req, res) => {
     const eventId = req.params.eventId;
     const { memberships, teamIds } = await loadMyTeams(req.user!.id);
@@ -567,12 +567,12 @@ export function makeMeRouter(prisma: Prisma): Router {
         jersey_number: m.jersey_number,
         status: entry.status,
         roster: (t?.team_members ?? [])
-          .map((tm) => ({ name: tm.users?.name ?? '—', phone: tm.users?.phone ?? null, role: tm.role, jersey_number: tm.jersey_number }))
+          .map((tm) => ({ name: tm.users?.name ?? '-', phone: tm.users?.phone ?? null, role: tm.role, jersey_number: tm.jersey_number }))
           .sort((a, b) => (a.jersey_number ?? 999) - (b.jersey_number ?? 999)),
       };
     });
 
-    // Fixtures for the user's teams in THIS championship — a roster may also play
+    // Fixtures for the user's teams in THIS championship - a roster may also play
     // in others, so filter by the fixture's championship via its discipline draw.
     const fixtures = await prisma.fixtures.findMany({
       where: {
@@ -586,7 +586,7 @@ export function makeMeRouter(prisma: Prisma): Router {
     const matches = fixtures.map((f) => summariseLean(f, teamIds));
     const { wins, losses, draws } = tally(fixtures, teamIds);
 
-    // Championship-wide standings (read-only) — read the materialized championship-
+    // Championship-wide standings (read-only) - read the materialized championship-
     // scope table maintained by the standings engine.
     const standings = await readStandings(prisma, eventId, 'championship', null);
 

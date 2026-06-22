@@ -1,5 +1,5 @@
 /* ============================================================
-   SPORTAGON — Base + Component styles
+   SPORTAGON - Base + Component styles
    ============================================================ */
 
 @import url("https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Archivo+Expanded:wght@600;700;800;900&display=swap");
@@ -32,7 +32,7 @@ a { color: inherit; text-decoration: none; }
 
 :focus-visible { outline: none; box-shadow: var(--ring-focus); border-radius: var(--r-sm); }
 
-/* —— Scrollbars —— */
+/* -- Scrollbars -- */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; border: 2px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); background-clip: content-box; }
@@ -203,7 +203,7 @@ a { color: inherit; text-decoration: none; }
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 
-/* Entrance — opacity stays 1 always (paused iframes can strand opacity:0);
+/* Entrance - opacity stays 1 always (paused iframes can strand opacity:0);
    only a subtle transform animates in when motion is welcome. */
 @keyframes fadeUp { from { transform: translateY(10px); } to { transform: none; } }
 .fade-up { opacity: 1; }
@@ -211,6 +211,6 @@ a { color: inherit; text-decoration: none; }
   .fade-up { animation: fadeUp var(--dur-slow) var(--ease-out); }
 }
 
-/* Score tick — transform only, never hide the digit */
+/* Score tick - transform only, never hide the digit */
 @keyframes tick { 0% { transform: translateY(35%); } 100% { transform: none; } }
 .tick { animation: tick var(--dur-base) var(--ease-out); }

@@ -4,7 +4,7 @@
 --   before that org (or its POC user) necessarily exists on the platform.
 --
 --   The invited POC sees pending invitations on login (matched by phone number),
---   and accepting creates a pending row in championship_organizations — which then
+--   and accepting creates a pending row in championship_organizations - which then
 --   surfaces in the host's Approvals queue, exactly like a self-application.
 --
 -- Visibility is enforced in the route layer (invitations.routes.ts); RLS remains

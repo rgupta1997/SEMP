@@ -62,9 +62,9 @@ export function PlatformOverview() {
                       {ev.status?.replace('_', ' ')}
                     </Badge>
                   </td>
-                  <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{ev.city || '—'}</td>
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{ev.city || '-'}</td>
                   <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                    {ev.start_date ? new Date(ev.start_date).toLocaleDateString() : '—'}
+                    {ev.start_date ? new Date(ev.start_date).toLocaleDateString() : '-'}
                     {ev.end_date ? ` – ${new Date(ev.end_date).toLocaleDateString()}` : ''}
                   </td>
                 </tr>

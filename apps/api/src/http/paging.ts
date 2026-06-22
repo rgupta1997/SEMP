@@ -2,7 +2,7 @@
 //
 // parsePaging: opt-in and backward-compatible. It only constrains results when the
 // client sends ?limit (clamped to 1..MAX_PAGE); ?offset skips. With no params the
-// query stays unbounded, preserving the existing array-returning contract — so this
+// query stays unbounded, preserving the existing array-returning contract - so this
 // is safe to drop into legacy list routes and gives the client a tool to page.
 //
 // coerceFilter: Express query values arrive as string | string[] | undefined. A

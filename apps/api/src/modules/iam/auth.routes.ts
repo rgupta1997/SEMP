@@ -46,7 +46,7 @@ export function makeAuthRouter(prisma: Prisma): Router {
     res.status(201).json({ token: tokenFor(user), ...context });
   }));
 
-  // Self-serve sign up — every login is just a user. Hosting a championship,
+  // Self-serve sign up - every login is just a user. Hosting a championship,
   // creating/joining an organization, or being assigned as an official are all
   // separate actions taken after sign-up.
   router.post('/signup', validateBody(signupSchema), asyncHandler(async (req, res) => {
@@ -68,14 +68,14 @@ export function makeAuthRouter(prisma: Prisma): Router {
     if (!user) throw new NotFoundError('User');
     const context = await buildAuthContext(prisma, user);
     // Identity/permissions are per-user and change (roles, must_change_password,
-    // org membership). Never let the browser cache or 304-revalidate it — always
+    // org membership). Never let the browser cache or 304-revalidate it - always
     // serve a fresh 200 so a stale context can't linger after those change.
     res.set('Cache-Control', 'no-store');
     res.json(context);
   }));
 
   // Change your own password. Provisioned users (must_change_password) skip the
-  // current-password check — they just authenticated with the temporary one. A
+  // current-password check - they just authenticated with the temporary one. A
   // normal change requires the current password. Clears the must-change flag.
   router.post('/change-password', requireAuth, validateBody(changePasswordSchema), asyncHandler(async (req, res) => {
     const { current_password, new_password } = req.body as { current_password?: string; new_password: string };

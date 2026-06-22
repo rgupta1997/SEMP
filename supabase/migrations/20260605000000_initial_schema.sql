@@ -1,5 +1,5 @@
 -- ============================================================================
--- SEMP — Initial schema
+-- SEMP - Initial schema
 -- Generated for Supabase (PostgreSQL).
 --
 -- Apply: paste this whole file into the Supabase SQL Editor and run,

@@ -18,7 +18,7 @@ permission resolution deferred); frontend is **bare-minimum CRUD** (a generic
 enrollment, teams, fixtures).
 
 Domain rules live in pure services: event lifecycle, entry/squad resolution, roster
-policy, and the **fixture generators** (`apps/api/src/modules/fixtures/domain/generators/`) —
+policy, and the **fixture generators** (`apps/api/src/modules/fixtures/domain/generators/`) -
 pure `teams[] + params -> GeneratedFixture[]` for Knockout / Round-Robin·League /
 Groups / Pool+Knockout.
 

@@ -17,7 +17,7 @@ export interface SchemeFixture {
   home_score: number | null;
   away_score: number | null;
   winner_team_id: string | null;
-  // Organiser-entered championship points per side — used only by the 'custom' scheme.
+  // Organiser-entered championship points per side - used only by the 'custom' scheme.
   home_points?: number | null;
   away_points?: number | null;
 }
@@ -29,7 +29,7 @@ export interface OrgTally {
   drawn: number;
   lost: number;
   points: number;
-  // Internal sort aids (goals for/against) — not persisted as columns.
+  // Internal sort aids (goals for/against) - not persisted as columns.
   gf: number;
   ga: number;
   // Scheme-specific counts surfaced to the UI (e.g. { gold: 2 }, { semi_finalist: 1 }).
@@ -42,7 +42,7 @@ function emptyTally(organization_id: string): OrgTally {
   return { organization_id, played: 0, won: 0, drawn: 0, lost: 0, points: 0, gf: 0, ga: 0, detail: {} };
 }
 
-// Core W/D/L counter shared by every scheme — counts played/won/drawn/lost and
+// Core W/D/L counter shared by every scheme - counts played/won/drawn/lost and
 // goals for/against, and awards `win`/`draw`/`loss` points. Returns a keyed map so
 // callers can layer scheme-specific points on top.
 function leagueTally(fixtures: SchemeFixture[], win: number, draw: number, loss: number): Map<string, OrgTally> {
@@ -91,7 +91,7 @@ function teamOrgMap(fixtures: SchemeFixture[]): Map<string, string> {
 // the moment a team wins through to the next stage it earns that stage's minimum
 // placement (the worst a team at that stage can finish), then upgrades it when the
 // stage's own match resolves. Winning a QF means you've *reached* the semis, so you
-// bank the semi-finalist floor right away — without waiting for the final to be
+// bank the semi-finalist floor right away - without waiting for the final to be
 // played. Taking the best of all candidates sidesteps ordering concerns between
 // rounds (a 3rd-place win beats the semi_finalist floor; a final win beats the
 // runner_up floor banked for reaching the final).
@@ -142,7 +142,7 @@ function leaguePointsScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRu
 }
 
 // Placement specificity, best (most decisive) first. A team's final placement is the
-// most specific one it earned that the rule actually scores — so a 3rd-place playoff
+// most specific one it earned that the rule actually scores - so a 3rd-place playoff
 // loss (fourth_place) beats the generic semi_finalist, yet a config that omits
 // third/fourth gracefully falls back to semi_finalist.
 const PLACEMENT_SPECIFICITY: StandingsPlacement[] = [
@@ -151,7 +151,7 @@ const PLACEMENT_SPECIFICITY: StandingsPlacement[] = [
 
 function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'placement' }>): OrgTally[] {
   // Base P/W/L from the knockout results (no league points), then layer placement
-  // points. Unlike the medal scheme these accrue progressively round by round — each
+  // points. Unlike the medal scheme these accrue progressively round by round - each
   // team holds the floor of the highest stage it has reached (see placementCandidates),
   // so the table is live throughout the bracket rather than blank until the final.
   const table = leagueTally(fixtures, 0, 0, 0);
@@ -169,7 +169,7 @@ function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule,
     }
   }
 
-  // Orgs that banked a scored placement — they do NOT also get participation.
+  // Orgs that banked a scored placement - they do NOT also get participation.
   const placed = new Set<string>();
   for (const [teamId, earned] of candidates) {
     const chosen = PLACEMENT_SPECIFICITY.find((p) => earned.has(p) && rule.points[p] !== undefined);
@@ -212,7 +212,7 @@ function customScheme(fixtures: SchemeFixture[]): OrgTally[] {
 
 function medalScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'medal' }>, decided: boolean): OrgTally[] {
   // Rank organizations within the discipline by a standard 3/1/0 win record, then
-  // award gold/silver/bronze points to the top three — but only once the discipline
+  // award gold/silver/bronze points to the top three - but only once the discipline
   // is decided (the final has been played / every match is in).
   const rows = [...leagueTally(fixtures, 3, 1, 0).values()];
   rankBy(rows, ['points', 'wins', 'lost']);
@@ -233,7 +233,7 @@ function medalScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { s
 // Run the scheme matching `rule`. For league_points/medal/custom, participation is a
 // flat top-up added to every org that took part; placement handles participation
 // itself (a sub-semis consolation floor). `decided` gates only the medal scheme's
-// position points until the discipline is concluded — placement now accrues live,
+// position points until the discipline is concluded - placement now accrues live,
 // round by round, and league points always have.
 export function runScheme(fixtures: SchemeFixture[], rule: StandingsRule, decided = true): OrgTally[] {
   let tallies: OrgTally[];
@@ -279,7 +279,7 @@ export function rankBy(rows: OrgTally[], tiebreakers: StandingsTiebreaker[]): Or
       case 'wins': return r.won;
       case 'lost': return -r.lost; // fewer losses ranks higher
       case 'score_diff': return r.gf - r.ga;
-      case 'head_to_head': return 0; // not implemented — neutral
+      case 'head_to_head': return 0; // not implemented - neutral
     }
   };
   rows.sort((a, b) => {

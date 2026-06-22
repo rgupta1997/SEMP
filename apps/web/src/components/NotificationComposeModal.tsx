@@ -7,7 +7,7 @@ import type { PostableEvent } from '../lib/notifications';
 import { Button, Field, Input, Modal, Segmented, Spinner, Textarea, toast } from './ui';
 
 // Compose + push a manual notification. Available to anyone the API lets post
-// (organisers / officials / captains / POCs) — the championship dropdown is filled from
+// (organisers / officials / captains / POCs) - the championship dropdown is filled from
 // /notifications/postable-championships, so it's empty (and this modal isn't reachable)
 // for read-only users.
 export function NotificationComposeModal({ onClose, defaultEventId }: { onClose: () => void; defaultEventId?: string }) {

@@ -1,5 +1,5 @@
 -- ============================================================================
--- Score columns on fixtures — enables true result entry, computed standings
+-- Score columns on fixtures - enables true result entry, computed standings
 -- and a medal/points tally instead of status-only outcomes.
 --   * home_score / away_score : nullable until a result is entered.
 --   * winner_team_id          : the winning team (null for draws/unplayed).

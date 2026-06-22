@@ -16,7 +16,7 @@ const STATUS_LABELS: Record<string, string> = {
   draft: 'Draft', registration_open: 'Registration open', ongoing: 'Live', completed: 'Completed',
 };
 
-// Apply to participate — pick which of your organizations to apply as, or create one
+// Apply to participate - pick which of your organizations to apply as, or create one
 // on the fly. Players with no organization land straight in "create" mode, so anyone
 // can apply directly to a championship.
 function ApplyModal({ championship, onClose }: { championship: Championship; onClose: () => void }) {
@@ -89,7 +89,7 @@ function ApplyModal({ championship, onClose }: { championship: Championship; onC
   );
 }
 
-// Discover — every championship on the platform, open to any signed-in user.
+// Discover - every championship on the platform, open to any signed-in user.
 // Searchable and filterable by sport / status so the list never dumps everything.
 // Anyone can apply to participate via the per-card CTA (choosing or creating an org).
 export function DiscoverPage() {

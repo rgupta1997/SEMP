@@ -100,12 +100,12 @@ export function UserFormModal({
     <Modal title={title ?? (isEdit ? 'Edit user' : 'Add user')} onClose={onClose}>
       <Field label="Full name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rohan Kulkarni" /></Field>
       <Field label="Email"><Input type="email" value={email} disabled={isEdit} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" /></Field>
-      <Field label="Phone" hint="Required — 10-digit mobile number"><Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit mobile number" /></Field>
+      <Field label="Phone" hint="Required - 10-digit mobile number"><Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit mobile number" /></Field>
       {!isEdit && <PhoneLookupNotice phone={phone} />}
       {showInstitution && (
         <Field label="Organization">
           <Select value={institutionId} onChange={(e) => setInstitutionId(e.target.value)}>
-            <option value="">— none —</option>
+            <option value="">- none -</option>
             {organizations!.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
           </Select>
         </Field>

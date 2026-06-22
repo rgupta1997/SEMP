@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import type { Prisma } from '../../infra/prisma.js';
 
-// Shared default for provisioned logins — they're forced to set their own on
+// Shared default for provisioned logins - they're forced to set their own on
 // first sign-in (see users.must_change_password).
 export const DEFAULT_PASSWORD = 'demo123';
 

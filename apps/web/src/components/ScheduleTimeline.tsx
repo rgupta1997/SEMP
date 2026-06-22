@@ -169,7 +169,7 @@ export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, pla
 
       {canManage && (
         <p className="text-xs text-slate-400 dark:text-slate-500">
-          Columns = time, rows = discipline. Tap an empty slot to schedule a match — pick its exact start time and how long it runs.
+          Columns = time, rows = discipline. Tap an empty slot to schedule a match - pick its exact start time and how long it runs.
         </p>
       )}
 

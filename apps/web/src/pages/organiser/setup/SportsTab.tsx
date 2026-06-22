@@ -149,7 +149,7 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
               <label className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                 Copy to all
                 <Select value="" onChange={(e) => { if (e.target.value) setAllFormats(e.target.value); }} className="w-44">
-                  <option value="">— pick a format —</option>
+                  <option value="">- pick a format -</option>
                   {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
                 </Select>
               </label>
@@ -159,7 +159,7 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
             <div key={id} className="flex items-center justify-between gap-3">
               <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{sportIcon(id) ? `${sportIcon(id)} ` : ''}{sportName(id)}</span>
               <Select value={selected[id]} onChange={(e) => setFormat(id, e.target.value)} className="w-56">
-                <option value="">— select a format —</option>
+                <option value="">- select a format -</option>
                 {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
               </Select>
             </div>
@@ -194,7 +194,7 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, d
   const { data: disciplines = [], isLoading: disciplinesLoading } = useApi<any[]>(disciplinesPath);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [venueId, setVenueId] = useState(venues[0]?.id ?? '');     // default to the first venue when one exists
-  const [formatId, setFormatId] = useState('');   // shared — applied to all ('' = inherit sport)
+  const [formatId, setFormatId] = useState('');   // shared - applied to all ('' = inherit sport)
   const [wholeEntry, setWholeEntry] = useState('individual');
   const [wholeMin, setWholeMin] = useState('1');
   const [wholeMax, setWholeMax] = useState('1');
@@ -208,7 +208,7 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, d
   const [error, setError] = useState<string | null>(null);
   const sportFormatName = formats.find((f) => f.id === tournamentSport.format_id)?.name;
 
-  // Inline "create a new discipline" — this modal is organiser-scoped, so the option
+  // Inline "create a new discipline" - this modal is organiser-scoped, so the option
   // is only ever shown to the organiser. The new discipline is added to this sport's
   // catalogue and auto-selected so it can be added in the same action.
   const [creatingDisc, setCreatingDisc] = useState(false);
@@ -306,7 +306,7 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, d
       {disciplinesLoading ? (
         <div className="mt-2 grid place-items-center py-4"><Spinner label="Loading disciplines…" /></div>
       ) : disciplines.length === 0 ? (
-        <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">No sub-disciplines defined for this sport — add a whole-sport discipline above, or create one below.</p>
+        <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">No sub-disciplines defined for this sport - add a whole-sport discipline above, or create one below.</p>
       ) : null}
 
       {creatingDisc ? (
@@ -347,7 +347,7 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, d
           <div className="grid gap-x-3 sm:grid-cols-2">
             <Field label="Venue">
               <Select value={venueId} onChange={(e) => setVenueId(e.target.value)}>
-                <option value="">— unassigned —</option>
+                <option value="">- unassigned -</option>
                 {venues.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
               </Select>
             </Field>
@@ -425,11 +425,11 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
     <Modal title={`Edit discipline · ${name}`} onClose={onClose}>
       <Field label="Venue">
         <Select value={venueId} onChange={(e) => setVenueId(e.target.value)}>
-          <option value="">— unassigned —</option>
+          <option value="">- unassigned -</option>
           {venues.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
         </Select>
       </Field>
-      <Field label="Fixture format" hint="Changing this affects the next draw — regenerate on the Schedule tab to apply.">
+      <Field label="Fixture format" hint="Changing this affects the next draw - regenerate on the Schedule tab to apply.">
         <Select value={formatId} onChange={(e) => setFormatId(e.target.value)}>
           <option value="">Same as sport{sportFormatName ? ` (${sportFormatName})` : ''}</option>
           {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -482,9 +482,9 @@ function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportNam
 
   return (
     <Modal title={`Edit sport · ${sportName}`} onClose={onClose}>
-      <Field label="Fixture format" hint="Changing this affects the next draw — regenerate on the Schedule tab to apply. Disciplines with their own format override are unaffected.">
+      <Field label="Fixture format" hint="Changing this affects the next draw - regenerate on the Schedule tab to apply. Disciplines with their own format override are unaffected.">
         <Select value={formatId} onChange={(e) => setFormatId(e.target.value)}>
-          <option value="">— select a format —</option>
+          <option value="">- select a format -</option>
           {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
         </Select>
       </Field>
@@ -619,7 +619,7 @@ export function SportsTab({ eventId }: { eventId: string }) {
       </div>
 
       {tsports.length === 0 ? (
-        <EmptyState icon={<Medal size={24} />} title="No sports yet" description="Add the sports this tournament will run — each gets its own fixture format."
+        <EmptyState icon={<Medal size={24} />} title="No sports yet" description="Add the sports this tournament will run - each gets its own fixture format."
           action={<Button onClick={() => setAdding(true)}>+ Add sport</Button>} />
       ) : (
         <div className="grid gap-3">

@@ -8,7 +8,7 @@ function scoreLine(m: MatchSummary): string | null {
   return `${m.my_score}–${m.opp_score}`;
 }
 
-// One match as a clickable card — stacks cleanly on mobile, row-like on desktop.
+// One match as a clickable card - stacks cleanly on mobile, row-like on desktop.
 // `showEvent` adds the championship name (used on the cross-championship dashboard/list).
 export function MatchRow({ match, showEvent = true }: { match: MatchSummary; showEvent?: boolean }) {
   const navigate = useNavigate();

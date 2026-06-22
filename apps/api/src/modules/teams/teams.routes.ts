@@ -66,7 +66,7 @@ const organizationWithOwnersInclude = {
   },
 };
 
-// Every user column EXCEPT password_hash — safe to embed in any roster payload.
+// Every user column EXCEPT password_hash - safe to embed in any roster payload.
 // `include: { users: { select: publicUserSelect } }` would serialise the bcrypt hash straight to clients.
 const publicUserSelect = {
   id: true, name: true, email: true, phone: true, avatar_url: true,
@@ -182,7 +182,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   // are enough. Passing the championship fields enters it into one championship at
   // creation (the old all-in-one flow); otherwise it's created unassigned and
   // entered into championships later via /teams/:id/entries. The creating user is
-  // seeded as captain (unless they administer the org — admins manage, not play).
+  // seeded as captain (unless they administer the org - admins manage, not play).
   router.post('/teams', guards.teamCreate, validateBody(createTeamSchema), asyncHandler(async (req, res) => {
     const { name, sport_id, organization_id, championship_id, championship_organization_id, tournament_discipline_id } = req.body as {
       name: string; sport_id: string; organization_id: string;
@@ -223,7 +223,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   }));
 
   // Enter an existing roster into one or more championships at once. Each entry
-  // validates an approved enrollment; the discipline draw is OPTIONAL — a team can
+  // validates an approved enrollment; the discipline draw is OPTIONAL - a team can
   // join a championship first and pick its discipline later (smooth entry). When a
   // draw IS given it must belong to that championship and match the team's sport. A
   // roster joins each championship once, and no two teams of the same org may occupy
@@ -273,7 +273,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     res.status(201).json(await hydrateTeam(prisma, team.id));
   }));
 
-  // Choose (or change) the discipline draw of an existing championship entry — the
+  // Choose (or change) the discipline draw of an existing championship entry - the
   // "now that you're in, pick your discipline" step. Same validation as entry: the
   // draw must belong to the entry's championship, match the team's sport, and not
   // already be taken by another of the org's teams. Pass null to clear it.
@@ -310,7 +310,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
         },
         select: { id: true },
       });
-      if (fixture) throw new BusinessRuleError('Cannot withdraw — this team already has fixtures in this championship');
+      if (fixture) throw new BusinessRuleError('Cannot withdraw - this team already has fixtures in this championship');
     }
     await prisma.team_entries.delete({ where: { id: entry.id } });
     res.status(204).send();
@@ -332,7 +332,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   }));
 
   // Reopen a locked entry so the squad can be edited again for that championship.
-  // Per-entry, like locking — other entries are untouched. Blocked once the team has
+  // Per-entry, like locking - other entries are untouched. Blocked once the team has
   // completed/scored matches in this draw, since changing the roster after results
   // would be unfair.
   router.post('/teams/:id/entries/:entryId/unlock', guards.teamManager, asyncHandler(async (req, res) => {
@@ -347,7 +347,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
           AND: [{ OR: [{ status: { in: ['completed', 'walkover', 'bye'] } }, { home_score: { not: null } }, { away_score: { not: null } }] }],
         },
       });
-      if (played > 0) throw new BusinessRuleError('This team already has completed or scored matches in this championship — its roster can’t be unlocked.');
+      if (played > 0) throw new BusinessRuleError('This team already has completed or scored matches in this championship - its roster can’t be unlocked.');
     }
     await prisma.team_entries.update({ where: { id: entry.id }, data: { status: 'forming' } });
     res.json(await hydrateTeam(prisma, req.params.id));
@@ -422,7 +422,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   // Delete a whole team. A fresh team (never entered into a championship) is removed
   // along with its roster. Once it has championship entries or fixtures it's protected:
   // the caller must opt in with ?cascade=true (the UI's explicit "remove anyway"), which
-  // also clears its entries and any fixtures it appears in (home/away/winner — fixture
+  // also clears its entries and any fixtures it appears in (home/away/winner - fixture
   // awards cascade with them). team_entries would cascade on their own, but we clear
   // everything in one transaction so the parent delete can't hit a stray FK.
   router.delete('/teams/:id', guards.teamManager, asyncHandler(async (req, res) => {
@@ -439,13 +439,13 @@ export function makeTeamsRouter(prisma: Prisma): Router {
         where: { AND: [fixtureWhere, { OR: [{ status: { in: ['completed', 'walkover', 'bye'] } }, { home_score: { not: null } }, { away_score: { not: null } }] }] },
       }),
     ]);
-    // Completed/scored matches are protected even when the caller opts into cascade —
+    // Completed/scored matches are protected even when the caller opts into cascade -
     // deleting them would corrupt opponents' fixtures and standings.
     if (playedCount > 0) {
-      throw new BusinessRuleError('This team has completed or scored matches — those results must be removed before it can be deleted.');
+      throw new BusinessRuleError('This team has completed or scored matches - those results must be removed before it can be deleted.');
     }
     if ((entryCount > 0 || fixtureCount > 0) && !cascade) {
-      throw new BusinessRuleError('This team is entered in a championship — confirm removal to delete it along with its entries and fixtures.');
+      throw new BusinessRuleError('This team is entered in a championship - confirm removal to delete it along with its entries and fixtures.');
     }
 
     await prisma.$transaction([
@@ -578,7 +578,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     res.status(201).json(member);
   }));
 
-  // Edit a roster row — promote to captain, change role, set a jersey number.
+  // Edit a roster row - promote to captain, change role, set a jersey number.
   router.patch('/teams/:id/members/:memberId', guards.teamManager, validateBody(updateTeamMemberSchema), asyncHandler(async (req, res) => {
     const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!team) throw new NotFoundError('Team');

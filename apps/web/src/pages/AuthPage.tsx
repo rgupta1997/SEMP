@@ -14,7 +14,7 @@ const HANK = "'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif";
 const MONO = "'IBM Plex Mono',ui-monospace,monospace";
 
 // Seed accounts from `npm run reset:all` (password: demo123; admin: admin123).
-// Temporary convenience panel — to be hidden before launch.
+// Temporary convenience panel - to be hidden before launch.
 const DEMO_GROUPS: { group: string; accounts: { email: string; label: string; pw?: string }[] }[] = [
   { group: 'Platform', accounts: [
     { email: 'admin@semp.local', label: 'System Admin', pw: 'admin123' },
@@ -38,7 +38,7 @@ const DEMO_GROUPS: { group: string; accounts: { email: string; label: string; pw
 const RAIL_POINTS = [
   'Set up a multi-sport championship in minutes',
   'Auto-generate clash-free fixtures across venues',
-  'Live scores, medal tallies — and zero spreadsheets',
+  'Live scores, medal tallies - and zero spreadsheets',
 ];
 
 const css = (dark: boolean) => `
@@ -152,7 +152,7 @@ export function AuthPage() {
 
       <div className="authGrid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.04fr) minmax(0,1fr)', minHeight: '100vh' }}>
 
-        {/* ===== LEFT — navy brand rail ===== */}
+        {/* ===== LEFT - navy brand rail ===== */}
         <aside className="brandRail" style={{ position: 'relative', overflow: 'hidden', background: C.navy, padding: '56px 56px 48px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <svg width="460" height="460" viewBox="0 0 100 100" aria-hidden style={{ position: 'absolute', right: -130, bottom: -120, opacity: 0.07 }}>
             <path d="M50 4 L89 27 V73 L50 96 L11 73 V27 Z" fill="none" stroke="#fff" strokeWidth="2" />
@@ -182,7 +182,7 @@ export function AuthPage() {
             </div>
           </div>
 
-          {/* live mini scoreboard — broadcast personality, echoes the landing hero card */}
+          {/* live mini scoreboard - broadcast personality, echoes the landing hero card */}
           <div style={{ position: 'relative', background: '#11233E', border: '1px solid #1E3354', borderRadius: 6, padding: '14px 16px', maxWidth: 290 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontFamily: MONO, fontWeight: 700, fontSize: 9.5, letterSpacing: '.08em', color: C.teal, textTransform: 'uppercase' }}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#DE3A3A' }} />Live · Football SF
@@ -198,7 +198,7 @@ export function AuthPage() {
           </div>
         </aside>
 
-        {/* ===== RIGHT — form ===== */}
+        {/* ===== RIGHT - form ===== */}
         <main style={{ position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 'clamp(28px,5vh,64px) clamp(22px,5vw,56px)' }}>
           {/* top bar: brand on mobile + theme toggle */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 28 }}>

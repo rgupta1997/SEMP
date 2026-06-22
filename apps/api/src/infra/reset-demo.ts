@@ -115,7 +115,7 @@ async function main() {
   }
 
   // Step 6b: Delete enrollments that reference a demo user (applied_by is NOT NULL,
-  // reviewed_by NoAction) — both would otherwise block the user delete below.
+  // reviewed_by NoAction) - both would otherwise block the user delete below.
   if (userIds.length > 0) {
     await prisma.championship_organizations.deleteMany({
       where: { OR: [{ applied_by: { in: userIds } }, { reviewed_by: { in: userIds } }] },
@@ -145,7 +145,7 @@ async function main() {
     console.log(`✓ Removed ${userIds.length} demo users`);
   }
 
-  // Step 9: Delete demo organizations — first unlink any surviving users whose
+  // Step 9: Delete demo organizations - first unlink any surviving users whose
   // home org is one of these (users.organization_id FK is NoAction).
   if (instIds.length > 0) {
     await prisma.users.updateMany({ where: { organization_id: { in: instIds } }, data: { organization_id: null } });

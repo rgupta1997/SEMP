@@ -53,7 +53,7 @@ export function PlatformUsersPage() {
 
   return (
     <div>
-      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">All platform accounts — create, import, edit, map to championships.</p>
+      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">All platform accounts - create, import, edit, map to championships.</p>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-xl font-semibold dark:text-slate-100">Users</h2>
@@ -93,7 +93,7 @@ export function PlatformUsersPage() {
                     <div>{u.email}</div>
                     {u.phone && <div className="text-xs text-slate-400 dark:text-slate-500">{u.phone}</div>}
                   </td>
-                  <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{u.organizations?.name ?? '—'}</td>
+                  <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{u.organizations?.name ?? '-'}</td>
                   <td className="px-4 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{fmtDate(u.created_at)}</td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
                     <Button size="sm" variant="ghost" onClick={() => setEditing(u)}>Edit</Button>
@@ -141,19 +141,19 @@ export function PlatformUsersPage() {
             <div className="grid gap-3 sm:grid-cols-3">
               <Field label="Organization (optional)">
                 <Select value={mapInstitution} onChange={(e) => setMapInstitution(e.target.value)}>
-                  <option value="">— none —</option>
+                  <option value="">- none -</option>
                   {organizations.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
                 </Select>
               </Field>
               <Field label="Map to championship (optional)">
                 <Select value={mapEvent} onChange={(e) => setMapEvent(e.target.value)}>
-                  <option value="">— none —</option>
+                  <option value="">- none -</option>
                   {championships.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </Select>
               </Field>
               <Field label="Championship role">
                 <Select value={mapRole} onChange={(e) => setMapRole(e.target.value)} disabled={!mapEvent}>
-                  <option value="">— select —</option>
+                  <option value="">- select -</option>
                   {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </Select>
               </Field>

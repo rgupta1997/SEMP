@@ -2,7 +2,7 @@
 --
 -- The landing page is unauthenticated, so the create endpoint is public; reading,
 -- triaging and deleting these rows is restricted to platform super-admins. This is
--- a standalone capture table — it references no other entity and is never exposed
+-- a standalone capture table - it references no other entity and is never exposed
 -- to ordinary users.
 
 create table if not exists demo_requests (

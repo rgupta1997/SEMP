@@ -142,7 +142,7 @@ export function StatusBadge({ status, label }: { status?: string | null; label?:
         : ['rejected', 'cancelled'].includes(s) ? 'rose'
           : ['registration_open'].includes(s) ? 'brand'
             : 'slate';
-  return <Badge tone={tone}>{label ?? (status ? titleCase(status) : '—')}</Badge>;
+  return <Badge tone={tone}>{label ?? (status ? titleCase(status) : '-')}</Badge>;
 }
 
 /* ----------------------------- Modal ----------------------------- */
@@ -169,7 +169,7 @@ export function Modal({ title, onClose, children, footer, wide, size }:
 }
 
 /* ----------------------------- Pills ----------------------------- */
-// Inline single-select chip group — a friendlier alternative to a <select> when
+// Inline single-select chip group - a friendlier alternative to a <select> when
 // the choices are few and worth showing at a glance (e.g. picking a discipline).
 export function Pills({ value, onChange, options, ariaLabel }: {
   value: string;
@@ -602,7 +602,7 @@ export function useToast(): ToastApi {
 }
 
 // Module-level emitter so non-hook code (mutation callbacks, helpers) can fire
-// toasts via `toast.error(...)` — registered by the mounted ToastProvider.
+// toasts via `toast.error(...)` - registered by the mounted ToastProvider.
 let emit: ToastApi['push'] | null = null;
 export const toast = {
   show: (t: { type?: ToastType; title: string; message?: string }) => emit?.(t),
@@ -641,7 +641,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
 /* ----------------------------- Confirm dialog ----------------------------- */
 // In-app replacement for window.confirm. Call `confirmDialog(...)` from anywhere and
-// await the boolean — a string arg is treated as the message. Mirrors the `toast`
+// await the boolean - a string arg is treated as the message. Mirrors the `toast`
 // pattern: a module-level emitter registered by the mounted <ConfirmProvider>. Falls
 // back to window.confirm if the provider isn't mounted (e.g. in tests).
 export interface ConfirmOptions {

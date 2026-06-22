@@ -1,5 +1,5 @@
 /* global React, Icon */
-// Sportagon — core UI components (names mirror existing components/ui.tsx)
+// Sportagon - core UI components (names mirror existing components/ui.tsx)
 const { createElement: h, useState } = React;
 const cx = (...a) => a.filter(Boolean).join(" ");
 

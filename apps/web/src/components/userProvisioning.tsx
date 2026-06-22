@@ -29,11 +29,11 @@ export function PhoneLookupNotice({ phone }: { phone: string }) {
   if (found) {
     return (
       <div className="mt-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-        ✓ Existing user <b>{found.name}</b> · {found.phone} — they'll be assigned. No new login is created.
+        ✓ Existing user <b>{found.name}</b> · {found.phone} - they'll be assigned. No new login is created.
       </div>
     );
   }
-  return <div className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">No existing user with this number — a new login will be created.</div>;
+  return <div className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">No existing user with this number - a new login will be created.</div>;
 }
 
 // Shown once after provisioning a new login, with a copy button so the actor can
@@ -52,7 +52,7 @@ export function CredentialsPanel({ creds, onDone }: { creds: Credentials; onDone
 
   const copy = async () => {
     try { await navigator.clipboard.writeText(text); toast.success('Login details copied'); }
-    catch { toast.error('Could not copy — select the text and copy manually'); }
+    catch { toast.error('Could not copy - select the text and copy manually'); }
   };
 
   return (

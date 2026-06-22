@@ -26,7 +26,7 @@ export function AchievementRow({ group }: { group: AchievementGroup }) {
       <span className="truncate text-base font-bold text-[var(--gold-ink-strong)] dark:text-amber-100">{group.award_name}</span>
       {group.latest_date && <span className="ml-auto flex-none text-sm font-medium text-[var(--gold-ink)] dark:text-slate-500">{fmtDate(group.latest_date)}</span>}
 
-      {/* Hover tooltip — per-occurrence meta (championship · tournament · match). */}
+      {/* Hover tooltip - per-occurrence meta (championship · tournament · match). */}
       <div
         role="tooltip"
         className="invisible absolute left-0 top-full z-20 mt-2 w-[min(30rem,90vw)] rounded-xl border border-slate-200 bg-white p-3 text-left opacity-0 shadow-xl transition-opacity duration-150 group-hover:visible group-hover:opacity-100 dark:border-slate-700 dark:bg-slate-800"
@@ -37,7 +37,7 @@ export function AchievementRow({ group }: { group: AchievementGroup }) {
         <ul className="space-y-1">
           {group.instances.map((it) => (
             <li key={it.id} className="flex items-baseline justify-between gap-3 text-xs">
-              <span className="text-slate-600 dark:text-slate-300">{instanceLine(it) || '—'}</span>
+              <span className="text-slate-600 dark:text-slate-300">{instanceLine(it) || '-'}</span>
               {it.date && <span className="flex-none text-slate-400 dark:text-slate-500">{fmtDate(it.date)}</span>}
             </li>
           ))}

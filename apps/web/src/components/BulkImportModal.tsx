@@ -81,7 +81,7 @@ export function BulkImportModal<R>({
 
   if (result !== null) {
     return (
-      <Modal title={`${title} — done`} onClose={onClose}>
+      <Modal title={`${title} - done`} onClose={onClose}>
         {renderResult ? renderResult(result) : <p className="text-sm text-slate-600 dark:text-slate-300">Import complete.</p>}
         <div className="mt-5 flex justify-end"><Button onClick={onClose}>Done</Button></div>
       </Modal>
@@ -147,7 +147,7 @@ export function BulkImportModal<R>({
                   const err = rowError(r);
                   return (
                     <tr key={i} className="border-t border-slate-100 dark:border-slate-800">
-                      {fields.map((f) => <td key={f.key} className="px-3 py-1.5 text-slate-700 dark:text-slate-300">{r[f.key] || '—'}</td>)}
+                      {fields.map((f) => <td key={f.key} className="px-3 py-1.5 text-slate-700 dark:text-slate-300">{r[f.key] || '-'}</td>)}
                       <td className={`px-3 py-1.5 ${err ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{err ?? 'OK'}</td>
                     </tr>
                   );

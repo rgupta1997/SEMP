@@ -26,7 +26,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     throw new ForbiddenError('Only an organization owner/admin can do this');
   });
 
-  // super OR owner of the :id org. Deleting an organization is owner-only — admins
+  // super OR owner of the :id org. Deleting an organization is owner-only - admins
   // manage day-to-day, but tearing down the whole org is the owner's call.
   const orgOwner = asyncHandler(async (req, _res, next) => {
     const u = req.user!;
@@ -64,7 +64,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     res.json(row);
   }));
 
-  // Create an organization — the creator becomes its owner. Optionally assigns a
+  // Create an organization - the creator becomes its owner. Optionally assigns a
   // separate POC/owner: if the phone (or email) already belongs to a user we reuse
   // them, otherwise we provision a new login (forced to change its password on
   // first sign-in) and return its temporary password once so it can be shared.
@@ -131,8 +131,8 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   // Delete an organization (owner-only). Most of the org's data RESTRICTs the delete
   // (teams, users' primary-org pointer, championship entries/enrollments/invitations),
   // so we clear it in one transaction; members + standings cascade on their own.
-  // Completed/scored matches are protected — those results must be removed first, even
-  // with cascade — and a non-empty org needs an explicit ?cascade=true confirmation.
+  // Completed/scored matches are protected - those results must be removed first, even
+  // with cascade - and a non-empty org needs an explicit ?cascade=true confirmation.
   router.delete('/:id', orgOwner, asyncHandler(async (req, res) => {
     const orgId = req.params.id;
     const org = await prisma.organizations.findUnique({ where: { id: orgId }, select: { id: true } });
@@ -153,10 +153,10 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
         : Promise.resolve(0),
     ]);
     if (playedCount > 0) {
-      throw new BusinessRuleError('This organization has teams with completed or scored matches — those results must be removed before it can be deleted.');
+      throw new BusinessRuleError('This organization has teams with completed or scored matches - those results must be removed before it can be deleted.');
     }
     if ((teamIds.length > 0 || entryCount > 0 || enrollCount > 0) && !cascade) {
-      throw new BusinessRuleError('This organization still has teams or championship entries — confirm removal to delete it along with them.');
+      throw new BusinessRuleError('This organization still has teams or championship entries - confirm removal to delete it along with them.');
     }
 
     await prisma.$transaction([
@@ -175,7 +175,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
 
   // ---- Self-service join requests ----
   // Any signed-in user can request to join an org. A request is just an
-  // organization_members row with status 'pending' — it grants no access until an
+  // organization_members row with status 'pending' - it grants no access until an
   // owner/admin approves (orgRole() requires status 'active'). The org's admins are
   // notified via an 'org_admins' notification.
   router.post('/:id/join', asyncHandler(async (req, res) => {
@@ -279,13 +279,13 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   }));
 
   // An org must always keep at least one active owner/admin. Throws if the given
-  // member is the last one and the change/removal would leave none — so an owner
+  // member is the last one and the change/removal would leave none - so an owner
   // can't demote, deactivate or remove themselves into an unmanageable org.
   async function assertNotLastAdmin(orgId: string, memberId: string): Promise<void> {
     const others = await prisma.organization_members.count({
       where: { organization_id: orgId, role: { in: ['owner', 'admin'] }, status: 'active', id: { not: memberId } },
     });
-    if (others === 0) throw new BusinessRuleError('This is the organization’s only owner/admin — promote another member to owner first.');
+    if (others === 0) throw new BusinessRuleError('This is the organization’s only owner/admin - promote another member to owner first.');
   }
 
   router.patch('/:id/members/:memberId', orgAdmin, validateBody(updateOrganizationMemberSchema), asyncHandler(async (req, res) => {
@@ -337,7 +337,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       target_user_id: member.user_id,
       sender_id: req.user!.id,
       type: 'org_join_approved',
-      audience: 'all', // ignored for direct notifications — target_user_id drives visibility
+      audience: 'all', // ignored for direct notifications - target_user_id drives visibility
       title: `You’ve been approved to join ${await orgName(req.params.id)}`,
     });
     res.json(updated);
@@ -353,7 +353,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       target_user_id: member.user_id,
       sender_id: req.user!.id,
       type: 'org_join_declined',
-      audience: 'all', // ignored for direct notifications — target_user_id drives visibility
+      audience: 'all', // ignored for direct notifications - target_user_id drives visibility
       title: `Your request to join ${await orgName(req.params.id)} was declined`,
     });
     res.json({ ok: true });

@@ -46,7 +46,7 @@ export const changePasswordSchema = z.object({
   new_password: z.string().min(6),
 });
 
-// Self-serve sign up — every login is just a user. There is no account-type
+// Self-serve sign up - every login is just a user. There is no account-type
 // choice: a user becomes an organiser by hosting a championship, a member by
 // joining/creating an organization, an official by being assigned to one.
 export const signupSchema = z.object({
@@ -58,7 +58,7 @@ export const signupSchema = z.object({
 
 // ---------- Users (admin / organiser / org-owner managed) ----------
 // Creating a login for someone else (a teammate, an official, a member). The
-// password is optional — the server falls back to the shared default so the
+// password is optional - the server falls back to the shared default so the
 // account can sign in immediately and reset later.
 export const createUserSchema = z.object({
   name: z.string().min(1),
@@ -181,7 +181,7 @@ export const createChampionshipSchema = z.object({
   name: z.string().min(1),
   slug: z.string().min(1).regex(/^[a-z0-9-]+$/, 'lowercase letters, numbers, hyphens only'),
   description: z.string().optional(),
-  // The host city is required — it doubles as the championship's default venue.
+  // The host city is required - it doubles as the championship's default venue.
   venue: z.string().min(1, 'Host city is required'),
   start_date: z.coerce.date(),
   end_date: z.coerce.date(),
@@ -283,7 +283,7 @@ export const bulkAssignOfficialsSchema = z.object({ user_ids: z.array(uuid).min(
 export const createInvitationSchema = z.object({
   organization_id: uuid,
 });
-// Accepting needs no body — the invitation already names the organization, and
+// Accepting needs no body - the invitation already names the organization, and
 // only its owners/admins can see it.
 
 // ---------- Phase 3c: invite a person by mobile to a role ----------
@@ -298,7 +298,7 @@ export const createUserInvitationSchema = z.object({
 });
 
 // ---------- Phase 4: teams ----------
-// Create a team. Only name + sport + org are required — a team is a standalone
+// Create a team. Only name + sport + org are required - a team is a standalone
 // organization asset. Pass the championship fields to enter it into a championship
 // at creation (the old all-in-one flow); otherwise enter it into championships
 // later via POST /teams/:id/entries (a roster can join many championships).
@@ -311,7 +311,7 @@ export const createTeamSchema = z.object({
   tournament_discipline_id: uuid.optional(),
 });
 // Enter an existing roster into one or more championships at once. Each entry
-// names an approved enrollment; the discipline draw is OPTIONAL — a team can enter
+// names an approved enrollment; the discipline draw is OPTIONAL - a team can enter
 // a championship first and pick its discipline afterwards (chosen via
 // updateTeamEntrySchema). When given, the draw must match the team's sport.
 export const enterChampionshipsSchema = z.object({
@@ -320,7 +320,7 @@ export const enterChampionshipsSchema = z.object({
     tournament_discipline_id: uuid.nullable().optional(),
   })).min(1).max(50),
 });
-// Set (or change) the discipline draw of an existing championship entry — the
+// Set (or change) the discipline draw of an existing championship entry - the
 // "choose your discipline once you're in" step. Pass null to clear it again.
 export const updateTeamEntrySchema = z.object({
   tournament_discipline_id: uuid.nullable(),
@@ -338,7 +338,7 @@ export const joinTeamSchema = z.object({
   role: z.enum(TEAM_MEMBER_ROLE).default('player'),
   jersey_number: z.number().int().optional(),
 });
-// Edit an existing roster row — e.g. promote a player to captain, or set a jersey.
+// Edit an existing roster row - e.g. promote a player to captain, or set a jersey.
 export const updateTeamMemberSchema = z
   .object({
     role: z.enum(TEAM_MEMBER_ROLE).optional(),
@@ -447,7 +447,7 @@ export const reactNotificationSchema = z.object({
 // standings_rules row and parsed by the recompute engine. One variant per scheme.
 
 // `participation` is awarded once to every organization that takes part in a
-// discipline (played ≥ 1 completed fixture), on top of the scheme's own points —
+// discipline (played ≥ 1 completed fixture), on top of the scheme's own points -
 // the classic "participation vs performance" split. Shared by every scheme.
 const participation = z.number().int().min(0).default(0);
 
@@ -491,7 +491,7 @@ export const standingsRuleSchema = z.discriminatedUnion('scheme', [
 ]);
 export type StandingsRule = z.infer<typeof standingsRuleSchema>;
 
-// The implicit default applied when no standings_rules row matches — preserves the
+// The implicit default applied when no standings_rules row matches - preserves the
 // historical behaviour (win = 3, draw = 1, loss = 0). Single source of truth shared
 // by the engine and the rules editor UI.
 export const DEFAULT_STANDINGS_RULE: StandingsRule = {
@@ -529,7 +529,7 @@ export const createDemoRequestSchema = z.object({
   message: z.string().max(2000).optional(),
 });
 
-// Admin-only triage update — move a lead through its lifecycle and/or annotate it.
+// Admin-only triage update - move a lead through its lifecycle and/or annotate it.
 export const updateDemoRequestSchema = z
   .object({
     status: z.enum(DEMO_REQUEST_STATUS).optional(),

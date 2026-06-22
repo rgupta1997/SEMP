@@ -1,4 +1,4 @@
-# Deploying SEMP — API on Render, Web on Netlify
+# Deploying SEMP - API on Render, Web on Netlify
 
 The backend (Express + Prisma, run with `tsx`) deploys to **Render**; the frontend
 (Vite static build) deploys to **Netlify**. Both deploy from a Git repo, so step 0
@@ -26,7 +26,7 @@ git push -u origin main
 Easiest path uses the committed `render.yaml`:
 1. Render → **New +** → **Blueprint** → connect the repo → Apply.
 2. It creates the `semp-api` web service. Fill the env vars it asks for:
-   - `DATABASE_URL` — your Supabase connection string. Use the **transaction pooler**:
+   - `DATABASE_URL` - your Supabase connection string. Use the **transaction pooler**:
      `postgresql://postgres.[REF]:[PW]@aws-0-[region].pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=5`
      - `:6543` + `pgbouncer=true` → transaction mode (multiplexes many clients).
      - `connection_limit=5` caps Prisma's own pool so overlapping redeploys stay in budget.
@@ -35,8 +35,8 @@ Easiest path uses the committed `render.yaml`:
        `EMAXCONNSESSION: max clients reached in session mode`.
      - The **direct** connection (`db.[REF].supabase.co:5432`) is for local
        `prisma db pull` introspection and one-off seeds, not the running service.
-   - `WEB_ORIGIN` — leave blank for now; set it in step 4.
-   - `JWT_SECRET` — generated automatically.
+   - `WEB_ORIGIN` - leave blank for now; set it in step 4.
+   - `JWT_SECRET` - generated automatically.
 3. First deploy runs `npm install --include=dev && prisma generate`, then
    `npm run start` (= `tsx src/main.ts`). When live, note the URL, e.g.
    `https://semp-api.onrender.com`. Check `https://…/health` returns `{"ok":true}`.
@@ -52,7 +52,7 @@ Easiest path uses the committed `render.yaml`:
    redirect automatically.
 2. Site settings → **Environment variables** → add:
    - `VITE_API_URL` = your Render URL from step 2 (e.g. `https://semp-api.onrender.com`).
-     **No trailing slash, no `/api`** — the client appends `/api` itself.
+     **No trailing slash, no `/api`** - the client appends `/api` itself.
 3. Deploy. Note the site URL, e.g. `https://your-app.netlify.app`.
 
 ## 4. Wire them together (CORS)
@@ -70,7 +70,7 @@ Easiest path uses the committed `render.yaml`:
 - **Free-tier cold start:** Render's free instance sleeps after inactivity; the first
   request after idle takes ~30–60s. Upgrade the plan to avoid it.
 - **`VITE_API_URL` is build-time.** Changing it requires a Netlify redeploy, not just a save.
-- **Prisma engine** is generated on Render's Linux during build, so it matches runtime — no `binaryTargets` needed.
+- **Prisma engine** is generated on Render's Linux during build, so it matches runtime - no `binaryTargets` needed.
 - **Schema/migrations:** Render does **not** run migrations. Apply DB schema changes to
   Supabase yourself (this repo's `supabase/migrations`), then `prisma generate` picks them up on the next deploy.
 - **Seeding a fresh DB:** run the seed once against the production DB, e.g. locally with

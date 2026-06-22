@@ -14,7 +14,7 @@ const SPORTS_CONFIG: Array<{
   disciplines: Array<{ name: string; entry_type: string; squad_min: number; squad_max: number }>;
 }> = [
   { name: 'Cricket', icon: '🏏', disciplines: [
-    // Disciplines are categories (gender/age), not formats — T20 is a format, not a discipline.
+    // Disciplines are categories (gender/age), not formats - T20 is a format, not a discipline.
     { name: 'Men\'s', entry_type: 'team', squad_min: 11, squad_max: 15 },
     { name: 'Women\'s', entry_type: 'team', squad_min: 11, squad_max: 15 },
     { name: 'U-19', entry_type: 'team', squad_min: 11, squad_max: 15 },
@@ -329,7 +329,7 @@ async function main() {
     data: {
       name: "Genesis Sports Fest '26",
       slug: 'genesis-26',
-      description: 'The flagship inter-collegiate sports festival — 32 sports across 9 days.',
+      description: 'The flagship inter-collegiate sports festival - 32 sports across 9 days.',
       venue: 'Mumbai University Grounds',
       start_date: new Date('2026-03-14'),
       end_date: new Date('2026-03-22'),

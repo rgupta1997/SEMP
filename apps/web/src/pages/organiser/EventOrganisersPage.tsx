@@ -88,7 +88,7 @@ export function EventOrganisersPage() {
       )}
 
       <Card className="bg-slate-50 dark:bg-slate-800/60 p-4 text-sm text-slate-600 dark:text-slate-300">
-        Co-organisers share full control of this championship — its setup, approvals, officials and schedule.
+        Co-organisers share full control of this championship - its setup, approvals, officials and schedule.
         Invite participating organizations from the <span className="font-medium">Invite</span> tab; assign officials in the section below.
       </Card>
 

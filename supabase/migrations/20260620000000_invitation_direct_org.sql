@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Championship invitations → direct-to-organization
 --   The host now invites an institution by picking it from the master
---   organization list and sending the request straight to that org — no POC
+--   organization list and sending the request straight to that org - no POC
 --   mobile number. The invited org's owners/admins see it on login (matched by
 --   organization membership, not by a typed phone number) and accept it.
 --

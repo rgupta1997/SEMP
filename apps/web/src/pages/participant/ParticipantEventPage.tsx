@@ -49,7 +49,7 @@ function RankBadge({ pos }: { pos: number }) {
 }
 
 export function ParticipantEventPage() {
-  // Route is /profile/championships/:championshipId — must match the param name,
+  // Route is /profile/championships/:championshipId - must match the param name,
   // otherwise this is undefined and the fetch 404s ("Championship not available").
   const { championshipId } = useParams();
   const [tab, setTab] = useState('overview');

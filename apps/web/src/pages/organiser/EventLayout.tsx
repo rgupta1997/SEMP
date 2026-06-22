@@ -63,7 +63,7 @@ export function EventLayout() {
         )}
       </div>
 
-      {/* Section tabs — the championship's own navigation, as horizontal pills. */}
+      {/* Section tabs - the championship's own navigation, as horizontal pills. */}
       <nav className="mb-6 flex flex-wrap gap-2">
         {EVENT_NAV.filter((it) => canManage || !it.manage).map((it) => (
           <NavLink

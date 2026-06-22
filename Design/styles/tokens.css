@@ -1,11 +1,11 @@
 /* ============================================================
-   SPORTAGON — Design Tokens
+   SPORTAGON - Design Tokens
    Layered color model: brand (themable) → neutral → semantic →
    sport accents. Light + dark. Tenant brand overrides --brand-*.
    ============================================================ */
 
 :root {
-  /* —— Brand: Sportagon "Azure" (evolved, default tenant) —— */
+  /* -- Brand: Sportagon "Azure" (evolved, default tenant) -- */
   --brand-50:  oklch(0.972 0.018 256);
   --brand-100: oklch(0.940 0.040 256);
   --brand-200: oklch(0.885 0.072 256);
@@ -18,7 +18,7 @@
   --brand-900: oklch(0.340 0.108 260);
   --brand-contrast: #ffffff; /* text on brand-500/600 */
 
-  /* —— Accent: Podium Gold (medals, highlights — used sparingly) —— */
+  /* -- Accent: Podium Gold (medals, highlights - used sparingly) -- */
   --gold-300: oklch(0.880 0.090 88);
   --gold-400: oklch(0.835 0.118 84);
   --gold-500: oklch(0.780 0.130 80);
@@ -26,7 +26,7 @@
   --silver:   oklch(0.800 0.012 250);
   --bronze:   oklch(0.660 0.090 55);
 
-  /* —— Neutral (cool slate, fixed across tenants) —— */
+  /* -- Neutral (cool slate, fixed across tenants) -- */
   --neutral-0:   #ffffff;
   --neutral-50:  #f6f7f9;
   --neutral-100: #eceef2;
@@ -41,7 +41,7 @@
   --neutral-900: #141b29;
   --neutral-950: #0b0f17;
 
-  /* —— Semantic (fixed meaning) —— */
+  /* -- Semantic (fixed meaning) -- */
   --success: oklch(0.640 0.150 156);
   --success-bg: oklch(0.955 0.040 156);
   --warning: oklch(0.760 0.140 76);
@@ -50,11 +50,11 @@
   --danger-bg: oklch(0.955 0.035 18);
   --info: oklch(0.660 0.130 232);
   --info-bg: oklch(0.960 0.035 232);
-  /* LIVE — dedicated broadcast red, distinct from danger */
+  /* LIVE - dedicated broadcast red, distinct from danger */
   --live: #e5352b;
   --live-glow: rgba(229, 53, 43, 0.45);
 
-  /* —— Surfaces & text (LIGHT) —— */
+  /* -- Surfaces & text (LIGHT) -- */
   --surface-base:    #f4f6f9;
   --surface-raised:  #ffffff;
   --surface-sunken:  #eaedf2;
@@ -81,25 +81,25 @@
   --shadow-xl: 0 8px 16px hsl(var(--shadow-color) / 0.08), 0 32px 64px hsl(var(--shadow-color) / 0.18);
   --ring-focus: 0 0 0 3px color-mix(in oklch, var(--brand-500) 35%, transparent);
 
-  /* —— Spacing (4px grid) —— */
+  /* -- Spacing (4px grid) -- */
   --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
   --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
   --sp-12: 48px; --sp-16: 64px; --sp-20: 80px; --sp-24: 96px;
 
-  /* —— Radius —— */
+  /* -- Radius -- */
   --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 22px; --r-2xl: 28px; --r-full: 999px;
 
-  /* —— Type —— */
+  /* -- Type -- */
   --font-ui: "Archivo", system-ui, -apple-system, sans-serif;
   --font-display: "Archivo Expanded", "Archivo", system-ui, sans-serif;
   --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
 
-  /* —— Motion —— */
+  /* -- Motion -- */
   --dur-fast: 120ms; --dur-base: 200ms; --dur-slow: 320ms;
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
-  /* —— Z —— */
+  /* -- Z -- */
   --z-dropdown: 100; --z-sticky: 200; --z-drawer: 400; --z-overlay: 500; --z-toast: 600; --z-max: 999;
 
   --density: 1; /* scaled by Tweaks: 0.85 compact … 1.15 comfortable */
@@ -155,7 +155,7 @@
   --shadow-xl: 0 8px 16px hsl(var(--shadow-color) / 0.5), 0 32px 64px hsl(var(--shadow-color) / 0.7);
 }
 
-/* —— Sport accents (fixed; pair with icon + label, never color alone) —— */
+/* -- Sport accents (fixed; pair with icon + label, never color alone) -- */
 :root {
   --sport-cricket:    oklch(0.68 0.16 145);
   --sport-football:   oklch(0.62 0.18 256);

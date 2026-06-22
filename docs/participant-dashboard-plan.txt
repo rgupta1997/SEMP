@@ -67,13 +67,13 @@ Landing Dashboard (/me)
 
 
 Event Detail (/me/events/:eventId)
-Full page (not a modal) — works on mobile and desktop.
+Full page (not a modal) - works on mobile and desktop.
 
 Tabs:
-  - Overview   — event info, dates, venue, institution, personal stats in this event
-  - My Teams   — all teams user played for (sport, discipline, role, jersey, roster)
-  - My Matches — all fixtures for user's teams, filterable by sport/status
-  - Standings  — read-only standings (prefer via /me/events/:id for access control)
+  - Overview   - event info, dates, venue, institution, personal stats in this event
+  - My Teams   - all teams user played for (sport, discipline, role, jersey, roster)
+  - My Matches - all fixtures for user's teams, filterable by sport/status
+  - Standings  - read-only standings (prefer via /me/events/:id for access control)
 
 Responsive:
   - Desktop: horizontal tabs, full-width match table
@@ -99,10 +99,10 @@ Only accessible if user is on home_team_id or away_team_id (enforced server-side
 BACKEND API PLAN
 ----------------
 All endpoints in apps/api/src/modules/iam/me.routes.ts
-Scoped to req.user.id — never accept arbitrary user IDs.
+Scoped to req.user.id - never accept arbitrary user IDs.
 
 
-1. GET /me/dashboard (summary — fast)
+1. GET /me/dashboard (summary - fast)
    Returns landing page data only:
 
    {
@@ -121,7 +121,7 @@ Scoped to req.user.id — never accept arbitrary user IDs.
    - Compute W/L/D from winner_team_id and scores
 
 
-2. GET /me/events/:eventId (detail — on click)
+2. GET /me/events/:eventId (detail - on click)
    Verify user has team_member row for a team in this event. Else 404.
 
    {
@@ -136,7 +136,7 @@ Scoped to req.user.id — never accept arbitrary user IDs.
    }
 
 
-3. GET /me/matches/:fixtureId (detail — on click)
+3. GET /me/matches/:fixtureId (detail - on click)
    Verify user is on home_team_id or away_team_id. Else 403.
 
    {
@@ -185,7 +185,7 @@ Responsive & Loading UX:
   - Event cards: grid-cols-1 sm:grid-cols-2 lg:grid-cols-3, entire card clickable
   - Match rows: table on desktop, stacked cards on mobile
   - Loading: Spinner + skeleton per section (not full-page unless first load)
-  - Caching: TanStack Query via useApi — staleTime 30s summary, 60s detail
+  - Caching: TanStack Query via useApi - staleTime 30s summary, 60s detail
   - Back nav: breadcrumb Dashboard > Event > Match detail
   - Empty states: "You haven't participated in any events yet"
 
@@ -203,12 +203,12 @@ Participant     - ALL events they played in, across any organizer, with full dri
 
 IMPLEMENTATION TODOS
 --------------------
-[ ] Create GET /me/dashboard — lightweight summary (stats + event cards + recent matches)
-[ ] Create GET /me/events/:eventId — full event participation detail
-[ ] Create GET /me/matches/:fixtureId — single match detail scoped to participant's team
+[ ] Create GET /me/dashboard - lightweight summary (stats + event cards + recent matches)
+[ ] Create GET /me/events/:eventId - full event participation detail
+[ ] Create GET /me/matches/:fixtureId - single match detail scoped to participant's team
 [ ] Build ParticipantDashboard with CareerStats, EventsGrid, RecentMatches
-[ ] Build ParticipantEventPage — tabs: Overview, Teams, Matches, Standings
-[ ] Build ParticipantMatchPage — full match card
+[ ] Build ParticipantEventPage - tabs: Overview, Teams, Matches, Standings
+[ ] Build ParticipantMatchPage - full match card
 [ ] Add routes and participant nav in App.tsx and AppShell.tsx
 
 
@@ -231,4 +231,4 @@ SEED / DEMO CONSIDERATION
 -------------------------
 Existing seed creates players in one event (Genesis '26).
 Optional: add a second completed event with the same player on a team to demo
-multi-event dashboard — not required for v1 but useful for testing.
+multi-event dashboard - not required for v1 but useful for testing.

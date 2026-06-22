@@ -34,7 +34,7 @@ const union = (...sets: Set<string>[]) => {
 };
 
 export async function getUserEventScopes(prisma: Prisma, user: AuthLike): Promise<EventScopes> {
-  // Super admins relate to (and can post to) every championship — callers special-case
+  // Super admins relate to (and can post to) every championship - callers special-case
   // `isSuper` rather than enumerating ids here.
   if (user.isSuperAdmin) {
     const empty = new Set<string>();
@@ -79,7 +79,7 @@ export async function getUserEventScopes(prisma: Prisma, user: AuthLike): Promis
       },
       select: { championship_id: true },
     }),
-    // Orgs the user owns/administers — they see 'org_admins' notifications (e.g.
+    // Orgs the user owns/administers - they see 'org_admins' notifications (e.g.
     // someone requesting to join). Pending memberships don't count (status active).
     prisma.organization_members.findMany({
       where: { user_id: user.id, role: { in: ['owner', 'admin'] }, status: 'active' },
@@ -153,7 +153,7 @@ export function visibilityWhere(scopes: EventScopes): Record<string, unknown> {
   return { OR: or };
 }
 
-// Shared insert helper — used by the manual-post route and the lifecycle/approval
+// Shared insert helper - used by the manual-post route and the lifecycle/approval
 // hooks in championships/enrollment routers.
 export function createNotification(prisma: Prisma, data: {
   championship_id?: string | null;

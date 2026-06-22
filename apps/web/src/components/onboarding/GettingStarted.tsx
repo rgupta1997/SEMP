@@ -5,7 +5,7 @@ import { Button, Card } from '../ui';
 
 // Dashboard "Getting started" card. Renders a role's onboarding steps as a live
 // checklist (progress comes from real data via the caller's hook) and links each
-// open step to where it's done. It's collapsible — never dismissed to nothing: the
+// open step to where it's done. It's collapsible - never dismissed to nothing: the
 // header (with a live progress count) always stays, so it can be re-opened. The
 // collapsed/expanded choice is remembered per `storageKey`.
 export function GettingStarted({ title, subtitle, state, storageKey, completeNote }: {
@@ -13,7 +13,7 @@ export function GettingStarted({ title, subtitle, state, storageKey, completeNot
   subtitle?: string;
   state: OnboardingState;
   storageKey: string;
-  // Shown once every step is done — e.g. "this covered one team; repeat for more".
+  // Shown once every step is done - e.g. "this covered one team; repeat for more".
   completeNote?: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(storageKey) === '1');
@@ -54,7 +54,7 @@ export function GettingStarted({ title, subtitle, state, storageKey, completeNot
 
           {state.complete ? (
             <div className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-              <p className="font-semibold">🎉 You’re all set — every step is done.</p>
+              <p className="font-semibold">🎉 You’re all set - every step is done.</p>
               {completeNote && <p className="mt-1 text-emerald-700/90 dark:text-emerald-300/90">{completeNote}</p>}
             </div>
           ) : (

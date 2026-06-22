@@ -2,7 +2,7 @@ export interface EventNavItem {
   segment: string;
   label: string;
   end?: boolean;
-  /** Management-only tab — hidden from users who don't organise the championship. */
+  /** Management-only tab - hidden from users who don't organise the championship. */
   manage?: boolean;
 }
 

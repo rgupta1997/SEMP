@@ -1,10 +1,10 @@
 @import "tailwindcss";
 
-/* Class-based dark mode — toggling `.dark` on <html> flips all `dark:` utilities. */
+/* Class-based dark mode - toggling `.dark` on <html> flips all `dark:` utilities. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ============================================================
-   SEMP / Sportagon — theme tokens
+   SEMP / Sportagon - theme tokens
    Brand ramp = evolved "Azure" (oklch), themable per tenant.
    Neutrals stay on Tailwind slate. Light theme; dark-ready vars
    declared for future use.
@@ -28,7 +28,7 @@
 }
 
 :root {
-  /* —— Dashboard design system surfaces —— */
+  /* -- Dashboard design system surfaces -- */
   --canvas: #f4f7fe;                 /* app page background */
   --sidebar-bg: #1a2236;             /* dark navy sidebar */
   --sidebar-active: #2d3748;         /* active/hover nav item */
@@ -50,16 +50,16 @@
   --status-ongoing-bg: #ddefd9;   --status-ongoing-ink: #38a169;
   --status-completed-bg: #e6fffa; --status-completed-ink: #319795;
 
-  /* —— Accent: podium gold (medals/highlights, used sparingly) —— */
+  /* -- Accent: podium gold (medals/highlights, used sparingly) -- */
   --gold-500: oklch(0.780 0.130 80);
   --silver:   oklch(0.800 0.012 250);
   --bronze:   oklch(0.660 0.090 55);
 
-  /* —— LIVE: dedicated broadcast red, distinct from danger/rose —— */
+  /* -- LIVE: dedicated broadcast red, distinct from danger/rose -- */
   --live: #e5352b;
   --live-glow: rgba(229, 53, 43, 0.40);
 
-  /* —— Sport accents (pair with icon + label, never colour alone) —— */
+  /* -- Sport accents (pair with icon + label, never colour alone) -- */
   --sport-cricket:    oklch(0.68 0.16 145);
   --sport-football:   oklch(0.62 0.18 256);
   --sport-basketball: oklch(0.68 0.17 52);
@@ -80,18 +80,18 @@ body {
 
 .dark body { @apply bg-slate-950 text-slate-100; }
 
-/* Tabular figures — apply to scores, times, IDs, tables so digits don't jitter */
+/* Tabular figures - apply to scores, times, IDs, tables so digits don't jitter */
 .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 
 /* Subtle entrance for page content (modals, toasts) */
 @keyframes fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .animate-fade-up { animation: fade-up var(--dur-base, 220ms) cubic-bezier(0.16, 1, 0.3, 1) both; }
 
-/* Route-level page transition — fast, directional, subtle */
+/* Route-level page transition - fast, directional, subtle */
 @keyframes page-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .animate-page-enter { animation: page-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) both; }
 
-/* Dropdown / popover entrance — slides from source (downward-opening menus) */
+/* Dropdown / popover entrance - slides from source (downward-opening menus) */
 @keyframes dropdown-enter { from { opacity: 0; transform: translateY(-6px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .animate-dropdown { animation: dropdown-enter 140ms cubic-bezier(0.16, 1, 0.3, 1) both; }
 
@@ -103,7 +103,7 @@ body {
 @keyframes tick { 0% { transform: scale(1); } 35% { transform: scale(1.14); } 100% { transform: scale(1); } }
 .animate-tick { animation: tick 260ms cubic-bezier(0.22, 0.61, 0.36, 1); }
 
-/* Skeleton shimmer — design-system loading placeholder (slate gradient sweep) */
+/* Skeleton shimmer - design-system loading placeholder (slate gradient sweep) */
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 .skeleton {
   background-image: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
@@ -112,14 +112,14 @@ body {
 }
 .dark .skeleton { background-image: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%); }
 
-/* Participant identity banner — medal stat pips on the podium colours */
+/* Participant identity banner - medal stat pips on the podium colours */
 .medal-pip { width: 9px; height: 9px; border-radius: 999px; }
 .medal-pip--gold   { background: var(--gold-500); opacity: 0.84; }
 .medal-pip--silver { background: var(--silver);   opacity: 0.84; }
 .medal-pip--bronze { background: var(--bronze);   opacity: 0.84; }
 .medal-tile { box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--gold-500) 39%, transparent); }
 
-/* LIVE badge — broadcast-red pulse ring (design system "Live" treatment) */
+/* LIVE badge - broadcast-red pulse ring (design system "Live" treatment) */
 @keyframes live-pulse {
   0%   { box-shadow: 0 0 0 0 var(--live-glow); }
   70%  { box-shadow: 0 0 0 7px transparent; }

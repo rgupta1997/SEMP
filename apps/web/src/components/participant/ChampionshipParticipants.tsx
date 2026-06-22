@@ -10,7 +10,7 @@ interface TeamGroup { team_id: string; team_name: string; sport?: { id?: string;
 interface OrgGroup { orgId: string; org?: { id: string; name: string; short_name?: string } | null; playerCount: number; teams: TeamGroup[] }
 interface ParticipantsResponse { organizations: OrgGroup[] }
 
-// Read-only roster of everyone in the championship — the same org → team → player
+// Read-only roster of everyone in the championship - the same org → team → player
 // tree the organiser sees, surfaced to players / officials / members so they can
 // see who else is competing. Contacts are phone-masked for non-insiders by the API.
 export function ChampionshipParticipants({ championshipId }: { championshipId: string }) {
@@ -99,7 +99,7 @@ export function ChampionshipParticipants({ championshipId }: { championshipId: s
           </div>
 
           {org.teams.length === 0 ? (
-            <div className="px-4 py-4 text-sm text-slate-400 dark:text-slate-500">Approved — no teams entered yet.</div>
+            <div className="px-4 py-4 text-sm text-slate-400 dark:text-slate-500">Approved - no teams entered yet.</div>
           ) : (
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
               {org.teams.map((team) => {

@@ -1,5 +1,5 @@
 /* global React, Icon, cx, Card, Button, Badge, StatusBadge, Crest, SportChip, PageHeader, Segmented, MatchRow, TEAMS, STANDINGS, MEDALS, SPORTS */
-// Sportagon — results surfaces: Standings, Medal tally, Schedule.
+// Sportagon - results surfaces: Standings, Medal tally, Schedule.
 const { createElement: r, useState: rst } = React;
 
 const teamName = (k) => (TEAMS[k] ? TEAMS[k].name : k);

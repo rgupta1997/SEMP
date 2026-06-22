@@ -1,7 +1,7 @@
 -- ============================================================================
 -- True many-to-many: a roster (team) can enter many championships
 --   Moves the single (championship, championship_organization, discipline, lock
---   status) tuple off `teams` into a new `team_entries` join table — one row per
+--   status) tuple off `teams` into a new `team_entries` join table - one row per
 --   championship a roster participates in. `teams` becomes the reusable roster
 --   identity (name + sport + org + members); fixtures keep referencing team_id and
 --   derive their championship from the fixture's discipline.
@@ -26,7 +26,7 @@ create table if not exists team_entries (
 create unique index if not exists uq_team_entries_team_championship
   on team_entries (team_id, championship_id);
 
--- Race-proof "one team per draw per org" — replaces uq_teams_institution_event_discipline.
+-- Race-proof "one team per draw per org" - replaces uq_teams_institution_event_discipline.
 -- Partial so an entry that has not yet picked a draw is unconstrained.
 create unique index if not exists uq_team_entries_org_draw
   on team_entries (championship_id, tournament_discipline_id, organization_id)

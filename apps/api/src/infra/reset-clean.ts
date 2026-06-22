@@ -1,17 +1,17 @@
-// Clean slate — wipe ALL transactional data (championships, tournaments, venues,
+// Clean slate - wipe ALL transactional data (championships, tournaments, venues,
 // organizations, teams, fixtures, enrollments, invitations, notifications, standings,
 // …) while KEEPING the master tables:
 //   sports · disciplines · tournament_formats · roles · permissions · users
 // Demo `.local` users are removed (super admins are always kept so platform access
 // survives). The Cricket discipline catalogue is corrected to categories (not formats).
-// Nothing is re-seeded — you're left with master data + real users only.
+// Nothing is re-seeded - you're left with master data + real users only.
 //   Run:  npm run reset:clean   (workspace @semp/api)
 import { prisma } from './prisma.js';
 
 const CRICKET_DISCIPLINES = ["Men's", "Women's", 'U-19', 'U-23'];
 
 async function main() {
-  console.log('🧹 Clean slate — wiping data, keeping master + real users…\n');
+  console.log('🧹 Clean slate - wiping data, keeping master + real users…\n');
 
   // Unlink users from organizations (users.organization_id is FK NoAction) so the
   // organization deletes below don't violate the constraint.
@@ -60,7 +60,7 @@ async function main() {
   }
   console.log(`  - removed ${ids.length} .local user(s)`);
 
-  // Fix Cricket disciplines: categories (gender/age), not formats — drop anything else
+  // Fix Cricket disciplines: categories (gender/age), not formats - drop anything else
   // (e.g. T20) and ensure the four categories exist.
   const cricket = await prisma.sports.findFirst({ where: { name: 'Cricket' } });
   if (cricket) {

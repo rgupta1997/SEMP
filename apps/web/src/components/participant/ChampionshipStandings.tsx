@@ -3,7 +3,7 @@ import { useApi } from '../../lib/hooks';
 import { Trophy } from 'lucide-react';
 import { Avatar, Badge, EmptyState, ListToolbar, Select, Spinner, Table } from '../../components/ui';
 
-// A draw row (subset of GET /:id/draws) — used only to source the tournament + sport
+// A draw row (subset of GET /:id/draws) - used only to source the tournament + sport
 // filter options (with their UUIDs, which the materialized scopes are keyed by).
 interface DrawRow {
   tournament_sports: {
@@ -23,7 +23,7 @@ interface StandingsResponse { scope: string; scope_id: string | null; standings:
 
 const MEDAL = ['🥇', '🥈', '🥉'];
 
-// Read-only standings for the participant view — the same per-scope tables the
+// Read-only standings for the participant view - the same per-scope tables the
 // organiser sees. Standings are materialized one scope at a time, so the tournament
 // + sport filters select a single scope (most specific wins): sport → tournament →
 // whole championship.
@@ -110,7 +110,7 @@ export function ChampionshipStandings({ championshipId }: { championshipId: stri
                     {(['gold', 'silver', 'bronze'] as const).map((m, mi) =>
                       r.detail?.[m] ? <span key={m} className="mr-1.5 whitespace-nowrap">{MEDAL[mi]}{r.detail[m]}</span> : null,
                     )}
-                    {!r.detail?.gold && !r.detail?.silver && !r.detail?.bronze && <span className="text-slate-300 dark:text-slate-600">—</span>}
+                    {!r.detail?.gold && !r.detail?.silver && !r.detail?.bronze && <span className="text-slate-300 dark:text-slate-600">-</span>}
                   </td>
                 )}
                 <td className="px-4 py-3 text-center"><Badge tone="brand">{r.points}</Badge></td>

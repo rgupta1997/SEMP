@@ -2,7 +2,7 @@
 -- Organization join requests + org/direct notifications
 --
 --   1. Self-service "join an organization" flow. A join request is simply an
---      organization_members row with status = 'pending' — no new table. The
+--      organization_members row with status = 'pending' - no new table. The
 --      unique (user_id, organization_id) constraint prevents duplicates, and
 --      the orgRole() guard already requires status = 'active', so a pending row
 --      grants no access until an owner/admin approves it. An index on

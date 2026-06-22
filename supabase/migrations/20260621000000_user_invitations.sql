@@ -1,6 +1,6 @@
 -- ============================================================================
 -- User invitations by mobile number
---   A general "invite a person to a role by their mobile number" — used to add
+--   A general "invite a person to a role by their mobile number" - used to add
 --   organization members, co-organisers and championship officials without
 --   pre-creating a login. When that person signs up / logs in with the same
 --   number, the pending invitation is auto-applied (see applyUserInvitations).

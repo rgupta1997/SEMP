@@ -1,5 +1,5 @@
 -- ============================================================================
--- Live scoring state on fixtures — backs the official match console.
+-- Live scoring state on fixtures - backs the official match console.
 --   * live_state : sport-specific match state snapshot (periods, segment scores,
 --                  serve, innings, etc). Reduced client-side, persisted here.
 --   * live_log   : append-only event timeline (points, wickets, cards…) powering

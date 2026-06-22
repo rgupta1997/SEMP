@@ -107,13 +107,13 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">Assign a point of contact</div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">Enter the POC's phone — we reuse their login if they're already on {BRAND.name}, otherwise we create one.</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Enter the POC's phone - we reuse their login if they're already on {BRAND.name}, otherwise we create one.</div>
             </div>
             <Toggle checked={withPoc} onChange={setWithPoc} />
           </div>
           {!withPoc && (
             <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700 dark:bg-sky-500/10 dark:text-sky-300">
-              No point of contact assigned — you'll be set as this organization's POC and owner. You can hand it off later from the Members page.
+              No point of contact assigned - you'll be set as this organization's POC and owner. You can hand it off later from the Members page.
             </p>
           )}
           {withPoc && (

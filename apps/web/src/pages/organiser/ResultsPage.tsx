@@ -26,7 +26,7 @@ interface ResultRow {
 const teamCode = (t: ResultRow['home']) =>
   (t?.organizations?.short_name || t?.name || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || '··';
 
-// Full label shown next to the chip — the organization's name, else the team name.
+// Full label shown next to the chip - the organization's name, else the team name.
 const teamLabel = (t: ResultRow['home']) =>
   t?.organizations?.name || t?.organizations?.short_name || t?.name || '';
 
@@ -130,7 +130,7 @@ export function ResultsPage() {
 
       {customActive && canManage && (
         <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
-          <span className="font-semibold">Custom points are on.</span> Open a completed match to award each side its championship points — standings won’t update until you do.
+          <span className="font-semibold">Custom points are on.</span> Open a completed match to award each side its championship points - standings won’t update until you do.
         </div>
       )}
 
@@ -139,7 +139,7 @@ export function ResultsPage() {
           icon={<Flag size={24} />}
           title={fixtures.length === 0 ? 'No fixtures yet' : 'No matches for this sport'}
           description={fixtures.length === 0
-            ? (canManage ? 'Generate draws on the Schedule tab — matches appear here for scoring.' : 'Results will appear here once matches are scheduled and played.')
+            ? (canManage ? 'Generate draws on the Schedule tab - matches appear here for scoring.' : 'Results will appear here once matches are scheduled and played.')
             : 'Clear the sport filter or pick another sport.'}
         />
       ) : (
@@ -162,7 +162,7 @@ export function ResultsPage() {
                 return (
                   <Card key={f.id} interactive={canManage} onClick={() => open(f)} className="flex items-center gap-2 p-3 sm:gap-4 sm:p-4">
                     <div className="w-10 shrink-0 truncate text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 sm:w-16" title={f.round ?? undefined}>
-                      {f.round || '—'}
+                      {f.round || '-'}
                     </div>
 
                     {/* Centered match block: home (right-aligned) · score · away (left-aligned) */}

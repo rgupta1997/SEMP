@@ -14,7 +14,7 @@ interface StandingRow {
 }
 interface StandingsResponse { scope: string; scope_id: string | null; standings: StandingRow[]; completed_matches: number }
 
-// A draw row (subset of GET /:id/draws) — used only to source the tournament + sport
+// A draw row (subset of GET /:id/draws) - used only to source the tournament + sport
 // filter options (with their UUIDs, which the materialized scopes are keyed by).
 interface DrawRow {
   tournament_sports: {
@@ -80,7 +80,7 @@ export function StandingsPage() {
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Completed matches" value={data?.completed_matches ?? 0} />
         <StatCard label="Organizations scoring" value={rows.length} />
-        <StatCard label="Leader" value={rows[0]?.organization?.short_name ?? rows[0]?.organization?.name ?? '—'} accent />
+        <StatCard label="Leader" value={rows[0]?.organization?.short_name ?? rows[0]?.organization?.name ?? '-'} accent />
       </div>
 
       <Card>
@@ -129,7 +129,7 @@ export function StandingsPage() {
                             </span>
                           ) : null,
                         )}
-                        {!r.detail?.gold && !r.detail?.silver && !r.detail?.bronze && <span className="text-slate-300 dark:text-slate-600">—</span>}
+                        {!r.detail?.gold && !r.detail?.silver && !r.detail?.bronze && <span className="text-slate-300 dark:text-slate-600">-</span>}
                       </td>
                     )}
                     <td className="px-4 py-3 text-center"><Badge tone="brand">{r.points}</Badge></td>

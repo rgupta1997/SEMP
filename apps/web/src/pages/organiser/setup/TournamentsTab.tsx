@@ -4,7 +4,7 @@ import { useApi, useApiMutation } from '../../../lib/hooks';
 import { Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Textarea } from '../../../components/ui';
 
 // View + edit + delete a single season. Opens from a card ("clip"). A season is
-// always live once created — there is no draft/publish lifecycle.
+// always live once created - there is no draft/publish lifecycle.
 function TournamentModal({ tournament, path, onClose }: { tournament: any; path: string; onClose: () => void }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(tournament.name ?? '');

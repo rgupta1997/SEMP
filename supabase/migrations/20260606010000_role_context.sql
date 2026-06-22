@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Role context columns on users
 --   * institution_id : links institution staff / captains / participants to the
---                      institution they belong to. Nullable — organisers and the
+--                      institution they belong to. Nullable - organisers and the
 --                      platform super-admin are not tied to an institution.
 --   * account_type   : the user's default app shell / global role. Event-scoped
 --                      roles (user_event_roles) refine capabilities per event.

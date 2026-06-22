@@ -21,7 +21,7 @@ export function CreateEventWizard() {
   const [step, setStep] = useState(0);
   const [eventId, setEventId] = useState<string | null>(null);
 
-  // Step 1 — basics
+  // Step 1 - basics
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugTouched, setSlugTouched] = useState(false);
@@ -88,7 +88,7 @@ export function CreateEventWizard() {
         {step === 0 ? (
           <Card className="p-6">
             <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">Tell us about the championship</h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">The basics — you can edit all of this later in settings.</p>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">The basics - you can edit all of this later in settings.</p>
             <form onSubmit={createDraft} className="mt-6">
               <Field label="Championship name">
                 <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Genesis Sports Fest '26" required />
@@ -100,7 +100,7 @@ export function CreateEventWizard() {
                 <Field label="Start date"><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} required /></Field>
                 <Field label="End date"><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} required /></Field>
               </div>
-              <Field label="Host city" hint="Required — used as your championship's default venue."><Input value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="Mumbai" required /></Field>
+              <Field label="Host city" hint="Required - used as your championship's default venue."><Input value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="Mumbai" required /></Field>
               <Field label="Description"><Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="A short summary of the championship…" /></Field>
               {error && <p className="mb-3 rounded-lg bg-rose-50 dark:bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">{error}</p>}
               <div className="flex justify-end gap-2">
@@ -147,7 +147,7 @@ function WizardFooter({ onBack, right }: { onBack: () => void; right: ReactNode 
   );
 }
 
-// Final step — a quick count of what's been configured before going live.
+// Final step - a quick count of what's been configured before going live.
 function ReviewStep({ eventId }: { eventId: string }) {
   const { data: draws = [] } = useApi<any[]>(`/championships/${eventId}/draws`);
   const { data: invites = [] } = useApi<any[]>(`/championships/${eventId}/invitations`);

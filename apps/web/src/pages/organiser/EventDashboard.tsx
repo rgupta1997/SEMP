@@ -20,9 +20,9 @@ export function EventDashboard() {
 
   const tasks: { label: string; to: string; tone: 'amber' | 'brand' }[] = [];
   if (pending.length) tasks.push({ label: `${pending.length} organization${pending.length > 1 ? 's' : ''} awaiting approval`, to: `/championships/${eventId}/approvals`, tone: 'amber' });
-  if (tournaments.length === 0) tasks.push({ label: 'No tournament yet — add one to start configuring sports', to: `/championships/${eventId}/setup`, tone: 'brand' });
+  if (tournaments.length === 0) tasks.push({ label: 'No tournament yet - add one to start configuring sports', to: `/championships/${eventId}/setup`, tone: 'brand' });
   if (venues.length === 0) tasks.push({ label: 'No venues added yet', to: `/championships/${eventId}/setup`, tone: 'brand' });
-  if (championship.status === 'draft') tasks.push({ label: 'Championship is in draft — open registration when setup is ready', to: `/championships/${eventId}`, tone: 'brand' });
+  if (championship.status === 'draft') tasks.push({ label: 'Championship is in draft - open registration when setup is ready', to: `/championships/${eventId}`, tone: 'brand' });
 
   return (
     <div className="space-y-6">
@@ -32,7 +32,7 @@ export function EventDashboard() {
           subtitle="Work through these to take it from draft to open for registration."
           state={onboarding}
           storageKey={`onboarding-organiser-${eventId}`}
-          completeNote="That set up one season. If you want to run multiple tournaments (seasons), repeat these steps for each — add the season, then its sports, disciplines and venues."
+          completeNote="That set up one season. If you want to run multiple tournaments (seasons), repeat these steps for each - add the season, then its sports, disciplines and venues."
         />
       )}
 
@@ -49,7 +49,7 @@ export function EventDashboard() {
           <CardHeader title="Needs your attention" subtitle="Open items blocking progress" />
           <CardBody>
             {tasks.length === 0 ? (
-              <p className="rounded-xl bg-emerald-50 px-4 py-6 text-center text-sm font-medium text-emerald-700">All clear — everything is running smoothly.</p>
+              <p className="rounded-xl bg-emerald-50 px-4 py-6 text-center text-sm font-medium text-emerald-700">All clear - everything is running smoothly.</p>
             ) : (
               <div className="space-y-2">
                 {tasks.map((t, i) => (

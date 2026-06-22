@@ -1,5 +1,5 @@
 /* global React, Icon, cx, Avatar, ROLES, NAV, BOTTOM, navItemByKey, SportChip */
-// Sportagon — top bar, bottom tabs, role switcher, command palette.
+// Sportagon - top bar, bottom tabs, role switcher, command palette.
 const { createElement: el, useState: useS, useEffect: useE } = React;
 
 function RoleSwitch({ role, setRole }) {
@@ -52,7 +52,7 @@ function BottomTabs({ role, active, onNav }) {
 // Command palette (⌘K)
 const CMDS = [
   { icon: "broadcast", label: "Live Ops board", hint: "Organiser", go: ["organiser", "liveops"] },
-  { icon: "whistle", label: "Score a match — Match Console", hint: "Official", go: ["official", "mymatches"] },
+  { icon: "whistle", label: "Score a match - Match Console", hint: "Official", go: ["official", "mymatches"] },
   { icon: "tv", label: "Open Big-Screen Scoreboard", hint: "Spectator", go: ["spectator", "scoreboard"] },
   { icon: "list", label: "Championship standings", hint: "Results", go: ["spectator", "standings"] },
   { icon: "medal", label: "Medal tally", hint: "Results", go: ["spectator", "medals"] },

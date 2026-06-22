@@ -29,9 +29,9 @@ export function DesignShowcase() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Design system" subtitle={`Live reference for the ${BRAND.name} UI kit — every element below is the real component.`} />
+      <PageHeader title="Design system" subtitle={`Live reference for the ${BRAND.name} UI kit - every element below is the real component.`} />
 
-      <Section title="Buttons — variants × sizes × states">
+      <Section title="Buttons - variants × sizes × states">
         <Button>Primary</Button>
         <Button variant="outline">Outline</Button>
         <Button variant="subtle">Subtle</Button>
@@ -107,7 +107,7 @@ export function DesignShowcase() {
         </div>
       </Section>
 
-      <Section title="Toasts — click to fire (bottom-right)">
+      <Section title="Toasts - click to fire (bottom-right)">
         <Button variant="outline" onClick={() => toast.push({ type: 'success', title: 'Match signed off', message: 'Result recorded.' })}>Success</Button>
         <Button variant="outline" onClick={() => toast.push({ type: 'info', title: 'Draw generated', message: '48 fixtures created.' })}>Info</Button>
         <Button variant="outline" onClick={() => toast.push({ type: 'warning', title: 'Approval pending', message: '3 organizations waiting.' })}>Warning</Button>
@@ -124,7 +124,7 @@ export function DesignShowcase() {
         </div>
       </Section>
 
-      <Section title="Cards — hover to see the lift">
+      <Section title="Cards - hover to see the lift">
         <div className="grid w-full gap-3 sm:grid-cols-3">
           {['Cricket', 'Football', 'Basketball'].map((s) => (
             <Card key={s} interactive className="p-4">

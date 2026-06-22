@@ -14,7 +14,7 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
   const guards = makeGuards(prisma);
   const eventOrganiser = guards.championshipManager(async (req) => req.params.eventId);
 
-  // The organizations the signed-in user owns/administers — the set an invitation
+  // The organizations the signed-in user owns/administers - the set an invitation
   // can be addressed to (and accepted/declined on behalf of).
   const myAdminOrgIds = async (userId: string): Promise<string[]> => {
     const rows = await prisma.organization_members.findMany({
@@ -27,7 +27,7 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
   // ----- Host side -----
 
   // Invite an organization picked from the master list. The request goes straight
-  // to that org's owners/admins — no POC mobile number.
+  // to that org's owners/admins - no POC mobile number.
   router.post('/championships/:eventId/invitations', eventOrganiser, validateBody(createInvitationSchema), asyncHandler(async (req, res) => {
     const championship = await prisma.championships.findUnique({ where: { id: req.params.eventId }, select: { id: true } });
     if (!championship) throw new NotFoundError('Championship');
@@ -98,9 +98,9 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
     })));
   }));
 
-  // Accept — the invitation already names the organization; only its owners/admins
+  // Accept - the invitation already names the organization; only its owners/admins
   // can accept. Because the host explicitly invited this org, accepting enrolls them
-  // as APPROVED straight away — no second trip through the Approvals queue. Stamped
+  // as APPROVED straight away - no second trip through the Approvals queue. Stamped
   // as reviewed by the inviting organiser. Idempotent if already enrolled.
   router.post('/invitations/:id/accept', asyncHandler(async (req, res) => {
     const inv = await prisma.championship_invitations.findUnique({

@@ -9,7 +9,7 @@ import { MatchRow } from '../../components/participant/MatchRow';
 import { AchievementRow } from '../../components/participant/AchievementRow';
 import type { AchievementGroup, DashboardData } from '../../components/participant/types';
 
-// Initial counts per section — the rest reveal inline via "Show more" so the
+// Initial counts per section - the rest reveal inline via "Show more" so the
 // dashboard stays scannable instead of rendering everything at once.
 const CHAMP_INITIAL = 6;
 const MATCH_INITIAL = 4;
@@ -63,7 +63,7 @@ export function ParticipantDashboard() {
         <EmptyState
           icon="◎"
           title="You haven't participated in any championships yet"
-          description="Join a team via an invite link from your captain — your championships and matches will show up here."
+          description="Join a team via an invite link from your captain - your championships and matches will show up here."
         />
       ) : (
         <>

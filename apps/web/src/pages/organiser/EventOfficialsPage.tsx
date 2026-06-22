@@ -108,7 +108,7 @@ export function EventOfficialsPage() {
                     <div>{fmtDate(o.assigned_at)}</div>
                     {o.assigned_by && <div className="text-xs text-slate-400 dark:text-slate-500">by {o.assigned_by.name}</div>}
                   </td>
-                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{o.notes || '—'}</td>
+                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{o.notes || '-'}</td>
                   <td className="px-4 py-3 text-right">
                     <Button
                       size="sm"

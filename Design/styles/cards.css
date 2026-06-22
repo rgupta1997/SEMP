@@ -1,5 +1,5 @@
 /* ============================================================
-   SPORTAGON — Match cards & rows (compact scoring surface)
+   SPORTAGON - Match cards & rows (compact scoring surface)
    ============================================================ */
 
 .msc { position: relative; padding: 14px; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }

@@ -27,7 +27,7 @@ export function EventParticipantsPage() {
     return next;
   });
 
-  // Sports represented by any team — surfaced in the shared header filter.
+  // Sports represented by any team - surfaced in the shared header filter.
   const sportOptions = useMemo(() => {
     const set = new Set<string>();
     orgs.forEach((o) => o.teams.forEach((t) => { if (t.sport?.name) set.add(t.sport.name); }));
@@ -35,7 +35,7 @@ export function EventParticipantsPage() {
   }, [orgs]);
   const { sportId } = usePageFilters({ sports: sportOptions.length ? sportOptions : undefined });
 
-  // Organizations present — drives the dedicated filter.
+  // Organizations present - drives the dedicated filter.
   const institutionOptions = useMemo(
     () => orgs.filter((o) => o.org).map((o) => ({ id: o.orgId, name: o.org!.name })).sort((a, b) => a.name.localeCompare(b.name)),
     [orgs],
@@ -58,7 +58,7 @@ export function EventParticipantsPage() {
         return { ...o, teams };
       })
       .filter((o) => {
-        // In the default view (no sport/search narrowing) keep every org — including
+        // In the default view (no sport/search narrowing) keep every org - including
         // approved orgs with no teams yet. Otherwise drop orgs that filtered to empty.
         if (sportId) return o.teams.length > 0;
         if (q) return o.teams.length > 0 || (o.org?.name ?? 'Unaffiliated').toLowerCase().includes(q);
@@ -117,7 +117,7 @@ export function EventParticipantsPage() {
               </div>
 
               {org.teams.length === 0 ? (
-                <div className="px-4 py-4 text-sm text-slate-400 dark:text-slate-500">Approved — no teams entered yet.</div>
+                <div className="px-4 py-4 text-sm text-slate-400 dark:text-slate-500">Approved - no teams entered yet.</div>
               ) : (
                 <div className="divide-y divide-slate-100 dark:divide-slate-800">
                   {org.teams.map((team) => {

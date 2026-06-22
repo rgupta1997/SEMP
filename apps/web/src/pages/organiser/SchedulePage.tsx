@@ -75,15 +75,15 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, venues, officials, tea
       <div className="grid grid-cols-2 gap-x-3">
         <Field label="Home team" hint={teamHint}>
           <Select value={homeId} onChange={(e) => setHomeId(e.target.value)}>
-            <option value="">— TBD —</option>
-            {/* Hide the team already picked as Away — a team can't play itself. */}
+            <option value="">- TBD -</option>
+            {/* Hide the team already picked as Away - a team can't play itself. */}
             {teams.filter((t) => t.id !== awayId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </Select>
         </Field>
         <Field label="Away team">
           <Select value={awayId} onChange={(e) => setAwayId(e.target.value)}>
-            <option value="">— TBD / bye —</option>
-            {/* Hide the team already picked as Home — a team can't play itself. */}
+            <option value="">- TBD / bye -</option>
+            {/* Hide the team already picked as Home - a team can't play itself. */}
             {teams.filter((t) => t.id !== homeId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </Select>
         </Field>
@@ -107,13 +107,13 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, venues, officials, tea
             const inVenue = grounds.filter((g) => (g.venue_id ?? '') === v);
             setGroundId(v && inVenue.length === 1 ? inVenue[0].id : '');
           }}>
-            <option value="">— unassigned —</option>
+            <option value="">- unassigned -</option>
             {venues.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
           </Select>
         </Field>
-        <Field label="Ground / court" hint={venueId && venueGrounds.length === 0 ? 'This venue has no courts — assign at the venue level.' : undefined}>
+        <Field label="Ground / court" hint={venueId && venueGrounds.length === 0 ? 'This venue has no courts - assign at the venue level.' : undefined}>
           <Select value={groundId} disabled={!venueId || venueGrounds.length === 0} onChange={(e) => setGroundId(e.target.value)}>
-            <option value="">{venueId ? '— any court —' : '— pick a venue first —'}</option>
+            <option value="">{venueId ? '- any court -' : '- pick a venue first -'}</option>
             {venueGrounds.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
           </Select>
         </Field>
@@ -125,14 +125,14 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, venues, officials, tea
         </Field>
         <Field label="Duration" hint="How long the match runs">
           <Select value={duration} onChange={(e) => setDuration(e.target.value)}>
-            <option value="">— default —</option>
+            <option value="">- default -</option>
             {[15, 20, 30, 45, 60, 75, 90, 120].map((m) => <option key={m} value={m}>{m} min</option>)}
           </Select>
         </Field>
       </div>
-      <Field label="Match official" hint={officials.length === 0 ? 'No officials assigned to this championship yet — add them on the Organising team tab.' : undefined}>
+      <Field label="Match official" hint={officials.length === 0 ? 'No officials assigned to this championship yet - add them on the Organising team tab.' : undefined}>
         <Select value={officialId} onChange={(e) => setOfficialId(e.target.value)}>
-          <option value="">— unassigned —</option>
+          <option value="">- unassigned -</option>
           {officials.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
         </Select>
       </Field>
@@ -167,7 +167,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
   const [creating, setCreating] = useState(false);
   const [view, setView] = useState<'list' | 'visual'>('visual');
 
-  // Once any fixture has been played, regenerating would erase results — the server
+  // Once any fixture has been played, regenerating would erase results - the server
   // refuses it, so disable the button and explain why rather than letting it 500.
   const hasPlayed = fixtures.some((f) => ['completed', 'walkover', 'bye'].includes(f.status) || f.home_score != null || f.away_score != null);
   const hasBracket = fixtures.some((f) => f.bracket_position != null);
@@ -201,7 +201,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
           {canManage && <Button size="sm" variant="subtle" onClick={() => setCreating(true)}>+ Add fixture</Button>}
           {canManage && (
             <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={generate.isPending || hasPlayed}
-              title={hasPlayed ? 'This draw has played matches — regenerating would erase those results.' : undefined}
+              title={hasPlayed ? 'This draw has played matches - regenerating would erase those results.' : undefined}
               onClick={() => generate.mutate(undefined, { onSuccess: () => toast.success('Draw generated'), onError: (e: any) => toast.error(e.message) })}>
               {generate.isPending ? 'Generating…' : fixtures.length ? 'Regenerate' : 'Generate draw'}
             </Button>
@@ -210,7 +210,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
       </div>
       <div className="mt-3">
         {isLoading ? <Spinner /> : fixtures.length === 0 ? (
-          <p className="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-3 text-sm text-slate-400 dark:text-slate-500">No fixtures yet — generate the draw from registered teams.</p>
+          <p className="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-3 text-sm text-slate-400 dark:text-slate-500">No fixtures yet - generate the draw from registered teams.</p>
         ) : showVisual ? (
           hasBracket
             ? <Bracket fixtures={fixtures} teamName={teamName} onSelect={canManage ? setEditing : () => {}} />
@@ -293,7 +293,7 @@ export function SchedulePage() {
   // DrawCard (sliced per draw), instead of a fixtures request per draw.
   const fixturesPath = `/championships/${eventId}/fixtures`;
   const { data: allFixtures = [], isLoading: fixturesLoading } = useApi<any[]>(fixturesPath);
-  // All draws for the championship in one request — feeds the timeline rows and each
+  // All draws for the championship in one request - feeds the timeline rows and each
   // manage-view SportBlock (replaces one disciplines query per sport).
   const { data: allDraws = [] } = useApi<any[]>(`/championships/${eventId}/draws`);
   const place = useApiMutation(
@@ -339,8 +339,8 @@ export function SchedulePage() {
   };
 
   // Tournament + Sport both live in the shared header filter (championship = route
-  // here, so no championship dropdown). Tournament is single-select — the manage view
-  // always shows one tournament's draws — so it's registered as required (no "All").
+  // here, so no championship dropdown). Tournament is single-select - the manage view
+  // always shows one tournament's draws - so it's registered as required (no "All").
   const tournamentOptions = tournaments.map((t: any) => ({ id: t.id, name: t.name }));
   const sportOptions = [...new Map(tsports.map((ts: any) => [ts.sport_id, sportName(ts.sport_id)])).entries()]
     .map(([id, name]) => ({ id, name }));

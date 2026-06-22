@@ -27,7 +27,7 @@ const COL_GAP = 52;  // horizontal gap between rounds (room for connectors)
 const HEADER_H = 28; // round-label band above the columns
 
 // Display label for a fixture status. A 'scheduled' fixture just means the
-// teams are paired (no time set yet), so it reads as "matched" — this also
+// teams are paired (no time set yet), so it reads as "matched" - this also
 // avoids clashing with the "Schedule" action button. Other statuses fall
 // through to StatusBadge's default rendering.
 export function fixtureStatusLabel(status?: string | null): string | undefined {
@@ -72,7 +72,7 @@ function MatchCard({ fixture, x, top, teamName, onSelect }:
   const decided = fixture.winner_team_id != null;
   const home = teamName(fixture.home_team_id);
   const away = isBye ? 'Bye' : teamName(fixture.away_team_id);
-  // Any match can be opened to edit — a real match to schedule it (even a later-round
+  // Any match can be opened to edit - a real match to schedule it (even a later-round
   // slot whose teams are still TBD), or a bye to adjust its teams/status or delete it.
   const clickable = !!onSelect;
 

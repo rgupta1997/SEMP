@@ -12,7 +12,7 @@ import { createNotification } from '../notifications/audience.js';
 
 // A match can only be recorded once its championship is under way. Resolves the
 // owning championship from the fixture's draw and blocks scoring while it's still
-// in draft or registration — nothing should be played before the event starts.
+// in draft or registration - nothing should be played before the event starts.
 async function assertChampionshipStarted(prisma: Prisma, fixtureId: string): Promise<void> {
   const fx = await prisma.fixtures.findUnique({
     where: { id: fixtureId },
@@ -25,7 +25,7 @@ async function assertChampionshipStarted(prisma: Prisma, fixtureId: string): Pro
   if (!fx) throw new NotFoundError('Fixture');
   const status = fx.tournament_disciplines?.tournament_sports?.tournaments?.championships?.status;
   if (status === 'draft' || status === 'registration_open') {
-    throw new BusinessRuleError('This championship hasn’t started yet — matches can be recorded once it’s set to ongoing.');
+    throw new BusinessRuleError('This championship hasn’t started yet - matches can be recorded once it’s set to ongoing.');
   }
 }
 
@@ -41,7 +41,7 @@ async function refreshStandings(prisma: Prisma, fixtureId: string): Promise<void
 
 // When a completed match belongs to a draw scored by the "custom" point system and
 // has no hand-entered points yet, nudge the championship's organiser(s) to add them.
-// Direct (target_user_id) notifications so only organisers are pinged. Best-effort —
+// Direct (target_user_id) notifications so only organisers are pinged. Best-effort -
 // never fails the result write.
 async function remindCustomPointsIfNeeded(prisma: Prisma, fixtureId: string, senderId: string): Promise<void> {
   try {
@@ -81,7 +81,7 @@ async function remindCustomPointsIfNeeded(prisma: Prisma, fixtureId: string, sen
       target_user_id: o.user_id,
       sender_id: senderId,
       type: 'manual',
-      audience: 'all', // ignored for direct notifications — target_user_id drives visibility
+      audience: 'all', // ignored for direct notifications - target_user_id drives visibility
       title: 'A result needs championship points',
       body: `A completed ${label} match still needs custom points. Open it on the Results page to award them.`,
     })));
@@ -119,7 +119,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       });
       if (!td) throw new NotFoundError('Tournament discipline');
 
-      // Regenerating wipes and rebuilds the draw — refuse if any fixture has already
+      // Regenerating wipes and rebuilds the draw - refuse if any fixture has already
       // been played (completed/walkover/bye, or a score recorded). Discarding those
       // would corrupt results and standings. Mirrors the cascade-delete safety rule.
       const played = await prisma.fixtures.count({
@@ -133,7 +133,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         },
       });
       if (played > 0) {
-        throw new BusinessRuleError('This draw already has played matches — regenerating would erase those results. Edit fixtures individually instead.');
+        throw new BusinessRuleError('This draw already has played matches - regenerating would erase those results. Edit fixtures individually instead.');
       }
 
       const formatName = td.tournament_formats?.name ?? td.tournament_sports.tournament_formats?.name;
@@ -160,7 +160,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
 
       const generated = generateFixtures(formatName, teams, params);
 
-      // Replace any existing fixtures for this draw atomically — a failed insert
+      // Replace any existing fixtures for this draw atomically - a failed insert
       // must not leave the draw wiped, and concurrent regenerations can't interleave.
       await prisma.$transaction([
         prisma.fixtures.deleteMany({ where: { tournament_discipline_id: td.id } }),
@@ -214,7 +214,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     if ('winner_team_id' in b) data.winner_team_id = b.winner_team_id ?? null;
     if ('notes' in b) data.notes = b.notes ?? null;
     if (b.status) data.status = b.status;
-    // Scoring a match (going live or completing) requires both teams to be known — a
+    // Scoring a match (going live or completing) requires both teams to be known - a
     // TBD bracket slot can't be played. Fetch once and reuse for the winner check.
     let fxTeams: { home_team_id: string | null; away_team_id: string | null } | null = null;
     const needsTeams = b.status === 'live' || b.status === 'completed';
@@ -231,13 +231,13 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     }
     if (Object.keys(data).length > 0) {
       await prisma.fixtures.update({ where: { id: req.params.id }, data });
-      // Headline (score/status/winner) changed — refresh the championship's standings.
+      // Headline (score/status/winner) changed - refresh the championship's standings.
       await refreshStandings(prisma, req.params.id);
     }
     let persisted = true;
     if ('live_state' in b || 'live_log' in b) {
       try {
-        // Preserve any organiser-entered custom_points — live scoring never sends
+        // Preserve any organiser-entered custom_points - live scoring never sends
         // them, so keep the existing value rather than wiping it.
         await prisma.$executeRaw`
           update fixtures
@@ -246,7 +246,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
               updated_at = now()
           where id = ${req.params.id}::uuid`;
       } catch {
-        persisted = false; // live_* columns not migrated yet — headline still saved
+        persisted = false; // live_* columns not migrated yet - headline still saved
       }
     }
     // Completing a custom-points match with no points yet → remind the organiser.
@@ -256,7 +256,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
 
   // Full fixture detail for the scoring console. Same authorization as scoring
   // (assigned official, organiser, or super) so the host can score any fixture in
-  // their championship — not just an official's assigned list. Shape mirrors the
+  // their championship - not just an official's assigned list. Shape mirrors the
   // rows from GET /me/officiating so the console reads them interchangeably.
   router.get('/fixtures/:id/scoring', guards.fixtureScorer, asyncHandler(async (req, res) => {
     const fixture = await prisma.fixtures.findUnique({
@@ -274,7 +274,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       },
     });
     if (!fixture) throw new NotFoundError('Fixture');
-    // The effective point system for this draw — drives the custom-points input on
+    // The effective point system for this draw - drives the custom-points input on
     // the console (shown only when the organiser chose "custom").
     const tdx = fixture.tournament_disciplines;
     const champId = tdx?.tournament_sports?.tournaments?.championships?.id;
@@ -324,7 +324,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     const fixture = await prisma.fixtures.findUnique({ where: { id: req.params.id } });
     if (!fixture) throw new NotFoundError('Fixture');
 
-    // A TBD slot can't be played — both teams must be set before recording a result.
+    // A TBD slot can't be played - both teams must be set before recording a result.
     const resultStatus = req.body.status ?? 'completed';
     if ((resultStatus === 'live' || resultStatus === 'completed') && (!fixture.home_team_id || !fixture.away_team_id)) {
       throw new BusinessRuleError('Both teams must be set before this match can go live or be scored.');
@@ -376,7 +376,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     res.json({ ok: true, home_points: home, away_points: away });
   }));
 
-  // Plain CRUD for manual fixture edits / scheduling — writes require the organiser
+  // Plain CRUD for manual fixture edits / scheduling - writes require the organiser
   // of the championship that owns the fixture's draw.
   router.use('/fixtures', makeCrudRouter(prisma.fixtures, {
     name: 'Fixture',

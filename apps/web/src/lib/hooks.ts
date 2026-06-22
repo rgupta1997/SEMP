@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from './api';
 
-// Admin-managed reference data that changes rarely — cache it aggressively so the
+// Admin-managed reference data that changes rarely - cache it aggressively so the
 // many screens that read it (pickers, setup modals, badges) don't refetch on every
 // mount. Mutating these (super-admin CRUD) invalidates the base key, which refreshes
 // it; otherwise it survives ~30 min in cache.
@@ -26,7 +26,7 @@ export function useApi<T = any>(path: string | null, enabled = true) {
 }
 
 // Mutation that refreshes the given query keys (paths) on success. Invalidation is
-// declared via `meta` so the global MutationCache (main.tsx) performs it — that way
+// declared via `meta` so the global MutationCache (main.tsx) performs it - that way
 // it still runs if this component unmounts before the request resolves (e.g. an
 // action that navigates away). An empty list means "refresh everything".
 export function useApiMutation<TBody = any, TRes = any>(
@@ -97,16 +97,16 @@ export function useTableControls<T>(rows: T[], opts: TableControlsOpts<T> = {}) 
 }
 
 export function fmtDate(d?: string | Date | null): string {
-  if (!d) return '—';
+  if (!d) return '-';
   const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return '—';
+  if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export function fmtDateTime(d?: string | Date | null): string {
-  if (!d) return '—';
+  if (!d) return '-';
   const date = new Date(d);
-  if (Number.isNaN(date.getTime())) return '—';
+  if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 

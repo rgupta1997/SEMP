@@ -36,7 +36,7 @@ function Detail({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex justify-between gap-4 py-1.5 text-sm">
       <span className="text-slate-500 dark:text-slate-400">{label}</span>
-      <span className="text-right font-medium text-slate-800 dark:text-slate-200">{value || '—'}</span>
+      <span className="text-right font-medium text-slate-800 dark:text-slate-200">{value || '-'}</span>
     </div>
   );
 }

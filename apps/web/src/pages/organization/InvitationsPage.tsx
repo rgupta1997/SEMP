@@ -6,7 +6,7 @@ import { OrgTabs } from '../../components/OrgTabs';
 import { InvitationsInbox } from '../../components/InvitationsInbox';
 import { EmptyState, PageHeader, Spinner } from '../../components/ui';
 
-// The org's "Invitations" tab — every championship invitation addressed to this
+// The org's "Invitations" tab - every championship invitation addressed to this
 // organization, in one place. Accepting auto-approves the org for that championship
 // so it can immediately enter teams.
 export function InvitationsPage() {

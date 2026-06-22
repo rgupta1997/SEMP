@@ -33,7 +33,7 @@ function maskPhone(phone?: string | null): string | null {
 // Only two kinds of viewer may see real contact numbers for a championship:
 //   1. the organiser / organising team (a user_championship_roles "Organiser" row), or
 //   2. an owner of an organization enrolled in that championship.
-// Everyone else — officials, players, org admins/members, and spectators — gets
+// Everyone else - officials, players, org admins/members, and spectators - gets
 // the phone masked.
 async function isChampionshipInsider(prisma: Prisma, userId: string, championshipId: string): Promise<boolean> {
   const [organiser, enrolledOwner] = await Promise.all([
@@ -59,7 +59,7 @@ function lifecycleMessage(status: ChampionshipStatus): { title: string; body: st
     case 'registration_open':
       return { title: 'Registration is open', body: 'This championship is now open for organization registration.' };
     case 'ongoing':
-      return { title: 'The championship is now live', body: 'Matches are underway — good luck to all teams.' };
+      return { title: 'The championship is now live', body: 'Matches are underway - good luck to all teams.' };
     case 'completed':
       return { title: 'The championship has concluded', body: 'Thanks for taking part. Final standings are available.' };
     default:
@@ -70,11 +70,11 @@ function lifecycleMessage(status: ChampionshipStatus): { title: string; body: st
 export function makeEventsRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
-  // organiser of THIS championship (or super) — for mutations on /:id and its children.
+  // organiser of THIS championship (or super) - for mutations on /:id and its children.
   const ownChampionship = guards.championshipManager(async (req) => req.params.id);
 
   // -------------------------------------------------------------------------
-  // DISCOVER — every championship, open to any authenticated user (spectators
+  // DISCOVER - every championship, open to any authenticated user (spectators
   // included). The "Host" and "Championships" views are derived from /mine.
   // -------------------------------------------------------------------------
   router.get('/', asyncHandler(async (_req, res) => {
@@ -86,7 +86,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
   }));
 
   // -------------------------------------------------------------------------
-  // MINE — championships the user is involved in, each tagged with the roles
+  // MINE - championships the user is involved in, each tagged with the roles
   // they hold (organiser / official / player / member). Powers the
   // "Championships" page and (filtered to organiser) the "Host" page.
   // -------------------------------------------------------------------------
@@ -100,7 +100,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
 
     // One round-trip, not two: the role lookups don't depend on the data queries, so
     // fire all six together rather than awaiting the roles first (each sequential
-    // await is a full network round-trip to the remote pooler — ~700ms each).
+    // await is a full network round-trip to the remote pooler - ~700ms each).
     const [orgRole, offRole, championshipRoleRows, officialRows, memberRows, enrolledRows] = await Promise.all([
       prisma.roles.findUnique({ where: { name: 'Organiser' }, select: { id: true } }),
       prisma.roles.findUnique({ where: { name: 'Official' }, select: { id: true } }),
@@ -138,9 +138,9 @@ export function makeEventsRouter(prisma: Prisma): Router {
     res.json(championship);
   }));
 
-  // CREATE championship — any authenticated user may host. Creator is auto-assigned
+  // CREATE championship - any authenticated user may host. Creator is auto-assigned
   // Organiser, and a default season (named after the championship) is created so the
-  // organiser can jump straight to adding sports — they never have to make a season
+  // organiser can jump straight to adding sports - they never have to make a season
   // by hand (they can still rename/add more on the Seasons tab).
   router.post('/', validateBody(createChampionshipSchema), asyncHandler(async (req, res) => {
     const championship = await prisma.championships.create({ data: req.body });
@@ -169,7 +169,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
     res.json(championship);
   }));
 
-  // DELETE championship — host (organiser) or super admin only, via ownChampionship.
+  // DELETE championship - host (organiser) or super admin only, via ownChampionship.
   // Most child FKs are ON DELETE NO ACTION in the DB, and every championship has at
   // least the creator's organiser role row, so we remove dependents in dependency
   // order inside one transaction. (officials, notifications and invitations cascade
@@ -177,10 +177,10 @@ export function makeEventsRouter(prisma: Prisma): Router {
   router.delete('/:id', ownChampionship, asyncHandler(async (req, res) => {
     const id = req.params.id;
     await prisma.$transaction([
-      // Fixtures sit at the bottom — they reference teams, grounds and disciplines.
+      // Fixtures sit at the bottom - they reference teams, grounds and disciplines.
       prisma.fixtures.deleteMany({ where: { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: id } } } } }),
       // Rosters are cross-championship now, so only their entries for this
-      // championship are removed — the teams + members survive for other events.
+      // championship are removed - the teams + members survive for other events.
       prisma.team_entries.deleteMany({ where: { championship_id: id } }),
       prisma.tournament_disciplines.deleteMany({ where: { tournament_sports: { tournaments: { championship_id: id } } } }),
       prisma.tournament_sports.deleteMany({ where: { tournaments: { championship_id: id } } }),
@@ -195,7 +195,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
     res.status(204).send();
   }));
 
-  // Status transition (validated lifecycle) — defined before generic /:id routes.
+  // Status transition (validated lifecycle) - defined before generic /:id routes.
   router.patch('/:id/status', ownChampionship, validateBody(updateChampionshipStatusSchema), asyncHandler(async (req, res) => {
     const championship = await prisma.championships.findUnique({ where: { id: req.params.id } });
     if (!championship) throw new NotFoundError('Championship');
@@ -226,7 +226,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
   }));
 
   // All draws (tournament_disciplines) across the championship, flattened with their
-  // sport/discipline/tournament names — powers team entry (single + bulk).
+  // sport/discipline/tournament names - powers team entry (single + bulk).
   router.get('/:id/draws', asyncHandler(async (req, res) => {
     const draws = await prisma.tournament_disciplines.findMany({
       where: { tournament_sports: { tournaments: { championship_id: req.params.id } } },
@@ -239,7 +239,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
     res.json(draws);
   }));
 
-  // All fixtures across the championship, flattened with team / ground / sport names —
+  // All fixtures across the championship, flattened with team / ground / sport names -
   // powers the schedule timeline (Gantt) view.
   router.get('/:id/fixtures', asyncHandler(async (req, res) => {
     const fixtures = await prisma.fixtures.findMany({
@@ -293,7 +293,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
     })));
   }));
 
-  // All grounds across the championship's venues — used to schedule fixtures to a ground.
+  // All grounds across the championship's venues - used to schedule fixtures to a ground.
   router.get('/:id/grounds', asyncHandler(async (req, res) => {
     const grounds = await prisma.venue_grounds.findMany({
       where: { venues: { championship_id: req.params.id } },

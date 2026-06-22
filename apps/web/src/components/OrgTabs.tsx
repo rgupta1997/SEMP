@@ -15,7 +15,7 @@ export function OrgTabs({ orgId }: { orgId: string }) {
   const perms = usePermissions();
   const canManage = perms.canManageOrg(orgId);
   const canDelete = perms.isOrgOwner(orgId);
-  // Open read — fetch for everyone so the organization's name/title always shows.
+  // Open read - fetch for everyone so the organization's name/title always shows.
   const { data: org } = useApi<any>(`/organizations/${orgId}`);
   // Pending championship invitations addressed to this org → badge on the Invitations tab.
   const { data: allInvites = [] } = useApi<any[]>(canManage ? '/me/invitations' : null);

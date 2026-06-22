@@ -5,7 +5,7 @@
 --   * notification_reads     : per-user read receipts (powers the unread badge).
 --
 -- Visibility is enforced in the route layer (see notifications.routes.ts +
--- audience.ts) — RLS is still deferred platform-wide, consistent with the rest
+-- audience.ts) - RLS is still deferred platform-wide, consistent with the rest
 -- of the schema. Idempotent so it can be re-applied safely.
 -- ============================================================================
 

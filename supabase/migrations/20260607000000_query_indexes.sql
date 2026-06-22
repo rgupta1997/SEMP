@@ -1,5 +1,5 @@
 -- ============================================================================
--- SEMP — Query-shaped indexes (composite + partial) and the team uniqueness guard
+-- SEMP - Query-shaped indexes (composite + partial) and the team uniqueness guard
 --
 -- The initial schema indexed every foreign-key column (good for joins/FK checks),
 -- but the hot read paths filter/sort on *combinations* of columns. This migration
@@ -16,7 +16,7 @@
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
--- team_members — the most-read child table.
+-- team_members - the most-read child table.
 --   * me/teams, dashboard, auth-context, teamManager guard all filter
 --     (user_id = ? AND is_active), and roster count/lock filter (team_id = ?
 --     AND is_active). Partial indexes keep only the live rows, which is the
@@ -29,7 +29,7 @@ create index if not exists idx_team_members_team_active
   on team_members (team_id) where is_active;
 
 -- ----------------------------------------------------------------------------
--- fixtures — the largest table and the heaviest read paths.
+-- fixtures - the largest table and the heaviest read paths.
 --   * List a draw's fixtures: WHERE tournament_discipline_id = ?
 --       ORDER BY pool_number, bracket_position, created_at
 --     -> one composite serves both the filter and the sort.
@@ -51,13 +51,13 @@ create index if not exists idx_fixtures_official_scheduled
   on fixtures (official_id, scheduled_at);
 
 -- ----------------------------------------------------------------------------
--- event_institutions — the organiser enrollment queue filters (event_id, status).
+-- event_institutions - the organiser enrollment queue filters (event_id, status).
 -- ----------------------------------------------------------------------------
 create index if not exists idx_event_institutions_event_status
   on event_institutions (event_id, status);
 
 -- ----------------------------------------------------------------------------
--- event_officials — officials list filters (event_id AND is_active); me/officiating
+-- event_officials - officials list filters (event_id AND is_active); me/officiating
 -- resolves an official's events with (user_id AND is_active). Partial on live rows.
 -- ----------------------------------------------------------------------------
 create index if not exists idx_event_officials_event_active
@@ -67,14 +67,14 @@ create index if not exists idx_event_officials_user_active
   on event_officials (user_id) where is_active;
 
 -- ----------------------------------------------------------------------------
--- users — the list/picker filters (institution_id AND account_type), and the POC
+-- users - the list/picker filters (institution_id AND account_type), and the POC
 -- lookup embedded on teams filters the same leading column.
 -- ----------------------------------------------------------------------------
 create index if not exists idx_users_institution_account_type
   on users (institution_id, account_type);
 
 -- ----------------------------------------------------------------------------
--- user_event_roles — the events-list "events I organise" query filters
+-- user_event_roles - the events-list "events I organise" query filters
 -- (user_id AND role_id). The existing unique (user_id, event_id, role_id) can
 -- only use the user_id prefix for that shape, so add the exact two-column index.
 -- ----------------------------------------------------------------------------
@@ -82,7 +82,7 @@ create index if not exists idx_user_event_roles_user_role
   on user_event_roles (user_id, role_id);
 
 -- ----------------------------------------------------------------------------
--- teams — uniqueness guard: one team per (institution, event, discipline).
+-- teams - uniqueness guard: one team per (institution, event, discipline).
 -- Partial so teams still in 'forming' with no draw yet (tournament_discipline_id
 -- NULL) are unconstrained; the rule only bites once a discipline is assigned.
 -- This both enforces the business rule under concurrency and serves the

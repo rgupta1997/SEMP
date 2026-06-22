@@ -10,7 +10,7 @@ const CHOOSE_LATER = '';
 
 // One selectable championship: a checkbox + (when checked) an OPTIONAL discipline
 // picker scoped to the team's sport, excluding draws the org has already taken.
-// Picking a discipline is not required — a team can enter now and choose later.
+// Picking a discipline is not required - a team can enter now and choose later.
 function EnrollmentRow({ enrollment, team, orgTeams, checked, drawId, onToggle, onDraw }: {
   enrollment: Enrollment; team: any; orgTeams: any[]; checked: boolean; drawId: string;
   onToggle: (v: boolean) => void; onDraw: (id: string) => void;
@@ -63,8 +63,8 @@ function EnrollmentRow({ enrollment, team, orgTeams, checked, drawId, onToggle, 
               />
               <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
                 {sportDraws.length === 0
-                  ? 'No disciplines set up here yet — enter now and pick one once the organiser adds them.'
-                  : 'Optional — you can pick or change the discipline after entering.'}
+                  ? 'No disciplines set up here yet - enter now and pick one once the organiser adds them.'
+                  : 'Optional - you can pick or change the discipline after entering.'}
               </p>
             </>
           )}
@@ -76,11 +76,11 @@ function EnrollmentRow({ enrollment, team, orgTeams, checked, drawId, onToggle, 
 
 // Enter an existing roster into one or more approved championships at once. Rendered
 // inline (a panel, not a popup). The same roster competes in every one. A discipline
-// draw is optional per championship — the team can be entered straight away and
+// draw is optional per championship - the team can be entered straight away and
 // assigned its discipline later.
 export function EnterChampionshipsPanel({ team, onClose }: { team: any; onClose: () => void }) {
   const qc = useQueryClient();
-  // Enrollments must be scoped to THIS team's organization — a user may own several
+  // Enrollments must be scoped to THIS team's organization - a user may own several
   // orgs, and an enrollment from another org can't be used here.
   const { data: enrollments = [] } = useApi<Enrollment[]>(`/me/enrollments?organization_id=${team.organization_id}`);
   const { data: orgTeams = [] } = useApi<any[]>(`/teams?organization_id=${team.organization_id}`);
@@ -126,10 +126,10 @@ export function EnterChampionshipsPanel({ team, onClose }: { team: any; onClose:
         <h3 className="font-semibold text-slate-900 dark:text-slate-100">Enter {team.name ? `“${team.name}” ` : ''}into championship(s)</h3>
         <button onClick={onClose} className="text-sm text-slate-500 hover:underline dark:text-slate-400">Cancel</button>
       </div>
-      <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Pick the approved championships to enter this team into. Choosing a discipline is optional — you can set it later. The same roster competes in every one.</p>
+      <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Pick the approved championships to enter this team into. Choosing a discipline is optional - you can set it later. The same roster competes in every one.</p>
       {approved.length === 0 ? (
         <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
-          No approved championships left to enter — either this team’s organization has none approved yet (apply via “Browse championships”) or this team is already in all of them.
+          No approved championships left to enter - either this team’s organization has none approved yet (apply via “Browse championships”) or this team is already in all of them.
         </p>
       ) : (
         <div className="max-h-80 space-y-2 overflow-auto">

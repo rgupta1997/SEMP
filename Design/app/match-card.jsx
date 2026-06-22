@@ -1,5 +1,5 @@
 /* global React, Icon, cx, Crest, StatusBadge, SportChip, SPORTS, bigScore, segLabel, subLine, lastEvent, winnerSide */
-// Sportagon — compact score card (third scoring surface; evolves MatchRow).
+// Sportagon - compact score card (third scoring surface; evolves MatchRow).
 const { createElement: mc } = React;
 
 function CompactScoreCard({ m, onOpen, cta, accentTop }) {

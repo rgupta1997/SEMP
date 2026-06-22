@@ -14,7 +14,7 @@ const server = app.listen(env.PORT, () => {
 // the Supabase pooler until it times them out, stacking on top of the new
 // instance's pool and exhausting the (small) session/transaction budget.
 async function shutdown(signal: string) {
-  console.log(`${signal} received — shutting down`);
+  console.log(`${signal} received - shutting down`);
   server.close();
   await prisma.$disconnect();
   process.exit(0);

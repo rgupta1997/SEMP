@@ -12,7 +12,7 @@ function RelationSelect({ field, value, onChange }: { field: FieldDef; value: st
   const { data = [] } = useQuery({ queryKey: [path], queryFn: () => api('GET', path) });
   return (
     <Select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">{nullable ? '— none —' : '— select —'}</option>
+      <option value="">{nullable ? '- none -' : '- select -'}</option>
       {data.map((o: any) => <option key={o.id} value={o.id}>{o[labelKey] ?? o.id}</option>)}
     </Select>
   );
@@ -101,7 +101,7 @@ function ResourceForm({ config, row, onClose }: { config: ResourceConfig; row: a
               <RelationSelect field={f} value={values[f.name]} onChange={(v) => set(f.name, v)} />
             ) : f.type === 'select' ? (
               <Select value={values[f.name]} onChange={(e) => set(f.name, e.target.value)}>
-                <option value="">— select —</option>
+                <option value="">- select -</option>
                 {f.options!.map((o) => <option key={o} value={o}>{o}</option>)}
               </Select>
             ) : f.type === 'checkbox' ? (
@@ -232,7 +232,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
                   )}
                   {!config.noEdit && canManage && <Button variant="ghost" onClick={() => setEditing(row)}>Edit</Button>}
                   {!config.noDelete && canManage && <Button variant="danger" onClick={async () => { if (await confirmDialog({ title: 'Delete', confirmLabel: 'Delete', message: 'Delete this item?' })) del.mutate(row.id); }}>Del</Button>}
-                  {!canManage && <span className="text-xs text-slate-400 dark:text-slate-500">—</span>}
+                  {!canManage && <span className="text-xs text-slate-400 dark:text-slate-500">-</span>}
                 </td>
               </tr>
             ))}

@@ -145,7 +145,7 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
   );
 }
 
-// Create a team as a standalone organization asset — just a name and sport. Rendered
+// Create a team as a standalone organization asset - just a name and sport. Rendered
 // inline (not a popup) so it sits right in the Teams list. It's entered into a
 // championship & discipline later from the team page.
 function InlineCreateTeam({ institutionId, onClose }: { institutionId: string; onClose: () => void }) {
@@ -184,7 +184,7 @@ function InlineCreateTeam({ institutionId, onClose }: { institutionId: string; o
         <label className="block sm:w-56">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Sport</span>
           <Select value={sportId} onChange={(e) => setSportId(e.target.value)}>
-            <option value="">— select a sport —</option>
+            <option value="">- select a sport -</option>
             {sports.map((s) => <option key={s.id} value={s.id}>{s.icon ? `${s.icon} ` : ''}{s.name}</option>)}
           </Select>
         </label>
@@ -212,7 +212,7 @@ export function TeamsPage() {
     : myTeams.filter((t) => t.membership_role === 'captain' || t.membership_role === 'vice_captain');
   const isLoading = institutionId ? instLoading : myLoading;
   // Enrollments scoped to THIS org (a user may run several) so "Enter" uses the right
-  // approved enrollment — otherwise entering a team can pick another org's enrollment.
+  // approved enrollment - otherwise entering a team can pick another org's enrollment.
   const { data: enrollments = [] } = useApi<any[]>(institutionId ? `/me/enrollments?organization_id=${institutionId}` : '/me/enrollments');
   const approved = enrollments.filter((e) => e.status === 'approved');
   const { eventId, setEventId } = useFilterBar();

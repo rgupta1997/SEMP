@@ -1,5 +1,5 @@
 /* global window, SPORTS */
-// Sportagon — scoring engine: formatters + reducer (sport-specific logic).
+// Sportagon - scoring engine: formatters + reducer (sport-specific logic).
 
 const pad = (n) => String(n).padStart(2, "0");
 const clockStr = (s) => `${Math.floor(s / 60)}:${pad(s % 60)}`;
@@ -50,18 +50,18 @@ function subLine(m) {
     case "sets": {
       const cur = (m.status === "live") ? [`${s.a ?? 0}–${s.b ?? 0}`] : [];
       const prev = (s.setScores || []).map((x) => `${x[0]}–${x[1]}`);
-      return [...prev, ...cur].join("  ·  ") || "—";
+      return [...prev, ...cur].join("  ·  ") || "-";
     }
     case "rally": {
       const prev = (s.gameScores || []).map((x) => `${x[0]}–${x[1]}`);
       const cur = (m.status === "live") ? [`${s.a ?? 0}–${s.b ?? 0}`] : [];
-      return [...prev, ...cur].join("  ·  ") || "—";
+      return [...prev, ...cur].join("  ·  ") || "-";
     }
     case "clock": {
       const qs = s.segScores || [];
       if (sp.key === "football") return `Scorers · ${[...(s.scorersA || []), ...(s.scorersB || [])].length} goals`;
       const line = qs.map((x) => `${x[0]}–${x[1]}`).join("  ·  ");
-      return line ? `By ${sp.segLabel}: ${line}` : "—";
+      return line ? `By ${sp.segLabel}: ${line}` : "-";
     }
     case "cricket": {
       const rr = s.rr ? `RR ${s.rr.toFixed(2)}` : "";
@@ -74,7 +74,7 @@ function subLine(m) {
 
 function lastEvent(m) {
   const e = (m.log || [])[0];
-  return e ? `${e.team === "A" ? m.teamA.short : e.team === "B" ? m.teamB.short : ""} — ${e.txt}`.trim() : "";
+  return e ? `${e.team === "A" ? m.teamA.short : e.team === "B" ? m.teamB.short : ""} - ${e.txt}`.trim() : "";
 }
 
 // ---- Winner / result string for completed ----
@@ -110,11 +110,11 @@ function scoreReducer(m, action) {
       const { team, pts = 1, label } = action;
       if (sp.archetype === "clock") {
         if (team === "A") s.a = (s.a || 0) + pts; else s.b = (s.b || 0) + pts;
-        logEntry = { t: nowTag(m), team, txt: `+${pts}${label ? ` — ${label}` : ""}`, pts, undo: { type: "POINT", team, pts } };
+        logEntry = { t: nowTag(m), team, txt: `+${pts}${label ? ` - ${label}` : ""}`, pts, undo: { type: "POINT", team, pts } };
       } else if (sp.archetype === "sets" || sp.archetype === "rally") {
         if (team === "A") s.a = (s.a || 0) + 1; else s.b = (s.b || 0) + 1;
         s.serving = team;
-        logEntry = { t: nowTag(m), team, txt: `Point${label ? ` — ${label}` : ""}` };
+        logEntry = { t: nowTag(m), team, txt: `Point${label ? ` - ${label}` : ""}` };
       } else if (sp.archetype === "cricket") {
         s.b = (s.b || 0) + pts; s.ballsB = (s.ballsB || 0) + 1;
         s.thisOver = [...(s.thisOver || []), String(pts)].slice(-6);
@@ -125,7 +125,7 @@ function scoreReducer(m, action) {
     case "WICKET": {
       s.wB = (s.wB || 0) + 1; s.ballsB = (s.ballsB || 0) + 1;
       s.thisOver = [...(s.thisOver || []), "W"].slice(-6);
-      logEntry = { t: `${(s.ballsB / 6).toFixed(1)}`, team: "B", txt: `WICKET — ${action.how || "bowled"}` };
+      logEntry = { t: `${(s.ballsB / 6).toFixed(1)}`, team: "B", txt: `WICKET - ${action.how || "bowled"}` };
       break;
     }
     case "EXTRA": {
@@ -142,7 +142,7 @@ function scoreReducer(m, action) {
     }
     case "CARD": {
       const k = action.team === "A" ? "cardsA" : "cardsB";
-      s[k] = [...(s[k] || []), `${s.minute}' ${action.card} — ${action.player || "Player"}`];
+      s[k] = [...(s[k] || []), `${s.minute}' ${action.card} - ${action.player || "Player"}`];
       logEntry = { t: `${s.minute}'`, team: action.team, txt: `${action.card} card` };
       break;
     }

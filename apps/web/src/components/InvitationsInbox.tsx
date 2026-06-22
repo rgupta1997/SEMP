@@ -24,7 +24,7 @@ export function InvitationsInbox({ organizationId, className = '' }: { organizat
 
   const accept = useApiMutation(
     (id: string) => api('POST', `/invitations/${id}/accept`),
-    // Auto-approved on accept (the host invited them) — refresh enrollments too so the
+    // Auto-approved on accept (the host invited them) - refresh enrollments too so the
     // org immediately shows as approved and can enter teams.
     ['/me/invitations', '/championships/mine', '/me/enrollments'],
   );

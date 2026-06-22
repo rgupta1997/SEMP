@@ -94,9 +94,9 @@ export function PocsPage() {
               {pendingMembers.map((m) => (
                 <div key={m.id} className="flex items-center justify-between px-5 py-3">
                   <div className="flex items-center gap-3">
-                    <Avatar name={m.users?.name ?? '—'} size={38} />
+                    <Avatar name={m.users?.name ?? '-'} size={38} />
                     <div>
-                      <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{m.users?.name ?? '—'}</div>
+                      <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{m.users?.name ?? '-'}</div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">{m.users?.email}{m.users?.phone ? ` · ${m.users.phone}` : ''}</div>
                     </div>
                   </div>
@@ -136,9 +136,9 @@ export function PocsPage() {
               {tc.view.map((m) => (
                 <div key={m.id} className={`flex items-center justify-between px-5 py-3 ${m.status === 'past' ? 'opacity-50' : ''}`}>
                   <div className="flex items-center gap-3">
-                    <Avatar name={m.users?.name ?? '—'} size={38} />
+                    <Avatar name={m.users?.name ?? '-'} size={38} />
                     <div>
-                      <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{m.users?.name ?? '—'}</div>
+                      <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{m.users?.name ?? '-'}</div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">{m.users?.email}{m.users?.phone ? ` · ${m.users.phone}` : ''}</div>
                     </div>
                   </div>

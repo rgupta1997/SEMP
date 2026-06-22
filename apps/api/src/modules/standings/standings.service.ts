@@ -60,7 +60,7 @@ export async function recomputeStandings(prisma: Prisma, championshipId: string)
   }
   const defaultRule = championshipRule ?? DEFAULT_STANDINGS_RULE;
 
-  // Draws that still have an unplayed fixture — used to decide whether a discipline
+  // Draws that still have an unplayed fixture - used to decide whether a discipline
   // is concluded (the medal scheme's position points are withheld until it is).
   const pending = await prisma.fixtures.groupBy({
     by: ['tournament_discipline_id'],
@@ -81,7 +81,7 @@ export async function recomputeStandings(prisma: Prisma, championshipId: string)
       tournament_sports: { select: { sport_id: true, tournament_id: true, format_id: true } },
       fixtures: {
         // Byes are unplayed but advance a team, so the placement scheme credits the
-        // floor of the stage they reached — include them alongside completed results.
+        // floor of the stage they reached - include them alongside completed results.
         where: { status: { in: ['completed', 'bye'] } },
         select: {
           status: true,
@@ -172,7 +172,7 @@ export async function recomputeStandings(prisma: Prisma, championshipId: string)
   ]);
 }
 
-// Recompute triggered by a fixture write — resolves the owning championship and
+// Recompute triggered by a fixture write - resolves the owning championship and
 // skips frozen (completed) championships so final standings don't move.
 export async function recomputeStandingsForFixture(prisma: Prisma, fixtureId: string): Promise<void> {
   const fx = await prisma.fixtures.findUnique({

@@ -1,5 +1,5 @@
 /* global React, Icon, cx, Crest, Button, SPORTS, SportChip, bigScore, segLabel, clockStr */
-// Sportagon — Official Match Console (mobile/tablet-first live scoring input).
+// Sportagon - Official Match Console (mobile/tablet-first live scoring input).
 const { createElement: n, useState: ust, useEffect: uft } = React;
 
 // ---- per-sport scoring control rows ----
@@ -88,7 +88,7 @@ function MatchConsole({ m, dispatch, onUndo, canUndo, onExit, syncOffline }) {
     isCricket
       ? n(CricketDeck, { m, dispatch })
       : sp.archetype === "time"
-        ? n("div", { className: "con-note" }, n(Icon, { name: "clock", size: 18 }), "Timed event — enter ranked results in the Results sheet.")
+        ? n("div", { className: "con-note" }, n(Icon, { name: "clock", size: 18 }), "Timed event - enter ranked results in the Results sheet.")
         : n("div", { className: "ctrl-split" },
             n("div", { className: "ctrl-side" }, n("div", { className: "ctrl-label" }, m.teamA.short), n(ScoreControls, { m, side: "A", dispatch })),
             n("div", { className: "ctrl-divider" }),
@@ -112,9 +112,9 @@ function MatchConsole({ m, dispatch, onUndo, canUndo, onExit, syncOffline }) {
         n("button", { className: "undo-btn", disabled: !canUndo, onClick: onUndo }, n(Icon, { name: "undo", size: 15 }), "Undo last")
       ),
       n("div", { className: "log-list no-scrollbar" },
-        (m.log || []).length === 0 && n("div", { className: "sm text-muted", style: { padding: "10px 2px" } }, "No events yet — start scoring."),
+        (m.log || []).length === 0 && n("div", { className: "sm text-muted", style: { padding: "10px 2px" } }, "No events yet - start scoring."),
         (m.log || []).map((e, i) => n("div", { key: i, className: cx("log-row", i === 0 && "newest") },
-          n("span", { className: "log-t mono" }, e.t || "—"),
+          n("span", { className: "log-t mono" }, e.t || "-"),
           e.team && n("span", { className: "log-team", style: { color: e.team === "A" ? "var(--brand-500)" : "var(--text-secondary)" } }, e.team === "A" ? m.teamA.short : m.teamB.short),
           n("span", { className: "log-txt" }, e.txt)
         ))

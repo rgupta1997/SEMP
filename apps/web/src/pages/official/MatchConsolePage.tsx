@@ -16,7 +16,7 @@ const SECONDARY: { status: string; label: string; variant: 'outline' | 'danger' 
 ];
 
 // Matches can only be recorded once the championship is under way (status
-// "ongoing"). Before that, scoring is blocked — these explain the current state.
+// "ongoing"). Before that, scoring is blocked - these explain the current state.
 const NOT_STARTED_STATUS: Record<string, string> = {
   draft: 'still in draft and hasn’t opened yet',
   registration_open: 'open for registration but hasn’t started yet',
@@ -26,7 +26,7 @@ export function MatchConsolePage() {
   const { fixtureId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  // Where to return when done — set by whoever opened the console (host Results
+  // Where to return when done - set by whoever opened the console (host Results
   // tab passes its path); officials fall back to their matches list.
   const back = (location.state as { from?: string } | null)?.from ?? '/officiating';
   const backLabel = back === '/officiating' ? 'My matches' : 'Results';
@@ -51,10 +51,10 @@ export function MatchConsolePage() {
   const done = () => navigate(back);
 
   // The championship must have started before any match can be recorded. Mirror the
-  // server rule in the UI so the official sees *why* — and can't waste effort scoring.
+  // server rule in the UI so the official sees *why* - and can't waste effort scoring.
   const champStatus = fixture.tournament_disciplines?.tournament_sports?.tournaments?.championships?.status;
   const notStarted = champStatus === 'draft' || champStatus === 'registration_open';
-  // A match can't be scored until both sides are known — a TBD bracket slot (e.g. a
+  // A match can't be scored until both sides are known - a TBD bracket slot (e.g. a
   // final waiting on its semis) has no teams to score. Mirror the server rule here.
   const missingTeams = !fixture.home_team_id || !fixture.away_team_id;
 
@@ -87,7 +87,7 @@ export function MatchConsolePage() {
             <div className="text-4xl" aria-hidden>🆚</div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Both teams aren’t set yet</h2>
             <p className="mx-auto max-w-md text-sm text-slate-600 dark:text-slate-300">
-              This match still has a <b>TBD</b> slot — it can’t go live or be scored until both teams are assigned.
+              This match still has a <b>TBD</b> slot - it can’t go live or be scored until both teams are assigned.
             </p>
             <p className="mx-auto max-w-md text-sm text-slate-500 dark:text-slate-400">
               The organiser sets the teams from the championship’s <b>Schedule → Fixtures</b> tab (edit the fixture). Once both sides are in, reopen this match to score it.
@@ -136,7 +136,7 @@ function CustomPointsPanel({ fixture, fixtureId, invalidate }: { fixture: any; f
 
   return (
     <Card>
-      <CardHeader title="Championship points" subtitle="This championship awards custom points — enter the points each side earns from this result. They feed the standings." />
+      <CardHeader title="Championship points" subtitle="This championship awards custom points - enter the points each side earns from this result. They feed the standings." />
       <CardBody>
         <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-3">
           <label className="block">
@@ -163,7 +163,7 @@ type AwardRow = AwardItem & { id: string; recipient_name: string | null };
 
 function rosterPeople(team: any): { id: string; name: string; team: string }[] {
   return (team?.team_members ?? [])
-    .map((tm: any) => ({ id: tm.users?.id as string, name: tm.users?.name ?? '—', team: teamLabel(team) }))
+    .map((tm: any) => ({ id: tm.users?.id as string, name: tm.users?.name ?? '-', team: teamLabel(team) }))
     .filter((p: { id?: string }) => !!p.id);
 }
 
@@ -195,10 +195,10 @@ function AwardsPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixture
 
   return (
     <Card>
-      <CardHeader title="Awards" subtitle="Recognise players — e.g. Player of the Match. Multiple allowed." />
+      <CardHeader title="Awards" subtitle="Recognise players - e.g. Player of the Match. Multiple allowed." />
       <CardBody className="space-y-3">
         {people.length === 0 ? (
-          <p className="text-sm text-slate-400 dark:text-slate-500">No players on the team rosters yet — add players to a team to give awards.</p>
+          <p className="text-sm text-slate-400 dark:text-slate-500">No players on the team rosters yet - add players to a team to give awards.</p>
         ) : (
           <>
             {rows.length === 0 && <p className="text-sm text-slate-400 dark:text-slate-500">No awards yet.</p>}
@@ -241,7 +241,7 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
   // per-tap score autosave (`persist.isPending`) never disables the match controls.
   const [submitting, setSubmitting] = useState(false);
   // Re-open a completed match for corrections. Revealing the scorer doesn't touch
-  // the server — the first scoring action (or re-sign-off) flips it back to live.
+  // the server - the first scoring action (or re-sign-off) flips it back to live.
   const [editing, setEditing] = useState(false);
   const seeded = useRef(false);
 
@@ -256,7 +256,7 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
   const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
 
   // `opts.winner` (when the key is present, even if null) overrides the derived
-  // winner — used by the cricket quick-result panel to declare a winner directly.
+  // winner - used by the cricket quick-result panel to declare a winner directly.
   // `opts.notes` persists the final result text.
   const save = (s: MatchState, l: LogEntry[], st: string, done = false, onSuccess?: () => void,
     opts?: { winner?: string | null; notes?: string }, onError?: () => void) => {
@@ -270,7 +270,7 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
   };
 
   const dispatch = (action: Action) => {
-    // Scoring is frozen once the final period is ended — ignore point taps until reopened.
+    // Scoring is frozen once the final period is ended - ignore point taps until reopened.
     if (state.ended && action.type === 'POINT') return;
     const { state: ns, entry } = reduce(def, state, action);
     setHistory((hh) => [...hh, { state, log }].slice(-50));
@@ -298,7 +298,7 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
   };
   // Keep the confirm dialog open (showing a spinner) until the save resolves, then
   // complete and return. Navigating only on success also lets the global mutation-
-  // cache invalidation mark /fixtures stale before the Results page remounts —
+  // cache invalidation mark /fixtures stale before the Results page remounts -
   // returning eagerly raced the GET ahead of the PATCH and left the old score on
   // screen until a manual refresh. `submitting` (not the autosave's pending flag)
   // gates this so a slow background score-save can't lock the sign-off button.
@@ -407,7 +407,7 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
               <CardHeader title="Championship log" action={<Button size="sm" variant="ghost" disabled={history.length === 0} onClick={undo}>↶ Undo</Button>} />
               <CardBody>
                 {log.length === 0 ? (
-                  <p className="text-sm text-slate-400 dark:text-slate-500">No championships yet — start scoring.</p>
+                  <p className="text-sm text-slate-400 dark:text-slate-500">No championships yet - start scoring.</p>
                 ) : (
                   <ul className="max-h-64 space-y-1.5 overflow-auto">
                     {log.map((e, i) => (
@@ -576,7 +576,7 @@ function DirectResult({ def, homeName, awayName, initialA, initialB, pending, on
 
   return (
     <Card>
-      <CardHeader title="Enter result directly" subtitle={`Override the live tally — type the final ${unit} if scoring went wrong.`} />
+      <CardHeader title="Enter result directly" subtitle={`Override the live tally - type the final ${unit} if scoring went wrong.`} />
       <CardBody className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -640,7 +640,7 @@ function ManualResult({ fixture, fixtureId, def, invalidate, onDone }: { fixture
   const winnerLabel =
     winnerId === fixture.home_team_id ? homeName :
     winnerId === fixture.away_team_id ? awayName :
-    winner === 'draw' || (hs != null && as != null) ? 'Draw' : '—';
+    winner === 'draw' || (hs != null && as != null) ? 'Draw' : '-';
 
   const submit = (status: 'live' | 'completed') => {
     saveResult.mutate({ home_score: hs, away_score: as, winner_team_id: winnerId, status, notes: notes || undefined },
@@ -666,7 +666,7 @@ function ManualResult({ fixture, fixtureId, def, invalidate, onDone }: { fixture
         <div className="mt-3">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Winner</span>
           <Select value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
-            <option value="auto">Auto (higher score) — {winnerLabel}</option>
+            <option value="auto">Auto (higher score) - {winnerLabel}</option>
             <option value="home">{homeName}</option>
             <option value="away">{awayName}</option>
             <option value="draw">Tie / draw</option>

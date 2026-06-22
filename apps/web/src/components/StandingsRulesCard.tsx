@@ -27,7 +27,7 @@ const SCHEME_DEFAULTS: Record<StandingsScheme, StandingsRule> = {
 };
 
 // Organisers pick one of exactly two point systems. Legacy league/medal rules still
-// compute, but the picker only offers these — and editing coerces anything else to
+// compute, but the picker only offers these - and editing coerces anything else to
 // Knockout so the dropdown always shows a supported option.
 const POINT_SYSTEM_OPTIONS: { value: StandingsScheme; label: string }[] = [
   { value: 'placement', label: 'Knockout' },
@@ -41,7 +41,7 @@ const PLACEMENT_LABEL: Record<(typeof PLACEMENT_KEYS)[number], string> = {
   winner: 'Winner', runner_up: 'Runner-up', semi_finalist: 'Semi-finalist', quarter_finalist: 'Quarter-finalist',
 };
 
-// A compact, read-only summary of a saved rule — shown when the editor is frozen.
+// A compact, read-only summary of a saved rule - shown when the editor is frozen.
 function ruleSummary(rule: StandingsRule): string {
   const parts: string[] = [SCHEME_LABEL[rule.scheme]];
   if (rule.scheme === 'league_points') parts.push(`Win ${rule.win} · Draw ${rule.draw} · Loss ${rule.loss}`);
@@ -109,7 +109,7 @@ function DefaultRuleEditor({ eventId, initial, saved }: { eventId: string; initi
   const [frozen, setFrozen] = useState(saved);
   const save = useApiMutation(
     (config: StandingsRule) => api('PUT', `/championships/${eventId}/standings-rules`, { scope_type: 'championship', config }),
-    [], // recompute touches every scope — refresh all queries
+    [], // recompute touches every scope - refresh all queries
   );
   return (
     <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">

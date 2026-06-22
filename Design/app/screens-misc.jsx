@@ -1,5 +1,5 @@
 /* global React, Icon, cx, Card, StatCard, Button, Badge, StatusBadge, Crest, SportChip, PageHeader, EmptyState, MatchRow, CompactScoreCard, SPORTS */
-// Sportagon — participant dashboard, design system showcase, placeholders.
+// Sportagon - participant dashboard, design system showcase, placeholders.
 const { createElement: p } = React;
 
 /* =================== PARTICIPANT DASHBOARD =================== */
@@ -48,7 +48,7 @@ function DesignSystem({ theme }) {
       p("h2", { className: "h2" }, "Brand ramp · themable per tenant"),
       p("div", { className: "ramp" }, ramp.map((n) => p("div", { key: n, className: "ramp-step" },
         p("span", { className: "ramp-chip", style: { background: `var(--brand-${n})` } }), p("span", { className: "mono xs" }, n)))),
-      p("p", { className: "sm text-muted", style: { marginTop: 8 } }, "Tenant theming overrides only the brand ramp — switch tenants in the Tweaks panel to see chrome re-skin while neutrals & semantics stay fixed.")),
+      p("p", { className: "sm text-muted", style: { marginTop: 8 } }, "Tenant theming overrides only the brand ramp - switch tenants in the Tweaks panel to see chrome re-skin while neutrals & semantics stay fixed.")),
 
     p("section", { className: "ds-section" },
       p("h2", { className: "h2" }, "Semantic & live"),
@@ -65,11 +65,11 @@ function DesignSystem({ theme }) {
     p("section", { className: "ds-section" },
       p("h2", { className: "h2" }, "Type scale · Archivo"),
       p("div", { className: "type-spec" },
-        p("div", { className: "display-lg" }, "118 — Scoreboard"),
+        p("div", { className: "display-lg" }, "118 - Scoreboard"),
         p("div", { className: "h1" }, "Heading 1 · Page titles"),
         p("div", { className: "h2" }, "Heading 2 · Section"),
         p("div", { className: "h3" }, "Heading 3 · Card title"),
-        p("div", { className: "body" }, "Body — the quick brown fox jumps over 1,234 athletes."),
+        p("div", { className: "body" }, "Body - the quick brown fox jumps over 1,234 athletes."),
         p("div", { className: "sm text-secondary" }, "Small · secondary metadata and hints"),
         p("div", { className: "eyebrow" }, "Eyebrow · uppercase label"))),
 
@@ -97,7 +97,7 @@ function Placeholder({ navItem, onGo }) {
       p(EmptyState, {
         icon: navItem ? navItem.icon : "layers",
         title: "In the full design set",
-        message: "This route is mapped in the IA and inherits the same shell, tokens, and components. This prototype goes deep on the live-event experience — the scoring system, scoreboards, ops & results.",
+        message: "This route is mapped in the IA and inherits the same shell, tokens, and components. This prototype goes deep on the live-event experience - the scoring system, scoreboards, ops & results.",
         action: p(Button, { variant: "primary", icon: "broadcast", onClick: onGo }, "Jump to Live Ops"),
       }))
   );

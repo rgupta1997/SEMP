@@ -1,4 +1,4 @@
-# Render Blueprint — SEMP backend (Express + Prisma, run with tsx).
+# Render Blueprint - SEMP backend (Express + Prisma, run with tsx).
 # Usage: push this repo to GitHub, then in Render → New + → Blueprint → pick the repo.
 # Set DATABASE_URL and WEB_ORIGIN in the dashboard (JWT_SECRET is generated for you).
 services:
@@ -15,7 +15,7 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false            # Supabase TRANSACTION pooler: ...pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=5
-                               # Do NOT use the session pooler (:5432 on the pooler host) — its 15-slot pool exhausts under Prisma's pool.
+                               # Do NOT use the session pooler (:5432 on the pooler host) - its 15-slot pool exhausts under Prisma's pool.
       - key: JWT_SECRET
         generateValue: true    # Render generates a strong secret
       - key: WEB_ORIGIN

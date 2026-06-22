@@ -4,9 +4,9 @@ import { cn } from './ui';
 
 // The app wordmark: the brand logo image followed by the mono product badge.
 //
-//   variant 'auto'  — follows the theme (swaps blue/white logo via dark: classes).
-//   variant 'white' — always-dark surfaces (e.g. the app sidebar).
-//   variant 'blue'  — always-light surfaces.
+//   variant 'auto'  - follows the theme (swaps blue/white logo via dark: classes).
+//   variant 'white' - always-dark surfaces (e.g. the app sidebar).
+//   variant 'blue'  - always-light surfaces.
 export function BrandMark({
   variant = 'auto', height = 26, to, className = '',
 }: { variant?: 'blue' | 'white' | 'auto'; height?: number; to?: string; className?: string }) {

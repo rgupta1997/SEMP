@@ -84,7 +84,7 @@ export function makeGuards(prisma: Prisma) {
     return championshipManager((req) => (req.method === 'POST' ? resolvers.body(req) : resolvers.byId(req.params.id)));
   }
 
-  // ---- guard: managing a specific team — an owner/admin of the owning
+  // ---- guard: managing a specific team - an owner/admin of the owning
   // organization, the team's own captain / vice-captain, or super ----
   const teamManager: RequestHandler = asyncHandler(async (req, _res, next) => {
     const u = req.user!;
@@ -104,7 +104,7 @@ export function makeGuards(prisma: Prisma) {
     throw new ForbiddenError('Only the team captain or an organization owner/admin can manage this team');
   });
 
-  // ---- guard: creating teams — an owner/admin of the org(s) named in the body ----
+  // ---- guard: creating teams - an owner/admin of the org(s) named in the body ----
   const teamCreate: RequestHandler = asyncHandler(async (req, _res, next) => {
     const u = req.user!;
     if (u.isSuperAdmin) return next();
@@ -118,7 +118,7 @@ export function makeGuards(prisma: Prisma) {
     throw new ForbiddenError('You can only create teams for an organization you own or administer');
   });
 
-  // ---- guard: managing a specific user (PATCH/DELETE /users/:id) — super admin,
+  // ---- guard: managing a specific user (PATCH/DELETE /users/:id) - super admin,
   // or an owner/admin of the target user's home organization ----
   const manageUser: RequestHandler = asyncHandler(async (req, _res, next) => {
     const u = req.user!;
@@ -140,7 +140,7 @@ export function makeGuards(prisma: Prisma) {
     throw new ForbiddenError('Only an organization owner/admin can enroll that organization');
   });
 
-  // ---- guard: recording a fixture result — assigned official, organiser, or super ----
+  // ---- guard: recording a fixture result - assigned official, organiser, or super ----
   const fixtureScorer: RequestHandler = asyncHandler(async (req, _res, next) => {
     const u = req.user!;
     if (u.isSuperAdmin) return next();

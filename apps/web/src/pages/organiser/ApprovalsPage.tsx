@@ -107,7 +107,7 @@ export function ApprovalsPage() {
                     <Avatar name={r.organizations?.name} size={34} />
                     <div>
                       <div className="font-medium text-slate-800 dark:text-slate-200">{r.organizations?.name}</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">{[r.organizations?.code, r.organizations?.city].filter(Boolean).join(' · ') || '—'}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">{[r.organizations?.code, r.organizations?.city].filter(Boolean).join(' · ') || '-'}</div>
                     </div>
                   </div>
                 </td>

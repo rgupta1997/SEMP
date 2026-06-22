@@ -2,8 +2,8 @@ import { useApi } from './hooks';
 
 // ---------------------------------------------------------------------------
 // Onboarding: a single source of truth for the guided flows. The same step
-// content drives three surfaces — the dashboard "Getting started" checklist,
-// the in-app tour, and the Help page — so they can never drift apart. The
+// content drives three surfaces - the dashboard "Getting started" checklist,
+// the in-app tour, and the Help page - so they can never drift apart. The
 // CONTENT arrays below hold the wording; the hooks attach a CTA target and a
 // live "done" flag computed from real data.
 // ---------------------------------------------------------------------------
@@ -45,14 +45,14 @@ export const POC_GUIDE: StepContent[] = [
   {
     id: 'team',
     title: 'Create a team',
-    description: 'A team is a reusable roster for one sport — create it once, enter it anywhere.',
+    description: 'A team is a reusable roster for one sport - create it once, enter it anywhere.',
     help: 'On the Teams page, “Create team” makes a standalone roster (just a name + sport). You build its squad once and can then enter it into one or more championships.',
   },
   {
     id: 'apply',
     title: 'Apply to a championship',
     description: 'Browse open championships and request to participate.',
-    help: 'Use Discover to find open championships and apply. An organiser reviews and approves your organization before you can enter teams — watch its status on your dashboard.',
+    help: 'Use Discover to find open championships and apply. An organiser reviews and approves your organization before you can enter teams - watch its status on your dashboard.',
   },
   {
     id: 'enter',
@@ -64,7 +64,7 @@ export const POC_GUIDE: StepContent[] = [
     id: 'roster',
     title: 'Build your squad',
     description: 'Add players to a team from your members or by pasting a list.',
-    help: 'Open a team and “Add players” — tick people from your organization or paste a Name, email, jersey list. The squad is shared across all of that team’s championship entries.',
+    help: 'Open a team and “Add players” - tick people from your organization or paste a Name, email, jersey list. The squad is shared across all of that team’s championship entries.',
   },
   {
     id: 'lock',
@@ -80,7 +80,7 @@ export const ORGANISER_GUIDE: StepContent[] = [
     id: 'season',
     title: 'Add a season',
     description: 'Create the season (tournament) that holds your sports.',
-    help: 'In Setup → Seasons, add at least one season. Everything else — sports, disciplines, fixtures — hangs off a season.',
+    help: 'In Setup → Seasons, add at least one season. Everything else - sports, disciplines, fixtures - hangs off a season.',
   },
   {
     id: 'draws',
@@ -208,10 +208,10 @@ export function useOrganiserOnboarding(eventId: string, status?: string, enabled
 export interface TourStep { target: string; title: string; body: string }
 
 export const PORTAL_TOUR: TourStep[] = [
-  { target: 'nav-/profile', title: 'My Game', body: 'Your personal hub — the championships you play in, your matches and achievements.' },
+  { target: 'nav-/profile', title: 'My Game', body: 'Your personal hub - the championships you play in, your matches and achievements.' },
   { target: 'nav-/organizations', title: 'Organizations', body: 'Manage the organizations you run: members, teams and rosters live here.' },
   { target: 'nav-/discover', title: 'Discover', body: 'Find open championships and apply to participate with your organization.' },
-  { target: 'nav-/championships', title: 'Championships', body: 'Everything you take part in, in one place — across every organization.' },
-  { target: 'nav-/host', title: 'Host', body: 'Run your own championship — create one and you become its organiser.' },
+  { target: 'nav-/championships', title: 'Championships', body: 'Everything you take part in, in one place - across every organization.' },
+  { target: 'nav-/host', title: 'Host', body: 'Run your own championship - create one and you become its organiser.' },
   { target: 'nav-/help', title: 'Help & guide', body: 'Step-by-step guides for every role. Come back here any time.' },
 ];

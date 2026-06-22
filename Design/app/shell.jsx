@@ -1,8 +1,8 @@
 /* global React, Icon, cx, Avatar, Badge, SPORTS */
-// Sportagon — app shell: logo, sidebar/rail, topbar, bottom tabs, role switcher.
+// Sportagon - app shell: logo, sidebar/rail, topbar, bottom tabs, role switcher.
 const { createElement: e, useState: uState } = React;
 
-// Logomark: three ascending bars (podium + motion) — simple geometric, scales 16px→TV.
+// Logomark: three ascending bars (podium + motion) - simple geometric, scales 16px→TV.
 function Logomark({ size = 30 }) {
   return e("svg", { width: size, height: size, viewBox: "0 0 32 32", "aria-hidden": true, style: { flex: "none" } },
     e("rect", { x: 3, y: 17, width: 7, height: 12, rx: 2.2, fill: "var(--brand-400)" }),
@@ -21,7 +21,7 @@ function Wordmark({ tenant }) {
   );
 }
 
-// Colored sport chip — mono letter + accent (paired w/ label elsewhere; never color alone)
+// Colored sport chip - mono letter + accent (paired w/ label elsewhere; never color alone)
 function SportChip({ sportKey, size = 30, radius }) {
   const sp = SPORTS[sportKey];
   return e("span", {

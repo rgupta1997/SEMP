@@ -14,7 +14,7 @@ const RESULT_STYLE: Record<string, string> = {
   pending: 'text-slate-400 dark:text-slate-500',
 };
 
-// Full, drilled-down view of every award the participant has earned — grouped by
+// Full, drilled-down view of every award the participant has earned - grouped by
 // award name, each occurrence linking to its match. Reached from the dashboard's
 // "All achievements →" link.
 export function ParticipantAchievementsPage() {
@@ -60,7 +60,7 @@ export function ParticipantAchievementsPage() {
                     const row = (
                       <div className="flex items-center justify-between gap-3 py-2.5">
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">{meta || '—'}</div>
+                          <div className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">{meta || '-'}</div>
                           {a.opponent_team_name && (
                             <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
                               {a.my_team_name ? `${a.my_team_name} ` : ''}vs {a.opponent_team_name}

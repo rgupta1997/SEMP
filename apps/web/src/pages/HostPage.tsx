@@ -8,7 +8,7 @@ interface MyChampionship {
   my_roles: string[];
 }
 
-// Host — championships the user organises, plus the entry point to create one.
+// Host - championships the user organises, plus the entry point to create one.
 // Open to everyone: anyone can host.
 export function HostPage() {
   const navigate = useNavigate();
@@ -17,7 +17,7 @@ export function HostPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Your championships" subtitle="Create and run multi-sport championships for any community — schools, colleges, corporates, clubs.">
+      <PageHeader title="Your championships" subtitle="Create and run multi-sport championships for any community - schools, colleges, corporates, clubs.">
         <Button onClick={() => navigate('/championships/new')}>+ Create championship</Button>
       </PageHeader>
 

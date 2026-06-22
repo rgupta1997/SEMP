@@ -18,7 +18,7 @@ const RESULT_STATUSES = new Set(['completed', 'walkover', 'bye', 'cancelled']);
 
 function teamLabel(t: FixtureRow['home']) { return t?.name ?? 'TBD'; }
 
-// Read-only, whole-championship fixtures for the participant view — the same
+// Read-only, whole-championship fixtures for the participant view - the same
 // schedule / results a spectator sees from Discover, so players can follow every
 // match (not just their own). `schedule` is the full fixture list (upcoming +
 // concluded); `results` narrows to matches that have concluded.
@@ -93,7 +93,7 @@ export function ChampionshipFixtures({ championshipId, mode }: { championshipId:
             return (
               <Card key={f.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 p-3 sm:p-4">
                 <div className="w-24 shrink-0 truncate text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400" title={f.round ?? undefined}>
-                  {f.round || '—'}
+                  {f.round || '-'}
                 </div>
 
                 <div className="flex flex-1 items-center justify-center gap-3 text-sm">

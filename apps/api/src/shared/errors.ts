@@ -1,5 +1,5 @@
 // Framework-free domain error taxonomy. Only the HTTP error middleware maps
-// these to status codes — the core never imports Express.
+// these to status codes - the core never imports Express.
 
 export class DomainError extends Error {
   constructor(

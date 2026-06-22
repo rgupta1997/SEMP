@@ -1,5 +1,5 @@
 /* global React, Icon, cx, Card, StatCard, Button, Badge, StatusBadge, Crest, SportChip, PageHeader, EmptyState, Segmented, CompactScoreCard, MatchRow, SPORTS, bigScore, segLabel, lastEvent */
-// Sportagon — operational screens: Organiser Live Ops, Official, Spectator Live.
+// Sportagon - operational screens: Organiser Live Ops, Official, Spectator Live.
 const { createElement: g, useState: gst } = React;
 
 /* =================== ORGANISER · LIVE OPS =================== */
@@ -7,13 +7,13 @@ function LiveOps({ matches, openScoreboard, openBigScreen }) {
   const live = matches.filter((m) => m.status === "live");
   const completedToday = matches.filter((m) => m.status === "completed" || m.status === "confirmed").length;
   const alerts = [
-    { icon: "alert", tone: "danger", txt: "Venue clash — Court A double-booked 19:30", act: "Resolve" },
+    { icon: "alert", tone: "danger", txt: "Venue clash - Court A double-booked 19:30", act: "Resolve" },
     { icon: "whistle", tone: "warning", txt: "2 fixtures at 18:00 have no assigned official", act: "Assign" },
     { icon: "checkCircle", tone: "warning", txt: "12 institution enrollments awaiting approval", act: "Review" },
   ];
   return g("div", { className: "content-pad content-max fade-up" },
     g(PageHeader, {
-      eyebrow: "Event Operations", title: "Live Ops", sub: "Mission control — everything happening right now across venues.",
+      eyebrow: "Event Operations", title: "Live Ops", sub: "Mission control - everything happening right now across venues.",
       actions: g(Button, { variant: "primary", icon: "tv", onClick: openBigScreen }, "Big-screen mode"),
     }),
     g("div", { className: "kpi-grid" },
@@ -69,7 +69,7 @@ function OfficialMatches({ matches, openConsole }) {
       g(StatCard, { label: "Upcoming today", value: upcoming.length, icon: "clock", accent: "var(--warning)" }),
       g(StatCard, { label: "Completed", value: done.length, icon: "checkCircle", accent: "var(--success)" })
     ),
-    Section("Live — needs scoring", live, g(StatusBadge, { status: "live" })),
+    Section("Live - needs scoring", live, g(StatusBadge, { status: "live" })),
     Section("Up next", upcoming),
     done.length > 0 && Section("Completed & signed", done)
   );

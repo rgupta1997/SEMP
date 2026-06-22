@@ -15,7 +15,7 @@ import { NotFoundError } from '../../shared/errors.js';
 export function makeDemoRequestsRouter(prisma: Prisma): Router {
   const router = Router();
 
-  // Public: capture a lead. Returns only an acknowledgement — never echoes stored
+  // Public: capture a lead. Returns only an acknowledgement - never echoes stored
   // data back to the anonymous caller.
   router.post('/', validateBody(createDemoRequestSchema), asyncHandler(async (req, res) => {
     await prisma.demo_requests.create({ data: req.body });

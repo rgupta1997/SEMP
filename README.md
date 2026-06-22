@@ -1,4 +1,4 @@
-# SEMP — Sports Event Management Platform
+# SEMP - Sports Event Management Platform
 
 Monorepo: **React** frontend + **Node/Express** API (all business logic) + **Supabase** (Postgres only).
 
@@ -34,11 +34,11 @@ except the admin):
 
 | Login | Role / shell |
 | --- | --- |
-| `admin@semp.local` / `admin123` | System admin — everything + Platform master data, can "View as" any role |
-| `organiser@semp.local` | Organiser — events, create-event wizard, setup, approvals, schedule, go-live |
-| `poc@vjti.local` | Institution / Captain — dashboard, browse & apply, teams, roster builder, students |
-| `official@semp.local` | Official — assigned matches + match console |
-| `player@vjti.local` | Participant — profile, player card, my teams, my schedule |
+| `admin@semp.local` / `admin123` | System admin - everything + Platform master data, can "View as" any role |
+| `organiser@semp.local` | Organiser - events, create-event wizard, setup, approvals, schedule, go-live |
+| `poc@vjti.local` | Institution / Captain - dashboard, browse & apply, teams, roster builder, students |
+| `official@semp.local` | Official - assigned matches + match console |
+| `player@vjti.local` | Participant - profile, player card, my teams, my schedule |
 
 A fully-populated demo event, **Genesis Sports Fest '26**, is seeded so every
 view has live data. Self-serve sign up (organiser / institution) is on the login
@@ -53,11 +53,11 @@ npm run test        # Vitest unit tests for the fixture-generation algorithms
 
 ## Architecture notes
 
-- **Auth**: custom JWT (bcrypt). `/auth/me` returns a full role context —
+- **Auth**: custom JWT (bcrypt). `/auth/me` returns a full role context -
   `account_type`, `institution`, event-scoped roles (`user_event_roles`) and team
-  memberships — which the web app uses to pick the right shell. Super admins can
+  memberships - which the web app uses to pick the right shell. Super admins can
   switch between role shells via the topbar "View as" selector.
-- **Hexagonal API**: pure domain services hold the rules — event lifecycle
+- **Hexagonal API**: pure domain services hold the rules - event lifecycle
   (`events/domain`), entry/squad resolution (`tournaments/domain`), roster policy
   (`teams/domain`), and the fixture generators (`fixtures/domain/generators`).
   Express + Prisma are adapters; the generic CRUD factory (`http/crud.ts`) serves

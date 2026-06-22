@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api, tokenStore } from './api';
 
 // Every login is a `user`; `system` is the platform super-admin shell. There are
-// no per-account-type shells any more — what a user can do is derived per
+// no per-account-type shells any more - what a user can do is derived per
 // championship (championship_roles) and per organization (organizations).
 export type AppRole = 'system' | 'user';
 

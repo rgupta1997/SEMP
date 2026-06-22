@@ -25,7 +25,7 @@ export function OrgOverviewPage() {
           subtitle="A few steps to go from sign-up to a locked roster."
           state={onboarding}
           storageKey={`onboarding-poc-${orgId}`}
-          completeNote="That covered one team. If your organization fields multiple teams, repeat these steps for each — create another team, enter it into a championship, then build and lock its roster."
+          completeNote="That covered one team. If your organization fields multiple teams, repeat these steps for each - create another team, enter it into a championship, then build and lock its roster."
         />
       ) : (
         <EmptyState icon="◎" title="Organization overview" description="Find this organization’s teams, members and championships in the tabs above." />

@@ -1,5 +1,5 @@
 /* global React, Icon, SPORTS, SportChip, Crest, bigScore, segLabel, subLine, lastEvent, clockStr, tennisPoint */
-// Sportagon — Live Public Scoreboard (broadcast-grade, dark default).
+// Sportagon - Live Public Scoreboard (broadcast-grade, dark default).
 const { createElement: c, useState: uss, useEffect: uef, useRef: uref } = React;
 
 function TeamBlock({ team, side, score, won, lost }) {
@@ -18,9 +18,9 @@ function SportDetail({ m }) {
   if (sp.key === "cricket") {
     return c("div", { className: "sb-detail" },
       c("div", { className: "sb-detail-row" },
-        c("span", { className: "sb-chip" }, c("span", { className: "sb-chip-k" }, "Striker"), c("span", { className: "tnum" }, s.striker || "—")),
-        c("span", { className: "sb-chip" }, c("span", { className: "sb-chip-k" }, "Non-striker"), s.nonStriker || "—"),
-        c("span", { className: "sb-chip" }, c("span", { className: "sb-chip-k" }, "Bowler"), s.bowler || "—")
+        c("span", { className: "sb-chip" }, c("span", { className: "sb-chip-k" }, "Striker"), c("span", { className: "tnum" }, s.striker || "-")),
+        c("span", { className: "sb-chip" }, c("span", { className: "sb-chip-k" }, "Non-striker"), s.nonStriker || "-"),
+        c("span", { className: "sb-chip" }, c("span", { className: "sb-chip-k" }, "Bowler"), s.bowler || "-")
       ),
       c("div", { className: "sb-over" },
         c("span", { className: "sb-chip-k" }, "This over"),
@@ -34,9 +34,9 @@ function SportDetail({ m }) {
       c("div", { style: { textAlign: "right" } }, c("span", { className: "sb-chip-k" }, m.teamB.short, " ⚽"), (s.scorersB || []).map((x, i) => c("span", { key: i, className: "sb-scorer tnum" }, x)))
     );
   }
-  // sets / rally / clock — set-by-set line
+  // sets / rally / clock - set-by-set line
   const sub = subLine(m);
-  if (!sub || sub === "—") return null;
+  if (!sub || sub === "-") return null;
   return c("div", { className: "sb-setline tnum" }, sub);
 }
 

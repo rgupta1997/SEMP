@@ -10,7 +10,7 @@
 --    role) and backfill it from the old single-org link + team captaincies.
 -- 4. Re-point the `notifications.audience` CHECK value.
 --
--- Hand-written, idempotent SQL — this is the source of truth (Prisma is
+-- Hand-written, idempotent SQL - this is the source of truth (Prisma is
 -- introspection-only). Apply via the Supabase SQL editor / `supabase db push`,
 -- then `npm run prisma:pull && npm run prisma:generate`.
 -- Postgres keeps FK constraints and index *names* working through a rename, so
@@ -112,7 +112,7 @@ do $$ begin
 end $$;
 
 -- ----------------------------------------------------------------------------
--- 3. organization_members — many-to-many user ↔ organization with a per-org role.
+-- 3. organization_members - many-to-many user ↔ organization with a per-org role.
 -- ----------------------------------------------------------------------------
 create table if not exists organization_members (
   id               uuid primary key default gen_random_uuid(),

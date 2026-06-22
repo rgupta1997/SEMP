@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { useAuth } from './auth';
 import { parseEventId } from './championship-nav';
 
-// Capability codes (entity.action). Client checks are UX-only — the API must
+// Capability codes (entity.action). Client checks are UX-only - the API must
 // still enforce every mutation server-side. Capabilities are derived from the
 // auth context: super admins can do everything; otherwise authority follows the
 // championships the user organises and the organizations they own/administer.
@@ -41,7 +41,7 @@ export function usePermissions() {
   const isOrgOwner = (id?: string | null) =>
     isSuper || (!!id && !!ctx?.organizations?.some((m) => m.organization_id === id && m.role === 'owner'));
 
-  // The championship currently in the URL (if any) — lets the coarse capability
+  // The championship currently in the URL (if any) - lets the coarse capability
   // shim resolve against THIS championship, so management controls only show to
   // the people who actually manage it.
   const currentId = parseEventId(pathname);

@@ -61,7 +61,7 @@ function AddPlayersPanel({ teamId, institutionId, existingUserIds, remaining, on
   { teamId: string; institutionId?: string; existingUserIds: Set<string>; remaining: number; onClose: () => void }) {
   const [tab, setTab] = useState('roster');
   // Source from the org's members (organization_members), not the legacy
-  // users.organization_id column — a user can belong to several orgs, and members
+  // users.organization_id column - a user can belong to several orgs, and members
   // added via the Members page only get an organization_members row.
   const { data: orgMembers = [], isLoading } = useApi<any[]>(institutionId ? `/organizations/${institutionId}/members` : null);
   const users = useMemo(
@@ -122,7 +122,7 @@ function AddPlayersPanel({ teamId, institutionId, existingUserIds, remaining, on
           {result.skipped.length > 0 && (
             <div className="mb-3 max-h-40 overflow-auto rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3 text-sm">
               <div className="mb-1 font-semibold text-slate-600 dark:text-slate-300">Skipped {result.skipped.length}:</div>
-              {result.skipped.map((s, i) => <div key={i} className="text-slate-500 dark:text-slate-400">{s.label} — {s.reason}</div>)}
+              {result.skipped.map((s, i) => <div key={i} className="text-slate-500 dark:text-slate-400">{s.label} - {s.reason}</div>)}
             </div>
           )}
           <div className="flex justify-end gap-2">
@@ -198,7 +198,7 @@ function AddPlayersPanel({ teamId, institutionId, existingUserIds, remaining, on
             <div>
               <Textarea rows={6} value={paste} onChange={(e) => setPaste(e.target.value)}
                 placeholder={"One per line:\nAarav Mehta, aarav@vjti.local, 7\nRohan Kulkarni, rohan@vjti.local\nkiran@vjti.local"} />
-              <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">Format: <span className="font-medium">Name, email, jersey#</span> — email is required, name & jersey optional. New people are created under your organization. {parsed.length > 0 && <span className="text-brand-600 dark:text-brand-300">{parsed.length} row{parsed.length === 1 ? '' : 's'} detected.</span>}</p>
+              <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">Format: <span className="font-medium">Name, email, jersey#</span> - email is required, name & jersey optional. New people are created under your organization. {parsed.length > 0 && <span className="text-brand-600 dark:text-brand-300">{parsed.length} row{parsed.length === 1 ? '' : 's'} detected.</span>}</p>
             </div>
           )}
 
@@ -221,7 +221,7 @@ function entryDrawLabel(entry: any): string {
   return [disc?.tournament_sports?.tournaments?.name, disc?.disciplines?.name].filter(Boolean).join(' · ');
 }
 
-// "Now that you're in, pick your discipline" — set or change the discipline draw of a
+// "Now that you're in, pick your discipline" - set or change the discipline draw of a
 // championship entry, inline under its row. Draws are scoped to the team's sport and
 // exclude those another of the org's teams already occupies.
 function ChooseDisciplinePanel({ team, entry, onClose }: { team: any; entry: any; onClose: () => void }) {
@@ -322,7 +322,7 @@ export function RosterPage() {
   // A team's own captain / vice-captain may edit it; so may the organization POC.
   const isMyCaptain = members.some((m: any) => m.user_id === ctx?.user.id && (m.role === 'captain' || m.role === 'vice_captain'));
   const canManage = can('roster.manage') || isMyCaptain;
-  // Deleting the whole team is an org-management action — POC only, not captains.
+  // Deleting the whole team is an org-management action - POC only, not captains.
   const canDeleteTeam = can('team.manage');
   // The roster is frozen only once every championship entry it has is locked.
   const allLocked = entries.length > 0 && entries.every((e) => e.status === 'roster_locked');
@@ -428,7 +428,7 @@ export function RosterPage() {
                       <div className="min-w-0">
                         <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{e.championships?.name ?? 'Championship'}</div>
                         <div className={`truncate text-xs ${hasDiscipline ? 'text-slate-500 dark:text-slate-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                          {hasDiscipline ? `${entryDrawLabel(e)} · squad ${er.squad_min}–${er.squad_max}` : 'Discipline not chosen yet — pick one to lock & get fixtures'}
+                          {hasDiscipline ? `${entryDrawLabel(e)} · squad ${er.squad_min}–${er.squad_max}` : 'Discipline not chosen yet - pick one to lock & get fixtures'}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -486,7 +486,7 @@ export function RosterPage() {
       {tab === 'squad' && (
       <Card>
         <CardHeader title={`Squad · ${activeCount}/${rules.squad_max}`}
-          subtitle={allLocked ? 'Roster is locked. To edit, unlock an entry under the Championships tab.' : entries.length === 0 ? 'Add players now — squad limits apply per championship once entered' : belowMin ? `Add at least ${rules.squad_min - activeCount} more to lock` : 'Add players to complete your squad'}
+          subtitle={allLocked ? 'Roster is locked. To edit, unlock an entry under the Championships tab.' : entries.length === 0 ? 'Add players now - squad limits apply per championship once entered' : belowMin ? `Add at least ${rules.squad_min - activeCount} more to lock` : 'Add players to complete your squad'}
           action={!allLocked && canManage && <Button size="sm" variant="subtle" disabled={atMax} title={atMax ? 'Squad is full' : undefined} onClick={() => setAdding(true)}>+ Add players</Button>} />
         <CardBody>
           {adding && canManage && <AddPlayersPanel teamId={teamId!} institutionId={team.organizations?.id ?? team.organization_id} existingUserIds={existingUserIds} remaining={remaining} onClose={() => setAdding(false)} />}

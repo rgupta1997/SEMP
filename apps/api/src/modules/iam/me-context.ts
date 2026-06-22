@@ -12,10 +12,10 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
 
   // Resolve any invitations addressed to this user's mobile before reading their
   // memberships/roles, so a freshly-applied invite shows up immediately. Never
-  // throws (see the service) — sign-in must not depend on it succeeding.
+  // throws (see the service) - sign-in must not depend on it succeeding.
   await applyUserInvitations(prisma, user);
 
-  // These reads are independent — run them together rather than serially, since
+  // These reads are independent - run them together rather than serially, since
   // this context is assembled on every login and every /me hit.
   const [orgFromUser, orgMemberships, championshipRoleRows, officialRows, memberships] = await Promise.all([
     user.organization_id

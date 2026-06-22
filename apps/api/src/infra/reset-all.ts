@@ -30,7 +30,7 @@ const rint = (min: number, max: number) => min + Math.floor(Math.random() * (max
 type DiscDef = { name: string; entry_type: string; squad_min: number; squad_max: number };
 const SPORTS_CONFIG: Array<{ name: string; icon: string; disciplines: DiscDef[] }> = [
   { name: 'Cricket', icon: '🏏', disciplines: [
-    // Disciplines are categories (gender/age), not formats — T20 is a format, not a discipline.
+    // Disciplines are categories (gender/age), not formats - T20 is a format, not a discipline.
     { name: "Men's", entry_type: 'team', squad_min: 11, squad_max: 15 },
     { name: "Women's", entry_type: 'team', squad_min: 11, squad_max: 15 },
     { name: 'U-19', entry_type: 'team', squad_min: 11, squad_max: 15 },
@@ -164,7 +164,7 @@ const SPORTS_CONFIG: Array<{ name: string; icon: string; disciplines: DiscDef[] 
 ];
 
 // ----------------------------------------------------------------------------
-// Organizations — three kinds, conveyed by name/short_name/code (no schema type).
+// Organizations - three kinds, conveyed by name/short_name/code (no schema type).
 // ----------------------------------------------------------------------------
 type OrgDef = { name: string; short: string; code: string; city: string; kind: 'institution' | 'corporate' | 'club'; status: boolean };
 const ORGS: OrgDef[] = [
@@ -216,7 +216,7 @@ const CHAMPS: ChampDef[] = [
   { name: 'Apex Premier Games 2025', slug: 'apex-premier-games-2025', status: 'completed', city: 'Delhi', tournaments: 6, sportsPerTournament: 3, featured: 6, orgCount: 12, start: '2025-11-05', end: '2025-11-16' },
 ];
 
-// Grounds we lay down per championship — every GROUND_TYPE is represented.
+// Grounds we lay down per championship - every GROUND_TYPE is represented.
 const GROUND_BLUEPRINT: Array<{ name: string; type: (typeof GROUND_TYPE)[number]; cap: number }> = [
   { name: 'Main Ground', type: 'field', cap: 5000 },
   { name: 'Show Court', type: 'court', cap: 800 },
@@ -227,7 +227,7 @@ const GROUND_BLUEPRINT: Array<{ name: string; type: (typeof GROUND_TYPE)[number]
 ];
 
 // ============================================================================
-// Wipe — every table, FK-safe via CASCADE.
+// Wipe - every table, FK-safe via CASCADE.
 // ============================================================================
 async function wipe() {
   await prisma.$executeRawUnsafe(`truncate table
@@ -301,7 +301,7 @@ function resolveFixture(gf: GeneratedFixture, idx: number, mode: 'all_completed'
   if (status === 'walkover') {
     return { ...base, status, winner_team_id: gf.homeTeamId }; // away forfeits
   }
-  return { ...base, status }; // scheduled / postponed / cancelled — no result yet
+  return { ...base, status }; // scheduled / postponed / cancelled - no result yet
 }
 
 async function main() {
@@ -390,7 +390,7 @@ async function main() {
   }
   console.log(`✓ ${orgRows.length} org owners (POCs)`);
 
-  // ---- Players (bulk) — 30 per org ----
+  // ---- Players (bulk) - 30 per org ----
   const playerData: Array<{ name: string; email: string; password_hash: string; phone: string; organization_id: string; must_change_password: boolean }> = [];
   let gi = 0;
   for (const o of orgRows) {
@@ -472,7 +472,7 @@ async function main() {
   for (let ci = 0; ci < CHAMPS.length; ci++) {
     const c = CHAMPS[ci];
     const champ = await prisma.championships.create({
-      data: { name: c.name, slug: c.slug, status: c.status, venue: `${c.city} Sports Complex`, description: `${c.name} — a multi-sport championship in ${c.city}.`, start_date: new Date(c.start), end_date: new Date(c.end) },
+      data: { name: c.name, slug: c.slug, status: c.status, venue: `${c.city} Sports Complex`, description: `${c.name} - a multi-sport championship in ${c.city}.`, start_date: new Date(c.start), end_date: new Date(c.end) },
     });
     const hostId = hostFor(ci);
     await prisma.user_championship_roles.create({ data: { championship_id: champ.id, user_id: hostId, role_id: roles.Organiser, assigned_by: admin.id } });
@@ -488,7 +488,7 @@ async function main() {
       await prisma.championship_officials.create({ data: { championship_id: champ.id, user_id: oid, assigned_by: hostId } });
     }
 
-    // Sponsors — big events cover all four tiers; others get one.
+    // Sponsors - big events cover all four tiers; others get one.
     const tiers: Array<(typeof SPONSOR_TIER)[number]> = c.tournaments >= 5 ? [...SPONSOR_TIER] : ['gold'];
     for (let s = 0; s < tiers.length; s++) {
       await prisma.sponsors.create({ data: { championship_id: champ.id, name: `${tiers[s][0].toUpperCase()}${tiers[s].slice(1)} Sponsor ${ci + 1}`, tier: tiers[s], display_order: s + 1 } });
@@ -509,7 +509,7 @@ async function main() {
     let formatCursor = ci; // vary which format leads off each event
     for (let ti = 0; ti < c.tournaments; ti++) {
       const tournament = await prisma.tournaments.create({
-        data: { championship_id: champ.id, name: c.tournaments === 1 ? `${c.name} Championship` : `${c.name} — Series ${ti + 1}`, description: `Series ${ti + 1} of ${c.name}.`, status: c.status === 'completed' ? 'completed' : c.status === 'draft' ? 'draft' : 'active' },
+        data: { championship_id: champ.id, name: c.tournaments === 1 ? `${c.name} Championship` : `${c.name} - Series ${ti + 1}`, description: `Series ${ti + 1} of ${c.name}.`, status: c.status === 'completed' ? 'completed' : c.status === 'draft' ? 'draft' : 'active' },
       });
       totalTournaments++;
 
@@ -534,9 +534,9 @@ async function main() {
       }
     }
 
-    // Draft event stops here (structure only — no enrollments/teams/fixtures).
+    // Draft event stops here (structure only - no enrollments/teams/fixtures).
     if (c.status === 'draft' || c.orgCount === 0) {
-      console.log(`✓ Championship: ${c.name} (${c.status}) — structure only`);
+      console.log(`✓ Championship: ${c.name} (${c.status}) - structure only`);
       continue;
     }
 
@@ -626,7 +626,7 @@ async function main() {
         const params = td.formatName.includes('Group') ? { num_groups: teamRefs.length >= 6 ? 2 : 2, advance_per_group: 2 } : { third_place_match: true, double_round: false };
         generated = generateFixtures(td.formatName, teamRefs, params);
       } catch {
-        continue; // not enough teams for this format — skip rather than fail the seed
+        continue; // not enough teams for this format - skip rather than fail the seed
       }
       const rows = generated.slice(0, FIXTURE_CAP - totalFixtures).map((gf, idx) => {
         const r = resolveFixture(gf, idx, fixtureMode);
@@ -687,7 +687,7 @@ async function main() {
     if (readRows.length) await prisma.notification_reads.createMany({ data: readRows, skipDuplicates: true });
     if (reactionRows.length) await prisma.notification_reactions.createMany({ data: reactionRows, skipDuplicates: true });
 
-    console.log(`✓ Championship: ${c.name} (${c.status}) — ${featured.length} featured disciplines`);
+    console.log(`✓ Championship: ${c.name} (${c.status}) - ${featured.length} featured disciplines`);
   }
 
   // ==========================================================================

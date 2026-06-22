@@ -3,7 +3,7 @@ import { GUIDES, PORTAL_TOUR } from '../lib/onboarding';
 import { Button, Card, CardBody, PageHeader } from '../components/ui';
 import { useTour } from '../components/onboarding/Tour';
 
-// "How to use this portal" — the same step content as the dashboard checklists,
+// "How to use this portal" - the same step content as the dashboard checklists,
 // grouped by audience, always available from the nav. Passive companion to the
 // data-driven checklist (which nudges you through your own next step).
 export function HelpPage() {
@@ -17,7 +17,7 @@ export function HelpPage() {
       <Card className="border-brand-200 bg-brand-50/60 dark:border-brand-500/30 dark:bg-brand-500/10">
         <CardBody className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            New here? The fastest way to learn is by doing — your dashboard shows a <b>Getting started</b> checklist that tracks your real progress and links each next step.
+            New here? The fastest way to learn is by doing - your dashboard shows a <b>Getting started</b> checklist that tracks your real progress and links each next step.
           </p>
         </CardBody>
       </Card>
@@ -46,9 +46,9 @@ export function HelpPage() {
         <CardBody>
           <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">For officials & players</h2>
           <ul className="mt-3 list-disc space-y-1.5 pl-5 text-sm text-slate-600 dark:text-slate-400">
-            <li><b>Officials</b> — assigned matches appear under <Link to="/officiating" className="text-brand-600 hover:underline dark:text-brand-300">Officiating</Link>; open a fixture to score it live.</li>
-            <li><b>Players</b> — once a captain adds you to a squad, your matches and results show up under <Link to="/profile" className="text-brand-600 hover:underline dark:text-brand-300">My Game</Link>.</li>
-            <li><b>Captains</b> — you can manage your own team’s squad from the team page, even without being an organization admin.</li>
+            <li><b>Officials</b> - assigned matches appear under <Link to="/officiating" className="text-brand-600 hover:underline dark:text-brand-300">Officiating</Link>; open a fixture to score it live.</li>
+            <li><b>Players</b> - once a captain adds you to a squad, your matches and results show up under <Link to="/profile" className="text-brand-600 hover:underline dark:text-brand-300">My Game</Link>.</li>
+            <li><b>Captains</b> - you can manage your own team’s squad from the team page, even without being an organization admin.</li>
           </ul>
         </CardBody>
       </Card>

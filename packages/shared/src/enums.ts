@@ -69,10 +69,10 @@ export type NotificationReaction = (typeof NOTIFICATION_REACTIONS)[number];
 // ---------- Standings ----------
 // The scoring scheme used to turn completed fixtures into a points table. Resolved
 // per discipline (see STANDINGS_RULE_SCOPE); the engine runs the matching strategy.
-//   league_points — points per win/draw/loss (the classic league table; default).
-//   placement     — knockout: points by how far a team advanced (winner, SF, …).
-//   medal         — top-3 organizations in a discipline earn gold/silver/bronze points.
-//   custom        — the organiser awards championship points per side, by hand, after
+//   league_points - points per win/draw/loss (the classic league table; default).
+//   placement     - knockout: points by how far a team advanced (winner, SF, …).
+//   medal         - top-3 organizations in a discipline earn gold/silver/bronze points.
+//   custom        - the organiser awards championship points per side, by hand, after
 //                   each result on the Results page (no auto formula).
 export const STANDINGS_SCHEME = ['league_points', 'placement', 'medal', 'custom'] as const;
 export type StandingsScheme = (typeof STANDINGS_SCHEME)[number];

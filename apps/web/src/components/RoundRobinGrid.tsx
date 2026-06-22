@@ -14,7 +14,7 @@ function shortCode(name: string): string {
 function ResultCell({ fixture, teamId, opponentId, onSelect }:
   { fixture: BracketFixture | undefined; teamId: string; opponentId: string; onSelect?: (f: BracketFixture) => void }) {
   if (!fixture) {
-    return <td className="h-11 w-14 border border-slate-100 text-center text-xs text-slate-300 dark:border-slate-800 dark:text-slate-700">—</td>;
+    return <td className="h-11 w-14 border border-slate-100 text-center text-xs text-slate-300 dark:border-slate-800 dark:text-slate-700">-</td>;
   }
   const decided = fixture.winner_team_id != null || (fixture.home_score != null && fixture.away_score != null);
   const live = fixture.status === 'live';
@@ -143,7 +143,7 @@ export function RoundRobinGrid({ fixtures, teamName, onSelect }:
           fixtures={fx}
           teamName={teamName}
           onSelect={onSelect}
-          caption={multiPool ? `Pool ${pool != null ? String.fromCharCode(64 + pool) : '—'}` : undefined}
+          caption={multiPool ? `Pool ${pool != null ? String.fromCharCode(64 + pool) : '-'}` : undefined}
         />
       ))}
     </div>

@@ -109,7 +109,7 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
   }));
 
   // Bulk-assign one role to several users at once (multi-select picker). Idempotent
-  // per (user, championship, role) like the single endpoint — one round-trip.
+  // per (user, championship, role) like the single endpoint - one round-trip.
   router.post('/championships/:eventId/roles/bulk', eventOrganiser, validateBody(bulkAssignRoleSchema), asyncHandler(async (req, res) => {
     const { user_ids, role_id } = req.body as { user_ids: string[]; role_id: string };
     const eventId = req.params.eventId;

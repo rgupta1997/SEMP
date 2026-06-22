@@ -81,9 +81,9 @@ export function PlatformDemoRequestsPage() {
                     <div className="text-xs text-slate-500 dark:text-slate-400">{r.email}</div>
                     {r.phone && <div className="text-xs text-slate-400 dark:text-slate-500">{r.phone}</div>}
                   </td>
-                  <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{r.organization || '—'}</td>
+                  <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{r.organization || '-'}</td>
                   <td className="px-4 py-2 text-slate-600 dark:text-slate-300">
-                    <div>{r.role || '—'}</div>
+                    <div>{r.role || '-'}</div>
                     {r.sport && <div className="text-xs text-slate-400 dark:text-slate-500">{r.sport}</div>}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{fmtDateTime(r.created_at)}</td>

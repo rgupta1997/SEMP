@@ -5,11 +5,11 @@ import type { Prisma } from '../../infra/prisma.js';
 export const last10 = (s?: string | null): string => (s ?? '').replace(/\D/g, '').slice(-10);
 
 // Apply any pending user_invitations addressed to this user's mobile, then mark
-// them accepted. Called from buildAuthContext so it runs on every login / /me —
+// them accepted. Called from buildAuthContext so it runs on every login / /me -
 // but only writes when there is actually a pending invite for the number (a single
 // indexed SELECT otherwise).
 //
-// Best-effort and defensive: this is on the hot auth path, so it NEVER throws — a
+// Best-effort and defensive: this is on the hot auth path, so it NEVER throws - a
 // bad/orphaned invite is logged and skipped (left pending) rather than breaking
 // sign-in. No new PrismaClient; uses the shared one passed in.
 export async function applyUserInvitations(prisma: Prisma, user: { id: string; phone?: string | null }): Promise<void> {
@@ -34,7 +34,7 @@ export async function applyUserInvitations(prisma: Prisma, user: { id: string; p
             create: { user_id: user.id, organization_id: inv.target_id, role: inv.role ?? 'member' },
           });
         } else if (inv.target_type === 'championship_organiser') {
-          if (!organiserRole) continue; // can't resolve the role — leave it pending
+          if (!organiserRole) continue; // can't resolve the role - leave it pending
           await prisma.user_championship_roles.upsert({
             where: { user_id_championship_id_role_id: { user_id: user.id, championship_id: inv.target_id, role_id: organiserRole.id } },
             update: {},
