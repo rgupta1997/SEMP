@@ -103,17 +103,102 @@ describe('participation points', () => {
   });
 });
 
-describe('position points are withheld until the discipline is decided', () => {
-  const bracket = [fx('A', 'B', 2, 1, 'SF'), fx('C', 'D', 3, 0, 'SF'), fx('A', 'C', 1, 0, 'Final')];
+describe('placement floors accrue progressively, round by round', () => {
+  const rule: StandingsRule = { scheme: 'placement', points: { winner: 7, runner_up: 5, semi_finalist: 3, quarter_finalist: 1 }, participation: 1 };
 
-  it('placement awards nothing while undecided, full points once decided', () => {
-    const rule: StandingsRule = { scheme: 'placement', points: { winner: 7, runner_up: 5, semi_finalist: 3 }, participation: 1 };
-    const undecided = byId(runScheme(bracket, rule, false));
-    expect(undecided.A.points).toBe(1); // participation only — no placement yet
-    expect(undecided.A.detail.winner).toBeUndefined();
-    const decided = byId(runScheme(bracket, rule, true));
-    expect(decided.A.points).toBe(8); // winner 7 + participation 1
+  it('banks the semi-finalist floor as soon as a team wins through to the semis', () => {
+    // Only the QFs are in: A/C/E/G reached the semis, B/D/F/H are out below them.
+    const rows = byId(runScheme([
+      fx('A', 'B', 2, 1, 'QF'), fx('C', 'D', 3, 0, 'QF'),
+      fx('E', 'F', 1, 0, 'QF'), fx('G', 'H', 2, 0, 'QF'),
+    ], rule));
+    // Reached the semis → semi-finalist floor, credited immediately (no final yet).
+    for (const t of ['A', 'C', 'E', 'G']) {
+      expect(rows[t].points).toBe(3);
+      expect(rows[t].detail).toMatchObject({ semi_finalist: 1 });
+    }
+    // Lost the QF → quarter-finalist points (configured), so no participation top-up.
+    for (const t of ['B', 'D', 'F', 'H']) {
+      expect(rows[t].points).toBe(1);
+      expect(rows[t].detail).toMatchObject({ quarter_finalist: 1 });
+      expect(rows[t].detail.participation).toBeUndefined();
+    }
   });
+
+  it('upgrades the floor to runner-up the moment a team reaches the final', () => {
+    // QFs + SFs played, final still pending: A and E reached the final.
+    const rows = byId(runScheme([
+      fx('A', 'B', 2, 1, 'QF'), fx('C', 'D', 3, 0, 'QF'),
+      fx('E', 'F', 1, 0, 'QF'), fx('G', 'H', 2, 0, 'QF'),
+      fx('A', 'C', 1, 0, 'SF'), fx('E', 'G', 2, 1, 'SF'),
+    ], rule));
+    expect(rows.A.points).toBe(5); // reached final → runner-up floor
+    expect(rows.E.points).toBe(5);
+    expect(rows.C.points).toBe(3); // lost SF → stays at semi-finalist
+    expect(rows.G.points).toBe(3);
+  });
+});
+
+describe('placement participation is a sub-semis consolation only', () => {
+  it('awards participation to a QF loser when no quarter-finalist points are configured', () => {
+    const rule: StandingsRule = { scheme: 'placement', points: { winner: 7, runner_up: 5, semi_finalist: 3 }, participation: 1 };
+    const rows = byId(runScheme([fx('A', 'B', 2, 1, 'QF')], rule));
+    expect(rows.A.points).toBe(3); // reached the semis
+    expect(rows.A.detail.participation).toBeUndefined();
+    expect(rows.B.points).toBe(1); // no QF points → consolation participation
+    expect(rows.B.detail).toMatchObject({ participation: 1 });
+  });
+
+  it('does not give participation to anyone who reached the semis', () => {
+    const rule: StandingsRule = { scheme: 'placement', points: { winner: 7, runner_up: 5, semi_finalist: 3 }, participation: 1 };
+    // 4-team bracket: everyone reaches at least the semis, so nobody gets participation.
+    const rows = byId(runScheme([
+      fx('A', 'B', 2, 1, 'SF'), fx('C', 'D', 3, 0, 'SF'), fx('A', 'C', 1, 0, 'Final'),
+    ], rule));
+    for (const t of ['A', 'B', 'C', 'D']) expect(rows[t].detail.participation).toBeUndefined();
+    expect(rows.A.points).toBe(7);
+    expect(rows.B.points).toBe(3);
+  });
+});
+
+describe('placement byes earn the reached-stage floor', () => {
+  const rule: StandingsRule = { scheme: 'placement', points: { winner: 7, runner_up: 5, semi_finalist: 3, quarter_finalist: 1 }, participation: 1 };
+  const bye = (team: string, round: string): SchemeFixture => ({
+    status: 'bye', round,
+    home_team_id: team, away_team_id: null,
+    home_org_id: team, away_org_id: null,
+    home_score: null, away_score: null, winner_team_id: null,
+  });
+
+  it('a bye into the semis banks the semi-finalist floor with no match played', () => {
+    const rows = byId(runScheme([bye('A', 'QF')], rule));
+    expect(rows.A.points).toBe(3);
+    expect(rows.A.detail).toMatchObject({ semi_finalist: 1 });
+    expect(rows.A).toMatchObject({ played: 0 }); // a bye is not a played match
+  });
+
+  it('a bye into the final banks the runner-up floor', () => {
+    const rows = byId(runScheme([bye('A', 'SF')], rule));
+    expect(rows.A.points).toBe(5);
+    expect(rows.A.detail).toMatchObject({ runner_up: 1 });
+  });
+
+  it('does not double-count a bye followed by a loss at that stage', () => {
+    // A byes into the semis, then loses the SF; B reaches the semis the normal way.
+    const rows = byId(runScheme([
+      bye('A', 'QF'),
+      fx('B', 'C', 2, 0, 'QF'),
+      fx('B', 'A', 2, 1, 'SF'),
+    ], rule));
+    expect(rows.A.points).toBe(3); // semi-finalist floor, credited once
+    expect(rows.A.detail).toMatchObject({ semi_finalist: 1 });
+    expect(rows.B.points).toBe(5); // B won through to the final → runner-up floor
+    expect(rows.C.points).toBe(1); // lost the QF → quarter-finalist points
+  });
+});
+
+describe('medal position points are withheld until the discipline is decided', () => {
+  const bracket = [fx('A', 'B', 2, 1, 'SF'), fx('C', 'D', 3, 0, 'SF'), fx('A', 'C', 1, 0, 'Final')];
 
   it('medal awards no medals while undecided', () => {
     const rule: StandingsRule = { scheme: 'medal', gold: 5, silver: 3, bronze: 1, participation: 0 };

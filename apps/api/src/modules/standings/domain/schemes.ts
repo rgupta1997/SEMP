@@ -86,11 +86,28 @@ function teamOrgMap(fixtures: SchemeFixture[]): Map<string, string> {
   return m;
 }
 
-// Knockout placement candidates a completed fixture implies. A team's final
-// placement is the best-scoring of its candidates (so a 3rd-place win beats the
-// implicit "semi-finalist" from losing the semi), which sidesteps any ordering
-// concerns between rounds.
+// Knockout placement candidates a completed fixture implies. A team's placement is
+// the best-scoring of its candidates, so points accrue progressively as a "floor":
+// the moment a team wins through to the next stage it earns that stage's minimum
+// placement (the worst a team at that stage can finish), then upgrades it when the
+// stage's own match resolves. Winning a QF means you've *reached* the semis, so you
+// bank the semi-finalist floor right away — without waiting for the final to be
+// played. Taking the best of all candidates sidesteps ordering concerns between
+// rounds (a 3rd-place win beats the semi_finalist floor; a final win beats the
+// runner_up floor banked for reaching the final).
 function placementCandidates(f: SchemeFixture): Array<[string, StandingsPlacement]> {
+  // A bye auto-advances its lone team to the next round with no opponent and no
+  // result, so it earns the same "reached the next stage" floor a winner of this
+  // round would. Byes only ever occur in the opening round (knockout.ts).
+  if (f.status === 'bye') {
+    const team = f.home_team_id ?? f.away_team_id;
+    if (!team) return [];
+    switch (f.round) {
+      case 'SF': return [[team, 'runner_up']]; // bye into the final
+      case 'QF': return [[team, 'semi_finalist']]; // bye into the semis
+      default: return []; // earlier rounds (R16, R32, …) have no canonical placement
+    }
+  }
   if (!f.winner_team_id) return [];
   const winner = f.winner_team_id;
   const loser = f.home_team_id === winner ? f.away_team_id : f.home_team_id;
@@ -105,9 +122,11 @@ function placementCandidates(f: SchemeFixture): Array<[string, StandingsPlacemen
       if (loser) out.push([loser, 'fourth_place']);
       break;
     case 'SF':
+      out.push([winner, 'runner_up']); // reached the final → runner-up floor
       if (loser) out.push([loser, 'semi_finalist']);
       break;
     case 'QF':
+      out.push([winner, 'semi_finalist']); // reached the semis → semi-finalist floor
       if (loser) out.push([loser, 'quarter_finalist']);
       break;
     default:
@@ -130,17 +149,19 @@ const PLACEMENT_SPECIFICITY: StandingsPlacement[] = [
   'winner', 'runner_up', 'third_place', 'fourth_place', 'semi_finalist', 'quarter_finalist',
 ];
 
-function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'placement' }>, decided: boolean): OrgTally[] {
+function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'placement' }>): OrgTally[] {
   // Base P/W/L from the knockout results (no league points), then layer placement
-  // points — but only once the discipline is decided (the final has been played).
+  // points. Unlike the medal scheme these accrue progressively round by round — each
+  // team holds the floor of the highest stage it has reached (see placementCandidates),
+  // so the table is live throughout the bracket rather than blank until the final.
   const table = leagueTally(fixtures, 0, 0, 0);
-  if (!decided) return [...table.values()];
   const teamOrg = teamOrgMap(fixtures);
 
-  // All placements each team earned across the bracket.
+  // All placements each team earned across the bracket. Byes count here (they grant
+  // a reached-the-next-stage floor) even though leagueTally ignores them as unplayed.
   const candidates = new Map<string, Set<StandingsPlacement>>();
   for (const f of fixtures) {
-    if (f.status !== 'completed') continue;
+    if (f.status !== 'completed' && f.status !== 'bye') continue;
     for (const [teamId, placement] of placementCandidates(f)) {
       let set = candidates.get(teamId);
       if (!set) { set = new Set(); candidates.set(teamId, set); }
@@ -148,6 +169,8 @@ function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule,
     }
   }
 
+  // Orgs that banked a scored placement — they do NOT also get participation.
+  const placed = new Set<string>();
   for (const [teamId, earned] of candidates) {
     const chosen = PLACEMENT_SPECIFICITY.find((p) => earned.has(p) && rule.points[p] !== undefined);
     if (!chosen) continue;
@@ -157,6 +180,19 @@ function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule,
     if (!row) { row = emptyTally(orgId); table.set(orgId, row); }
     row.points += rule.points[chosen]!;
     row.detail[chosen] = (row.detail[chosen] ?? 0) + 1;
+    placed.add(orgId);
+  }
+
+  // Participation is a consolation floor, not a universal top-up: it goes only to
+  // orgs knocked out below the semis with no placement point to show for it (so if
+  // quarter-finalist points are configured, QF losers take those instead). Anyone
+  // who reached the semis already carries a higher placement floor.
+  if (rule.participation > 0) {
+    for (const row of table.values()) {
+      if (placed.has(row.organization_id)) continue;
+      row.points += rule.participation;
+      row.detail.participation = (row.detail.participation ?? 0) + 1;
+    }
   }
   return [...table.values()];
 }
@@ -194,14 +230,18 @@ function medalScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { s
   return rows;
 }
 
-// Run the scheme matching `rule`, then layer participation points (awarded once to
-// every organization that took part). `decided` gates placement/medal position
-// points until the discipline is concluded; league points always accrue live.
+// Run the scheme matching `rule`. For league_points/medal/custom, participation is a
+// flat top-up added to every org that took part; placement handles participation
+// itself (a sub-semis consolation floor). `decided` gates only the medal scheme's
+// position points until the discipline is concluded — placement now accrues live,
+// round by round, and league points always have.
 export function runScheme(fixtures: SchemeFixture[], rule: StandingsRule, decided = true): OrgTally[] {
   let tallies: OrgTally[];
   switch (rule.scheme) {
     case 'league_points': tallies = leaguePointsScheme(fixtures, rule); break;
-    case 'placement': tallies = placementScheme(fixtures, rule, decided); break;
+    // Placement folds participation in itself (consolation floor for sub-semis exits),
+    // so it returns directly rather than taking the universal top-up below.
+    case 'placement': return placementScheme(fixtures, rule);
     case 'medal': tallies = medalScheme(fixtures, rule, decided); break;
     case 'custom': tallies = customScheme(fixtures); break;
   }

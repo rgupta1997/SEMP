@@ -98,7 +98,7 @@ export function MatchConsolePage() {
       ) : (
         <>
           {def.archetype === 'time'
-            ? <ManualResult fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} onDone={done} />
+            ? <ManualResult fixture={fixture} fixtureId={fixtureId!} def={def} invalidate={invalidate} onDone={done} />
             : <LiveConsole key={fixtureId} fixture={fixture} fixtureId={fixtureId!} def={def} live={live} invalidate={invalidate} onDone={done} />}
 
           {fixture.point_scheme === 'custom' && (
@@ -323,6 +323,24 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
     save(ns, log, st, v.complete, v.complete ? () => { setStatus('completed'); onDone(); } : undefined, opts);
   };
 
+  // Manual override for non-cricket sports: type the headline result directly when
+  // the live tally went wrong or wasn't used. Writes the numbers into the matching
+  // state fields (so live_state stays consistent with the headline), then optionally
+  // completes. 'auto' winner is left to `save` to derive from the headline.
+  const applyDirect = (a: number, b: number, win: 'auto' | 'home' | 'away' | 'draw', complete: boolean) => {
+    const ns: MatchState = { ...state, segScores: [...state.segScores] };
+    if (def.archetype === 'sets' || def.archetype === 'rally') { ns.segsA = a; ns.segsB = b; }
+    else { ns.a = a; ns.b = b; }
+    setState(ns);
+    const st = complete ? 'completed' : status === 'scheduled' ? 'live' : status;
+    setStatus(st);
+    const opts: { winner?: string | null } = {};
+    if (win === 'home') opts.winner = fixture.home_team_id;
+    else if (win === 'away') opts.winner = fixture.away_team_id;
+    else if (win === 'draw') opts.winner = null;
+    save(ns, log, st, complete, complete ? () => { setStatus('completed'); onDone(); } : undefined, 'winner' in opts ? opts : undefined);
+  };
+
   const h = headline(def, state);
   const live_ = status === 'live';
   const completed = status === 'completed' || status === 'confirmed';
@@ -415,10 +433,13 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
               </CardBody>
             </Card>
 
-            {def.archetype === 'cricket' && (
+            {def.archetype === 'cricket' ? (
               <CricketQuickResult key={`${state.runsA}-${state.wktA}-${state.runsB}-${state.wktB}`}
                 state={state} homeName={homeName} awayName={awayName}
                 currentNotes={fixture.notes ?? ''} pending={persist.isPending} onApply={applyQuick} />
+            ) : (
+              <DirectResult key={`${h.a}-${h.b}`} def={def} homeName={homeName} awayName={awayName}
+                initialA={h.a} initialB={h.b} pending={persist.isPending} onApply={applyDirect} />
             )}
           </div>
         </div>
@@ -541,6 +562,50 @@ function CricketQuickResult({ state, homeName, awayName, currentNotes, pending, 
   );
 }
 
+// Non-cricket fallback: type the headline result directly (points for points sports,
+// segments won for sets/rally) and pick the winner, when the live deck went wrong or
+// wasn't used. Keyed by the live headline upstream so it re-seeds as tapping changes it.
+function DirectResult({ def, homeName, awayName, initialA, initialB, pending, onApply }:
+  { def: SportDef; homeName: string; awayName: string; initialA: number; initialB: number; pending: boolean;
+    onApply: (a: number, b: number, win: 'auto' | 'home' | 'away' | 'draw', complete: boolean) => void }) {
+  const [a, setA] = useState(String(initialA));
+  const [b, setB] = useState(String(initialB));
+  const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>('auto');
+  const num = (s: string) => Math.max(0, Math.floor(Number(s) || 0));
+  const unit = def.archetype === 'sets' || def.archetype === 'rally' ? `${def.segLabel.toLowerCase()}s won` : 'points';
+
+  return (
+    <Card>
+      <CardHeader title="Enter result directly" subtitle={`Override the live tally — type the final ${unit} if scoring went wrong.`} />
+      <CardBody className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="mb-1 truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</div>
+            <Input type="number" min={0} value={a} onChange={(e) => setA(e.target.value)} className="text-center" aria-label={`${homeName} ${unit}`} />
+          </div>
+          <div>
+            <div className="mb-1 truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</div>
+            <Input type="number" min={0} value={b} onChange={(e) => setB(e.target.value)} className="text-center" aria-label={`${awayName} ${unit}`} />
+          </div>
+        </div>
+        <div className="text-[10px] uppercase tracking-wide text-slate-400">{unit}</div>
+        <Field label="Winner">
+          <Select value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
+            <option value="auto">Auto (from score)</option>
+            <option value="home">{homeName}</option>
+            <option value="away">{awayName}</option>
+            <option value="draw">Tie / draw</option>
+          </Select>
+        </Field>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" disabled={pending} onClick={() => onApply(num(a), num(b), winner, false)}>Apply (keep live)</Button>
+          <Button size="sm" disabled={pending} onClick={() => onApply(num(a), num(b), winner, true)}>Save &amp; complete</Button>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
 function SecondaryStatus({ fixtureId, status, label, variant, invalidate, onDone }:
   { fixtureId: string; status: string; label: string; variant: 'outline' | 'danger'; invalidate: (string | null)[]; onDone: () => void }) {
   // Go through /live (assigned-official authorized), not the organiser-only /fixtures/:id.
@@ -554,41 +619,58 @@ function SecondaryStatus({ fixtureId, status, label, variant, invalidate, onDone
 }
 
 /* ----------------------------- Manual result (time/measured sports) ----------------------------- */
-function ManualResult({ fixture, fixtureId, invalidate, onDone }: { fixture: any; fixtureId: string; invalidate: (string | null)[]; onDone: () => void }) {
+function ManualResult({ fixture, fixtureId, def, invalidate, onDone }: { fixture: any; fixtureId: string; def: SportDef; invalidate: (string | null)[]; onDone: () => void }) {
   const homeName = teamLabel(homeTeam(fixture));
   const awayName = teamLabel(awayTeam(fixture));
   const [home, setHome] = useState(fixture.home_score != null ? String(fixture.home_score) : '');
   const [away, setAway] = useState(fixture.away_score != null ? String(fixture.away_score) : '');
+  // Winner is chosen explicitly, not derived: for time events the fastest (lowest)
+  // wins, so "higher score" can't be assumed. 'auto' falls back to higher-score.
+  const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>('auto');
   const [notes, setNotes] = useState(fixture.notes ?? '');
   const saveResult = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/result`, body), invalidate);
 
   const hs = home === '' ? null : Number(home);
   const as = away === '' ? null : Number(away);
-  const winnerLabel = hs == null || as == null ? '—' : hs > as ? homeName : as > hs ? awayName : 'Draw';
+  const autoWinnerId = hs != null && as != null && hs !== as ? (hs > as ? fixture.home_team_id : fixture.away_team_id) : null;
+  const winnerId =
+    winner === 'home' ? fixture.home_team_id :
+    winner === 'away' ? fixture.away_team_id :
+    winner === 'draw' ? null : autoWinnerId;
+  const winnerLabel =
+    winnerId === fixture.home_team_id ? homeName :
+    winnerId === fixture.away_team_id ? awayName :
+    winner === 'draw' || (hs != null && as != null) ? 'Draw' : '—';
 
   const submit = (status: 'live' | 'completed') => {
-    const winner_team_id = hs != null && as != null && hs !== as ? (hs > as ? fixture.home_team_id : fixture.away_team_id) : null;
-    saveResult.mutate({ home_score: hs, away_score: as, winner_team_id, status, notes: notes || undefined },
+    saveResult.mutate({ home_score: hs, away_score: as, winner_team_id: winnerId, status, notes: notes || undefined },
       { onSuccess: status === 'completed' ? onDone : undefined, onError: (e: any) => toast.error(e.message) });
   };
 
   return (
     <Card>
-      <CardHeader title="Enter result" subtitle="Record the score — the winner is derived automatically." />
+      <CardHeader title="Enter result" subtitle="Record the result for this match, then confirm the winner." />
       <CardBody>
+        {def.manualHint && <p className="mb-3 rounded-lg bg-brand-50 px-3 py-2 text-xs text-slate-600 dark:bg-brand-500/10 dark:text-slate-300">{def.manualHint}</p>}
         <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-3">
           <label className="block">
             <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</span>
-            <Input type="number" min={0} value={home} onChange={(e) => setHome(e.target.value)} className="text-center text-lg font-bold" />
+            <Input type="number" value={home} onChange={(e) => setHome(e.target.value)} className="text-center text-lg font-bold" />
           </label>
           <span className="pb-2 text-lg font-black text-slate-400 dark:text-slate-500">:</span>
           <label className="block">
             <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</span>
-            <Input type="number" min={0} value={away} onChange={(e) => setAway(e.target.value)} className="text-center text-lg font-bold" />
+            <Input type="number" value={away} onChange={(e) => setAway(e.target.value)} className="text-center text-lg font-bold" />
           </label>
         </div>
-        <div className="mt-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-sm">
-          <span className="text-slate-500 dark:text-slate-400">Winner: </span><span className="font-semibold text-slate-800 dark:text-slate-200">{winnerLabel}</span>
+        <div className="mt-3">
+          <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Winner</span>
+          <Select value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
+            <option value="auto">Auto (higher score) — {winnerLabel}</option>
+            <option value="home">{homeName}</option>
+            <option value="away">{awayName}</option>
+            <option value="draw">Tie / draw</option>
+          </Select>
         </div>
         <div className="mt-4">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Result note</span>

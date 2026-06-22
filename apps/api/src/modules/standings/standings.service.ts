@@ -61,7 +61,7 @@ export async function recomputeStandings(prisma: Prisma, championshipId: string)
   const defaultRule = championshipRule ?? DEFAULT_STANDINGS_RULE;
 
   // Draws that still have an unplayed fixture — used to decide whether a discipline
-  // is concluded (placement/medal position points are withheld until it is).
+  // is concluded (the medal scheme's position points are withheld until it is).
   const pending = await prisma.fixtures.groupBy({
     by: ['tournament_discipline_id'],
     where: {
@@ -80,8 +80,11 @@ export async function recomputeStandings(prisma: Prisma, championshipId: string)
       format_id: true,
       tournament_sports: { select: { sport_id: true, tournament_id: true, format_id: true } },
       fixtures: {
-        where: { status: 'completed' },
+        // Byes are unplayed but advance a team, so the placement scheme credits the
+        // floor of the stage they reached — include them alongside completed results.
+        where: { status: { in: ['completed', 'bye'] } },
         select: {
+          status: true,
           round: true, home_team_id: true, away_team_id: true,
           home_score: true, away_score: true, winner_team_id: true, live_state: true,
           teams_fixtures_home_team_idToteams: { select: { organization_id: true } },
@@ -111,7 +114,7 @@ export async function recomputeStandings(prisma: Prisma, championshipId: string)
     const fixtures: SchemeFixture[] = d.fixtures.map((f) => {
       const cp = (f.live_state as any)?.custom_points ?? null;
       return {
-        status: 'completed',
+        status: f.status,
         round: f.round,
         home_team_id: f.home_team_id,
         away_team_id: f.away_team_id,
@@ -126,7 +129,8 @@ export async function recomputeStandings(prisma: Prisma, championshipId: string)
     });
 
     // A discipline is "decided" once its final has been played, or once no fixtures
-    // remain to be played. Until then placement/medal positions are withheld.
+    // remain to be played. This now gates only the (legacy) medal scheme's positions;
+    // the placement scheme accrues its floors live, round by round.
     const hasCompletedFinal = fixtures.some((f) => f.round === 'Final' && f.winner_team_id);
     const decided = hasCompletedFinal || !drawsWithPending.has(d.id);
 

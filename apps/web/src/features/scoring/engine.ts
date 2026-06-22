@@ -8,29 +8,64 @@ export interface SportDef {
   segLabel: string;     // Quarter / Half / Set / Game / Innings / Heat
   segMax: number;
   pointButtons: number[]; // increments offered per scoring tap
+  manualHint?: string;  // 'time' archetype only — guidance shown in the manual result form
 }
 
-// Keyed by sport name (lowercased). Anything unknown falls back to running points.
+// Keyed by sport name (lowercased). Anything unknown falls back to a running points
+// tally — but every seeded sport is listed below so its console is purpose-built
+// rather than guessed. Grouped by archetype so the scoring model is self-evident.
 const DEFS: Record<string, Partial<SportDef> & { archetype: Archetype }> = {
-  basketball: { archetype: 'points', segLabel: 'Quarter', segMax: 4, pointButtons: [1, 2, 3] },
-  netball: { archetype: 'points', segLabel: 'Quarter', segMax: 4, pointButtons: [1, 2, 3] },
-  football: { archetype: 'points', segLabel: 'Half', segMax: 2, pointButtons: [1] },
-  soccer: { archetype: 'points', segLabel: 'Half', segMax: 2, pointButtons: [1] },
-  futsal: { archetype: 'points', segLabel: 'Half', segMax: 2, pointButtons: [1] },
+  // ── Invasion / goal sports: running points tallied per period ────────────────
+  basketball:     { archetype: 'points', segLabel: 'Quarter', segMax: 4, pointButtons: [1, 2, 3] },
+  netball:        { archetype: 'points', segLabel: 'Quarter', segMax: 4, pointButtons: [1, 2, 3] },
+  football:       { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1] },
+  soccer:         { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1] },
+  futsal:         { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1] },
+  hockey:         { archetype: 'points', segLabel: 'Quarter', segMax: 4, pointButtons: [1] },
   'field hockey': { archetype: 'points', segLabel: 'Quarter', segMax: 4, pointButtons: [1] },
-  hockey: { archetype: 'points', segLabel: 'Quarter', segMax: 4, pointButtons: [1] },
-  handball: { archetype: 'points', segLabel: 'Half', segMax: 2, pointButtons: [1] },
-  'water polo': { archetype: 'points', segLabel: 'Quarter', segMax: 4, pointButtons: [1] },
-  kabaddi: { archetype: 'points', segLabel: 'Half', segMax: 2, pointButtons: [1, 2, 3] },
-  volleyball: { archetype: 'sets', segLabel: 'Set', segMax: 5, pointButtons: [1] },
-  tennis: { archetype: 'sets', segLabel: 'Set', segMax: 3, pointButtons: [1] },
-  badminton: { archetype: 'rally', segLabel: 'Game', segMax: 3, pointButtons: [1] },
-  'table tennis': { archetype: 'rally', segLabel: 'Game', segMax: 5, pointButtons: [1] },
-  'table-tennis': { archetype: 'rally', segLabel: 'Game', segMax: 5, pointButtons: [1] },
-  squash: { archetype: 'rally', segLabel: 'Game', segMax: 5, pointButtons: [1] },
-  cricket: { archetype: 'cricket', segLabel: 'Innings', segMax: 2, pointButtons: [0, 1, 2, 3, 4, 6] },
-  athletics: { archetype: 'time', segLabel: 'Heat', segMax: 1, pointButtons: [] },
-  swimming: { archetype: 'time', segLabel: 'Heat', segMax: 1, pointButtons: [] },
+  handball:       { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1] },
+  'water polo':   { archetype: 'points', segLabel: 'Quarter', segMax: 4, pointButtons: [1] },
+  kabaddi:        { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1, 2, 3] },
+  'kho-kho':      { archetype: 'points', segLabel: 'Innings', segMax: 2, pointButtons: [1, 2] },
+  frisbee:        { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1] },
+
+  // ── Set / game sports: win a segment, the most segments wins ─────────────────
+  volleyball:     { archetype: 'sets',  segLabel: 'Set',   segMax: 5, pointButtons: [1] },
+  throwball:      { archetype: 'sets',  segLabel: 'Set',   segMax: 3, pointButtons: [1] },
+  tennis:         { archetype: 'sets',  segLabel: 'Set',   segMax: 3, pointButtons: [1] },
+  'pool/snooker': { archetype: 'sets',  segLabel: 'Frame', segMax: 5, pointButtons: [1] },
+  carrom:         { archetype: 'sets',  segLabel: 'Board', segMax: 3, pointButtons: [1] },
+  badminton:      { archetype: 'rally', segLabel: 'Game',  segMax: 3, pointButtons: [1] },
+  'table tennis': { archetype: 'rally', segLabel: 'Game',  segMax: 5, pointButtons: [1] },
+  'table-tennis': { archetype: 'rally', segLabel: 'Game',  segMax: 5, pointButtons: [1] },
+  squash:         { archetype: 'rally', segLabel: 'Game',  segMax: 5, pointButtons: [1] },
+
+  // ── Cricket: ball-by-ball runs & wickets across innings ──────────────────────
+  cricket:        { archetype: 'cricket', segLabel: 'Innings', segMax: 2, pointButtons: [0, 1, 2, 3, 4, 6] },
+  'box cricket':  { archetype: 'cricket', segLabel: 'Innings', segMax: 2, pointButtons: [0, 1, 2, 3, 4, 6] },
+
+  // ── Measured / judged / combat: record the final result, confirm the winner ──
+  // These have no live tally — the official enters the outcome once. For time
+  // events the fastest (lowest) wins, so the winner is picked explicitly rather
+  // than derived from "higher score".
+  athletics:       { archetype: 'time', segLabel: 'Heat',    segMax: 1, pointButtons: [], manualHint: 'Enter each side’s time or mark, then pick the winner (fastest time, or best distance/height).' },
+  swimming:        { archetype: 'time', segLabel: 'Heat',    segMax: 1, pointButtons: [], manualHint: 'Enter each side’s time — fastest (lowest) wins, so confirm the winner below.' },
+  cycling:         { archetype: 'time', segLabel: 'Race',    segMax: 1, pointButtons: [], manualHint: 'Enter finish time or position, then pick the winner.' },
+  rowing:          { archetype: 'time', segLabel: 'Race',    segMax: 1, pointButtons: [], manualHint: 'Enter each crew’s time — fastest wins, confirm below.' },
+  weightlifting:   { archetype: 'time', segLabel: 'Lift',    segMax: 1, pointButtons: [], manualHint: 'Enter best total lifted in kg — highest wins.' },
+  powerlifting:    { archetype: 'time', segLabel: 'Lift',    segMax: 1, pointButtons: [], manualHint: 'Enter best total lifted in kg — highest wins.' },
+  shooting:        { archetype: 'time', segLabel: 'Round',   segMax: 1, pointButtons: [], manualHint: 'Enter total points scored — highest wins.' },
+  archery:         { archetype: 'time', segLabel: 'Round',   segMax: 1, pointButtons: [], manualHint: 'Enter total points scored — highest wins.' },
+  gymnastics:      { archetype: 'time', segLabel: 'Routine', segMax: 1, pointButtons: [], manualHint: 'Enter the judged score — highest wins.' },
+  yoga:            { archetype: 'time', segLabel: 'Round',   segMax: 1, pointButtons: [], manualHint: 'Enter the judged score — highest wins.' },
+  chess:           { archetype: 'time', segLabel: 'Game',    segMax: 1, pointButtons: [], manualHint: 'Enter points (win = 1, draw = ½ each), then pick the winner.' },
+  fencing:         { archetype: 'time', segLabel: 'Bout',    segMax: 1, pointButtons: [], manualHint: 'Enter touches scored — highest wins.' },
+  boxing:          { archetype: 'time', segLabel: 'Bout',    segMax: 1, pointButtons: [], manualHint: 'Enter judges’ points (or note a stoppage), then pick the winner.' },
+  wrestling:       { archetype: 'time', segLabel: 'Bout',    segMax: 1, pointButtons: [], manualHint: 'Enter points scored, then pick the winner.' },
+  judo:            { archetype: 'time', segLabel: 'Bout',    segMax: 1, pointButtons: [], manualHint: 'Enter points scored, then pick the winner.' },
+  taekwondo:       { archetype: 'time', segLabel: 'Bout',    segMax: 1, pointButtons: [], manualHint: 'Enter points scored, then pick the winner.' },
+  'arm wrestling': { archetype: 'time', segLabel: 'Best of 3', segMax: 1, pointButtons: [], manualHint: 'Enter rounds won (best of 3), then pick the winner.' },
+  'tug of war':    { archetype: 'time', segLabel: 'Best of 3', segMax: 1, pointButtons: [], manualHint: 'Enter pulls won (best of 3), then pick the winner.' },
 };
 
 export function sportDef(name?: string | null): SportDef {
