@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Compass, Landmark, Layers, LayoutGrid, LayoutList, Lock,
-  Mail, Medal, Menu, Moon, Plus, Sun, Trophy, User, Users, X,
+  Mail, Medal, Menu, Moon, Plus, Sun, Trophy, Upload, User, Users, X,
 } from 'lucide-react';
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
 import { BRAND } from '../lib/brand';
@@ -38,6 +38,7 @@ function navFor(role: AppRole): NavGroup[] {
     }, {
       group: 'Platform', items: [
         { to: '/platform/users', label: 'All Users', icon: <Users size={16} /> },
+        { to: '/platform/import-setup', label: 'Import Setup', icon: <Upload size={16} /> },
         { to: '/platform/demo-requests', label: 'Demo Requests', icon: <Mail size={16} /> },
       ],
     }];

@@ -6,6 +6,7 @@ import {
   SearchInput, Select, Spinner,
 } from '../../components/ui';
 import { BulkImportModal } from '../../components/BulkImportModal';
+import { downloadCsvTemplate } from '../../lib/import';
 import { UserFormModal, type UserFormBody } from '../../components/UserFormModal';
 
 interface UserRow {
@@ -14,13 +15,26 @@ interface UserRow {
   organizations?: { id: string; name: string } | null;
 }
 
-interface ImportResult { created: number; matched: number; total: number }
+interface ImportResult {
+  created: number; matched: number; total: number;
+  credentials: { name: string; email: string; phone: string | null; password: string }[];
+}
 
 const USER_IMPORT_FIELDS = [
-  { key: 'name', label: 'Name', required: true },
-  { key: 'email', label: 'Email', required: true, aliases: ['e-mail'] },
-  { key: 'phone', label: 'Phone', aliases: ['mobile', 'contact'] },
+  { key: 'name', label: 'Full Name', required: true, aliases: ['full name', 'fullname'] },
+  { key: 'email', label: 'Email', required: true, aliases: ['e-mail', 'email address'] },
+  { key: 'phone', label: 'Phone', required: true, aliases: ['mobile', 'contact', 'phone number', 'phone no', 'mobile number'] },
+  { key: 'institution', label: 'Institution', aliases: ['institution', 'college', 'organisation', 'organization'] },
 ];
+
+// Login-password rule for bulk-provisioned users: first word of the name
+// (lowercased, a-z0-9 only) + "@" + last four phone digits, e.g. rohit@7626.
+// Mirrors deriveProvisionedPassword on the server so the preview matches.
+function derivePassword(name: string, phone: string): string {
+  const first = (name.trim().split(/\s+/)[0] ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const last4 = (phone || '').replace(/\D/g, '').slice(-4);
+  return first && last4.length === 4 ? `${first}@${last4}` : 'demo123';
+}
 
 export function PlatformUsersPage() {
   const { data: users = [], isLoading } = useApi<UserRow[]>('/users');
@@ -135,7 +149,8 @@ export function PlatformUsersPage() {
           title="Import users"
           fields={USER_IMPORT_FIELDS}
           templateName="users-template.csv"
-          sampleRow={['Aarav Mehta', 'aarav@example.com', '9800000001']}
+          sampleRow={['Rohit Gupta', 'rohit.gupta@example.com', '7977177626', 'IIM Bangalore']}
+          derivedColumns={[{ label: 'Login password', compute: (r) => derivePassword(r.name, r.phone) }]}
           submitLabel="Import"
           extraControls={(
             <div className="grid gap-3 sm:grid-cols-3">
@@ -157,24 +172,77 @@ export function PlatformUsersPage() {
                   {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </Select>
               </Field>
+              <p className="sm:col-span-3 text-xs text-slate-500 dark:text-slate-400">
+                Each new user's password is set to <span className="font-mono">firstname@last4digits</span> of their phone
+                (e.g. <span className="font-mono">rohit@7626</span>) and they're asked to change it on first sign-in.
+              </p>
             </div>
           )}
           renderResult={(r) => (
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              <span className="font-bold text-emerald-600">{r.created}</span> created · {r.matched} already existed · {r.total} total.
-            </p>
+            <div className="space-y-3">
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                <span className="font-bold text-emerald-600">{r.created}</span> created · {r.matched} already existed · {r.total} total.
+              </p>
+              {r.credentials.length > 0 && (
+                <>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Generated logins (change required on first sign-in). Share these securely.
+                  </p>
+                  <div className="max-h-52 overflow-auto rounded-lg border border-slate-200 dark:border-slate-800">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                        <tr><th className="px-3 py-2">Name</th><th className="px-3 py-2">Email</th><th className="px-3 py-2">Password</th></tr>
+                      </thead>
+                      <tbody>
+                        {r.credentials.map((c) => (
+                          <tr key={c.email} className="border-t border-slate-100 dark:border-slate-800">
+                            <td className="px-3 py-1.5 text-slate-700 dark:text-slate-300">{c.name}</td>
+                            <td className="px-3 py-1.5 text-slate-600 dark:text-slate-300">{c.email}</td>
+                            <td className="px-3 py-1.5 font-mono text-xs text-slate-700 dark:text-slate-300">{c.password}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => downloadCsvTemplate(
+                      'user-credentials.csv',
+                      ['name', 'email', 'phone', 'password'],
+                      r.credentials.map((c) => [c.name, c.email, c.phone ?? '', c.password]),
+                    )}
+                  >
+                    ↓ Download credentials CSV
+                  </Button>
+                </>
+              )}
+            </div>
           )}
           onClose={() => setImporting(false)}
-          onSubmit={async (rows) => api<ImportResult>('POST', '/users/bulk', {
-            users: rows.map((row) => ({
-              name: row.name,
-              email: row.email,
-              phone: row.phone || undefined,
-            })),
-            organization_id: mapInstitution || undefined,
-            championship_id: mapEvent || undefined,
-            role_id: mapEvent && mapRole ? mapRole : undefined,
-          })}
+          onSubmit={async (rows) => {
+            // Send in chunks so each request stays under the server's batch cap and
+            // keeps per-request password hashing bounded; aggregate the results.
+            const CHUNK = 100;
+            const agg: ImportResult = { created: 0, matched: 0, total: 0, credentials: [] };
+            for (let i = 0; i < rows.length; i += CHUNK) {
+              const res = await api<ImportResult>('POST', '/users/bulk', {
+                users: rows.slice(i, i + CHUNK).map((row) => ({
+                  name: row.name,
+                  email: row.email,
+                  phone: row.phone || undefined,
+                })),
+                organization_id: mapInstitution || undefined,
+                championship_id: mapEvent || undefined,
+                role_id: mapEvent && mapRole ? mapRole : undefined,
+              });
+              agg.created += res.created;
+              agg.matched += res.matched;
+              agg.total += res.total;
+              agg.credentials.push(...res.credentials);
+            }
+            return agg;
+          }}
         />
       )}
     </div>

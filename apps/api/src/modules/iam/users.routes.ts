@@ -6,7 +6,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { ForbiddenError } from '../../shared/errors.js';
-import { DEFAULT_PASSWORD, findUserByPhone, hashProvisionedPassword, maskEmail, maskPhone, phoneLast10 } from './users.helpers.js';
+import { deriveProvisionedPassword, findUserByPhone, hashProvisionedPassword, maskEmail, maskPhone, phoneLast10 } from './users.helpers.js';
 
 // Fields safe to return to any caller (never the password hash).
 const PUBLIC_SELECT = {
@@ -150,52 +150,64 @@ export function makeUsersRouter(prisma: Prisma): Router {
       throw new ForbiddenError('You do not manage this championship');
     }
 
-    const defaultHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
-    const result = await prisma.$transaction(async (tx) => {
-      let created = 0;
-      let matched = 0;
-      const skipped: { label: string; reason: string }[] = [];
+    // Drop repeated emails within this batch so we don't try to create the same
+    // login twice (email is unique).
+    const seen = new Set<string>();
+    const rows = users.filter((u) => (seen.has(u.email) ? false : (seen.add(u.email), true)));
+    const emails = rows.map((r) => r.email);
 
-      for (const row of users) {
-        let user = await tx.users.findUnique({ where: { email: row.email }, select: { id: true, name: true } });
-        if (user) {
-          matched++;
-        } else {
-          const u = await tx.users.create({
-            data: {
-              name: row.name.trim() || row.email.split('@')[0],
-              email: row.email,
-              phone: row.phone ?? null,
-              password_hash: defaultHash,
-              organization_id: orgId,
-              must_change_password: true,
-            },
-            select: { id: true, name: true },
-          });
-          user = u;
-          created++;
-        }
+    // Which of these already exist? Those are "matched"; the rest are created.
+    const existing = await prisma.users.findMany({ where: { email: { in: emails } }, select: { email: true } });
+    const existingEmails = new Set(existing.map((u) => u.email));
 
-        if (orgId) {
-          await tx.organization_members.upsert({
-            where: { user_id_organization_id: { user_id: user.id, organization_id: orgId } },
-            update: {},
-            create: { user_id: user.id, organization_id: orgId, role: 'member' },
-          });
-        }
+    // Build the new logins, hashing passwords OUTSIDE the transaction — bcrypt is
+    // CPU-bound and doing it inside would hold the transaction open and time out.
+    const toCreate = await Promise.all(
+      rows.filter((r) => !existingEmails.has(r.email)).map(async (r) => {
+        const name = r.name.trim() || r.email.split('@')[0];
+        // Rule: first name + "@" + last 4 phone digits (e.g. rohit@7626).
+        const password = deriveProvisionedPassword(name, r.phone);
+        return { name, email: r.email, phone: r.phone ?? null, password, password_hash: await bcrypt.hash(password, 10) };
+      }),
+    );
 
-        if (championship_id && role_id) {
-          await tx.user_championship_roles.upsert({
-            where: { user_id_championship_id_role_id: { user_id: user.id, championship_id, role_id } },
-            update: {},
-            create: { user_id: user.id, championship_id, role_id, assigned_by: actor.id },
-          });
-        }
+    // Inside the transaction we only touch the DB (fast): bulk-insert the new
+    // users, then link everyone we saw to the org / championship role. skipDuplicates
+    // makes the membership/role links idempotent on re-import.
+    await prisma.$transaction(async (tx) => {
+      if (toCreate.length) {
+        await tx.users.createMany({
+          data: toCreate.map((u) => ({
+            name: u.name, email: u.email, phone: u.phone,
+            password_hash: u.password_hash, organization_id: orgId, must_change_password: true,
+          })),
+          skipDuplicates: true,
+        });
       }
-      return { created, matched, skipped, total: created + matched };
-    });
 
-    res.status(201).json(result);
+      const ids = (await tx.users.findMany({ where: { email: { in: emails } }, select: { id: true } })).map((u) => u.id);
+
+      if (orgId && ids.length) {
+        await tx.organization_members.createMany({
+          data: ids.map((user_id) => ({ user_id, organization_id: orgId, role: 'member' })),
+          skipDuplicates: true,
+        });
+      }
+      if (championship_id && role_id && ids.length) {
+        await tx.user_championship_roles.createMany({
+          data: ids.map((user_id) => ({ user_id, championship_id, role_id, assigned_by: actor.id })),
+          skipDuplicates: true,
+        });
+      }
+    }, { timeout: 30000 });
+
+    const created = toCreate.length;
+    res.status(201).json({
+      created,
+      matched: rows.length - created,
+      total: rows.length,
+      credentials: toCreate.map((u) => ({ name: u.name, email: u.email, phone: u.phone, password: u.password })),
+    });
   }));
 
   // Edit a user (super admin, or an owner/admin of the target's organization).

@@ -8,11 +8,19 @@ export interface BulkImportField extends ImportColumn {
   required?: boolean;
 }
 
+// A read-only preview column computed from each parsed row (not part of the
+// source file). Used e.g. to show the auto-generated password for user imports.
+export interface DerivedColumn {
+  label: string;
+  compute: (row: Record<string, string>) => string;
+}
+
 interface BulkImportModalProps<R> {
   title: string;
   fields: BulkImportField[];
   templateName: string;          // downloaded file name, e.g. 'users-template.csv'
   sampleRow?: string[];          // example values aligned to `fields` order
+  derivedColumns?: DerivedColumn[]; // extra computed preview columns
   submitLabel?: string;
   extraControls?: ReactNode;     // e.g. championship/role mapping above the importer
   onClose: () => void;
@@ -23,7 +31,7 @@ interface BulkImportModalProps<R> {
 const isEmail = (v: string) => /\S+@\S+\.\S+/.test(v);
 
 export function BulkImportModal<R>({
-  title, fields, templateName, sampleRow, submitLabel = 'Import',
+  title, fields, templateName, sampleRow, derivedColumns = [], submitLabel = 'Import',
   extraControls, onClose, onSubmit, renderResult,
 }: BulkImportModalProps<R>) {
   const qc = useQueryClient();
@@ -139,6 +147,7 @@ export function BulkImportModal<R>({
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
                 <tr>
                   {fields.map((f) => <th key={f.key} className="px-3 py-2">{f.label}</th>)}
+                  {derivedColumns.map((c) => <th key={c.label} className="px-3 py-2">{c.label}</th>)}
                   <th className="px-3 py-2">Status</th>
                 </tr>
               </thead>
@@ -148,6 +157,7 @@ export function BulkImportModal<R>({
                   return (
                     <tr key={i} className="border-t border-slate-100 dark:border-slate-800">
                       {fields.map((f) => <td key={f.key} className="px-3 py-1.5 text-slate-700 dark:text-slate-300">{r[f.key] || '-'}</td>)}
+                      {derivedColumns.map((c) => <td key={c.label} className="px-3 py-1.5 font-mono text-xs text-slate-700 dark:text-slate-300">{err ? '-' : (c.compute(r) || '-')}</td>)}
                       <td className={`px-3 py-1.5 ${err ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{err ?? 'OK'}</td>
                     </tr>
                   );

@@ -25,6 +25,7 @@ import { makeEnrollmentRouter } from '../modules/enrollment/enrollment.routes.js
 import { makeInvitationsRouter } from '../modules/enrollment/invitations.routes.js';
 import { makeUserInvitationsRouter } from '../modules/iam/user-invitations.routes.js';
 import { makeTeamsRouter } from '../modules/teams/teams.routes.js';
+import { makeMatrixImportRouter } from '../modules/import/matrix-import.routes.js';
 import { makeVenuesRouter, makeVenueGroundsRouter } from '../modules/venues/venues.routes.js';
 import { makeFixturesRouter } from '../modules/fixtures/fixtures.routes.js';
 import { makeNotificationsRouter } from '../modules/notifications/notifications.routes.js';
@@ -105,6 +106,8 @@ export function buildApp(prisma: Prisma) {
   api.use('/championships', makeEventsRouter(prisma));
   // Standings (materialized tables + scoring rules) - also under /championships/:id.
   api.use('/championships', makeStandingsRouter(prisma));
+  // Matrix import (sections × sport/discipline) - builds the whole setup from a sheet.
+  api.use('/championships', makeMatrixImportRouter(prisma));
   api.use('/venues', makeVenuesRouter(prisma));
   api.use('/venue-grounds', makeVenueGroundsRouter(prisma));
   api.use('/sponsors', makeCrudRouter(prisma.sponsors, {

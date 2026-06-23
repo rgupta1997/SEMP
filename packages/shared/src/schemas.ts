@@ -371,6 +371,33 @@ export const bulkCreateTeamsSchema = z.object({
   teams: z.array(createTeamSchema).min(1).max(100),
 });
 
+// ---------- Championship setup matrix import ----------
+// A 2D spreadsheet (section columns × sport/discipline rows) parsed by the web app
+// into this normalized shape. People are matched to existing users by phone only, so
+// phone is kept as a free string (we match on its digits and report misses) rather
+// than the strict phone validator - one malformed cell must not reject the upload.
+const matrixPerson = z.object({ name: z.string().default(''), phone: z.string().min(1) });
+export const matrixImportSchema = z.object({
+  default_format_id: uuid,                                  // required: tournament_sports.format_id is NOT NULL
+  // People whose phone matches no existing user can be provisioned as new logins
+  // (name+phone from the sheet, firstname@last4 password). Choose where: an explicit
+  // org, or each person's own section org (create_missing_in_section). When neither is
+  // set, unmatched people are skipped and reported.
+  create_missing_org_id: uuid.nullable().optional(),
+  create_missing_in_section: z.boolean().optional(),
+  sections: z.array(z.string().min(1)).min(1).max(50),
+  owners: z.array(matrixPerson.extend({ section: z.string().min(1) })).max(1000).default([]),
+  units: z.array(z.object({
+    sport: z.string().min(1),
+    discipline: z.string().min(1).nullable().default(null),
+    teams: z.array(z.object({
+      section: z.string().min(1),
+      captain: matrixPerson.nullish(),
+      poc: matrixPerson.nullish(),
+    })).max(200),
+  })).max(200),
+});
+
 // ---------- Phase 5: fixtures ----------
 export const generateFixturesSchema = z.object({
   // ordered team ids = seed order; empty -> use teams registered to the discipline
