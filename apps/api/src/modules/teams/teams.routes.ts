@@ -497,6 +497,10 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     if (entries.length > 0 && entries.every((e) => e.status === 'roster_locked')) {
       throw new BusinessRuleError('Every championship entry for this team is locked');
     }
+    if (data.role === 'captain' || data.role === 'vice_captain') {
+      const existing = await prisma.team_members.findFirst({ where: { team_id: teamId, role: data.role }, select: { id: true } });
+      if (existing) throw new BusinessRuleError(`This team already has a ${data.role === 'vice_captain' ? 'vice-captain' : 'captain'}`);
+    }
     const count = await prisma.team_members.count({ where: { team_id: teamId, is_active: true } });
     assertCanAddMember(looseAddRules(entries), count);
     return prisma.team_members.create({
@@ -575,6 +579,13 @@ export function makeTeamsRouter(prisma: Prisma): Router {
         if (count + 1 > rules.squad_max) {
           throw new BusinessRuleError(`Squad limit reached: at most ${rules.squad_max} members`);
         }
+        // Captain and vice-captain are unique per team; skip extras rather than failing the whole batch.
+        if (row.role === 'captain' || row.role === 'vice_captain') {
+          const roleLabel = row.role === 'vice_captain' ? 'vice-captain' : 'captain';
+          const takenInBatch = newMembers.some((m) => m.role === row.role);
+          const takenInDb = !takenInBatch && await tx.team_members.findFirst({ where: { team_id: team.id, role: row.role }, select: { id: true } });
+          if (takenInBatch || takenInDb) { skipped.push({ label, reason: `team already has a ${roleLabel}` }); continue; }
+        }
         onRoster.add(userId);
         newMembers.push({ team_id: team.id, user_id: userId, role: row.role, jersey_number: row.jersey_number ?? null });
         count++;
@@ -603,6 +614,13 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     await assertRosterEditable(prisma, team.id);
     const member = await prisma.team_members.findFirst({ where: { id: req.params.memberId, team_id: team.id } });
     if (!member) throw new NotFoundError('Team member');
+    if (req.body.role && (req.body.role === 'captain' || req.body.role === 'vice_captain') && req.body.role !== member.role) {
+      const existing = await prisma.team_members.findFirst({
+        where: { team_id: team.id, role: req.body.role, id: { not: member.id } },
+        select: { id: true },
+      });
+      if (existing) throw new BusinessRuleError(`This team already has a ${req.body.role === 'vice_captain' ? 'vice-captain' : 'captain'}`);
+    }
     const updated = await prisma.team_members.update({
       where: { id: member.id },
       data: req.body,
