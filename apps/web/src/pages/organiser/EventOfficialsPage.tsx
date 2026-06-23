@@ -151,7 +151,7 @@ export function EventOfficialsPage() {
           <span className="text-lg">ℹ️</span>
           <span>
             Officials assigned to this championship will see this championship's fixtures in their "My Matches" view and can score assigned matches.
-            Each championship has its own set of officials for proper multi-tenant isolation.
+            Each championship has its own set of officials.
           </span>
         </div>
       </Card>
