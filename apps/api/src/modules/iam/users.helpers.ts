@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { Prisma as PrismaNS } from '@prisma/client';
 import type { Prisma } from '../../infra/prisma.js';
 
 // Shared default for provisioned logins - they're forced to set their own on
@@ -43,4 +44,36 @@ export async function hashProvisionedPassword(password?: string | null) {
   const tempPassword = (password && password.trim()) || DEFAULT_PASSWORD;
   const password_hash = await bcrypt.hash(tempPassword, 10);
   return { tempPassword, password_hash };
+}
+
+// Default rule for bulk-provisioned logins: first word of the name (lowercased,
+// stripped to a-z0-9) + "@" + the last four phone digits, e.g.
+// "Rohit Gupta" / "7977177626" -> "rohit@7626". Falls back to the shared default
+// when the name or phone can't produce a valid pattern (so the row still imports).
+export function deriveProvisionedPassword(name: string, phone?: string | null): string {
+  const first = (name.trim().split(/\s+/)[0] ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const last4 = phoneDigits(phone).slice(-4);
+  return first && last4.length === 4 ? `${first}@${last4}` : DEFAULT_PASSWORD;
+}
+
+// Resolve many phones to users in one query, keyed by their last 10 digits (the
+// same key findUserByPhone matches on). Phones shorter than 10 digits are dropped.
+// Used by the matrix import to match POCs/captains to already-provisioned logins.
+export async function findUsersByPhones(
+  prisma: Prisma,
+  phones: Array<string | null | undefined>,
+): Promise<Map<string, { id: string; name: string; email: string; phone: string | null }>> {
+  const map = new Map<string, { id: string; name: string; email: string; phone: string | null }>();
+  const keys = [...new Set(phones.map((p) => phoneLast10(p)).filter((k) => k.length === 10))];
+  if (keys.length === 0) return map;
+  const rows = await prisma.$queryRaw<Array<{ id: string; name: string; email: string; phone: string | null }>>(
+    PrismaNS.sql`
+      select id, name, email, phone from users
+      where right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) in (${PrismaNS.join(keys)})`,
+  );
+  for (const r of rows) {
+    const k = phoneLast10(r.phone);
+    if (k.length === 10 && !map.has(k)) map.set(k, r);
+  }
+  return map;
 }

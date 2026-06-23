@@ -51,6 +51,7 @@ import { PlatformOverview } from './pages/platform/PlatformOverview';
 import { PlatformUsersPage } from './pages/platform/PlatformUsersPage';
 import { PlatformInstitutionsPage } from './pages/platform/PlatformInstitutionsPage';
 import { PlatformDemoRequestsPage } from './pages/platform/PlatformDemoRequestsPage';
+import { ChampionshipMatrixImportPage } from './pages/platform/ChampionshipMatrixImportPage';
 
 function HomeRedirect() {
   const { activeRole } = useAuth();
@@ -112,6 +113,7 @@ function AuthenticatedRoutes() {
         <Route path="/platform/users" element={<RequireRole roles={SYSTEM}><PlatformUsersPage /></RequireRole>} />
         <Route path="/platform/demo-requests" element={<RequireRole roles={SYSTEM}><PlatformDemoRequestsPage /></RequireRole>} />
         <Route path="/platform/organizations" element={<RequireRole roles={SYSTEM}><PlatformInstitutionsPage /></RequireRole>} />
+        <Route path="/platform/import-setup" element={<RequireRole roles={SYSTEM}><ChampionshipMatrixImportPage /></RequireRole>} />
         <Route path="/platform/:key" element={<RequireRole roles={SYSTEM}><PlatformResource /></RequireRole>} />
 
         {/* Notifications + help + design system - any authenticated user */}
