@@ -57,8 +57,8 @@ function parsePasted(text: string): { name?: string; email?: string; jersey_numb
 
 // Inline "Add players" block (not a popup). Lists the organization's members in a
 // table you tick to add, or paste a list. Shows the import result inline when done.
-function AddPlayersPanel({ teamId, institutionId, existingUserIds, remaining, onClose }:
-  { teamId: string; institutionId?: string; existingUserIds: Set<string>; remaining: number; onClose: () => void }) {
+function AddPlayersPanel({ teamId, institutionId, existingUserIds, remaining, takenRoles, onClose }:
+  { teamId: string; institutionId?: string; existingUserIds: Set<string>; remaining: number; takenRoles: Set<string>; onClose: () => void }) {
   const [tab, setTab] = useState('roster');
   // Source from the org's members (organization_members), not the legacy
   // users.organization_id column - a user can belong to several orgs, and members
@@ -144,10 +144,10 @@ function AddPlayersPanel({ teamId, institutionId, existingUserIds, remaining, on
             <label className="flex items-center gap-2">
               <span className="text-slate-500 dark:text-slate-400">Add as</span>
               <Select value={role} onChange={(e) => setRole(e.target.value)} className="w-auto">
-                <option value="player">player</option>
-                <option value="captain">captain</option>
-                <option value="manager">manager</option>
-                <option value="coach">coach</option>
+                <option value="player">Player</option>
+                <option value="captain" disabled={takenRoles.has('captain')}>Captain{takenRoles.has('captain') ? ' (taken)' : ''}</option>
+                <option value="vice_captain" disabled={takenRoles.has('vice_captain')}>Vice Captain{takenRoles.has('vice_captain') ? ' (taken)' : ''}</option>
+                <option value="substitute">Substitute</option>
               </Select>
             </label>
           </div>
@@ -161,36 +161,36 @@ function AddPlayersPanel({ teamId, institutionId, existingUserIds, remaining, on
                 {shown.length === 0 ? (
                   <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">No members match your search.</p>
                 ) : (
-                <div className="max-h-72 overflow-auto rounded-xl border border-slate-200 dark:border-slate-800">
-                <table className="min-w-full text-sm">
-                  <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800/60">
-                    <tr>
-                      <th className="w-10 px-3 py-2">
-                        <Checkbox checked={allChecked} indeterminate={selected.size > 0 && !allChecked}
-                          onChange={(v) => setSelected(v ? new Set(shown.map((u) => u.id)) : new Set())} />
-                      </th>
-                      <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Player</th>
-                      <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Email &amp; mobile</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {shown.map((u) => (
-                      <tr key={u.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60" onClick={() => toggle(u.id)}>
-                        <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox checked={selected.has(u.id)} onChange={() => toggle(u.id)} />
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex items-center gap-2">
-                            <Avatar name={u.name} size={28} />
-                            <span className="font-medium text-slate-800 dark:text-slate-200">{u.name}</span>
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{u.email}{u.phone ? ` · ${u.phone}` : ''}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                </div>
+                  <div className="max-h-72 overflow-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                    <table className="min-w-full text-sm">
+                      <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800/60">
+                        <tr>
+                          <th className="w-10 px-3 py-2">
+                            <Checkbox checked={allChecked} indeterminate={selected.size > 0 && !allChecked}
+                              onChange={(v) => setSelected(v ? new Set(shown.map((u) => u.id)) : new Set())} />
+                          </th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Player</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Email &amp; mobile</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {shown.map((u) => (
+                          <tr key={u.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60" onClick={() => toggle(u.id)}>
+                            <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                              <Checkbox checked={selected.has(u.id)} onChange={() => toggle(u.id)} />
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <Avatar name={u.name} size={28} />
+                                <span className="font-medium text-slate-800 dark:text-slate-200">{u.name}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{u.email}{u.phone ? ` · ${u.phone}` : ''}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </>
             )
@@ -331,6 +331,7 @@ export function RosterPage() {
   const belowMin = activeCount < rules.squad_min;
   const atMax = activeCount >= rules.squad_max;
   const existingUserIds = new Set<string>(members.map((m: any) => m.user_id).filter(Boolean));
+  const takenRoles = new Set<string>(members.map((m: any) => m.role));
   const remaining = Math.max(0, rules.squad_max - activeCount);
   const pocs = (team.organizations?.organization_members ?? []).map((m: any) => m.users).filter(Boolean);
 
@@ -395,139 +396,143 @@ export function RosterPage() {
 
       {tab === 'championships' && (
         <>
-      {entries.length === 0 && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
-          <p>This team isn’t in a championship yet. Build the squad now, then enter it into one or more championships when you’re ready to compete.</p>
-          {canManage && <Button size="sm" onClick={() => setEntering(true)}>Enter championship(s)</Button>}
-        </div>
-      )}
-
-      {entering && <EnterChampionshipsPanel team={team} onClose={() => setEntering(false)} />}
-
-      {/* Championship entries */}
-      <Card>
-        <CardHeader
-          title="Championships"
-          subtitle={entries.length === 0 ? 'Enter this team into a championship & discipline to compete.' : `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}`}
-          action={!allLocked && canManage && <Button size="sm" variant="subtle" onClick={() => setEntering(true)}>+ Enter championship</Button>}
-        />
-        <CardBody>
-          {entries.length === 0 ? (
-            <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">No championship entries yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {entries.map((e) => {
-                const er = e.entry_rules ?? rules;
-                const eLocked = e.status === 'roster_locked';
-                const belowMinE = activeCount < (er.squad_min ?? 1);
-                const hasDiscipline = !!e.tournament_discipline_id;
-                const choosing = choosingDiscipline?.id === e.id;
-                return (
-                  <div key={e.id} className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
-                    <div className="flex items-center justify-between gap-3 px-4 py-2.5">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{e.championships?.name ?? 'Championship'}</div>
-                        <div className={`truncate text-xs ${hasDiscipline ? 'text-slate-500 dark:text-slate-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                          {hasDiscipline ? `${entryDrawLabel(e)} · squad ${er.squad_min}–${er.squad_max}` : 'Discipline not chosen yet - pick one to lock & get fixtures'}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <StatusBadge status={e.status} />
-                        {!eLocked && canManage && (
-                          <>
-                            {!hasDiscipline && (
-                              <Button size="sm" variant={choosing ? 'outline' : 'subtle'} onClick={() => setChoosingDiscipline(choosing ? null : e)}>Choose discipline</Button>
-                            )}
-                            <Button size="sm" variant="ghost" disabled={lockEntry.isPending || belowMinE || !hasDiscipline}
-                              title={!hasDiscipline ? 'Choose a discipline first' : belowMinE ? `Need at least ${er.squad_min} players` : undefined}
-                              onClick={async () => {
-                                if (await confirmDialog({
-                                  title: 'Lock roster',
-                                  confirmLabel: 'Lock roster',
-                                  message: `Lock this squad for ${e.championships?.name ?? 'this championship'}? You won’t be able to add or change players for this entry until you unlock it. Any other championships this team is in stay editable.`,
-                                })) lockEntry.mutate(e.id, { onSuccess: () => toast.success('Entry locked'), onError: (err: any) => toast.error(err.message) });
-                              }}>
-                              Lock
-                            </Button>
-                            {hasDiscipline && (
-                              <button className="text-xs text-slate-500 hover:underline dark:text-slate-400" onClick={() => setChoosingDiscipline(choosing ? null : e)}>Change</button>
-                            )}
-                            <button className="text-sm text-rose-500 hover:underline"
-                              onClick={async () => { if (await confirmDialog({ title: 'Withdraw team', message: `Withdraw this team from ${e.championships?.name ?? 'the championship'}?`, confirmLabel: 'Withdraw' })) withdraw.mutate(e.id, { onSuccess: () => toast.success('Withdrawn'), onError: (err: any) => toast.error(err.message) }); }}>
-                              Withdraw
-                            </button>
-                          </>
-                        )}
-                        {eLocked && canManage && (
-                          <Button size="sm" variant="outline" disabled={unlockEntry.isPending}
-                            onClick={async () => {
-                              if (await confirmDialog({
-                                title: 'Unlock roster',
-                                confirmLabel: 'Unlock',
-                                message: `Unlock this team’s roster for ${e.championships?.name ?? 'this championship'} so you can add or change players? You can lock it again afterwards.`,
-                              })) unlockEntry.mutate(e.id, { onSuccess: () => toast.success('Roster unlocked'), onError: (err: any) => toast.error(err.message) });
-                            }}>
-                            Unlock
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                    {choosing && <ChooseDisciplinePanel team={team} entry={e} onClose={() => setChoosingDiscipline(null)} />}
-                  </div>
-                );
-              })}
+          {entries.length === 0 && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+              <p>This team isn’t in a championship yet. Build the squad now, then enter it into one or more championships when you’re ready to compete.</p>
+              {canManage && <Button size="sm" onClick={() => setEntering(true)}>Enter championship(s)</Button>}
             </div>
           )}
-        </CardBody>
-      </Card>
+
+          {entering && <EnterChampionshipsPanel team={team} onClose={() => setEntering(false)} />}
+
+          {/* Championship entries */}
+          <Card>
+            <CardHeader
+              title="Championships"
+              subtitle={entries.length === 0 ? 'Enter this team into a championship & discipline to compete.' : `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}`}
+              action={!allLocked && canManage && <Button size="sm" variant="subtle" onClick={() => setEntering(true)}>+ Enter championship</Button>}
+            />
+            <CardBody>
+              {entries.length === 0 ? (
+                <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">No championship entries yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {entries.map((e) => {
+                    const er = e.entry_rules ?? rules;
+                    const eLocked = e.status === 'roster_locked';
+                    const belowMinE = activeCount < (er.squad_min ?? 1);
+                    const hasDiscipline = !!e.tournament_discipline_id;
+                    const choosing = choosingDiscipline?.id === e.id;
+                    return (
+                      <div key={e.id} className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
+                        <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{e.championships?.name ?? 'Championship'}</div>
+                            <div className={`truncate text-xs ${hasDiscipline ? 'text-slate-500 dark:text-slate-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                              {hasDiscipline ? `${entryDrawLabel(e)} · squad ${er.squad_min}–${er.squad_max}` : 'Discipline not chosen yet - pick one to lock & get fixtures'}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <StatusBadge status={e.status} />
+                            {!eLocked && canManage && (
+                              <>
+                                {!hasDiscipline && (
+                                  <Button size="sm" variant={choosing ? 'outline' : 'subtle'} onClick={() => setChoosingDiscipline(choosing ? null : e)}>Choose discipline</Button>
+                                )}
+                                <Button size="sm" variant="ghost" disabled={lockEntry.isPending || belowMinE || !hasDiscipline}
+                                  title={!hasDiscipline ? 'Choose a discipline first' : belowMinE ? `Need at least ${er.squad_min} players` : undefined}
+                                  onClick={async () => {
+                                    if (await confirmDialog({
+                                      title: 'Lock roster',
+                                      confirmLabel: 'Lock roster',
+                                      message: `Lock this squad for ${e.championships?.name ?? 'this championship'}? You won’t be able to add or change players for this entry until you unlock it. Any other championships this team is in stay editable.`,
+                                    })) lockEntry.mutate(e.id, { onSuccess: () => toast.success('Entry locked'), onError: (err: any) => toast.error(err.message) });
+                                  }}>
+                                  Lock
+                                </Button>
+                                {hasDiscipline && (
+                                  <button className="text-xs text-slate-500 hover:underline dark:text-slate-400" onClick={() => setChoosingDiscipline(choosing ? null : e)}>Change</button>
+                                )}
+                                <button className="text-sm text-rose-500 hover:underline"
+                                  onClick={async () => { if (await confirmDialog({ title: 'Withdraw team', message: `Withdraw this team from ${e.championships?.name ?? 'the championship'}?`, confirmLabel: 'Withdraw' })) withdraw.mutate(e.id, { onSuccess: () => toast.success('Withdrawn'), onError: (err: any) => toast.error(err.message) }); }}>
+                                  Withdraw
+                                </button>
+                              </>
+                            )}
+                            {eLocked && canManage && (
+                              <Button size="sm" variant="outline" disabled={unlockEntry.isPending}
+                                onClick={async () => {
+                                  if (await confirmDialog({
+                                    title: 'Unlock roster',
+                                    confirmLabel: 'Unlock',
+                                    message: `Unlock this team’s roster for ${e.championships?.name ?? 'this championship'} so you can add or change players? You can lock it again afterwards.`,
+                                  })) unlockEntry.mutate(e.id, { onSuccess: () => toast.success('Roster unlocked'), onError: (err: any) => toast.error(err.message) });
+                                }}>
+                                Unlock
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                        {choosing && <ChooseDisciplinePanel team={team} entry={e} onClose={() => setChoosingDiscipline(null)} />}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardBody>
+          </Card>
         </>
       )}
 
       {tab === 'squad' && (
-      <Card>
-        <CardHeader title={`Squad · ${activeCount}/${rules.squad_max}`}
-          subtitle={allLocked ? 'Roster is locked. To edit, unlock an entry under the Championships tab.' : entries.length === 0 ? 'Add players now - squad limits apply per championship once entered' : belowMin ? `Add at least ${rules.squad_min - activeCount} more to lock` : 'Add players to complete your squad'}
-          action={!allLocked && canManage && <Button size="sm" variant="subtle" disabled={atMax} title={atMax ? 'Squad is full' : undefined} onClick={() => setAdding(true)}>+ Add players</Button>} />
-        <CardBody>
-          {adding && canManage && <AddPlayersPanel teamId={teamId!} institutionId={team.organizations?.id ?? team.organization_id} existingUserIds={existingUserIds} remaining={remaining} onClose={() => setAdding(false)} />}
-          <Progress
-            value={activeCount}
-            max={rules.squad_max}
-            tone={atMax ? 'rose' : belowMin ? 'amber' : 'brand'}
-            label={`Squad fill (min ${rules.squad_min})`}
-            className="mb-4"
-          />
-          {members.length === 0 ? (
-            <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">No players yet. Add members to get started.</p>
-          ) : (
-            <div className="space-y-2">
-              {members.map((m: any) => (
-                <div key={m.id} className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-2.5">
-                  <div className="flex items-center gap-3">
-                    <Avatar name={m.users?.name} size={36} />
-                    <div>
-                      <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{m.users?.name}{m.jersey_number != null && <span className="ml-2 text-slate-400 dark:text-slate-500">#{m.jersey_number}</span>}</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">{m.users?.email}{m.users?.phone ? ` · ${m.users.phone}` : ''}</div>
+        <Card>
+          <CardHeader title={`Squad · ${activeCount}/${rules.squad_max}`}
+            subtitle={allLocked ? 'Roster is locked. To edit, unlock an entry under the Championships tab.' : entries.length === 0 ? 'Add players now - squad limits apply per championship once entered' : belowMin ? `Add at least ${rules.squad_min - activeCount} more to lock` : 'Add players to complete your squad'}
+            action={!allLocked && canManage && <Button size="sm" variant="subtle" disabled={atMax} title={atMax ? 'Squad is full' : undefined} onClick={() => setAdding(true)}>+ Add players</Button>} />
+          <CardBody>
+            {adding && canManage && <AddPlayersPanel teamId={teamId!} institutionId={team.organizations?.id ?? team.organization_id} existingUserIds={existingUserIds} remaining={remaining} takenRoles={takenRoles} onClose={() => setAdding(false)} />}
+            <Progress
+              value={activeCount}
+              max={rules.squad_max}
+              tone={atMax ? 'rose' : belowMin ? 'amber' : 'brand'}
+              label={`Squad fill (min ${rules.squad_min})`}
+              className="mb-4"
+            />
+            {members.length === 0 ? (
+              <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">No players yet. Add members to get started.</p>
+            ) : (
+              <div className="space-y-2">
+                {members.map((m: any) => (
+                  <div key={m.id} className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-2.5">
+                    <div className="flex items-center gap-3">
+                      <Avatar name={m.users?.name} size={36} />
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{m.users?.name}{m.jersey_number != null && <span className="ml-2 text-slate-400 dark:text-slate-500">#{m.jersey_number}</span>}</div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">{m.users?.email}{m.users?.phone ? ` · ${m.users.phone}` : ''}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {!allLocked && canManage ? (
+                        <Select value={m.role} disabled={updateMember.isPending}
+                          onChange={(e) => updateMember.mutate({ memberId: m.id, role: e.target.value }, { onError: (err: any) => toast.error(err.message) })}
+                          aria-label="Member role">
+                          {TEAM_MEMBER_ROLE.map((r) => (
+                            <option key={r} value={r} disabled={(r === 'captain' || r === 'vice_captain') && takenRoles.has(r) && m.role !== r}>
+                              {titleCase(r)}{(r === 'captain' || r === 'vice_captain') && takenRoles.has(r) && m.role !== r ? ' (taken)' : ''}
+                            </option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <Badge tone={m.role === 'captain' ? 'brand' : 'slate'}>{titleCase(m.role)}</Badge>
+                      )}
+                      {!allLocked && canManage && <button onClick={async () => { if (await confirmDialog({ title: 'Remove member', message: `Remove ${m.users?.name ?? 'this member'} from the squad?`, confirmLabel: 'Remove' })) removeMember.mutate(m.id, { onError: (err: any) => toast.error(err.message) }); }} className="text-sm text-rose-500 hover:underline">Remove</button>}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {!allLocked && canManage ? (
-                      <Select value={m.role} disabled={updateMember.isPending}
-                        onChange={(e) => updateMember.mutate({ memberId: m.id, role: e.target.value }, { onError: (err: any) => toast.error(err.message) })}
-                        aria-label="Member role">
-                        {TEAM_MEMBER_ROLE.map((r) => <option key={r} value={r}>{titleCase(r)}</option>)}
-                      </Select>
-                    ) : (
-                      <Badge tone={m.role === 'captain' ? 'brand' : 'slate'}>{titleCase(m.role)}</Badge>
-                    )}
-                    {!allLocked && canManage && <button onClick={async () => { if (await confirmDialog({ title: 'Remove member', message: `Remove ${m.users?.name ?? 'this member'} from the squad?`, confirmLabel: 'Remove' })) removeMember.mutate(m.id, { onError: (err: any) => toast.error(err.message) }); }} className="text-sm text-rose-500 hover:underline">Remove</button>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardBody>
-      </Card>
+                ))}
+              </div>
+            )}
+          </CardBody>
+        </Card>
       )}
 
       {editing && <EditTeamModal team={team} onClose={() => setEditing(false)} />}
