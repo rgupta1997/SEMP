@@ -11,3 +11,6 @@ supabase/.temp/
 LIVE_SIMULATION_TEST.md
 TESTING_GUIDE.md
 .claude
+
+# Local Netlify folder
+.netlify
