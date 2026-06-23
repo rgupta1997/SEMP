@@ -5,8 +5,9 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { requireAuth, signToken } from '../../http/middleware/auth.js';
-import { NotFoundError, UnauthorizedError } from '../../shared/errors.js';
+import { ConflictError, NotFoundError, UnauthorizedError } from '../../shared/errors.js';
 import { buildAuthContext } from './me-context.js';
+import { findUserByPhone } from './users.helpers.js';
 
 function publicUser(u: any) {
   const { password_hash, ...rest } = u;
@@ -38,6 +39,13 @@ export function makeAuthRouter(prisma: Prisma): Router {
   // Creates a normal (non-admin) user with a password. Used to onboard captains/players.
   router.post('/register', validateBody(registerSchema), asyncHandler(async (req, res) => {
     const { name, email, password, phone } = req.body;
+
+    const existingEmail = await prisma.users.findUnique({ where: { email } });
+    if (existingEmail) throw new ConflictError('An account with this email already exists');
+
+    const existingPhone = await findUserByPhone(prisma, phone);
+    if (existingPhone) throw new ConflictError('An account with this phone number already exists');
+
     const password_hash = await bcrypt.hash(password, 10);
     const user = await prisma.users.create({
       data: { name, email, phone, password_hash, is_super_admin: false },
@@ -52,8 +60,11 @@ export function makeAuthRouter(prisma: Prisma): Router {
   router.post('/signup', validateBody(signupSchema), asyncHandler(async (req, res) => {
     const { name, email, password, phone } = req.body;
 
-    const existing = await prisma.users.findUnique({ where: { email } });
-    if (existing) throw new UnauthorizedError('An account with this email already exists');
+    const existingEmail = await prisma.users.findUnique({ where: { email } });
+    if (existingEmail) throw new ConflictError('An account with this email already exists');
+
+    const existingPhone = await findUserByPhone(prisma, phone);
+    if (existingPhone) throw new ConflictError('An account with this phone number already exists');
 
     const password_hash = await bcrypt.hash(password, 10);
     const user = await prisma.users.create({
