@@ -197,6 +197,7 @@ export function AppShell() {
                       <div className="border-b border-slate-100 px-4 py-2.5 dark:border-slate-700">
                         <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{ctx.user.name}</div>
                         <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.email}</div>
+                        {ctx.user.phone && <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.phone}</div>}
                       </div>
                       <button onClick={signOut} className="w-full px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">Sign out</button>
                     </div>
