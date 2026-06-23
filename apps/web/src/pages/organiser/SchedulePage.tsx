@@ -159,8 +159,17 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, venues, officials, tea
 function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, sportName, formatLabel, teamName, grounds, venues, officials, canManage }:
   { td: any; fixtures: any[]; fixturesLoading: boolean; fixturesPath: string; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
   // The championship-wide list is ordered by schedule; restore the per-draw
-  // pool → bracket order this card expects.
+  // pool → bracket order the visual (bracket / grid) view needs for layout.
   const fixtures = [...drawFixtures].sort((a, b) => (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0));
+  // The List view reads top-to-bottom, so order it chronologically (matching the
+  // official / participant match lists). bracket_position can collide across rounds,
+  // which interleaves them; scheduled time keeps rounds in play order. Unscheduled
+  // matches fall back to the draw order and sort last.
+  const listFixtures = [...drawFixtures].sort((a, b) => {
+    const ta = a.scheduled_at ? new Date(a.scheduled_at).getTime() : Infinity;
+    const tb = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Infinity;
+    return ta - tb || (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0);
+  });
   const isLoading = fixturesLoading;
   const generate = useApiMutation(() => api('POST', `/tournament-disciplines/${td.id}/fixtures/generate`, { params: {} }), [fixturesPath]);
   const [editing, setEditing] = useState<any | null>(null);
@@ -170,6 +179,10 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
   // Once any fixture has been played, regenerating would erase results - the server
   // refuses it, so disable the button and explain why rather than letting it 500.
   const hasPlayed = fixtures.some((f) => ['completed', 'walkover', 'bye'].includes(f.status) || f.home_score != null || f.away_score != null);
+  // Leagues generate incrementally (keep existing matches, add the new teams' fixtures),
+  // so the action stays available mid-tournament; knockout/pool draws rebuild from
+  // scratch and are blocked once anything's been played.
+  const isLeague = /league|round.?robin/i.test(formatLabel ?? '');
   const hasBracket = fixtures.some((f) => f.bracket_position != null);
   // Knockout draws show a bracket; everything else (league / round-robin /
   // groups) shows a results grid. Both are the "visual" view.
@@ -200,10 +213,12 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
           )}
           {canManage && <Button size="sm" variant="subtle" onClick={() => setCreating(true)}>+ Add fixture</Button>}
           {canManage && (
-            <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={generate.isPending || hasPlayed}
-              title={hasPlayed ? 'This draw has played matches - regenerating would erase those results.' : undefined}
-              onClick={() => generate.mutate(undefined, { onSuccess: () => toast.success('Draw generated'), onError: (e: any) => toast.error(e.message) })}>
-              {generate.isPending ? 'Generating…' : fixtures.length ? 'Regenerate' : 'Generate draw'}
+            <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={generate.isPending || (hasPlayed && !isLeague)}
+              title={isLeague && fixtures.length
+                ? 'Keeps existing matches and adds fixtures for newly-registered teams.'
+                : hasPlayed ? 'This draw has played matches - regenerating would erase those results.' : undefined}
+              onClick={() => generate.mutate(undefined, { onSuccess: () => toast.success(isLeague && fixtures.length ? 'New teams added' : 'Draw generated'), onError: (e: any) => toast.error(e.message) })}>
+              {generate.isPending ? 'Generating…' : fixtures.length ? (isLeague ? 'Add new teams' : 'Regenerate') : 'Generate draw'}
             </Button>
           )}
         </div>
@@ -217,7 +232,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
             : <RoundRobinGrid fixtures={fixtures} teamName={teamName} onSelect={canManage ? setEditing : () => {}} />
         ) : (
           <div className="space-y-1.5">
-            {fixtures.map((f) => (
+            {listFixtures.map((f) => (
               <div key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-sm">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 w-20">{f.round || 'Match'}</span>
                 <span className="flex-1 min-w-[180px] font-medium text-slate-700 dark:text-slate-300">
@@ -301,6 +316,11 @@ export function SchedulePage() {
       api('PATCH', `/fixtures/${fixtureId}`, { scheduled_at: whenIso, duration_minutes: durationMinutes }),
     [`/championships/${eventId}/fixtures`],
   );
+  // Send a placed match back to the unscheduled pool (clears its slot on the timeline).
+  const unschedule = useApiMutation(
+    (fixtureId: string) => api('PATCH', `/fixtures/${fixtureId}`, { scheduled_at: null }),
+    [`/championships/${eventId}/fixtures`],
+  );
   const { data: tournaments = [], isLoading: tournamentsLoading } = useApi<any[]>(`/tournaments?championship_id=${eventId}`);
   // Tournament lives in the shared header filter (single-select). '' before the
   // default kicks in, so fall back to the first tournament for data fetching.
@@ -336,6 +356,9 @@ export function SchedulePage() {
   // persist them onto the fixture.
   const placeMatch = (fixtureId: string, startISO: string, durationMinutes: number) => {
     place.mutate({ fixtureId, whenIso: startISO, durationMinutes }, { onSuccess: () => toast.success('Match scheduled'), onError: (e: any) => toast.error(e.message) });
+  };
+  const unscheduleMatch = (fixtureId: string) => {
+    unschedule.mutate(fixtureId, { onSuccess: () => toast.success('Match unscheduled'), onError: (e: any) => toast.error(e.message) });
   };
 
   // Tournament + Sport both live in the shared header filter (championship = route
@@ -374,8 +397,9 @@ export function SchedulePage() {
             fixtures={allFixtures}
             days={days}
             canManage={canManage}
-            placing={place.isPending}
+            placing={place.isPending || unschedule.isPending}
             onPlace={placeMatch}
+            onUnschedule={unscheduleMatch}
           />
         )
       ) : tsportsLoading ? (

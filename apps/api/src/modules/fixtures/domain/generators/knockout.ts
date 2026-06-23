@@ -26,6 +26,7 @@ export function generateKnockout(teams: TeamRef[], params: KnockoutParams = {}):
   }
 
   const fixtures: GeneratedFixture[] = [];
+  const byPosition = new Map<number, GeneratedFixture>();
 
   for (let r = 0; r < roundsCount; r++) {
     const matchesInRound = size / 2 ** (r + 1);
@@ -42,7 +43,7 @@ export function generateKnockout(teams: TeamRef[], params: KnockoutParams = {}):
       }
       const isBye = r === 0 && (home === null || away === null);
 
-      fixtures.push({
+      const fixture: GeneratedFixture = {
         round: roundLabel(teamsInRound),
         poolNumber: null,
         bracketPosition: position,
@@ -50,8 +51,26 @@ export function generateKnockout(teams: TeamRef[], params: KnockoutParams = {}):
         awayTeamId: away?.teamId ?? null,
         status: isBye ? 'bye' : 'scheduled',
         feedsInto,
-      });
+      };
+      fixtures.push(fixture);
+      byPosition.set(position, fixture);
     }
+  }
+
+  // A bye is auto-complete: its lone team advances with no match played, so seed that
+  // team straight into its next-round slot. The two children of a parent match feed it
+  // in slot order - the upper child (even local index) fills home, the lower fills away
+  // - matching the bracket layout. The bye fixture's winner is the advancing team.
+  for (let j = 0; j < size / 2; j++) {
+    const child = byPosition.get(offsets[0] + j);
+    if (!child || child.status !== 'bye' || child.feedsInto == null) continue;
+    const advancing = child.homeTeamId ?? child.awayTeamId;
+    if (!advancing) continue;
+    child.winnerTeamId = advancing;
+    const parent = byPosition.get(child.feedsInto);
+    if (!parent) continue;
+    if (j % 2 === 0) parent.homeTeamId = advancing;
+    else parent.awayTeamId = advancing;
   }
 
   if (params.thirdPlaceMatch) {

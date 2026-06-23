@@ -2,12 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
-import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Select, Spinner, StatusBadge, Textarea, BackButton, cn, toast } from '../../components/ui';
-import { awayTeam, disciplineLabel, eventInfo, eventLabel, homeTeam, teamLabel, venueLabel } from './fixtureHelpers';
+import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Select, Spinner, StatusBadge, Textarea, BackButton, cn, confirmDialog, toast } from '../../components/ui';
+import { awayTeam, disciplineLabel, eventInfo, eventLabel, homeTeam, sportName as sportNameOf, teamLabel, venueLabel } from './fixtureHelpers';
 import {
   headline, hydrate, reduce, sportDef, subLine,
   type Action, type LogEntry, type MatchState, type SportDef,
 } from '../../features/scoring/engine';
+import { resolveTemplate, tieTemplateFor, eventTemplateFor } from '../../features/scoring/templates';
+import {
+  hydrateTie, rubbersWon, tieWinner, tieTarget, rubberDef, decideRubber as decideRubberFn, reopenRubber as reopenRubberFn,
+  type TieState, type RubberInstance,
+} from '../../features/scoring/tie';
+import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
+import type { TieSpec, EventSpec, ScoringMode } from '@semp/shared';
 
 const SECONDARY: { status: string; label: string; variant: 'outline' | 'danger' }[] = [
   { status: 'walkover', label: 'Walkover', variant: 'outline' },
@@ -37,8 +44,11 @@ export function MatchConsolePage() {
   if (isLoading) return <Spinner />;
   if (!fixture) return <EmptyState icon="⚑" title="Match not found" description="This fixture isn't available to you." action={<Button onClick={() => navigate(back)}>Back</Button>} />;
 
-  const sportName = fixture.tournament_disciplines?.tournament_sports?.sports?.name;
-  const def = sportDef(sportName);
+  // The fixture's structure (single / tie / event) and scoring depth (detailed /
+  // manual) are now chosen by the official on the console (see ScoringTabs) rather than
+  // fixed by the discipline - so here we only need to know whether this sport can be an
+  // event (which has no two teams) to relax the "both teams set" guard below.
+  const canBeEvent = !!eventTemplateFor(sportNameOf(fixture));
   // Refresh the official list AND the host's championship views (results table +
   // live-computed standings) after any scoring change.
   const evId = eventInfo(fixture)?.id;
@@ -56,7 +66,9 @@ export function MatchConsolePage() {
   const notStarted = champStatus === 'draft' || champStatus === 'registration_open';
   // A match can't be scored until both sides are known - a TBD bracket slot (e.g. a
   // final waiting on its semis) has no teams to score. Mirror the server rule here.
-  const missingTeams = !fixture.home_team_id || !fixture.away_team_id;
+  // Sports that can be scored as a multi-competitor event have no two teams, so the
+  // check doesn't apply to them.
+  const missingTeams = !canBeEvent && (!fixture.home_team_id || !fixture.away_team_id);
 
   return (
     <div>
@@ -97,9 +109,7 @@ export function MatchConsolePage() {
         </Card>
       ) : (
         <>
-          {def.archetype === 'time'
-            ? <ManualResult fixture={fixture} fixtureId={fixtureId!} def={def} invalidate={invalidate} onDone={done} />
-            : <LiveConsole key={fixtureId} fixture={fixture} fixtureId={fixtureId!} def={def} live={live} invalidate={invalidate} onDone={done} />}
+          <ScoringTabs fixture={fixture} fixtureId={fixtureId!} live={live} invalidate={invalidate} onDone={done} />
 
           {fixture.point_scheme === 'custom' && (
             <div className="mt-5">
@@ -113,6 +123,104 @@ export function MatchConsolePage() {
         </>
       )}
     </div>
+  );
+}
+
+/* ----------------------------- Scoring tabs (structure + depth) ----------------------------- */
+type Structure = 'single' | 'tie' | 'event';
+
+// A pill toggle for picking among a few options (structure / scoring depth).
+function TabBar<T extends string>({ value, onChange, options, label }:
+  { value: T; onChange: (v: T) => void; options: { value: T; label: string }[]; label: string }) {
+  if (options.length < 2) return null;
+  return (
+    <div>
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</div>
+      <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-800/60">
+        {options.map((o) => (
+          <button key={o.value} type="button" onClick={() => onChange(o.value)}
+            className={cn('rounded-lg px-3 py-1.5 text-sm font-medium transition',
+              o.value === value ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-100' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200')}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Officials pick how to score this match here, not the organiser: the structure
+// (single / team tie / multi-competitor event - only those the sport supports) and the
+// depth (live point-by-point vs final score). Defaults to the sport's natural format
+// (and to whatever has already been scored on reload); switching tabs is non-destructive
+// since each structure keeps its own slice of live_state.
+function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
+  { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+  const sportName = sportNameOf(fixture);
+  const template = resolveTemplate(fixture);
+  const singleDef: SportDef = template.single ?? sportDef(sportName);
+  const tieSpec = (template.fixtureType === 'tie' && template.tie) ? template.tie : tieTemplateFor(sportName)?.tie;
+  const eventSpec = (template.fixtureType === 'event' && template.event) ? template.event : eventTemplateFor(sportName)?.event;
+
+  const structures: Structure[] = ['single', ...(tieSpec ? ['tie' as const] : []), ...(eventSpec ? ['event' as const] : [])];
+  // Default structure: an explicit stored config wins; otherwise the sport's natural
+  // format (event/tie sports default to those, everything else to a single match).
+  const storedType = fixture?.tournament_disciplines?.format_config?.scoring?.fixtureType as Structure | undefined;
+  const naturalDefault: Structure = eventSpec ? 'event' : tieSpec ? 'tie' : 'single';
+  const baseDefault: Structure = storedType && structures.includes(storedType) ? storedType : naturalDefault;
+
+  const [structure, setStructure] = useState<Structure>(baseDefault);
+  // Once the live snapshot arrives, snap to whatever's already been scored (so a
+  // half-finished tie/event reopens on the right tab).
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current || !live) return;
+    seeded.current = true;
+    if (live.live_state?.tie && tieSpec) setStructure('tie');
+    else if (live.live_state?.event && eventSpec) setStructure('event');
+  }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
+
+  // Measured/time single sports have no per-tick scoring, so they're manual-only.
+  const forcedManual = structure === 'single' && singleDef.archetype === 'time';
+  const storedMode = fixture?.tournament_disciplines?.format_config?.scoring?.scoringMode as ScoringMode | undefined;
+  const [mode, setMode] = useState<ScoringMode>(storedMode ?? (singleDef.archetype === 'time' ? 'manual' : 'detailed'));
+  const effectiveMode: ScoringMode = forcedManual ? 'manual' : mode;
+  const showDepth = structure !== 'event' && !forcedManual;
+  // Multi-competitor events default to a simple team ranking (which team did well); the
+  // detailed per-athlete console is kept available behind this toggle.
+  const [eventMode, setEventMode] = useState<'ranking' | 'detailed'>('ranking');
+
+  const structureLabel = (s: Structure) =>
+    s === 'tie' ? `Team tie · ${tieSpec?.rubbers.length ?? 0} rubbers`
+    : s === 'event' ? `Event · ${eventSpec?.subEvents.length ?? 0} sub-events`
+    : 'Single match';
+
+  return (
+    <>
+      {(structures.length > 1 || showDepth || structure === 'event') && (
+        <div className="mb-5 flex flex-wrap items-end gap-x-6 gap-y-3">
+          <TabBar label="Match structure" value={structure} onChange={setStructure}
+            options={structures.map((s) => ({ value: s, label: structureLabel(s) }))} />
+          {structure === 'event' ? (
+            <TabBar label="Scoring" value={eventMode} onChange={setEventMode}
+              options={[{ value: 'ranking', label: 'Ranking' }, { value: 'detailed', label: 'Detailed · per athlete' }]} />
+          ) : showDepth ? (
+            <TabBar label="Scoring" value={mode} onChange={setMode}
+              options={[{ value: 'detailed', label: 'Detailed · live' }, { value: 'manual', label: 'Manual · final score' }]} />
+          ) : null}
+        </div>
+      )}
+
+      {structure === 'event' && eventSpec
+        ? eventMode === 'ranking'
+          ? <EventRankingConsole key={`evr-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />
+          : <EventConsole key={`ev-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />
+        : structure === 'tie' && tieSpec
+          ? <TieConsole key={`tie-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={tieSpec} mode={effectiveMode} live={live} invalidate={invalidate} onDone={onDone} />
+          : effectiveMode === 'manual'
+            ? <ManualResult key={`man-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} invalidate={invalidate} onDone={onDone} />
+            : <LiveConsole key={`live-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} live={live} invalidate={invalidate} onDone={onDone} />}
+    </>
   );
 }
 
@@ -377,10 +485,22 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
                 </div>
               )}
 
-              {(def.archetype === 'sets' || def.archetype === 'rally') && (
+              {!!def.events?.length && def.archetype !== 'cricket' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <EventDeck side="A" name={homeName} def={def} team={homeTeam(fixture)} dispatch={dispatch} disabled={state.ended} />
+                  <EventDeck side="B" name={awayName} def={def} team={awayTeam(fixture)} dispatch={dispatch} disabled={state.ended} />
+                </div>
+              )}
+
+              {(def.archetype === 'sets' || def.archetype === 'rally') && !state.ended && (
                 <Button variant="outline" className="w-full" onClick={() => dispatch({ type: 'NEXT_SEG' })}>
                   End {def.segLabel.toLowerCase()} {state.seg} (award to leader)
                 </Button>
+              )}
+              {(def.archetype === 'sets' || def.archetype === 'rally') && state.ended && (
+                <p className="rounded-lg bg-brand-50 px-3 py-2 text-center text-sm font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
+                  {headline(def, state).a > headline(def, state).b ? homeName : awayName} win {headline(def, state).a}–{headline(def, state).b}. Use ↶ Undo to reopen.
+                </p>
               )}
               {def.archetype === 'points' && state.seg < def.segMax && !state.ended && (
                 <Button variant="outline" className="w-full" onClick={() => dispatch({ type: 'NEXT_SEG' })}>
@@ -462,7 +582,16 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
           <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-2xl dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Confirm final result</h3>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">This completes the match and updates standings.</p>
-            <div className="my-4 text-2xl font-black tabular-nums text-slate-900 dark:text-slate-100">{h.a} – {h.b}</div>
+            <div className="my-4 space-y-1">
+              <div className="flex items-center justify-between gap-4 text-base font-semibold text-slate-800 dark:text-slate-200">
+                <span className="min-w-0 truncate text-left">{homeName}</span>
+                <span className="tabular-nums text-2xl font-black text-slate-900 dark:text-slate-100">{h.a}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4 text-base font-semibold text-slate-800 dark:text-slate-200">
+                <span className="min-w-0 truncate text-left">{awayName}</span>
+                <span className="tabular-nums text-2xl font-black text-slate-900 dark:text-slate-100">{h.b}</span>
+              </div>
+            </div>
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" disabled={submitting} onClick={() => setConfirming(false)}>Cancel</Button>
               <Button className="flex-1" disabled={submitting} onClick={signOff}>{submitting ? 'Signing off…' : 'Sign off'}</Button>
@@ -474,6 +603,510 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
   );
 }
 
+/* ----------------------------- Tie console (rubbers) ----------------------------- */
+// A fixture made of several rubbers (e.g. TT team event MS/WS/MD/WD/XD). The tie owns
+// persistence (whole tie -> live_state.tie, headline = rubbers won); each rubber is
+// scored by the same per-contest deck. Detailed mode shows the live deck; manual mode
+// (and measured rubbers like pool/chess) just records the rubber winner.
+function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }:
+  { fixture: any; fixtureId: string; spec: TieSpec; mode: ScoringMode; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+  const homeName = teamLabel(homeTeam(fixture));
+  const awayName = teamLabel(awayTeam(fixture));
+
+  const [state, setState] = useState<TieState>(() => hydrateTie(live?.live_state?.tie, spec));
+  const [status, setStatus] = useState<string>(fixture.status);
+  const [submitting, setSubmitting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seeded.current && live) { setState(hydrateTie(live.live_state?.tie, spec)); seeded.current = true; }
+  }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- spec is stable per fixture
+
+  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
+
+  // Public ticker log: one line per decided rubber.
+  const buildLog = (s: TieState): LogEntry[] =>
+    s.rubbers.filter((r) => r.winner).map((r) => ({ t: '', team: r.winner ?? undefined, txt: `${r.label}: ${r.winner === 'A' ? homeName : awayName} won` }));
+
+  const save = (next: TieState, st: string, done = false, onSuccess?: () => void, onErr?: () => void) => {
+    const { a, b } = rubbersWon(next);
+    const w = tieWinner(spec, next);
+    const winner_team_id = done ? (w === 'A' ? fixture.home_team_id : w === 'B' ? fixture.away_team_id : null) : null;
+    persist.mutate(
+      { live_state: { tie: next }, live_log: buildLog(next), home_score: a, away_score: b, status: st, winner_team_id },
+      { onSuccess, onError: (e: any) => { onErr?.(); toast.error(e.message); } },
+    );
+  };
+
+  // Going live the moment scoring starts (mirrors LiveConsole's status handling).
+  const liveStatusFor = (st: string) => (st === 'scheduled' || st === 'completed' || st === 'confirmed' ? 'live' : st);
+
+  const dispatchRubber = (action: Action) => {
+    const i = state.activeRubber;
+    const r = state.rubbers[i];
+    if (!r || r.status === 'completed' || r.status === 'dead') return;
+    const { state: ns } = reduce(rubberDef(spec, i), r.state, action);
+    const rubbers = state.rubbers.map((rr, idx) => (idx === i ? { ...rr, state: ns, status: (rr.status === 'pending' ? 'live' : rr.status) as RubberInstance['status'] } : rr));
+    let next: TieState = { ...state, rubbers };
+    // When the rubber's contest clinches (best-of-N sets decided), auto-complete it
+    // and advance to the next rubber - no separate "won" tap needed.
+    if (ns.ended && !r.winner) next = decideRubberFn(spec, next, i, ns.segsA >= ns.segsB ? 'A' : 'B');
+    const st = liveStatusFor(status);
+    setState(next); setStatus(st); save(next, st);
+  };
+
+  const decide = (i: number, winner: 'A' | 'B') => {
+    const next = decideRubberFn(spec, state, i, winner);
+    const st = liveStatusFor(status);
+    setState(next); setStatus(st); save(next, st);
+  };
+
+  // Correct a sub-match: clear a decided/skipped rubber so it can be re-scored. `reset`
+  // also wipes its point tally (for a fresh detailed re-score). Reopening can un-decide
+  // the tie, which revives skipped rubbers - so the official can finish it differently.
+  const reopen = (i: number, reset = false) => {
+    const next = reopenRubberFn(spec, state, i, reset);
+    const st = liveStatusFor(status);
+    setState(next); setStatus(st); save(next, st);
+  };
+
+  const setActive = (i: number) => setState((s) => ({ ...s, activeRubber: i }));
+
+  const goLive = () => { setSubmitting(true); setStatus('live'); save(state, 'live', false, () => setSubmitting(false), () => setSubmitting(false)); };
+
+  const w = tieWinner(spec, state);
+  const decided = w !== null;
+  const target = tieTarget(spec);
+  const signOff = async () => {
+    if (!decided) { toast.error(`The tie isn’t decided yet - record rubber results until one side reaches ${target}.`); return; }
+    const { a, b } = rubbersWon(state);
+    const ok = await confirmDialog({ title: 'Confirm final result', confirmLabel: 'Sign off', message: `${homeName} ${a} - ${b} ${awayName}. This completes the tie and updates standings.` });
+    if (!ok) return;
+    setSubmitting(true);
+    save(state, 'completed', true, () => { setStatus('completed'); setSubmitting(false); onDone(); }, () => setSubmitting(false));
+  };
+
+  const { a, b } = rubbersWon(state);
+  const live_ = status === 'live';
+  const completed = status === 'completed' || status === 'confirmed';
+  const active = state.rubbers[state.activeRubber];
+  const rdef = rubberDef(spec, state.activeRubber);
+
+  const rubberScore = (r: RubberInstance, i: number): string => {
+    if (r.status === 'dead') return 'not played';
+    if (r.winner) return `${r.winner === 'A' ? homeName : awayName} won`;
+    const d = rubberDef(spec, i);
+    if (d.archetype === 'time') return r.status === 'live' ? 'in progress' : 'not started';
+    const h = headline(d, r.state);
+    return `${h.a}–${h.b}`;
+  };
+
+  return (
+    <>
+      <Card className="mb-5 overflow-hidden">
+        <div className="bg-slate-900 px-6 py-6 text-white">
+          <div className="flex items-center justify-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            {live_ && <span className="inline-flex items-center gap-1.5 text-[var(--live)]"><span className="h-2 w-2 animate-pulse rounded-full bg-[var(--live)]" />LIVE</span>}
+            <span>Tie · first to {target} rubbers</span>
+          </div>
+          <div className="mt-2 flex items-center justify-center gap-5">
+            <div className="flex-1 text-right text-lg font-bold">{homeName}</div>
+            <div className="flex items-center gap-3 text-5xl font-black tabular-nums"><span>{a}</span><span className="text-slate-600">:</span><span>{b}</span></div>
+            <div className="flex-1 text-left text-lg font-bold">{awayName}</div>
+          </div>
+          <div className="mt-2 text-center text-sm text-slate-400">{decided ? `${w === 'A' ? homeName : awayName} win the tie` : `${a + b} of ${spec.rubbers.length} rubbers played`}</div>
+        </div>
+      </Card>
+
+      {(!completed || editing) && (
+        <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+          <div className="space-y-5">
+            <Card>
+              <CardHeader title="Rubbers" subtitle="Tap a rubber to score it (or to reopen and correct one). The tie is won by taking the majority." />
+              <CardBody className="space-y-1.5">
+                {state.rubbers.map((r, i) => {
+                  const isActive = i === state.activeRubber;
+                  const dead = r.status === 'dead';
+                  return (
+                    <button key={r.key} type="button" onClick={() => setActive(i)}
+                      className={cn('flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition',
+                        isActive ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10'
+                          : dead ? 'border-slate-200 opacity-60 hover:opacity-100 dark:border-slate-800'
+                            : 'border-slate-200 hover:border-brand-300 dark:border-slate-700')}>
+                      <span className="font-medium text-slate-700 dark:text-slate-200">{r.label}</span>
+                      <span className={cn('text-xs font-semibold', r.winner ? 'text-brand-600 dark:text-brand-300' : 'text-slate-400 dark:text-slate-500')}>{rubberScore(r, i)}</span>
+                    </button>
+                  );
+                })}
+              </CardBody>
+            </Card>
+
+            {active && (
+              <Card>
+                <CardHeader title={active.label} subtitle={active.status === 'dead' ? 'Skipped (dead rubber)' : active.winner ? `${active.winner === 'A' ? homeName : awayName} won this rubber` : rdef.archetype === 'time' ? 'Pick the winner of this rubber.' : `${rdef.segLabel} ${Math.min(active.state.seg, rdef.segMax)} of ${rdef.segMax}`} />
+                <CardBody className="space-y-4">
+                  {active.status === 'dead' ? (
+                    <div className="space-y-3 text-center">
+                      <p className="text-sm text-slate-500 dark:text-slate-400">This rubber was skipped because the tie was already decided. Reopen it to record or correct a result.</p>
+                      <Button variant="outline" className="w-full" onClick={() => reopen(state.activeRubber)}>↺ Reopen this rubber</Button>
+                    </div>
+                  ) : (
+                    <>
+                      {mode === 'detailed' && rdef.archetype !== 'time' && (
+                        <>
+                          <div className="grid grid-cols-2 gap-3">
+                            <SideDeck name={homeName} side="A" def={rdef} dispatch={dispatchRubber} disabled={!!active.winner || active.state.ended} />
+                            <SideDeck name={awayName} side="B" def={rdef} dispatch={dispatchRubber} disabled={!!active.winner || active.state.ended} />
+                          </div>
+                          {(rdef.archetype === 'sets' || rdef.archetype === 'rally') && !active.winner && !active.state.ended && (
+                            <Button variant="outline" className="w-full" onClick={() => dispatchRubber({ type: 'NEXT_SEG' })}>End {rdef.segLabel.toLowerCase()} {active.state.seg} (award to leader)</Button>
+                          )}
+                          {!!rdef.events?.length && (
+                            <div className="grid grid-cols-2 gap-3">
+                              <EventDeck side="A" name={homeName} def={rdef} team={homeTeam(fixture)} dispatch={dispatchRubber} disabled={!!active.winner} />
+                              <EventDeck side="B" name={awayName} def={rdef} team={awayTeam(fixture)} dispatch={dispatchRubber} disabled={!!active.winner} />
+                            </div>
+                          )}
+                          <div className="text-center text-sm text-slate-500 dark:text-slate-400">{subLine(rdef, active.state) || ' '}</div>
+                        </>
+                      )}
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button variant={active.winner === 'A' ? 'primary' : 'outline'} onClick={() => decide(state.activeRubber, 'A')}>{homeName} won</Button>
+                        <Button variant={active.winner === 'B' ? 'primary' : 'outline'} onClick={() => decide(state.activeRubber, 'B')}>{awayName} won</Button>
+                      </div>
+                      {active.winner && mode === 'detailed' && rdef.archetype !== 'time' && (
+                        <Button variant="ghost" className="w-full" onClick={() => reopen(state.activeRubber, true)}>↺ Reopen &amp; clear to re-score</Button>
+                      )}
+                    </>
+                  )}
+                </CardBody>
+              </Card>
+            )}
+          </div>
+
+          <div className="space-y-5">
+            <Card>
+              <CardHeader title="Tie control" />
+              <CardBody className="space-y-2">
+                {!live_ && !editing && <Button className="w-full justify-start" disabled={submitting} onClick={goLive}>Start tie (go live)</Button>}
+                <Button className="w-full justify-start" disabled={submitting} onClick={signOff}>✍ End tie &amp; sign off</Button>
+                {!decided && <p className="px-1 text-xs text-slate-400 dark:text-slate-500">Record rubber results until one side reaches {target}.</p>}
+                {SECONDARY.map((s) => (
+                  <SecondaryStatus key={s.status} fixtureId={fixtureId} status={s.status} label={s.label} variant={s.variant} invalidate={invalidate} onDone={onDone} />
+                ))}
+              </CardBody>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {completed && !editing && (
+        <Card><CardBody className="py-8 text-center">
+          <div className="text-sm text-slate-500 dark:text-slate-400">Tie recorded.</div>
+          <div className="mt-1 text-2xl font-black tabular-nums text-slate-900 dark:text-slate-100">{homeName} {a} – {b} {awayName}</div>
+          <div className="mx-auto mt-3 max-w-md space-y-1 text-sm text-slate-500 dark:text-slate-400">
+            {state.rubbers.map((r, i) => <div key={r.key} className="flex justify-between gap-4"><span>{r.label}</span><span>{rubberScore(r, i)}</span></div>)}
+          </div>
+          <div className="mt-4 flex justify-center gap-2">
+            <Button variant="outline" onClick={() => setEditing(true)}>Edit result</Button>
+            <Button onClick={onDone}>Back to matches</Button>
+          </div>
+        </CardBody></Card>
+      )}
+    </>
+  );
+}
+
+/* ----------------------------- Event ranking (default for multi-competitor) ----------------------------- */
+const ordinal = (n: number): string => {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
+};
+
+// The default scoring for a multi-competitor event (swimming / powerlifting): no athlete
+// detail at all - just rank the championship's teams/orgs by how they did. Points are
+// awarded by placement (medalPoints) and shown as a standing. Stored separately from the
+// detailed per-athlete state in live_state.eventRanking, so the two modes don't clobber.
+function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
+  { fixture: any; fixtureId: string; spec: EventSpec; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[] }) {
+  const champId = eventInfo(fixture)?.id;
+  const { data: parts } = useApi<{ organizations: { orgId: string; org: { id: string; name: string } | null }[] }>(
+    champId ? `/championships/${champId}/participants` : null);
+  const orgs = (parts?.organizations ?? [])
+    .map((o) => ({ id: o.org?.id ?? o.orgId, name: o.org?.name ?? 'Unaffiliated' }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const medalPoints = spec.result.medalPoints ?? [5, 3, 1];
+
+  // place map keyed by orgId (independent of the async orgs fetch).
+  const seed = (l?: { live_state: any }) => {
+    const rows = l?.live_state?.eventRanking?.rows;
+    const m: Record<string, number> = {};
+    if (Array.isArray(rows)) for (const r of rows) if (r?.orgId && typeof r.place === 'number') m[r.orgId] = r.place;
+    return m;
+  };
+  const [places, setPlaces] = useState<Record<string, number>>(() => seed(live));
+  const seeded = useRef(false);
+  useEffect(() => { if (!seeded.current && live) { seeded.current = true; setPlaces(seed(live)); } }, [live]);
+
+  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
+  const setPlace = (orgId: string, place: number | null) => setPlaces((p) => {
+    const n = { ...p }; if (place) n[orgId] = place; else delete n[orgId]; return n;
+  });
+
+  const save = () => {
+    const rows = orgs.map((o) => ({ orgId: o.id, org: o.name, place: places[o.id] ?? null }));
+    persist.mutate(
+      { live_state: { ...(live?.live_state ?? {}), eventRanking: { rows } }, status: fixture.status === 'scheduled' ? 'live' : fixture.status },
+      { onSuccess: () => toast.success('Ranking saved'), onError: (e: any) => toast.error(e.message) },
+    );
+  };
+
+  const n = orgs.length;
+  const ranked = orgs
+    .map((o) => ({ ...o, place: places[o.id] ?? null, points: placementPoints(places[o.id], medalPoints) }))
+    .filter((r) => r.place != null)
+    .sort((a, b) => b.points - a.points || (a.place! - b.place!) || a.name.localeCompare(b.name));
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+      <Card>
+        <CardHeader title="Team ranking" subtitle={`Set each team's finishing place — points are awarded by placement (${medalPoints.join(' / ')}).`} />
+        <CardBody className="space-y-2">
+          {orgs.length === 0 ? (
+            <p className="text-sm text-slate-400 dark:text-slate-500">No teams have joined this championship yet.</p>
+          ) : orgs.map((o) => (
+            <div key={o.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-800">
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{o.name}</span>
+              <div className="flex items-center gap-2">
+                <Select value={places[o.id] ?? ''} onChange={(e) => setPlace(o.id, e.target.value ? Number(e.target.value) : null)} className="w-28">
+                  <option value="">— place —</option>
+                  {Array.from({ length: n }, (_, i) => i + 1).map((pl) => <option key={pl} value={pl}>{ordinal(pl)}</option>)}
+                </Select>
+                <span className="w-8 text-right text-sm font-bold tabular-nums text-slate-500 dark:text-slate-400">{placementPoints(places[o.id], medalPoints)}</span>
+              </div>
+            </div>
+          ))}
+          <div className="flex justify-end pt-1">
+            <Button size="sm" disabled={persist.isPending} onClick={save}>{persist.isPending ? 'Saving…' : 'Save ranking'}</Button>
+          </div>
+        </CardBody>
+      </Card>
+
+      <div className="space-y-5">
+        <Card>
+          <CardHeader title="Standing" subtitle="Best team first" />
+          <CardBody>
+            {ranked.length === 0 ? <p className="text-sm text-slate-400 dark:text-slate-500">No places set yet.</p> : (
+              <ul className="space-y-1.5">
+                {ranked.map((r, i) => (
+                  <li key={r.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5 text-sm dark:bg-slate-800/60">
+                    <span className="font-medium text-slate-700 dark:text-slate-200">{i + 1}. {r.name}</span>
+                    <span className="font-bold tabular-nums">{r.points}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardBody>
+        </Card>
+        <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-500/10">
+          <CardBody className="text-xs text-slate-600 dark:text-slate-300">
+            Saved here as the team ranking. Feeding these points into championship standings is the remaining backend step for events.
+          </CardBody>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------- Event console (multi-competitor) ----------------------------- */
+// Swimming heats / powerlifting categories: many participants, each recording a mark per
+// sub-event, aggregated into team (org) points. Stores EventState in live_state.event.
+// NOTE: final completion + feeding points into standings is the remaining backend track
+// for events (see plan); results save and aggregate live here.
+function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
+  { fixture: any; fixtureId: string; spec: EventSpec; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[] }) {
+  const [state, setState] = useState<EventState>(() => hydrateEvent(live?.live_state?.event));
+  const seeded = useRef(false);
+  useEffect(() => { if (!seeded.current && live) { setState(hydrateEvent(live.live_state?.event)); seeded.current = true; } }, [live]);
+
+  // Orgs entered in this championship drive the "counts towards" picker (standings
+  // aggregate by org). Free of a champ id we simply offer no orgs (the field still
+  // allows an individual entry).
+  const champId = eventInfo(fixture)?.id;
+  const { data: parts } = useApi<{ organizations: { orgId: string; org: { id: string; name: string } | null }[] }>(
+    champId ? `/championships/${champId}/participants` : null);
+  const orgs = (parts?.organizations ?? [])
+    .map((o) => ({ id: o.org?.id ?? o.orgId, name: o.org?.name ?? 'Unaffiliated' }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  // Map a stored row to its dropdown value: prefer the stored orgId, else match the
+  // legacy free-text name to an org so older rows still show their selection.
+  const orgValue = (p: ParticipantResult) => p.orgId ?? orgs.find((o) => o.name === (p.org ?? ''))?.id ?? '';
+
+  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
+
+  const isTime = spec.result.resultType === 'time';
+  const pickOne = !!spec.pickOne;
+  const noun = spec.subEventNoun ?? 'sub-event';
+  const nounLower = noun.toLowerCase();
+  const firstKey = spec.subEvents[0]?.key;
+
+  const addP = () => setState((s) => ({ participants: [...s.participants, { id: `p${Date.now()}`, name: '', org: null, orgId: null, category: pickOne ? firstKey : null, marks: {} }] }));
+  const removeP = (id: string) => setState((s) => ({ participants: s.participants.filter((p) => p.id !== id) }));
+  const patchP = (id: string, patch: Partial<ParticipantResult>) => setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+  const setOrg = (id: string, orgId: string) => patchP(id, { orgId: orgId || null, org: orgs.find((o) => o.id === orgId)?.name ?? null });
+  const setMark = (id: string, key: string, n: number | null) => setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, marks: { ...p.marks, [key]: n } } : p)) }));
+  // Switching weight class carries the mark over to the new key (and drops the old).
+  const setCategory = (id: string, cat: string) => setState((s) => ({ participants: s.participants.map((p) => {
+    if (p.id !== id) return p;
+    const prev = p.category ?? firstKey;
+    return { ...p, category: cat, marks: { [cat]: p.marks[prev] ?? null } };
+  }) }));
+
+  const save = () => persist.mutate(
+    { live_state: { ...(live?.live_state ?? {}), event: state }, status: fixture.status === 'scheduled' ? 'live' : fixture.status },
+    { onSuccess: () => toast.success('Results saved'), onError: (e: any) => toast.error(e.message) },
+  );
+
+  const agg = aggregateEvent(spec, state);
+  const blocks = subEventResults(spec, state);
+  const unit = spec.result.unit ? ` (${spec.result.unit})` : '';
+  const pts = (spec.result.medalPoints ?? [5, 3, 1]).join(' / ');
+  const best = spec.result.winnerIs === 'min' ? 'fastest' : 'best';
+  // Plain-English explanation of how marks become org points, by aggregate rule.
+  const scoringText = spec.result.aggregate === 'sumBest'
+    ? `Each org's points are the sum of its athletes' marks.`
+    : spec.result.aggregate === 'medals'
+      ? `Each ${nounLower} is ranked (${best} wins) — the top finishers earn ${pts} points for their org. An org's total is the sum across every ${nounLower}.`
+      : `Each ${nounLower} awards placement points down the order to each finisher's org; an org's total is the sum across every ${nounLower}.`;
+  const subtitle = pickOne
+    ? `Pick each competitor's ${nounLower} and enter their total${unit}.`
+    : `Enter each competitor's mark per ${nounLower}${unit}.`;
+  const markLabel = `Total${unit}`;
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+      <Card>
+        <CardHeader title="Participants & results" subtitle={subtitle} />
+        <CardBody className="space-y-3">
+          <p className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-slate-600 dark:bg-brand-500/10 dark:text-slate-300">{scoringText}</p>
+          {state.participants.length === 0 && <p className="text-sm text-slate-400 dark:text-slate-500">No participants yet - add one below.</p>}
+          {state.participants.map((p) => {
+            const cat = p.category ?? firstKey;
+            return (
+              <div key={p.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+                <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
+                  <Field label="Name"><Input value={p.name} onChange={(e) => patchP(p.id, { name: e.target.value })} placeholder="Competitor" /></Field>
+                  <Field label="Counts towards">
+                    <Select value={orgValue(p)} onChange={(e) => setOrg(p.id, e.target.value)}>
+                      <option value="">— Individual —</option>
+                      {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </Select>
+                  </Field>
+                  <Button variant="ghost" size="sm" className="mb-1" onClick={() => removeP(p.id)}>Remove</Button>
+                </div>
+                {pickOne ? (
+                  <div className="mt-2 grid grid-cols-[1fr_140px] items-end gap-2">
+                    <Field label={noun}>
+                      <Select value={cat} onChange={(e) => setCategory(p.id, e.target.value)}>
+                        {spec.subEvents.map((se) => <option key={se.key} value={se.key}>{se.label}</option>)}
+                      </Select>
+                    </Field>
+                    <Field label={markLabel}>
+                      <MarkInput value={p.marks[cat] ?? null} isTime={isTime} onChange={(n) => setMark(p.id, cat, n)} ariaLabel={`${p.name || 'competitor'} ${markLabel}`} />
+                    </Field>
+                  </div>
+                ) : (
+                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {spec.subEvents.map((se) => (
+                      <label key={se.key} className="block">
+                        <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
+                        <MarkInput value={p.marks[se.key] ?? null} isTime={isTime} onChange={(n) => setMark(p.id, se.key, n)} ariaLabel={`${p.name || 'competitor'} ${se.label}`} />
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <div className="flex items-center justify-between">
+            <Button variant="outline" size="sm" onClick={addP}>+ Add participant</Button>
+            <Button size="sm" disabled={persist.isPending} onClick={save}>{persist.isPending ? 'Saving…' : 'Save results'}</Button>
+          </div>
+        </CardBody>
+      </Card>
+
+      <div className="space-y-5">
+        <Card>
+          <CardHeader title="Team points" subtitle={spec.result.aggregate === 'sumBest' ? 'Sum of marks' : spec.result.aggregate === 'medals' ? `Medals ${pts}` : 'Placement points'} />
+          <CardBody>
+            {agg.length === 0 ? <p className="text-sm text-slate-400 dark:text-slate-500">No results yet.</p> : (
+              <ul className="space-y-1.5">
+                {agg.map((r, i) => (
+                  <li key={r.key} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5 text-sm dark:bg-slate-800/60">
+                    <span className="font-medium text-slate-700 dark:text-slate-200">{i + 1}. {r.label}</span>
+                    <span className="font-bold tabular-nums">{r.points}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardBody>
+        </Card>
+
+        {blocks.length > 0 && (
+          <Card>
+            <CardHeader title={`Results by ${nounLower}`} subtitle="Who placed where, and the points it earned." />
+            <CardBody className="space-y-3">
+              {blocks.map((b) => (
+                <div key={b.key}>
+                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{b.label}</div>
+                  <ul className="space-y-1">
+                    {b.rows.map((r) => (
+                      <li key={r.rank} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="truncate text-slate-600 dark:text-slate-300">{r.rank}. {r.name}{r.org ? <span className="text-slate-400 dark:text-slate-500"> · {r.org}</span> : null}</span>
+                        <span className="shrink-0 tabular-nums text-slate-500 dark:text-slate-400">{isTime ? formatTime(r.mark) : r.mark}{!isTime && spec.result.unit ? ` ${spec.result.unit}` : ''} · +{r.points}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </CardBody>
+          </Card>
+        )}
+
+        <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-500/10">
+          <CardBody className="text-xs text-slate-600 dark:text-slate-300">
+            Event results save live and aggregate here. Final sign-off and feeding these points into championship standings is the remaining backend step for multi-competitor events.
+          </CardBody>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// Numeric/time mark cell. Keeps the raw string the official typed (so mid-entry values
+// like "1:0" aren't reformatted under the cursor) and emits the parsed number upward;
+// only re-seeds from props when the stored value changes externally (e.g. live reload).
+function MarkInput({ value, isTime, onChange, ariaLabel }: { value: number | null; isTime: boolean; onChange: (n: number | null) => void; ariaLabel?: string }) {
+  const fmt = (v: number | null) => (v == null ? '' : isTime ? formatTime(v) : String(v));
+  const [raw, setRaw] = useState(() => fmt(value));
+  const emitted = useRef(value);
+  useEffect(() => { if (value !== emitted.current) { emitted.current = value; setRaw(fmt(value)); } }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handle = (s: string) => {
+    setRaw(s);
+    const n = isTime ? parseTimeInput(s) : (s.trim() === '' ? null : Number(s));
+    emitted.current = n;
+    onChange(n);
+  };
+  return (
+    <Input
+      type={isTime ? 'text' : 'number'} inputMode={isTime ? 'decimal' : 'numeric'}
+      value={raw} onChange={(e) => handle(e.target.value)} onBlur={() => setRaw(fmt(emitted.current))}
+      className="text-center" aria-label={ariaLabel} placeholder={isTime ? 'mm:ss.s' : ''}
+    />
+  );
+}
+
 function SideDeck({ name, side, def, dispatch, disabled }: { name: string; side: 'A' | 'B'; def: SportDef; dispatch: (a: Action) => void; disabled?: boolean }) {
   return (
     <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
@@ -481,6 +1114,38 @@ function SideDeck({ name, side, def, dispatch, disabled }: { name: string; side:
       <div className="grid gap-2">
         {def.pointButtons.map((p) => (
           <Button key={p} className="w-full justify-center text-base" disabled={disabled} onClick={() => dispatch({ type: 'POINT', team: side, pts: p })}>+{p}</Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Configured events for a side (raid/tackle/card/…), attributed to a roster player.
+// Scoring events credit the side via the engine; non-scoring events just log. Rendered
+// only when the contest defines `events`.
+function EventDeck({ side, name, def, team, dispatch, disabled }: { side: 'A' | 'B'; name: string; def: SportDef; team: any; dispatch: (a: Action) => void; disabled?: boolean }) {
+  const players = rosterPeople(team);
+  const [pid, setPid] = useState(players[0]?.id ?? '');
+  if (!def.events?.length) return null;
+  const fire = (ev: NonNullable<SportDef['events']>[number]) => {
+    const pl = players.find((p) => p.id === pid);
+    dispatch({
+      type: 'EVENT', team: side, key: ev.key, label: ev.label, pts: ev.points ?? 0,
+      playerId: ev.perPlayer ? (pid || undefined) : undefined,
+      playerName: ev.perPlayer ? pl?.name : undefined,
+    });
+  };
+  return (
+    <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+      <div className="mb-2 truncate text-center text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{name} · events</div>
+      {def.attributePlayers && players.length > 0 && (
+        <Select value={pid} onChange={(e) => setPid(e.target.value)} className="mb-2 text-sm">
+          {players.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </Select>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        {def.events.map((ev) => (
+          <Button key={ev.key} variant="outline" size="sm" className="justify-center" disabled={disabled} onClick={() => fire(ev)}>{ev.label}</Button>
         ))}
       </div>
     </div>
@@ -630,6 +1295,14 @@ function ManualResult({ fixture, fixtureId, def, invalidate, onDone }: { fixture
   const [notes, setNotes] = useState(fixture.notes ?? '');
   const saveResult = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/result`, body), invalidate);
 
+  // Guidance on what the two numbers mean for this sport. `manualHint` (time/measured
+  // sports) wins; otherwise derive from the archetype so manual mode reads clearly for
+  // any sport (e.g. sets/games won vs raw points).
+  const hint = def.manualHint ?? (
+    def.archetype === 'sets' || def.archetype === 'rally' ? `Enter the number of ${def.segLabel.toLowerCase()}s each side won, then confirm the winner.`
+    : def.archetype === 'cricket' ? 'Enter the final runs for each side, then confirm the winner.'
+    : 'Enter the final score for each side, then confirm the winner.');
+
   const hs = home === '' ? null : Number(home);
   const as = away === '' ? null : Number(away);
   const autoWinnerId = hs != null && as != null && hs !== as ? (hs > as ? fixture.home_team_id : fixture.away_team_id) : null;
@@ -651,7 +1324,7 @@ function ManualResult({ fixture, fixtureId, def, invalidate, onDone }: { fixture
     <Card>
       <CardHeader title="Enter result" subtitle="Record the result for this match, then confirm the winner." />
       <CardBody>
-        {def.manualHint && <p className="mb-3 rounded-lg bg-brand-50 px-3 py-2 text-xs text-slate-600 dark:bg-brand-500/10 dark:text-slate-300">{def.manualHint}</p>}
+        {hint && <p className="mb-3 rounded-lg bg-brand-50 px-3 py-2 text-xs text-slate-600 dark:bg-brand-500/10 dark:text-slate-300">{hint}</p>}
         <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-3">
           <label className="block">
             <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</span>

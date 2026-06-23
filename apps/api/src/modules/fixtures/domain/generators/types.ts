@@ -10,5 +10,6 @@ export interface GeneratedFixture {
   homeTeamId: string | null;
   awayTeamId: string | null;
   status: 'scheduled' | 'bye';
+  winnerTeamId?: string | null; // set for byes - the lone team that auto-advances
   feedsInto?: number; // bracketPosition of the match the winner advances to
 }

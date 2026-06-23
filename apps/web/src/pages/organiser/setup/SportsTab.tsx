@@ -407,6 +407,9 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
 
   const save = () => {
     setError(null);
+    // Match structure + scoring depth are now chosen by the official on the match
+    // console, not here - so this no longer writes format_config.scoring (any existing
+    // value is left untouched by omitting format_config from the update).
     update.mutate(
       {
         venue_id: venueId || null,
@@ -449,6 +452,9 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
           {TOURNAMENT_DISCIPLINE_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
         </Select>
       </Field>
+      <p className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
+        Match structure (single / team tie / event) and scoring depth (live vs final score) are chosen by the official on the match console.
+      </p>
       {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
       <div className="mt-2 flex items-center justify-between">
         <Button variant="ghost" className="text-rose-600 dark:text-rose-400"

@@ -71,6 +71,11 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const short = organization?.short_name || organization?.name || 'Team';
+  // Default team name keeps the championship name (not the sport - the discipline row
+  // already shows that); a sub-discipline like "Men's"/"Women's" is appended so two
+  // teams in the same sport stay distinct.
+  const champName = enrollment?.championships?.name ?? '';
+  const defaultName = (d: any) => `${short} ${champName}${d.disciplines?.name ? ` ${d.disciplines.name}` : ''}`.replace(/\s+/g, ' ').trim();
 
   const create = useApiMutation<{ teams: any[] }, { created: number; teams: any[] }>(
     (body) => api('POST', '/teams/bulk', body),
@@ -89,7 +94,7 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
       championship_organization_id: enrollment.id,
       sport_id: d.tournament_sports.sport_id,
       tournament_discipline_id: d.id,
-      name: `${short} ${drawLabel(d).replace(' · ', ' ')}`,
+      name: defaultName(d),
     }));
     create.mutate({ teams }, {
       onSuccess: (r) => { if (r.teams?.[0]) navigate(`/organizations/${organization.id}/teams/${r.teams[0].id}`); else onClose(); },
@@ -127,7 +132,7 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
               <Checkbox checked={selected.has(d.id)} onChange={() => toggle(d.id)} />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">{drawLabel(d)}</div>
-                <div className="truncate text-xs text-slate-400 dark:text-slate-500">{d.entry_type} · {squadText(d)}{drawFormatName(d, formats) ? ` · ${drawFormatName(d, formats)}` : ''} · {short} {drawLabel(d).replace(' · ', ' ')}</div>
+                <div className="truncate text-xs text-slate-400 dark:text-slate-500">{d.entry_type} · {squadText(d)}{drawFormatName(d, formats) ? ` · ${drawFormatName(d, formats)}` : ''} · {defaultName(d)}</div>
               </div>
             </label>
           ))}
@@ -205,6 +210,10 @@ export function TeamsPage() {
   const institutionId = orgId ?? ctx?.organization?.id ?? ctx?.user.organization_id ?? '';
   // Organization staff see all their organization's teams; a captain with no
   // organization still sees the teams they captain (via /me/teams).
+  // The org being viewed - NOT ctx.organization, which is the user's primary org. A POC
+  // managing several orgs (IIMB A/B/C) must enter teams against the org in the URL, or the
+  // entry modal reads the wrong org's existing teams (and hides every discipline as "taken").
+  const { data: viewedOrg } = useApi<any>(institutionId ? `/organizations/${institutionId}` : null);
   const { data: instTeams = [], isLoading: instLoading } = useApi<any[]>(institutionId ? `/teams?organization_id=${institutionId}` : null);
   const { data: myTeams = [], isLoading: myLoading } = useApi<any[]>(institutionId ? null : '/me/teams');
   const teams = institutionId
@@ -374,12 +383,10 @@ export function TeamsPage() {
                     </div>
                     <h3 className="mt-3 font-semibold text-slate-900 dark:text-slate-100">{t.name}</h3>
                     <p className="text-sm text-slate-500 dark:text-slate-400">{t.sports?.name}</p>
-                    <div className="mt-1.5 flex flex-wrap gap-1">
+                    <div className="mt-1.5">
                       {teamEntries(t).length === 0
                         ? <span className="text-xs text-amber-600 dark:text-amber-400">Not entered yet</span>
-                        : teamEntries(t).map((e: any) => (
-                          <span key={e.id} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{e.championships?.name ?? 'Championship'}</span>
-                        ))}
+                        : <span className="text-xs text-slate-500 dark:text-slate-400">Entered in {teamEntries(t).length} championship{teamEntries(t).length === 1 ? '' : 's'}</span>}
                     </div>
                     <div className="mt-2">
                       <p className="text-xs text-slate-400 dark:text-slate-500">{t.team_members?.length ?? 0} member{(t.team_members?.length ?? 0) === 1 ? '' : 's'}</p>
@@ -393,7 +400,7 @@ export function TeamsPage() {
         </>
       )}
 
-      {bulkCreating && institutionId && <BulkCreateTeamsModal approved={approved} organization={ctx?.organization ?? { id: institutionId }} defaultEnrollmentId={defaultEnrollmentId} onClose={() => setBulkCreating(false)} />}
+      {bulkCreating && institutionId && <BulkCreateTeamsModal approved={approved} organization={viewedOrg ?? (ctx?.organization?.id === institutionId ? ctx.organization : { id: institutionId })} defaultEnrollmentId={defaultEnrollmentId} onClose={() => setBulkCreating(false)} />}
     </div>
   );
 }
