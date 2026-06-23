@@ -26,6 +26,13 @@ export function EventParticipantsPage() {
     next.has(teamId) ? next.delete(teamId) : next.add(teamId);
     return next;
   });
+  // Organizations collapse by default too; expanding one reveals its teams.
+  const [expandedOrgs, setExpandedOrgs] = useState<Set<string>>(new Set());
+  const toggleOrg = (orgId: string) => setExpandedOrgs((prev) => {
+    const next = new Set(prev);
+    next.has(orgId) ? next.delete(orgId) : next.add(orgId);
+    return next;
+  });
 
   // Sports represented by any team - surfaced in the shared header filter.
   const sportOptions = useMemo(() => {
@@ -68,6 +75,11 @@ export function EventParticipantsPage() {
 
   const t = useTableControls(filteredOrgs, { pageSize: 8 });
 
+  // While a filter/search is active, keep matching orgs open so results stay visible;
+  // otherwise orgs are collapsed until clicked.
+  const isFiltering = !!(search.trim() || sportId || institutionId);
+  const orgOpen = (orgId: string) => isFiltering || expandedOrgs.has(orgId);
+
   if (isLoading) return <div className="grid h-40 place-items-center"><Spinner /></div>;
 
   return (
@@ -101,22 +113,30 @@ export function EventParticipantsPage() {
         </Card>
       ) : (
         <>
-          {t.view.map((org) => (
+          {t.view.map((org) => {
+            const open = orgOpen(org.orgId);
+            return (
             <Card key={org.orgId} className="overflow-hidden">
-              <div className="border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 px-4 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="font-semibold text-slate-800 dark:text-slate-200">
+              <button
+                type="button"
+                onClick={() => toggleOrg(org.orgId)}
+                aria-expanded={open}
+                className={`flex w-full items-center justify-between gap-3 bg-slate-50 dark:bg-slate-800/60 px-4 py-3 text-left hover:bg-slate-100 dark:hover:bg-slate-800 ${open ? 'border-b border-slate-100 dark:border-slate-800' : ''}`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="w-4 text-slate-400 dark:text-slate-500">{open ? '▾' : '▸'}</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
                     {org.org?.name || 'Unaffiliated'}
-                    {org.org?.short_name && <span className="ml-2 text-slate-500 dark:text-slate-400">({org.org.short_name})</span>}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge tone="slate">{org.teams.length} team{org.teams.length === 1 ? '' : 's'}</Badge>
-                    <Badge tone="slate">{org.playerCount} player{org.playerCount === 1 ? '' : 's'}</Badge>
-                  </div>
+                    {org.org?.short_name && <span className="ml-2 font-normal text-slate-500 dark:text-slate-400">({org.org.short_name})</span>}
+                  </span>
                 </div>
-              </div>
+                <div className="flex items-center gap-2">
+                  <Badge tone="slate">{org.teams.length} team{org.teams.length === 1 ? '' : 's'}</Badge>
+                  <Badge tone="slate">{org.playerCount} player{org.playerCount === 1 ? '' : 's'}</Badge>
+                </div>
+              </button>
 
-              {org.teams.length === 0 ? (
+              {open && (org.teams.length === 0 ? (
                 <div className="px-4 py-4 text-sm text-slate-400 dark:text-slate-500">Approved - no teams entered yet.</div>
               ) : (
                 <div className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -178,9 +198,10 @@ export function EventParticipantsPage() {
                     );
                   })}
                 </div>
-              )}
+              ))}
             </Card>
-          ))}
+          );
+          })}
           <Pagination page={t.page} pageCount={t.pageCount} total={t.total} pageSize={t.pageSize} onPage={t.setPage} />
         </>
       )}

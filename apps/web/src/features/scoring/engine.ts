@@ -1,6 +1,8 @@
 // Archetype-driven scoring engine. A sport maps to an archetype that decides how
 // the console scores it and how the headline (home_score/away_score) is derived.
 
+import type { EventTypeSpec } from '@semp/shared';
+
 export type Archetype = 'points' | 'sets' | 'rally' | 'cricket' | 'time';
 
 export interface SportDef {
@@ -9,6 +11,8 @@ export interface SportDef {
   segMax: number;
   pointButtons: number[]; // increments offered per scoring tap
   manualHint?: string;  // 'time' archetype only - guidance shown in the manual result form
+  events?: EventTypeSpec[];   // detailed-mode event buttons (raid/tackle/card…)
+  attributePlayers?: boolean; // capture the acting player for events
 }
 
 // Keyed by sport name (lowercased). Anything unknown falls back to a running points
@@ -18,14 +22,24 @@ const DEFS: Record<string, Partial<SportDef> & { archetype: Archetype }> = {
   // ── Invasion / goal sports: running points tallied per period ────────────────
   basketball:     { archetype: 'points', segLabel: 'Quarter', segMax: 4, pointButtons: [1, 2, 3] },
   netball:        { archetype: 'points', segLabel: 'Quarter', segMax: 4, pointButtons: [1, 2, 3] },
-  football:       { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1] },
-  soccer:         { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1] },
-  futsal:         { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1] },
+  football:       { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1], attributePlayers: true,
+    events: [{ key: 'yellow', label: 'Yellow card', perPlayer: true }, { key: 'red', label: 'Red card', perPlayer: true }] },
+  soccer:         { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1], attributePlayers: true,
+    events: [{ key: 'yellow', label: 'Yellow card', perPlayer: true }, { key: 'red', label: 'Red card', perPlayer: true }] },
+  futsal:         { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1], attributePlayers: true,
+    events: [{ key: 'yellow', label: 'Yellow card', perPlayer: true }, { key: 'red', label: 'Red card', perPlayer: true }] },
   hockey:         { archetype: 'points', segLabel: 'Quarter', segMax: 4, pointButtons: [1] },
   'field hockey': { archetype: 'points', segLabel: 'Quarter', segMax: 4, pointButtons: [1] },
   handball:       { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1] },
   'water polo':   { archetype: 'points', segLabel: 'Quarter', segMax: 4, pointButtons: [1] },
-  kabaddi:        { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1, 2, 3] },
+  kabaddi:        { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1, 2, 3],
+    attributePlayers: true,
+    events: [
+      { key: 'raid',   label: 'Raid +1',   points: 1, perPlayer: true },
+      { key: 'tackle', label: 'Tackle +1', points: 1, perPlayer: true },
+      { key: 'bonus',  label: 'Bonus +1',  points: 1, perPlayer: true },
+      { key: 'allout', label: 'All Out +2', points: 2 },
+    ] },
   'kho-kho':      { archetype: 'points', segLabel: 'Innings', segMax: 2, pointButtons: [1, 2] },
   frisbee:        { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1] },
 
@@ -83,7 +97,7 @@ export interface MatchState {
   ended?: boolean;                   // final period frozen (points archetype) - locks scoring until reopened
 }
 
-export interface LogEntry { t: string; team?: 'A' | 'B'; txt: string }
+export interface LogEntry { t: string; team?: 'A' | 'B'; txt: string; player?: string; kind?: string }
 
 export function initState(): MatchState {
   return { a: 0, b: 0, seg: 1, segScores: [], segsA: 0, segsB: 0, inn: 1, batting: 'A', runsA: 0, wktA: 0, runsB: 0, wktB: 0 };
@@ -99,6 +113,7 @@ export function hydrate(raw: any): MatchState {
 
 export type Action =
   | { type: 'POINT'; team?: 'A' | 'B'; pts?: number; label?: string }
+  | { type: 'EVENT'; team?: 'A' | 'B'; key: string; label: string; pts?: number; playerId?: string; playerName?: string }
   | { type: 'NEXT_SEG' }
   | { type: 'END_FINAL' }
   | { type: 'REOPEN' }
@@ -116,6 +131,16 @@ export function reduce(def: SportDef, s: MatchState, action: Action): { state: M
       }
       if (action.team === 'A') ns.a += pts; else ns.b += pts;
       return { state: ns, entry: { t: `${def.segLabel} ${ns.seg}`, team: action.team, txt: `+${pts}${action.label ? ` ${action.label}` : ''}` } };
+    }
+    case 'EVENT': {
+      // A configured event (raid/tackle/card/…): credit points to the acting side when
+      // the event scores, and log it with the acting player for the timeline / stats.
+      const pts = action.pts ?? 0;
+      if (def.archetype !== 'cricket' && pts) {
+        if (action.team === 'A') ns.a += pts; else if (action.team === 'B') ns.b += pts;
+      }
+      const txt = `${action.label}${action.playerName ? ` · ${action.playerName}` : ''}`;
+      return { state: ns, entry: { t: `${def.segLabel} ${ns.seg}`, team: action.team, txt, player: action.playerName, kind: action.key } };
     }
     case 'WICKET': {
       if (ns.batting === 'A') ns.wktA += 1; else ns.wktB += 1;
@@ -141,11 +166,17 @@ export function reduce(def: SportDef, s: MatchState, action: Action): { state: M
     }
     case 'NEXT_SEG': {
       if (def.archetype === 'sets' || def.archetype === 'rally') {
+        if (ns.ended) return { state: ns }; // already clinched - ignore
         const aWon = ns.a >= ns.b;
         if (aWon) ns.segsA += 1; else ns.segsB += 1;
         ns.segScores.push([ns.a, ns.b]);
         const finished = ns.seg;
-        ns.a = 0; ns.b = 0; ns.seg += 1;
+        ns.a = 0; ns.b = 0;
+        // Best-of-segMax: first to a majority wins the contest. Freeze there instead
+        // of advancing past it (no "set 4 of 3"), and never exceed segMax.
+        const need = Math.floor(def.segMax / 2) + 1;
+        if (ns.segsA >= need || ns.segsB >= need) ns.ended = true;
+        else ns.seg = Math.min(ns.seg + 1, def.segMax);
         return { state: ns, entry: { t: '', txt: `${aWon ? 'Home' : 'Away'} take ${def.segLabel.toLowerCase()} ${finished}` } };
       }
       ns.segScores.push([ns.a, ns.b]);
@@ -167,7 +198,7 @@ export function headline(def: SportDef, s: MatchState): { a: number; b: number }
 export function subLine(def: SportDef, s: MatchState): string {
   if (def.archetype === 'sets' || def.archetype === 'rally') {
     const parts = s.segScores.map((x) => `${x[0]}–${x[1]}`);
-    parts.push(`${s.a}–${s.b}`);
+    if (!s.ended) parts.push(`${s.a}–${s.b}`); // hide the empty current set once clinched
     return parts.join('  ·  ');
   }
   if (def.archetype === 'cricket') {

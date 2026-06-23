@@ -28,6 +28,21 @@ describe('knockout', () => {
     expect(byes).toHaveLength(2);
   });
 
+  it('auto-advances each bye team into its next-round slot', () => {
+    const f = generateKnockout(teams(6));
+    const byPos = new Map(f.map((x) => [x.bracketPosition, x]));
+    const byes = f.filter((x) => x.status === 'bye');
+    for (const bye of byes) {
+      const advancing = bye.homeTeamId ?? bye.awayTeamId;
+      // The bye records its lone team as the winner...
+      expect(bye.winnerTeamId).toBe(advancing);
+      // ...and that team is seeded into the match it feeds.
+      const parent = byPos.get(bye.feedsInto!);
+      expect(parent).toBeDefined();
+      expect([parent!.homeTeamId, parent!.awayTeamId]).toContain(advancing);
+    }
+  });
+
   it('wires feedsInto toward the final', () => {
     const f = generateKnockout(teams(4));
     const final = f.find((x) => x.round === 'Final')!;

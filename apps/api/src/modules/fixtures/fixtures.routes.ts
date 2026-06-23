@@ -119,23 +119,6 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       });
       if (!td) throw new NotFoundError('Tournament discipline');
 
-      // Regenerating wipes and rebuilds the draw - refuse if any fixture has already
-      // been played (completed/walkover/bye, or a score recorded). Discarding those
-      // would corrupt results and standings. Mirrors the cascade-delete safety rule.
-      const played = await prisma.fixtures.count({
-        where: {
-          tournament_discipline_id: td.id,
-          OR: [
-            { status: { in: ['completed', 'walkover', 'bye'] } },
-            { home_score: { not: null } },
-            { away_score: { not: null } },
-          ],
-        },
-      });
-      if (played > 0) {
-        throw new BusinessRuleError('This draw already has played matches - regenerating would erase those results. Edit fixtures individually instead.');
-      }
-
       const formatName = td.tournament_formats?.name ?? td.tournament_sports.tournament_formats?.name;
       if (!formatName) throw new BusinessRuleError('No format configured for this draw');
 
@@ -158,6 +141,54 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         teams = registered.map((e) => ({ teamId: e.team_id }));
       }
 
+      const existing = await prisma.fixtures.findMany({
+        where: { tournament_discipline_id: td.id },
+        select: { id: true, home_team_id: true, away_team_id: true, status: true, home_score: true, away_score: true },
+      });
+
+      // Incremental generate: a league / round-robin that already has fixtures keeps
+      // them (and their scheduling/results) and only adds matches for newly-registered
+      // "pending" teams - the ones not yet in any fixture. Each pending team is paired
+      // with every other team it hasn't been drawn against. Knockout / pool draws can't
+      // be partially extended, so they fall through to a full rebuild below.
+      const name = formatName.trim().toLowerCase();
+      const isLeague = name.includes('league') || name.includes('round robin') || name.includes('round-robin');
+      if (isLeague && existing.length > 0) {
+        const placed = new Set<string>();
+        for (const f of existing) { if (f.home_team_id) placed.add(f.home_team_id); if (f.away_team_id) placed.add(f.away_team_id); }
+        const pairKey = (a: string, b: string) => [a, b].sort().join('|');
+        const drawn = new Set(existing.filter((f) => f.home_team_id && f.away_team_id).map((f) => pairKey(f.home_team_id!, f.away_team_id!)));
+        const allIds = teams.map((t) => t.teamId);
+        const pending = allIds.filter((id) => !placed.has(id));
+        const doubleRound = Boolean((params as any).double_round ?? (params as any).doubleRound ?? false);
+        const toCreate: Array<{ tournament_discipline_id: string; home_team_id: string; away_team_id: string; round: string; status: string }> = [];
+        for (const p of pending) {
+          for (const other of allIds) {
+            if (other === p) continue;
+            const key = pairKey(p, other);
+            if (drawn.has(key)) continue;
+            drawn.add(key);
+            toCreate.push({ tournament_discipline_id: td.id, home_team_id: p, away_team_id: other, round: 'Added', status: 'scheduled' });
+            if (doubleRound) toCreate.push({ tournament_discipline_id: td.id, home_team_id: other, away_team_id: p, round: 'Added', status: 'scheduled' });
+          }
+        }
+        if (toCreate.length) await prisma.fixtures.createMany({ data: toCreate });
+        const rows = await prisma.fixtures.findMany({
+          where: { tournament_discipline_id: td.id },
+          orderBy: [{ pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
+        });
+        res.status(201).json(rows);
+        return;
+      }
+
+      // Rebuild: wipe and regenerate from scratch - refuse if any fixture has already
+      // been played (completed/walkover/bye, or a score recorded). Discarding those
+      // would corrupt results and standings. Mirrors the cascade-delete safety rule.
+      const played = existing.some((f) => ['completed', 'walkover', 'bye'].includes(f.status) || f.home_score != null || f.away_score != null);
+      if (played) {
+        throw new BusinessRuleError('This draw already has played matches - regenerating would erase those results. Edit fixtures individually instead.');
+      }
+
       const generated = generateFixtures(formatName, teams, params);
 
       // Replace any existing fixtures for this draw atomically - a failed insert
@@ -169,6 +200,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
             tournament_discipline_id: td.id,
             home_team_id: f.homeTeamId,
             away_team_id: f.awayTeamId,
+            winner_team_id: f.winnerTeamId ?? null,
             round: f.round,
             pool_number: f.poolNumber,
             bracket_position: f.bracketPosition,
@@ -216,14 +248,19 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     if (b.status) data.status = b.status;
     // Scoring a match (going live or completing) requires both teams to be known - a
     // TBD bracket slot can't be played. Fetch once and reuse for the winner check.
-    let fxTeams: { home_team_id: string | null; away_team_id: string | null } | null = null;
+    let fxTeams: { home_team_id: string | null; away_team_id: string | null; tournament_disciplines: { format_config: any } | null } | null = null;
     const needsTeams = b.status === 'live' || b.status === 'completed';
     if (needsTeams || b.winner_team_id != null) {
-      fxTeams = await prisma.fixtures.findUnique({ where: { id: req.params.id }, select: { home_team_id: true, away_team_id: true } });
+      fxTeams = await prisma.fixtures.findUnique({ where: { id: req.params.id }, select: { home_team_id: true, away_team_id: true, tournament_disciplines: { select: { format_config: true } } } });
       if (!fxTeams) throw new NotFoundError('Fixture');
     }
     if (needsTeams && (!fxTeams!.home_team_id || !fxTeams!.away_team_id)) {
-      throw new BusinessRuleError('Both teams must be set before this match can go live or be scored.');
+      // Multi-competitor events (swimming/powerlifting) are intentionally team-less, so
+      // the "both teams" rule doesn't apply to them - only to real TBD bracket slots. An
+      // event is recognised by its stored config or by the event state being scored.
+      const cfgType = (fxTeams!.tournament_disciplines?.format_config as any)?.scoring?.fixtureType;
+      const isEvent = cfgType === 'event' || !!(b.live_state && (b.live_state.event || b.live_state.eventRanking));
+      if (!isEvent) throw new BusinessRuleError('Both teams must be set before this match can go live or be scored.');
     }
     // A declared winner must be one of the two teams in this fixture.
     if (b.winner_team_id != null && b.winner_team_id !== fxTeams!.home_team_id && b.winner_team_id !== fxTeams!.away_team_id) {

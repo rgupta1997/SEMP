@@ -191,6 +191,13 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     const creatorId = req.user!.id;
     const seedCaptain = !(await isOrgAdmin(creatorId, organization_id));
 
+    // No two teams of the same org may share a name within a sport.
+    const nameClash = await prisma.teams.findFirst({
+      where: { organization_id, sport_id, name: { equals: name.trim(), mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (nameClash) throw new BusinessRuleError('Your organization already has a team with this name in this sport');
+
     // Validate the optional "enter at create" inputs before opening a transaction.
     let entryData: { championship_id: string; championship_organization_id: string; tournament_discipline_id: string } | null = null;
     if (championship_organization_id) {
@@ -377,6 +384,14 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       select: { organization_id: true, championship_id: true, tournament_discipline_id: true },
     });
     const seen = new Set(existing.map((e) => `${e.organization_id}|${e.championship_id}|${e.tournament_discipline_id}`));
+    // No two teams of the same org may share a name within a sport - check against the
+    // existing roster (one query) and within this batch.
+    const nameKey = (orgId: string, sportId: string, name: string) => `${orgId}|${sportId}|${name.trim().toLowerCase()}`;
+    const existingTeams = await prisma.teams.findMany({
+      where: { OR: teams.map((t) => ({ organization_id: t.organization_id, sport_id: t.sport_id })) },
+      select: { organization_id: true, sport_id: true, name: true },
+    });
+    const nameSeen = new Set(existingTeams.map((t) => nameKey(t.organization_id, t.sport_id, t.name)));
     for (const t of teams) {
       const ei = eiMap.get(t.championship_organization_id);
       if (!ei) throw new NotFoundError('Enrollment');
@@ -384,6 +399,9 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       const k = dupKey(t);
       if (seen.has(k)) throw new BusinessRuleError(`A duplicate team for "${t.name}" is in this discipline draw`);
       seen.add(k);
+      const nk = nameKey(t.organization_id, t.sport_id, t.name);
+      if (nameSeen.has(nk)) throw new BusinessRuleError(`A team named "${t.name}" already exists in this sport`);
+      nameSeen.add(nk);
     }
     const creatorId = req.user!.id;
     const orgIds = [...new Set(teams.map((t) => t.organization_id))];

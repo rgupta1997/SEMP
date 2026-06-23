@@ -11,9 +11,12 @@ export function EventDashboard() {
   const { data: teams = [] } = useApi<any[]>(`/teams?championship_id=${eventId}`);
   const { data: venues = [] } = useApi<any[]>(`/venues?championship_id=${eventId}`);
   const { data: enrollments = [] } = useApi<any[]>(`/championships/${eventId}/enrollments`);
+  const { data: draws = [] } = useApi<any[]>(`/championships/${eventId}/draws`);
 
   const pending = enrollments.filter((e) => e.status === 'pending');
   const approved = enrollments.filter((e) => e.status === 'approved');
+  // Distinct sports offered across the championship's draws.
+  const sportsCount = new Set(draws.map((d) => d.tournament_sports?.sport_id).filter(Boolean)).size;
 
   // Live "getting started" progress for this championship (organisers only).
   const onboarding = useOrganiserOnboarding(eventId, championship.status, canManage);
@@ -36,8 +39,9 @@ export function EventDashboard() {
         />
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard label="Seasons" value={tournaments.length} />
+        <StatCard label="Sports" value={sportsCount} />
         <StatCard label="Teams" value={teams.length} hint={`${approved.length} organizations approved`} />
         <StatCard label="Pending approvals" value={pending.length} accent={pending.length > 0} hint="needs review" />
         <StatCard label="Venues" value={venues.length} />

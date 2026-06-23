@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type DragEvent } from 'react';
 import { fmtDate } from '../lib/hooks';
-import { Badge, Button, EmptyState, Field, Modal, Segmented, Select, StatusBadge, cn } from './ui';
+import { Badge, Button, EmptyState, Field, Modal, Segmented, Select, cn } from './ui';
 
 export interface DisciplineRow {
   id: string;            // tournament_discipline_id
@@ -30,9 +30,22 @@ const DEFAULT_END_HOUR = 20;
 const DURATION_OPTIONS = [15, 20, 30, 45, 60, 75, 90, 120];
 const DEFAULT_DURATION = 60;
 
+// Horizontal gantt: time runs left → right. Each hour is HOUR_PX wide, so a 60-minute
+// match is exactly one hour wide and a 15-minute match a quarter of that. Overlapping
+// matches stack into lanes (LANE_PX tall each).
+const HOUR_PX = 148;
+const QUARTER_PX = HOUR_PX / 4; // a 15-minute slot
+const LANE_PX = 56;
+const ROW_PAD = 8;
+const CARD_GAP = 14; // vertical gap between stacked lanes, so cards never touch
+const LABEL_W = 172;
+const HEADER_H = 34;
+const QUARTERS = [0, 1, 2, 3] as const;
+
 const pad = (n: number) => String(n).padStart(2, '0');
 const dayKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const hhmm = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const fixtureDuration = (f: GridFixture) => (f.duration_minutes && f.duration_minutes > 0 ? f.duration_minutes : DEFAULT_DURATION);
 
 function matchLabel(f: GridFixture): string {
   if (f.home || f.away) return `${f.home?.name ?? 'TBD'} v ${f.away?.name ?? 'TBD'}`;
@@ -43,31 +56,104 @@ function matchLabel(f: GridFixture): string {
 function timeRange(f: GridFixture): string {
   if (!f.scheduled_at) return '';
   const start = new Date(f.scheduled_at);
-  const mins = f.duration_minutes && f.duration_minutes > 0 ? f.duration_minutes : DEFAULT_DURATION;
+  const mins = fixtureDuration(f);
   const end = new Date(start.getTime() + mins * 60000);
   return `${hhmm(start)}–${hhmm(end)} · ${mins}m`;
 }
 
-// Discipline × time scheduler. Rows are the championship's disciplines; columns are
-// hourly lanes across the day. Tap an empty slot (managers only) to place one of that
-// discipline's unscheduled matches at a chosen start time + duration; scheduled
-// matches render as blocks in their row + start-hour lane.
-export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, placing }: {
+// Lay a row's matches onto horizontal lanes: each match spans [start, start+duration)
+// minutes; overlapping matches drop into the next free lane (calendar style) so a
+// 60-minute match always shows its full width and clashes are both visible.
+function packRow(items: GridFixture[]) {
+  const ev = items
+    .map((f) => {
+      const d = new Date(f.scheduled_at!);
+      const start = d.getHours() * 60 + d.getMinutes();
+      return { f, start, end: start + fixtureDuration(f) };
+    })
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const laneEnds: number[] = [];
+  const placed = ev.map((it) => {
+    let lane = laneEnds.findIndex((end) => end <= it.start);
+    if (lane === -1) { lane = laneEnds.length; laneEnds.push(it.end); }
+    else laneEnds[lane] = it.end;
+    return { ...it, lane };
+  });
+  return { placed, lanes: Math.max(1, laneEnds.length) };
+}
+
+// A match counts as LIVE only when BOTH hold: scoring has been started (status 'live')
+// AND the clock is within its scheduled window [start, end]. So a match flipped live
+// early (before its slot) or left live long after it ended doesn't pulse forever - it
+// goes live as its datetime arrives and drops out once the end time passes.
+function isLiveNow(f: GridFixture, now: number): boolean {
+  if (f.status !== 'live' || !f.scheduled_at) return false;
+  const start = new Date(f.scheduled_at).getTime();
+  const end = start + fixtureDuration(f) * 60000;
+  return now >= start && now <= end;
+}
+
+// Compact status marker shown on the card (so completed/postponed/etc. are clearly
+// labelled, not just colour-coded). Returns null for the default "scheduled" look.
+function statusChip(status: string): { text: string; cls: string } | null {
+  switch (status) {
+    case 'completed': return { text: 'Completed', cls: 'text-emerald-700 dark:text-emerald-400' };
+    case 'walkover': return { text: 'Walkover', cls: 'text-emerald-700 dark:text-emerald-400' };
+    case 'postponed': return { text: 'Postponed', cls: 'text-slate-500 dark:text-slate-400' };
+    case 'cancelled': return { text: 'Cancelled', cls: 'text-slate-500 dark:text-slate-400' };
+    case 'bye': return { text: 'Bye', cls: 'text-slate-500 dark:text-slate-400' };
+    default: return null; // scheduled, or live-but-outside-its-window
+  }
+}
+
+// Status → card tint. `live` (the start+end window is current AND recording) wins; then
+// resolved states read green/grey, and everything else is the "to-do" amber.
+function cardTint(status: string, live: boolean): string {
+  if (live) return 'border-rose-300 bg-rose-50 dark:border-rose-500/40 dark:bg-rose-500/10';
+  switch (status) {
+    case 'completed':
+    case 'walkover':
+      return 'border-emerald-200 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10';
+    case 'bye':
+      return 'border-dashed border-slate-300 bg-slate-50 dark:border-slate-600 dark:bg-slate-800/60';
+    case 'postponed':
+    case 'cancelled':
+      return 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60';
+    default:
+      return 'border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10';
+  }
+}
+
+// Discipline × time scheduler (horizontal gantt). Rows are the championship's
+// disciplines; time runs left→right with one column per hour, each split into four
+// 15-minute slots. Tap an empty slot (managers only) to place one of that discipline's
+// unscheduled matches there; drag a placed match to another slot to move it, or click
+// it to change its time/duration or unschedule it.
+export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, onUnschedule, placing }: {
   rows: DisciplineRow[];
   fixtures: GridFixture[];
   days: string[];
   canManage: boolean;
   onPlace: (fixtureId: string, startISO: string, durationMinutes: number) => void;
+  onUnschedule?: (fixtureId: string) => void;
   placing?: boolean;
 }) {
   const [day, setDay] = useState('');
   const activeDay = day && days.includes(day) ? day : days[0] ?? '';
-  const [slot, setSlot] = useState<{ row: DisciplineRow; hour: number } | null>(null);
+  const [slot, setSlot] = useState<{ row: DisciplineRow; hour: number; minute: number } | null>(null);
+  const [editing, setEditing] = useState<GridFixture | null>(null);
+  // Re-render every 30s so a match flips to LIVE the moment its start time arrives and
+  // drops out once its end passes, without needing a manual refresh.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
 
   const unscheduledCount = useMemo(() => fixtures.filter((f) => !f.scheduled_at).length, [fixtures]);
 
-  // Hour lanes to render: the default 8–20 window, widened to include any match
-  // scheduled earlier/later on the active day (so a 06:00 or 22:00 match still shows).
+  // Hour columns to render: the default 8–20 window, widened to cover any match that
+  // starts earlier or runs later on the active day.
   const hours = useMemo(() => {
     let lo = DEFAULT_START_HOUR;
     let hi = DEFAULT_END_HOUR;
@@ -76,22 +162,37 @@ export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, pla
       const d = new Date(f.scheduled_at);
       if (dayKey(d) !== activeDay) continue;
       lo = Math.min(lo, d.getHours());
-      hi = Math.max(hi, d.getHours());
+      const endHour = new Date(d.getTime() + fixtureDuration(f) * 60000);
+      hi = Math.max(hi, endHour.getMinutes() > 0 ? endHour.getHours() : endHour.getHours() - 1);
     }
     lo = Math.max(0, lo);
-    hi = Math.min(23, hi);
+    hi = Math.min(23, Math.max(hi, lo));
     return Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
   }, [fixtures, activeDay]);
+  const startHour = hours[0] ?? DEFAULT_START_HOUR;
+  const trackW = hours.length * HOUR_PX;
 
-  const cellFixtures = (rowId: string, hour: number) =>
-    fixtures.filter((f) => {
-      if (f.tournament_discipline_id !== rowId || !f.scheduled_at) return false;
-      const d = new Date(f.scheduled_at);
-      if (dayKey(d) !== activeDay) return false;
-      return d.getHours() === hour;
-    });
-
+  const dayFixtures = (rowId: string) => fixtures.filter((f) => {
+    if (f.tournament_discipline_id !== rowId || !f.scheduled_at) return false;
+    return dayKey(new Date(f.scheduled_at)) === activeDay;
+  });
   const rowUnscheduled = (rowId: string) => fixtures.filter((f) => f.tournament_discipline_id === rowId && !f.scheduled_at);
+
+  // Drag a placed match onto an empty slot to reschedule it - accepted only within the
+  // match's own discipline row (we move it in time, not across draws).
+  const onCardDragStart = (ev: DragEvent, f: GridFixture) => {
+    ev.dataTransfer.setData('text/plain', f.id);
+    ev.dataTransfer.effectAllowed = 'move';
+  };
+  const onSlotDrop = (ev: DragEvent, rowId: string, hour: number, minute: number) => {
+    ev.preventDefault();
+    const id = ev.dataTransfer.getData('text/plain');
+    const f = fixtures.find((x) => x.id === id);
+    if (!f || f.tournament_discipline_id !== rowId) return;
+    const [y, mo, d] = activeDay.split('-').map(Number);
+    const startISO = new Date(y, mo - 1, d, hour, minute).toISOString();
+    onPlace(id, startISO, fixtureDuration(f));
+  };
 
   if (rows.length === 0) {
     return <EmptyState icon="⚑" title="No disciplines yet" description="Add sports & disciplines in Setup before scheduling matches." />;
@@ -106,70 +207,102 @@ export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, pla
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Unscheduled: {unscheduledCount}</span>
       </div>
 
-      <div className="overflow-x-auto">
-        <div className="inline-block rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <table className="border-collapse">
-          <thead>
-            <tr className="border-b border-slate-200 dark:border-slate-800">
-              <th className="sticky left-0 z-10 bg-white px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:bg-slate-900 dark:text-slate-500" style={{ minWidth: 160 }}>
-                Discipline / time
-              </th>
-              {hours.map((h) => (
-                <th key={h} className="px-3 py-2 text-center text-xs font-bold text-slate-500 dark:text-slate-400" style={{ minWidth: 130 }}>{pad(h)}:00</th>
+      {/* Single scroll box so the header row and discipline column can stay pinned. */}
+      <div className="max-h-[68vh] overflow-auto rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div style={{ width: LABEL_W + trackW }}>
+          {/* Header: sticky on vertical scroll; the corner cell also sticks left. */}
+          <div className="sticky top-0 z-30 flex border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+            <div className="sticky left-0 z-10 flex items-center border-r border-slate-200 bg-white px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-500"
+              style={{ width: LABEL_W, minWidth: LABEL_W, height: HEADER_H }}>
+              Discipline / time
+            </div>
+            <div className="relative" style={{ width: trackW, height: HEADER_H }}>
+              {hours.map((h, hi) => (
+                <div key={h} className="absolute top-0 flex h-full items-center justify-center border-l border-slate-100 text-xs font-bold text-slate-500 dark:border-slate-800 dark:text-slate-400"
+                  style={{ left: hi * HOUR_PX, width: HOUR_PX }}>{pad(h)}:00</div>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800/60">
-                <td className="sticky left-0 z-10 bg-white px-3 py-3 align-top dark:bg-slate-900">
+            </div>
+          </div>
+
+          {/* Rows */}
+          {rows.map((row) => {
+            const { placed, lanes } = packRow(dayFixtures(row.id));
+            const rowH = lanes * LANE_PX + ROW_PAD * 2;
+            return (
+              <div key={row.id} className="flex border-b border-slate-100 last:border-0 dark:border-slate-800/60">
+                <div className="sticky left-0 z-20 border-r border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900" style={{ width: LABEL_W, minWidth: LABEL_W }}>
                   <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{row.sport} · {row.discipline}</div>
                   <div className="text-xs text-slate-400 dark:text-slate-500">{row.format ?? row.entry_type ?? ''}</div>
-                </td>
-                {hours.map((h) => {
-                  const items = cellFixtures(row.id, h);
-                  return (
-                    <td key={h} className="p-1.5 align-top">
-                      {items.length > 0 ? (
-                        <div className="space-y-1">
-                          {items.map((f) => (
-                            <div key={f.id} className="flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-left dark:border-amber-500/30 dark:bg-amber-500/10">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
-                                  <span>{f.sport_icon ?? '•'}</span><span className="truncate">{f.round || 'Match'}</span>
-                                </div>
-                                <div className="truncate text-xs font-medium text-slate-700 dark:text-slate-200">{matchLabel(f)}</div>
-                                <div className="truncate text-[10px] text-slate-400 dark:text-slate-500">{timeRange(f)}</div>
-                              </div>
-                              {f.status !== 'scheduled' && <span className="shrink-0"><StatusBadge status={f.status} /></span>}
-                            </div>
-                          ))}
+                </div>
+                <div className="relative" style={{ width: trackW, height: rowH }}>
+                  {/* 15-minute slots: click to schedule, or drop a match here. */}
+                  {hours.map((h, hi) => QUARTERS.map((q) => (
+                    canManage ? (
+                      <button
+                        key={`${h}-${q}`}
+                        type="button"
+                        onClick={() => setSlot({ row, hour: h, minute: q * 15 })}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => onSlotDrop(e, row.id, h, q * 15)}
+                        aria-label={`Schedule ${row.sport} ${row.discipline} at ${pad(h)}:${pad(q * 15)}`}
+                        className={cn(
+                          'group absolute top-0 grid place-items-center text-slate-300 transition-colors hover:bg-brand-50 dark:text-slate-600 dark:hover:bg-brand-500/10',
+                          q === 0 ? 'border-l border-slate-200 dark:border-slate-700/80' : 'border-l border-dashed border-slate-100 dark:border-slate-800/60',
+                        )}
+                        style={{ left: hi * HOUR_PX + q * QUARTER_PX, width: QUARTER_PX, height: rowH }}
+                      >
+                        <span className="text-xs opacity-0 transition-opacity group-hover:opacity-100">+</span>
+                      </button>
+                    ) : (
+                      <div key={`${h}-${q}`} className={cn('absolute top-0', q === 0 ? 'border-l border-slate-200 dark:border-slate-700/80' : 'border-l border-dashed border-slate-100 dark:border-slate-800/60')}
+                        style={{ left: hi * HOUR_PX + q * QUARTER_PX, width: QUARTER_PX, height: rowH }} />
+                    )
+                  )))}
+
+                  {/* Placed matches: width = duration, lane = overlap row. */}
+                  {placed.map(({ f, start, lane }) => {
+                    const left = ((start - startHour * 60) / 60) * HOUR_PX;
+                    const width = Math.max(QUARTER_PX - 2, (fixtureDuration(f) / 60) * HOUR_PX - 2);
+                    const wide = width >= 116;
+                    const live = isLiveNow(f, now);
+                    const chip = statusChip(f.status);
+                    return (
+                      <div
+                        key={f.id}
+                        draggable={canManage}
+                        onDragStart={canManage ? (ev) => onCardDragStart(ev, f) : undefined}
+                        onClick={canManage ? () => setEditing(f) : undefined}
+                        title={`${matchLabel(f)} · ${timeRange(f)} · ${live ? 'live' : f.status}`}
+                        className={cn(
+                          'absolute z-10 flex flex-col justify-center overflow-hidden rounded-lg border px-1.5',
+                          cardTint(f.status, live),
+                          canManage && 'cursor-pointer hover:shadow-sm hover:brightness-95',
+                        )}
+                        style={{ left, width, top: ROW_PAD + lane * LANE_PX, height: LANE_PX - CARD_GAP }}
+                      >
+                        <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          <span>{f.sport_icon ?? '•'}</span><span className="truncate">{f.round || 'Match'}</span>
+                          {live ? (
+                            <span className="ml-auto flex shrink-0 items-center gap-0.5 text-[9px] text-rose-600 dark:text-rose-400"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" />LIVE</span>
+                          ) : wide && chip ? (
+                            <span className={cn('ml-auto shrink-0 text-[9px] font-bold', chip.cls)}>{chip.text}</span>
+                          ) : null}
                         </div>
-                      ) : canManage ? (
-                        <button
-                          type="button"
-                          onClick={() => setSlot({ row, hour: h })}
-                          className="grid h-14 w-full place-items-center rounded-lg border border-dashed border-slate-200 text-slate-300 transition hover:border-brand-300 hover:text-brand-500 dark:border-slate-700 dark:text-slate-600 dark:hover:border-brand-500/50"
-                          aria-label={`Schedule ${row.sport} ${row.discipline} at ${pad(h)}:00`}
-                        >
-                          +
-                        </button>
-                      ) : (
-                        <div className="h-14 rounded-lg border border-dashed border-slate-100 dark:border-slate-800/60" />
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                        <div className="truncate text-xs font-medium text-slate-700 dark:text-slate-200">{matchLabel(f)}</div>
+                        {wide && <div className="truncate text-[10px] text-slate-400 dark:text-slate-500">{timeRange(f)}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
       {canManage && (
         <p className="text-xs text-slate-400 dark:text-slate-500">
-          Columns = time, rows = discipline. Tap an empty slot to schedule a match - pick its exact start time and how long it runs.
+          Time runs left to right - each hour column is split into four 15-minute slots, so a match's width is its duration (a 60-minute match fills an hour, a 15-minute one a quarter). Tap an empty slot to schedule a match, drag a placed match to move it, or click it to change its time, duration or unschedule it.
         </p>
       )}
 
@@ -183,21 +316,33 @@ export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, pla
           onPlace={onPlace}
         />
       )}
+
+      {editing && (
+        <EditTimingModal
+          fixture={editing}
+          days={days}
+          activeDay={activeDay}
+          placing={placing}
+          onClose={() => setEditing(null)}
+          onPlace={onPlace}
+          onUnschedule={onUnschedule}
+        />
+      )}
     </div>
   );
 }
 
 // Schedule-a-match modal: pick one of the discipline's unscheduled matches, set the
-// exact start time (seeded from the tapped lane) and a duration, then place it.
+// exact start time (seeded from the tapped slot) and a duration, then place it.
 function PlaceModal({ slot, activeDay, matches, placing, onClose, onPlace }: {
-  slot: { row: DisciplineRow; hour: number };
+  slot: { row: DisciplineRow; hour: number; minute: number };
   activeDay: string;
   matches: GridFixture[];
   placing?: boolean;
   onClose: () => void;
   onPlace: (fixtureId: string, startISO: string, durationMinutes: number) => void;
 }) {
-  const [time, setTime] = useState(`${pad(slot.hour)}:00`);
+  const [time, setTime] = useState(`${pad(slot.hour)}:${pad(slot.minute)}`);
   const [duration, setDuration] = useState(DEFAULT_DURATION);
 
   const place = (fixtureId: string) => {
@@ -214,7 +359,7 @@ function PlaceModal({ slot, activeDay, matches, placing, onClose, onPlace }: {
 
       <div className="mb-4 grid grid-cols-2 gap-3">
         <Field label="Start time">
-          <input type="time" value={time} onChange={(e) => setTime(e.target.value)}
+          <input type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)}
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" />
         </Field>
         <Field label="Duration">
@@ -246,6 +391,64 @@ function PlaceModal({ slot, activeDay, matches, placing, onClose, onPlace }: {
           ))}
         </div>
       )}
+    </Modal>
+  );
+}
+
+// Edit the timing of a placed match straight from the timeline: change its day, start
+// time or duration, or unschedule it (sending it back to the unscheduled pool).
+function EditTimingModal({ fixture, days, activeDay, placing, onClose, onPlace, onUnschedule }: {
+  fixture: GridFixture;
+  days: string[];
+  activeDay: string;
+  placing?: boolean;
+  onClose: () => void;
+  onPlace: (fixtureId: string, startISO: string, durationMinutes: number) => void;
+  onUnschedule?: (fixtureId: string) => void;
+}) {
+  const cur = fixture.scheduled_at ? new Date(fixture.scheduled_at) : null;
+  const [day, setDay] = useState(cur ? dayKey(cur) : activeDay);
+  const [time, setTime] = useState(cur ? hhmm(cur) : '09:00');
+  const [duration, setDuration] = useState(fixtureDuration(fixture));
+
+  const save = () => {
+    const [y, mo, d] = day.split('-').map(Number);
+    const [hh, mm] = time.split(':').map(Number);
+    const startISO = new Date(y, mo - 1, d, hh || 0, mm || 0).toISOString();
+    onPlace(fixture.id, startISO, duration);
+    onClose();
+  };
+  const unschedule = () => { onUnschedule?.(fixture.id); onClose(); };
+
+  return (
+    <Modal title={`Edit timing · ${matchLabel(fixture)}`} onClose={onClose}>
+      {days.length > 1 && (
+        <Field label="Day">
+          <Select value={day} onChange={(e) => setDay(e.target.value)}>
+            {days.map((d) => <option key={d} value={d}>{fmtDate(d)}</option>)}
+          </Select>
+        </Field>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Start time">
+          <input type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" />
+        </Field>
+        <Field label="Duration">
+          <Select value={String(duration)} onChange={(e) => setDuration(Number(e.target.value))}>
+            {DURATION_OPTIONS.map((m) => <option key={m} value={m}>{m} min</option>)}
+          </Select>
+        </Field>
+      </div>
+      <div className="mt-3 flex items-center justify-between">
+        {onUnschedule ? (
+          <Button variant="ghost" className="text-rose-600 dark:text-rose-400" disabled={placing} onClick={unschedule}>Unschedule</Button>
+        ) : <span />}
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button disabled={placing} onClick={save}>{placing ? 'Saving…' : 'Save'}</Button>
+        </div>
+      </div>
     </Modal>
   );
 }

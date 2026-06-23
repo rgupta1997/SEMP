@@ -5,6 +5,7 @@ import {
   SPONSOR_TIER, STANDINGS_RULE_SCOPE, STANDINGS_TIEBREAKER, TEAM_MEMBER_ROLE,
   TEAM_STATUS, TOURNAMENT_DISCIPLINE_STATUS, TOURNAMENT_STATUS,
 } from './enums.js';
+import { disciplineFormatConfigSchema } from './scoring.js';
 
 const uuid = z.string().uuid();
 const json = z.record(z.any());
@@ -254,7 +255,7 @@ export const createTournamentDisciplineSchema = z.object({
   tournament_sport_id: uuid,
   discipline_id: uuid.nullable().optional(),
   format_id: uuid.nullable().optional(),
-  format_config: json.default({}),
+  format_config: disciplineFormatConfigSchema.default({}),
   venue_id: uuid.nullable().optional(),
   rulebook_url: z.string().optional(),
   entry_type: z.enum(ENTRY_TYPE).optional(),
