@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react';
-import { fmtDate } from '../lib/hooks';
-import { Badge, Button, EmptyState, Field, Modal, Segmented, Select, cn } from './ui';
+import { fmtDate, fmtDateTime } from '../lib/hooks';
+import { Badge, Button, EmptyState, Field, Modal, Segmented, Select, cn, toast } from './ui';
 
 export interface DisciplineRow {
   id: string;            // tournament_discipline_id
@@ -14,6 +14,7 @@ export interface GridFixture {
   tournament_discipline_id: string;
   status: string;
   round?: string | null;
+  bracket_position?: number | null;
   scheduled_at: string | null;
   duration_minutes?: number | null;
   sport?: string | null;
@@ -59,6 +60,43 @@ function timeRange(f: GridFixture): string {
   const mins = fixtureDuration(f);
   const end = new Date(start.getTime() + mins * 60000);
   return `${hhmm(start)}–${hhmm(end)} · ${mins}m`;
+}
+
+// Knockout-stage matches carry a bracket position (QF/SF/final/round-of-N) or a
+// 3rd-place label; everything else (round-robin "Round N", group "Pool A - Match N",
+// incrementally-added league fixtures) is a league/group match.
+const KNOCKOUT_ROUND = /^(final|sf|qf|r\d+|3rd place|bronze)\b/i;
+function isKnockout(f: GridFixture): boolean {
+  return f.bracket_position != null || (!!f.round && KNOCKOUT_ROUND.test(f.round.trim()));
+}
+
+// League-before-knockout rule (per sport): a knockout match (QF/SF/final) must not
+// start before that sport's league/group matches, and a league match must not be
+// pushed past the sport's knockout matches. Compares against already-scheduled
+// fixtures of the same sport (across its disciplines); returns a human-readable
+// reason if the proposed start breaks that order, else null.
+function placementError(fixture: GridFixture, startMs: number, all: GridFixture[]): string | null {
+  const sport = fixture.sport;
+  if (!sport) return null; // can't attribute the fixture to a sport - don't block
+  const sameSport = all.filter((f) => f.id !== fixture.id && f.sport === sport && f.scheduled_at);
+  if (isKnockout(fixture)) {
+    const leagueStarts = sameSport.filter((f) => !isKnockout(f)).map((f) => new Date(f.scheduled_at!).getTime());
+    if (leagueStarts.length) {
+      const latest = Math.max(...leagueStarts);
+      if (startMs < latest) {
+        return `Knockout matches can't be scheduled before the ${sport} league stage. The last league match starts ${fmtDateTime(new Date(latest))} - pick a later time.`;
+      }
+    }
+  } else {
+    const koStarts = sameSport.filter(isKnockout).map((f) => new Date(f.scheduled_at!).getTime());
+    if (koStarts.length) {
+      const earliest = Math.min(...koStarts);
+      if (startMs > earliest) {
+        return `League matches must be scheduled before the ${sport} knockout stage. The first knockout match starts ${fmtDateTime(new Date(earliest))} - pick an earlier time.`;
+      }
+    }
+  }
+  return null;
 }
 
 // Lay a row's matches onto horizontal lanes: each match spans [start, start+duration)
@@ -124,6 +162,34 @@ function cardTint(status: string, live: boolean): string {
   }
 }
 
+// Knockout rounds are labelled by the number of teams remaining (R16, QF = 8,
+// SF = 4, Final = 2; "3rd Place" is the consolation). Map a label to that count so
+// the unscheduled list can be ordered by play order.
+function knockoutTeams(round: string): number | null {
+  const s = round.trim().toLowerCase();
+  if (s === 'final' || s === 'f') return 2;
+  if (s.includes('3rd') || s.includes('third')) return 3; // consolation - just before the final
+  if (s.startsWith('sf') || s.includes('semi')) return 4;
+  if (s.startsWith('qf') || s.includes('quarter')) return 8;
+  const m = s.match(/^r(\d+)$/); // R16, R32, R64…
+  if (m) return Number(m[1]);
+  return null;
+}
+
+// Sort key that puts a discipline's matches in play order: pool/league rounds first,
+// then the knockout bracket biggest-first (R32 → R16 → QF → SF → 3rd Place → Final).
+function roundSortKey(round: string | null | undefined): number {
+  const r = (round ?? '').trim();
+  if (!r) return 9000; // unlabelled "Match" sorts last
+  const pool = r.match(/^(?:pool|group)\s+([a-z])\b.*?(\d+)?\s*$/i);
+  if (pool) return 1000 + (pool[1].toUpperCase().charCodeAt(0) - 65) * 100 + (pool[2] ? Number(pool[2]) : 0);
+  const rr = r.match(/^round\s+(\d+)/i);
+  if (rr) return 1000 + Number(rr[1]);
+  const ko = knockoutTeams(r);
+  if (ko != null) return 5000 - ko; // more teams remaining ⇒ earlier round
+  return 9000;
+}
+
 // Discipline × time scheduler (horizontal gantt). Rows are the championship's
 // disciplines; time runs left→right with one column per hour, each split into four
 // 15-minute slots. Tap an empty slot (managers only) to place one of that discipline's
@@ -178,6 +244,16 @@ export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, onU
   });
   const rowUnscheduled = (rowId: string) => fixtures.filter((f) => f.tournament_discipline_id === rowId && !f.scheduled_at);
 
+  // Run the league-before-knockout check, then place (or surface why not). Returns
+  // false when the placement was rejected so callers (modals) can stay open.
+  const tryPlace = (fixtureId: string, startISO: string, durationMinutes: number): boolean => {
+    const f = fixtures.find((x) => x.id === fixtureId);
+    const err = f ? placementError(f, new Date(startISO).getTime(), fixtures) : null;
+    if (err) { toast.error(err); return false; }
+    onPlace(fixtureId, startISO, durationMinutes);
+    return true;
+  };
+
   // Drag a placed match onto an empty slot to reschedule it - accepted only within the
   // match's own discipline row (we move it in time, not across draws).
   const onCardDragStart = (ev: DragEvent, f: GridFixture) => {
@@ -191,7 +267,7 @@ export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, onU
     if (!f || f.tournament_discipline_id !== rowId) return;
     const [y, mo, d] = activeDay.split('-').map(Number);
     const startISO = new Date(y, mo - 1, d, hour, minute).toISOString();
-    onPlace(id, startISO, fixtureDuration(f));
+    tryPlace(id, startISO, fixtureDuration(f));
   };
 
   if (rows.length === 0) {
@@ -313,7 +389,7 @@ export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, onU
           matches={rowUnscheduled(slot.row.id)}
           placing={placing}
           onClose={() => setSlot(null)}
-          onPlace={onPlace}
+          onPlace={tryPlace}
         />
       )}
 
@@ -324,7 +400,7 @@ export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, onU
           activeDay={activeDay}
           placing={placing}
           onClose={() => setEditing(null)}
-          onPlace={onPlace}
+          onPlace={tryPlace}
           onUnschedule={onUnschedule}
         />
       )}
@@ -340,21 +416,34 @@ function PlaceModal({ slot, activeDay, matches, placing, onClose, onPlace }: {
   matches: GridFixture[];
   placing?: boolean;
   onClose: () => void;
-  onPlace: (fixtureId: string, startISO: string, durationMinutes: number) => void;
+  onPlace: (fixtureId: string, startISO: string, durationMinutes: number) => boolean;
 }) {
   const [time, setTime] = useState(`${pad(slot.hour)}:${pad(slot.minute)}`);
   const [duration, setDuration] = useState(DEFAULT_DURATION);
+
+  // List the discipline's unscheduled matches in play order: pool/league rounds
+  // first, then the knockout bracket biggest-first (R16 → QF → SF → Final).
+  const ordered = useMemo(
+    () => [...matches].sort((a, b) => roundSortKey(a.round) - roundSortKey(b.round)),
+    [matches],
+  );
 
   const place = (fixtureId: string) => {
     const [y, mo, d] = activeDay.split('-').map(Number);
     const [hh, mm] = time.split(':').map(Number);
     const startISO = new Date(y, mo - 1, d, hh || 0, mm || 0).toISOString();
-    onPlace(fixtureId, startISO, duration);
-    onClose();
+    // Stay on the modal so the organiser can keep placing matches (the placed one
+    // drops out of the list as the fixtures refetch). On a rejected place, leave the
+    // time alone so the toast is actionable; on success, roll the start time forward
+    // by this match's duration so the next match lands in the following slot.
+    if (!onPlace(fixtureId, startISO, duration)) return;
+    const next = Math.min((hh || 0) * 60 + (mm || 0) + duration, 23 * 60 + 45);
+    setTime(`${pad(Math.floor(next / 60))}:${pad(next % 60)}`);
   };
 
   return (
-    <Modal title="Schedule a match" onClose={onClose}>
+    <Modal title="Schedule a match" onClose={onClose}
+      footer={<div className="flex justify-end"><Button variant="ghost" onClick={onClose}>Done</Button></div>}>
       <p className="-mt-2 mb-3 text-sm text-slate-500 dark:text-slate-400">{slot.row.sport} · {slot.row.discipline} · {fmtDate(activeDay)}</p>
 
       <div className="mb-4 grid grid-cols-2 gap-3">
@@ -376,7 +465,7 @@ function PlaceModal({ slot, activeDay, matches, placing, onClose, onPlace }: {
         </p>
       ) : (
         <div className="space-y-2">
-          {matches.map((f) => (
+          {ordered.map((f) => (
             <div key={f.id} className={cn('flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-800', placing && 'opacity-60')}>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -403,7 +492,7 @@ function EditTimingModal({ fixture, days, activeDay, placing, onClose, onPlace, 
   activeDay: string;
   placing?: boolean;
   onClose: () => void;
-  onPlace: (fixtureId: string, startISO: string, durationMinutes: number) => void;
+  onPlace: (fixtureId: string, startISO: string, durationMinutes: number) => boolean;
   onUnschedule?: (fixtureId: string) => void;
 }) {
   const cur = fixture.scheduled_at ? new Date(fixture.scheduled_at) : null;
@@ -415,8 +504,8 @@ function EditTimingModal({ fixture, days, activeDay, placing, onClose, onPlace, 
     const [y, mo, d] = day.split('-').map(Number);
     const [hh, mm] = time.split(':').map(Number);
     const startISO = new Date(y, mo - 1, d, hh || 0, mm || 0).toISOString();
-    onPlace(fixture.id, startISO, duration);
-    onClose();
+    // Keep the modal open if the placement was rejected (so the toast is actionable).
+    if (onPlace(fixture.id, startISO, duration)) onClose();
   };
   const unschedule = () => { onUnschedule?.(fixture.id); onClose(); };
 
