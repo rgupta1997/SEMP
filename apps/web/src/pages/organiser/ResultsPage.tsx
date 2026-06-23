@@ -160,33 +160,36 @@ export function ResultsPage() {
                 const completed = f.status === 'completed' || f.status === 'confirmed';
                 const scored = !individual && f.home_score != null && f.away_score != null;
                 return (
-                  <Card key={f.id} interactive={canManage} onClick={() => open(f)} className="flex items-center gap-2 p-3 sm:gap-4 sm:p-4">
-                    <div className="w-10 shrink-0 truncate text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 sm:w-16" title={f.round ?? undefined}>
+                  <Card key={f.id} interactive={canManage} onClick={() => open(f)} className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-2 p-3 sm:gap-x-4 sm:p-4">
+                    {/* Left cell (1fr): match type — always shown in full.
+                        Both outer cells are equal 1fr so the auto center column is
+                        always physically centered regardless of their content widths. */}
+                    <div className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400" title={f.round ?? undefined}>
                       {f.round || '-'}
                     </div>
 
-                    {/* Centered match block: home (right-aligned) · score · away (left-aligned) */}
-                    <div className="flex flex-1 items-center justify-center gap-2 sm:gap-3">
+                    {/* Center cell (auto): home · score · away */}
+                    <div className="flex items-center gap-2 sm:gap-3">
                       {individual ? (
                         <>
-                          <div className="flex w-28 items-center justify-end gap-2 sm:w-44">
+                          <div className="flex w-36 items-center justify-end gap-2 sm:w-52">
                             <span className="grid h-9 w-9 place-items-center rounded-lg bg-slate-900 text-slate-500 dark:bg-slate-800">··</span>
                           </div>
-                          <span className="w-16 shrink-0 text-center text-slate-300 dark:text-slate-600 sm:w-20">··</span>
-                          <div className="flex w-28 items-center gap-2 sm:w-44">
+                          <span className="w-16 shrink-0 text-center text-slate-300 dark:text-slate-600">··</span>
+                          <div className="flex w-36 items-center gap-2 sm:w-52">
                             <span className="grid h-9 w-9 place-items-center rounded-lg bg-slate-900 text-slate-500 dark:bg-slate-800">··</span>
                           </div>
                         </>
                       ) : (
                         <>
-                          <div className="flex w-28 items-center justify-end gap-2 sm:w-44">
+                          <div className="flex w-36 items-center justify-end gap-2 sm:w-52">
                             {f.home && <span className="truncate text-right text-sm font-medium text-slate-700 dark:text-slate-200" title={teamLabel(f.home)}>{teamLabel(f.home)}</span>}
                             <TeamChip team={f.home} winner={f.winner_team_id != null && f.winner_team_id === f.home?.id} />
                           </div>
-                          <span className="w-16 shrink-0 whitespace-nowrap text-center text-lg font-bold tabular-nums text-slate-800 dark:text-slate-100 sm:w-20">
+                          <span className="w-16 shrink-0 whitespace-nowrap text-center text-lg font-bold tabular-nums text-slate-800 dark:text-slate-100">
                             {scored ? `${f.home_score}–${f.away_score}` : <span className="text-slate-300 dark:text-slate-600">··</span>}
                           </span>
-                          <div className="flex w-28 items-center gap-2 sm:w-44">
+                          <div className="flex w-36 items-center gap-2 sm:w-52">
                             <TeamChip team={f.away} winner={f.winner_team_id != null && f.winner_team_id === f.away?.id} />
                             {f.away && <span className="truncate text-sm font-medium text-slate-700 dark:text-slate-200" title={teamLabel(f.away)}>{teamLabel(f.away)}</span>}
                           </div>
@@ -194,15 +197,15 @@ export function ResultsPage() {
                       )}
                     </div>
 
-                    {/* Fixed-width actions column so status + Edit/Record line up across rows */}
-                    <div className="flex w-28 shrink-0 items-center justify-end gap-2 sm:w-40 sm:gap-3">
+                    {/* Right cell (1fr): status + actions */}
+                    <div className="flex items-center justify-end gap-2 sm:gap-3">
                       {individual ? (
                         <StatusBadge status="" label="Individual" />
                       ) : (
                         <StatusBadge status={f.status} />
                       )}
                       {canManage && (
-                        <span className="w-16 shrink-0 text-right text-sm font-semibold text-brand-600 dark:text-brand-300">
+                        <span className="shrink-0 text-right text-sm font-semibold text-brand-600 dark:text-brand-300">
                           {completed ? 'Edit' : 'Record →'}
                         </span>
                       )}
