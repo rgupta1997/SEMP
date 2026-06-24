@@ -89,7 +89,7 @@ export function BulkImportModal<R>({
 
   if (result !== null) {
     return (
-      <Modal title={`${title} - done`} onClose={onClose}>
+      <Modal title={`${title} - done`} onClose={onClose} dismissible={false}>
         {renderResult ? renderResult(result) : <p className="text-sm text-slate-600 dark:text-slate-300">Import complete.</p>}
         <div className="mt-5 flex justify-end"><Button onClick={onClose}>Done</Button></div>
       </Modal>
@@ -97,7 +97,7 @@ export function BulkImportModal<R>({
   }
 
   return (
-    <Modal title={title} onClose={onClose} wide>
+    <Modal title={title} onClose={onClose} wide dismissible={!busy}>
       {extraControls && <div className="mb-4">{extraControls}</div>}
 
       <div className="mb-4">

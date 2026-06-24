@@ -214,11 +214,14 @@ export function StatusLegend({ statuses = MATCH_LEGEND_STATUSES, value, onSelect
 // stay pinned while only the body scrolls. Put action buttons in `footer` so they
 // never scroll out of view. `size` overrides the default/`wide` width.
 const MODAL_WIDTHS = { lg: 'max-w-lg', xl: 'max-w-xl', '2xl': 'max-w-2xl', '3xl': 'max-w-3xl', '4xl': 'max-w-4xl' } as const;
-export function Modal({ title, onClose, children, footer, wide, size }:
-  { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; size?: keyof typeof MODAL_WIDTHS }) {
+export function Modal({ title, onClose, children, footer, wide, size, dismissible = true }:
+  { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; size?: keyof typeof MODAL_WIDTHS; dismissible?: boolean }) {
   const maxW = size ? MODAL_WIDTHS[size] : wide ? 'max-w-2xl' : 'max-w-lg';
+  // `dismissible={false}` keeps a backdrop click from closing the modal - used for
+  // long/batched flows (imports) so a stray outside-click can't discard an in-flight
+  // run or its result. The × button still closes it explicitly.
   return createPortal(
-    <div className="animate-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4 sm:p-6 backdrop-blur-sm" onClick={onClose}>
+    <div className="animate-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4 sm:p-6 backdrop-blur-sm" onClick={dismissible ? onClose : undefined}>
       <div className={cn('flex max-h-full w-full flex-col animate-fade-up rounded-[20px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900', maxW)} onClick={(e) => e.stopPropagation()}>
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700">
           <h3 className="text-lg font-semibold dark:text-slate-100">{title}</h3>

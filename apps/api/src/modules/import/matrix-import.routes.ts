@@ -248,6 +248,15 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
       // Make sure every declared section org + enrollment exists, even if it has no people yet.
       for (const section of body.sections) await ensureSection(section);
 
+      // Team people (captains / per-discipline POCs) become plain MEMBERS of their section
+      // org so the org shows in their "Organizations" list. Collected here (deduped by
+      // user+org) and written in ONE batch after step 5 - doing an upsert per person blew
+      // the interactive-transaction budget on large sheets (P2028). skipDuplicates leaves
+      // any existing membership (e.g. an owner row) untouched, so it never downgrades.
+      const teamOrgMembers = new Map<string, { user_id: string; organization_id: string }>();
+      const addTeamOrgMember = (userId: string, orgId: string) =>
+        teamOrgMembers.set(`${userId}|${orgId}`, { user_id: userId, organization_id: orgId });
+
       // 3.5) Provision missing logins (now that section orgs exist), then fold them into
       //      the phone map so the assignment loops resolve them like any matched user.
       //      Owners' home org is ALWAYS their own section org (they own it); other people
@@ -261,11 +270,9 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
           skipDuplicates: true,
         });
         const created = await tx.users.findMany({ where: { email: { in: list.map((u) => u.email) } }, select: { id: true, name: true, email: true, phone: true } });
-        const byEmail = new Map(list.map((u) => [u.email, u]));
-        const memberships = created
-          .map((u) => { const nu = byEmail.get(u.email); const org = nu ? orgFor(nu) : null; return org && nu ? { user_id: u.id, organization_id: org, role: nu.isOwner ? 'owner' : 'member' } : null; })
-          .filter((m): m is { user_id: string; organization_id: string; role: string } => !!m);
-        if (memberships.length) await tx.organization_members.createMany({ data: memberships, skipDuplicates: true });
+        // Org memberships are assigned uniformly below - owners in step 4, team people
+        // (captains / per-discipline POCs) in step 5 - so new and matched users get the
+        // same roles. Here we only create the logins + fold them into the phone map.
         for (const u of created) {
           const k = phoneLast10(u.phone);
           if (k.length === 10 && !phoneMap.has(k)) { phoneMap.set(k, u); summary.users.created++; }
@@ -317,6 +324,8 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
               update: { role: 'captain', is_active: true },
               create: { team_id: team.id, user_id: captain.id, role: 'captain' },
             });
+            // Also a member of the section org, so the org shows in their Organizations.
+            addTeamOrgMember(captain.id, orgId);
             summary.captains_assigned++;
           }
           // The per-discipline POC is added as vice_captain: that team role carries the
@@ -330,11 +339,21 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
               update: { role: 'vice_captain', is_active: true },
               create: { team_id: team.id, user_id: poc.id, role: 'vice_captain' },
             });
+            addTeamOrgMember(poc.id, orgId);
             summary.pocs_assigned++;
           }
         }
       }
-    }, { timeout: 30000 });
+
+      // 6) One batch insert of all team-person org memberships (members). skipDuplicates
+      //    keeps existing rows (owners/admins) as-is, so nobody is downgraded.
+      if (teamOrgMembers.size) {
+        await tx.organization_members.createMany({
+          data: [...teamOrgMembers.values()].map((m) => ({ ...m, role: 'member' })),
+          skipDuplicates: true,
+        });
+      }
+    }, { timeout: 120000, maxWait: 15000 });
 
     // Recompute matches now that provisioned users are in the phone map - anyone still
     // unmatched had no valid phone / no target org and was skipped.
