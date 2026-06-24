@@ -3,9 +3,10 @@ import { ChevronDown, Trophy } from 'lucide-react';
 import { useEvent } from './EventLayout';
 import { usePageFilters } from '../../lib/filters';
 import { useApi } from '../../lib/hooks';
-import { Avatar, Badge, Card, CardBody, CardHeader, EmptyState, RefreshBar, Spinner, StatCard, Table, cn } from '../../components/ui';
+import { Avatar, Badge, Card, CardBody, CardHeader, EmptyState, RefreshBar, Spinner, StatCard, Table, Tabs, cn } from '../../components/ui';
 import { SharePublicLink } from '../../components/SharePublicLink';
 import { StandingsBreakdown } from '../../components/StandingsBreakdown';
+import { StandingsMedalTable, rankMedals } from '../../components/StandingsMedalTable';
 
 interface StandingRow {
   organization_id: string;
@@ -47,6 +48,8 @@ export function StandingsPage() {
   const { data: draws = [] } = useApi<DrawRow[]>(`/championships/${eventId}/draws`);
   // Which org's row is expanded to show its per-event points breakdown.
   const [expanded, setExpanded] = useState<string | null>(null);
+  // Olympic-style medal tally (primary) vs the P/W/D/L points table - same rows, two views.
+  const [view, setView] = useState<'points' | 'medals'>('medals');
 
   const tournamentOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -85,12 +88,26 @@ export function StandingsPage() {
   // Show a medals column only when some discipline used the medal scheme.
   const showMedals = rows.some((r) => r.detail && (r.detail.gold || r.detail.silver || r.detail.bronze));
 
+  // Medal leader = top of the medal tally (gold, then silver/bronze); points leader = rank 1.
+  const medalLeader = rankMedals(rows)[0]?.row.organization;
+  const pointsLeader = rows[0]?.organization;
+
   return (
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Completed matches" value={data?.completed_matches ?? 0} />
-        <StatCard label="Organizations scoring" value={rows.length} />
-        <StatCard label="Leader" value={rows[0]?.organization?.short_name ?? rows[0]?.organization?.name ?? '-'} accent />
+        {view === 'medals' ? (
+          <>
+            <StatCard label="Sports & disciplines" value={draws.length} />
+            <StatCard label="Organizations" value={rows.length} />
+            <StatCard label="Medal leader" value={medalLeader?.short_name ?? medalLeader?.name ?? '-'} accent />
+          </>
+        ) : (
+          <>
+            <StatCard label="Completed matches" value={data?.completed_matches ?? 0} />
+            <StatCard label="Organizations scoring" value={rows.length} />
+            <StatCard label="Leader" value={pointsLeader?.short_name ?? pointsLeader?.name ?? '-'} accent />
+          </>
+        )}
       </div>
 
       <Card>
@@ -104,9 +121,15 @@ export function StandingsPage() {
             </div>
           }
         />
-        <CardBody>
+        <CardBody className="space-y-4">
+          {!isLoading && rows.length > 0 && (
+            <Tabs active={view} onChange={(v) => setView(v as 'points' | 'medals')}
+              tabs={[{ id: 'medals', label: 'Medal tally' }, { id: 'points', label: 'Points table' }]} />
+          )}
           {isLoading ? <Spinner /> : rows.length === 0 ? (
             <EmptyState icon={<Trophy size={24} />} title="No results yet" description="Standings populate as officials complete matches with scores." />
+          ) : view === 'medals' ? (
+            <StandingsMedalTable rows={rows} base={`/championships/${eventId}`} scope={scope} scopeId={scopeId} />
           ) : (
             <Table>
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">

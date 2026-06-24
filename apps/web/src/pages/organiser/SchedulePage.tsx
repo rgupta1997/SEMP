@@ -190,10 +190,14 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
   // scratch and are blocked once anything's been played.
   const isLeague = /league|round.?robin/i.test(formatLabel ?? '');
   const hasBracket = fixtures.some((f) => f.bracket_position != null);
+  // Ranking/event draws (powerlifting/swimming/athletics) have a single team-less event
+  // fixture - no head-to-head, so the bracket/grid views don't apply. They get a simple
+  // event-row view that names the discipline instead.
+  const isRanking = /rank/i.test(formatLabel ?? '');
   // Knockout draws show a bracket; everything else (league / round-robin /
   // groups) shows a results grid. Both are the "visual" view.
   const visualLabel = hasBracket ? 'Bracket' : 'Grid';
-  const showVisual = fixtures.length > 0 && view === 'visual';
+  const showVisual = !isRanking && fixtures.length > 0 && view === 'visual';
 
   const groundLabel = (id: string | null) => { const g = grounds.find((x) => x.id === id); return g ? `${g.venues?.name ? g.venues.name + ' · ' : ''}${g.name}` : null; };
   const officialName = (id: string | null) => officials.find((o) => o.id === id)?.name ?? null;
@@ -209,7 +213,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
           <div className="text-xs text-slate-500 dark:text-slate-400">{td.entry_type} draw · {fixtures.length} fixture{fixtures.length === 1 ? '' : 's'}</div>
         </div>
         <div className="flex items-center gap-2">
-          {fixtures.length > 0 && (
+          {fixtures.length > 0 && !isRanking && (
             <Segmented
               size="sm"
               value={view}
@@ -231,7 +235,26 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
       </div>
       <div className="mt-3">
         {isLoading ? <Spinner /> : fixtures.length === 0 ? (
-          <p className="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-3 text-sm text-slate-400 dark:text-slate-500">No fixtures yet - generate the draw from registered teams.</p>
+          <p className="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-3 text-sm text-slate-400 dark:text-slate-500">
+            {isRanking ? 'No event yet - generate to create the ranking event.' : 'No fixtures yet - generate the draw from registered teams.'}
+          </p>
+        ) : isRanking ? (
+          // Ranking event: one team-less fixture per draw - show the event (discipline)
+          // name and its schedule/status rather than a head-to-head matchup.
+          <div className="space-y-1.5">
+            {listFixtures.map((f) => (
+              <div key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-sm">
+                <span className="w-20 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{f.round || 'Event'}</span>
+                <span className="flex-1 min-w-[180px] font-medium text-slate-700 dark:text-slate-300">{td.disciplines?.name ?? sportName} · Ranking event</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {groundLabel(f.venue_ground_id) ?? 'No ground'} · {f.scheduled_at ? fmtDateTime(f.scheduled_at) : 'Unscheduled'}
+                  {officialName(f.official_id) ? ` · ${officialName(f.official_id)}` : ' · No official'}
+                </span>
+                <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
+                {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)}>Edit</Button>}
+              </div>
+            ))}
+          </div>
         ) : showVisual ? (
           hasBracket
             ? <Bracket fixtures={fixtures} teamName={teamName} teamOrg={teamOrg} onSelect={canManage ? setEditing : () => {}} />

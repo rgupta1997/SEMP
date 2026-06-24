@@ -10,6 +10,7 @@ import { createNotification } from '../notifications/audience.js';
 import { recomputeStandings } from '../standings/standings.service.js';
 import { signShareToken } from '../public/share-token.js';
 import { listChampionshipFixtures } from './fixtures-list.js';
+import { findUserByPhone } from '../iam/users.helpers.js';
 
 // Prisma include that pulls just the sport names offered by a championship, plus a
 // helper that flattens them to a distinct, sorted `sports: string[]` and drops the
@@ -337,6 +338,25 @@ export function makeEventsRouter(prisma: Prisma): Router {
       .sort((a, b) => (a.org?.name ?? 'Unaffiliated').localeCompare(b.org?.name ?? 'Unaffiliated'));
 
     res.json({ organizations });
+  }));
+
+  // Look a competitor up by phone for event (powerlifting/swimming) scoring: returns the
+  // matched user plus the org they're rostered under *within this championship* (a team
+  // entered in it), so officials can enter athletes by phone and auto-fill their org.
+  router.get('/:id/competitors/lookup', asyncHandler(async (req, res) => {
+    const phone = typeof req.query.phone === 'string' ? req.query.phone : '';
+    const user = await findUserByPhone(prisma, phone);
+    if (!user) { res.json({ found: false }); return; }
+    // The org of a team this user is a member of and that is entered in this championship.
+    const team = await prisma.teams.findFirst({
+      where: {
+        team_entries: { some: { championship_id: req.params.id } },
+        team_members: { some: { user_id: user.id } },
+      },
+      include: { organizations: { select: { id: true, name: true } } },
+    });
+    const org = team?.organizations ?? null;
+    res.json({ found: true, userId: user.id, name: user.name, orgId: org?.id ?? null, org: org?.name ?? null });
   }));
 
   // -------------------------------------------------------------------------

@@ -2,10 +2,11 @@ import { BusinessRuleError } from '../../../../shared/errors.js';
 import { generateGroups } from './groups.js';
 import { generateKnockout } from './knockout.js';
 import { generateRoundRobin } from './round-robin.js';
+import { generateRanking } from './ranking.js';
 import type { GeneratedFixture, TeamRef } from './types.js';
 
 export type { GeneratedFixture, TeamRef } from './types.js';
-export { generateGroups, generateKnockout, generateRoundRobin };
+export { generateGroups, generateKnockout, generateRoundRobin, generateRanking };
 
 // Dispatch by tournament_formats.name. `params` are the format's instance config.
 export function generateFixtures(
@@ -37,6 +38,10 @@ export function generateFixtures(
     return generateRoundRobin(teams, {
       doubleRound: Boolean(params.double_round ?? params.doubleRound ?? false),
     });
+  }
+  if (name.includes('rank')) {
+    // Ranking event (powerlifting/swimming/athletics): one team-less event fixture.
+    return generateRanking(teams, params);
   }
 
   throw new BusinessRuleError(`No fixture generator for format '${formatName}'`);

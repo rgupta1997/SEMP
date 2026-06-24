@@ -1,20 +1,17 @@
-// Multi-competitor event engine (swimming heats, powerlifting categories). Unlike a
-// single/tie fixture there are no two teams - many participants record a mark per
-// sub-event, and marks aggregate into team (org) points. Pure functions; the console
-// stores EventState in fixtures.live_state.event.
+// Web display helpers for multi-competitor events (swimming heats, powerlifting
+// categories, athletics). The pure scoring/aggregation now lives in @semp/shared so the
+// API standings service reuses the exact same maths; this file keeps the web-only bits
+// (time parse/format, hydration, the per-sub-event display table) and re-exports the
+// shared helpers the console imports from here.
 
 import type { EventSpec } from '@semp/shared';
+import {
+  aggregateEvent, placementPoints, rankSubEvent,
+  type AggRow, type EventOrgContribution, type EventState, type ParticipantResult,
+} from '@semp/shared';
 
-export interface ParticipantResult {
-  id: string;                       // local row id
-  name: string;                     // competitor name
-  org?: string | null;             // org name this result counts towards (display label)
-  orgId?: string | null;           // org id (chosen from the championship's entered orgs)
-  category?: string | null;        // for pickOne events: the single sub-event contested
-  marks: Record<string, number | null>; // subEvent.key -> mark (time/weight/points)
-}
-
-export interface EventState { participants: ParticipantResult[] }
+export { aggregateEvent, placementPoints, rankSubEvent };
+export type { AggRow, EventOrgContribution, EventState, ParticipantResult };
 
 export function initEvent(): EventState { return { participants: [] }; }
 
@@ -24,6 +21,7 @@ export function hydrateEvent(raw: any): EventState {
     participants: ps.map((p: any, i: number) => ({
       id: typeof p?.id === 'string' ? p.id : `p${i}`,
       name: typeof p?.name === 'string' ? p.name : '',
+      phone: typeof p?.phone === 'string' ? p.phone : null,
       org: p?.org ?? null,
       orgId: p?.orgId ?? null,
       category: typeof p?.category === 'string' ? p.category : null,
@@ -58,72 +56,12 @@ export function formatTime(sec: number): string {
   return `${m}:${whole.padStart(2, '0')}${frac ? `.${frac}` : ''}`;
 }
 
-// Aggregation key/label = the org when set, else the participant (individual ranking).
-// Keyed by orgId (stable) when present, falling back to the org name for legacy rows.
-const keyOf = (p: ParticipantResult) => (p.orgId ?? (p.org && p.org.trim() ? p.org.trim() : p.id));
-const labelOf = (p: ParticipantResult) => (p.org && p.org.trim() ? p.org.trim() : (p.name || 'Unnamed'));
-
-// Rank participants within one sub-event (1 = best). Participants without a mark are
-// excluded. Ties share the better rank's points by simple ordinal ranking.
-export function rankSubEvent(spec: EventSpec, state: EventState, subKey: string): Map<string, number> {
-  const entries = state.participants
-    .map((p) => ({ id: p.id, mark: p.marks[subKey] }))
-    .filter((e): e is { id: string; mark: number } => typeof e.mark === 'number');
-  entries.sort((a, b) => (spec.result.winnerIs === 'min' ? a.mark - b.mark : b.mark - a.mark));
-  const ranks = new Map<string, number>();
-  entries.forEach((e, i) => ranks.set(e.id, i + 1));
-  return ranks;
-}
-
-export interface AggRow { key: string; label: string; points: number }
-
-// Team (org) points from the configured aggregation rule:
-//   medals     -> medalPoints[rank-1] per sub-event (5/3/1 …)
-//   placePoints-> (N - rank + 1) per sub-event
-//   sumBest    -> sum of each participant's marks across sub-events (team total)
-export function aggregateEvent(spec: EventSpec, state: EventState): AggRow[] {
-  const points = new Map<string, number>();
-  const labels = new Map<string, string>();
-  const bump = (p: ParticipantResult, pts: number) => {
-    const k = keyOf(p);
-    labels.set(k, labelOf(p));
-    points.set(k, (points.get(k) ?? 0) + pts);
-  };
-
-  if (spec.result.aggregate === 'sumBest') {
-    for (const p of state.participants) {
-      const sum = spec.subEvents.reduce((acc, se) => acc + (typeof p.marks[se.key] === 'number' ? (p.marks[se.key] as number) : 0), 0);
-      bump(p, sum);
-    }
-  } else {
-    const medals = spec.result.medalPoints ?? [5, 3, 1];
-    const n = state.participants.length;
-    for (const se of spec.subEvents) {
-      const ranks = rankSubEvent(spec, state, se.key);
-      for (const [pid, rank] of ranks) {
-        const p = state.participants.find((x) => x.id === pid);
-        if (!p) continue;
-        const pts = spec.result.aggregate === 'medals' ? (medals[rank - 1] ?? 0) : Math.max(0, n - rank + 1);
-        bump(p, pts);
-      }
-    }
-  }
-
-  return [...points.entries()]
-    .map(([key, pts]) => ({ key, label: labels.get(key) ?? key, points: pts }))
-    .sort((a, b) => b.points - a.points);
-}
-
-// Simple team-ranking model - the default for multi-competitor events. Rather than
-// entering per-athlete marks, the official just gives each org a finishing place; points
-// are awarded by placement from medalPoints (place 1 -> medalPoints[0], etc).
+// Simple team-ranking model - the default for multi-competitor events. The official gives
+// each org a finishing place; points are awarded by placement (medalPoints).
 export interface RankRow { orgId: string | null; org: string; place: number | null }
-export function placementPoints(place: number | null | undefined, medalPoints: number[]): number {
-  return place && place >= 1 ? (medalPoints[place - 1] ?? 0) : 0;
-}
 
-// Per-sub-event ranking shown to the official so the points trail is visible ("who
-// placed where, and what their org earned"). Only meaningful for rank-based aggregates
+// Per-sub-event ranking shown to the official so the points trail is visible ("who placed
+// where, and what their org earned"). Only meaningful for rank-based aggregates
 // (medals/placePoints); a sumBest event has no per-sub ranking, so this returns [].
 export interface SubEventRow { rank: number; name: string; org?: string | null; mark: number; points: number }
 export interface SubEventBlock { key: string; label: string; rows: SubEventRow[] }

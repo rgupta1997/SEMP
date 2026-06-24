@@ -31,6 +31,7 @@ import { makeVenuesRouter, makeVenueGroundsRouter } from '../modules/venues/venu
 import { makeFixturesRouter } from '../modules/fixtures/fixtures.routes.js';
 import { makeNotificationsRouter } from '../modules/notifications/notifications.routes.js';
 import { makeDemoRequestsRouter } from '../modules/marketing/demo-requests.routes.js';
+import { makeFeedbackRouter } from '../modules/marketing/feedback.routes.js';
 import { BusinessRuleError } from '../shared/errors.js';
 
 export function buildApp(prisma: Prisma) {
@@ -59,6 +60,11 @@ export function buildApp(prisma: Prisma) {
   // reads/triage inside the router are gated to super-admins. Mounted before the
   // global requireAuth so anonymous visitors can submit.
   api.use('/demo-requests', makeDemoRequestsRouter(prisma));
+
+  // User feedback - POST is public (the public championship pages are unauthenticated and
+  // a signed-in sender's id is captured opportunistically); reads/triage inside the router
+  // are gated to super-admins. Mounted before the global requireAuth.
+  api.use('/feedback', makeFeedbackRouter(prisma));
 
   // Public, view-only championship pages via a share token (Overview + Standings).
   // Mounted before requireAuth so anyone with the link can view without signing in.

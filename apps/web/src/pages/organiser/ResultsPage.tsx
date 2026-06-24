@@ -168,18 +168,17 @@ export function ResultsPage() {
                       {f.round || '-'}
                     </div>
 
-                    {/* Center cell (auto): home · score · away */}
+                    {/* Center cell (auto): home · score · away. Ranking/event fixtures
+                        have no head-to-head matchup, so show the event (discipline) name
+                        instead of two empty team chips. */}
                     <div className="flex items-center gap-2 sm:gap-3">
                       {individual ? (
-                        <>
-                          <div className="flex w-36 items-center justify-end gap-2 sm:w-52">
-                            <span className="grid h-9 w-9 place-items-center rounded-lg bg-slate-900 text-slate-500 dark:bg-slate-800">··</span>
-                          </div>
-                          <span className="w-16 shrink-0 text-center text-slate-300 dark:text-slate-600">··</span>
-                          <div className="flex w-36 items-center gap-2 sm:w-52">
-                            <span className="grid h-9 w-9 place-items-center rounded-lg bg-slate-900 text-slate-500 dark:bg-slate-800">··</span>
-                          </div>
-                        </>
+                        <div className="flex w-[19rem] items-center justify-center gap-2 text-center sm:w-[27rem]">
+                          <span className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200" title={f.discipline ?? f.sport ?? undefined}>
+                            {f.discipline ?? f.sport ?? 'Event'}
+                          </span>
+                          <Badge tone="violet">Ranking event</Badge>
+                        </div>
                       ) : (
                         <>
                           <div className="flex w-36 items-center justify-end gap-2 sm:w-52">

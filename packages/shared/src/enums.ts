@@ -111,6 +111,12 @@ export const DEMO_REQUEST_ROLES = [
 ] as const;
 export type DemoRequestRole = (typeof DEMO_REQUEST_ROLES)[number];
 
+// ---------- Feedback ----------
+// Triage state for user feedback captured from the public pages + the in-app shell.
+// 'new' on capture; an admin moves it through reviewing → resolved/closed.
+export const FEEDBACK_STATUS = ['new', 'reviewing', 'resolved', 'closed'] as const;
+export type FeedbackStatus = (typeof FEEDBACK_STATUS)[number];
+
 // Legal championship status transitions (enforced by the ChampionshipLifecycle domain service).
 export const CHAMPIONSHIP_STATUS_TRANSITIONS: Record<ChampionshipStatus, ChampionshipStatus[]> = {
   draft: ['registration_open'],

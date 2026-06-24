@@ -5,7 +5,14 @@ import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { ENTRY_TYPE, TOURNAMENT_DISCIPLINE_STATUS } from '@semp/shared';
 import { usePermissions } from '../../../lib/permissions';
+import { eventTemplateFor } from '../../../features/scoring/templates';
 import { Badge, Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge, toast } from '../../../components/ui';
+
+// Ranking/event sports (powerlifting, swimming, athletics) have no head-to-head matches,
+// so they're locked to the "Rankings" format. `eventTemplateFor` is the same per-sport
+// check the scoring console uses to default these sports to the event console.
+const isRankingFormat = (name?: string | null) => !!name && name.trim().toLowerCase().includes('rank');
+const isRankingSport = (sportName?: string | null) => !!eventTemplateFor(sportName);
 
 /* ----------------------------- Add sports modal ----------------------------- */
 // Tap sport tiles to select several at once; choose a fixture format for each,
@@ -24,14 +31,21 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
   const available = sports.filter((s) => !existingSportIds.has(s.id));
   // Default new sports to Knockout (organisers can still pick another format below).
   const defaultFormat = (formats.find((f) => f.name === 'Knockout') ?? formats[0])?.id ?? '';
+  // Ranking/event sports are forced onto the Rankings format (when it's seeded).
+  const rankingFormatId = formats.find((f) => isRankingFormat(f.name))?.id ?? '';
+  const sportNameOf = (id: string) => sports.find((s) => s.id === id)?.name;
+  const lockedToRanking = (id: string) => !!rankingFormatId && isRankingSport(sportNameOf(id));
+  // The format a sport defaults to when tapped: Rankings for event sports, else Knockout.
+  const formatFor = (id: string) => (lockedToRanking(id) ? rankingFormatId : defaultFormat);
 
   const toggle = (id: string) => setSelected((m) => {
     const next = { ...m };
-    if (id in next) delete next[id]; else next[id] = defaultFormat;
+    if (id in next) delete next[id]; else next[id] = formatFor(id);
     return next;
   });
   const setFormat = (id: string, fid: string) => setSelected((m) => ({ ...m, [id]: fid }));
-  const setAllFormats = (fid: string) => setSelected((m) => Object.fromEntries(Object.keys(m).map((id) => [id, fid])));
+  // Copy-to-all skips ranking sports - they stay on Rankings regardless of the choice.
+  const setAllFormats = (fid: string) => setSelected((m) => Object.fromEntries(Object.keys(m).map((id) => [id, lockedToRanking(id) ? rankingFormatId : fid])));
   const selectedIds = Object.keys(selected);
 
   // The format picker lives below the sport grid (often below the fold). When the
@@ -150,7 +164,7 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
                 Copy to all
                 <Select value="" onChange={(e) => { if (e.target.value) setAllFormats(e.target.value); }} className="w-44">
                   <option value="">- pick a format -</option>
-                  {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  {formats.filter((f) => !isRankingFormat(f.name)).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
                 </Select>
               </label>
             )}
@@ -158,10 +172,16 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
           {selectedIds.map((id) => (
             <div key={id} className="flex items-center justify-between gap-3">
               <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{sportIcon(id) ? `${sportIcon(id)} ` : ''}{sportName(id)}</span>
-              <Select value={selected[id]} onChange={(e) => setFormat(id, e.target.value)} className="w-56">
-                <option value="">- select a format -</option>
-                {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-              </Select>
+              {lockedToRanking(id) ? (
+                <Select value={rankingFormatId} disabled className="w-56" title="Ranking sports have no head-to-head matches">
+                  <option value={rankingFormatId}>Rankings</option>
+                </Select>
+              ) : (
+                <Select value={selected[id]} onChange={(e) => setFormat(id, e.target.value)} className="w-56">
+                  <option value="">- select a format -</option>
+                  {formats.filter((f) => !isRankingFormat(f.name)).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </Select>
+              )}
             </div>
           ))}
         </div>
@@ -354,7 +374,7 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, d
             <Field label="Fixture format" hint="Override the draw, or inherit the sport's format.">
               <Select value={formatId} onChange={(e) => setFormatId(e.target.value)}>
                 <option value="">Same as sport{sportFormatName ? ` (${sportFormatName})` : ''}</option>
-                {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                {formats.filter((f) => isRankingFormat(f.name) === isRankingFormat(sportFormatName)).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
               </Select>
             </Field>
           </div>
@@ -435,7 +455,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
       <Field label="Fixture format" hint="Changing this affects the next draw - regenerate on the Schedule tab to apply.">
         <Select value={formatId} onChange={(e) => setFormatId(e.target.value)}>
           <option value="">Same as sport{sportFormatName ? ` (${sportFormatName})` : ''}</option>
-          {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          {formats.filter((f) => isRankingFormat(f.name) === isRankingFormat(sportFormatName)).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
         </Select>
       </Field>
       <div className="grid grid-cols-3 gap-x-3">
@@ -473,7 +493,10 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
 
 /* ----------------------------- Edit / remove sport modal ----------------------------- */
 function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportName: string; formats: any[]; onClose: () => void }) {
-  const [formatId, setFormatId] = useState(ts.format_id ?? '');
+  // Ranking/event sports are locked to the Rankings format (no head-to-head matches).
+  const rankingFormatId = formats.find((f) => isRankingFormat(f.name))?.id ?? '';
+  const lockedToRanking = !!rankingFormatId && isRankingSport(sportName);
+  const [formatId, setFormatId] = useState(lockedToRanking ? rankingFormatId : (ts.format_id ?? ''));
   const [error, setError] = useState<string | null>(null);
   const path = `/tournament-sports?tournament_id=${ts.tournament_id}`;
 
@@ -482,16 +505,23 @@ function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportNam
 
   const save = () => {
     setError(null);
-    if (!formatId) { setError('Pick a fixture format'); return; }
-    update.mutate({ format_id: formatId }, { onError: (e: any) => setError(e.message) });
+    const fid = lockedToRanking ? rankingFormatId : formatId;
+    if (!fid) { setError('Pick a fixture format'); return; }
+    update.mutate({ format_id: fid }, { onError: (e: any) => setError(e.message) });
   };
 
   return (
     <Modal title={`Edit sport · ${sportName}`} onClose={onClose}>
       <Field label="Fixture format" hint="Changing this affects the next draw - regenerate on the Schedule tab to apply. Disciplines with their own format override are unaffected.">
-        <Select value={formatId} onChange={(e) => setFormatId(e.target.value)}>
-          <option value="">- select a format -</option>
-          {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+        <Select value={formatId} disabled={lockedToRanking} onChange={(e) => setFormatId(e.target.value)} title={lockedToRanking ? 'Ranking sports have no head-to-head matches' : undefined}>
+          {lockedToRanking ? (
+            <option value={rankingFormatId}>Rankings</option>
+          ) : (
+            <>
+              <option value="">- select a format -</option>
+              {formats.filter((f) => !isRankingFormat(f.name)).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </>
+          )}
         </Select>
       </Field>
       {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}

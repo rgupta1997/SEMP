@@ -4,6 +4,7 @@ import { BrandMark } from '../../components/BrandMark';
 import { Card, CardBody, EmptyState, Spinner, StatCard, StatusBadge, Tabs } from '../../components/ui';
 import { ChampionshipStandings } from '../../components/participant/ChampionshipStandings';
 import { ChampionshipFixtures } from '../../components/participant/ChampionshipFixtures';
+import { FeedbackWidget } from '../../components/FeedbackWidget';
 
 interface PublicOverview {
   championship: {
@@ -92,6 +93,8 @@ export function PublicChampionshipPage({ token }: { token: string }) {
           <ChampionshipStandings championshipId="" apiBase={`/public/championships/${token}`} />
         )}
       </main>
+
+      <FeedbackWidget championshipId={c.id} context={`public:${token}`} />
     </div>
   );
 }

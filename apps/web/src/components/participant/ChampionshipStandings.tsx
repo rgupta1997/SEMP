@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useApi } from '../../lib/hooks';
 import { ChevronDown, Trophy } from 'lucide-react';
-import { Avatar, Badge, EmptyState, ListToolbar, RefreshBar, Select, Spinner, Table, cn } from '../../components/ui';
+import { Avatar, Badge, EmptyState, ListToolbar, RefreshBar, Select, Spinner, Table, Tabs, cn } from '../../components/ui';
 import { StandingsBreakdown } from '../StandingsBreakdown';
+import { StandingsMedalTable } from '../StandingsMedalTable';
 
 // A draw row (subset of GET /:id/draws) - used only to source the tournament + sport
 // filter options (with their UUIDs, which the materialized scopes are keyed by).
@@ -37,6 +38,8 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
   const [sportId, setSportId] = useState('');
   // Which org's row is expanded to show its per-event points breakdown.
   const [expanded, setExpanded] = useState<string | null>(null);
+  // Olympic-style medal tally (primary) vs the P/W/D/L points table - same rows, two views.
+  const [view, setView] = useState<'points' | 'medals'>('medals');
 
   const tournamentOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -90,8 +93,15 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
         <RefreshBar updatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={() => refetch()} />
       </div>
 
+      {!isLoading && rows.length > 0 && (
+        <Tabs active={view} onChange={(v) => setView(v as 'points' | 'medals')}
+          tabs={[{ id: 'medals', label: 'Medal tally' }, { id: 'points', label: 'Points table' }]} />
+      )}
+
       {isLoading ? <Spinner /> : rows.length === 0 ? (
         <EmptyState icon={<Trophy size={24} />} title="No results yet" description="Standings populate as matches are completed." />
+      ) : view === 'medals' ? (
+        <StandingsMedalTable rows={rows} base={base} scope={scope} scopeId={scopeId} />
       ) : (
         <Table>
           <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">

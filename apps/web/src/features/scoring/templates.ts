@@ -139,6 +139,20 @@ const EVENT_TEMPLATES: Record<string, FormatTemplate> = {
     ],
     { pickOne: true, subEventNoun: 'Weight category' },
   ),
+  // Athletics: many track/field events, each ranked; the top finishers earn 5/3/1 for
+  // their org. The default ranking console only needs the placement points; the detailed
+  // per-athlete console treats higher marks as better (suits field events).
+  athletics: event(
+    { resultType: 'points', winnerIs: 'max', unit: 'pts', aggregate: 'medals', medalPoints: [5, 3, 1] },
+    [
+      { key: 'm100', label: "Men's 100m" }, { key: 'm200', label: "Men's 200m" }, { key: 'm400', label: "Men's 400m" },
+      { key: 'mlj', label: "Men's Long Jump" }, { key: 'msp', label: "Men's Shot Put" },
+      { key: 'w100', label: "Women's 100m" }, { key: 'w200', label: "Women's 200m" },
+      { key: 'wlj', label: "Women's Long Jump" }, { key: 'wsp', label: "Women's Shot Put" },
+      { key: 'relay', label: 'Mixed 4x100m Relay' },
+    ],
+    { subEventNoun: 'Event' },
+  ),
 };
 
 // The seeded event template for a sport, if any (drives the "Multi-competitor event"

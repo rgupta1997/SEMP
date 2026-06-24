@@ -14,6 +14,7 @@ import {
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
+import { rankingContributions, detailedContributions } from '@semp/shared';
 import type { TieSpec, EventSpec, ScoringMode } from '@semp/shared';
 
 // Walkover is handled separately (it needs a winner + reason); these are the plain
@@ -169,7 +170,11 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
   const tieSpec = (template.fixtureType === 'tie' && template.tie) ? template.tie : tieTemplateFor(sportName)?.tie;
   const eventSpec = (template.fixtureType === 'event' && template.event) ? template.event : eventTemplateFor(sportName)?.event;
 
-  const structures: Structure[] = ['single', ...(tieSpec ? ['tie' as const] : []), ...(eventSpec ? ['event' as const] : [])];
+  // Ranking/event sports (powerlifting/swimming/athletics) have no head-to-head match,
+  // so they're event-only - the "Single match" structure doesn't apply and is omitted.
+  const structures: Structure[] = eventSpec
+    ? ['event']
+    : ['single', ...(tieSpec ? ['tie' as const] : [])];
   // Default structure: an explicit stored config wins; otherwise the sport's natural
   // format (event/tie sports default to those, everything else to a single match).
   const storedType = fixture?.tournament_disciplines?.format_config?.scoring?.fixtureType as Structure | undefined;
@@ -178,19 +183,25 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
 
   const [structure, setStructure] = useState<Structure>(baseDefault);
   // Once the live snapshot arrives, snap to whatever's already been scored (so a
-  // half-finished tie/event reopens on the right tab).
+  // half-finished tie/event reopens on the right tab). `touched` guards against a slow
+  // live query: if the official picks a tab before it resolves, this one-shot seed must
+  // not stomp their choice when it finally lands (that read as "the toggle won't switch").
   const seeded = useRef(false);
+  const touched = useRef(false);
   useEffect(() => {
-    if (seeded.current || !live) return;
+    if (seeded.current || touched.current || !live) return;
     seeded.current = true;
     if (live.live_state?.tie && tieSpec) setStructure('tie');
     else if (live.live_state?.event && eventSpec) setStructure('event');
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
 
-  // Measured/time single sports have no per-tick scoring, so they're manual-only.
-  const forcedManual = structure === 'single' && singleDef.archetype === 'time';
+  // Measured/time single sports have no per-tick scoring, so they're manual-only. Cricket
+  // & box cricket are recorded as a final scorecard (runs/wkts/overs) rather than ball-by-
+  // ball here, so they're manual-only too - the detailed live deck is retired for cricket.
+  const manualOnlyArchetype = singleDef.archetype === 'time' || singleDef.archetype === 'cricket';
+  const forcedManual = structure === 'single' && manualOnlyArchetype;
   const storedMode = fixture?.tournament_disciplines?.format_config?.scoring?.scoringMode as ScoringMode | undefined;
-  const [mode, setMode] = useState<ScoringMode>(storedMode ?? (singleDef.archetype === 'time' ? 'manual' : 'detailed'));
+  const [mode, setMode] = useState<ScoringMode>(storedMode ?? (manualOnlyArchetype ? 'manual' : 'detailed'));
   const effectiveMode: ScoringMode = forcedManual ? 'manual' : mode;
   const showDepth = structure !== 'event' && !forcedManual;
   // Multi-competitor events default to a simple team ranking (which team did well); the
@@ -217,6 +228,7 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
   // recorded so the official can't lose a part-scored tie/match by tapping the wrong tab.
   const switchStructure = async (next: Structure) => {
     if (next === structure) return;
+    touched.current = true;
     if (hasProgress) {
       const ok = await confirmDialog({
         title: 'Switch scoring structure?',
@@ -233,6 +245,7 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
   // flip the mode mid-scoring by accident.
   const switchMode = async (next: ScoringMode) => {
     if (next === mode) return;
+    touched.current = true;
     if (hasProgress) {
       const ok = await confirmDialog({
         title: 'Switch scoring mode?',
@@ -250,8 +263,12 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
     <>
       {(structures.length > 1 || showDepth || structure === 'event') && (
         <div className="mb-5 flex flex-wrap items-end gap-x-6 gap-y-3">
-          <TabBar label="Match structure" value={structure} onChange={switchStructure}
-            options={structures.map((s) => ({ value: s, label: structureLabel(s) }))} />
+          {/* Only offer the structure switch when there's a real choice - event-only
+              sports have a single structure, so the lone tab is hidden. */}
+          {structures.length > 1 && (
+            <TabBar label="Match structure" value={structure} onChange={switchStructure}
+              options={structures.map((s) => ({ value: s, label: structureLabel(s) }))} />
+          )}
           {structure === 'event' ? (
             <TabBar label="Scoring" value={eventMode} onChange={setEventMode}
               options={[{ value: 'ranking', label: 'Ranking' }, { value: 'detailed', label: 'Detailed · per athlete' }]} />
@@ -979,13 +996,21 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
     const n = { ...p }; if (place) n[orgId] = place; else delete n[orgId]; return n;
   });
 
-  const save = () => {
-    const rows = orgs.map((o) => ({ orgId: o.id, org: o.name, place: places[o.id] ?? null }));
+  // Persist the ranking. `eventStandings` is the self-contained per-org contribution
+  // (points + medals) the standings service reads - so events feed the championship table
+  // without the server needing the event spec. `complete` signs the event off.
+  const persistRanking = (complete: boolean) => {
+    const rows = orgs.map((o) => ({ orgId: o.id, org: o.name, place: places[o.id] ?? null, points: placementPoints(places[o.id], medalPoints) }));
+    const eventStandings = rankingContributions(rows, medalPoints);
     persist.mutate(
-      { live_state: { ...(live?.live_state ?? {}), eventRanking: { rows } }, status: fixture.status === 'scheduled' ? 'live' : fixture.status },
-      { onSuccess: () => toast.success('Ranking saved'), onError: (e: any) => toast.error(e.message) },
+      {
+        live_state: { ...(live?.live_state ?? {}), eventRanking: { rows }, eventStandings },
+        status: complete ? 'completed' : (fixture.status === 'scheduled' ? 'live' : fixture.status),
+      },
+      { onSuccess: () => toast.success(complete ? 'Event signed off' : 'Ranking saved'), onError: (e: any) => toast.error(e.message) },
     );
   };
+  const save = () => persistRanking(false);
 
   const n = orgs.length;
   const ranked = orgs
@@ -1012,8 +1037,9 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
               </div>
             </div>
           ))}
-          <div className="flex justify-end pt-1">
-            <Button size="sm" disabled={persist.isPending} onClick={save}>{persist.isPending ? 'Saving…' : 'Save ranking'}</Button>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button size="sm" variant="outline" disabled={persist.isPending} onClick={() => persistRanking(false)}>{persist.isPending ? 'Saving…' : 'Save ranking'}</Button>
+            <Button size="sm" disabled={persist.isPending} onClick={() => persistRanking(true)}>Save &amp; sign off</Button>
           </div>
         </CardBody>
       </Card>
@@ -1034,9 +1060,9 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
             )}
           </CardBody>
         </Card>
-        <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-500/10">
+        <Card className="border-emerald-200 bg-emerald-50/60 dark:border-emerald-500/30 dark:bg-emerald-500/10">
           <CardBody className="text-xs text-slate-600 dark:text-slate-300">
-            Saved here as the team ranking. Feeding these points into championship standings is the remaining backend step for events.
+            These placement points (and 🥇/🥈/🥉 for the top three) feed straight into the championship standings and medal tally.
           </CardBody>
         </Card>
       </div>
@@ -1076,10 +1102,32 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const nounLower = noun.toLowerCase();
   const firstKey = spec.subEvents[0]?.key;
 
-  const addP = () => setState((s) => ({ participants: [...s.participants, { id: `p${Date.now()}`, name: '', org: null, orgId: null, category: pickOne ? firstKey : null, marks: {} }] }));
+  const addP = () => setState((s) => ({ participants: [...s.participants, { id: `p${Date.now()}`, name: '', phone: null, org: null, orgId: null, category: pickOne ? firstKey : null, marks: {} }] }));
   const removeP = (id: string) => setState((s) => ({ participants: s.participants.filter((p) => p.id !== id) }));
   const patchP = (id: string, patch: Partial<ParticipantResult>) => setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
   const setOrg = (id: string, orgId: string) => patchP(id, { orgId: orgId || null, org: orgs.find((o) => o.id === orgId)?.name ?? null });
+
+  // Look a competitor up by phone and auto-fill their name + the org they're rostered
+  // under in this championship - faster (and less error-prone) than typing both by hand.
+  const [lookingUp, setLookingUp] = useState<string | null>(null);
+  const lookupPhone = async (id: string, phone: string) => {
+    if (!champId) return;
+    if (phone.replace(/\D/g, '').length < 10) { toast.error('Enter the competitor’s 10-digit phone number'); return; }
+    setLookingUp(id);
+    try {
+      const r: any = await api('GET', `/championships/${champId}/competitors/lookup?phone=${encodeURIComponent(phone)}`);
+      if (r?.found) {
+        patchP(id, { name: r.name ?? '', orgId: r.orgId ?? null, org: r.org ?? null });
+        toast.success(r.org ? `${r.name} · ${r.org}` : `${r.name} — no org in this championship, set it manually`);
+      } else {
+        toast.error('No competitor found for that number');
+      }
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Lookup failed');
+    } finally {
+      setLookingUp(null);
+    }
+  };
   const setMark = (id: string, key: string, n: number | null) => setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, marks: { ...p.marks, [key]: n } } : p)) }));
   // Switching weight class carries the mark over to the new key (and drops the old).
   const setCategory = (id: string, cat: string) => setState((s) => ({ participants: s.participants.map((p) => {
@@ -1088,10 +1136,17 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     return { ...p, category: cat, marks: { [cat]: p.marks[prev] ?? null } };
   }) }));
 
-  const save = () => persist.mutate(
-    { live_state: { ...(live?.live_state ?? {}), event: state }, status: fixture.status === 'scheduled' ? 'live' : fixture.status },
-    { onSuccess: () => toast.success('Results saved'), onError: (e: any) => toast.error(e.message) },
+  // `eventStandings` is the per-org contribution (points + medals from each sub-event's
+  // top three) the standings service reads, so detailed event results feed the
+  // championship table + medal tally too. `complete` signs the event off.
+  const persistEvent = (complete: boolean) => persist.mutate(
+    {
+      live_state: { ...(live?.live_state ?? {}), event: state, eventStandings: detailedContributions(spec, state) },
+      status: complete ? 'completed' : (fixture.status === 'scheduled' ? 'live' : fixture.status),
+    },
+    { onSuccess: () => toast.success(complete ? 'Event signed off' : 'Results saved'), onError: (e: any) => toast.error(e.message) },
   );
+  const save = () => persistEvent(false);
 
   const agg = aggregateEvent(spec, state);
   const blocks = subEventResults(spec, state);
@@ -1120,7 +1175,19 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
             const cat = p.category ?? firstKey;
             return (
               <div key={p.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
-                <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
+                <Field label="Find by phone" hint="Auto-fills the competitor’s name and org from this championship.">
+                  <div className="flex gap-2">
+                    <Input
+                      value={p.phone ?? ''} inputMode="tel" placeholder="10-digit phone"
+                      onChange={(e) => patchP(p.id, { phone: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); lookupPhone(p.id, p.phone ?? ''); } }}
+                    />
+                    <Button type="button" variant="outline" disabled={lookingUp === p.id} onClick={() => lookupPhone(p.id, p.phone ?? '')}>
+                      {lookingUp === p.id ? 'Finding…' : 'Find'}
+                    </Button>
+                  </div>
+                </Field>
+                <div className="mt-2 grid grid-cols-[1fr_1fr_auto] items-end gap-2">
                   <Field label="Name"><Input value={p.name} onChange={(e) => patchP(p.id, { name: e.target.value })} placeholder="Competitor" /></Field>
                   <Field label="Counts towards">
                     <Select value={orgValue(p)} onChange={(e) => setOrg(p.id, e.target.value)}>
@@ -1154,9 +1221,12 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
               </div>
             );
           })}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <Button variant="outline" size="sm" onClick={addP}>+ Add participant</Button>
-            <Button size="sm" disabled={persist.isPending} onClick={save}>{persist.isPending ? 'Saving…' : 'Save results'}</Button>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={persist.isPending} onClick={() => persistEvent(false)}>{persist.isPending ? 'Saving…' : 'Save results'}</Button>
+              <Button size="sm" disabled={persist.isPending} onClick={() => persistEvent(true)}>Save &amp; sign off</Button>
+            </div>
           </div>
         </CardBody>
       </Card>
@@ -1199,9 +1269,9 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
           </Card>
         )}
 
-        <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-500/10">
+        <Card className="border-emerald-200 bg-emerald-50/60 dark:border-emerald-500/30 dark:bg-emerald-500/10">
           <CardBody className="text-xs text-slate-600 dark:text-slate-300">
-            Event results save live and aggregate here. Final sign-off and feeding these points into championship standings is the remaining backend step for multi-competitor events.
+            Each org's points (and 🥇/🥈/🥉 from every sub-event's top three) feed straight into the championship standings and medal tally.
           </CardBody>
         </Card>
       </div>

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  DEMO_REQUEST_STATUS, ENTRY_TYPE, ENROLLMENT_STATUS, CHAMPIONSHIP_STATUS, FIXTURE_STATUS, GROUND_TYPE,
+  DEMO_REQUEST_STATUS, FEEDBACK_STATUS, ENTRY_TYPE, ENROLLMENT_STATUS, CHAMPIONSHIP_STATUS, FIXTURE_STATUS, GROUND_TYPE,
   NOTIFICATION_AUDIENCE, NOTIFICATION_REACTIONS, ORGANIZATION_MEMBER_ROLE,
   SPONSOR_TIER, STANDINGS_RULE_SCOPE, STANDINGS_TIEBREAKER, TEAM_MEMBER_ROLE,
   TEAM_STATUS, TOURNAMENT_DISCIPLINE_STATUS, TOURNAMENT_STATUS,
@@ -564,5 +564,20 @@ export const updateDemoRequestSchema = z
     message: z.string().max(2000).nullable().optional(),
   })
   .refine((d) => d.status !== undefined || d.message !== undefined, { message: 'Nothing to update' });
+
+// Public feedback capture. Only `message` is required; name/email/context/championship
+// are optional. Mounted before auth, so it's trimmed/capped to avoid abuse as storage.
+export const createFeedbackSchema = z.object({
+  message: z.string().min(1).max(4000),
+  name: z.string().max(120).optional(),
+  email: z.string().email().max(160).optional().or(z.literal('')),
+  context: z.string().max(200).optional(),
+  championship_id: uuid.optional(),
+});
+
+// Admin-only triage update for a feedback row.
+export const updateFeedbackSchema = z
+  .object({ status: z.enum(FEEDBACK_STATUS).optional() })
+  .refine((d) => d.status !== undefined, { message: 'Nothing to update' });
 
 export { ENROLLMENT_STATUS };

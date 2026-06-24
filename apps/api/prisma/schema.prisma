@@ -359,6 +359,7 @@ model users {
   championship_organizations_championship_organizations_applied_byTousers  championship_organizations[] @relation("championship_organizations_applied_byTousers")
   championship_organizations_championship_organizations_reviewed_byTousers championship_organizations[] @relation("championship_organizations_reviewed_byTousers")
   demo_requests                                                            demo_requests[]
+  feedback                                                                 feedback[]
   fixture_awards                                                           fixture_awards[]
   fixtures                                                                 fixtures[]
   notification_reactions                                                   notification_reactions[]
@@ -581,4 +582,24 @@ model demo_requests {
 
   @@index([created_at(sort: Desc)], map: "idx_demo_requests_created")
   @@index([status], map: "idx_demo_requests_status")
+}
+
+/// User feedback from the public pages + in-app shell. championship_id / user_id are kept
+/// as scalar columns (DB FKs exist) - only handled_by navigates, mirroring demo_requests.
+model feedback {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  message         String
+  name            String?  @db.VarChar
+  email           String?  @db.VarChar
+  context         String?  @db.VarChar
+  championship_id String?  @db.Uuid
+  user_id         String?  @db.Uuid
+  status          String   @default("new") @db.VarChar
+  handled_by      String?  @db.Uuid
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime @default(now()) @db.Timestamptz(6)
+  users           users?   @relation(fields: [handled_by], references: [id], onUpdate: NoAction)
+
+  @@index([created_at(sort: Desc)], map: "idx_feedback_created")
+  @@index([status], map: "idx_feedback_status")
 }

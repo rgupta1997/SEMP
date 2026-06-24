@@ -142,6 +142,44 @@ export async function recomputeStandings(prisma: Prisma, championshipId: string)
     accumulate(ensureBucket('sport', ts.sport_id).rows, tallies);
   }
 
+  // ---- Multi-competitor ranking events (powerlifting / swimming / athletics) ----
+  // These draws have no head-to-head fixtures; each event fixture stores a self-contained
+  // per-org contribution (points + gold/silver/bronze) under live_state.eventStandings,
+  // written by the event consoles. An event is scored in place (not "won"), so we read
+  // live + completed and fold each org's contribution into the same buckets.
+  const eventFixtures = await prisma.fixtures.findMany({
+    where: {
+      status: { in: ['live', 'completed'] },
+      tournament_disciplines: { tournament_sports: { tournaments: { championship_id: championshipId } } },
+    },
+    select: {
+      live_state: true,
+      tournament_disciplines: { select: { tournament_sports: { select: { sport_id: true, tournament_id: true } } } },
+    },
+  });
+  for (const f of eventFixtures) {
+    const contributions = (f.live_state as any)?.eventStandings;
+    if (!Array.isArray(contributions) || contributions.length === 0) continue;
+    const ts = f.tournament_disciplines?.tournament_sports;
+    if (!ts) continue;
+    const tallies: OrgTally[] = [];
+    for (const c of contributions) {
+      if (!c?.orgId) continue;
+      const detail: Record<string, number> = {};
+      if (c.gold) detail.gold = c.gold;
+      if (c.silver) detail.silver = c.silver;
+      if (c.bronze) detail.bronze = c.bronze;
+      tallies.push({
+        organization_id: c.orgId, played: 0, won: 0, drawn: 0, lost: 0,
+        points: typeof c.points === 'number' ? c.points : 0, gf: 0, ga: 0, detail,
+      });
+    }
+    if (tallies.length === 0) continue;
+    accumulate(ensureBucket('championship', null).rows, tallies);
+    accumulate(ensureBucket('tournament', ts.tournament_id).rows, tallies);
+    accumulate(ensureBucket('sport', ts.sport_id).rows, tallies);
+  }
+
   // Rank each scope by the championship default's tiebreakers (a single, predictable
   // ordering across mixed-scheme scopes), then flatten to rows for insertion.
   const tiebreakers: StandingsTiebreaker[] =
@@ -338,6 +376,46 @@ export async function readStandingsBreakdown(
       won: tally.won, drawn: tally.drawn, lost: tally.lost,
       detail: tally.detail,
       matches,
+    });
+  }
+
+  // Ranking events (no head-to-head) contribute via live_state.eventStandings, not the
+  // per-draw scheme - append the org's per-sport contribution so the breakdown shows what
+  // a powerlifting/swimming/athletics draw earned too (medals + points, no match list).
+  const eventFx = await prisma.fixtures.findMany({
+    where: {
+      status: { in: ['live', 'completed'] },
+      tournament_disciplines: {
+        tournament_sports: {
+          tournaments: { championship_id: championshipId, ...(scope === 'tournament' && scopeId ? { id: scopeId } : {}) },
+          ...(scope === 'sport' && scopeId ? { sport_id: scopeId } : {}),
+        },
+      },
+    },
+    select: {
+      live_state: true,
+      tournament_discipline_id: true,
+      tournament_disciplines: { select: { disciplines: { select: { name: true } }, tournament_sports: { select: { sports: { select: { name: true } } } } } },
+    },
+  });
+  for (const f of eventFx) {
+    const contribs = (f.live_state as any)?.eventStandings;
+    if (!Array.isArray(contribs)) continue;
+    const mine = contribs.find((c: any) => c?.orgId === orgId);
+    if (!mine) continue;
+    const detail: Record<string, number> = {};
+    if (mine.gold) detail.gold = mine.gold;
+    if (mine.silver) detail.silver = mine.silver;
+    if (mine.bronze) detail.bronze = mine.bronze;
+    events.push({
+      draw_id: f.tournament_discipline_id,
+      sport: f.tournament_disciplines?.tournament_sports?.sports?.name ?? 'Event',
+      discipline: f.tournament_disciplines?.disciplines?.name ?? null,
+      scheme: 'medal',
+      points: typeof mine.points === 'number' ? mine.points : 0,
+      won: 0, drawn: 0, lost: 0,
+      detail,
+      matches: [],
     });
   }
 

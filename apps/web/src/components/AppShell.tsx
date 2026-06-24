@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Compass, Flag, Landmark, Layers, LayoutGrid, LayoutList, Lock,
-  Mail, Medal, Menu, Moon, Plus, Sun, Trophy, Upload, User, Users, X,
+  Mail, Medal, Menu, MessageSquare, Moon, Plus, Sun, Trophy, Upload, User, Users, X,
 } from 'lucide-react';
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
 import { BRAND } from '../lib/brand';
@@ -13,6 +13,7 @@ import { useTheme } from '../lib/theme';
 import { Avatar, cn } from './ui';
 import { BrandMark } from './BrandMark';
 import { NotificationBell } from './NotificationBell';
+import { FeedbackWidget } from './FeedbackWidget';
 
 interface NavItem { to: string; label: string; icon: ReactNode; end?: boolean }
 interface NavGroup { group: string; items: NavItem[] }
@@ -40,6 +41,7 @@ function navFor(role: AppRole): NavGroup[] {
         { to: '/platform/users', label: 'All Users', icon: <Users size={16} /> },
         { to: '/platform/import-setup', label: 'Import Setup', icon: <Upload size={16} /> },
         { to: '/platform/demo-requests', label: 'Demo Requests', icon: <Mail size={16} /> },
+        { to: '/platform/feedback', label: 'Feedback', icon: <MessageSquare size={16} /> },
       ],
     }];
   }
@@ -217,6 +219,7 @@ export function AppShell() {
             </div>
           </main>
         </div>
+        <FeedbackWidget context={pathname} />
       </div>
     </FilterProvider>
   );
