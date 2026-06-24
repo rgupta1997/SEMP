@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { matrixImportSchema } from '@semp/shared';
+import { matrixImportSchema, eventTemplateFor, isRankingSport } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
@@ -52,6 +52,14 @@ function countTeams(body: MatrixBody): number {
   return n;
 }
 
+// Phones (last-10 keys) that appear as Overall POCs. These become org owners and are
+// ALWAYS provisioned when unmatched - a section is unusable without its owner - even
+// when no "create missing users" option is chosen. Other unmatched people are created
+// only when a target org is picked.
+function ownerPhoneKeys(body: MatrixBody): Set<string> {
+  return new Set(body.owners.map((o) => phoneLast10(o.phone)).filter((k) => k.length === 10));
+}
+
 export function makeMatrixImportRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
@@ -74,17 +82,21 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
     const existingOrgNames = new Set(existingOrgs.map((o) => o.name.toLowerCase()));
 
     // Unmatched people get provisioned (deduped by phone) when a target org is chosen
-    // (an explicit org, or each person's own section org).
-    const creatablePhones = new Set(unmatched.map((p) => phoneLast10(p.phone)).filter((k) => k.length === 10));
-    const willCreate = body.create_missing_org_id || body.create_missing_in_section ? creatablePhones.size : 0;
+    // (an explicit org, or each person's own section org). Overall POCs (org owners) are
+    // ALWAYS provisioned, so only the *other* unmatched people are skipped & reported.
+    const ownerKeys = ownerPhoneKeys(body);
+    const provision = !!body.create_missing_org_id || !!body.create_missing_in_section;
+    const willCreatePhone = (p: Ref) => { const k = phoneLast10(p.phone); return k.length === 10 && (provision || ownerKeys.has(k)); };
+    const creatable = new Set(unmatched.filter(willCreatePhone).map((p) => phoneLast10(p.phone)));
+    const skipped = unmatched.filter((p) => !creatable.has(phoneLast10(p.phone)));
 
     res.json({
       sections: body.sections.map((name) => ({ name, exists: existingOrgNames.has(name.toLowerCase()) })),
       sports: body.units.map((u) => ({ sport: u.sport, discipline: u.discipline })),
       teams: countTeams(body),
-      people: { total: people.length, matched: people.length - unmatched.length, unmatched: unmatched.length },
-      will_create: willCreate,
-      unmatched: unmatched.map((p) => ({ section: p.section, sport: p.sport, discipline: p.discipline, role: p.role, name: p.name, phone: maskPhone(p.phone) })),
+      people: { total: people.length, matched: people.length - unmatched.length, unmatched: skipped.length },
+      will_create: creatable.size,
+      unmatched: skipped.map((p) => ({ section: p.section, sport: p.sport, discipline: p.discipline, role: p.role, name: p.name, phone: maskPhone(p.phone) })),
     });
   }));
 
@@ -97,28 +109,38 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
     const championship = await prisma.championships.findUnique({ where: { id: championshipId }, select: { id: true } });
     if (!championship) throw new NotFoundError('Championship');
 
+    // Ranking sports (powerlifting/swimming/athletics) have no head-to-head matches, so
+    // they're locked to the "Rankings" format rather than the sheet's default (Knockout).
+    // Resolve its id once; if the format isn't seeded yet we fall back to the default.
+    const rankingFormat = await prisma.tournament_formats.findFirst({ where: { name: { equals: 'Rankings', mode: 'insensitive' } }, select: { id: true } });
+    const rankingFormatId = rankingFormat?.id ?? null;
+
     // Resolve people up front (one query); anyone we can't match by phone is either
-    // provisioned as a new login (when create_missing_org_id is set) or skipped.
+    // provisioned as a new login or skipped (see below).
     const people = collectPeople(body);
     const phoneMap = await findUsersByPhones(prisma, people.map((p) => p.phone));
     const resolved = (phone: string) => phoneMap.get(phoneLast10(phone)) ?? null;
     const createOrgId = body.create_missing_org_id ?? null;
     // Provision missing people either in one chosen org, or in each person's own section org.
     const provisionMissing = !!createOrgId || !!body.create_missing_in_section;
+    const ownerKeys = ownerPhoneKeys(body);
 
-    // Build provisional logins for unmatched phones (deduped, remembering the section
-    // they first appear in). The sheet has no email, so synthesize one from the phone;
-    // password follows the firstname@last4 rule. Hash OUTSIDE the transaction (bcrypt is
-    // CPU-bound) - the tx only does fast DB work.
-    const newUsers = new Map<string, { name: string; email: string; phone: string; section: string; password: string; password_hash: string }>();
-    if (provisionMissing) {
-      for (const p of people) {
-        const last10 = phoneLast10(p.phone);
-        if (last10.length !== 10 || resolved(p.phone) || newUsers.has(last10)) continue;
-        const name = p.name.trim() || `User ${last10}`;
-        const password = deriveProvisionedPassword(name, p.phone);
-        newUsers.set(last10, { name, email: `${last10}@import.local`, phone: p.phone, section: p.section, password, password_hash: '' });
-      }
+    // Build provisional logins for unmatched phones (deduped, remembering the section they
+    // first appear in). Overall POCs become org owners and are ALWAYS provisioned so no
+    // section is left without one; other unmatched people are created only when a target
+    // org is chosen. The sheet has no email, so synthesize one from the phone; password
+    // follows the firstname@last4 rule. Hash OUTSIDE the transaction (bcrypt is CPU-bound).
+    const newUsers = new Map<string, { name: string; email: string; phone: string; section: string; isOwner: boolean; password: string; password_hash: string }>();
+    for (const p of people) {
+      const last10 = phoneLast10(p.phone);
+      if (last10.length !== 10 || resolved(p.phone) || newUsers.has(last10)) continue;
+      const isOwner = ownerKeys.has(last10);
+      if (!isOwner && !provisionMissing) continue;
+      const name = p.name.trim() || `User ${last10}`;
+      const password = deriveProvisionedPassword(name, p.phone);
+      newUsers.set(last10, { name, email: `${last10}@import.local`, phone: p.phone, section: p.section, isOwner, password, password_hash: '' });
+    }
+    if (newUsers.size) {
       await Promise.all([...newUsers.values()].map(async (u) => { u.password_hash = await bcrypt.hash(u.password, 10); }));
     }
 
@@ -160,10 +182,14 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
         const key = sportName.toLowerCase();
         if (sportInfoByName.has(key)) return sportInfoByName.get(key)!;
         const sportId = await getSport(sportName);
+        // Ranking sports use the Rankings format; everything else the sheet's default. For
+        // ranking sports we also correct the format on re-import (they're never head-to-head).
+        const ranking = isRankingSport(sportName) && !!rankingFormatId;
+        const formatId = ranking ? rankingFormatId! : body.default_format_id;
         const ts = await tx.tournament_sports.upsert({
           where: { tournament_id_sport_id: { tournament_id: tournament.id, sport_id: sportId } },
-          update: {},
-          create: { tournament_id: tournament.id, sport_id: sportId, format_id: body.default_format_id },
+          update: ranking ? { format_id: formatId } : {},
+          create: { tournament_id: tournament.id, sport_id: sportId, format_id: formatId },
           select: { id: true },
         });
         const info = { sportId, tsId: ts.id };
@@ -187,7 +213,13 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
           ? await tx.tournament_disciplines.findUnique({ where: { tournament_sport_id_discipline_id: { tournament_sport_id: tsId, discipline_id: disciplineId } }, select: { id: true } })
           : await tx.tournament_disciplines.findFirst({ where: { tournament_sport_id: tsId, discipline_id: null }, select: { id: true } });
         if (!td) {
-          td = await tx.tournament_disciplines.create({ data: { tournament_sport_id: tsId, discipline_id: disciplineId, venue_id: venueId }, select: { id: true } });
+          // Ranking sports get their multi-competitor event template so the scoring console
+          // shows the right races/lifts/events (not a default single-contest console).
+          const scoring = eventTemplateFor(sportName);
+          td = await tx.tournament_disciplines.create({
+            data: { tournament_sport_id: tsId, discipline_id: disciplineId, venue_id: venueId, ...(scoring ? { format_config: { scoring } as any } : {}) },
+            select: { id: true },
+          });
           summary.draws.created++;
         }
         tdIdByUnit.set(unitKey, td.id);
@@ -218,20 +250,21 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
 
       // 3.5) Provision missing logins (now that section orgs exist), then fold them into
       //      the phone map so the assignment loops resolve them like any matched user.
-      //      Home org = the chosen org, else the person's section org.
+      //      Owners' home org is ALWAYS their own section org (they own it); other people
+      //      go to the chosen org, else their section org.
       if (newUsers.size) {
         const list = [...newUsers.values()];
-        const orgFor = (section: string) => createOrgId ?? orgIdBySection.get(section.toLowerCase()) ?? null;
+        const orgFor = (u: { section: string; isOwner: boolean }) =>
+          u.isOwner ? (orgIdBySection.get(u.section.toLowerCase()) ?? null) : (createOrgId ?? orgIdBySection.get(u.section.toLowerCase()) ?? null);
         await tx.users.createMany({
-          data: list.map((u) => ({ name: u.name, email: u.email, phone: u.phone, password_hash: u.password_hash, organization_id: orgFor(u.section), must_change_password: true })),
+          data: list.map((u) => ({ name: u.name, email: u.email, phone: u.phone, password_hash: u.password_hash, organization_id: orgFor(u), must_change_password: true })),
           skipDuplicates: true,
         });
         const created = await tx.users.findMany({ where: { email: { in: list.map((u) => u.email) } }, select: { id: true, name: true, email: true, phone: true } });
-        const sectionByEmail = new Map(list.map((u) => [u.email, u.section]));
+        const byEmail = new Map(list.map((u) => [u.email, u]));
         const memberships = created
-          .map((u) => ({ user_id: u.id, organization_id: orgFor(sectionByEmail.get(u.email) ?? '') }))
-          .filter((m): m is { user_id: string; organization_id: string } => !!m.organization_id)
-          .map((m) => ({ ...m, role: 'member' }));
+          .map((u) => { const nu = byEmail.get(u.email); const org = nu ? orgFor(nu) : null; return org && nu ? { user_id: u.id, organization_id: org, role: nu.isOwner ? 'owner' : 'member' } : null; })
+          .filter((m): m is { user_id: string; organization_id: string; role: string } => !!m);
         if (memberships.length) await tx.organization_members.createMany({ data: memberships, skipDuplicates: true });
         for (const u of created) {
           const k = phoneLast10(u.phone);
@@ -239,7 +272,9 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
         }
       }
 
-      // 4) Overall POCs -> org owners.
+      // 4) Overall POCs -> org owners. The owner membership (role owner, status active) is
+      //    what the auth context + canManageOrg use to surface and let them manage the org
+      //    on login. Also set their home org when they don't have one yet, so they land on it.
       for (const o of body.owners) {
         const user = o.phone ? resolved(o.phone) : null;
         if (!user) continue;
@@ -249,6 +284,7 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
           update: { role: 'owner', status: 'active' },
           create: { user_id: user.id, organization_id: orgId, role: 'owner' },
         });
+        await tx.users.updateMany({ where: { id: user.id, organization_id: null }, data: { organization_id: orgId } });
         summary.owners_assigned++;
       }
 
