@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Compass, Landmark, Layers, LayoutGrid, LayoutList, Lock,
+  Compass, Flag, Landmark, Layers, LayoutGrid, LayoutList, Lock,
   Mail, Medal, Menu, Moon, Plus, Sun, Trophy, Upload, User, Users, X,
 } from 'lucide-react';
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
@@ -46,6 +46,9 @@ function navFor(role: AppRole): NavGroup[] {
   return [{
     group: BRAND.name, items: [
       { to: '/profile', label: 'My Game', icon: <User size={16} />, end: true },
+      // Officials reach their assigned matches here. Always shown so a freshly-assigned
+      // official finds it without re-logging in (the page itself is empty until assigned).
+      { to: '/officiating', label: 'Officiating', icon: <Flag size={16} /> },
       { to: '/organizations', label: 'Organizations', icon: <Landmark size={16} /> },
       { to: '/discover', label: 'Discover', icon: <Compass size={16} /> },
       { to: '/championships', label: 'Championships', icon: <Trophy size={16} /> },

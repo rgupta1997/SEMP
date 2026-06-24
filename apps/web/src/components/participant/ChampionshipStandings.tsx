@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useApi } from '../../lib/hooks';
-import { Trophy } from 'lucide-react';
-import { Avatar, Badge, EmptyState, ListToolbar, RefreshBar, Select, Spinner, Table } from '../../components/ui';
+import { ChevronDown, Trophy } from 'lucide-react';
+import { Avatar, Badge, EmptyState, ListToolbar, RefreshBar, Select, Spinner, Table, cn } from '../../components/ui';
+import { StandingsBreakdown } from '../StandingsBreakdown';
 
 // A draw row (subset of GET /:id/draws) - used only to source the tournament + sport
 // filter options (with their UUIDs, which the materialized scopes are keyed by).
@@ -34,6 +35,8 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
   const { data: draws = [] } = useApi<DrawRow[]>(`${base}/draws`);
   const [tournamentId, setTournamentId] = useState('');
   const [sportId, setSportId] = useState('');
+  // Which org's row is expanded to show its per-event points breakdown.
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const tournamentOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -104,11 +107,20 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={r.organization_id} className="border-t border-slate-100 dark:border-slate-800">
+            {rows.map((r, i) => {
+              const isOpen = expanded === r.organization_id;
+              const colSpan = 7 + (showMedals ? 1 : 0);
+              return (
+              <Fragment key={r.organization_id}>
+              <tr
+                onClick={() => setExpanded(isOpen ? null : r.organization_id)}
+                className={cn('cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40', isOpen && 'bg-slate-50 dark:bg-slate-800/40')}
+                title="Show how these points were earned"
+              >
                 <td className="px-4 py-3 text-lg">{MEDAL[i] ?? <span className="font-bold text-slate-400 dark:text-slate-500">{r.rank ?? i + 1}</span>}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
+                    <ChevronDown size={16} className={cn('shrink-0 text-slate-400 transition-transform dark:text-slate-500', isOpen && 'rotate-180')} />
                     <Avatar name={r.organization?.name} size={30} />
                     <span className="font-medium text-slate-800 dark:text-slate-200">{r.organization?.name}</span>
                   </div>
@@ -127,7 +139,16 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
                 )}
                 <td className="px-4 py-3 text-center"><Badge tone="brand">{r.points}</Badge></td>
               </tr>
-            ))}
+              {isOpen && (
+                <tr className="bg-slate-50/60 dark:bg-slate-800/20">
+                  <td colSpan={colSpan} className="px-4 pb-4 pt-0">
+                    <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} orgId={r.organization_id} />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
+              );
+            })}
           </tbody>
         </Table>
       )}

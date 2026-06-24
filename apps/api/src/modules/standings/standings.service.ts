@@ -185,6 +185,167 @@ export async function recomputeStandingsForFixture(prisma: Prisma, fixtureId: st
   await recomputeStandings(prisma, t.championship_id);
 }
 
+// One row of an org's standings breakdown: a single match it played in a draw, with
+// the result and (for per-match schemes) the points that match contributed.
+export interface BreakdownMatch {
+  round: string | null;
+  opponent: string;
+  result: 'won' | 'lost' | 'drawn' | 'bye';
+  score: string | null;
+  points: number | null;
+}
+// An org's contribution from one draw (event = sport · discipline): the points/record
+// that draw added to its scope total, plus the matches behind it.
+export interface BreakdownEvent {
+  draw_id: string;
+  sport: string;
+  discipline: string | null;
+  scheme: StandingsScheme;
+  points: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  detail: Record<string, number>;
+  matches: BreakdownMatch[];
+}
+
+// Explain one org's standings total: which events (draws) contributed how many points
+// and how. Re-runs the same per-draw scheme `recomputeStandings` uses (so the numbers
+// match the table exactly), but keeps only the requested org and attaches its matches.
+// Scope filters the draws the same way the materialized buckets are keyed: championship
+// = all, tournament = that tournament's draws, sport = that sport's draws.
+export async function readStandingsBreakdown(
+  prisma: Prisma,
+  championshipId: string,
+  scope: StandingsAggScope,
+  scopeId: string | null,
+  orgId: string,
+): Promise<BreakdownEvent[]> {
+  // Rule resolution (most-specific wins) - mirrors recomputeStandings.
+  const ruleRows = await prisma.standings_rules.findMany({ where: { championship_id: championshipId } });
+  const byDiscipline = new Map<string, StandingsRule>();
+  const byFormat = new Map<string, StandingsRule>();
+  let championshipRule: StandingsRule | undefined;
+  for (const r of ruleRows) {
+    const rule = parseRule(r.config);
+    if (r.scope_type === 'discipline' && r.scope_id) byDiscipline.set(r.scope_id, rule);
+    else if (r.scope_type === 'format' && r.scope_id) byFormat.set(r.scope_id, rule);
+    else if (r.scope_type === 'championship') championshipRule = rule;
+  }
+  const defaultRule = championshipRule ?? DEFAULT_STANDINGS_RULE;
+
+  // Pending fixtures gate the medal scheme's positions (same as recompute), so the
+  // breakdown points match the table even before a discipline is decided.
+  const pending = await prisma.fixtures.groupBy({
+    by: ['tournament_discipline_id'],
+    where: {
+      status: { in: ['scheduled', 'live', 'postponed'] },
+      tournament_disciplines: { tournament_sports: { tournaments: { championship_id: championshipId } } },
+    },
+  });
+  const drawsWithPending = new Set(pending.map((p) => p.tournament_discipline_id));
+
+  const draws = await prisma.tournament_disciplines.findMany({
+    where: {
+      tournament_sports: {
+        tournaments: { championship_id: championshipId, ...(scope === 'tournament' && scopeId ? { id: scopeId } : {}) },
+        ...(scope === 'sport' && scopeId ? { sport_id: scopeId } : {}),
+      },
+    },
+    select: {
+      id: true,
+      discipline_id: true,
+      format_id: true,
+      disciplines: { select: { name: true } },
+      tournament_sports: { select: { sport_id: true, tournament_id: true, format_id: true, sports: { select: { name: true } } } },
+      fixtures: {
+        where: { status: { in: ['completed', 'bye'] } },
+        select: {
+          status: true, round: true,
+          home_team_id: true, away_team_id: true,
+          home_score: true, away_score: true, winner_team_id: true, live_state: true,
+          teams_fixtures_home_team_idToteams: { select: { organization_id: true, organizations: { select: { name: true, short_name: true } } } },
+          teams_fixtures_away_team_idToteams: { select: { organization_id: true, organizations: { select: { name: true, short_name: true } } } },
+        },
+      },
+    },
+  });
+
+  const events: BreakdownEvent[] = [];
+  for (const d of draws) {
+    if (d.fixtures.length === 0) continue;
+    const ts = d.tournament_sports;
+    const effectiveFormatId = d.format_id ?? ts.format_id;
+    const rule =
+      (d.discipline_id ? byDiscipline.get(d.discipline_id) : undefined) ??
+      (effectiveFormatId ? byFormat.get(effectiveFormatId) : undefined) ??
+      defaultRule;
+
+    const schemeFixtures: SchemeFixture[] = d.fixtures.map((f) => {
+      const cp = (f.live_state as any)?.custom_points ?? null;
+      return {
+        status: f.status, round: f.round,
+        home_team_id: f.home_team_id, away_team_id: f.away_team_id,
+        home_org_id: f.teams_fixtures_home_team_idToteams?.organization_id ?? null,
+        away_org_id: f.teams_fixtures_away_team_idToteams?.organization_id ?? null,
+        home_score: f.home_score, away_score: f.away_score,
+        winner_team_id: f.winner_team_id,
+        home_points: typeof cp?.home === 'number' ? cp.home : null,
+        away_points: typeof cp?.away === 'number' ? cp.away : null,
+      };
+    });
+
+    const hasCompletedFinal = schemeFixtures.some((f) => f.round === 'Final' && f.winner_team_id);
+    const decided = hasCompletedFinal || !drawsWithPending.has(d.id);
+    const tally = runScheme(schemeFixtures, rule, decided).find((t) => t.organization_id === orgId);
+    if (!tally) continue; // org didn't take part in / score from this draw
+
+    // The org's own matches in this draw, oriented to it (its score first).
+    const matches: BreakdownMatch[] = [];
+    for (const f of d.fixtures) {
+      const isHome = f.teams_fixtures_home_team_idToteams?.organization_id === orgId;
+      const isAway = f.teams_fixtures_away_team_idToteams?.organization_id === orgId;
+      if (!isHome && !isAway) continue;
+      const oppOrg = isHome ? f.teams_fixtures_away_team_idToteams?.organizations : f.teams_fixtures_home_team_idToteams?.organizations;
+      const opponent = f.status === 'bye' ? 'Bye' : (oppOrg?.name ?? oppOrg?.short_name ?? 'TBD');
+      const myScore = isHome ? f.home_score : f.away_score;
+      const oppScore = isHome ? f.away_score : f.home_score;
+      const score = myScore != null && oppScore != null ? `${myScore}–${oppScore}` : null;
+
+      let result: BreakdownMatch['result'];
+      let points: number | null = null;
+      if (f.status === 'bye') {
+        result = 'bye';
+      } else {
+        const myTeam = isHome ? f.home_team_id : f.away_team_id;
+        if (f.winner_team_id == null && myScore != null && oppScore != null && myScore === oppScore) result = 'drawn';
+        else if (f.winner_team_id === myTeam) result = 'won';
+        else result = 'lost';
+        // Per-match points only exist for the per-match schemes; placement/medal points
+        // are earned at the draw level (stage reached / final rank), shown via `detail`.
+        if (rule.scheme === 'league_points') points = result === 'won' ? rule.win : result === 'drawn' ? rule.draw : rule.loss;
+        else if (rule.scheme === 'custom') { const cp = (f.live_state as any)?.custom_points ?? null; const v = isHome ? cp?.home : cp?.away; points = typeof v === 'number' ? v : null; }
+      }
+      matches.push({ round: f.round, opponent, result, score, points });
+    }
+
+    events.push({
+      draw_id: d.id,
+      sport: ts.sports?.name ?? 'Sport',
+      discipline: d.disciplines?.name ?? null,
+      scheme: rule.scheme,
+      points: tally.points,
+      won: tally.won, drawn: tally.drawn, lost: tally.lost,
+      detail: tally.detail,
+      matches,
+    });
+  }
+
+  // Biggest contributors first, then alphabetical for a stable order.
+  events.sort((a, b) => b.points - a.points || a.sport.localeCompare(b.sport));
+  return events;
+}
+
 // Read a materialized standings table (org rows joined for display), ordered by rank.
 export async function readStandings(prisma: Prisma, championshipId: string, scope: StandingsAggScope, scopeId: string | null) {
   const rows = await prisma.standings.findMany({

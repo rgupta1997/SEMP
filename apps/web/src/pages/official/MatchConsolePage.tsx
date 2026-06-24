@@ -202,17 +202,61 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
     : s === 'event' ? `Event · ${eventSpec?.subEvents.length ?? 0} sub-events`
     : 'Single match';
 
+  // Whether the match has any scoring worth protecting before a tab switch - it's gone
+  // live, has a score, a point log, or a saved tie/event slice.
+  const ls = live?.live_state;
+  const hasProgress =
+    fixture.status === 'live' || fixture.status === 'completed' ||
+    fixture.home_score != null || fixture.away_score != null ||
+    (live?.live_log?.length ?? 0) > 0 ||
+    !!ls?.tie?.rubbers?.some((r: any) => r?.winner) ||
+    !!(ls?.event && Object.keys(ls.event).length > 0);
+
+  // Each structure signs off its own result, so moving to another one abandons whatever
+  // was scored under the current one. Confirm the switch once the match has any scoring
+  // recorded so the official can't lose a part-scored tie/match by tapping the wrong tab.
+  const switchStructure = async (next: Structure) => {
+    if (next === structure) return;
+    if (hasProgress) {
+      const ok = await confirmDialog({
+        title: 'Switch scoring structure?',
+        confirmLabel: 'Switch & discard',
+        message: `The ${structureLabel(structure)} score recorded here will be lost if you switch to ${structureLabel(next)}. This can't be undone.`,
+      });
+      if (!ok) return;
+    }
+    setStructure(next);
+  };
+
+  // Detailed ↔ Manual keeps the running score (Manual seeds from the live tally), but it
+  // changes how the rest of the match is scored - a softer confirm so the official doesn't
+  // flip the mode mid-scoring by accident.
+  const switchMode = async (next: ScoringMode) => {
+    if (next === mode) return;
+    if (hasProgress) {
+      const ok = await confirmDialog({
+        title: 'Switch scoring mode?',
+        confirmLabel: 'Switch',
+        message: next === 'manual'
+          ? 'Switch to entering a final score? The current score carries over, but live point-by-point scoring stops.'
+          : 'Switch to live point-by-point scoring? The current score carries over.',
+      });
+      if (!ok) return;
+    }
+    setMode(next);
+  };
+
   return (
     <>
       {(structures.length > 1 || showDepth || structure === 'event') && (
         <div className="mb-5 flex flex-wrap items-end gap-x-6 gap-y-3">
-          <TabBar label="Match structure" value={structure} onChange={setStructure}
+          <TabBar label="Match structure" value={structure} onChange={switchStructure}
             options={structures.map((s) => ({ value: s, label: structureLabel(s) }))} />
           {structure === 'event' ? (
             <TabBar label="Scoring" value={eventMode} onChange={setEventMode}
               options={[{ value: 'ranking', label: 'Ranking' }, { value: 'detailed', label: 'Detailed · per athlete' }]} />
           ) : showDepth ? (
-            <TabBar label="Scoring" value={mode} onChange={setMode}
+            <TabBar label="Scoring" value={mode} onChange={switchMode}
               options={[{ value: 'detailed', label: 'Detailed · live' }, { value: 'manual', label: 'Manual · final score' }]} />
           ) : null}
         </div>
@@ -240,6 +284,8 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
 function CustomPointsPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixtureId: string; invalidate: (string | null)[] }) {
   const homeName = teamLabel(homeTeam(fixture));
   const awayName = teamLabel(awayTeam(fixture));
+  const homeOrg = orgLabel(homeTeam(fixture));
+  const awayOrg = orgLabel(awayTeam(fixture));
   const cp = fixture.live_state?.custom_points ?? {};
   const [home, setHome] = useState(cp.home != null ? String(cp.home) : '');
   const [away, setAway] = useState(cp.away != null ? String(cp.away) : '');
@@ -257,12 +303,14 @@ function CustomPointsPanel({ fixture, fixtureId, invalidate }: { fixture: any; f
       <CardBody>
         <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-3">
           <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</span>
+            <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</span>
+            <span className="mb-1.5 block h-3.5 text-[11px] font-normal text-slate-400 dark:text-slate-500">{homeOrg}</span>
             <Input type="number" min={0} value={home} onChange={(e) => setHome(e.target.value)} className="text-center text-lg font-bold" />
           </label>
           <span className="pb-2 text-sm font-semibold text-slate-400 dark:text-slate-500">pts</span>
           <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</span>
+            <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</span>
+            <span className="mb-1.5 block h-3.5 text-[11px] font-normal text-slate-400 dark:text-slate-500">{awayOrg}</span>
             <Input type="number" min={0} value={away} onChange={(e) => setAway(e.target.value)} className="text-center text-lg font-bold" />
           </label>
         </div>
@@ -374,6 +422,8 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
   { fixture: any; fixtureId: string; def: SportDef; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
   const homeName = teamLabel(homeTeam(fixture));
   const awayName = teamLabel(awayTeam(fixture));
+  const homeOrg = orgLabel(homeTeam(fixture));
+  const awayOrg = orgLabel(awayTeam(fixture));
 
   const [state, setState] = useState<MatchState>(() => hydrate(live?.live_state));
   const [log, setLog] = useState<LogEntry[]>(() => (Array.isArray(live?.live_log) ? live!.live_log : []));
@@ -535,8 +585,8 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
                 <CricketDeck def={def} dispatch={dispatch} />
               ) : (
                 <div className="grid grid-cols-2 gap-3">
-                  <SideDeck name={homeName} side="A" def={def} dispatch={dispatch} disabled={state.ended} />
-                  <SideDeck name={awayName} side="B" def={def} dispatch={dispatch} disabled={state.ended} />
+                  <SideDeck name={homeName} org={homeOrg} side="A" def={def} dispatch={dispatch} disabled={state.ended} />
+                  <SideDeck name={awayName} org={awayOrg} side="B" def={def} dispatch={dispatch} disabled={state.ended} />
                 </div>
               )}
 
@@ -602,7 +652,7 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
               <CardBody className="space-y-2">
                 {!live_ && !editing && <Button className="w-full justify-start" disabled={submitting} onClick={goLive}>Start match (go live)</Button>}
                 <Button className="w-full justify-start" onClick={() => setConfirming(true)}>✍ End match &amp; sign off</Button>
-                <WalkoverButton fixtureId={fixtureId} homeName={homeName} awayName={awayName} homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id} invalidate={invalidate} onDone={onDone} />
+                <WalkoverButton fixtureId={fixtureId} homeName={homeName} awayName={awayName} homeOrg={homeOrg} awayOrg={awayOrg} homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id} invalidate={invalidate} onDone={onDone} />
                 {SECONDARY.map((s) => (
                   <SecondaryStatus key={s.status} fixtureId={fixtureId} status={s.status} label={s.label} variant={s.variant} invalidate={invalidate} onDone={onDone} />
                 ))}
@@ -611,10 +661,10 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
 
             {def.archetype === 'cricket' ? (
               <CricketQuickResult key={`${state.runsA}-${state.wktA}-${state.runsB}-${state.wktB}-${state.ballsA}-${state.ballsB}`}
-                state={state} homeName={homeName} awayName={awayName}
+                state={state} homeName={homeName} awayName={awayName} homeOrg={homeOrg} awayOrg={awayOrg}
                 currentNotes={fixture.notes ?? ''} pending={persist.isPending} onApply={applyQuick} />
             ) : (
-              <DirectResult key={`${h.a}-${h.b}`} def={def} homeName={homeName} awayName={awayName}
+              <DirectResult key={`${h.a}-${h.b}`} def={def} homeName={homeName} awayName={awayName} homeOrg={homeOrg} awayOrg={awayOrg}
                 initialA={h.a} initialB={h.b} pending={persist.isPending} onApply={applyDirect} />
             )}
           </div>
@@ -668,6 +718,8 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
   { fixture: any; fixtureId: string; spec: TieSpec; mode: ScoringMode; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
   const homeName = teamLabel(homeTeam(fixture));
   const awayName = teamLabel(awayTeam(fixture));
+  const homeOrg = orgLabel(homeTeam(fixture));
+  const awayOrg = orgLabel(awayTeam(fixture));
 
   const [state, setState] = useState<TieState>(() => hydrateTie(live?.live_state?.tie, spec));
   const [status, setStatus] = useState<string>(fixture.status);
@@ -817,8 +869,8 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
                       {mode === 'detailed' && rdef.archetype !== 'time' && (
                         <>
                           <div className="grid grid-cols-2 gap-3">
-                            <SideDeck name={homeName} side="A" def={rdef} dispatch={dispatchRubber} disabled={!!active.winner || active.state.ended} />
-                            <SideDeck name={awayName} side="B" def={rdef} dispatch={dispatchRubber} disabled={!!active.winner || active.state.ended} />
+                            <SideDeck name={homeName} org={homeOrg} side="A" def={rdef} dispatch={dispatchRubber} disabled={!!active.winner || active.state.ended} />
+                            <SideDeck name={awayName} org={awayOrg} side="B" def={rdef} dispatch={dispatchRubber} disabled={!!active.winner || active.state.ended} />
                           </div>
                           {(rdef.archetype === 'sets' || rdef.archetype === 'rally') && !active.winner && !active.state.ended && (
                             <Button variant="outline" className="w-full" onClick={() => dispatchRubber({ type: 'NEXT_SEG' })}>End {rdef.segLabel.toLowerCase()} {active.state.seg} (award to leader)</Button>
@@ -833,8 +885,18 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
                         </>
                       )}
                       <div className="grid grid-cols-2 gap-2">
-                        <Button variant={active.winner === 'A' ? 'primary' : 'outline'} onClick={() => decide(state.activeRubber, 'A')}>{homeName} won</Button>
-                        <Button variant={active.winner === 'B' ? 'primary' : 'outline'} onClick={() => decide(state.activeRubber, 'B')}>{awayName} won</Button>
+                        <Button variant={active.winner === 'A' ? 'primary' : 'outline'} onClick={() => decide(state.activeRubber, 'A')}>
+                          <span className="flex flex-col items-center leading-tight">
+                            <span>{homeName} won</span>
+                            {homeOrg && <span className="text-[11px] font-normal opacity-75">{homeOrg}</span>}
+                          </span>
+                        </Button>
+                        <Button variant={active.winner === 'B' ? 'primary' : 'outline'} onClick={() => decide(state.activeRubber, 'B')}>
+                          <span className="flex flex-col items-center leading-tight">
+                            <span>{awayName} won</span>
+                            {awayOrg && <span className="text-[11px] font-normal opacity-75">{awayOrg}</span>}
+                          </span>
+                        </Button>
                       </div>
                       {active.winner && mode === 'detailed' && rdef.archetype !== 'time' && (
                         <Button variant="ghost" className="w-full" onClick={() => reopen(state.activeRubber, true)}>↺ Reopen &amp; clear to re-score</Button>
@@ -853,7 +915,7 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
                 {!live_ && !editing && <Button className="w-full justify-start" disabled={submitting} onClick={goLive}>Start tie (go live)</Button>}
                 <Button className="w-full justify-start" disabled={submitting} onClick={signOff}>✍ End tie &amp; sign off</Button>
                 {!decided && <p className="px-1 text-xs text-slate-400 dark:text-slate-500">Record rubber results until one side reaches {target}.</p>}
-                <WalkoverButton fixtureId={fixtureId} homeName={homeName} awayName={awayName} homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id} invalidate={invalidate} onDone={onDone} />
+                <WalkoverButton fixtureId={fixtureId} homeName={homeName} awayName={awayName} homeOrg={homeOrg} awayOrg={awayOrg} homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id} invalidate={invalidate} onDone={onDone} />
                 {SECONDARY.map((s) => (
                   <SecondaryStatus key={s.status} fixtureId={fixtureId} status={s.status} label={s.label} variant={s.variant} invalidate={invalidate} onDone={onDone} />
                 ))}
@@ -1170,10 +1232,13 @@ function MarkInput({ value, isTime, onChange, ariaLabel }: { value: number | nul
   );
 }
 
-function SideDeck({ name, side, def, dispatch, disabled }: { name: string; side: 'A' | 'B'; def: SportDef; dispatch: (a: Action) => void; disabled?: boolean }) {
+function SideDeck({ name, org, side, def, dispatch, disabled }: { name: string; org?: string; side: 'A' | 'B'; def: SportDef; dispatch: (a: Action) => void; disabled?: boolean }) {
   return (
     <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
-      <div className="mb-2 truncate text-center text-sm font-semibold text-slate-700 dark:text-slate-300">{name}</div>
+      <div className="mb-2 text-center">
+        <div className="truncate text-sm font-semibold text-slate-700 dark:text-slate-300">{name}</div>
+        {org && <div className="truncate text-[11px] font-normal text-slate-400 dark:text-slate-500">{org}</div>}
+      </div>
       <div className="grid gap-2">
         {def.pointButtons.map((p) => (
           <Button key={p} className="w-full justify-center text-base" disabled={disabled} onClick={() => dispatch({ type: 'POINT', team: side, pts: p })}>+{p}</Button>
@@ -1200,7 +1265,10 @@ function EventDeck({ side, name, def, team, dispatch, disabled }: { side: 'A' | 
   };
   return (
     <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
-      <div className="mb-2 truncate text-center text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{name} · events</div>
+      <div className="mb-2 text-center">
+        <div className="truncate text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{name} · events</div>
+        {orgLabel(team) && <div className="truncate text-[11px] font-normal normal-case tracking-normal text-slate-400 dark:text-slate-500">{orgLabel(team)}</div>}
+      </div>
       {def.attributePlayers && players.length > 0 && (
         <Select value={pid} onChange={(e) => setPid(e.target.value)} className="mb-2 text-sm">
           {players.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -1234,12 +1302,13 @@ function CricketDeck({ def, dispatch }: { def: SportDef; dispatch: (a: Action) =
 
 // Runs / wickets / overs trio for one cricket side - shared by the live quick-result
 // and the manual final-score form so both read and behave identically.
-function CricketSideInputs({ name, runs, wkt, overs, onRuns, onWkt, onOvers }:
-  { name: string; runs: string; wkt: string; overs: string;
+function CricketSideInputs({ name, org, runs, wkt, overs, onRuns, onWkt, onOvers }:
+  { name: string; org?: string; runs: string; wkt: string; overs: string;
     onRuns: (v: string) => void; onWkt: (v: string) => void; onOvers: (v: string) => void }) {
   return (
     <div>
       <div className="mb-1 truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{name}</div>
+      {org && <div className="-mt-0.5 mb-1 truncate text-[11px] font-normal text-slate-400 dark:text-slate-500">{org}</div>}
       <div className="flex gap-2">
         <Input type="number" min={0} value={runs} onChange={(e) => onRuns(e.target.value)} className="text-center" aria-label={`${name} runs`} />
         <Input type="number" min={0} value={wkt} onChange={(e) => onWkt(e.target.value)} className="w-14 text-center" aria-label={`${name} wickets`} />
@@ -1253,8 +1322,8 @@ function CricketSideInputs({ name, runs, wkt, overs, onRuns, onWkt, onOvers }:
 // Cricket-only: enter runs + wickets for both teams directly, declare the winner
 // (or let it derive from runs), and write the final result text. Keyed by the live
 // score upstream so it re-seeds when ball-by-ball scoring changes the totals.
-function CricketQuickResult({ state, homeName, awayName, currentNotes, pending, onApply }:
-  { state: MatchState; homeName: string; awayName: string; currentNotes: string; pending: boolean;
+function CricketQuickResult({ state, homeName, awayName, homeOrg, awayOrg, currentNotes, pending, onApply }:
+  { state: MatchState; homeName: string; awayName: string; homeOrg?: string; awayOrg?: string; currentNotes: string; pending: boolean;
     onApply: (v: { runsA: number; wktA: number; runsB: number; wktB: number; oversA: string; oversB: string; winner: 'auto' | 'home' | 'away' | 'draw'; notes: string; complete: boolean }) => void }) {
   const [rA, setRA] = useState(String(state.runsA ?? 0));
   const [wA, setWA] = useState(String(state.wktA ?? 0));
@@ -1273,8 +1342,8 @@ function CricketQuickResult({ state, homeName, awayName, currentNotes, pending, 
       <CardHeader title="Quick result" subtitle="Enter the score directly or declare the winner." />
       <CardBody className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <CricketSideInputs name={homeName} runs={rA} wkt={wA} overs={oA} onRuns={setRA} onWkt={setWA} onOvers={setOA} />
-          <CricketSideInputs name={awayName} runs={rB} wkt={wB} overs={oB} onRuns={setRB} onWkt={setWB} onOvers={setOB} />
+          <CricketSideInputs name={homeName} org={homeOrg} runs={rA} wkt={wA} overs={oA} onRuns={setRA} onWkt={setWA} onOvers={setOA} />
+          <CricketSideInputs name={awayName} org={awayOrg} runs={rB} wkt={wB} overs={oB} onRuns={setRB} onWkt={setWB} onOvers={setOB} />
         </div>
         <Field label="Winner">
           <Select value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
@@ -1299,8 +1368,8 @@ function CricketQuickResult({ state, homeName, awayName, currentNotes, pending, 
 // Non-cricket fallback: type the headline result directly (points for points sports,
 // segments won for sets/rally) and pick the winner, when the live deck went wrong or
 // wasn't used. Keyed by the live headline upstream so it re-seeds as tapping changes it.
-function DirectResult({ def, homeName, awayName, initialA, initialB, pending, onApply }:
-  { def: SportDef; homeName: string; awayName: string; initialA: number; initialB: number; pending: boolean;
+function DirectResult({ def, homeName, awayName, homeOrg, awayOrg, initialA, initialB, pending, onApply }:
+  { def: SportDef; homeName: string; awayName: string; homeOrg?: string; awayOrg?: string; initialA: number; initialB: number; pending: boolean;
     onApply: (a: number, b: number, win: 'auto' | 'home' | 'away' | 'draw', complete: boolean) => void }) {
   const [a, setA] = useState(String(initialA));
   const [b, setB] = useState(String(initialB));
@@ -1315,10 +1384,12 @@ function DirectResult({ def, homeName, awayName, initialA, initialB, pending, on
         <div className="grid grid-cols-2 gap-3">
           <div>
             <div className="mb-1 truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</div>
+            {homeOrg && <div className="-mt-0.5 mb-1 truncate text-[11px] font-normal text-slate-400 dark:text-slate-500">{homeOrg}</div>}
             <Input type="number" min={0} value={a} onChange={(e) => setA(e.target.value)} className="text-center" aria-label={`${homeName} ${unit}`} />
           </div>
           <div>
             <div className="mb-1 truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</div>
+            {awayOrg && <div className="-mt-0.5 mb-1 truncate text-[11px] font-normal text-slate-400 dark:text-slate-500">{awayOrg}</div>}
             <Input type="number" min={0} value={b} onChange={(e) => setB(e.target.value)} className="text-center" aria-label={`${awayName} ${unit}`} />
           </div>
         </div>
@@ -1343,8 +1414,8 @@ function DirectResult({ def, homeName, awayName, initialA, initialB, pending, on
 // Walkover needs a winner and a reason - a plain status flip would leave the match
 // with no result. Opens a popup to capture both, then records it via /live (which
 // also advances the winner in a bracket draw).
-function WalkoverButton({ fixtureId, homeName, awayName, homeTeamId, awayTeamId, invalidate, onDone }:
-  { fixtureId: string; homeName: string; awayName: string; homeTeamId: string | null; awayTeamId: string | null; invalidate: (string | null)[]; onDone: () => void }) {
+function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeTeamId, awayTeamId, invalidate, onDone }:
+  { fixtureId: string; homeName: string; awayName: string; homeOrg?: string; awayOrg?: string; homeTeamId: string | null; awayTeamId: string | null; invalidate: (string | null)[]; onDone: () => void }) {
   const [open, setOpen] = useState(false);
   const [winner, setWinner] = useState<'home' | 'away'>('home');
   const [reason, setReason] = useState('');
@@ -1368,8 +1439,8 @@ function WalkoverButton({ fixtureId, homeName, awayName, homeTeamId, awayTeamId,
             <div className="mt-4">
               <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Winner</span>
               <Select value={winner} onChange={(e) => setWinner(e.target.value as 'home' | 'away')}>
-                <option value="home">{homeName}</option>
-                <option value="away">{awayName}</option>
+                <option value="home">{homeOrg ? `${homeName} — ${homeOrg}` : homeName}</option>
+                <option value="away">{awayOrg ? `${awayName} — ${awayOrg}` : awayName}</option>
               </Select>
             </div>
             <div className="mt-3">
@@ -1403,6 +1474,8 @@ function SecondaryStatus({ fixtureId, status, label, variant, invalidate, onDone
 function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone }: { fixture: any; fixtureId: string; def: SportDef; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
   const homeName = teamLabel(homeTeam(fixture));
   const awayName = teamLabel(awayTeam(fixture));
+  const homeOrg = orgLabel(homeTeam(fixture));
+  const awayOrg = orgLabel(awayTeam(fixture));
   // Seed from the live detailed tally when one exists (so switching Detailed → Manual
   // keeps the score instead of resetting), else from the saved headline.
   const liveH = live?.live_state && Object.keys(live.live_state).length > 0 ? headline(def, hydrate(live.live_state)) : null;
@@ -1447,12 +1520,14 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone }: { f
         {hint && <p className="mb-3 rounded-lg bg-brand-50 px-3 py-2 text-xs text-slate-600 dark:bg-brand-500/10 dark:text-slate-300">{hint}</p>}
         <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-3">
           <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</span>
+            <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</span>
+            <span className="mb-1.5 block h-3.5 text-[11px] font-normal text-slate-400 dark:text-slate-500">{homeOrg}</span>
             <Input type="number" value={home} onChange={(e) => setHome(e.target.value)} className="text-center text-lg font-bold" />
           </label>
           <span className="pb-2 text-lg font-black text-slate-400 dark:text-slate-500">:</span>
           <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</span>
+            <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</span>
+            <span className="mb-1.5 block h-3.5 text-[11px] font-normal text-slate-400 dark:text-slate-500">{awayOrg}</span>
             <Input type="number" value={away} onChange={(e) => setAway(e.target.value)} className="text-center text-lg font-bold" />
           </label>
         </div>
@@ -1488,6 +1563,8 @@ function CricketManualResult({ fixture, fixtureId, live, invalidate, onDone }:
   { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
   const homeName = teamLabel(homeTeam(fixture));
   const awayName = teamLabel(awayTeam(fixture));
+  const homeOrg = orgLabel(homeTeam(fixture));
+  const awayOrg = orgLabel(awayTeam(fixture));
   // Seed from the saved live snapshot (the only place wickets/overs live). The live
   // query can land after mount, so re-seed once it arrives - mirrors LiveConsole.
   const seed = hydrate(live?.live_state);
@@ -1536,8 +1613,8 @@ function CricketManualResult({ fixture, fixtureId, live, invalidate, onDone }:
       <CardBody>
         <p className="mb-3 rounded-lg bg-brand-50 px-3 py-2 text-xs text-slate-600 dark:bg-brand-500/10 dark:text-slate-300">Enter the final runs, wickets and overs for each side, then confirm the winner.</p>
         <div className="grid grid-cols-2 gap-3">
-          <CricketSideInputs name={homeName} runs={rA} wkt={wA} overs={oA} onRuns={setRA} onWkt={setWA} onOvers={setOA} />
-          <CricketSideInputs name={awayName} runs={rB} wkt={wB} overs={oB} onRuns={setRB} onWkt={setWB} onOvers={setOB} />
+          <CricketSideInputs name={homeName} org={homeOrg} runs={rA} wkt={wA} overs={oA} onRuns={setRA} onWkt={setWA} onOvers={setOA} />
+          <CricketSideInputs name={awayName} org={awayOrg} runs={rB} wkt={wB} overs={oB} onRuns={setRB} onWkt={setWB} onOvers={setOB} />
         </div>
         <div className="mt-3">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Winner</span>

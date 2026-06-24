@@ -3,7 +3,7 @@ import { STANDINGS_AGG_SCOPE, type StandingsAggScope } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { NotFoundError } from '../../shared/errors.js';
-import { readStandings } from '../standings/standings.service.js';
+import { readStandings, readStandingsBreakdown } from '../standings/standings.service.js';
 import { listChampionshipFixtures } from '../championships/fixtures-list.js';
 import { verifyShareToken } from './share-token.js';
 
@@ -53,6 +53,20 @@ export function makePublicRouter(prisma: Prisma): Router {
     if (scope !== 'championship' && !scopeId) { res.json({ scope, scope_id: null, standings: [] }); return; }
     const standings = await readStandings(prisma, id, scope, scopeId);
     res.json({ scope, scope_id: scopeId, standings, completed_matches: standings.reduce((n, r) => n + r.played, 0) });
+  }));
+
+  // Per-event breakdown for one org (same shape as the authed route) - drives the
+  // expandable standings row on the public share page.
+  router.get('/championships/:token/standings/breakdown', asyncHandler(async (req, res) => {
+    const id = resolve(req.params.token);
+    const scope = (req.query.scope as StandingsAggScope) || 'championship';
+    if (!STANDINGS_AGG_SCOPE.includes(scope)) throw new NotFoundError('Scope');
+    const scopeId = scope === 'championship' ? null : (req.query.scopeId as string | undefined) ?? null;
+    const orgId = req.query.orgId as string | undefined;
+    if (!orgId) throw new NotFoundError('Organization');
+    if (scope !== 'championship' && !scopeId) { res.json({ events: [] }); return; }
+    const events = await readStandingsBreakdown(prisma, id, scope, scopeId, orgId);
+    res.json({ events });
   }));
 
   // All fixtures (powers the Schedule + Results tabs - same shape the spectator gets).

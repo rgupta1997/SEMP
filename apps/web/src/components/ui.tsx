@@ -148,12 +148,27 @@ export function StatusBadge({ status, label }: { status?: string | null; label?:
 // "Updated HH:MM:SS · ↻ Refresh now" control for auto-refreshing tables (e.g.
 // standings). The caller owns the data + interval; this just renders the timestamp
 // and a manual refresh button.
-export function RefreshBar({ updatedAt, isFetching, onRefresh, className = '' }: { updatedAt?: number; isFetching?: boolean; onRefresh: () => void; className?: string }) {
+export function RefreshBar({ updatedAt, isFetching, onRefresh, cooldownMs = 10000, className = '' }: { updatedAt?: number; isFetching?: boolean; onRefresh: () => void; cooldownMs?: number; className?: string }) {
   const label = updatedAt ? new Date(updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
+  // After a manual refresh, lock the button for `cooldownMs` (tick down the remaining
+  // seconds) so spectators can't hammer it - the table still auto-refreshes on its own.
+  const [cooldown, setCooldown] = useState(0);
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setInterval(() => setCooldown((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [cooldown]);
+  const handleRefresh = () => {
+    if (isFetching || cooldown > 0) return;
+    onRefresh();
+    setCooldown(Math.ceil(cooldownMs / 1000));
+  };
   return (
     <div className={cn('flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500', className)}>
       <span>Updated {label}</span>
-      <Button size="sm" variant="ghost" disabled={isFetching} onClick={onRefresh}>{isFetching ? 'Refreshing…' : '↻ Refresh now'}</Button>
+      <Button size="sm" variant="ghost" disabled={isFetching || cooldown > 0} onClick={handleRefresh}>
+        {isFetching ? 'Refreshing…' : cooldown > 0 ? `↻ Wait ${cooldown}s` : '↻ Refresh now'}
+      </Button>
     </div>
   );
 }

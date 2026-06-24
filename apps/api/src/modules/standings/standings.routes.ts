@@ -5,7 +5,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError } from '../../shared/errors.js';
-import { readStandings, recomputeStandings } from './standings.service.js';
+import { readStandings, readStandingsBreakdown, recomputeStandings } from './standings.service.js';
 
 // Standings = materialized org-level tables (read) + editable scoring rules (write).
 // Mounted under /championships alongside the events router.
@@ -25,6 +25,19 @@ export function makeStandingsRouter(prisma: Prisma): Router {
     }
     const standings = await readStandings(prisma, req.params.id, scope, scopeId);
     res.json({ scope, scope_id: scopeId, standings, completed_matches: standings.reduce((n, r) => n + r.played, 0) });
+  }));
+
+  // Per-event breakdown for one org in a scope: which draws contributed how many points
+  // (and the matches behind them). Drives the expandable standings row.
+  router.get('/:id/standings/breakdown', asyncHandler(async (req, res) => {
+    const scope = (req.query.scope as StandingsAggScope) || 'championship';
+    if (!STANDINGS_AGG_SCOPE.includes(scope)) throw new NotFoundError('Scope');
+    const scopeId = scope === 'championship' ? null : (req.query.scopeId as string | undefined) ?? null;
+    const orgId = req.query.orgId as string | undefined;
+    if (!orgId) throw new NotFoundError('Organization');
+    if (scope !== 'championship' && !scopeId) return res.json({ events: [] });
+    const events = await readStandingsBreakdown(prisma, req.params.id, scope, scopeId, orgId);
+    res.json({ events });
   }));
 
   // The championship's scoring rules + the format/discipline options the organiser
