@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useMatch } from 'react-router-dom';
 import { useAuth, type AppRole } from './lib/auth';
 import { AppShell, roleHome } from './components/AppShell';
 import { ConfirmProvider, Spinner, ToastProvider } from './components/ui';
@@ -52,6 +52,7 @@ import { PlatformUsersPage } from './pages/platform/PlatformUsersPage';
 import { PlatformInstitutionsPage } from './pages/platform/PlatformInstitutionsPage';
 import { PlatformDemoRequestsPage } from './pages/platform/PlatformDemoRequestsPage';
 import { ChampionshipMatrixImportPage } from './pages/platform/ChampionshipMatrixImportPage';
+import { PublicChampionshipPage } from './pages/public/PublicChampionshipPage';
 
 function HomeRedirect() {
   const { activeRole } = useAuth();
@@ -133,6 +134,11 @@ function AppRoutes() {
 
   // Consume the one-shot login flag once we've acted on it (below).
   useEffect(() => { if (justLoggedIn) clearJustLoggedIn(); }, [justLoggedIn, clearJustLoggedIn]);
+
+  // Public, view-only share link - rendered with no sidebar/login, regardless of
+  // whether the visitor is signed in (so the link works for anyone).
+  const publicMatch = useMatch('/c/:token');
+  if (publicMatch?.params.token) return <PublicChampionshipPage token={publicMatch.params.token} />;
 
   if (loading) return <div className="grid h-screen place-items-center"><Spinner /></div>;
   // Logged out: a public marketing landing page at the root, with the sign-in

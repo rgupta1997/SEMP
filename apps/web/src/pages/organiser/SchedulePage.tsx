@@ -4,7 +4,7 @@ import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { usePageFilters, useFilterBar } from '../../lib/filters';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
-import { Badge, Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Segmented, Select, Spinner, StatusBadge, toast } from '../../components/ui';
+import { Badge, Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Segmented, Select, Spinner, StatusBadge, StatusLegend, toast } from '../../components/ui';
 import { Bracket, fixtureStatusLabel } from '../../components/Bracket';
 import { RoundRobinGrid } from '../../components/RoundRobinGrid';
 import { ScheduleTimeline } from '../../components/ScheduleTimeline';
@@ -66,6 +66,12 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, venues, officials, tea
 
   const title = isEdit ? `Edit · ${teamName(fixture.home_team_id)} vs ${teamName(fixture.away_team_id)}` : 'Add fixture';
   const teamHint = teams.length === 0 ? 'No teams registered to this draw yet.' : undefined;
+  // Disambiguate same-named teams (e.g. several "Badminton (Mixed)" draws) by
+  // appending each team's organization to its option label.
+  const optLabel = (t: any) => {
+    const org = t.organizations?.short_name || t.organizations?.name;
+    return org ? `${t.name} — ${org}` : t.name;
+  };
   // The grounds belonging to the chosen venue (venues come straight from the venues
   // list, so a venue with no courts still shows and is selectable).
   const venueGrounds = grounds.filter((g) => (g.venue_id ?? '') === venueId);
@@ -77,14 +83,14 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, venues, officials, tea
           <Select value={homeId} onChange={(e) => setHomeId(e.target.value)}>
             <option value="">- TBD -</option>
             {/* Hide the team already picked as Away - a team can't play itself. */}
-            {teams.filter((t) => t.id !== awayId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {teams.filter((t) => t.id !== awayId).map((t) => <option key={t.id} value={t.id}>{optLabel(t)}</option>)}
           </Select>
         </Field>
         <Field label="Away team">
           <Select value={awayId} onChange={(e) => setAwayId(e.target.value)}>
             <option value="">- TBD / bye -</option>
             {/* Hide the team already picked as Home - a team can't play itself. */}
-            {teams.filter((t) => t.id !== homeId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {teams.filter((t) => t.id !== homeId).map((t) => <option key={t.id} value={t.id}>{optLabel(t)}</option>)}
           </Select>
         </Field>
       </div>
@@ -156,8 +162,8 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, venues, officials, tea
   );
 }
 
-function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, sportName, formatLabel, teamName, grounds, venues, officials, canManage }:
-  { td: any; fixtures: any[]; fixturesLoading: boolean; fixturesPath: string; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
+function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, sportName, formatLabel, teamName, teamOrg, grounds, venues, officials, canManage }:
+  { td: any; fixtures: any[]; fixturesLoading: boolean; fixturesPath: string; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
   // The championship-wide list is ordered by schedule; restore the per-draw
   // pool → bracket order the visual (bracket / grid) view needs for layout.
   const fixtures = [...drawFixtures].sort((a, b) => (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0));
@@ -228,15 +234,23 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
           <p className="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-3 text-sm text-slate-400 dark:text-slate-500">No fixtures yet - generate the draw from registered teams.</p>
         ) : showVisual ? (
           hasBracket
-            ? <Bracket fixtures={fixtures} teamName={teamName} onSelect={canManage ? setEditing : () => {}} />
-            : <RoundRobinGrid fixtures={fixtures} teamName={teamName} onSelect={canManage ? setEditing : () => {}} />
+            ? <Bracket fixtures={fixtures} teamName={teamName} teamOrg={teamOrg} onSelect={canManage ? setEditing : () => {}} />
+            : <RoundRobinGrid fixtures={fixtures} teamName={teamName} teamOrg={teamOrg} onSelect={canManage ? setEditing : () => {}} />
         ) : (
           <div className="space-y-1.5">
             {listFixtures.map((f) => (
               <div key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-sm">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 w-20">{f.round || 'Match'}</span>
-                <span className="flex-1 min-w-[180px] font-medium text-slate-700 dark:text-slate-300">
-                  {teamName(f.home_team_id)} <span className="text-slate-400 dark:text-slate-500">vs</span> {teamName(f.away_team_id)}
+                <span className="flex flex-1 min-w-[180px] items-center gap-2 font-medium text-slate-700 dark:text-slate-300">
+                  <span className="inline-flex flex-col">
+                    <span className="leading-tight">{teamName(f.home_team_id)}</span>
+                    {teamOrg(f.home_team_id) && <span className="text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{teamOrg(f.home_team_id)}</span>}
+                  </span>
+                  <span className="text-slate-400 dark:text-slate-500">vs</span>
+                  <span className="inline-flex flex-col">
+                    <span className="leading-tight">{teamName(f.away_team_id)}</span>
+                    {teamOrg(f.away_team_id) && <span className="text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{teamOrg(f.away_team_id)}</span>}
+                  </span>
                 </span>
                 <span className="text-xs text-slate-500 dark:text-slate-400">
                   {groundLabel(f.venue_ground_id) ?? 'No ground'} · {f.scheduled_at ? fmtDateTime(f.scheduled_at) : 'Unscheduled'}
@@ -257,8 +271,8 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
   );
 }
 
-function SportBlock({ ts, draws, allFixtures, fixturesLoading, fixturesPath, sportName, formatName, teamName, grounds, venues, officials, canManage }:
-  { ts: any; draws: any[]; allFixtures: any[]; fixturesLoading: boolean; fixturesPath: string; sportName: string; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
+function SportBlock({ ts, draws, allFixtures, fixturesLoading, fixturesPath, sportName, formatName, teamName, teamOrg, grounds, venues, officials, canManage }:
+  { ts: any; draws: any[]; allFixtures: any[]; fixturesLoading: boolean; fixturesPath: string; sportName: string; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
   if (draws.length === 0) return null;
   // Effective format: the draw's own format wins, else the sport's (matches the
   // generate route's fallback).
@@ -276,6 +290,7 @@ function SportBlock({ ts, draws, allFixtures, fixturesLoading, fixturesPath, spo
             sportName={sportName}
             formatLabel={formatName(td.format_id) ?? formatName(ts.format_id)}
             teamName={teamName}
+            teamOrg={teamOrg}
             grounds={grounds}
             venues={venues}
             officials={officials}
@@ -304,6 +319,8 @@ function buildDays(startISO?: string, endISO?: string): string[] {
 export function SchedulePage() {
   const { eventId, canManage, championship } = useEvent();
   const [topView, setTopView] = useState<'manage' | 'timeline'>('manage');
+  // Timeline status filter, driven by clicking the colour legend (empty = show all).
+  const [timelineStatus, setTimelineStatus] = useState('');
   // One championship-wide fixtures request feeds the timeline AND every manage-view
   // DrawCard (sliced per draw), instead of a fixtures request per draw.
   const fixturesPath = `/championships/${eventId}/fixtures`;
@@ -341,6 +358,12 @@ export function SchedulePage() {
 
   const sportName = (id: string) => sports.find((s) => s.id === id)?.name ?? 'Sport';
   const teamName = (id: string | null) => (id ? teams.find((t) => t.id === id)?.name ?? 'TBD' : 'TBD');
+  // Organization sub-heading for a team (short name preferred), '' when unaffiliated -
+  // shown under the team name on the bracket / grid / list so same-named draws read apart.
+  const teamOrg = (id: string | null) => {
+    const o = id ? teams.find((t) => t.id === id)?.organizations : null;
+    return o?.short_name || o?.name || '';
+  };
   const formatName = (id: string | null | undefined) => (id ? formats.find((f) => f.id === id)?.name ?? null : null);
 
   // Discipline rows + day tabs for the timeline scheduler.
@@ -392,15 +415,18 @@ export function SchedulePage() {
       </div>
       {topView === 'timeline' ? (
         fixturesLoading ? <div className="grid h-40 place-items-center"><Spinner /></div> : (
-          <ScheduleTimeline
-            rows={timelineRows}
-            fixtures={allFixtures}
-            days={days}
-            canManage={canManage}
-            placing={place.isPending || unschedule.isPending}
-            onPlace={placeMatch}
-            onUnschedule={unscheduleMatch}
-          />
+          <div className="space-y-3">
+            <StatusLegend value={timelineStatus} onSelect={setTimelineStatus} />
+            <ScheduleTimeline
+              rows={timelineRows}
+              fixtures={timelineStatus ? allFixtures.filter((f: any) => f.status === timelineStatus) : allFixtures}
+              days={days}
+              canManage={canManage}
+              placing={place.isPending || unschedule.isPending}
+              onPlace={placeMatch}
+              onUnschedule={unscheduleMatch}
+            />
+          </div>
         )
       ) : tsportsLoading ? (
         <div className="grid h-40 place-items-center"><Spinner /></div>
@@ -408,7 +434,7 @@ export function SchedulePage() {
         <EmptyState icon="⚑" title="No sports configured" description="Add sports & disciplines in Setup, then come back to generate fixtures." />
       ) : (
         <div className="space-y-6">
-          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} fixturesPath={fixturesPath} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} grounds={grounds} venues={venues} officials={officials} canManage={canManage} />)}
+          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} fixturesPath={fixturesPath} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManage} />)}
         </div>
       )}
     </div>

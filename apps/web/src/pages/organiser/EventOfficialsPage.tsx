@@ -28,7 +28,7 @@ function AssignOfficialModal({ eventId, existingIds, onClose }: { eventId: strin
   return (
     <PeoplePicker
       title="Assign officials"
-      subtitle="Search by mobile or name and pick officials. Unknown numbers get an invite to join."
+      subtitle="Search by phone and pick officials. Unknown numbers get an invite to join."
       assignedUserIds={existingIds}
       assignedLabel="Official"
       invite={{ target_type: 'championship_official', target_id: eventId }}

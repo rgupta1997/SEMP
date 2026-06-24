@@ -26,6 +26,7 @@ import { makeInvitationsRouter } from '../modules/enrollment/invitations.routes.
 import { makeUserInvitationsRouter } from '../modules/iam/user-invitations.routes.js';
 import { makeTeamsRouter } from '../modules/teams/teams.routes.js';
 import { makeMatrixImportRouter } from '../modules/import/matrix-import.routes.js';
+import { makePublicRouter } from '../modules/public/public.routes.js';
 import { makeVenuesRouter, makeVenueGroundsRouter } from '../modules/venues/venues.routes.js';
 import { makeFixturesRouter } from '../modules/fixtures/fixtures.routes.js';
 import { makeNotificationsRouter } from '../modules/notifications/notifications.routes.js';
@@ -58,6 +59,10 @@ export function buildApp(prisma: Prisma) {
   // reads/triage inside the router are gated to super-admins. Mounted before the
   // global requireAuth so anonymous visitors can submit.
   api.use('/demo-requests', makeDemoRequestsRouter(prisma));
+
+  // Public, view-only championship pages via a share token (Overview + Standings).
+  // Mounted before requireAuth so anyone with the link can view without signing in.
+  api.use('/public', makePublicRouter(prisma));
 
   // Everything below requires authentication.
   api.use(requireAuth);

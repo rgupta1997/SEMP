@@ -94,13 +94,32 @@ export interface MatchState {
   segsA: number; segsB: number;      // periods/sets/games won (sets/rally)
   inn: number; batting: 'A' | 'B';   // cricket
   runsA: number; wktA: number; runsB: number; wktB: number;
+  ballsA: number; ballsB: number;    // cricket: legal balls bowled per innings (overs = balls/6)
   ended?: boolean;                   // final period frozen (points archetype) - locks scoring until reopened
+}
+
+// Balls → cricket overs notation, e.g. 92 → "15.2" (15 overs, 2 balls).
+export function oversStr(balls: number): string {
+  const b = Math.max(0, Math.floor(balls || 0));
+  return `${Math.floor(b / 6)}.${b % 6}`;
+}
+// Parse "15.2" overs notation back to a ball count (balls capped at 5 per over).
+export function oversToBalls(overs: string): number {
+  const [ov, ball] = String(overs ?? '').split('.');
+  return (Math.max(0, Math.floor(Number(ov) || 0)) * 6) + Math.min(5, Math.max(0, Math.floor(Number(ball) || 0)));
+}
+// Cricket "runs/wkts (overs)" for one side.
+export function cricketScore(s: MatchState, side: 'A' | 'B'): string {
+  const runs = side === 'A' ? s.runsA : s.runsB;
+  const wkt = side === 'A' ? s.wktA : s.wktB;
+  const balls = side === 'A' ? s.ballsA : s.ballsB;
+  return `${runs}/${wkt} (${oversStr(balls)})`;
 }
 
 export interface LogEntry { t: string; team?: 'A' | 'B'; txt: string; player?: string; kind?: string }
 
 export function initState(): MatchState {
-  return { a: 0, b: 0, seg: 1, segScores: [], segsA: 0, segsB: 0, inn: 1, batting: 'A', runsA: 0, wktA: 0, runsB: 0, wktB: 0 };
+  return { a: 0, b: 0, seg: 1, segScores: [], segsA: 0, segsB: 0, inn: 1, batting: 'A', runsA: 0, wktA: 0, runsB: 0, wktB: 0, ballsA: 0, ballsB: 0 };
 }
 
 // Tolerant rehydrate from a persisted (possibly partial) snapshot.
@@ -126,8 +145,9 @@ export function reduce(def: SportDef, s: MatchState, action: Action): { state: M
     case 'POINT': {
       const pts = action.pts ?? 1;
       if (def.archetype === 'cricket') {
-        if (ns.batting === 'A') ns.runsA += pts; else ns.runsB += pts;
-        return { state: ns, entry: { t: `Inn ${ns.inn}`, team: ns.batting, txt: `${pts} run${pts === 1 ? '' : 's'}` } };
+        if (ns.batting === 'A') { ns.runsA += pts; ns.ballsA += 1; } else { ns.runsB += pts; ns.ballsB += 1; }
+        const balls = ns.batting === 'A' ? ns.ballsA : ns.ballsB;
+        return { state: ns, entry: { t: `${oversStr(balls)} ov`, team: ns.batting, txt: `${pts} run${pts === 1 ? '' : 's'}` } };
       }
       if (action.team === 'A') ns.a += pts; else ns.b += pts;
       return { state: ns, entry: { t: `${def.segLabel} ${ns.seg}`, team: action.team, txt: `+${pts}${action.label ? ` ${action.label}` : ''}` } };
@@ -143,8 +163,9 @@ export function reduce(def: SportDef, s: MatchState, action: Action): { state: M
       return { state: ns, entry: { t: `${def.segLabel} ${ns.seg}`, team: action.team, txt, player: action.playerName, kind: action.key } };
     }
     case 'WICKET': {
-      if (ns.batting === 'A') ns.wktA += 1; else ns.wktB += 1;
-      return { state: ns, entry: { t: `Inn ${ns.inn}`, team: ns.batting, txt: 'Wicket' } };
+      if (ns.batting === 'A') { ns.wktA += 1; ns.ballsA += 1; } else { ns.wktB += 1; ns.ballsB += 1; }
+      const balls = ns.batting === 'A' ? ns.ballsA : ns.ballsB;
+      return { state: ns, entry: { t: `${oversStr(balls)} ov`, team: ns.batting, txt: 'Wicket' } };
     }
     case 'SWITCH_INNINGS': {
       ns.inn = Math.min(ns.inn + 1, def.segMax);
@@ -203,7 +224,7 @@ export function subLine(def: SportDef, s: MatchState): string {
   }
   if (def.archetype === 'cricket') {
     const bt = s.batting === 'A' ? 'Home' : 'Away';
-    return `Innings ${s.inn} · ${bt} batting · ${s.batting === 'A' ? `${s.runsA}/${s.wktA}` : `${s.runsB}/${s.wktB}`}`;
+    return `Innings ${s.inn} · ${bt} batting · Home ${cricketScore(s, 'A')} · Away ${cricketScore(s, 'B')}`;
   }
   const parts = s.segScores.map((x, i) => `${def.segLabel[0]}${i + 1} ${x[0]}–${x[1]}`);
   return parts.join('  ·  ');

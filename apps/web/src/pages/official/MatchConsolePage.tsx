@@ -3,9 +3,9 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
 import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Select, Spinner, StatusBadge, Textarea, BackButton, cn, confirmDialog, toast } from '../../components/ui';
-import { awayTeam, disciplineLabel, eventInfo, eventLabel, homeTeam, sportName as sportNameOf, teamLabel, venueLabel } from './fixtureHelpers';
+import { awayTeam, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, sportName as sportNameOf, teamLabel, venueLabel } from './fixtureHelpers';
 import {
-  headline, hydrate, reduce, sportDef, subLine,
+  cricketScore, headline, hydrate, oversStr, oversToBalls, reduce, sportDef, subLine,
   type Action, type LogEntry, type MatchState, type SportDef,
 } from '../../features/scoring/engine';
 import { resolveTemplate, tieTemplateFor, eventTemplateFor } from '../../features/scoring/templates';
@@ -16,9 +16,10 @@ import {
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
 import type { TieSpec, EventSpec, ScoringMode } from '@semp/shared';
 
+// Walkover is handled separately (it needs a winner + reason); these are the plain
+// status-only secondary actions. Postpone is intentionally omitted here - it's done
+// from the Schedule tab, not mid-scoring.
 const SECONDARY: { status: string; label: string; variant: 'outline' | 'danger' }[] = [
-  { status: 'walkover', label: 'Walkover', variant: 'outline' },
-  { status: 'postponed', label: 'Postpone', variant: 'outline' },
   { status: 'cancelled', label: 'Cancel match', variant: 'danger' },
 ];
 
@@ -114,6 +115,12 @@ export function MatchConsolePage() {
           {fixture.point_scheme === 'custom' && (
             <div className="mt-5">
               <CustomPointsPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
+            </div>
+          )}
+
+          {sportDef(sportNameOf(fixture)).archetype === 'cricket' && (
+            <div className="mt-5">
+              <ScorecardPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
             </div>
           )}
 
@@ -218,7 +225,9 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
         : structure === 'tie' && tieSpec
           ? <TieConsole key={`tie-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={tieSpec} mode={effectiveMode} live={live} invalidate={invalidate} onDone={onDone} />
           : effectiveMode === 'manual'
-            ? <ManualResult key={`man-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} invalidate={invalidate} onDone={onDone} />
+            ? singleDef.archetype === 'cricket'
+              ? <CricketManualResult key={`cman-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} live={live} invalidate={invalidate} onDone={onDone} />
+              : <ManualResult key={`man-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} live={live} invalidate={invalidate} onDone={onDone} />
             : <LiveConsole key={`live-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} live={live} invalidate={invalidate} onDone={onDone} />}
     </>
   );
@@ -259,6 +268,32 @@ function CustomPointsPanel({ fixture, fixtureId, invalidate }: { fixture: any; f
         </div>
         <div className="mt-4 flex justify-end">
           <Button disabled={save.isPending} onClick={submit}>{save.isPending ? 'Saving…' : 'Save points'}</Button>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+/* ----------------------------- External scorecard (cricket) ----------------------------- */
+// Cricket / Box Cricket: store a CrickHeroes (or any) full-scorecard URL. Saved to
+// the fixture's live_state.scorecard_url and surfaced as a "View full scorecard" CTA
+// on the match views for spectators.
+function ScorecardPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixtureId: string; invalidate: (string | null)[] }) {
+  const [url, setUrl] = useState<string>(fixture.live_state?.scorecard_url ?? '');
+  const save = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/scorecard`, body), [`/fixtures/${fixtureId}/scoring`, ...invalidate]);
+  return (
+    <Card>
+      <CardHeader title="Full scorecard link" subtitle="Paste a CrickHeroes (or any) live scorecard URL - spectators get a button to open the full scorecard." />
+      <CardBody className="space-y-3">
+        <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://crickheroes.com/..." />
+        <div className="flex items-center justify-between">
+          {url
+            ? <a href={url} target="_blank" rel="noreferrer" className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-400">↗ Open scorecard</a>
+            : <span className="text-xs text-slate-400">No link yet</span>}
+          <Button size="sm" disabled={save.isPending}
+            onClick={() => save.mutate({ url }, { onSuccess: () => toast.success('Scorecard link saved'), onError: (e: any) => toast.error(e.message) })}>
+            {save.isPending ? 'Saving…' : 'Save link'}
+          </Button>
         </div>
       </CardBody>
     </Card>
@@ -419,8 +454,8 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
 
   // Cricket: write runs/wickets straight into state (so live_state + headline stay
   // consistent) and optionally declare the winner + final result text directly.
-  const applyQuick = (v: { runsA: number; wktA: number; runsB: number; wktB: number; winner: 'auto' | 'home' | 'away' | 'draw'; notes: string; complete: boolean }) => {
-    const ns: MatchState = { ...state, runsA: v.runsA, wktA: v.wktA, runsB: v.runsB, wktB: v.wktB };
+  const applyQuick = (v: { runsA: number; wktA: number; runsB: number; wktB: number; oversA: string; oversB: string; winner: 'auto' | 'home' | 'away' | 'draw'; notes: string; complete: boolean }) => {
+    const ns: MatchState = { ...state, runsA: v.runsA, wktA: v.wktA, runsB: v.runsB, wktB: v.wktB, ballsA: oversToBalls(v.oversA), ballsB: oversToBalls(v.oversB) };
     setState(ns);
     const st = v.complete ? 'completed' : status === 'scheduled' ? 'live' : status;
     setStatus(st);
@@ -461,11 +496,31 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
             {live_ && <span className="inline-flex items-center gap-1.5 text-[var(--live)]"><span className="h-2 w-2 animate-pulse rounded-full bg-[var(--live)]" />LIVE</span>}
           </div>
           <div className="mt-2 flex items-center justify-center gap-5">
-            <div className="flex-1 text-right text-lg font-bold">{homeName}</div>
-            <div className="flex items-center gap-3 text-5xl font-black tabular-nums">
-              <span>{h.a}</span><span className="text-slate-600">:</span><span>{h.b}</span>
+            <div className="flex-1 text-right">
+              <div className="text-lg font-bold">{homeName}</div>
+              {orgLabel(homeTeam(fixture)) && <div className="text-xs font-normal text-slate-400">{orgLabel(homeTeam(fixture))}</div>}
             </div>
-            <div className="flex-1 text-left text-lg font-bold">{awayName}</div>
+            {def.archetype === 'cricket' ? (
+              <div className="flex items-start justify-center gap-3 tabular-nums">
+                <div className="flex flex-col items-center">
+                  <span className="text-3xl font-black leading-none">{state.runsA}/{state.wktA}</span>
+                  <span className="mt-1.5 text-xs font-medium text-slate-400">{oversStr(state.ballsA)} ov</span>
+                </div>
+                <span className="pt-1.5 text-lg font-bold text-slate-500">vs</span>
+                <div className="flex flex-col items-center">
+                  <span className="text-3xl font-black leading-none">{state.runsB}/{state.wktB}</span>
+                  <span className="mt-1.5 text-xs font-medium text-slate-400">{oversStr(state.ballsB)} ov</span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 text-5xl font-black tabular-nums">
+                <span>{h.a}</span><span className="text-slate-600">:</span><span>{h.b}</span>
+              </div>
+            )}
+            <div className="flex-1 text-left">
+              <div className="text-lg font-bold">{awayName}</div>
+              {orgLabel(awayTeam(fixture)) && <div className="text-xs font-normal text-slate-400">{orgLabel(awayTeam(fixture))}</div>}
+            </div>
           </div>
           <div className="mt-2 text-center text-sm text-slate-400">{subLine(def, state) || ` `}</div>
         </div>
@@ -524,10 +579,10 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
 
           <div className="space-y-5">
             <Card>
-              <CardHeader title="Championship log" action={<Button size="sm" variant="ghost" disabled={history.length === 0} onClick={undo}>↶ Undo</Button>} />
+              <CardHeader title="Scoring log" action={<Button size="sm" variant="ghost" disabled={history.length === 0} onClick={undo}>↶ Undo</Button>} />
               <CardBody>
                 {log.length === 0 ? (
-                  <p className="text-sm text-slate-400 dark:text-slate-500">No championships yet - start scoring.</p>
+                  <p className="text-sm text-slate-400 dark:text-slate-500">No logs yet - start scoring.</p>
                 ) : (
                   <ul className="max-h-64 space-y-1.5 overflow-auto">
                     {log.map((e, i) => (
@@ -547,6 +602,7 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
               <CardBody className="space-y-2">
                 {!live_ && !editing && <Button className="w-full justify-start" disabled={submitting} onClick={goLive}>Start match (go live)</Button>}
                 <Button className="w-full justify-start" onClick={() => setConfirming(true)}>✍ End match &amp; sign off</Button>
+                <WalkoverButton fixtureId={fixtureId} homeName={homeName} awayName={awayName} homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id} invalidate={invalidate} onDone={onDone} />
                 {SECONDARY.map((s) => (
                   <SecondaryStatus key={s.status} fixtureId={fixtureId} status={s.status} label={s.label} variant={s.variant} invalidate={invalidate} onDone={onDone} />
                 ))}
@@ -554,7 +610,7 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
             </Card>
 
             {def.archetype === 'cricket' ? (
-              <CricketQuickResult key={`${state.runsA}-${state.wktA}-${state.runsB}-${state.wktB}`}
+              <CricketQuickResult key={`${state.runsA}-${state.wktA}-${state.runsB}-${state.wktB}-${state.ballsA}-${state.ballsB}`}
                 state={state} homeName={homeName} awayName={awayName}
                 currentNotes={fixture.notes ?? ''} pending={persist.isPending} onApply={applyQuick} />
             ) : (
@@ -710,9 +766,15 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
             <span>Tie · first to {target} rubbers</span>
           </div>
           <div className="mt-2 flex items-center justify-center gap-5">
-            <div className="flex-1 text-right text-lg font-bold">{homeName}</div>
+            <div className="flex-1 text-right">
+              <div className="text-lg font-bold">{homeName}</div>
+              {orgLabel(homeTeam(fixture)) && <div className="text-xs font-normal text-slate-400">{orgLabel(homeTeam(fixture))}</div>}
+            </div>
             <div className="flex items-center gap-3 text-5xl font-black tabular-nums"><span>{a}</span><span className="text-slate-600">:</span><span>{b}</span></div>
-            <div className="flex-1 text-left text-lg font-bold">{awayName}</div>
+            <div className="flex-1 text-left">
+              <div className="text-lg font-bold">{awayName}</div>
+              {orgLabel(awayTeam(fixture)) && <div className="text-xs font-normal text-slate-400">{orgLabel(awayTeam(fixture))}</div>}
+            </div>
           </div>
           <div className="mt-2 text-center text-sm text-slate-400">{decided ? `${w === 'A' ? homeName : awayName} win the tie` : `${a + b} of ${spec.rubbers.length} rubbers played`}</div>
         </div>
@@ -791,6 +853,7 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
                 {!live_ && !editing && <Button className="w-full justify-start" disabled={submitting} onClick={goLive}>Start tie (go live)</Button>}
                 <Button className="w-full justify-start" disabled={submitting} onClick={signOff}>✍ End tie &amp; sign off</Button>
                 {!decided && <p className="px-1 text-xs text-slate-400 dark:text-slate-500">Record rubber results until one side reaches {target}.</p>}
+                <WalkoverButton fixtureId={fixtureId} homeName={homeName} awayName={awayName} homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id} invalidate={invalidate} onDone={onDone} />
                 {SECONDARY.map((s) => (
                   <SecondaryStatus key={s.status} fixtureId={fixtureId} status={s.status} label={s.label} variant={s.variant} invalidate={invalidate} onDone={onDone} />
                 ))}
@@ -1169,43 +1232,49 @@ function CricketDeck({ def, dispatch }: { def: SportDef; dispatch: (a: Action) =
   );
 }
 
+// Runs / wickets / overs trio for one cricket side - shared by the live quick-result
+// and the manual final-score form so both read and behave identically.
+function CricketSideInputs({ name, runs, wkt, overs, onRuns, onWkt, onOvers }:
+  { name: string; runs: string; wkt: string; overs: string;
+    onRuns: (v: string) => void; onWkt: (v: string) => void; onOvers: (v: string) => void }) {
+  return (
+    <div>
+      <div className="mb-1 truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{name}</div>
+      <div className="flex gap-2">
+        <Input type="number" min={0} value={runs} onChange={(e) => onRuns(e.target.value)} className="text-center" aria-label={`${name} runs`} />
+        <Input type="number" min={0} value={wkt} onChange={(e) => onWkt(e.target.value)} className="w-14 text-center" aria-label={`${name} wickets`} />
+        <Input value={overs} onChange={(e) => onOvers(e.target.value)} className="w-16 text-center" placeholder="0.0" aria-label={`${name} overs`} />
+      </div>
+      <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-400">runs · wkts · overs</div>
+    </div>
+  );
+}
+
 // Cricket-only: enter runs + wickets for both teams directly, declare the winner
 // (or let it derive from runs), and write the final result text. Keyed by the live
 // score upstream so it re-seeds when ball-by-ball scoring changes the totals.
 function CricketQuickResult({ state, homeName, awayName, currentNotes, pending, onApply }:
   { state: MatchState; homeName: string; awayName: string; currentNotes: string; pending: boolean;
-    onApply: (v: { runsA: number; wktA: number; runsB: number; wktB: number; winner: 'auto' | 'home' | 'away' | 'draw'; notes: string; complete: boolean }) => void }) {
+    onApply: (v: { runsA: number; wktA: number; runsB: number; wktB: number; oversA: string; oversB: string; winner: 'auto' | 'home' | 'away' | 'draw'; notes: string; complete: boolean }) => void }) {
   const [rA, setRA] = useState(String(state.runsA ?? 0));
   const [wA, setWA] = useState(String(state.wktA ?? 0));
+  const [oA, setOA] = useState(oversStr(state.ballsA ?? 0));
   const [rB, setRB] = useState(String(state.runsB ?? 0));
   const [wB, setWB] = useState(String(state.wktB ?? 0));
+  const [oB, setOB] = useState(oversStr(state.ballsB ?? 0));
   const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>('auto');
   const [notes, setNotes] = useState(currentNotes);
 
   const num = (s: string) => Math.max(0, Math.floor(Number(s) || 0));
-  const vals = (complete: boolean) => ({ runsA: num(rA), wktA: num(wA), runsB: num(rB), wktB: num(wB), winner, notes, complete });
+  const vals = (complete: boolean) => ({ runsA: num(rA), wktA: num(wA), runsB: num(rB), wktB: num(wB), oversA: oA, oversB: oB, winner, notes, complete });
 
   return (
     <Card>
       <CardHeader title="Quick result" subtitle="Enter the score directly or declare the winner." />
       <CardBody className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <div className="mb-1 truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</div>
-            <div className="flex gap-2">
-              <Input type="number" min={0} value={rA} onChange={(e) => setRA(e.target.value)} className="text-center" aria-label={`${homeName} runs`} />
-              <Input type="number" min={0} value={wA} onChange={(e) => setWA(e.target.value)} className="w-16 text-center" aria-label={`${homeName} wickets`} />
-            </div>
-            <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-400">runs · wkts</div>
-          </div>
-          <div>
-            <div className="mb-1 truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</div>
-            <div className="flex gap-2">
-              <Input type="number" min={0} value={rB} onChange={(e) => setRB(e.target.value)} className="text-center" aria-label={`${awayName} runs`} />
-              <Input type="number" min={0} value={wB} onChange={(e) => setWB(e.target.value)} className="w-16 text-center" aria-label={`${awayName} wickets`} />
-            </div>
-            <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-400">runs · wkts</div>
-          </div>
+          <CricketSideInputs name={homeName} runs={rA} wkt={wA} overs={oA} onRuns={setRA} onWkt={setWA} onOvers={setOA} />
+          <CricketSideInputs name={awayName} runs={rB} wkt={wB} overs={oB} onRuns={setRB} onWkt={setWB} onOvers={setOB} />
         </div>
         <Field label="Winner">
           <Select value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
@@ -1271,6 +1340,53 @@ function DirectResult({ def, homeName, awayName, initialA, initialB, pending, on
   );
 }
 
+// Walkover needs a winner and a reason - a plain status flip would leave the match
+// with no result. Opens a popup to capture both, then records it via /live (which
+// also advances the winner in a bracket draw).
+function WalkoverButton({ fixtureId, homeName, awayName, homeTeamId, awayTeamId, invalidate, onDone }:
+  { fixtureId: string; homeName: string; awayName: string; homeTeamId: string | null; awayTeamId: string | null; invalidate: (string | null)[]; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [winner, setWinner] = useState<'home' | 'away'>('home');
+  const [reason, setReason] = useState('');
+  const mut = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
+  const submit = () => {
+    if (!reason.trim()) { toast.error('Add a walkover reason'); return; }
+    const winner_team_id = winner === 'home' ? homeTeamId : awayTeamId;
+    mut.mutate(
+      { status: 'walkover', winner_team_id, notes: reason.trim() },
+      { onSuccess: () => { setOpen(false); onDone(); }, onError: (e: any) => toast.error(e.message) },
+    );
+  };
+  return (
+    <>
+      <Button variant="outline" className="w-full justify-start" onClick={() => setOpen(true)}>Walkover</Button>
+      {open && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4" onClick={() => setOpen(false)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Record walkover</h3>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">A walkover awards the match to one side. Pick the winner and add a reason.</p>
+            <div className="mt-4">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Winner</span>
+              <Select value={winner} onChange={(e) => setWinner(e.target.value as 'home' | 'away')}>
+                <option value="home">{homeName}</option>
+                <option value="away">{awayName}</option>
+              </Select>
+            </div>
+            <div className="mt-3">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Reason</span>
+              <Textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. opponent didn't show / withdrew" />
+            </div>
+            <div className="mt-4 flex gap-2">
+              <Button variant="outline" className="flex-1" disabled={mut.isPending} onClick={() => setOpen(false)}>Cancel</Button>
+              <Button className="flex-1" disabled={mut.isPending} onClick={submit}>{mut.isPending ? 'Saving…' : 'Record walkover'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function SecondaryStatus({ fixtureId, status, label, variant, invalidate, onDone }:
   { fixtureId: string; status: string; label: string; variant: 'outline' | 'danger'; invalidate: (string | null)[]; onDone: () => void }) {
   // Go through /live (assigned-official authorized), not the organiser-only /fixtures/:id.
@@ -1284,11 +1400,16 @@ function SecondaryStatus({ fixtureId, status, label, variant, invalidate, onDone
 }
 
 /* ----------------------------- Manual result (time/measured sports) ----------------------------- */
-function ManualResult({ fixture, fixtureId, def, invalidate, onDone }: { fixture: any; fixtureId: string; def: SportDef; invalidate: (string | null)[]; onDone: () => void }) {
+function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone }: { fixture: any; fixtureId: string; def: SportDef; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
   const homeName = teamLabel(homeTeam(fixture));
   const awayName = teamLabel(awayTeam(fixture));
-  const [home, setHome] = useState(fixture.home_score != null ? String(fixture.home_score) : '');
-  const [away, setAway] = useState(fixture.away_score != null ? String(fixture.away_score) : '');
+  // Seed from the live detailed tally when one exists (so switching Detailed → Manual
+  // keeps the score instead of resetting), else from the saved headline.
+  const liveH = live?.live_state && Object.keys(live.live_state).length > 0 ? headline(def, hydrate(live.live_state)) : null;
+  const seedHome = liveH ? liveH.a : fixture.home_score;
+  const seedAway = liveH ? liveH.b : fixture.away_score;
+  const [home, setHome] = useState(seedHome != null ? String(seedHome) : '');
+  const [away, setAway] = useState(seedAway != null ? String(seedAway) : '');
   // Winner is chosen explicitly, not derived: for time events the fastest (lowest)
   // wins, so "higher score" can't be assumed. 'auto' falls back to higher-score.
   const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>('auto');
@@ -1300,7 +1421,6 @@ function ManualResult({ fixture, fixtureId, def, invalidate, onDone }: { fixture
   // any sport (e.g. sets/games won vs raw points).
   const hint = def.manualHint ?? (
     def.archetype === 'sets' || def.archetype === 'rally' ? `Enter the number of ${def.segLabel.toLowerCase()}s each side won, then confirm the winner.`
-    : def.archetype === 'cricket' ? 'Enter the final runs for each side, then confirm the winner.'
     : 'Enter the final score for each side, then confirm the winner.');
 
   const hs = home === '' ? null : Number(home);
@@ -1352,6 +1472,89 @@ function ManualResult({ fixture, fixtureId, def, invalidate, onDone }: { fixture
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="outline" disabled={saveResult.isPending} onClick={() => submit('live')}>Save (keep live)</Button>
           <Button disabled={saveResult.isPending} onClick={() => submit('completed')}>{saveResult.isPending ? 'Saving…' : 'Save & complete'}</Button>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+/* ----------------------------- Manual result (cricket) ----------------------------- */
+// Cricket's manual final-score form: like the generic ManualResult but with the
+// runs/wickets/overs trio per side, just as cricket is actually scored. Persisted via
+// /live (not /result) so wickets & overs land in live_state and the "runs/wkts (overs)"
+// score renders everywhere - the bare runs alone would drop the wickets the official
+// typed. inn/batting and any other live keys are preserved by spreading the snapshot.
+function CricketManualResult({ fixture, fixtureId, live, invalidate, onDone }:
+  { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+  const homeName = teamLabel(homeTeam(fixture));
+  const awayName = teamLabel(awayTeam(fixture));
+  // Seed from the saved live snapshot (the only place wickets/overs live). The live
+  // query can land after mount, so re-seed once it arrives - mirrors LiveConsole.
+  const seed = hydrate(live?.live_state);
+  const [rA, setRA] = useState(String(seed.runsA ?? 0));
+  const [wA, setWA] = useState(String(seed.wktA ?? 0));
+  const [oA, setOA] = useState(oversStr(seed.ballsA ?? 0));
+  const [rB, setRB] = useState(String(seed.runsB ?? 0));
+  const [wB, setWB] = useState(String(seed.wktB ?? 0));
+  const [oB, setOB] = useState(oversStr(seed.ballsB ?? 0));
+  const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>('auto');
+  const [notes, setNotes] = useState(fixture.notes ?? '');
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current || !live) return;
+    seeded.current = true;
+    const s = hydrate(live.live_state);
+    setRA(String(s.runsA ?? 0)); setWA(String(s.wktA ?? 0)); setOA(oversStr(s.ballsA ?? 0));
+    setRB(String(s.runsB ?? 0)); setWB(String(s.wktB ?? 0)); setOB(oversStr(s.ballsB ?? 0));
+  }, [live]);
+
+  const save = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
+
+  const num = (s: string) => Math.max(0, Math.floor(Number(s) || 0));
+  const runsA = num(rA), runsB = num(rB);
+  // Winner is by runs (higher wins); 'auto' derives it, the rest are explicit.
+  const autoWinnerId = runsA === runsB ? null : runsA > runsB ? fixture.home_team_id : fixture.away_team_id;
+  const winnerId =
+    winner === 'home' ? fixture.home_team_id :
+    winner === 'away' ? fixture.away_team_id :
+    winner === 'draw' ? null : autoWinnerId;
+  const winnerLabel =
+    winnerId === fixture.home_team_id ? homeName :
+    winnerId === fixture.away_team_id ? awayName : 'Tie / draw';
+
+  const submit = (status: 'live' | 'completed') => {
+    const ns: MatchState = { ...hydrate(live?.live_state), runsA, wktA: num(wA), ballsA: oversToBalls(oA), runsB, wktB: num(wB), ballsB: oversToBalls(oB) };
+    save.mutate(
+      { live_state: ns, live_log: live?.live_log ?? [], home_score: runsA, away_score: runsB, status, winner_team_id: winnerId, notes: notes || null },
+      { onSuccess: status === 'completed' ? onDone : undefined, onError: (e: any) => toast.error(e.message) },
+    );
+  };
+
+  return (
+    <Card>
+      <CardHeader title="Enter result" subtitle="Record each side’s runs, wickets and overs, then confirm the winner." />
+      <CardBody>
+        <p className="mb-3 rounded-lg bg-brand-50 px-3 py-2 text-xs text-slate-600 dark:bg-brand-500/10 dark:text-slate-300">Enter the final runs, wickets and overs for each side, then confirm the winner.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <CricketSideInputs name={homeName} runs={rA} wkt={wA} overs={oA} onRuns={setRA} onWkt={setWA} onOvers={setOA} />
+          <CricketSideInputs name={awayName} runs={rB} wkt={wB} overs={oB} onRuns={setRB} onWkt={setWB} onOvers={setOB} />
+        </div>
+        <div className="mt-3">
+          <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Winner</span>
+          <Select value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
+            <option value="auto">Auto (higher runs) - {winnerLabel}</option>
+            <option value="home">{homeName}</option>
+            <option value="away">{awayName}</option>
+            <option value="draw">Tie / draw</option>
+          </Select>
+        </div>
+        <div className="mt-4">
+          <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Result note</span>
+          <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="MoM, remarks, walkover reason…" />
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="outline" disabled={save.isPending} onClick={() => submit('live')}>Save (keep live)</Button>
+          <Button disabled={save.isPending} onClick={() => submit('completed')}>{save.isPending ? 'Saving…' : 'Save & complete'}</Button>
         </div>
       </CardBody>
     </Card>

@@ -3,6 +3,8 @@
 export function homeTeam(f: any) { return f.teams_fixtures_home_team_idToteams; }
 export function awayTeam(f: any) { return f.teams_fixtures_away_team_idToteams; }
 export function teamLabel(t: any): string { return t?.name ?? t?.organizations?.name ?? 'TBD'; }
+// Organization sub-heading for a team (short name preferred), '' when unaffiliated.
+export function orgLabel(t: any): string { return t?.organizations?.short_name || t?.organizations?.name || ''; }
 
 export function sportName(f: any): string | null {
   return f.tournament_disciplines?.tournament_sports?.sports?.name ?? null;

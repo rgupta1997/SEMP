@@ -19,9 +19,13 @@ export interface GridFixture {
   duration_minutes?: number | null;
   sport?: string | null;
   sport_icon?: string | null;
-  home?: { id: string; name: string } | null;
-  away?: { id: string; name: string } | null;
+  home?: TimelineTeam | null;
+  away?: TimelineTeam | null;
 }
+interface TimelineTeam { id: string; name: string; organizations?: { short_name?: string | null; name?: string | null } | null }
+
+// Organization sub-heading for a team (short name preferred), '' when unaffiliated.
+const teamOrg = (t?: TimelineTeam | null) => t?.organizations?.short_name || t?.organizations?.name || '';
 
 // Default working window; the grid expands to cover any match scheduled outside it,
 // up to the full 24-hour day.
@@ -51,6 +55,17 @@ const fixtureDuration = (f: GridFixture) => (f.duration_minutes && f.duration_mi
 function matchLabel(f: GridFixture): string {
   if (f.home || f.away) return `${f.home?.name ?? 'TBD'} v ${f.away?.name ?? 'TBD'}`;
   return f.round || 'Match';
+}
+
+// Team name with its organization as a smaller sub-line underneath, so same-named
+// teams (e.g. several "Badminton (Mixed)" draws) read apart in the picker list.
+function TeamWithOrg({ team }: { team?: TimelineTeam | null }) {
+  return (
+    <span className="inline-flex flex-col">
+      <span className="leading-tight">{team?.name ?? 'TBD'}</span>
+      {teamOrg(team) && <span className="text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{teamOrg(team)}</span>}
+    </span>
+  );
 }
 
 // "09:00–09:45" range label from a fixture's start + duration.
@@ -470,7 +485,11 @@ function PlaceModal({ slot, activeDay, matches, placing, onClose, onPlace }: {
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <Badge tone="slate">{f.round || 'Match'}</Badge>
-                  <span className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">{matchLabel(f)}</span>
+                  <span className="flex items-center gap-1.5 text-sm font-medium text-slate-700 dark:text-slate-200">
+                    <TeamWithOrg team={f.home} />
+                    <span className="text-slate-400 dark:text-slate-500">v</span>
+                    <TeamWithOrg team={f.away} />
+                  </span>
                 </div>
               </div>
               <Button size="sm" variant="subtle" disabled={placing} onClick={() => place(f.id)}>

@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useApi } from '../../lib/hooks';
 import { Trophy } from 'lucide-react';
-import { Avatar, Badge, EmptyState, ListToolbar, Select, Spinner, Table } from '../../components/ui';
+import { Avatar, Badge, EmptyState, ListToolbar, RefreshBar, Select, Spinner, Table } from '../../components/ui';
 
 // A draw row (subset of GET /:id/draws) - used only to source the tournament + sport
 // filter options (with their UUIDs, which the materialized scopes are keyed by).
@@ -27,8 +27,11 @@ const MEDAL = ['🥇', '🥈', '🥉'];
 // organiser sees. Standings are materialized one scope at a time, so the tournament
 // + sport filters select a single scope (most specific wins): sport → tournament →
 // whole championship.
-export function ChampionshipStandings({ championshipId }: { championshipId: string }) {
-  const { data: draws = [] } = useApi<DrawRow[]>(`/championships/${championshipId}/draws`);
+// `apiBase` lets the public share page reuse this table against the unauthenticated
+// /public/championships/:token endpoints (defaults to the authed championship path).
+export function ChampionshipStandings({ championshipId, apiBase }: { championshipId: string; apiBase?: string }) {
+  const base = apiBase ?? `/championships/${championshipId}`;
+  const { data: draws = [] } = useApi<DrawRow[]>(`${base}/draws`);
   const [tournamentId, setTournamentId] = useState('');
   const [sportId, setSportId] = useState('');
 
@@ -50,30 +53,39 @@ export function ChampionshipStandings({ championshipId }: { championshipId: stri
   }, [sportId, tournamentId]);
 
   const query = scopeId ? `?scope=${scope}&scopeId=${scopeId}` : `?scope=${scope}`;
-  const { data, isLoading } = useApi<StandingsResponse>(`/championships/${championshipId}/standings${query}`);
+  const { data, isLoading, refetch, dataUpdatedAt, isFetching } = useApi<StandingsResponse>(`${base}/standings${query}`);
   const rows = data?.standings ?? [];
+
+  // Re-pull every 10s so spectators see standings update as matches complete.
+  useEffect(() => {
+    const t = setInterval(() => refetch(), 10000);
+    return () => clearInterval(t);
+  }, [refetch]);
 
   // Show a medals column only when some discipline used the medal scheme.
   const showMedals = rows.some((r) => r.detail && (r.detail.gold || r.detail.silver || r.detail.bronze));
 
   return (
     <div className="space-y-4">
-      {(tournamentOptions.length > 1 || sportOptions.length > 1) && (
-        <ListToolbar>
-          {tournamentOptions.length > 1 && (
-            <Select value={tournamentId} onChange={(e) => { setTournamentId(e.target.value); setSportId(''); }} className="w-auto" aria-label="Filter by tournament">
-              <option value="">All tournaments</option>
-              {tournamentOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </Select>
-          )}
-          {sportOptions.length > 1 && (
-            <Select value={sportId} onChange={(e) => { setSportId(e.target.value); setTournamentId(''); }} className="w-auto" aria-label="Filter by sport">
-              <option value="">All sports</option>
-              {sportOptions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </Select>
-          )}
-        </ListToolbar>
-      )}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {(tournamentOptions.length > 1 || sportOptions.length > 1) ? (
+          <ListToolbar>
+            {tournamentOptions.length > 1 && (
+              <Select value={tournamentId} onChange={(e) => { setTournamentId(e.target.value); setSportId(''); }} className="w-auto" aria-label="Filter by tournament">
+                <option value="">All tournaments</option>
+                {tournamentOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </Select>
+            )}
+            {sportOptions.length > 1 && (
+              <Select value={sportId} onChange={(e) => { setSportId(e.target.value); setTournamentId(''); }} className="w-auto" aria-label="Filter by sport">
+                <option value="">All sports</option>
+                {sportOptions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </Select>
+            )}
+          </ListToolbar>
+        ) : <span />}
+        <RefreshBar updatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={() => refetch()} />
+      </div>
 
       {isLoading ? <Spinner /> : rows.length === 0 ? (
         <EmptyState icon={<Trophy size={24} />} title="No results yet" description="Standings populate as matches are completed." />

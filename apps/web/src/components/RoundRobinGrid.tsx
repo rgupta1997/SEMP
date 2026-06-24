@@ -51,8 +51,8 @@ function ResultCell({ fixture, teamId, opponentId, onSelect }:
   );
 }
 
-function Crosstable({ fixtures, teamName, onSelect, caption }:
-  { fixtures: BracketFixture[]; teamName: (id: string | null) => string; onSelect?: (f: BracketFixture) => void; caption?: string }) {
+function Crosstable({ fixtures, teamName, teamOrg, onSelect, caption }:
+  { fixtures: BracketFixture[]; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; onSelect?: (f: BracketFixture) => void; caption?: string }) {
   const { teamIds, lookup } = useMemo(() => {
     const ids: string[] = [];
     const seen = new Set<string>();
@@ -91,7 +91,8 @@ function Crosstable({ fixtures, teamName, onSelect, caption }:
           {teamIds.map((rowId) => (
             <tr key={rowId}>
               <th className="sticky left-0 z-10 min-w-[10rem] border border-slate-100 bg-white px-3 py-2 text-left font-medium text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
-                <span className="block truncate" title={teamName(rowId)}>{teamName(rowId)}</span>
+                <span className="block truncate leading-tight" title={teamName(rowId)}>{teamName(rowId)}</span>
+                {teamOrg?.(rowId) && <span className="block truncate text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{teamOrg(rowId)}</span>}
               </th>
               {teamIds.map((colId) =>
                 rowId === colId ? (
@@ -120,8 +121,8 @@ function Crosstable({ fixtures, teamName, onSelect, caption }:
 // Graphical view for round-robin / league / group draws: a results crosstable
 // (each cell = the match between the row's home team and the column's away
 // team, coloured by result). Group/pool draws render one table per pool.
-export function RoundRobinGrid({ fixtures, teamName, onSelect }:
-  { fixtures: BracketFixture[]; teamName: (id: string | null) => string; onSelect?: (f: BracketFixture) => void }) {
+export function RoundRobinGrid({ fixtures, teamName, teamOrg, onSelect }:
+  { fixtures: BracketFixture[]; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; onSelect?: (f: BracketFixture) => void }) {
   const pools = useMemo(() => {
     const byPool = new Map<number | null, BracketFixture[]>();
     for (const f of fixtures) {
@@ -142,6 +143,7 @@ export function RoundRobinGrid({ fixtures, teamName, onSelect }:
           key={pool ?? 'league'}
           fixtures={fx}
           teamName={teamName}
+          teamOrg={teamOrg}
           onSelect={onSelect}
           caption={multiPool ? `Pool ${pool != null ? String.fromCharCode(64 + pool) : '-'}` : undefined}
         />

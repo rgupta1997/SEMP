@@ -20,7 +20,7 @@ export interface BracketFixture {
 // ---- layout constants (px) ----
 const MATCH_W = 208;
 const META_H = 18;   // top line: scheduled time / status
-const ROW_H = 26;    // each team row
+const ROW_H = 34;    // each team row (team name + organization sub-line)
 const MATCH_H = META_H + ROW_H * 2; // fixed so connector geometry is exact
 const ROW_GAP = 22;  // vertical gap between first-round matches
 const COL_GAP = 52;  // horizontal gap between rounds (room for connectors)
@@ -46,8 +46,8 @@ function roundTitle(round: string | null, teamsInRound: number): string {
   }
 }
 
-function TeamRow({ name, score, isWinner, decided }:
-  { name: string; score: number | null | undefined; isWinner: boolean; decided: boolean }) {
+function TeamRow({ name, org, score, isWinner, decided }:
+  { name: string; org?: string; score: number | null | undefined; isWinner: boolean; decided: boolean }) {
   return (
     <div
       className={cn(
@@ -59,19 +59,24 @@ function TeamRow({ name, score, isWinner, decided }:
     >
       <span className="flex min-w-0 items-center gap-1.5">
         {isWinner && <span className="text-[10px] text-brand-500" aria-hidden>▶</span>}
-        <span className="truncate">{name}</span>
+        <span className="min-w-0">
+          <span className="block truncate leading-tight">{name}</span>
+          {org && <span className="block truncate text-[10px] font-normal leading-tight text-slate-400 dark:text-slate-500">{org}</span>}
+        </span>
       </span>
       {score != null && <span className="tnum tabular-nums text-sm">{score}</span>}
     </div>
   );
 }
 
-function MatchCard({ fixture, x, top, teamName, onSelect }:
-  { fixture: BracketFixture; x: number; top: number; teamName: (id: string | null) => string; onSelect?: (f: BracketFixture) => void }) {
+function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect }:
+  { fixture: BracketFixture; x: number; top: number; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; onSelect?: (f: BracketFixture) => void }) {
   const isBye = fixture.status === 'bye';
   const decided = fixture.winner_team_id != null;
   const home = teamName(fixture.home_team_id);
   const away = isBye ? 'Bye' : teamName(fixture.away_team_id);
+  const homeOrg = teamOrg?.(fixture.home_team_id) ?? '';
+  const awayOrg = isBye ? '' : teamOrg?.(fixture.away_team_id) ?? '';
   // Any match can be opened to edit - a real match to schedule it (even a later-round
   // slot whose teams are still TBD), or a bye to adjust its teams/status or delete it.
   const clickable = !!onSelect;
@@ -86,9 +91,9 @@ function MatchCard({ fixture, x, top, teamName, onSelect }:
         {fixture.status && fixture.status !== 'bye' && <StatusBadge status={fixture.status} label={fixtureStatusLabel(fixture.status)} />}
       </div>
       <div className="border-t border-slate-100 dark:border-slate-800">
-        <TeamRow name={home} score={fixture.home_score} isWinner={decided && fixture.winner_team_id === fixture.home_team_id} decided={decided} />
+        <TeamRow name={home} org={homeOrg} score={fixture.home_score} isWinner={decided && fixture.winner_team_id === fixture.home_team_id} decided={decided} />
         <div className="border-t border-slate-100 dark:border-slate-800" />
-        <TeamRow name={away} score={isBye ? null : fixture.away_score} isWinner={decided && fixture.winner_team_id === fixture.away_team_id} decided={decided} />
+        <TeamRow name={away} org={awayOrg} score={isBye ? null : fixture.away_score} isWinner={decided && fixture.winner_team_id === fixture.away_team_id} decided={decided} />
       </div>
     </>
   );
@@ -120,8 +125,8 @@ function MatchCard({ fixture, x, top, teamName, onSelect }:
 // (every round has half the matches of the previous one), keyed by
 // bracket_position. Matches without a bracket_position (e.g. a 3rd-place
 // playoff) are rendered separately below the tree.
-export function Bracket({ fixtures, teamName, onSelect }:
-  { fixtures: BracketFixture[]; teamName: (id: string | null) => string; onSelect?: (f: BracketFixture) => void }) {
+export function Bracket({ fixtures, teamName, teamOrg, onSelect }:
+  { fixtures: BracketFixture[]; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; onSelect?: (f: BracketFixture) => void }) {
   const { rounds, extras, centers, width, height } = useMemo(() => {
     const bracketed = fixtures.filter((f) => f.bracket_position != null);
     const extras = fixtures.filter((f) => f.bracket_position == null);
@@ -212,6 +217,7 @@ export function Bracket({ fixtures, teamName, onSelect }:
               x={colX(r)}
               top={centers[r][i] - MATCH_H / 2}
               teamName={teamName}
+              teamOrg={teamOrg}
               onSelect={onSelect}
             />
           )),
@@ -227,7 +233,7 @@ export function Bracket({ fixtures, teamName, onSelect }:
                 {f.round ?? 'Match'}
               </div>
               <div className="relative" style={{ height: MATCH_H }}>
-                <MatchCard fixture={f} x={0} top={0} teamName={teamName} onSelect={onSelect} />
+                <MatchCard fixture={f} x={0} top={0} teamName={teamName} teamOrg={teamOrg} onSelect={onSelect} />
               </div>
             </div>
           ))}

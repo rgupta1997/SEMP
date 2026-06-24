@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Trophy } from 'lucide-react';
 import { useEvent } from './EventLayout';
 import { usePageFilters } from '../../lib/filters';
 import { useApi } from '../../lib/hooks';
-import { Avatar, Badge, Card, CardBody, CardHeader, EmptyState, Spinner, StatCard, Table, cn } from '../../components/ui';
+import { Avatar, Badge, Card, CardBody, CardHeader, EmptyState, RefreshBar, Spinner, StatCard, Table, cn } from '../../components/ui';
+import { SharePublicLink } from '../../components/SharePublicLink';
 
 interface StandingRow {
   organization_id: string;
@@ -69,8 +70,14 @@ export function StandingsPage() {
   }, [sportId, tournamentId, sportOptions, tournamentOptions]);
 
   const query = scopeId ? `?scope=${scope}&scopeId=${scopeId}` : `?scope=${scope}`;
-  const { data, isLoading } = useApi<StandingsResponse>(`/championships/${eventId}/standings${query}`);
+  const { data, isLoading, refetch, dataUpdatedAt, isFetching } = useApi<StandingsResponse>(`/championships/${eventId}/standings${query}`);
   const rows = data?.standings ?? [];
+
+  // Live-ish standings: re-pull every 10s so completed matches show without a reload.
+  useEffect(() => {
+    const t = setInterval(() => refetch(), 10000);
+    return () => clearInterval(t);
+  }, [refetch]);
 
   // Show a medals column only when some discipline used the medal scheme.
   const showMedals = rows.some((r) => r.detail && (r.detail.gold || r.detail.silver || r.detail.bronze));
@@ -87,6 +94,12 @@ export function StandingsPage() {
         <CardHeader
           title="Championship table"
           subtitle={`${scopeLabel} · computed from completed fixtures, scored by each discipline's rule`}
+          action={
+            <div className="flex items-center gap-2">
+              <RefreshBar updatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={() => refetch()} />
+              <SharePublicLink eventId={eventId} />
+            </div>
+          }
         />
         <CardBody>
           {isLoading ? <Spinner /> : rows.length === 0 ? (

@@ -101,7 +101,7 @@ export function PeoplePicker({ title, subtitle, excludeUserIds, assignedUserIds,
     <Modal title={title} onClose={onClose} wide>
       {subtitle && <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}
       {roleControl}
-      <SearchInput value={search} onChange={setSearch} placeholder="Search by name or mobile…" className="w-full" />
+      <SearchInput value={search} onChange={setSearch} placeholder="Search by phone…" className="w-full" />
 
       {canInvite && (
         <div className="mt-2 flex items-center justify-between gap-3 rounded-lg bg-brand-50 px-3 py-2 dark:bg-brand-500/10">
@@ -119,7 +119,7 @@ export function PeoplePicker({ title, subtitle, excludeUserIds, assignedUserIds,
         {isFetching && matches.length === 0 ? (
           <div className="grid h-20 place-items-center"><Spinner /></div>
         ) : matches.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">{q ? 'No matching users.' : 'Search to find people by name or mobile.'}</p>
+          <p className="px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">{q ? 'No matching users.' : 'Search to find people by phone.'}</p>
         ) : matches.map((u) => {
           const isAssigned = assigned.has(u.id);
           return (

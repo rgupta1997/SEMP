@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { useEvent } from './EventLayout';
 import { useApi } from '../../lib/hooks';
 import { Button, Card, CardBody, CardHeader, StatCard, StatusBadge } from '../../components/ui';
+import { SharePublicLink } from '../../components/SharePublicLink';
 import { GettingStarted } from '../../components/onboarding/GettingStarted';
 import { useOrganiserOnboarding } from '../../lib/onboarding';
 
@@ -29,6 +30,13 @@ export function EventDashboard() {
 
   return (
     <div className="space-y-6">
+      {canManage && (
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-slate-400 dark:text-slate-500">Share a read-only link (Overview, Schedule, Results & Standings) with anyone.</span>
+          <SharePublicLink eventId={eventId} />
+        </div>
+      )}
+
       {canManage && (
         <GettingStarted
           title="Set up your championship"

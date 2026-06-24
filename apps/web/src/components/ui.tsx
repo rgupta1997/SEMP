@@ -145,6 +145,55 @@ export function StatusBadge({ status, label }: { status?: string | null; label?:
   return <Badge tone={tone}>{label ?? (status ? titleCase(status) : '-')}</Badge>;
 }
 
+// "Updated HH:MM:SS · ↻ Refresh now" control for auto-refreshing tables (e.g.
+// standings). The caller owns the data + interval; this just renders the timestamp
+// and a manual refresh button.
+export function RefreshBar({ updatedAt, isFetching, onRefresh, className = '' }: { updatedAt?: number; isFetching?: boolean; onRefresh: () => void; className?: string }) {
+  const label = updatedAt ? new Date(updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
+  return (
+    <div className={cn('flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500', className)}>
+      <span>Updated {label}</span>
+      <Button size="sm" variant="ghost" disabled={isFetching} onClick={onRefresh}>{isFetching ? 'Refreshing…' : '↻ Refresh now'}</Button>
+    </div>
+  );
+}
+
+// Color legend for match statuses - reuses StatusBadge so the colors always match
+// the badges shown on the schedule, results, timeline and overview. Pass `onSelect`
+// to make each badge a toggle filter (clicking the active one clears it).
+const MATCH_LEGEND_STATUSES = ['scheduled', 'live', 'completed', 'walkover', 'postponed', 'cancelled'];
+export function StatusLegend({ statuses = MATCH_LEGEND_STATUSES, value, onSelect, className = '' }:
+  { statuses?: string[]; value?: string; onSelect?: (status: string) => void; className?: string }) {
+  const interactive = !!onSelect;
+  return (
+    <div className={cn('flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs text-slate-500 dark:text-slate-400', className)}>
+      <span className="font-semibold uppercase tracking-wide">{interactive ? 'Filter' : 'Legend'}</span>
+      {statuses.map((s) => {
+        if (!interactive) return <StatusBadge key={s} status={s} />;
+        const active = value === s;
+        return (
+          <button
+            key={s}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onSelect!(active ? '' : s)}
+            className={cn(
+              'rounded-full transition focus:outline-none focus:ring-2 focus:ring-brand-400',
+              active && 'ring-2 ring-brand-500 ring-offset-1 dark:ring-offset-slate-900',
+              value && !active && 'opacity-40 hover:opacity-100',
+            )}
+          >
+            <StatusBadge status={s} />
+          </button>
+        );
+      })}
+      {interactive && value && (
+        <button type="button" onClick={() => onSelect!('')} className="ml-0.5 underline hover:text-slate-700 dark:hover:text-slate-200">Clear</button>
+      )}
+    </div>
+  );
+}
+
 /* ----------------------------- Modal ----------------------------- */
 // The modal is capped to the viewport height: the header (and optional `footer`)
 // stay pinned while only the body scrolls. Put action buttons in `footer` so they

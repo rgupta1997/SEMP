@@ -28,7 +28,7 @@ function AddMemberModal({ orgId, memberUserIds, onClose }: { orgId: string; memb
   return (
     <PeoplePicker
       title="Add members"
-      subtitle="Search by mobile or name and pick people to add. Unknown numbers get an invite to join."
+      subtitle="Search by phone and pick people to add. Unknown numbers get an invite to join."
       assignedUserIds={memberUserIds}
       assignedLabel="Member"
       invite={{ target_type: 'org_member', target_id: orgId, role }}

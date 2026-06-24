@@ -8,6 +8,8 @@ import { NotFoundError } from '../../shared/errors.js';
 import { assertChampionshipTransition } from './domain/championship-lifecycle.js';
 import { createNotification } from '../notifications/audience.js';
 import { recomputeStandings } from '../standings/standings.service.js';
+import { signShareToken } from '../public/share-token.js';
+import { listChampionshipFixtures } from './fixtures-list.js';
 
 // Prisma include that pulls just the sport names offered by a championship, plus a
 // helper that flattens them to a distinct, sorted `sports: string[]` and drops the
@@ -28,6 +30,15 @@ function maskPhone(phone?: string | null): string | null {
   const digits = phone.replace(/\D/g, '');
   if (digits.length <= 3) return '•••';
   return '•'.repeat(digits.length - 3) + digits.slice(-3);
+}
+
+// Mask an email for spectators: keep the first 2 chars of the local part + domain.
+function maskEmail(email?: string | null): string | null {
+  if (!email) return email ?? null;
+  const [local, domain] = email.split('@');
+  if (!domain) return email;
+  const shown = local.slice(0, 2);
+  return `${shown}${'•'.repeat(Math.max(1, local.length - shown.length))}@${domain}`;
 }
 
 // Only two kinds of viewer may see real contact numbers for a championship:
@@ -138,6 +149,14 @@ export function makeEventsRouter(prisma: Prisma): Router {
     res.json(championship);
   }));
 
+  // The view-only public share token for this championship (organiser/super only).
+  // The frontend builds the link as `<origin>/c/<token>`.
+  router.get('/:id/share-link', ownChampionship, asyncHandler(async (req, res) => {
+    const championship = await prisma.championships.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!championship) throw new NotFoundError('Championship');
+    res.json({ token: signShareToken(req.params.id) });
+  }));
+
   // CREATE championship - any authenticated user may host. Creator is auto-assigned
   // Organiser, and a default season (named after the championship) is created so the
   // organiser can jump straight to adding sports - they never have to make a season
@@ -240,57 +259,9 @@ export function makeEventsRouter(prisma: Prisma): Router {
   }));
 
   // All fixtures across the championship, flattened with team / ground / sport names -
-  // powers the schedule timeline (Gantt) view.
+  // powers the schedule timeline (Gantt) view. Shared with the public share page.
   router.get('/:id/fixtures', asyncHandler(async (req, res) => {
-    const fixtures = await prisma.fixtures.findMany({
-      where: { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: req.params.id } } } },
-      include: {
-        teams_fixtures_home_team_idToteams: { select: { id: true, name: true, organizations: { select: { short_name: true, name: true } } } },
-        teams_fixtures_away_team_idToteams: { select: { id: true, name: true, organizations: { select: { short_name: true, name: true } } } },
-        venue_grounds: { select: { id: true, name: true, venues: { select: { name: true } } } },
-        tournament_disciplines: {
-          select: {
-            entry_type: true,
-            disciplines: { select: { name: true } },
-            tournament_sports: {
-              select: {
-                sports: { select: { name: true, icon: true } },
-                tournaments: { select: { id: true, name: true } },
-              },
-            },
-          },
-        },
-      },
-      orderBy: [{ scheduled_at: 'asc' }, { created_at: 'asc' }],
-    });
-    res.json(fixtures.map((f) => ({
-      id: f.id,
-      status: f.status,
-      round: f.round,
-      scheduled_at: f.scheduled_at,
-      duration_minutes: f.duration_minutes,
-      tournament_discipline_id: f.tournament_discipline_id,
-      entry_type: f.tournament_disciplines?.entry_type ?? null,
-      home_score: f.home_score,
-      away_score: f.away_score,
-      winner_team_id: f.winner_team_id,
-      // Raw FK / position fields so the Schedule "Fixtures" view (DrawCard, bracket,
-      // grid, fixture editor) can render and edit straight from this one
-      // championship-wide list instead of a per-draw request each.
-      home_team_id: f.home_team_id,
-      away_team_id: f.away_team_id,
-      venue_ground_id: f.venue_ground_id,
-      official_id: f.official_id,
-      pool_number: f.pool_number,
-      bracket_position: f.bracket_position,
-      ground: f.venue_grounds ? { id: f.venue_grounds.id, name: f.venue_grounds.name, venue: f.venue_grounds.venues?.name ?? null } : null,
-      sport: f.tournament_disciplines?.tournament_sports?.sports?.name ?? null,
-      sport_icon: f.tournament_disciplines?.tournament_sports?.sports?.icon ?? null,
-      tournament: f.tournament_disciplines?.tournament_sports?.tournaments ?? null,
-      discipline: f.tournament_disciplines?.disciplines?.name ?? null,
-      home: f.teams_fixtures_home_team_idToteams,
-      away: f.teams_fixtures_away_team_idToteams,
-    })));
+    res.json(await listChampionshipFixtures(prisma, req.params.id));
   }));
 
   // All grounds across the championship's venues - used to schedule fixtures to a ground.
@@ -316,6 +287,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
   router.get('/:id/participants', asyncHandler(async (req, res) => {
     const insider = req.user!.isSuperAdmin || await isChampionshipInsider(prisma, req.user!.id, req.params.id);
     const mask = (p?: string | null) => (insider ? (p ?? null) : maskPhone(p));
+    const maskMail = (e?: string | null) => (insider ? (e ?? null) : maskEmail(e));
 
     const [teams, approvedOrgs] = await Promise.all([
       prisma.teams.findMany({
@@ -350,7 +322,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
         .filter((m) => m.users)
         .map((m) => {
           bucket.players.add(m.users!.id);
-          return { id: m.users!.id, name: m.users!.name, email: m.users!.email, phone: mask(m.users!.phone), role: m.role, jersey_number: m.jersey_number };
+          return { id: m.users!.id, name: m.users!.name, email: maskMail(m.users!.email), phone: mask(m.users!.phone), role: m.role, jersey_number: m.jersey_number };
         });
       bucket.teams.set(team.id, { team_id: team.id, team_name: team.name, sport: team.sports, players });
     }
@@ -384,7 +356,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
       const user = o.users_championship_officials_user_idTousers;
       return {
         id: o.id,
-        user: user && !insider ? { ...user, phone: maskPhone(user.phone) } : user,
+        user: user && !insider ? { ...user, phone: maskPhone(user.phone), email: maskEmail(user.email) } : user,
         assigned_by: o.users_championship_officials_assigned_byTousers,
         assigned_at: o.assigned_at,
         notes: o.notes,

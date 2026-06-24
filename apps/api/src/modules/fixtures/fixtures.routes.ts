@@ -39,6 +39,80 @@ async function refreshStandings(prisma: Prisma, fixtureId: string): Promise<void
   }
 }
 
+// Fisher-Yates shuffle - randomizes seed order so each draw (and each sport) gets a
+// different bracket/round-robin ordering instead of always the registration order.
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const k = Math.floor(Math.random() * (i + 1));
+    [a[i], a[k]] = [a[k], a[i]];
+  }
+  return a;
+}
+
+// Single-elimination bracket advancement: put `teamId` into the correct slot of the
+// match that the match at `position` feeds into. Bracket positions are contiguous
+// round-by-round, so the parent is derived from the bracket size (sibling count =
+// size - 1). No-op for non-bracket formats (group/round-robin have null positions),
+// non-power-of-two brackets, the final, or a parent that's already been played.
+async function advanceInBracket(prisma: Prisma, drawId: string, position: number, teamId: string): Promise<void> {
+  const sibs = await prisma.fixtures.findMany({
+    where: { tournament_discipline_id: drawId, bracket_position: { not: null } },
+    select: { id: true, bracket_position: true, status: true },
+  });
+  const size = sibs.length + 1;
+  if (size < 2 || (size & (size - 1)) !== 0) return; // not a clean single-elim bracket
+  const rounds = Math.log2(size);
+  const offsets: number[] = [];
+  let acc = 0;
+  for (let r = 0; r < rounds; r++) { offsets.push(acc); acc += size / 2 ** (r + 1); }
+  let round = -1;
+  let j = -1;
+  for (let ri = 0; ri < rounds; ri++) {
+    const matchesInRound = size / 2 ** (ri + 1);
+    if (position >= offsets[ri] && position < offsets[ri] + matchesInRound) { round = ri; j = position - offsets[ri]; break; }
+  }
+  if (round < 0 || round >= rounds - 1) return; // not found, or it's the final - nowhere to advance
+  const parentPos = offsets[round + 1] + Math.floor(j / 2);
+  const parent = sibs.find((s) => s.bracket_position === parentPos);
+  if (!parent || parent.status === 'completed') return; // don't overwrite a played match
+  // Even child → parent's home slot, odd child → away (mirrors the generator's pairing).
+  await prisma.fixtures.update({ where: { id: parent.id }, data: j % 2 === 0 ? { home_team_id: teamId } : { away_team_id: teamId } });
+}
+
+// After a completed bracket result, push the winner into the next round. Best-effort -
+// the result is already saved, so an advancement hiccup must not fail the request.
+async function advanceWinner(prisma: Prisma, fixtureId: string): Promise<void> {
+  try {
+    const fx = await prisma.fixtures.findUnique({
+      where: { id: fixtureId },
+      select: { tournament_discipline_id: true, bracket_position: true, winner_team_id: true, status: true },
+    });
+    const advancing = fx?.status === 'completed' || fx?.status === 'walkover';
+    if (!fx || !advancing || fx.winner_team_id == null || fx.bracket_position == null) return;
+    await advanceInBracket(prisma, fx.tournament_discipline_id, fx.bracket_position, fx.winner_team_id);
+  } catch (err) {
+    console.error(`[bracket] winner advancement failed for fixture ${fixtureId}:`, err);
+  }
+}
+
+// Round-0 byes: the lone present team auto-advances to the next round. Run right
+// after generation so byes don't leave a permanent TBD in the next round.
+async function propagateByes(prisma: Prisma, drawId: string): Promise<void> {
+  try {
+    const byes = await prisma.fixtures.findMany({
+      where: { tournament_discipline_id: drawId, status: 'bye', bracket_position: { not: null } },
+      select: { bracket_position: true, home_team_id: true, away_team_id: true },
+    });
+    for (const b of byes) {
+      const team = b.home_team_id ?? b.away_team_id;
+      if (team && b.bracket_position != null) await advanceInBracket(prisma, drawId, b.bracket_position, team);
+    }
+  } catch (err) {
+    console.error(`[bracket] bye propagation failed for draw ${drawId}:`, err);
+  }
+}
+
 // When a completed match belongs to a draw scored by the "custom" point system and
 // has no hand-entered points yet, nudge the championship's organiser(s) to add them.
 // Direct (target_user_id) notifications so only organisers are pinged. Best-effort -
@@ -128,17 +202,18 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         ...(req.body.params as object),
       };
 
-      // Teams: explicit seed order, else all rosters entered into this draw.
+      // Teams: explicit seed order is respected as given; otherwise the rosters entered
+      // into this draw are shuffled so every draw (and sport) gets a fresh random
+      // bracket instead of always the registration order.
       let teams: TeamRef[];
       if (req.body.team_ids?.length) {
         teams = req.body.team_ids.map((id: string) => ({ teamId: id }));
       } else {
         const registered = await prisma.team_entries.findMany({
           where: { tournament_discipline_id: td.id },
-          orderBy: { created_at: 'asc' },
           select: { team_id: true },
         });
-        teams = registered.map((e) => ({ teamId: e.team_id }));
+        teams = shuffle(registered.map((e) => ({ teamId: e.team_id })));
       }
 
       const existing = await prisma.fixtures.findMany({
@@ -209,6 +284,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         }),
       ]);
 
+      // Auto-advance round-0 byes so the next round isn't left with a permanent TBD.
+      await propagateByes(prisma, td.id);
+
       const rows = await prisma.fixtures.findMany({
         where: { tournament_discipline_id: td.id },
         orderBy: [{ pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
@@ -278,7 +356,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         // them, so keep the existing value rather than wiping it.
         await prisma.$executeRaw`
           update fixtures
-          set live_state = jsonb_set(${JSON.stringify(b.live_state ?? {})}::jsonb, '{custom_points}', coalesce(live_state -> 'custom_points', 'null'::jsonb), true),
+          set live_state = jsonb_set(
+                jsonb_set(${JSON.stringify(b.live_state ?? {})}::jsonb, '{custom_points}', coalesce(live_state -> 'custom_points', 'null'::jsonb), true),
+                '{scorecard_url}', coalesce(live_state -> 'scorecard_url', 'null'::jsonb), true),
               live_log = ${JSON.stringify(b.live_log ?? [])}::jsonb,
               updated_at = now()
           where id = ${req.params.id}::uuid`;
@@ -286,7 +366,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         persisted = false; // live_* columns not migrated yet - headline still saved
       }
     }
-    // Completing a custom-points match with no points yet → remind the organiser.
+    // Completing a bracket match (or a walkover with a winner) → advance the winner;
+    // custom-points → remind organiser.
+    if (b.status === 'completed' || b.status === 'walkover') await advanceWinner(prisma, req.params.id);
     if (b.status === 'completed') await remindCustomPointsIfNeeded(prisma, req.params.id, req.user!.id);
     res.json({ ok: true, persisted });
   }));
@@ -391,7 +473,10 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       },
     });
     await refreshStandings(prisma, req.params.id);
-    if ((req.body.status ?? 'completed') === 'completed') await remindCustomPointsIfNeeded(prisma, req.params.id, req.user!.id);
+    if ((req.body.status ?? 'completed') === 'completed') {
+      await advanceWinner(prisma, req.params.id);
+      await remindCustomPointsIfNeeded(prisma, req.params.id, req.user!.id);
+    }
     res.json(updated);
   }));
 
@@ -411,6 +496,22 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       where id = ${req.params.id}::uuid`;
     await refreshStandings(prisma, req.params.id);
     res.json({ ok: true, home_points: home, away_points: away });
+  }));
+
+  // Set/clear the external full-scorecard link (e.g. CrickHeroes) for a match. Stored
+  // on live_state.scorecard_url (no migration) and merged so live-scoring keys stay
+  // intact. Surfaced as a "View full scorecard" CTA on the match views.
+  router.patch('/fixtures/:id/scorecard', guards.fixtureScorer, asyncHandler(async (req, res) => {
+    const fx = await prisma.fixtures.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!fx) throw new NotFoundError('Fixture');
+    const raw = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    if (raw && !/^https?:\/\//i.test(raw)) throw new BusinessRuleError('Enter a full URL starting with http(s)://');
+    await prisma.$executeRaw`
+      update fixtures
+      set live_state = jsonb_set(coalesce(live_state, '{}'::jsonb), '{scorecard_url}', ${JSON.stringify(raw || null)}::jsonb, true),
+          updated_at = now()
+      where id = ${req.params.id}::uuid`;
+    res.json({ ok: true, scorecard_url: raw || null });
   }));
 
   // Plain CRUD for manual fixture edits / scheduling - writes require the organiser

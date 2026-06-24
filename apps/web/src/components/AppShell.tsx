@@ -169,8 +169,9 @@ export function AppShell() {
           </nav>
         </aside>
 
-        {/* Main */}
-        <div className="flex h-screen min-w-0 flex-col">
+        {/* Main - pinned to the viewport height so only <main> scrolls; the sidebar
+            stays put (md:h-auto would let the column grow and drag the whole grid). */}
+        <div className="flex h-screen min-h-0 min-w-0 flex-col">
           <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 dark:border-slate-800 dark:bg-slate-900">
             <div className="flex min-w-0 items-center gap-2">
               <button onClick={() => setSidebarOpen(true)} className="grid h-9 w-9 place-items-center rounded-lg text-slate-600 transition-[background-color,transform] duration-150 hover:bg-slate-100 active:scale-90 md:hidden dark:text-slate-300 dark:hover:bg-slate-800" aria-label="Open menu"><Menu size={18} /></button>
@@ -207,7 +208,7 @@ export function AppShell() {
               </div>
             </div>
           </header>
-          <main className="flex-1 overflow-auto bg-[var(--canvas)] p-4 sm:p-6 dark:bg-slate-950">
+          <main className="min-h-0 flex-1 overflow-auto bg-[var(--canvas)] p-4 sm:p-6 dark:bg-slate-950">
             <div key={pathname} className={cn('mx-auto animate-page-enter', !eventId && 'max-w-6xl')}>
               <Outlet />
             </div>

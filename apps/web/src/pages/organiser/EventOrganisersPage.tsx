@@ -21,7 +21,7 @@ function AddOrganiserModal({ eventId, roleId, assignedIds, onClose }:
   return (
     <PeoplePicker
       title="Add team members"
-      subtitle="Search by mobile or name and pick people to co-organise. Unknown numbers get an invite to join."
+      subtitle="Search by phone and pick people to co-organise. Unknown numbers get an invite to join."
       assignedUserIds={assignedIds}
       assignedLabel="Organiser"
       invite={{ target_type: 'championship_organiser', target_id: eventId }}
