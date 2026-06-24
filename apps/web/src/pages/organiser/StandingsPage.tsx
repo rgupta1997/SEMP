@@ -115,7 +115,7 @@ export function StandingsPage() {
           title="Championship table"
           subtitle={`${scopeLabel} · computed from completed fixtures, scored by each discipline's rule`}
           action={
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
               <RefreshBar updatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={() => refetch()} />
               <SharePublicLink eventId={eventId} />
             </div>

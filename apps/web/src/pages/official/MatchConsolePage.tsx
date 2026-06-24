@@ -900,13 +900,13 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
                       )}
                       <div className="grid grid-cols-2 gap-2">
                         <Button variant={active.winner === 'A' ? 'primary' : 'outline'} onClick={() => decide(state.activeRubber, 'A')}>
-                          <span className="flex flex-col items-center leading-tight">
+                          <span className="flex w-full min-w-0 flex-col items-center whitespace-normal break-words text-center leading-tight">
                             <span>{homeName} won</span>
                             {homeOrg && <span className="text-[11px] font-normal opacity-75">{homeOrg}</span>}
                           </span>
                         </Button>
                         <Button variant={active.winner === 'B' ? 'primary' : 'outline'} onClick={() => decide(state.activeRubber, 'B')}>
-                          <span className="flex flex-col items-center leading-tight">
+                          <span className="flex w-full min-w-0 flex-col items-center whitespace-normal break-words text-center leading-tight">
                             <span>{awayName} won</span>
                             {awayOrg && <span className="text-[11px] font-normal opacity-75">{awayOrg}</span>}
                           </span>
