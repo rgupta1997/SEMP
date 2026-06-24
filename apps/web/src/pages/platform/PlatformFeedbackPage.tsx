@@ -66,7 +66,6 @@ export function PlatformFeedbackPage() {
               <tr>
                 <th className="px-4 py-2">Feedback</th>
                 <th className="px-4 py-2">From</th>
-                <th className="px-4 py-2">Where</th>
                 <th className="px-4 py-2">Received</th>
                 <th className="px-4 py-2">Status</th>
                 <th className="px-4 py-2"></th>
@@ -82,7 +81,6 @@ export function PlatformFeedbackPage() {
                     <div>{r.name || (r.user_id ? 'Signed-in user' : 'Anonymous')}</div>
                     {r.email && <div className="text-xs text-slate-400 dark:text-slate-500">{r.email}</div>}
                   </td>
-                  <td className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">{r.context || '-'}</td>
                   <td className="px-4 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{fmtDateTime(r.created_at)}</td>
                   <td className="px-4 py-2">
                     <div className="flex items-center gap-2">
