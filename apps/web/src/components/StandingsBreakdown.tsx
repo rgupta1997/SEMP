@@ -58,9 +58,6 @@ export function StandingsBreakdown({ base, scope, scopeId, entityId }: { base: s
               {e.discipline && <span className="font-medium text-slate-400 dark:text-slate-500"> · {e.discipline}</span>}
             </div>
             <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-              <span className="font-semibold text-emerald-600 dark:text-emerald-400">{e.won}W</span>
-              <span>{e.drawn}D</span>
-              <span className="text-rose-500">{e.lost}L</span>
               <Badge tone="brand">+{e.points} pts</Badge>
             </div>
           </div>
