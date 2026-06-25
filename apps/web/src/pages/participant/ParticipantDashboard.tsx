@@ -54,7 +54,7 @@ export function ParticipantDashboard() {
   }, [data?.achievements]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-20">
       <PageHeader title={`Welcome, ${user.name.split(' ')[0]}`} subtitle="Your matches and championships across the platform." />
 
       {isLoading || !data ? (

@@ -7,13 +7,13 @@ import {
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
 import { BRAND } from '../lib/brand';
 import { parseEventId } from '../lib/championship-nav';
+import { FeedbackWidget } from './FeedbackWidget';
 import { useFilterBar, FilterProvider } from '../lib/filters';
 import { useApi } from '../lib/hooks';
 import { useTheme } from '../lib/theme';
 import { Avatar, cn } from './ui';
 import { BrandMark } from './BrandMark';
 import { NotificationBell } from './NotificationBell';
-import { FeedbackWidget } from './FeedbackWidget';
 
 interface NavItem { to: string; label: string; icon: ReactNode; end?: boolean }
 interface NavGroup { group: string; items: NavItem[] }
@@ -131,6 +131,21 @@ export function AppShell() {
   const groups = navFor(activeRole);
   const subtitle = championship?.name ?? ROLE_LABELS[activeRole];
 
+  // Feedback button: only on overview/landing surfaces (My Game, Discover, My
+  // Championships, an org's overview, a championship's overview) - not deep inner
+  // pages. It's rendered OUTSIDE the scroll/animated container below so that
+  // `position: fixed` pins it to the viewport (a transformed ancestor would make it
+  // scroll with the page instead).
+  const fbPath = pathname.replace(/\/+$/, '') || '/';
+  const fbSegs = fbPath.split('/').filter(Boolean);
+  const isChampionshipOverview = fbSegs.length === 2 && fbSegs[0] === 'championships' && fbSegs[1] !== 'new';
+  const showFeedback =
+    fbPath === '/profile' ||
+    fbPath === '/discover' ||
+    fbPath === '/championships' ||
+    isChampionshipOverview ||
+    (fbSegs.length === 3 && fbSegs[0] === 'organizations' && fbSegs[2] === 'overview');
+
   return (
     <FilterProvider>
       <div className="h-screen overflow-hidden md:grid md:grid-cols-[240px_1fr]">
@@ -219,7 +234,12 @@ export function AppShell() {
             </div>
           </main>
         </div>
-        <FeedbackWidget context={pathname} />
+        {showFeedback && (
+          <FeedbackWidget
+            championshipId={isChampionshipOverview ? fbSegs[1] : undefined}
+            context={pathname}
+          />
+        )}
       </div>
     </FilterProvider>
   );

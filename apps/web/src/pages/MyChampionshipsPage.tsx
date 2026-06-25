@@ -64,7 +64,8 @@ export function MyChampionshipsPage() {
   });
 
   return (
-    <div className="space-y-4">
+    // pb-20 keeps the bottom pagination clear of the floating Feedback button.
+    <div className="space-y-4 pb-20">
       <PageHeader title="Where you're competing" subtitle="Every championship you're part of - across all your organizations." />
 
       <InvitationsInbox />

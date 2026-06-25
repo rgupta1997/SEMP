@@ -132,7 +132,8 @@ export function DiscoverPage() {
   });
 
   return (
-    <div>
+    // pb-20 keeps the bottom pagination clear of the floating Feedback button.
+    <div className="pb-20">
       <PageHeader title="Find your next game" subtitle="Championships, organizations & teams looking for players." />
       {championships.length > 0 && (
         <ListToolbar>
