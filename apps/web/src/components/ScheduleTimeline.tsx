@@ -57,6 +57,19 @@ function matchLabel(f: GridFixture): string {
   return f.round || 'Match';
 }
 
+// Same as matchLabel but appends each team's organisation in parentheses, so the
+// hover tooltip tells apart same-named teams (e.g. several "Badminton (Mixed)"
+// draws) by org. Native title tooltips are plain text, so org reads inline here.
+function teamLabelWithOrg(t?: TimelineTeam | null): string {
+  const name = t?.name ?? 'TBD';
+  const org = teamOrg(t);
+  return org ? `${name} (${org})` : name;
+}
+function matchLabelWithOrg(f: GridFixture): string {
+  if (f.home || f.away) return `${teamLabelWithOrg(f.home)} v ${teamLabelWithOrg(f.away)}`;
+  return f.round || 'Match';
+}
+
 // Team name with its organization as a smaller sub-line underneath, so same-named
 // teams (e.g. several "Badminton (Mixed)" draws) read apart in the picker list.
 function TeamWithOrg({ team }: { team?: TimelineTeam | null }) {
@@ -243,8 +256,14 @@ export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, onU
       const d = new Date(f.scheduled_at);
       if (dayKey(d) !== activeDay) continue;
       lo = Math.min(lo, d.getHours());
-      const endHour = new Date(d.getTime() + fixtureDuration(f) * 60000);
-      hi = Math.max(hi, endHour.getMinutes() > 0 ? endHour.getHours() : endHour.getHours() - 1);
+      const end = new Date(d.getTime() + fixtureDuration(f) * 60000);
+      // A match running into the next day would wrap its end hour back to a small
+      // number (e.g. 00:30 ⇒ 0), so cap it at end-of-day instead. Always include the
+      // match's own start hour too, so a late start always has a column even when the
+      // end-hour maths lands on or below it (e.g. ends exactly on the hour).
+      const endsNextDay = dayKey(end) !== dayKey(d);
+      const endHour = endsNextDay ? 23 : (end.getMinutes() > 0 ? end.getHours() : end.getHours() - 1);
+      hi = Math.max(hi, d.getHours(), endHour);
     }
     lo = Math.max(0, lo);
     hi = Math.min(23, Math.max(hi, lo));
@@ -363,7 +382,7 @@ export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, onU
                         draggable={canManage}
                         onDragStart={canManage ? (ev) => onCardDragStart(ev, f) : undefined}
                         onClick={canManage ? () => setEditing(f) : undefined}
-                        title={`${matchLabel(f)} · ${timeRange(f)} · ${live ? 'live' : f.status}`}
+                        title={`${matchLabelWithOrg(f)} · ${timeRange(f)} · ${live ? 'live' : f.status}`}
                         className={cn(
                           'absolute z-10 flex flex-col justify-center overflow-hidden rounded-lg border px-1.5',
                           cardTint(f.status, live),
