@@ -244,6 +244,10 @@ export function runScheme(fixtures: SchemeFixture[], rule: StandingsRule, decide
     case 'placement': return placementScheme(fixtures, rule);
     case 'medal': tallies = medalScheme(fixtures, rule, decided); break;
     case 'custom': tallies = customScheme(fixtures); break;
+    // Ranking events have no head-to-head fixtures - their points come from the event
+    // console's eventStandings (folded in separately by the service). So a draw resolved
+    // to a ranking rule contributes no auto points here (just P/W/L columns + participation).
+    case 'ranking': tallies = [...leagueTally(fixtures, 0, 0, 0).values()]; break;
   }
   if (rule.participation > 0) {
     for (const t of tallies) {

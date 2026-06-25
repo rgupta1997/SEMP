@@ -3,7 +3,7 @@ import { STANDINGS_AGG_SCOPE, type StandingsAggScope } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { NotFoundError } from '../../shared/errors.js';
-import { readStandings, readStandingsBreakdown } from '../standings/standings.service.js';
+import { readStandings, readStandingsBreakdown, countCompletedMatches } from '../standings/standings.service.js';
 import { listChampionshipFixtures } from '../championships/fixtures-list.js';
 import { verifyShareToken } from './share-token.js';
 
@@ -31,7 +31,7 @@ export function makePublicRouter(prisma: Prisma): Router {
       }),
       prisma.championship_organizations.count({ where: { championship_id: id, status: 'approved' } }),
       prisma.fixtures.count({ where: draw }),
-      prisma.fixtures.count({ where: { ...draw, status: { in: ['completed', 'walkover', 'bye'] } } }),
+      countCompletedMatches(prisma, id),
       prisma.tournament_sports.findMany({
         where: { tournaments: { championship_id: id } },
         select: { sports: { select: { name: true, icon: true } } },
@@ -52,7 +52,8 @@ export function makePublicRouter(prisma: Prisma): Router {
     const scopeId = scope === 'championship' ? null : (req.query.scopeId as string | undefined) ?? null;
     if (scope !== 'championship' && !scopeId) { res.json({ scope, scope_id: null, standings: [] }); return; }
     const standings = await readStandings(prisma, id, scope, scopeId);
-    res.json({ scope, scope_id: scopeId, standings, completed_matches: standings.reduce((n, r) => n + r.played, 0) });
+    const completed_matches = await countCompletedMatches(prisma, id, scope, scopeId);
+    res.json({ scope, scope_id: scopeId, standings, completed_matches });
   }));
 
   // Per-event breakdown for one org (same shape as the authed route) - drives the

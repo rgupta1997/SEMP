@@ -38,7 +38,14 @@ export type EventResultType = (typeof EVENT_RESULT_TYPES)[number];
 export const EVENT_AGGREGATES = ['medals', 'sumBest', 'placePoints'] as const;
 export type EventAggregate = (typeof EVENT_AGGREGATES)[number];
 
-export interface SubEventSpec { key: string; label: string }
+export interface SubEventSpec {
+  key: string;
+  label: string;
+  // Optional per-sub-event medal scale, overriding EventResultSpec.medalPoints for this
+  // sub-event only - e.g. swimming relays pay 10/7/3 while the individual events pay 5/3/1.
+  medalPoints?: number[];
+  kind?: 'individual' | 'relay';   // labelling / visuals only; does not affect scoring
+}
 
 export interface EventResultSpec {
   resultType: EventResultType;
@@ -146,7 +153,12 @@ export const eventResultSpecSchema: z.ZodType<EventResultSpec> = z.object({
 });
 
 export const eventSpecSchema: z.ZodType<EventSpec> = z.object({
-  subEvents: z.array(z.object({ key: z.string().min(1), label: z.string().min(1) })).min(1),
+  subEvents: z.array(z.object({
+    key: z.string().min(1),
+    label: z.string().min(1),
+    medalPoints: z.array(z.number().int()).optional(),
+    kind: z.enum(['individual', 'relay']).optional(),
+  })).min(1),
   result: eventResultSpecSchema,
   pickOne: z.boolean().optional(),
   subEventNoun: z.string().optional(),

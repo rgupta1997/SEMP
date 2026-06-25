@@ -7,7 +7,7 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { generateFixtures, type TeamRef } from './domain/generators/index.js';
-import { recomputeStandingsForFixture, resolveSchemeForDraw } from '../standings/standings.service.js';
+import { recomputeStandingsForFixture, resolveRuleForDraw, resolveSchemeForDraw } from '../standings/standings.service.js';
 import { createNotification } from '../notifications/audience.js';
 
 // A match can only be recorded once its championship is under way. Resolves the
@@ -344,10 +344,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     if (b.winner_team_id != null && b.winner_team_id !== fxTeams!.home_team_id && b.winner_team_id !== fxTeams!.away_team_id) {
       throw new BusinessRuleError('Winner must be one of the two teams in this match');
     }
-    if (Object.keys(data).length > 0) {
+    const headlineChanged = Object.keys(data).length > 0;
+    if (headlineChanged) {
       await prisma.fixtures.update({ where: { id: req.params.id }, data });
-      // Headline (score/status/winner) changed - refresh the championship's standings.
-      await refreshStandings(prisma, req.params.id);
     }
     let persisted = true;
     if ('live_state' in b || 'live_log' in b) {
@@ -366,6 +365,10 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         persisted = false; // live_* columns not migrated yet - headline still saved
       }
     }
+    // Recompute standings AFTER both writes, so a freshly-persisted eventStandings (event
+    // sign-off) is reflected - recomputing before the live_state write would read the old
+    // contribution and leave the materialized table stale.
+    if (headlineChanged) await refreshStandings(prisma, req.params.id);
     // Completing a bracket match (or a walkover with a winner) → advance the winner;
     // custom-points → remind organiser.
     if (b.status === 'completed' || b.status === 'walkover') await advanceWinner(prisma, req.params.id);
@@ -398,8 +401,13 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     const tdx = fixture.tournament_disciplines;
     const champId = tdx?.tournament_sports?.tournaments?.championships?.id;
     const formatId = tdx?.format_id ?? tdx?.tournament_sports?.format_id ?? null;
-    const point_scheme = champId ? await resolveSchemeForDraw(prisma, champId, tdx?.discipline_id ?? null, formatId) : null;
-    res.json({ ...fixture, point_scheme });
+    const rule = champId ? await resolveRuleForDraw(prisma, champId, tdx?.discipline_id ?? null, formatId) : null;
+    // `ranking_points` / `ranking_participation` let the ranking console award the
+    // organiser-configured placement points (1st/2nd/3rd/…) + a participation floor for
+    // every ranked org, instead of the template default.
+    const ranking_points = rule?.scheme === 'ranking' ? rule.places : null;
+    const ranking_participation = rule?.scheme === 'ranking' ? rule.participation : 0;
+    res.json({ ...fixture, point_scheme: rule?.scheme ?? null, ranking_points, ranking_participation });
   }));
 
   // ---- Awards (player-of-the-match etc.) ----

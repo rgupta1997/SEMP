@@ -5,7 +5,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError } from '../../shared/errors.js';
-import { readStandings, readStandingsBreakdown, recomputeStandings } from './standings.service.js';
+import { readStandings, readStandingsBreakdown, recomputeStandings, countCompletedMatches } from './standings.service.js';
 
 // Standings = materialized org-level tables (read) + editable scoring rules (write).
 // Mounted under /championships alongside the events router.
@@ -24,7 +24,8 @@ export function makeStandingsRouter(prisma: Prisma): Router {
       return res.json({ scope, scope_id: null, standings: [] });
     }
     const standings = await readStandings(prisma, req.params.id, scope, scopeId);
-    res.json({ scope, scope_id: scopeId, standings, completed_matches: standings.reduce((n, r) => n + r.played, 0) });
+    const completed_matches = await countCompletedMatches(prisma, req.params.id, scope, scopeId);
+    res.json({ scope, scope_id: scopeId, standings, completed_matches });
   }));
 
   // Per-event breakdown for one org in a scope: which draws contributed how many points
@@ -50,27 +51,38 @@ export function makeStandingsRouter(prisma: Prisma): Router {
         where: { tournament_sports: { tournaments: { championship_id: championshipId } } },
         select: {
           format_id: true,
-          disciplines: { select: { id: true, name: true } },
+          entry_type: true,
+          disciplines: { select: { id: true, name: true, entry_type: true, sports: { select: { name: true } } } },
           tournament_formats: { select: { id: true, name: true } },
           tournament_sports: { select: { format_id: true, tournament_formats: { select: { id: true, name: true } } } },
         },
       }),
     ]);
 
-    // Distinct formats + disciplines actually used in this championship.
+    // Distinct formats + disciplines actually used in this championship. Disciplines carry
+    // their sport + entry type + format so the editor rows are distinguishable (several
+    // sports each have a "Men"/"Mixed" discipline that would otherwise look identical).
     const formats = new Map<string, string>();
-    const disciplines = new Map<string, string>();
+    const disciplines = new Map<string, { name: string; sport: string | null; entry_type: string | null; format: string | null }>();
     for (const d of draws) {
       const fmt = d.tournament_formats ?? d.tournament_sports.tournament_formats;
       if (fmt) formats.set(fmt.id, fmt.name);
-      if (d.disciplines) disciplines.set(d.disciplines.id, d.disciplines.name);
+      if (d.disciplines && !disciplines.has(d.disciplines.id)) {
+        disciplines.set(d.disciplines.id, {
+          name: d.disciplines.name,
+          sport: d.disciplines.sports?.name ?? null,
+          entry_type: d.entry_type ?? d.disciplines.entry_type ?? null,
+          format: fmt?.name ?? null,
+        });
+      }
     }
 
     res.json({
       default: DEFAULT_STANDINGS_RULE,
       rules: rules.map((r) => ({ id: r.id, scope_type: r.scope_type, scope_id: r.scope_id, config: r.config })),
       formats: [...formats].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
-      disciplines: [...disciplines].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
+      disciplines: [...disciplines].map(([id, v]) => ({ id, ...v }))
+        .sort((a, b) => (a.sport ?? '').localeCompare(b.sport ?? '') || a.name.localeCompare(b.name)),
     });
   }));
 

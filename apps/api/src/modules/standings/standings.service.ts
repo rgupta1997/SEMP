@@ -22,9 +22,12 @@ function parseRule(config: unknown): StandingsRule {
 // discipline → format → championship default → built-in default). Shared with the
 // result-entry paths so they can tell whether a draw expects hand-entered custom
 // points (and remind the organiser when one is missing).
-export async function resolveSchemeForDraw(
+// Resolve the full editable rule for a draw (most-specific-wins: discipline → format →
+// championship default → built-in default). Shared by the scheme helper below and the
+// scoring endpoint (which needs a ranking rule's place points).
+export async function resolveRuleForDraw(
   prisma: Prisma, championshipId: string, disciplineId: string | null, formatId: string | null,
-): Promise<StandingsScheme> {
+): Promise<StandingsRule> {
   const ruleRows = await prisma.standings_rules.findMany({ where: { championship_id: championshipId } });
   const byDiscipline = new Map<string, StandingsRule>();
   const byFormat = new Map<string, StandingsRule>();
@@ -35,11 +38,39 @@ export async function resolveSchemeForDraw(
     else if (r.scope_type === 'format' && r.scope_id) byFormat.set(r.scope_id, rule);
     else if (r.scope_type === 'championship') championshipRule = rule;
   }
-  const rule =
+  return (
     (disciplineId ? byDiscipline.get(disciplineId) : undefined) ??
     (formatId ? byFormat.get(formatId) : undefined) ??
-    championshipRule ?? DEFAULT_STANDINGS_RULE;
-  return rule.scheme;
+    championshipRule ?? DEFAULT_STANDINGS_RULE
+  );
+}
+
+export async function resolveSchemeForDraw(
+  prisma: Prisma, championshipId: string, disciplineId: string | null, formatId: string | null,
+): Promise<StandingsScheme> {
+  return (await resolveRuleForDraw(prisma, championshipId, disciplineId, formatId)).scheme;
+}
+
+// Count completed matches in a scope (championship / tournament / sport). Each fixture is
+// counted ONCE (summing per-org `played` double-counts every head-to-head match), and
+// byes are excluded - a bye is an auto-advance, not a played match. Walkovers count (a
+// forfeit is still a real result).
+export async function countCompletedMatches(
+  prisma: Prisma, championshipId: string,
+  scope: 'championship' | 'tournament' | 'sport' = 'championship', scopeId: string | null = null,
+): Promise<number> {
+  return prisma.fixtures.count({
+    where: {
+      status: { in: ['completed', 'walkover'] },
+      tournament_disciplines: {
+        tournament_sports: {
+          tournaments: { championship_id: championshipId },
+          ...(scope === 'tournament' && scopeId ? { tournament_id: scopeId } : {}),
+          ...(scope === 'sport' && scopeId ? { sport_id: scopeId } : {}),
+        },
+      },
+    },
+  });
 }
 
 // Rebuild every standings table for a championship from its completed fixtures.
@@ -407,6 +438,7 @@ export async function readStandingsBreakdown(
     if (mine.gold) detail.gold = mine.gold;
     if (mine.silver) detail.silver = mine.silver;
     if (mine.bronze) detail.bronze = mine.bronze;
+    if (mine.participation) detail.participation = mine.participation;
     events.push({
       draw_id: f.tournament_discipline_id,
       sport: f.tournament_disciplines?.tournament_sports?.sports?.name ?? 'Event',

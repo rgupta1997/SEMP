@@ -511,11 +511,21 @@ export const customRuleSchema = z.object({
   participation,
 });
 
+// Ranking events (swimming/powerlifting/athletics): `places[i]` is the championship
+// points for finishing place i+1 (places[0] = 1st, places[1] = 2nd, …). Places beyond
+// the array score 0 (or `participation`). The event console's final ranking awards these.
+export const rankingRuleSchema = z.object({
+  scheme: z.literal('ranking'),
+  places: z.array(z.number().int().min(0)).min(1).default([5, 3, 1]),
+  participation,
+});
+
 export const standingsRuleSchema = z.discriminatedUnion('scheme', [
   leaguePointsRuleSchema,
   placementRuleSchema,
   medalRuleSchema,
   customRuleSchema,
+  rankingRuleSchema,
 ]);
 export type StandingsRule = z.infer<typeof standingsRuleSchema>;
 

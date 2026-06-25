@@ -21,8 +21,9 @@ export interface EventRankingRow { orgId: string | null; org: string; place: num
 
 // An org's standings contribution from one event fixture: championship points + medals.
 // Both consoles persist this (live_state.eventStandings) so the standings service can stay
-// dumb (no spec resolution server-side).
-export interface EventOrgContribution { orgId: string; org: string; points: number; gold: number; silver: number; bronze: number }
+// dumb (no spec resolution server-side). `participation` flags the consolation floor - the
+// org placed but earned no place points - so the breakdown can tag it (vs a real place).
+export interface EventOrgContribution { orgId: string; org: string; points: number; gold: number; silver: number; bronze: number; participation?: number }
 
 const keyOf = (p: ParticipantResult) => (p.orgId ?? (p.org && p.org.trim() ? p.org.trim() : p.id));
 const labelOf = (p: ParticipantResult) => (p.org && p.org.trim() ? p.org.trim() : (p.name || 'Unnamed'));
@@ -34,14 +35,24 @@ export function placementPoints(place: number | null | undefined, medalPoints: n
 }
 
 // Rank participants within one sub-event (1 = best). Participants without a mark are
-// excluded. Simple ordinal ranking (ties take adjacent ranks).
+// excluded. Competition ranking ("1-2-2-4"): tied marks SHARE the better place and each
+// earns that place's points, and the next distinct mark skips the places they consumed -
+// so two equal firsts both score gold and there is no silver (rulebook: equal results
+// both take the points). Organiser overrides happen upstream by editing the marks.
 export function rankSubEvent(spec: EventSpec, state: EventState, subKey: string): Map<string, number> {
   const entries = state.participants
     .map((p) => ({ id: p.id, mark: p.marks[subKey] }))
     .filter((e): e is { id: string; mark: number } => typeof e.mark === 'number');
   entries.sort((a, b) => (spec.result.winnerIs === 'min' ? a.mark - b.mark : b.mark - a.mark));
   const ranks = new Map<string, number>();
-  entries.forEach((e, i) => ranks.set(e.id, i + 1));
+  let prevMark: number | null = null;
+  let prevRank = 0;
+  entries.forEach((e, i) => {
+    const rank = prevMark !== null && e.mark === prevMark ? prevRank : i + 1;
+    ranks.set(e.id, rank);
+    prevMark = e.mark;
+    prevRank = rank;
+  });
   return ranks;
 }
 
@@ -66,9 +77,12 @@ export function aggregateEvent(spec: EventSpec, state: EventState): AggRow[] {
       bump(p, sum);
     }
   } else {
-    const medals = spec.result.medalPoints ?? [5, 3, 1];
+    const defaultMedals = spec.result.medalPoints ?? [5, 3, 1];
     const n = state.participants.length;
     for (const se of spec.subEvents) {
+      // Each sub-event may override the medal scale (e.g. relays pay 10/7/3, individual
+      // events 5/3/1). Falls back to the event-level scale when not set.
+      const medals = se.medalPoints ?? defaultMedals;
       const ranks = rankSubEvent(spec, state, se.key);
       for (const [pid, rank] of ranks) {
         const p = state.participants.find((x) => x.id === pid);
@@ -90,13 +104,17 @@ export function rankingContributions(rows: EventRankingRow[], medalPoints: numbe
   const out: EventOrgContribution[] = [];
   for (const r of rows) {
     if (!r.orgId || !r.place || r.place < 1) continue;
+    const placePts = placementPoints(r.place, medalPoints);
+    const points = typeof r.points === 'number' ? r.points : placePts;
     out.push({
       orgId: r.orgId,
       org: r.org,
-      points: typeof r.points === 'number' ? r.points : placementPoints(r.place, medalPoints),
+      points,
       gold: r.place === 1 ? 1 : 0,
       silver: r.place === 2 ? 1 : 0,
       bronze: r.place === 3 ? 1 : 0,
+      // Scored but earned no place points => the points are the participation floor.
+      participation: placePts === 0 && points > 0 ? 1 : 0,
     });
   }
   return out;

@@ -74,7 +74,10 @@ export type NotificationReaction = (typeof NOTIFICATION_REACTIONS)[number];
 //   medal         - top-3 organizations in a discipline earn gold/silver/bronze points.
 //   custom        - the organiser awards championship points per side, by hand, after
 //                   each result on the Results page (no auto formula).
-export const STANDINGS_SCHEME = ['league_points', 'placement', 'medal', 'custom'] as const;
+//   ranking       - ranking events (swimming/powerlifting/athletics): organiser sets the
+//                   points for each finishing place (1st/2nd/3rd/…); the event console's
+//                   final ranking awards them. No head-to-head fixtures.
+export const STANDINGS_SCHEME = ['league_points', 'placement', 'medal', 'custom', 'ranking'] as const;
 export type StandingsScheme = (typeof STANDINGS_SCHEME)[number];
 
 // Ordered tiebreakers for the league_points scheme (applied left-to-right).

@@ -206,7 +206,6 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
   const showDepth = structure !== 'event' && !forcedManual;
   // Multi-competitor events default to a simple team ranking (which team did well); the
   // detailed per-athlete console is kept available behind this toggle.
-  const [eventMode, setEventMode] = useState<'ranking' | 'detailed'>('ranking');
 
   const structureLabel = (s: Structure) =>
     s === 'tie' ? `Team tie · ${tieSpec?.rubbers.length ?? 0} rubbers`
@@ -261,7 +260,7 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
 
   return (
     <>
-      {(structures.length > 1 || showDepth || structure === 'event') && (
+      {(structures.length > 1 || showDepth) && (
         <div className="mb-5 flex flex-wrap items-end gap-x-6 gap-y-3">
           {/* Only offer the structure switch when there's a real choice - event-only
               sports have a single structure, so the lone tab is hidden. */}
@@ -269,10 +268,10 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
             <TabBar label="Match structure" value={structure} onChange={switchStructure}
               options={structures.map((s) => ({ value: s, label: structureLabel(s) }))} />
           )}
-          {structure === 'event' ? (
-            <TabBar label="Scoring" value={eventMode} onChange={setEventMode}
-              options={[{ value: 'ranking', label: 'Ranking' }, { value: 'detailed', label: 'Detailed · per athlete' }]} />
-          ) : showDepth ? (
+          {/* Event/ranking sports (swimming, powerlifting, athletics) only ever use the
+              Ranking entry - the detailed per-athlete console is intentionally hidden, so
+              officials just set finishing places. Other sports keep the depth toggle. */}
+          {structure !== 'event' && showDepth ? (
             <TabBar label="Scoring" value={mode} onChange={switchMode}
               options={[{ value: 'detailed', label: 'Detailed · live' }, { value: 'manual', label: 'Manual · final score' }]} />
           ) : null}
@@ -280,9 +279,7 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
       )}
 
       {structure === 'event' && eventSpec
-        ? eventMode === 'ranking'
-          ? <EventRankingConsole key={`evr-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />
-          : <EventConsole key={`ev-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />
+        ? <EventRankingConsole key={`evr-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />
         : structure === 'tie' && tieSpec
           ? <TieConsole key={`tie-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={tieSpec} mode={effectiveMode} live={live} invalidate={invalidate} onDone={onDone} />
           : effectiveMode === 'manual'
@@ -978,7 +975,12 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   const orgs = (parts?.organizations ?? [])
     .map((o) => ({ id: o.org?.id ?? o.orgId, name: o.org?.name ?? 'Unaffiliated' }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  const medalPoints = spec.result.medalPoints ?? [5, 3, 1];
+  // Organiser-configured ranking points (from the "Ranking" point system on the Standings
+  // settings, resolved server-side per draw) win; otherwise the template default.
+  const medalPoints: number[] = (fixture as any)?.ranking_points ?? spec.result.medalPoints ?? [5, 3, 1];
+  // Every ranked org also gets the participation floor (e.g. 1); places beyond the points
+  // list fall back to just that. Unranked orgs (no place) score nothing.
+  const participation: number = (fixture as any)?.ranking_participation ?? 0;
 
   // place map keyed by orgId (independent of the async orgs fetch).
   const seed = (l?: { live_state: any }) => {
@@ -995,26 +997,41 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   const setPlace = (orgId: string, place: number | null) => setPlaces((p) => {
     const n = { ...p }; if (place) n[orgId] = place; else delete n[orgId]; return n;
   });
+  // Championship points for an org. Participation is a consolation floor, NOT a top-up:
+  // a ranked org earns its place points (10/7/3/…), OR - if it placed below the configured
+  // places (0 points) - just the participation point. Unranked orgs score nothing.
+  const pointsFor = (orgId: string) => {
+    const pl = places[orgId];
+    if (!pl) return 0;
+    const placePts = placementPoints(pl, medalPoints);
+    return placePts > 0 ? placePts : participation;
+  };
 
   // Persist the ranking. `eventStandings` is the self-contained per-org contribution
   // (points + medals) the standings service reads - so events feed the championship table
   // without the server needing the event spec. `complete` signs the event off.
   const persistRanking = (complete: boolean) => {
-    const rows = orgs.map((o) => ({ orgId: o.id, org: o.name, place: places[o.id] ?? null, points: placementPoints(places[o.id], medalPoints) }));
-    const eventStandings = rankingContributions(rows, medalPoints);
+    const rows = orgs.map((o) => ({ orgId: o.id, org: o.name, place: places[o.id] ?? null, points: pointsFor(o.id) }));
+    // "Save ranking" only stores the draft places - it must NOT move the standings. Only
+    // "Save & sign off" writes `eventStandings` (what the standings service reads) and
+    // completes the event, so the championship table changes only on sign-off. A plain
+    // save keeps the fixture's current status + any previously signed-off contribution.
+    const live_state = complete
+      ? { ...(live?.live_state ?? {}), eventRanking: { rows }, eventStandings: rankingContributions(rows, medalPoints) }
+      : { ...(live?.live_state ?? {}), eventRanking: { rows } };
     persist.mutate(
       {
-        live_state: { ...(live?.live_state ?? {}), eventRanking: { rows }, eventStandings },
-        status: complete ? 'completed' : (fixture.status === 'scheduled' ? 'live' : fixture.status),
+        live_state,
+        status: complete ? 'completed' : fixture.status,
       },
-      { onSuccess: () => toast.success(complete ? 'Event signed off' : 'Ranking saved'), onError: (e: any) => toast.error(e.message) },
+      { onSuccess: () => toast.success(complete ? 'Event signed off' : 'Ranking saved (not in standings yet)'), onError: (e: any) => toast.error(e.message) },
     );
   };
   const save = () => persistRanking(false);
 
   const n = orgs.length;
   const ranked = orgs
-    .map((o) => ({ ...o, place: places[o.id] ?? null, points: placementPoints(places[o.id], medalPoints) }))
+    .map((o) => ({ ...o, place: places[o.id] ?? null, points: pointsFor(o.id) }))
     .filter((r) => r.place != null)
     .sort((a, b) => b.points - a.points || (a.place! - b.place!) || a.name.localeCompare(b.name));
 
@@ -1033,7 +1050,7 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
                   <option value="">— place —</option>
                   {Array.from({ length: n }, (_, i) => i + 1).map((pl) => <option key={pl} value={pl}>{ordinal(pl)}</option>)}
                 </Select>
-                <span className="w-8 text-right text-sm font-bold tabular-nums text-slate-500 dark:text-slate-400">{placementPoints(places[o.id], medalPoints)}</span>
+                <span className="w-8 text-right text-sm font-bold tabular-nums text-slate-500 dark:text-slate-400">{pointsFor(o.id)}</span>
               </div>
             </div>
           ))}
