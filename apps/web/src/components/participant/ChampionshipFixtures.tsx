@@ -23,6 +23,12 @@ const RESULT_STATUSES = new Set(['live', 'completed', 'walkover', 'bye', 'cancel
 function teamLabel(t: TeamRef | null) { return t?.name ?? 'TBD'; }
 function orgLabel(t: TeamRef | null) { return t?.organizations?.short_name || t?.organizations?.name || ''; }
 
+// Ranking events (powerlifting/swimming/athletics) have no head-to-head matchup -
+// everyone competes for a single ranking - so the generator emits one team-less
+// fixture with round 'Event'. Showing "TBD v TBD" there is wrong: there's no
+// opponent to decide. We show the discipline name + a Ranking event tag instead.
+function isRankingEvent(f: FixtureRow) { return f.round === 'Event' && !f.home && !f.away; }
+
 // Team name with its organization as a sub-heading underneath, so teams are
 // distinguishable across orgs on the schedule/results.
 function TeamName({ team, align, won }: { team: TeamRef | null; align: 'left' | 'right'; won: boolean }) {
@@ -130,13 +136,24 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
                 </div>
 
                 <div className="flex flex-1 items-center justify-center gap-3 text-sm">
-                  <TeamName team={f.home} align="right" won={homeWon} />
-                  <span className="min-w-[3.5ch] self-start pt-0.5 text-center font-bold tabular-nums text-slate-800 dark:text-slate-100">
-                    {scored
-                      ? `${f.home_score}–${f.away_score}`
-                      : <span className="text-slate-300 dark:text-slate-600">v</span>}
-                  </span>
-                  <TeamName team={f.away} align="left" won={awayWon} />
+                  {isRankingEvent(f) ? (
+                    <div className="flex items-center justify-center gap-2 text-center">
+                      <span className="truncate font-semibold text-slate-700 dark:text-slate-200" title={f.discipline ?? f.sport ?? undefined}>
+                        {f.discipline ?? f.sport ?? 'Event'}
+                      </span>
+                      <Badge tone="violet">Ranking event</Badge>
+                    </div>
+                  ) : (
+                    <>
+                      <TeamName team={f.home} align="right" won={homeWon} />
+                      <span className="min-w-[3.5ch] self-start pt-0.5 text-center font-bold tabular-nums text-slate-800 dark:text-slate-100">
+                        {scored
+                          ? `${f.home_score}–${f.away_score}`
+                          : <span className="text-slate-300 dark:text-slate-600">v</span>}
+                      </span>
+                      <TeamName team={f.away} align="left" won={awayWon} />
+                    </>
+                  )}
                 </div>
 
                 <div className="ml-auto flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">

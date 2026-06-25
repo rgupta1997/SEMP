@@ -157,14 +157,25 @@ export function ResultsPage() {
 
               {g.rows.map((f) => {
                 const individual = f.entry_type === 'individual';
+                // Ranking events (powerlifting/swimming/athletics) have no head-to-head
+                // matchup - the generator emits one team-less fixture with round 'Event'.
+                // Showing "TBD vs TBD" there is wrong: there's no opponent to decide, so
+                // we show the discipline name + a Ranking event tag instead.
+                const rankingEvent = f.round === 'Event' && !f.home && !f.away;
                 const completed = f.status === 'completed' || f.status === 'confirmed';
-                const scored = !individual && f.home_score != null && f.away_score != null;
+                const scored = !individual && !rankingEvent && f.home_score != null && f.away_score != null;
                 return (
-                  <Card key={f.id} interactive={canManage} onClick={() => open(f)} className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-2 p-3 sm:gap-x-4 sm:p-4">
+                  // On phone the row content is wider than the viewport, so the card
+                  // becomes a horizontal scroll container and the status/action column
+                  // is pinned (sticky) so it stays reachable. The inner wrapper uses
+                  // `sm:contents` so on larger screens the three cells fall back into
+                  // the original 1fr / auto / 1fr grid unchanged.
+                  <Card key={f.id} interactive={canManage} onClick={() => open(f)} className="block overflow-x-auto sm:grid sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center sm:gap-x-4 sm:overflow-visible sm:p-4">
+                    <div className="flex w-max items-center gap-x-2 py-3 pl-3 sm:contents">
                     {/* Left cell (1fr): match type — always shown in full.
                         Both outer cells are equal 1fr so the auto center column is
                         always physically centered regardless of their content widths. */}
-                    <div className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400" title={f.round ?? undefined}>
+                    <div className="shrink-0 whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400" title={f.round ?? undefined}>
                       {f.round || '-'}
                     </div>
 
@@ -172,7 +183,7 @@ export function ResultsPage() {
                         have no head-to-head matchup, so show the event (discipline) name
                         instead of two empty team chips. */}
                     <div className="flex items-center gap-2 sm:gap-3">
-                      {individual ? (
+                      {individual || rankingEvent ? (
                         <div className="flex w-[19rem] items-center justify-center gap-2 text-center sm:w-[27rem]">
                           <span className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200" title={f.discipline ?? f.sport ?? undefined}>
                             {f.discipline ?? f.sport ?? 'Event'}
@@ -196,8 +207,10 @@ export function ResultsPage() {
                       )}
                     </div>
 
-                    {/* Right cell (1fr): status + actions */}
-                    <div className="flex items-center justify-end gap-2 sm:gap-3">
+                    {/* Right cell (1fr): status + actions. Pinned to the right edge on
+                        phone (sticky) so it stays visible while the match info scrolls
+                        underneath; reverts to a plain grid cell from sm up. */}
+                    <div className="sticky right-0 z-10 flex items-center justify-end gap-2 self-stretch bg-white pl-3 pr-3 shadow-[-8px_0_8px_-6px_rgba(15,23,42,0.08)] dark:bg-slate-900 sm:static sm:z-auto sm:self-auto sm:gap-3 sm:bg-transparent sm:pl-0 sm:pr-0 sm:shadow-none dark:sm:bg-transparent">
                       {individual ? (
                         <StatusBadge status="" label="Individual" />
                       ) : (
@@ -208,6 +221,7 @@ export function ResultsPage() {
                           {completed ? 'Edit' : 'Record →'}
                         </span>
                       )}
+                    </div>
                     </div>
                   </Card>
                 );

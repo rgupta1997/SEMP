@@ -3,6 +3,11 @@
 export function homeTeam(f: any) { return f.teams_fixtures_home_team_idToteams; }
 export function awayTeam(f: any) { return f.teams_fixtures_away_team_idToteams; }
 export function teamLabel(t: any): string { return t?.name ?? t?.organizations?.name ?? 'TBD'; }
+// Ranking events (powerlifting/swimming/athletics) have no head-to-head matchup -
+// every competitor is ranked together - so the generator emits one team-less fixture
+// with round 'Event'. There's no opponent to decide, so showing "TBD vs TBD" is wrong;
+// callers show the discipline name instead.
+export function isRankingEvent(f: any): boolean { return f?.round === 'Event' && !homeTeam(f) && !awayTeam(f); }
 // Organization sub-heading for a team (short name preferred), '' when unaffiliated.
 export function orgLabel(t: any): string { return t?.organizations?.short_name || t?.organizations?.name || ''; }
 

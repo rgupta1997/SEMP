@@ -20,8 +20,10 @@ export interface BracketFixture {
 // ---- layout constants (px) ----
 const MATCH_W = 208;
 const META_H = 18;   // top line: scheduled time / status
-const ROW_H = 34;    // each team row (team name + organization sub-line)
-const MATCH_H = META_H + ROW_H * 2; // fixed so connector geometry is exact
+const ROW_H = 38;    // each team row (team name + organization sub-line)
+// Card height leaves a small buffer beyond the rows so the two 1px inter-row
+// borders don't push the bottom organisation sub-line under the clipped edge.
+const MATCH_H = META_H + ROW_H * 2 + 6; // card height (also drives connector geometry)
 const ROW_GAP = 22;  // vertical gap between first-round matches
 const COL_GAP = 52;  // horizontal gap between rounds (room for connectors)
 const HEADER_H = 28; // round-label band above the columns

@@ -92,12 +92,12 @@ export function Card({ className = '', children, interactive, ...p }: HTMLAttrib
 
 export function CardHeader({ title, subtitle, action }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 px-5 pt-5 pb-3">
-      <div>
+    <div className="flex flex-col gap-3 px-5 pt-5 pb-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+      <div className="min-w-0">
         <h3 className="font-semibold text-slate-900 dark:text-slate-100">{title}</h3>
         {subtitle && <p className="text-sm text-slate-500 mt-0.5 dark:text-slate-400">{subtitle}</p>}
       </div>
-      {action}
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   );
 }

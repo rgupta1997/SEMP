@@ -203,8 +203,8 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
   const officialName = (id: string | null) => officials.find((o) => o.id === id)?.name ?? null;
 
   return (
-    <Card className="p-4">
-      <div className="flex items-center justify-between gap-3">
+    <Card className="min-w-0 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-900 dark:text-slate-100">{td.disciplines?.name ?? sportName}</span>
@@ -250,8 +250,13 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
                   {groundLabel(f.venue_ground_id) ?? 'No ground'} · {f.scheduled_at ? fmtDateTime(f.scheduled_at) : 'Unscheduled'}
                   {officialName(f.official_id) ? ` · ${officialName(f.official_id)}` : ' · No official'}
                 </span>
-                <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
-                {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)}>Edit</Button>}
+                {/* Status + Edit share one row on phone, split 50/50 (status left,
+                    Edit right) so they line up across rows regardless of name length;
+                    from sm up they fall back to the inline end-of-row layout. */}
+                <div className="grid w-full grid-cols-2 items-center justify-items-center gap-2 sm:flex sm:w-auto sm:gap-3">
+                  <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
+                  {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)}>Edit</Button>}
+                </div>
               </div>
             ))}
           </div>
@@ -279,10 +284,13 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
                   {groundLabel(f.venue_ground_id) ?? 'No ground'} · {f.scheduled_at ? fmtDateTime(f.scheduled_at) : 'Unscheduled'}
                   {officialName(f.official_id) ? ` · ${officialName(f.official_id)}` : ' · No official'}
                 </span>
-                <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
-                {canManage && (
-                  <Button size="sm" variant="ghost" onClick={() => setEditing(f)}>Edit</Button>
-                )}
+                {/* Status + Edit share one row on phone, split 50/50 (status left,
+                    Edit right) so they line up across rows regardless of name length;
+                    from sm up they fall back to the inline end-of-row layout. */}
+                <div className="grid w-full grid-cols-2 items-center justify-items-center gap-2 sm:flex sm:w-auto sm:gap-3">
+                  <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
+                  {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)}>Edit</Button>}
+                </div>
               </div>
             ))}
           </div>
@@ -302,7 +310,7 @@ function SportBlock({ ts, draws, allFixtures, fixturesLoading, fixturesPath, spo
   return (
     <div>
       <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{sportName}</h3>
-      <div className="grid gap-3">
+      <div className="grid grid-cols-1 gap-3">
         {draws.map((td) => (
           <DrawCard
             key={td.id}
