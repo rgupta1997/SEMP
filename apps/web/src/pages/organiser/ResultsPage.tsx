@@ -157,8 +157,13 @@ export function ResultsPage() {
 
               {g.rows.map((f) => {
                 const individual = f.entry_type === 'individual';
+                // Ranking events (powerlifting/swimming/athletics) have no head-to-head
+                // matchup - the generator emits one team-less fixture with round 'Event'.
+                // Showing "TBD vs TBD" there is wrong: there's no opponent to decide, so
+                // we show the discipline name + a Ranking event tag instead.
+                const rankingEvent = f.round === 'Event' && !f.home && !f.away;
                 const completed = f.status === 'completed' || f.status === 'confirmed';
-                const scored = !individual && f.home_score != null && f.away_score != null;
+                const scored = !individual && !rankingEvent && f.home_score != null && f.away_score != null;
                 return (
                   // On phone the row content is wider than the viewport, so the card
                   // becomes a horizontal scroll container and the status/action column
@@ -178,7 +183,7 @@ export function ResultsPage() {
                         have no head-to-head matchup, so show the event (discipline) name
                         instead of two empty team chips. */}
                     <div className="flex items-center gap-2 sm:gap-3">
-                      {individual ? (
+                      {individual || rankingEvent ? (
                         <div className="flex w-[19rem] items-center justify-center gap-2 text-center sm:w-[27rem]">
                           <span className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200" title={f.discipline ?? f.sport ?? undefined}>
                             {f.discipline ?? f.sport ?? 'Event'}

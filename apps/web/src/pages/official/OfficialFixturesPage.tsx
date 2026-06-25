@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useTableControls, fmtDateTime } from '../../lib/hooks';
 import { Button, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, StatCard, StatusBadge } from '../../components/ui';
-import { awayTeam, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, sportName, teamLabel, venueLabel } from './fixtureHelpers';
+import { awayTeam, disciplineLabel, eventInfo, eventLabel, homeTeam, isRankingEvent, orgLabel, sportName, teamLabel, venueLabel } from './fixtureHelpers';
 import { titleCase } from '../../lib/format';
 
 export function OfficialFixturesPage() {
@@ -86,17 +86,24 @@ export function OfficialFixturesPage() {
                         <span>{disciplineLabel(f)}</span>
                         {f.round && <span className="rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-slate-500 dark:text-slate-400">{f.round}</span>}
                       </div>
-                      <div className="mt-1 flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100">
-                        <span className="flex flex-col">
-                          <span className="leading-tight">{teamLabel(homeTeam(f))}</span>
-                          {orgLabel(homeTeam(f)) && <span className="text-xs font-normal leading-tight text-slate-400 dark:text-slate-500">{orgLabel(homeTeam(f))}</span>}
-                        </span>
-                        <span className="text-slate-300 dark:text-slate-600">vs</span>
-                        <span className="flex flex-col">
-                          <span className="leading-tight">{teamLabel(awayTeam(f))}</span>
-                          {orgLabel(awayTeam(f)) && <span className="text-xs font-normal leading-tight text-slate-400 dark:text-slate-500">{orgLabel(awayTeam(f))}</span>}
-                        </span>
-                      </div>
+                      {isRankingEvent(f) ? (
+                        <div className="mt-1 flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100">
+                          <span className="leading-tight">{disciplineLabel(f)}</span>
+                          <span className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-semibold text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">Ranking event</span>
+                        </div>
+                      ) : (
+                        <div className="mt-1 flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100">
+                          <span className="flex flex-col">
+                            <span className="leading-tight">{teamLabel(homeTeam(f))}</span>
+                            {orgLabel(homeTeam(f)) && <span className="text-xs font-normal leading-tight text-slate-400 dark:text-slate-500">{orgLabel(homeTeam(f))}</span>}
+                          </span>
+                          <span className="text-slate-300 dark:text-slate-600">vs</span>
+                          <span className="flex flex-col">
+                            <span className="leading-tight">{teamLabel(awayTeam(f))}</span>
+                            {orgLabel(awayTeam(f)) && <span className="text-xs font-normal leading-tight text-slate-400 dark:text-slate-500">{orgLabel(awayTeam(f))}</span>}
+                          </span>
+                        </div>
+                      )}
                       <div className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{eventLabel(f)} · {venueLabel(f)} · {fmtDateTime(f.scheduled_at)}</div>
                     </div>
                     <div className="flex items-center gap-3">
