@@ -79,9 +79,6 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
     return () => clearInterval(t);
   }, [refetch]);
 
-  // Show a medals column only when some discipline used the medal scheme.
-  const showMedals = rows.some((r) => r.detail && (r.detail.gold || r.detail.silver || r.detail.bronze));
-
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -123,56 +120,47 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
               <th className="px-3 py-3 text-center">W</th>
               <th className="px-3 py-3 text-center">D</th>
               <th className="px-3 py-3 text-center">L</th>
-              {showMedals && <th className="px-3 py-3 text-center">Medals</th>}
               <th className="px-4 py-3 text-center">Pts</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => {
-              const isOpen = expanded === r.entity_id;
-              const colSpan = 7 + (showMedals ? 1 : 0);
+              const isOpen = expanded === r.organization_id;
+              const colSpan = 7;
               return (
-              <Fragment key={r.entity_id}>
-              <tr
-                onClick={() => setExpanded(isOpen ? null : r.entity_id)}
-                className={cn('cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40', isOpen && 'bg-slate-50 dark:bg-slate-800/40')}
-                title="Show how these points were earned"
-              >
-                <td className="px-4 py-3 text-lg">{MEDAL[i] ?? <span className="font-bold text-slate-400 dark:text-slate-500">{r.rank ?? i + 1}</span>}</td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <ChevronDown size={16} className={cn('shrink-0 text-slate-400 transition-transform dark:text-slate-500', isOpen && 'rotate-180')} />
-                    <Avatar name={r.name} size={30} />
-                    <span className="min-w-0">
-                      <span className="block font-medium text-slate-800 dark:text-slate-200">{r.name}</span>
-                      {r.org_unit?.parent && (
-                        <span className="block text-[11.5px] text-slate-500 dark:text-slate-400">{r.org_unit.parent}</span>
-                      )}
-                    </span>
-                  </div>
-                </td>
-                <td className="px-3 py-3 text-center text-slate-600 dark:text-slate-300">{r.played}</td>
-                <td className="px-3 py-3 text-center font-semibold text-emerald-600">{r.won}</td>
-                <td className="px-3 py-3 text-center text-slate-500 dark:text-slate-400">{r.drawn}</td>
-                <td className="px-3 py-3 text-center text-rose-500">{r.lost}</td>
-                {showMedals && (
-                  <td className="px-3 py-3 text-center text-sm tabular-nums">
-                    {(['gold', 'silver', 'bronze'] as const).map((m, mi) =>
-                      r.detail?.[m] ? <span key={m} className="mr-1.5 whitespace-nowrap">{MEDAL[mi]}{r.detail[m]}</span> : null,
-                    )}
-                    {!r.detail?.gold && !r.detail?.silver && !r.detail?.bronze && <span className="text-slate-300 dark:text-slate-600">-</span>}
-                  </td>
-                )}
-                <td className="px-4 py-3 text-center"><Badge tone="brand">{r.points}</Badge></td>
-              </tr>
-              {isOpen && (
-                <tr className="bg-slate-50/60 dark:bg-slate-800/20">
-                  <td colSpan={colSpan} className="px-4 pb-4 pt-0">
-                    <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} entityId={r.entity_id} />
-                  </td>
-                </tr>
-              )}
-              </Fragment>
+                <Fragment key={r.entity_id}>
+                  <tr
+                    onClick={() => setExpanded(isOpen ? null : r.entity_id)}
+                    className={cn('cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40', isOpen && 'bg-slate-50 dark:bg-slate-800/40')}
+                    title="Show how these points were earned"
+                  >
+                    <td className="px-4 py-3 text-lg">{MEDAL[i] ?? <span className="font-bold text-slate-400 dark:text-slate-500">{r.rank ?? i + 1}</span>}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <ChevronDown size={16} className={cn('shrink-0 text-slate-400 transition-transform dark:text-slate-500', isOpen && 'rotate-180')} />
+                        <Avatar name={r.name} size={30} />
+                        <span className="min-w-0">
+                          <span className="block font-medium text-slate-800 dark:text-slate-200">{r.name}</span>
+                          {r.org_unit?.parent && (
+                            <span className="block text-[11.5px] text-slate-500 dark:text-slate-400">{r.org_unit.parent}</span>
+                          )}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-center text-slate-600 dark:text-slate-300">{r.played}</td>
+                    <td className="px-3 py-3 text-center font-semibold text-emerald-600">{r.won}</td>
+                    <td className="px-3 py-3 text-center text-slate-500 dark:text-slate-400">{r.drawn}</td>
+                    <td className="px-3 py-3 text-center text-rose-500">{r.lost}</td>
+                    <td className="px-4 py-3 text-center"><Badge tone="brand">{r.points}</Badge></td>
+                  </tr>
+                  {isOpen && (
+                    <tr className="bg-slate-50/60 dark:bg-slate-800/20">
+                      <td colSpan={colSpan} className="px-4 pb-4 pt-0">
+                        <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} entityId={r.entity_id} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>

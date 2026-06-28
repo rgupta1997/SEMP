@@ -100,9 +100,6 @@ export function StandingsPage() {
     return () => clearInterval(t);
   }, [refetch]);
 
-  // Show a medals column only when some discipline used the medal scheme.
-  const showMedals = rows.some((r) => r.detail && (r.detail.gold || r.detail.silver || r.detail.bronze));
-
   // Medal leader = top of the medal tally (gold, then silver/bronze); points leader = rank 1.
   const medalLeader = rankMedals(rows)[0]?.row;
   const pointsLeader = rows[0];
@@ -152,132 +149,113 @@ export function StandingsPage() {
             <StandingsMedalTable rows={rows} base={`/championships/${eventId}`} scope={scope} scopeId={scopeId} />
           ) : (
             <>
-            {/* ---------------- phone: a league table that fits ----------------
+              {/* ---------------- phone: a league table that fits ----------------
                 Eight columns - #, name, P, W, D, L, Medals, Pts - is a horizontal
                 scroll on a 390px screen, and the two that matter (who, and how many
                 points) sit at opposite ends of the drag. Two lines instead: the
                 position, the squad's short name and its points on the first, the
                 record and any medals on the second. Same rows, same expansion, no
                 sideways movement. */}
-            <div className="sm:hidden">
-              {rows.map((r, i) => {
-                const isOpen = expanded === r.entity_id;
-                return (
-                  <div key={r.entity_id} className="border-t border-slate-100 first:border-t-0 dark:border-slate-800">
-                    <button
-                      type="button"
-                      onClick={() => setExpanded(isOpen ? null : r.entity_id)}
-                      aria-expanded={isOpen}
-                      className={cn(
-                        'flex w-full items-center gap-2.5 px-1 py-2.5 text-left transition-colors',
-                        isOpen && 'bg-slate-50 dark:bg-slate-800/40',
-                      )}
-                    >
-                      <RankBadge pos={r.rank ?? i + 1} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[15px] font-semibold text-slate-800 dark:text-slate-100">
-                          {r.name || r.short_name}
-                        </span>
-                        {/* The record, as one muted run. Colour still carries won
-                            and lost, and the letters carry them for anybody who
-                            cannot see the colour. */}
-                        <span className="t-meta mt-0.5 flex items-center gap-2 tabular-nums">
-                          <span>P{r.played}</span>
-                          <span className="text-emerald-600 dark:text-emerald-400">W{r.won}</span>
-                          <span>D{r.drawn}</span>
-                          <span className="text-rose-500 dark:text-rose-400">L{r.lost}</span>
-                          {showMedals && (['gold', 'silver', 'bronze'] as const).map((m) => (
-                            r.detail?.[m] ? (
-                              <span key={m} className="inline-flex items-center gap-0.5">
-                                <span className={`medal-pip medal-pip--${m}`} />{r.detail[m]}
-                              </span>
-                            ) : null
-                          ))}
-                        </span>
-                      </span>
-                      <Badge tone="brand">{r.points}</Badge>
-                      <ChevronDown size={15} className={cn('shrink-0 text-slate-400 transition-transform', isOpen && 'rotate-180')} />
-                    </button>
-                    {isOpen && (
-                      <div className="pb-3">
-                        <StandingsBreakdown base={`/championships/${eventId}`} scope={scope} scopeId={scopeId} entityId={r.entity_id} />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="hidden sm:block">
-            <Table>
-              <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                <tr>
-                  <th className="px-4 py-3">#</th>
-                  <th className="px-4 py-3">Organization</th>
-                  <th className="px-3 py-3 text-center">P</th>
-                  <th className="px-3 py-3 text-center">W</th>
-                  <th className="px-3 py-3 text-center">D</th>
-                  <th className="px-3 py-3 text-center">L</th>
-                  {showMedals && <th className="px-3 py-3 text-center">Medals</th>}
-                  <th className="px-4 py-3 text-center">Pts</th>
-                </tr>
-              </thead>
-              <tbody>
+              <div className="sm:hidden">
                 {rows.map((r, i) => {
                   const isOpen = expanded === r.entity_id;
-                  const colSpan = 7 + (showMedals ? 1 : 0);
                   return (
-                  <Fragment key={r.entity_id}>
-                  <tr
-                    onClick={() => setExpanded(isOpen ? null : r.entity_id)}
-                    className={cn('cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40', isOpen && 'bg-slate-50 dark:bg-slate-800/40')}
-                    title="Show how these points were earned"
-                  >
-                    <td className="px-4 py-3"><RankBadge pos={r.rank ?? i + 1} /></td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <ChevronDown size={16} className={cn('shrink-0 text-slate-400 transition-transform dark:text-slate-500', isOpen && 'rotate-180')} />
-                        <Avatar name={r.name} size={30} />
-                        <span className="min-w-0">
-                          <span className="block font-medium text-slate-800 dark:text-slate-200">{r.name}</span>
-                          {r.org_unit?.parent && (
-                            <span className="block text-[11.5px] text-slate-500 dark:text-slate-400">{r.org_unit.parent}</span>
-                          )}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 text-center text-slate-600 dark:text-slate-300">{r.played}</td>
-                    <td className="px-3 py-3 text-center font-semibold text-emerald-600">{r.won}</td>
-                    <td className="px-3 py-3 text-center text-slate-500 dark:text-slate-400">{r.drawn}</td>
-                    <td className="px-3 py-3 text-center text-rose-500">{r.lost}</td>
-                    {showMedals && (
-                      <td className="px-3 py-3 text-center text-sm tabular-nums">
-                        {(['gold', 'silver', 'bronze'] as const).map((m, mi) =>
-                          r.detail?.[m] ? (
-                            <span key={m} className="mr-1.5 inline-flex items-center gap-0.5 whitespace-nowrap">
-                              <span className={`medal-pip medal-pip--${m}`} />
-                              <span>{r.detail[m]}</span>
-                            </span>
-                          ) : null,
+                    <div key={r.entity_id} className="border-t border-slate-100 first:border-t-0 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setExpanded(isOpen ? null : r.entity_id)}
+                        aria-expanded={isOpen}
+                        className={cn(
+                          'flex w-full items-center gap-2.5 px-1 py-2.5 text-left transition-colors',
+                          isOpen && 'bg-slate-50 dark:bg-slate-800/40',
                         )}
-                        {!r.detail?.gold && !r.detail?.silver && !r.detail?.bronze && <span className="text-slate-300 dark:text-slate-600">-</span>}
-                      </td>
-                    )}
-                    <td className="px-4 py-3 text-center"><Badge tone="brand">{r.points}</Badge></td>
-                  </tr>
-                  {isOpen && (
-                    <tr className="bg-slate-50/60 dark:bg-slate-800/20">
-                      <td colSpan={colSpan} className="px-4 pb-4 pt-0">
-                        <StandingsBreakdown base={`/championships/${eventId}`} scope={scope} scopeId={scopeId} entityId={r.entity_id} />
-                      </td>
-                    </tr>
-                  )}
-                  </Fragment>
+                      >
+                        <RankBadge pos={r.rank ?? i + 1} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[15px] font-semibold text-slate-800 dark:text-slate-100">
+                            {r.name || r.short_name}
+                          </span>
+                          {/* The record, as one muted run. Colour still carries won
+                            and lost, and the letters carry them for anybody who
+                            cannot see the colour. */}
+                          <span className="t-meta mt-0.5 flex items-center gap-2 tabular-nums">
+                            <span>P{r.played}</span>
+                            <span className="text-emerald-600 dark:text-emerald-400">W{r.won}</span>
+                            <span>D{r.drawn}</span>
+                            <span className="text-rose-500 dark:text-rose-400">L{r.lost}</span>
+                            {showMedals && (['gold', 'silver', 'bronze'] as const).map((m) => (
+                              r.detail?.[m] ? (
+                                <span key={m} className="inline-flex items-center gap-0.5">
+                                  <span className={`medal-pip medal-pip--${m}`} />{r.detail[m]}
+                                </span>
+                              ) : null
+                            ))}
+                          </span>
+                        </span>
+                        <Badge tone="brand">{r.points}</Badge>
+                        <ChevronDown size={15} className={cn('shrink-0 text-slate-400 transition-transform', isOpen && 'rotate-180')} />
+                      </button>
+                      {isOpen && (
+                        <div className="pb-3">
+                          <StandingsBreakdown base={`/championships/${eventId}`} scope={scope} scopeId={scopeId} entityId={r.entity_id} />
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
-              </tbody>
-            </Table>
-            </div>
+              </div>
+
+              <div className="hidden sm:block">
+                <Table>
+                  <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    <tr>
+                      <th className="px-4 py-3">#</th>
+                      <th className="px-4 py-3">Organization</th>
+                      <th className="px-3 py-3 text-center">P</th>
+                      <th className="px-3 py-3 text-center">W</th>
+                      <th className="px-3 py-3 text-center">D</th>
+                      <th className="px-3 py-3 text-center">L</th>
+                      <th className="px-4 py-3 text-center">Pts</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => {
+                      const isOpen = expanded === r.organization_id;
+                      const colSpan = 7;
+                      return (
+                        <Fragment key={r.organization_id}>
+                          <tr
+                            onClick={() => setExpanded(isOpen ? null : r.organization_id)}
+                            className={cn('cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40', isOpen && 'bg-slate-50 dark:bg-slate-800/40')}
+                            title="Show how these points were earned"
+                          >
+                            <td className="px-4 py-3"><RankBadge pos={r.rank ?? i + 1} /></td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-3">
+                                <ChevronDown size={16} className={cn('shrink-0 text-slate-400 transition-transform dark:text-slate-500', isOpen && 'rotate-180')} />
+                                <Avatar name={r.organization?.name} size={30} />
+                                <span className="font-medium text-slate-800 dark:text-slate-200">{r.organization?.name}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-3 text-center text-slate-600 dark:text-slate-300">{r.played}</td>
+                            <td className="px-3 py-3 text-center font-semibold text-emerald-600">{r.won}</td>
+                            <td className="px-3 py-3 text-center text-slate-500 dark:text-slate-400">{r.drawn}</td>
+                            <td className="px-3 py-3 text-center text-rose-500">{r.lost}</td>
+                            <td className="px-4 py-3 text-center"><Badge tone="brand">{r.points}</Badge></td>
+                          </tr>
+                          {isOpen && (
+                            <tr className="bg-slate-50/60 dark:bg-slate-800/20">
+                              <td colSpan={colSpan} className="px-4 pb-4 pt-0">
+                                <StandingsBreakdown base={`/championships/${eventId}`} scope={scope} scopeId={scopeId} orgId={r.organization_id} />
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </Table>
+              </div>
             </>
           )}
         </CardBody>
