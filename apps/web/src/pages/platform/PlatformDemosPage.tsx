@@ -6,7 +6,7 @@ import {
 import { api } from '../../lib/api';
 import { fmtDateTime, useApi, useApiMutation } from '../../lib/hooks';
 import {
-  Badge, Button, Card, Checkbox, confirmDialog, EmptyState, Field, Input, Modal, Spinner, Textarea, toast,
+  Badge, Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Spinner, Textarea, toast,
 } from '../../components/ui';
 
 interface DemoSandbox {
@@ -164,7 +164,7 @@ export function PlatformDemosPage() {
 /* --------------------------- create form --------------------------- */
 
 function CreateSandboxModal({ onClose }: { onClose: () => void }) {
-  const { data: catalog = [] } = useApi<{ id: string; name: string }[]>('/sports');
+  const { data: catalog = [] } = useApi<{ id: string; name: string; icon?: string | null }[]>('/sports');
   const [clientName, setClientName] = useState('');
   const [brandColor, setBrandColor] = useState('#2563eb');
   const [visibility, setVisibility] = useState<'public' | 'private'>('public');
@@ -191,7 +191,7 @@ function CreateSandboxModal({ onClose }: { onClose: () => void }) {
 
   const submit = () => {
     if (clientName.trim().length < 2) { toast.error('Client name required', 'Enter at least 2 characters.'); return; }
-    if (sports.length < 2) { toast.error('Pick at least 2 sports'); return; }
+    if (sports.length < 1) { toast.error('Pick at least 1 sport'); return; }
     if (organiserMode === 'attach' && !attachEmail.trim()) { toast.error('Organiser email required', 'Enter the existing user’s email.'); return; }
     const org_names = Object.fromEntries(
       DEMO_CHAMP_KINDS
@@ -273,14 +273,21 @@ function CreateSandboxModal({ onClose }: { onClose: () => void }) {
           </div>
         </Field>
 
-        <Field label="Sports" hint="Each becomes a draw in all four championships.">
-          <div className="flex flex-wrap gap-x-4 gap-y-2">
-            {(catalog.length ? catalog.map((s) => s.name) : [...DEMO_DEFAULT_SPORTS]).map((name) => (
-              <label key={name} className="flex cursor-pointer items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300">
-                <Checkbox checked={sports.includes(name)} onChange={(v) => setSports((cur) => (v ? [...cur, name] : cur.filter((x) => x !== name)))} />
-                {name}
-              </label>
-            ))}
+        <Field label="Sports" hint="Tap to select — each becomes a draw in all four championships.">
+          {/* Same tap-tile grid as the championship setup's Add-sports modal. */}
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+            {(catalog.length ? catalog : [...DEMO_DEFAULT_SPORTS].map((name) => ({ id: name, name, icon: undefined as string | undefined }))).map((s) => {
+              const isSel = sports.includes(s.name);
+              return (
+                <button key={s.id} type="button"
+                  onClick={() => setSports((cur) => (isSel ? cur.filter((x) => x !== s.name) : [...cur, s.name]))}
+                  className={`relative flex flex-col items-center gap-1 rounded-xl border p-3 text-center transition ${isSel ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/15' : 'border-slate-200 hover:border-brand-300 dark:border-slate-700 dark:hover:border-brand-500/50'}`}>
+                  <span className="text-2xl">{s.icon || '◇'}</span>
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{s.name}</span>
+                  {isSel && <span className="absolute right-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-brand-500 text-xs text-white">✓</span>}
+                </button>
+              );
+            })}
           </div>
         </Field>
 

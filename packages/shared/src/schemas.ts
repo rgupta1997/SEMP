@@ -602,8 +602,10 @@ export const createDemoSandboxSchema = z.object({
   // Applied to all four seeded championships; default public.
   visibility: z.enum(CHAMPIONSHIP_VISIBILITY).optional(),
   // Sports for the demo draws; defaults to DEMO_DEFAULT_SPORTS. Validated against
-  // the sports catalog server-side so a typo fails fast instead of mid-seed.
-  sports: z.array(z.string().min(1)).min(2).max(10).optional(),
+  // the sports catalog server-side so a typo fails fast instead of mid-seed. The cap
+  // only bounds seeding time (each sport adds ~32 teams / ~160 players / ~32 fixtures
+  // across the 4 championships) - it is not a technical limit.
+  sports: z.array(z.string().min(1)).min(1).max(30).optional(),
   // Per-championship-kind participating organization names (up to 8 each);
   // missing kinds/slots fill from templates like "<Client> Institute of Technology".
   org_names: z
