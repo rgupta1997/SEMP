@@ -5,7 +5,7 @@ import { api } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
 import { CHAMPIONSHIP_STATUS } from '@semp/shared';
 import { titleCase } from '../../lib/format';
-import { Button, Card, CardBody, CardHeader, confirmDialog, Field, Input, Progress, StatusBadge, Textarea, toast } from '../../components/ui';
+import { Button, Card, CardBody, CardHeader, confirmDialog, Field, Input, Pills, Progress, StatusBadge, Textarea, toast } from '../../components/ui';
 import { StandingsRulesCard } from '../../components/StandingsRulesCard';
 
 export function EventSettingsPage() {
@@ -16,6 +16,7 @@ export function EventSettingsPage() {
   const [description, setDescription] = useState(championship.description ?? '');
   const [startDate, setStartDate] = useState(championship.start_date?.slice(0, 10) ?? '');
   const [endDate, setEndDate] = useState(championship.end_date?.slice(0, 10) ?? '');
+  const [visibility, setVisibility] = useState<'public' | 'private'>(championship.visibility === 'private' ? 'private' : 'public');
   const [saved, setSaved] = useState(false);
 
   const save = useApiMutation(
@@ -43,10 +44,18 @@ export function EventSettingsPage() {
           </div>
           <Field label="Host city / venue"><Input value={venue} onChange={(e) => setVenue(e.target.value)} /></Field>
           <Field label="Description"><Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
+          <Field label="Visibility" hint={visibility === 'private'
+            ? 'Hidden from Discover - organizations can only join through your invitations.'
+            : 'Listed in Discover so any organization can find it and apply.'}>
+            <Pills value={visibility} onChange={(v) => setVisibility(v as 'public' | 'private')} options={[
+              { value: 'public', label: 'Public' },
+              { value: 'private', label: 'Private (invite-only)' },
+            ]} ariaLabel="Championship visibility" />
+          </Field>
           <div className="flex items-center justify-end gap-3">
             {saved && <span className="text-sm font-medium text-emerald-600">Saved ✓</span>}
             <Button disabled={save.isPending}
-              onClick={() => save.mutate({ name, venue: venue || undefined, description: description || undefined, start_date: startDate, end_date: endDate }, { onSuccess: () => toast.success('Championship saved'), onError: (e: any) => toast.error(e.message) })}>
+              onClick={() => save.mutate({ name, venue: venue || undefined, description: description || undefined, start_date: startDate, end_date: endDate, visibility }, { onSuccess: () => toast.success('Championship saved'), onError: (e: any) => toast.error(e.message) })}>
               {save.isPending ? 'Saving…' : 'Save changes'}
             </Button>
           </div>

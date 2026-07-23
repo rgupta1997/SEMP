@@ -8,6 +8,7 @@ import { BackButton, Button, cn, Spinner, StatusBadge, toast } from '../../compo
 export interface EventDetail {
   id: string; name: string; slug: string; status: string;
   venue?: string; description?: string; start_date: string; end_date: string;
+  visibility?: string; // 'public' (default) | 'private'
 }
 interface EventCtx { championship: EventDetail; eventId: string; canManage: boolean }
 export const useEvent = () => useOutletContext<EventCtx>();

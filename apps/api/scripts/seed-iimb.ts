@@ -16,8 +16,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
-import { tieTemplateFor, eventTemplateFor } from '../../web/src/features/scoring/templates';
-import { initTie, decideRubber, tieWinner, rubbersWon } from '../../web/src/features/scoring/tie';
+import { tieTemplateFor, eventTemplateFor, initTie, decideRubber, tieWinner, rubbersWon } from '@semp/shared';
 import { recomputeStandings } from '../src/modules/standings/standings.service.js';
 
 const prisma = new PrismaClient();

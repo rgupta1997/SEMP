@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  DEMO_REQUEST_STATUS, FEEDBACK_STATUS, ENTRY_TYPE, ENROLLMENT_STATUS, CHAMPIONSHIP_STATUS, FIXTURE_STATUS, GROUND_TYPE,
+  DEMO_REQUEST_STATUS, FEEDBACK_STATUS, ENTRY_TYPE, ENROLLMENT_STATUS, CHAMPIONSHIP_STATUS, CHAMPIONSHIP_VISIBILITY, FIXTURE_STATUS, GROUND_TYPE,
   NOTIFICATION_AUDIENCE, NOTIFICATION_REACTIONS, ORGANIZATION_MEMBER_ROLE,
   SPONSOR_TIER, STANDINGS_RULE_SCOPE, STANDINGS_TIEBREAKER, TEAM_MEMBER_ROLE,
   TEAM_STATUS, TOURNAMENT_DISCIPLINE_STATUS, TOURNAMENT_STATUS,
@@ -187,6 +187,8 @@ export const createChampionshipSchema = z.object({
   start_date: z.coerce.date(),
   end_date: z.coerce.date(),
   status: z.enum(CHAMPIONSHIP_STATUS).optional(),
+  // 'private' hides the championship from Discover/Browse; orgs join by invite only.
+  visibility: z.enum(CHAMPIONSHIP_VISIBILITY).optional(),
 });
 export const updateChampionshipSchema = createChampionshipSchema.partial();
 export const updateChampionshipStatusSchema = z.object({ status: z.enum(CHAMPIONSHIP_STATUS) });
@@ -589,5 +591,40 @@ export const createFeedbackSchema = z.object({
 export const updateFeedbackSchema = z
   .object({ status: z.enum(FEEDBACK_STATUS).optional() })
   .refine((d) => d.status !== undefined, { message: 'Nothing to update' });
+
+// ---------- Demo sandboxes ----------
+// Super-admin creates a personalized, isolated demo environment per client. Only
+// client_name is required; everything else has defaults derived from it (the form
+// pre-fills them and the admin tweaks only when the client wants something specific).
+export const createDemoSandboxSchema = z.object({
+  client_name: z.string().min(2).max(60),
+  brand_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  // Applied to all four seeded championships; default public.
+  visibility: z.enum(CHAMPIONSHIP_VISIBILITY).optional(),
+  // Sports for the demo draws; defaults to DEMO_DEFAULT_SPORTS. Validated against
+  // the sports catalog server-side so a typo fails fast instead of mid-seed.
+  sports: z.array(z.string().min(1)).min(2).max(10).optional(),
+  // Per-championship-kind participating organization names (up to 8 each);
+  // missing kinds/slots fill from templates like "<Client> Institute of Technology".
+  org_names: z
+    .object({
+      college: z.array(z.string().min(1).max(120)).max(8).optional(),
+      school: z.array(z.string().min(1).max(120)).max(8).optional(),
+      corporate: z.array(z.string().min(1).max(120)).max(8).optional(),
+      public: z.array(z.string().min(1).max(120)).max(8).optional(),
+    })
+    .optional(),
+  // Real stakeholder names to sprinkle in as team captains so the client sees
+  // familiar people on rosters and podiums.
+  custom_names: z.array(z.string().min(2).max(80)).max(20).optional(),
+  organiser: z
+    .object({
+      mode: z.enum(['create', 'attach']),
+      email: z.string().email().optional(), // required when mode = 'attach'
+    })
+    .refine((o) => o.mode !== 'attach' || !!o.email, { message: 'Email is required to attach an existing user' })
+    .default({ mode: 'create' }),
+});
+export type CreateDemoSandboxInput = z.infer<typeof createDemoSandboxSchema>;
 
 export { ENROLLMENT_STATUS };

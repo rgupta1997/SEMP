@@ -10,6 +10,7 @@ interface Championship {
   id: string; name: string; slug: string; status: string;
   venue?: string | null; start_date: string; end_date: string;
   sports?: string[];
+  visibility?: string; // private ones appear only for people already involved
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -163,7 +164,10 @@ export function DiscoverPage() {
               <Card key={c.id} className="flex flex-col p-5">
                 <div className="flex items-start justify-between">
                   <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-50 text-lg font-black text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">{c.name.slice(0, 1)}</span>
-                  <StatusBadge status={c.status} />
+                  <div className="flex items-center gap-1.5">
+                    {c.visibility === 'private' && <StatusBadge status="private" label="Private" />}
+                    <StatusBadge status={c.status} />
+                  </div>
                 </div>
                 <h3 className="mt-3 font-semibold text-slate-900 dark:text-slate-100">{c.name}</h3>
                 <p className="text-sm text-slate-500 dark:text-slate-400">{c.venue || 'Venue TBD'} · {fmtDateRange(c.start_date, c.end_date)}</p>

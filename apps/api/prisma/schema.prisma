@@ -25,19 +25,19 @@ model disciplines {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model championship_organizations {
-  id                                                  String        @id(map: "event_institutions_pkey") @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  championship_id                                     String        @db.Uuid
-  organization_id                                     String        @db.Uuid
-  status                                              String        @default("pending") @db.VarChar
-  applied_by                                          String        @db.Uuid
-  reviewed_by                                         String?       @db.Uuid
+  id                                                  String         @id(map: "event_institutions_pkey") @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  championship_id                                     String         @db.Uuid
+  organization_id                                     String         @db.Uuid
+  status                                              String         @default("pending") @db.VarChar
+  applied_by                                          String         @db.Uuid
+  reviewed_by                                         String?        @db.Uuid
   rejection_note                                      String?
-  applied_at                                          DateTime      @default(now()) @db.Timestamptz(6)
-  reviewed_at                                         DateTime?     @db.Timestamptz(6)
-  users_championship_organizations_applied_byTousers  users         @relation("championship_organizations_applied_byTousers", fields: [applied_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "event_institutions_applied_by_fkey")
-  championships                                       championships @relation(fields: [championship_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "event_institutions_event_id_fkey")
-  organizations                                       organizations @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "event_institutions_institution_id_fkey")
-  users_championship_organizations_reviewed_byTousers users?        @relation("championship_organizations_reviewed_byTousers", fields: [reviewed_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "event_institutions_reviewed_by_fkey")
+  applied_at                                          DateTime       @default(now()) @db.Timestamptz(6)
+  reviewed_at                                         DateTime?      @db.Timestamptz(6)
+  users_championship_organizations_applied_byTousers  users          @relation("championship_organizations_applied_byTousers", fields: [applied_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "event_institutions_applied_by_fkey")
+  championships                                       championships  @relation(fields: [championship_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "event_institutions_event_id_fkey")
+  organizations                                       organizations  @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "event_institutions_institution_id_fkey")
+  users_championship_organizations_reviewed_byTousers users?         @relation("championship_organizations_reviewed_byTousers", fields: [reviewed_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "event_institutions_reviewed_by_fkey")
   team_entries                                        team_entries[]
 
   @@unique([championship_id, organization_id], map: "event_institutions_event_id_institution_id_key")
@@ -45,6 +45,7 @@ model championship_organizations {
   @@index([championship_id], map: "idx_event_institutions_event_id")
   @@index([organization_id], map: "idx_event_institutions_institution_id")
   @@index([reviewed_by], map: "idx_event_institutions_reviewed_by")
+  @@index([championship_id, status], map: "idx_event_institutions_event_status")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -57,11 +58,13 @@ model championships {
   start_date                 DateTime                     @db.Date
   end_date                   DateTime                     @db.Date
   status                     String                       @default("draft") @db.VarChar
+  visibility                 String                       @default("public") @db.VarChar
   created_at                 DateTime                     @default(now()) @db.Timestamptz(6)
   updated_at                 DateTime                     @default(now()) @db.Timestamptz(6)
   championship_invitations   championship_invitations[]
   championship_officials     championship_officials[]
   championship_organizations championship_organizations[]
+  feedback                   feedback[]
   notifications              notifications[]
   sponsors                   sponsors[]
   standings                  standings[]
@@ -108,6 +111,8 @@ model fixtures {
   @@index([tournament_discipline_id], map: "idx_fixtures_tournament_discipline_id")
   @@index([venue_ground_id], map: "idx_fixtures_venue_ground_id")
   @@index([winner_team_id], map: "idx_fixtures_winner_team_id")
+  @@index([tournament_discipline_id, pool_number, bracket_position, created_at], map: "idx_fixtures_draw_ordering")
+  @@index([official_id, scheduled_at], map: "idx_fixtures_official_scheduled")
 }
 
 model organizations {
@@ -142,6 +147,7 @@ model organization_members {
   @@unique([user_id, organization_id])
   @@index([organization_id], map: "idx_organization_members_organization_id")
   @@index([user_id], map: "idx_organization_members_user_id")
+  @@index([organization_id, status], map: "idx_organization_members_org_status")
 }
 
 model permissions {
@@ -216,8 +222,8 @@ model teams {
   fixtures_fixtures_away_team_idToteams   fixtures[]     @relation("fixtures_away_team_idToteams")
   fixtures_fixtures_home_team_idToteams   fixtures[]     @relation("fixtures_home_team_idToteams")
   fixtures_fixtures_winner_team_idToteams fixtures[]     @relation("fixtures_winner_team_idToteams")
-  team_members                            team_members[]
   team_entries                            team_entries[]
+  team_members                            team_members[]
   organizations                           organizations  @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "teams_institution_id_fkey")
   sports                                  sports         @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -234,10 +240,10 @@ model team_entries {
   tournament_discipline_id     String?                    @db.Uuid
   status                       String                     @default("forming") @db.VarChar
   created_at                   DateTime                   @default(now()) @db.Timestamptz(6)
-  teams                        teams                      @relation(fields: [team_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  organizations                organizations              @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   championships                championships              @relation(fields: [championship_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   championship_organizations   championship_organizations @relation(fields: [championship_organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  organizations                organizations              @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  teams                        teams                      @relation(fields: [team_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tournament_disciplines       tournament_disciplines?    @relation(fields: [tournament_discipline_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([team_id, championship_id], map: "uq_team_entries_team_championship")
@@ -336,6 +342,7 @@ model user_championship_roles {
   @@index([championship_id], map: "idx_user_event_roles_event_id")
   @@index([role_id], map: "idx_user_event_roles_role_id")
   @@index([user_id], map: "idx_user_event_roles_user_id")
+  @@index([user_id, role_id], map: "idx_user_event_roles_user_role")
 }
 
 model users {
@@ -359,7 +366,10 @@ model users {
   championship_organizations_championship_organizations_applied_byTousers  championship_organizations[] @relation("championship_organizations_applied_byTousers")
   championship_organizations_championship_organizations_reviewed_byTousers championship_organizations[] @relation("championship_organizations_reviewed_byTousers")
   demo_requests                                                            demo_requests[]
+  demo_sandboxes_demo_sandboxes_created_byTousers                          demo_sandboxes[]             @relation("demo_sandboxes_created_byTousers")
+  demo_sandboxes_demo_sandboxes_organiser_user_idTousers                   demo_sandboxes[]             @relation("demo_sandboxes_organiser_user_idTousers")
   feedback                                                                 feedback[]
+  feedback_feedback_user_idTousers                                         feedback[]                   @relation("feedback_user_idTousers")
   fixture_awards                                                           fixture_awards[]
   fixtures                                                                 fixtures[]
   notification_reactions                                                   notification_reactions[]
@@ -369,9 +379,12 @@ model users {
   team_members                                                             team_members[]
   user_championship_roles_user_championship_roles_assigned_byTousers       user_championship_roles[]    @relation("user_championship_roles_assigned_byTousers")
   user_championship_roles_user_championship_roles_user_idTousers           user_championship_roles[]    @relation("user_championship_roles_user_idTousers")
+  user_invitations_user_invitations_accepted_user_idTousers                user_invitations[]           @relation("user_invitations_accepted_user_idTousers")
+  user_invitations_user_invitations_invited_byTousers                      user_invitations[]           @relation("user_invitations_invited_byTousers")
   organizations                                                            organizations?               @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "users_institution_id_fkey")
 
   @@index([organization_id], map: "idx_users_organization_id")
+  @@index([organization_id, account_type], map: "idx_users_institution_account_type")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -457,13 +470,13 @@ model notifications {
   id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   championship_id        String?                  @db.Uuid
   sender_id              String?                  @db.Uuid
-  organization_id        String?                  @db.Uuid
-  target_user_id         String?                  @db.Uuid
   type                   String                   @default("manual") @db.VarChar
   audience               String                   @default("all") @db.VarChar
   title                  String                   @db.VarChar
   body                   String?
   created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  organization_id        String?                  @db.Uuid
+  target_user_id         String?                  @db.Uuid
   notification_reactions notification_reactions[]
   notification_reads     notification_reads[]
   championships          championships?           @relation(fields: [championship_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "notifications_event_id_fkey")
@@ -497,20 +510,19 @@ model championship_invitations {
   @@index([organization_id], map: "idx_championship_invitations_organization")
 }
 
-// Invite a person by mobile to a role (org member / co-organiser / official),
-// auto-applied when they sign in with that number. FK constraints exist in the DB
-// but are intentionally not modelled as Prisma relations to keep this additive.
 model user_invitations {
-  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  mobile           String    @db.VarChar
-  target_type      String    @db.VarChar
-  target_id        String    @db.Uuid
-  role             String?   @db.VarChar
-  invited_by       String    @db.Uuid
-  status           String    @default("pending") @db.VarChar
-  accepted_user_id String?   @db.Uuid
-  created_at       DateTime  @default(now()) @db.Timestamptz(6)
-  responded_at     DateTime? @db.Timestamptz(6)
+  id                                             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  mobile                                         String    @db.VarChar
+  target_type                                    String    @db.VarChar
+  target_id                                      String    @db.Uuid
+  role                                           String?   @db.VarChar
+  invited_by                                     String    @db.Uuid
+  status                                         String    @default("pending") @db.VarChar
+  accepted_user_id                               String?   @db.Uuid
+  created_at                                     DateTime  @default(now()) @db.Timestamptz(6)
+  responded_at                                   DateTime? @db.Timestamptz(6)
+  users_user_invitations_accepted_user_idTousers users?    @relation("user_invitations_accepted_user_idTousers", fields: [accepted_user_id], references: [id], onUpdate: NoAction)
+  users_user_invitations_invited_byTousers       users     @relation("user_invitations_invited_byTousers", fields: [invited_by], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([mobile, status], map: "idx_user_invitations_mobile")
   @@index([target_type, target_id], map: "idx_user_invitations_target")
@@ -587,19 +599,45 @@ model demo_requests {
 /// User feedback from the public pages + in-app shell. championship_id / user_id are kept
 /// as scalar columns (DB FKs exist) - only handled_by navigates, mirroring demo_requests.
 model feedback {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  message         String
-  name            String?  @db.VarChar
-  email           String?  @db.VarChar
-  context         String?  @db.VarChar
-  championship_id String?  @db.Uuid
-  user_id         String?  @db.Uuid
-  status          String   @default("new") @db.VarChar
-  handled_by      String?  @db.Uuid
-  created_at      DateTime @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime @default(now()) @db.Timestamptz(6)
-  users           users?   @relation(fields: [handled_by], references: [id], onUpdate: NoAction)
+  id                            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  message                       String
+  name                          String?        @db.VarChar
+  email                         String?        @db.VarChar
+  context                       String?        @db.VarChar
+  championship_id               String?        @db.Uuid
+  user_id                       String?        @db.Uuid
+  status                        String         @default("new") @db.VarChar
+  handled_by                    String?        @db.Uuid
+  created_at                    DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at                    DateTime       @default(now()) @db.Timestamptz(6)
+  championships                 championships? @relation(fields: [championship_id], references: [id], onUpdate: NoAction)
+  users                         users?         @relation(fields: [handled_by], references: [id], onUpdate: NoAction)
+  users_feedback_user_idTousers users?         @relation("feedback_user_idTousers", fields: [user_id], references: [id], onUpdate: NoAction)
 
   @@index([created_at(sort: Desc)], map: "idx_feedback_created")
   @@index([status], map: "idx_feedback_status")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model demo_sandboxes {
+  id                                            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  client_name                                   String    @db.VarChar
+  slug                                          String    @unique @db.VarChar
+  email_domain                                  String    @unique @db.VarChar
+  brand_color                                   String?   @db.VarChar
+  config                                        Json      @default("{}")
+  manifest                                      Json      @default("{}")
+  organiser_user_id                             String?   @db.Uuid
+  organiser_email                               String    @db.VarChar
+  organiser_password                            String?   @db.VarChar
+  status                                        String    @default("seeding") @db.VarChar
+  error                                         String?
+  created_by                                    String?   @db.Uuid
+  created_at                                    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                                    DateTime  @default(now()) @db.Timestamptz(6)
+  last_seeded_at                                DateTime? @db.Timestamptz(6)
+  users_demo_sandboxes_created_byTousers        users?    @relation("demo_sandboxes_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction)
+  users_demo_sandboxes_organiser_user_idTousers users?    @relation("demo_sandboxes_organiser_user_idTousers", fields: [organiser_user_id], references: [id], onUpdate: NoAction)
+
+  @@index([created_at(sort: Desc)], map: "idx_demo_sandboxes_created")
 }

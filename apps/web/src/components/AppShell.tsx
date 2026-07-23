@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Compass, Flag, Landmark, Layers, LayoutGrid, LayoutList, Lock,
+  Compass, Flag, FlaskConical, Landmark, Layers, LayoutGrid, LayoutList, Lock,
   Mail, Medal, Menu, MessageSquare, Moon, Plus, Sun, Trophy, Upload, User, Users, X,
 } from 'lucide-react';
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
@@ -41,6 +41,7 @@ function navFor(role: AppRole): NavGroup[] {
         { to: '/platform/users', label: 'All Users', icon: <Users size={16} /> },
         { to: '/platform/import-setup', label: 'Import Setup', icon: <Upload size={16} /> },
         { to: '/platform/demo-requests', label: 'Demo Requests', icon: <Mail size={16} /> },
+        { to: '/platform/demos', label: 'Demo Sandboxes', icon: <FlaskConical size={16} /> },
         { to: '/platform/feedback', label: 'Feedback', icon: <MessageSquare size={16} /> },
       ],
     }];

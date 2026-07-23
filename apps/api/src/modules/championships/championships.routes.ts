@@ -85,12 +85,49 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // organiser of THIS championship (or super) - for mutations on /:id and its children.
   const ownChampionship = guards.championshipManager(async (req) => req.params.id);
 
+  // Private championships are visible only to people already involved: any
+  // championship role (organiser/official), active officiating, playing on an
+  // entered team, or belonging to an org that is enrolled or invited. Everyone
+  // else simply never sees them (Discover, Browse, or by direct id).
+  const involvedChampionshipIds = async (userId: string): Promise<Set<string>> => {
+    const [roleRows, officialRows, memberRows, orgRows] = await Promise.all([
+      prisma.user_championship_roles.findMany({ where: { user_id: userId }, select: { championship_id: true } }),
+      prisma.championship_officials.findMany({ where: { user_id: userId, is_active: true }, select: { championship_id: true } }),
+      prisma.team_members.findMany({ where: { user_id: userId, is_active: true }, select: { teams: { select: { team_entries: { select: { championship_id: true } } } } } }),
+      prisma.organization_members.findMany({ where: { user_id: userId, status: 'active' }, select: { organization_id: true } }),
+    ]);
+    const ids = new Set<string>();
+    for (const r of roleRows) ids.add(r.championship_id);
+    for (const o of officialRows) ids.add(o.championship_id);
+    for (const m of memberRows) for (const e of m.teams?.team_entries ?? []) ids.add(e.championship_id);
+    const orgIds = orgRows.map((o) => o.organization_id);
+    if (orgIds.length) {
+      const [enrolled, invited] = await Promise.all([
+        prisma.championship_organizations.findMany({ where: { organization_id: { in: orgIds } }, select: { championship_id: true } }),
+        prisma.championship_invitations.findMany({ where: { organization_id: { in: orgIds } }, select: { championship_id: true } }),
+      ]);
+      for (const e of enrolled) ids.add(e.championship_id);
+      for (const i of invited) ids.add(i.championship_id);
+    }
+    return ids;
+  };
+
+  const canSeeChampionship = async (user: { id: string; isSuperAdmin?: boolean }, championship: { id: string; visibility: string }): Promise<boolean> => {
+    if (championship.visibility !== 'private' || user.isSuperAdmin) return true;
+    return (await involvedChampionshipIds(user.id)).has(championship.id);
+  };
+
   // -------------------------------------------------------------------------
-  // DISCOVER - every championship, open to any authenticated user (spectators
-  // included). The "Host" and "Championships" views are derived from /mine.
+  // DISCOVER - every PUBLIC championship, open to any authenticated user
+  // (spectators included), plus private ones the user is involved in. The
+  // "Host" and "Championships" views are derived from /mine.
   // -------------------------------------------------------------------------
-  router.get('/', asyncHandler(async (_req, res) => {
+  router.get('/', asyncHandler(async (req, res) => {
+    const where = req.user!.isSuperAdmin
+      ? {}
+      : { OR: [{ visibility: 'public' }, { id: { in: [...(await involvedChampionshipIds(req.user!.id))] } }] };
     const championships = await prisma.championships.findMany({
+      where,
       orderBy: { created_at: 'desc' },
       include: championshipSportsInclude,
     });
@@ -143,10 +180,12 @@ export function makeEventsRouter(prisma: Prisma): Router {
     res.json(championships.map((c) => ({ ...withSports(c), my_roles: [...(roles.get(c.id) ?? [])] })));
   }));
 
-  // GET single championship
+  // GET single championship. A private one 404s for outsiders (same as not existing,
+  // so its presence is never leaked by direct id).
   router.get('/:id', asyncHandler(async (req, res) => {
     const championship = await prisma.championships.findUnique({ where: { id: req.params.id } });
     if (!championship) throw new NotFoundError('Championship');
+    if (!(await canSeeChampionship(req.user!, championship))) throw new NotFoundError('Championship');
     res.json(championship);
   }));
 

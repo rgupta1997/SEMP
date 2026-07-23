@@ -2,6 +2,12 @@
 // the console scores it and how the headline (home_score/away_score) is derived.
 
 import type { EventTypeSpec } from '@semp/shared';
+import { initState, hydrate, type MatchState } from '@semp/shared';
+
+// MatchState + init/hydrate now live in @semp/shared (the API's demo seeder builds
+// tie states too); re-export so existing `from './engine'` imports keep working.
+export { initState, hydrate };
+export type { MatchState };
 
 export type Archetype = 'points' | 'sets' | 'rally' | 'cricket' | 'time';
 
@@ -87,17 +93,6 @@ export function sportDef(name?: string | null): SportDef {
   return { archetype: 'points', segLabel: 'Period', segMax: 2, pointButtons: [1], ...(d ?? {}) } as SportDef;
 }
 
-export interface MatchState {
-  a: number; b: number;              // current-period points (or running points)
-  seg: number;                       // current period (1-based)
-  segScores: [number, number][];     // finished period scores
-  segsA: number; segsB: number;      // periods/sets/games won (sets/rally)
-  inn: number; batting: 'A' | 'B';   // cricket
-  runsA: number; wktA: number; runsB: number; wktB: number;
-  ballsA: number; ballsB: number;    // cricket: legal balls bowled per innings (overs = balls/6)
-  ended?: boolean;                   // final period frozen (points archetype) - locks scoring until reopened
-}
-
 // Balls → cricket overs notation, e.g. 92 → "15.2" (15 overs, 2 balls).
 export function oversStr(balls: number): string {
   const b = Math.max(0, Math.floor(balls || 0));
@@ -117,18 +112,6 @@ export function cricketScore(s: MatchState, side: 'A' | 'B'): string {
 }
 
 export interface LogEntry { t: string; team?: 'A' | 'B'; txt: string; player?: string; kind?: string }
-
-export function initState(): MatchState {
-  return { a: 0, b: 0, seg: 1, segScores: [], segsA: 0, segsB: 0, inn: 1, batting: 'A', runsA: 0, wktA: 0, runsB: 0, wktB: 0, ballsA: 0, ballsB: 0 };
-}
-
-// Tolerant rehydrate from a persisted (possibly partial) snapshot.
-export function hydrate(raw: any): MatchState {
-  const s = initState();
-  if (raw && typeof raw === 'object') Object.assign(s, raw);
-  if (!Array.isArray(s.segScores)) s.segScores = [];
-  return s;
-}
 
 export type Action =
   | { type: 'POINT'; team?: 'A' | 'B'; pts?: number; label?: string }

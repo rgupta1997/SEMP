@@ -20,10 +20,20 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
 
   // Organization applies to a championship (status: pending, stamps applied_by).
   router.post('/championships/:eventId/enroll', guards.enrollSelf, validateBody(enrollOrganizationSchema), asyncHandler(async (req, res) => {
-    const championship = await prisma.championships.findUnique({ where: { id: req.params.eventId }, select: { status: true } });
+    const championship = await prisma.championships.findUnique({ where: { id: req.params.eventId }, select: { status: true, visibility: true } });
     if (!championship) throw new NotFoundError('Championship');
     if (championship.status !== 'registration_open') {
       throw new BusinessRuleError('This championship is not open for registration');
+    }
+    // Private championships are invite-only: an org may enroll only if the organiser
+    // has invited it (the usual path is accepting the invitation, which enrolls
+    // directly - this guard just closes the apply-by-id side door).
+    if (championship.visibility === 'private') {
+      const invited = await prisma.championship_invitations.findFirst({
+        where: { championship_id: req.params.eventId, organization_id: req.body.organization_id },
+        select: { id: true },
+      });
+      if (!invited) throw new BusinessRuleError('This championship is private - organizations join by invitation from the organiser.');
     }
     const existing = await prisma.championship_organizations.findUnique({
       where: { championship_id_organization_id: { championship_id: req.params.eventId, organization_id: req.body.organization_id } },

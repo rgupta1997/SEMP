@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useApi, useApiMutation } from '../../lib/hooks';
-import { BackButton, Button, Card, Field, Input, Spinner, Stepper, Textarea, toast } from '../../components/ui';
+import { BackButton, Button, Card, Field, Input, Pills, Spinner, Stepper, Textarea, toast } from '../../components/ui';
 import { SportsTab } from './setup/SportsTab';
 import { InvitePanel } from '../../components/InvitePanel';
 
@@ -29,6 +29,7 @@ export function CreateEventWizard() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [description, setDescription] = useState('');
+  const [visibility, setVisibility] = useState<'public' | 'private'>('public');
   const [error, setError] = useState<string | null>(null);
   const effectiveSlug = slugTouched ? slug : slugify(name);
 
@@ -47,7 +48,7 @@ export function CreateEventWizard() {
     setError(null);
     if (!venue.trim()) { setError('Host city is required'); return; }
     if (!startDate || !endDate) { setError('Start and end dates are required'); return; }
-    const body = { name, slug: effectiveSlug, venue: venue.trim(), description: description || undefined, start_date: startDate, end_date: endDate };
+    const body = { name, slug: effectiveSlug, venue: venue.trim(), description: description || undefined, start_date: startDate, end_date: endDate, visibility };
     if (eventId) {
       update.mutate(body, {
         onSuccess: () => setStep(1),
@@ -102,6 +103,14 @@ export function CreateEventWizard() {
               </div>
               <Field label="Host city" hint="Required - used as your championship's default venue."><Input value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="Mumbai" required /></Field>
               <Field label="Description"><Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="A short summary of the championship…" /></Field>
+              <Field label="Visibility" hint={visibility === 'private'
+                ? 'Hidden from Discover - organizations can only join through your invitations.'
+                : 'Listed in Discover so any organization can find it and apply.'}>
+                <Pills value={visibility} onChange={(v) => setVisibility(v as 'public' | 'private')} options={[
+                  { value: 'public', label: 'Public' },
+                  { value: 'private', label: 'Private (invite-only)' },
+                ]} ariaLabel="Championship visibility" />
+              </Field>
               {error && <p className="mb-3 rounded-lg bg-rose-50 dark:bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">{error}</p>}
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="ghost" onClick={() => navigate('/championships')}>Cancel</Button>

@@ -15,13 +15,16 @@ function masterStaleTime(path: string | null): number | undefined {
     : undefined; // undefined → fall back to the global 30s default
 }
 
-// GET list/item with the path as the cache key.
-export function useApi<T = any>(path: string | null, enabled = true) {
+// GET list/item with the path as the cache key. `opts.refetchInterval` polls the
+// endpoint (ms, or a function of the query so polling can stop when the data
+// settles) - used by screens watching a background job (e.g. demo sandboxes).
+export function useApi<T = any>(path: string | null, enabled = true, opts?: { refetchInterval?: number | false | ((query: any) => number | false) }) {
   return useQuery<T>({
     queryKey: [path],
     queryFn: () => api('GET', path as string),
     enabled: enabled && path !== null,
     staleTime: masterStaleTime(path),
+    refetchInterval: opts?.refetchInterval,
   });
 }
 

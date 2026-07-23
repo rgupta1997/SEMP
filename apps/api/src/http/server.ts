@@ -32,6 +32,7 @@ import { makeFixturesRouter } from '../modules/fixtures/fixtures.routes.js';
 import { makeNotificationsRouter } from '../modules/notifications/notifications.routes.js';
 import { makeDemoRequestsRouter } from '../modules/marketing/demo-requests.routes.js';
 import { makeFeedbackRouter } from '../modules/marketing/feedback.routes.js';
+import { makeDemosRouter } from '../modules/demos/demos.routes.js';
 import { BusinessRuleError } from '../shared/errors.js';
 
 export function buildApp(prisma: Prisma) {
@@ -74,6 +75,9 @@ export function buildApp(prisma: Prisma) {
   api.use(requireAuth);
 
   const guards = makeGuards(prisma);
+
+  // ----- Demo sandboxes - super-admin only (guards are inside the router) -----
+  api.use('/demos', makeDemosRouter(prisma));
 
   // ----- "Me"-scoped read endpoints (resolved from the authenticated user) -----
   api.use('/', makeMeRouter(prisma));

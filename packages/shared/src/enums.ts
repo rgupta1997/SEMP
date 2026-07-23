@@ -120,6 +120,30 @@ export type DemoRequestRole = (typeof DEMO_REQUEST_ROLES)[number];
 export const FEEDBACK_STATUS = ['new', 'reviewing', 'resolved', 'closed'] as const;
 export type FeedbackStatus = (typeof FEEDBACK_STATUS)[number];
 
+// ---------- Championship visibility ----------
+// 'public' championships appear in Discover/Browse for everyone; 'private' ones are
+// visible only to people already involved (organiser, official, enrolled/invited org
+// members) and organizations join them by invitation only.
+export const CHAMPIONSHIP_VISIBILITY = ['public', 'private'] as const;
+export type ChampionshipVisibility = (typeof CHAMPIONSHIP_VISIBILITY)[number];
+
+// ---------- Demo sandboxes ----------
+// Lifecycle of a per-client demo environment. Busy states (seeding/resetting/
+// deleting) run in a background job; ready/error are the resting states.
+export const DEMO_SANDBOX_STATUS = ['seeding', 'ready', 'resetting', 'deleting', 'error'] as const;
+export type DemoSandboxStatus = (typeof DEMO_SANDBOX_STATUS)[number];
+
+// Sports pre-selected in the sandbox create form. Each must exist in the global
+// sports catalog; the form lets the admin add/remove from the full catalog.
+export const DEMO_DEFAULT_SPORTS = [
+  'Badminton', 'Table Tennis', 'Football', 'Basketball', 'Cricket', 'Volleyball',
+] as const;
+
+// The four championship archetypes every sandbox contains, each frozen at a
+// different lifecycle stage for the demo narrative.
+export const DEMO_CHAMP_KINDS = ['college', 'school', 'corporate', 'public'] as const;
+export type DemoChampKind = (typeof DEMO_CHAMP_KINDS)[number];
+
 // Legal championship status transitions (enforced by the ChampionshipLifecycle domain service).
 export const CHAMPIONSHIP_STATUS_TRANSITIONS: Record<ChampionshipStatus, ChampionshipStatus[]> = {
   draft: ['registration_open'],
