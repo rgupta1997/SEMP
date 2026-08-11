@@ -1,5 +1,9 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // "native" keeps local dev / Render (Debian-based build image) working as-is.
+  // "rhel-openssl-3.0.x" is the engine AWS Lambda's nodejs20.x (Amazon Linux 2023,
+  // x86_64) runtime needs — required so the Lambda bundle ships a matching binary.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {

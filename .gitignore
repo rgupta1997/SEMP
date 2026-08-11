@@ -7,6 +7,8 @@ build/
 *.log
 .DS_Store
 apps/api/src/infra/prisma/generated/
+apps/api/dist-lambda/
+apps/api/dist-lambda.zip
 supabase/.temp/
 LIVE_SIMULATION_TEST.md
 TESTING_GUIDE.md
