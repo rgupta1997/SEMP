@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
@@ -58,9 +59,9 @@ model championships {
   start_date                 DateTime                     @db.Date
   end_date                   DateTime                     @db.Date
   status                     String                       @default("draft") @db.VarChar
-  visibility                 String                       @default("public") @db.VarChar
   created_at                 DateTime                     @default(now()) @db.Timestamptz(6)
   updated_at                 DateTime                     @default(now()) @db.Timestamptz(6)
+  visibility                 String                       @default("public") @db.VarChar
   championship_invitations   championship_invitations[]
   championship_officials     championship_officials[]
   championship_organizations championship_organizations[]
@@ -98,6 +99,7 @@ model fixtures {
   live_state                           Json                   @default("{}")
   live_log                             Json                   @default("[]")
   fixture_awards                       fixture_awards[]
+  fixture_events                       fixture_events[]
   teams_fixtures_away_team_idToteams   teams?                 @relation("fixtures_away_team_idToteams", fields: [away_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   teams_fixtures_home_team_idToteams   teams?                 @relation("fixtures_home_team_idToteams", fields: [home_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users                                users?                 @relation(fields: [official_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -371,11 +373,12 @@ model users {
   feedback                                                                 feedback[]
   feedback_feedback_user_idTousers                                         feedback[]                   @relation("feedback_user_idTousers")
   fixture_awards                                                           fixture_awards[]
+  fixture_events                                                           fixture_events[]
   fixtures                                                                 fixtures[]
+  notification_cursors                                                     notification_cursors?
   notification_reactions                                                   notification_reactions[]
   notification_reads                                                       notification_reads[]
   notifications                                                            notifications[]
-  notification_cursors                                                     notification_cursors?
   organization_members                                                     organization_members[]
   team_members                                                             team_members[]
   user_championship_roles_user_championship_roles_assigned_byTousers       user_championship_roles[]    @relation("user_championship_roles_assigned_byTousers")
@@ -475,12 +478,12 @@ model notifications {
   audience               Json
   title                  String                   @db.VarChar
   body                   String?
-  created_at              DateTime                 @default(now()) @db.Timestamptz(6)
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
   organization_id        String?                  @db.Uuid
   target_user_id         String?                  @db.Uuid
+  notification_cursors   notification_cursors[]
   notification_reactions notification_reactions[]
   notification_reads     notification_reads[]
-  notification_cursors   notification_cursors[]
   championships          championships?           @relation(fields: [championship_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "notifications_event_id_fkey")
   users                  users?                   @relation(fields: [sender_id], references: [id], onUpdate: NoAction)
 
@@ -653,4 +656,25 @@ model demo_sandboxes {
   users_demo_sandboxes_organiser_user_idTousers users?    @relation("demo_sandboxes_organiser_user_idTousers", fields: [organiser_user_id], references: [id], onUpdate: NoAction)
 
   @@index([created_at(sort: Desc)], map: "idx_demo_sandboxes_created")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model fixture_events {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fixture_id     String   @db.Uuid
+  rubber_key     String?  @db.VarChar(40)
+  team_side      String?  @db.Char(1)
+  event_key      String   @db.VarChar(40)
+  label          String   @db.VarChar(120)
+  points         Int      @default(0)
+  player_user_id String?  @db.Uuid
+  segment        String?  @db.VarChar(40)
+  seq            Int      @default(0)
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  fixtures       fixtures @relation(fields: [fixture_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users          users?   @relation(fields: [player_user_id], references: [id], onUpdate: NoAction)
+
+  @@index([fixture_id], map: "idx_fixture_events_fixture")
+  @@index([event_key], map: "idx_fixture_events_key")
+  @@index([player_user_id], map: "idx_fixture_events_player")
 }

@@ -6,7 +6,7 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError } from '../../shared/errors.js';
 import { assertChampionshipTransition } from './domain/championship-lifecycle.js';
-import { createNotification } from '../notifications/audience.js';
+import { notify } from '@semp/notifications/server/notify.js';
 import { recomputeStandings } from '../standings/standings.service.js';
 import { signShareToken } from '../public/share-token.js';
 import { listChampionshipFixtures } from './fixtures-list.js';
@@ -268,18 +268,14 @@ export function makeEventsRouter(prisma: Prisma): Router {
       catch (err) { console.error(`[standings] final recompute failed for ${updated.id}:`, err); }
     }
 
-    // Lifecycle announcement → organizations + captains only.
-    const msg = lifecycleMessage(req.body.status as ChampionshipStatus);
-    if (msg) {
-      await createNotification(prisma, {
-        championship_id: updated.id,
-        sender_id: req.user!.id,
-        type: 'event_lifecycle',
-        audience: 'organizations_captains',
-        title: msg.title,
-        body: msg.body,
-      });
-    }
+await notify(prisma, {
+  type: 'event_lifecycle',
+  championshipId: updated.id,
+  senderId: req.user!.id,
+  data: {
+    status: req.body.status,
+  },
+});
 
     res.json(updated);
   }));

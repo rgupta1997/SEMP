@@ -5,8 +5,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
-import { createNotification } from '../notifications/audience.js';
-
+import { notify } from '@semp/notifications/server/notify.js';
 const ORG_ADMIN = ['owner', 'admin'];
 
 export function makeInvitationsRouter(prisma: Prisma): Router {
@@ -132,13 +131,15 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
     });
 
     const org = await prisma.organizations.findUnique({ where: { id: inv.organization_id }, select: { name: true, short_name: true } });
-    await createNotification(prisma, {
-      championship_id: inv.championship_id,
-      sender_id: req.user!.id,
+    await notify(prisma, {
       type: 'enrollment_approved',
-      audience: 'all',
-      title: `${org?.short_name || org?.name || 'An organization'} has joined the championship`,
-      body: `${org?.name ?? 'An organization'} accepted the invitation to ${inv.championships?.name ?? 'the championship'} and can now enter teams.`,
+      championshipId: inv.championship_id,
+      senderId: req.user!.id,
+      data: {
+        orgName: org?.short_name || org?.name || 'An organization',
+        bodyOrgName: org?.name ?? 'An organization',
+        championshipName: inv.championships?.name,
+      },
     });
 
     res.status(201).json(enrollment);

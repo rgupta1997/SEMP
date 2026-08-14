@@ -4,11 +4,13 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { parsePaging } from '../../http/paging.js';
-import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import {
-  canPostToEvent, canSeeNotification, createNotification,
+  canPostToEvent, canSeeNotification,
   getUserEventScopes, visibilityWhere,
 } from './audience.js';
+import { notify } from '@semp/notifications/server/notify.js';
+import { Rules, type AudienceRule } from '@semp/notifications/core/rules.js';
 
 // Group raw reaction rows into { emoji, count, mine } for the current user.
 function summarizeReactions(rows: { reaction: string; user_id: string }[], userId: string) {
@@ -97,17 +99,37 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
   router.post('/notifications', validateBody(createNotificationSchema), asyncHandler(async (req, res) => {
     const user = req.user!;
     const scopes = await getUserEventScopes(prisma, user);
+
     if (!canPostToEvent(scopes, req.body.championship_id)) {
       throw new ForbiddenError('You cannot post notifications for this championship');
     }
-    const n = await createNotification(prisma, {
-      championship_id: req.body.championship_id,
-      sender_id: user.id,
+
+    let audience: AudienceRule;
+
+    switch (req.body.audience) {
+      case 'all':
+        audience = Rules.everyone(req.body.championship_id);
+        break;
+
+      case 'organizations_captains':
+        audience = Rules.role('captain', req.body.championship_id);
+        break;
+
+      default:
+        throw new BusinessRuleError('Unsupported notification audience');
+    }
+
+    const n = await notify(prisma, {
       type: 'manual',
-      audience: req.body.audience,
-      title: req.body.title,
-      body: req.body.body ?? null,
+      championshipId: req.body.championship_id,
+      senderId: user.id,
+      audience,
+      data: {
+        title: req.body.title,
+        body: req.body.body,
+      },
     });
+
     res.status(201).json(n);
   }));
 
@@ -170,6 +192,32 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
     });
     res.json({ reactions: summarizeReactions(all, user.id) });
   }));
+  
+  // ----- Test compose audience -----
+
+  router.post('/notifications/test-compose', asyncHandler(async (req, res) => {
+    const {
+      championship_id,
+      audience,
+      title,
+      body,
+    } = req.body;
+
+    const n = await notify(prisma, {
+      type: 'manual',
+      championshipId: championship_id,
+      senderId: req.user!.id,
+      audience,
+      data: {
+        title: title ?? 'NOTIFICATION TEST',
+        body: body ?? null,
+      },
+    });
+
+    res.status(201).json(n);
+  }));
 
   return router;
 }
+
+
