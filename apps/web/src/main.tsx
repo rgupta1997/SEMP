@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-query';
 
 import { AuthProvider } from './lib/auth';
+import { useAuth } from './lib/auth';
 import { supabase } from './lib/supabase';
 import { notificationHooks } from './lib/notification';
 import { App } from './App';
@@ -59,8 +60,11 @@ function NotificationRealtimeProvider({
     '[notifications] realtime provider mounted',
   );
 
+  const { ctx } = useAuth();
+
   notificationHooks.useNotificationRealtime(
     supabase,
+    ctx?.user.id,
   );
 
   return <>{children}</>;

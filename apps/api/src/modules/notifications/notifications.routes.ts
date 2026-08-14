@@ -6,7 +6,7 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { parsePaging } from '../../http/paging.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import {
-  canPostToEvent, canSeeNotification,
+  canPostToEvent, canSeeNotification, parseAudienceRule,
   getUserEventScopes, visibilityWhere,
 } from './audience.js';
 import { notify } from '@semp/notifications/server/notify.js';
@@ -203,11 +203,40 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
       body,
     } = req.body;
 
+    const scopes = await getUserEventScopes(prisma, req.user!);
+    const parsedAudience = parseAudienceRule(audience);
+
+    if (!championship_id || !canPostToEvent(scopes, championship_id)) {
+      throw new ForbiddenError('You cannot post notifications for this championship');
+    }
+
+    // This endpoint is used by the new audience picker. Do not accept an
+    // arbitrary JSON payload that could bypass the audience rule engine.
+    if (!parsedAudience) {
+      throw new BusinessRuleError('Invalid notification audience');
+    }
+
+    const belongsToChampionship = (rule: AudienceRule): boolean => {
+      switch (rule.kind) {
+        case 'everyone':
+        case 'role':
+          return rule.championshipId === championship_id;
+        case 'compose':
+          return rule.rules.length > 0 && rule.rules.every(belongsToChampionship);
+        default:
+          return false;
+      }
+    };
+
+    if (!belongsToChampionship(parsedAudience)) {
+      throw new BusinessRuleError('Audience must belong to the selected championship');
+    }
+
     const n = await notify(prisma, {
       type: 'manual',
       championshipId: championship_id,
       senderId: req.user!.id,
-      audience,
+      audience: parsedAudience,
       data: {
         title: title ?? 'NOTIFICATION TEST',
         body: body ?? null,

@@ -294,7 +294,7 @@ export async function getUserEventScopes(
   };
 }
 
-function parseAudienceRule(
+export function parseAudienceRule(
   value: JsonValue,
 ): AudienceRule | null {
   if (

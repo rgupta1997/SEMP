@@ -3,8 +3,12 @@ import {
   type RuleContext,
 } from '../core/registry.js';
 import type { AudienceRule } from '../core/rules.js';
+import {
+  resolveUserIds,
+  type NotificationPrisma as RecipientResolverPrisma,
+} from './resolve-user-ids.js';
 
-export interface NotificationPrisma {
+export interface NotificationPrisma extends RecipientResolverPrisma {
   notifications: {
     create(args: {
       data: {
@@ -17,6 +21,15 @@ export interface NotificationPrisma {
         title: string;
         body?: string | null;
       };
+    }): Promise<{ id: string }>;
+  };
+  notification_deliveries: {
+    createMany(args: {
+      data: Array<{
+        notification_id: string;
+        user_id: string;
+      }>;
+      skipDuplicates: boolean;
     }): Promise<unknown>;
   };
 }
@@ -58,7 +71,7 @@ export async function notify(
     ? definition.bodyTemplate(data)
     : null;
 
-  return prisma.notifications.create({
+  const notification = await prisma.notifications.create({
     data: {
       championship_id: input.championshipId ?? null,
       organization_id: input.organizationId ?? null,
@@ -71,4 +84,20 @@ export async function notify(
       body,
     },
   });
+
+  // Realtime is delivered from per-user rows, never from the global
+  // notifications table. The feed still performs its normal visibility check.
+  const recipientIds = await resolveUserIds(prisma, audience);
+
+  if (recipientIds.size > 0) {
+    await prisma.notification_deliveries.createMany({
+      data: [...recipientIds].map((user_id) => ({
+        notification_id: notification.id,
+        user_id,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  return notification;
 }

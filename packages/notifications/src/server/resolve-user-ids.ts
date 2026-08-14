@@ -58,6 +58,7 @@ export interface NotificationPrisma {
             where: {
                 team_id?: string | { in: string[] };
                 is_active: true;
+                role?: { in: string[] };
             };
             select: {
                 user_id: true;
@@ -196,11 +197,34 @@ export async function resolveUserIds(
                 );
             }
 
-            // Organiser / Captain continue to use the
-            // championship role system.
+            // Captains are team memberships, not championship-role rows.
+            if (rule.role === 'captain') {
+                const entries = await prisma.team_entries.findMany({
+                    where: { championship_id: rule.championshipId },
+                    select: { team_id: true },
+                });
+
+                const teamIds = entries.map((entry) => entry.team_id);
+
+                if (teamIds.length === 0) {
+                    return new Set();
+                }
+
+                const captains = await prisma.team_members.findMany({
+                    where: {
+                        team_id: { in: teamIds },
+                        is_active: true,
+                        role: { in: ['captain', 'vice_captain'] },
+                    },
+                    select: { user_id: true },
+                });
+
+                return new Set(captains.map((row) => row.user_id));
+            }
+
+            // Organisers continue to use the championship role system.
             const roleName = {
                 organiser: 'Organiser',
-                captain: 'Captain',
             }[rule.role];
 
             const role = await prisma.roles.findUnique({

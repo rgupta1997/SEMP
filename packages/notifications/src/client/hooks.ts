@@ -114,13 +114,17 @@ export function createNotificationHooks(
     supabase: Parameters<
       typeof subscribeToNotifications
     >[0],
+    userId: string | undefined,
   ) {
     const queryClient = useQueryClient();
 
     useEffect(() => {
+      if (!userId) return;
+
       const channel = subscribeToNotifications(
         supabase,
         {
+          userId,
           onNotification: () => {
             // Refresh the unread badge immediately.
             void queryClient.refetchQueries({
@@ -147,7 +151,7 @@ export function createNotificationHooks(
           channel,
         );
       };
-    }, [supabase, queryClient]);
+    }, [supabase, queryClient, userId]);
   }
 
   return {

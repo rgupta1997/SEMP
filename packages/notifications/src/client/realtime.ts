@@ -4,6 +4,7 @@ import type {
 } from '@supabase/supabase-js';
 
 export interface NotificationRealtimeOptions {
+  userId: string;
   onNotification: () => void;
 }
 
@@ -16,13 +17,14 @@ export function subscribeToNotifications(
   );
 
   const channel = supabase
-    .channel('notifications')
+    .channel(`notifications:${options.userId}`)
     .on(
       'postgres_changes',
       {
         event: 'INSERT',
         schema: 'public',
-        table: 'notifications',
+        table: 'notification_deliveries',
+        filter: `user_id=eq.${options.userId}`,
       },
       (payload) => {
         console.log(

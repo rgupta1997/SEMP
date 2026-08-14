@@ -1,13 +1,11 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { NotificationAudience } from '@semp/shared';
 import {
   Rules,
   type AudienceRole,
   type AudienceRule,
 } from '@semp/notifications/client';
 
-import { api } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { notificationHooks } from '../lib/notification';
 import type { PostableEvent } from '../lib/notifications';
@@ -17,7 +15,6 @@ import {
   Field,
   Input,
   Modal,
-  Segmented,
   Spinner,
   Textarea,
   toast,
@@ -46,11 +43,8 @@ export function NotificationComposeModal({
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
 
-  const [audience, setAudience] =
-    useState<NotificationAudience>('all');
-
   const [selectedServiceAudiences, setSelectedServiceAudiences] =
-    useState<AudienceRole[]>([]);
+    useState<AudienceRole[]>(['all' as AudienceRole]);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] =
@@ -62,10 +56,6 @@ export function NotificationComposeModal({
   const buildServiceAudience = (
     championshipId: string,
   ): AudienceRule | null => {
-    if (selectedServiceAudiences.length === 0) {
-      return null;
-    }
-
     if (
       selectedServiceAudiences.includes(
         'all' as AudienceRole,
@@ -130,16 +120,6 @@ export function NotificationComposeModal({
               onError: (error) => reject(error),
             },
           );
-        });
-      } else {
-        // Existing notification flow.
-        // Used only when no Notification Service Audience
-        // has been selected.
-        await api('POST', '/notifications', {
-          championship_id: chosen,
-          title: title.trim(),
-          body: body.trim() || undefined,
-          audience,
         });
       }
 
@@ -234,26 +214,6 @@ export function NotificationComposeModal({
 
           <Field
             label="Audience"
-            hint="Who should receive this notification."
-          >
-            <Segmented<NotificationAudience>
-              value={audience}
-              onChange={setAudience}
-              options={[
-                {
-                  value: 'all',
-                  label: 'All championship users',
-                },
-                {
-                  value: 'organizations_captains',
-                  label: 'Organizations + captains',
-                },
-              ]}
-            />
-          </Field>
-
-          <Field
-            label="Notification Service Audience"
             hint="Hold Ctrl (Windows) or Cmd (Mac) to select multiple."
           >
             <select
@@ -270,6 +230,10 @@ export function NotificationComposeModal({
               }}
               className="min-h-32 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-brand-500 focus:ring-[3px] focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             >
+              <option value="all">
+                All championship users
+              </option>
+
               <option value="poc">
                 Point of Contact
               </option>
