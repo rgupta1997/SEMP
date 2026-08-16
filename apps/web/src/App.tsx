@@ -28,6 +28,9 @@ import { EventImportPage } from './pages/organiser/EventImportPage';
 import { OrganizationsPage } from './pages/OrganizationsPage';
 import { OrgOverviewPage } from './pages/organization/OrgOverviewPage';
 import { OrgHomePage } from './pages/organization/OrgHomePage';
+import { OrgReportsPage } from './pages/organization/OrgReportsPage';
+import { OrgAchievementsPage } from './pages/organization/OrgAchievementsPage';
+import { OrgAdministrationPage } from './pages/organization/OrgAdministrationPage';
 import { TeamsPage } from './pages/organization/TeamsPage';
 import { RosterPage } from './pages/organization/RosterPage';
 import { RollImportPage } from './pages/organization/RollImportPage';
@@ -107,6 +110,10 @@ function AuthenticatedRoutes() {
             profile of an organisation; this is the operator's command centre. */}
         <Route path="/organizations/:orgId/home" element={<OrgHomePage />} />
         <Route path="/organizations/:orgId/overview" element={<OrgOverviewPage />} />
+        {/* Wave 4 surfaces. Records and reports are module-gated the same way the rest is. */}
+        <Route path="/organizations/:orgId/achievements" element={<ModuleGate module="records"><OrgAchievementsPage /></ModuleGate>} />
+        <Route path="/organizations/:orgId/reports" element={<ModuleGate module="reports"><OrgReportsPage /></ModuleGate>} />
+        <Route path="/organizations/:orgId/administration" element={<ModuleGate module="administration"><OrgAdministrationPage /></ModuleGate>} />
         {/* Module-gated (J6-E2-S2): a direct link to something the institution
             has switched off for this audience gets a plain "not available" page,
             never a raw error or a silently empty screen. */}

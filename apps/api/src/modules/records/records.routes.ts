@@ -215,12 +215,62 @@ export function makeRecordsRouter(prisma: Prisma): Router {
     });
     if (!allowed) throw new ForbiddenError('You do not have permission to view this institution\'s achievements.');
 
+    // The Hall of Fame reads both halves of the same board (J4-E9): team honours, and
+    // the individuals behind them. They are separate scopes rather than one merged
+    // list because a squad medal already fanned out to a row per member - showing both
+    // at once would count every team honour once for the team and again for each
+    // player, which is how an honours board stops being countable.
+    const scope = req.query.scope === 'individuals' ? 'individuals' : 'teams';
+    const sportId = typeof req.query.sport_id === 'string' ? req.query.sport_id : null;
+
     const rows = await prisma.achievements.findMany({
-      where: { organization_id: organizationId, team_id: { not: null }, ...LIVE },
+      where: {
+        organization_id: organizationId,
+        ...(scope === 'teams' ? { team_id: { not: null } } : { user_id: { not: null } }),
+        ...(sportId ? { sport_id: sportId } : {}),
+        ...LIVE,
+      },
       orderBy: [{ occurred_on: 'desc' }, { created_at: 'desc' }],
       take: 500,
     });
-    res.json(rows.map(achievementView));
+
+    // Names, so the board reads as people and squads rather than uuids.
+    const userIds = [...new Set(rows.map((r) => r.user_id).filter((v): v is string => !!v))];
+    const teamIds = [...new Set(rows.map((r) => r.team_id).filter((v): v is string => !!v))];
+    const sportIds = [...new Set(rows.map((r) => r.sport_id).filter((v): v is string => !!v))];
+    const [users, teams, sports] = await Promise.all([
+      userIds.length ? prisma.users.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [],
+      teamIds.length ? prisma.teams.findMany({ where: { id: { in: teamIds } }, select: { id: true, name: true } }) : [],
+      sportIds.length ? prisma.sports.findMany({ where: { id: { in: sportIds } }, select: { id: true, name: true } }) : [],
+    ]);
+    const userName = new Map(users.map((u) => [u.id, u.name]));
+    const teamName = new Map(teams.map((t) => [t.id, t.name]));
+    const sportName = new Map(sports.map((s) => [s.id, s.name]));
+
+    // The spotlight: who holds the most, weighted so a gold outranks three bronzes.
+    const tally = new Map<string, { user_id: string; name: string; gold: number; silver: number; bronze: number; awards: number }>();
+    for (const r of rows) {
+      if (!r.user_id) continue;
+      const t = tally.get(r.user_id) ?? { user_id: r.user_id, name: userName.get(r.user_id) ?? 'Unknown', gold: 0, silver: 0, bronze: 0, awards: 0 };
+      if (r.medal && r.medal in t) t[r.medal as 'gold' | 'silver' | 'bronze'] += 1;
+      if (r.kind === 'award') t.awards += 1;
+      tally.set(r.user_id, t);
+    }
+    const weight = (t: { gold: number; silver: number; bronze: number; awards: number }) => t.gold * 3 + t.silver * 2 + t.bronze + t.awards;
+
+    res.json({
+      scope,
+      rows: rows.map((r) => ({
+        ...achievementView(r),
+        recipient: r.user_id ? (userName.get(r.user_id) ?? null) : (r.team_id ? (teamName.get(r.team_id) ?? null) : null),
+        sport: r.sport_id ? (sportName.get(r.sport_id) ?? null) : null,
+      })),
+      leaderboard: [...tally.values()].sort((a, b) => weight(b) - weight(a)).slice(0, 5)
+        .map((t) => ({ ...t, total_medals: t.gold + t.silver + t.bronze })),
+      // Only the sports this institution has actually won something in - a filter
+      // offering thirty-six sports it has never entered is a filter nobody uses.
+      sports: [...sportName.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
+    });
   }));
 
   return router;

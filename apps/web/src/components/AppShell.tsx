@@ -1,9 +1,9 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  AtSign, BarChart3, Check, ChevronsUpDown, Compass, Flag, FlaskConical, History, Home,
+  AtSign, Award, BarChart3, Check, ChevronsUpDown, Compass, Flag, FlaskConical, Home,
   Landmark, Layers, LayoutGrid, LayoutList, Lock, Mail, Medal, Menu, MessageSquare, Moon,
-  Plus, Shield, Sun, ToggleLeft, Trophy, Upload, User, Users, X,
+  Plus, Settings, Shield, Sun, Trophy, Upload, User, Users, X,
 } from 'lucide-react';
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
 import { useWorkspace, type Workspace } from '../lib/workspace';
@@ -33,33 +33,28 @@ export function roleHome(role: AppRole): string {
 // and refused - the nav and the server read the same `modules` map (J6-E2-S2).
 function institutionNav(orgId: string, modules: string[] | null): NavGroup[] {
   const on = (m: string) => !modules || modules.includes(m);
-  const groups: NavGroup[] = [{
-    group: 'Institution', items: [
+  // One flat list, in the designed order. Grouping it read as three small products;
+  // an institution thinks of this as one workspace with nine places in it.
+  return [{
+    group: '', items: [
       { to: `/organizations/${orgId}/home`, label: 'Home', icon: <Home size={16} />, end: true },
       ...(on('people') ? [{ to: `/organizations/${orgId}/members`, label: 'People', icon: <Users size={16} /> }] : []),
       ...(on('teams') ? [{ to: `/organizations/${orgId}/teams`, label: 'Teams', icon: <Shield size={16} /> }] : []),
-      ...(on('administration') ? [{ to: `/organizations/${orgId}/structure`, label: 'Structure', icon: <Layers size={16} /> }] : []),
-    ],
-  }, {
-    group: 'Competition', items: [
-      ...(on('championships') ? [{ to: '/championships', label: 'Championships', icon: <Trophy size={16} /> }] : []),
+      // "Events" is the institution's word for these. "Championships" is the
+      // platform's, and it is the participant shell that keeps it.
+      ...(on('championships') ? [{ to: '/championships', label: 'Events', icon: <Trophy size={16} /> }] : []),
       { to: '/discover', label: 'Discover', icon: <Compass size={16} /> },
-      ...(on('championships') ? [{ to: '/host', label: 'Host', icon: <Plus size={16} /> }] : []),
+      ...(on('records') ? [{ to: `/organizations/${orgId}/achievements`, label: 'Achievements', icon: <Medal size={16} /> }] : []),
+      // Certificates (J4-E6/E7) belongs here in the designed order and goes in the
+      // moment it exists. It is deliberately absent until then: "an item appears only
+      // when its underlying capability exists" (J1-E7-S2), and a nav link that lands
+      // on a placeholder - or worse, bounces off the catch-all - is a promise the
+      // product cannot keep.
+      ...(on('reports') ? [{ to: `/organizations/${orgId}/reports`, label: 'Reports', icon: <BarChart3 size={16} /> }] : []),
+      ...(on('administration') ? [{ to: `/organizations/${orgId}/administration`, label: 'Administration', icon: <Settings size={16} /> }] : []),
+      { to: '/help', label: 'Help & guide', icon: '?' },
     ],
   }];
-
-  const admin: NavItem[] = [
-    ...(on('records') ? [{ to: `/organizations/${orgId}/achievements`, label: 'Achievements', icon: <Medal size={16} /> }] : []),
-    ...(on('reports') ? [{ to: `/organizations/${orgId}/reports`, label: 'Reports', icon: <BarChart3 size={16} /> }] : []),
-    ...(on('administration') ? [
-      { to: `/organizations/${orgId}/roles`, label: 'Roles', icon: <Lock size={16} /> },
-      { to: `/organizations/${orgId}/modules`, label: 'Modules', icon: <ToggleLeft size={16} /> },
-      { to: `/organizations/${orgId}/activity`, label: 'Activity', icon: <History size={16} /> },
-    ] : []),
-  ];
-  if (admin.length) groups.push({ group: 'Administration', items: admin });
-  groups.push({ group: '', items: [{ to: '/help', label: 'Help & guide', icon: '?' }] });
-  return groups;
 }
 
 function navFor(role: AppRole): NavGroup[] {
