@@ -45,6 +45,14 @@ const rosterImportSchema = z.object({
 
 const addPersonSchema = rosterRowSchema.extend({ name: z.string().min(1).max(200) });
 
+// Bulk verification (J1-E6). Capped at one roll's worth per call so a runaway client
+// cannot open a transaction over the whole table.
+const verifyPeopleSchema = z.object({
+  member_ids: z.array(z.string().uuid()).min(1).max(5000),
+  verification: z.enum(['verified', 'rejected']),
+  note: z.string().max(500).nullish(),
+});
+
 export function makePeopleRouter(prisma: Prisma): Router {
   const router = Router();
 
@@ -368,6 +376,59 @@ export function makePeopleRouter(prisma: Prisma): Router {
       take: 2000,
     });
     res.json(rows.map(personView));
+  }));
+
+  // Verifying people (J1-E6). Verification is the institution's own judgement about
+  // its own roll, so it is per-membership, not per-person: one college vouching for
+  // somebody must not bind another's. Done in bulk because a roll import lands 2,000
+  // pending rows and confirming them one at a time is not a workflow.
+  //
+  // Every transition is audited individually. A single "verified 1,847 people" line
+  // would be useless the day somebody asks who vouched for one of them.
+  router.post('/:id/people/verify', requireManage, validateBody(verifyPeopleSchema), asyncHandler(async (req, res) => {
+    const organizationId = req.params.id;
+    const { member_ids, verification, note } = req.body as
+      { member_ids: string[]; verification: 'verified' | 'rejected'; note?: string | null };
+
+    const members = await prisma.organization_members.findMany({
+      where: { id: { in: member_ids }, organization_id: organizationId },
+      select: { id: true, verification: true, users: { select: { id: true, name: true, email: true } } },
+    });
+    // Ids that belong to another institution are silently absent rather than
+    // reported - confirming which ids exist elsewhere would leak across the tenancy
+    // boundary the rest of this router is built to hold.
+    const changed = members.filter((m) => m.verification !== verification);
+
+    await prisma.$transaction(
+      changed.map((m) => prisma.organization_members.update({
+        where: { id: m.id },
+        data: {
+          verification,
+          verified_by: req.user!.id,
+          verified_at: new Date(),
+          rejection_note: verification === 'rejected' ? (note ?? null) : null,
+        },
+      })),
+    );
+
+    for (const m of changed) {
+      await audit(prisma, req, {
+        action: verification === 'verified' ? AUDIT_ACTIONS.personVerified : AUDIT_ACTIONS.personVerificationRejected,
+        target: { type: 'organization_members', id: m.id, label: `${m.users?.name} (${m.users?.email})` },
+        organizationId,
+        summary: verification === 'verified'
+          ? `Verified ${m.users?.name} as a member of this institution`
+          : `Declined to verify ${m.users?.name}${note ? ` - ${note}` : ''}`,
+        diff: { verification: { from: m.verification, to: verification } },
+      });
+    }
+
+    res.json({
+      requested: member_ids.length,
+      matched: members.length,
+      changed: changed.length,
+      already: members.length - changed.length,
+    });
   }));
 
   /** The aggregate view - the only way demographics leave the database (J5-E3). */

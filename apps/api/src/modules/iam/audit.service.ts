@@ -63,6 +63,8 @@ export const AUDIT_ACTIONS = {
   memberInviteRevoked: 'org.member.invite_revoked',
   authSignupVerified: 'auth.signup_verified',
   passwordReset: 'auth.password_reset',
+  personVerified: 'org.person.verified',
+  personVerificationRejected: 'org.person.verification_rejected',
   teamCreated: 'team.created',
   teamUpdated: 'team.updated',
   teamDeleted: 'team.deleted',

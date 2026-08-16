@@ -21,6 +21,7 @@ import { makeGuards } from './middleware/permissions.js';
 import { makeAuthRouter } from '../modules/iam/auth.routes.js';
 import { makeMeRouter } from '../modules/iam/me.routes.js';
 import { makeRecordsRouter } from '../modules/records/records.routes.js';
+import { makeWorkspaceRouter } from '../modules/workspace/workspace.routes.js';
 import { makePeopleRouter } from '../modules/people/people.routes.js';
 import { makeUsersRouter } from '../modules/iam/users.routes.js';
 import { makeOrganizationsRouter } from '../modules/iam/organizations.routes.js';
@@ -131,6 +132,9 @@ export function buildApp(prisma: Prisma) {
   // Deliberately has no write routes: a timeline entry changes only by correcting
   // the locked result behind it (J4-E2-S2).
   api.use('/', makeRecordsRouter(prisma));
+
+  // The institution home (J1-E7) - one aggregate behind the workspace's first screen.
+  api.use('/', makeWorkspaceRouter(prisma));
 
   // ----- Notifications - global per-user feed + bell (visibility is championship-scoped) -----
   api.use('/', makeNotificationsRouter(prisma));

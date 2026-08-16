@@ -111,6 +111,51 @@ export function makeRecordsRouter(prisma: Prisma): Router {
       if (outcome && outcome in outcomes) outcomes[outcome as keyof typeof outcomes] += 1;
     }
 
+    // The same numbers again, split by sport (J4-E3). One global career total answers
+    // "how much have they played"; only the per-sport split answers "what are they",
+    // which is the question a coach, a selector and the player all actually ask.
+    // Derived from the rows already loaded rather than re-queried - the split has to
+    // add up to the totals above, and two queries is how that stops being true.
+    const sportIds = [...new Set([...entries, ...achievements].map((r) => r.sport_id).filter((s): s is string => !!s))];
+    const sportNames = sportIds.length
+      ? new Map((await prisma.sports.findMany({ where: { id: { in: sportIds } }, select: { id: true, name: true } }))
+        .map((s) => [s.id, s.name]))
+      : new Map<string, string>();
+
+    const bySport = new Map<string, {
+      sport_id: string | null; sport: string; events: number;
+      won: number; lost: number; drew: number;
+      medals: { gold: number; silver: number; bronze: number }; awards: number;
+    }>();
+    const bucket = (sportId: string | null) => {
+      const key = sportId ?? 'unattributed';
+      if (!bySport.has(key)) {
+        bySport.set(key, {
+          sport_id: sportId,
+          // Rows that predate sport attribution are grouped honestly rather than
+          // dropped, so the split still sums to the career total.
+          sport: sportId ? (sportNames.get(sportId) ?? 'Unknown sport') : 'Unattributed',
+          events: 0, won: 0, lost: 0, drew: 0,
+          medals: { gold: 0, silver: 0, bronze: 0 }, awards: 0,
+        });
+      }
+      return bySport.get(key)!;
+    };
+    for (const e of entries) {
+      const b = bucket(e.sport_id);
+      b.events += 1;
+      const outcome = (e.detail as { outcome?: string } | null)?.outcome;
+      if (outcome === 'won' || outcome === 'lost' || outcome === 'drew') b[outcome] += 1;
+    }
+    for (const a of achievements) {
+      const b = bucket(a.sport_id);
+      if (a.medal && a.medal in b.medals) b.medals[a.medal as keyof typeof b.medals] += 1;
+      if (a.kind === 'award') b.awards += 1;
+    }
+    const per_sport = [...bySport.values()]
+      .map((s) => ({ ...s, total_medals: s.medals.gold + s.medals.silver + s.medals.bronze }))
+      .sort((a, b) => b.total_medals - a.total_medals || b.events - a.events || a.sport.localeCompare(b.sport));
+
     return {
       person: user,
       stats: {
@@ -124,6 +169,7 @@ export function makeRecordsRouter(prisma: Prisma): Router {
         // quietly neither.
         provisional: provisional.length,
       },
+      per_sport,
       // One list, already ordered - the client badges each row by `verified`
       // rather than re-sorting two arrays and risking a different order per
       // viewer.
