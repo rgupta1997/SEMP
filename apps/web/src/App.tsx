@@ -31,6 +31,7 @@ import { OrgHomePage } from './pages/organization/OrgHomePage';
 import { OrgReportsPage } from './pages/organization/OrgReportsPage';
 import { OrgAchievementsPage } from './pages/organization/OrgAchievementsPage';
 import { OrgAdministrationPage } from './pages/organization/OrgAdministrationPage';
+import { OrgCertificatesPage } from './pages/organization/OrgCertificatesPage';
 import { TeamsPage } from './pages/organization/TeamsPage';
 import { RosterPage } from './pages/organization/RosterPage';
 import { RollImportPage } from './pages/organization/RollImportPage';
@@ -69,6 +70,7 @@ import { PlatformFeedbackPage } from './pages/platform/PlatformFeedbackPage';
 import { PlatformDemosPage } from './pages/platform/PlatformDemosPage';
 import { ChampionshipMatrixImportPage } from './pages/platform/ChampionshipMatrixImportPage';
 import { PublicChampionshipPage } from './pages/public/PublicChampionshipPage';
+import { VerifyCertificatePage } from './pages/public/VerifyCertificatePage';
 import { InviteAcceptPage } from './pages/InviteAcceptPage';
 
 // Where "home" is depends on which product this person is in (J1-E7-S1). Someone who
@@ -113,6 +115,7 @@ function AuthenticatedRoutes() {
         {/* Wave 4 surfaces. Records and reports are module-gated the same way the rest is. */}
         <Route path="/organizations/:orgId/achievements" element={<ModuleGate module="records"><OrgAchievementsPage /></ModuleGate>} />
         <Route path="/organizations/:orgId/reports" element={<ModuleGate module="reports"><OrgReportsPage /></ModuleGate>} />
+        <Route path="/organizations/:orgId/certificates" element={<ModuleGate module="records"><OrgCertificatesPage /></ModuleGate>} />
         <Route path="/organizations/:orgId/administration" element={<ModuleGate module="administration"><OrgAdministrationPage /></ModuleGate>} />
         {/* Module-gated (J6-E2-S2): a direct link to something the institution
             has switched off for this audience gets a plain "not available" page,
@@ -194,6 +197,12 @@ function AppRoutes() {
   // whether the visitor is signed in (so the link works for anyone).
   const publicMatch = useMatch('/c/:token');
   if (publicMatch?.params.token) return <PublicChampionshipPage token={publicMatch.params.token} />;
+
+  // Certificate verification (J4-E8). Ahead of every auth check for the same reason
+  // the share link is: the people who most need to verify a certificate - an employer,
+  // another institution - have no account here and never will.
+  const verifyMatch = useMatch('/verify/:token');
+  if (verifyMatch?.params.token) return <VerifyCertificatePage token={verifyMatch.params.token} />;
 
   // An invitation link has to work for someone who has never signed in - and equally
   // for someone already signed in as somebody else, hence ahead of the ctx check.

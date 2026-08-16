@@ -45,11 +45,7 @@ function institutionNav(orgId: string, modules: string[] | null): NavGroup[] {
       ...(on('championships') ? [{ to: '/championships', label: 'Events', icon: <Trophy size={16} /> }] : []),
       { to: '/discover', label: 'Discover', icon: <Compass size={16} /> },
       ...(on('records') ? [{ to: `/organizations/${orgId}/achievements`, label: 'Achievements', icon: <Medal size={16} /> }] : []),
-      // Certificates (J4-E6/E7) belongs here in the designed order and goes in the
-      // moment it exists. It is deliberately absent until then: "an item appears only
-      // when its underlying capability exists" (J1-E7-S2), and a nav link that lands
-      // on a placeholder - or worse, bounces off the catch-all - is a promise the
-      // product cannot keep.
+      ...(on('records') ? [{ to: `/organizations/${orgId}/certificates`, label: 'Certificates', icon: <Award size={16} /> }] : []),
       ...(on('reports') ? [{ to: `/organizations/${orgId}/reports`, label: 'Reports', icon: <BarChart3 size={16} /> }] : []),
       ...(on('administration') ? [{ to: `/organizations/${orgId}/administration`, label: 'Administration', icon: <Settings size={16} /> }] : []),
       { to: '/help', label: 'Help & guide', icon: '?' },
