@@ -28,7 +28,12 @@ export interface MatchSummary {
   id: string;
   round: string | null;
   status: string;
+  // 'locked' = the result is official. Anything else is provisional.
+  scorecard_status?: 'draft' | 'submitted' | 'locked';
+  /** Set only when the result was corrected after being made official (J6-E4-S4). */
+  amended_at?: string | null;
   scheduled_at: string | null;
+  venue?: string | null;
   sport: string | null;
   discipline: string | null;
   championship: { id: string; name: string; slug: string } | null;

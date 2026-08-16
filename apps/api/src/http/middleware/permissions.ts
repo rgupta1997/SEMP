@@ -2,6 +2,8 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from './error.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { ROLE_CODES, roleWhereByCode } from '../../modules/iam/role-codes.js';
+import { can } from './can.js';
 
 // Server-side authorization. The client mirrors these rules for UX, but this is
 // the real boundary: every mutation must pass through here. Authority is
@@ -11,7 +13,7 @@ export function makeGuards(prisma: Prisma) {
   let organiserRoleId: string | null | undefined;
   async function getOrganiserRoleId(): Promise<string | null> {
     if (organiserRoleId === undefined) {
-      const r = await prisma.roles.findUnique({ where: { name: 'Organiser' }, select: { id: true } });
+      const r = await prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser), select: { id: true } });
       organiserRoleId = r?.id ?? null;
     }
     return organiserRoleId;
@@ -38,7 +40,11 @@ export function makeGuards(prisma: Prisma) {
     });
     return !!row;
   }
+  // Still used by callers outside this file (invitation acceptance), which is a
+  // membership question rather than a permission one - "are you the org's admin",
+  // not "may you do X". Guards here go through can() instead.
   const ORG_ADMIN = ['owner', 'admin'];
+  void ORG_ADMIN;
 
   // ---- championship resolvers (walk a resource back to its owning championship) ----
   const championshipOfTournament = async (id?: string | null) =>
@@ -97,10 +103,21 @@ export function makeGuards(prisma: Prisma) {
       },
     });
     if (!team) throw new NotFoundError('Team');
-    // Owner/admin of the owning organization.
-    if (await orgRole(u.id, team.organization_id, ORG_ADMIN)) return next();
-    // The team's own captain / vice-captain.
+
+    // The team's own captain, always. This is NOT a fallback - it is a rule about THIS
+    // team, and no organisation-scoped role can express "captain of the team in front
+    // of you". Kept first so it reads as the first-class authority it is.
     if (team.team_members.some((m) => m.role === 'captain' || m.role === 'vice_captain')) return next();
+
+    // Everything else is a grant. `team.manage` is retired from the fallbacks: an
+    // owner or admin gets here through the org_owner / org_admin role rows, which the
+    // organisation can edit - so removing team.manage from org_admin now actually
+    // removes it. (RETIRED: fallback was orgRole(u.id, org, ['owner','admin']).)
+    const allowed = await can(prisma, 'team.manage', {
+      user: u,
+      scope: { organizationId: team.organization_id },
+    });
+    if (allowed) return next();
     throw new ForbiddenError('Only the team captain or an organization owner/admin can manage this team');
   });
 
@@ -113,7 +130,13 @@ export function makeGuards(prisma: Prisma) {
       : [req.body?.organization_id];
     const unique = [...new Set(ids.filter(Boolean))] as string[];
     if (unique.length === 0) throw new ForbiddenError('No organization specified');
-    const ok = await Promise.all(unique.map((id) => orgRole(u.id, id, ORG_ADMIN)));
+    // EVERY organisation named must permit it, not any - creating teams in bulk
+    // across orgs is the rule most likely to be silently loosened by a rewrite.
+    // (RETIRED: fallback was orgRole(u.id, id, ['owner','admin']).)
+    const ok = await Promise.all(unique.map((id) => can(prisma, 'team.create', {
+      user: u,
+      scope: { organizationId: id },
+    })));
     if (ok.every(Boolean)) return next();
     throw new ForbiddenError('You can only create teams for an organization you own or administer');
   });
@@ -128,15 +151,28 @@ export function makeGuards(prisma: Prisma) {
       select: { organization_id: true },
     });
     if (!target) throw new NotFoundError('User');
-    if (await orgRole(u.id, target.organization_id, ORG_ADMIN)) return next();
+    // (RETIRED: fallback was orgRole(u.id, target.organization_id, ['owner','admin']).)
+    const allowed = await can(prisma, 'org.member.manage', {
+      user: u,
+      scope: { organizationId: target.organization_id },
+    });
+    if (allowed) return next();
     throw new ForbiddenError('You can only manage users in an organization you own or administer');
   });
 
   // ---- guard: enrolling an organization you own/administer into a championship ----
+  // Checks `event.enroll`, not `event.approve`: entering your own organisation and
+  // deciding who may enter yours are opposite sides of the same handshake, and this
+  // guard was reading the host's permission for the entrant's action.
+  // (RETIRED: fallback was orgRole(u.id, body.organization_id, ['owner','admin']).)
   const enrollSelf: RequestHandler = asyncHandler(async (req, _res, next) => {
     const u = req.user!;
     if (u.isSuperAdmin) return next();
-    if (await orgRole(u.id, req.body?.organization_id, ORG_ADMIN)) return next();
+    const allowed = await can(prisma, 'event.enroll', {
+      user: u,
+      scope: { organizationId: req.body?.organization_id },
+    });
+    if (allowed) return next();
     throw new ForbiddenError('Only an organization owner/admin can enroll that organization');
   });
 

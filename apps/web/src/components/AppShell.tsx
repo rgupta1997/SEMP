@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Compass, Flag, FlaskConical, Landmark, Layers, LayoutGrid, LayoutList, Lock,
+  AtSign, Compass, Flag, FlaskConical, Landmark, Layers, LayoutGrid, LayoutList, Lock,
   Mail, Medal, Menu, MessageSquare, Moon, Plus, Sun, Trophy, Upload, User, Users, X,
 } from 'lucide-react';
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
@@ -34,6 +34,7 @@ function navFor(role: AppRole): NavGroup[] {
         { to: '/platform/disciplines', label: 'Disciplines', icon: <Layers size={16} /> },
         { to: '/platform/tournament-formats', label: 'Formats', icon: <LayoutList size={16} /> },
         { to: '/platform/organizations', label: 'Organizations', icon: <Landmark size={16} /> },
+        { to: '/platform/org-domains', label: 'Email Domains', icon: <AtSign size={16} /> },
         { to: '/platform/roles', label: 'Roles & Permissions', icon: <Lock size={16} /> },
       ],
     }, {

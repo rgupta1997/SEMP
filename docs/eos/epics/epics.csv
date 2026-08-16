@@ -1,0 +1,691 @@
+﻿Issue Type,Key,Epic Link,Journey,Wave,Summary,Description,Acceptance Criteria,Personas,Modules,Priority,T-Shirt,Depends On,Flags
+"Epic","J6-E3","","J6 Govern & Administer","0","Audit trail","Every privileged action is recorded in an append-only trail that outlives the people named in it.","","Sports Secretary, Faculty Coordinator","03","P0","M","",""
+"Story","J6-E3-S1","J6-E3","J6 Govern & Administer","0","Privileged actions are recorded","As a Sports Secretary, I want every consequential action recorded, so that I can prove what happened.","When a privileged action occurs — a result locked or corrected, a registration approved,
+     a person verified, a role assigned, a certificate issued or revoked, an organisation
+     setting changed, a report exported, an erasure executed
+Then an entry records who did it, when, to what, a human-readable summary, and what changed
+And system-performed actions are recorded with the actor shown as System","Sports Secretary, Faculty Coordinator","03","P0","","",""
+"Story","J6-E3-S2","J6-E3","J6 Govern & Administer","0","Entries cannot be altered","As a Sports Secretary, I want the log to be append-only, so that it's worth something as evidence.","Then no interface or endpoint permits editing or deleting an audit entry
+And the database itself refuses updates and deletes on the audit table
+And deleting the thing an entry describes does not delete the entry","Sports Secretary, Faculty Coordinator","03","P0","","",""
+"Story","J6-E3-S3","J6-E3","J6 Govern & Administer","0","Read the timeline","As a Faculty Coordinator, I want to browse and filter the audit trail, so that I can answer a specific question quickly.","Then I see a reverse-chronological timeline scoped to my institution
+And I can filter by actor, action type, target and date range
+And each entry reads as a sentence, not a raw payload
+And I only see entries for institutions I have audit rights in","Sports Secretary, Faculty Coordinator","03","P0","","",""
+"Story","J6-E3-S4","J6-E3","J6 Govern & Administer","0","Entries survive the people in them","As a Sports Secretary, I want old entries to remain readable, so that history doesn't degrade as people leave.","Given the user who performed an action has since been deleted or erased
+Then the entry still shows the actor's name as recorded at the time
+And the entry still shows what the target was at the time","Sports Secretary, Faculty Coordinator","03","P0","","",""
+"Epic","J6-E5","","J6 Govern & Administer","0","Tenant isolation & data boundaries","An institution's data is not visible to, or enumerable by, other institutions.","","Sports Secretary","01, 03","P0","M","",""
+"Story","J6-E5-S1","J6-E5","J6 Govern & Administer","0","Our data is not browsable by outsiders","As a Sports Secretary, I want our people and internal data invisible to other institutions, so that we can put real student records here.","Given I belong to institution A
+When I request the organisation list
+Then I see only institutions I belong to
+And a directory search returns only name, short name, city and logo, never membership
+And personal organisations never appear
+And I cannot retrieve institution B's people, teams or reports by any endpoint","Sports Secretary","01, 03","P0","","",""
+"Story","J6-E5-S2","J6-E5","J6 Govern & Administer","0","Cross-institution membership is scoped","As a Player, I want my two institutions kept separate, so that one cannot see my standing in the other.","Given I belong to a university and a city club
+Then each sees only my membership, verification status and member code with them
+And neither sees the other's
+And my lifetime record shows results from both only to me","Sports Secretary","01, 03","P0","","",""
+"Story","J6-E5-S3","J6-E5","J6 Govern & Administer","0","Deleting an institution is guarded","As a Sports Secretary, I want deletion to be deliberate and safe, so that competition history can't be destroyed by accident.","Given my institution has teams with completed or scored matches
+When I attempt to delete it
+Then it is refused, and I am told those results must be removed first
+
+Given it has teams or entries but no played matches
+Then I must explicitly confirm cascading removal
+And only an owner may delete, never an admin","Sports Secretary","01, 03","P0","","",""
+"Epic","J1-E1","","J1 Institution Onboarding","1","Institution identity & verified tenancy","IIMB exists as a verified institution tenant with its email domain claimed, distinct from the lightweight community orgs anyone can create.","","Sports Secretary","01","P0","M","",""
+"Story","J1-E1-S1","J1-E1","J1 Institution Onboarding","1","Register an institution","As a Sports Secretary, I want to register my institution with its name, logo and city, so that my people see a workspace that looks like ours, not a generic tool.","Given I am signed in and belong to no institution
+When I create an organisation and supply name, short name, city and logo
+Then it is created with kind='community' and verified=false
+And I become its owner
+And it does not appear in any other user's organisation directory listing","Sports Secretary","01","P0","","",""
+"Story","J1-E1-S2","J1-E1","J1 Institution Onboarding","1","Claim our email domain","As a Sports Secretary, I want to claim `@iimb.ac.in` for my institution, so that anyone from IIMB is routed to our workspace automatically.","Given I am the owner of an institution
+When I add the domain ""iimb.ac.in""
+Then it is stored against my institution with verified=false
+And it has no effect on sign-in until a platform admin verifies it
+
+Given a domain is already claimed and verified by another institution
+When I try to add the same domain
+Then I am told the domain is already claimed
+And I am not told which institution holds it
+
+Given I try to add a public mail provider such as ""gmail.com""
+When I submit it
+Then it is rejected against the public-provider deny-list","Sports Secretary","01","P0","","",""
+"Story","J1-E1-S3","J1-E1","J1 Institution Onboarding","1","Request verification `[platform action]`","As a Sports Secretary, I want my institution verified, so that the Verified badge and the workspace features are switched on.","Given my institution has at least one claimed domain
+When I request verification
+Then Sportagon is notified and the request is recorded
+
+Given a platform admin approves the request
+Then kind becomes 'institution' and verified becomes true
+And my claimed domains become verified and start routing sign-in
+And the Verified badge appears in my sidebar
+And an audit entry records who verified it and when","Sports Secretary","01","P0","","",""
+"Story","J1-E1-S4","J1-E1","J1 Institution Onboarding","1","Configure workspace settings","As a Sports Secretary, I want to control which sign-in methods my institution allows, so that we match our own security policy.","Given my institution is verified
+When I enable password and one-time code, and leave SSO off
+Then only those methods are offered on the sign-in screen for my domain
+And the settings are validated against a schema before saving","Sports Secretary","01","P0","","",""
+"Epic","J1-E2","","J1 Institution Onboarding","1","Email-first sign-in & account recovery","A person types their work email and the product knows who they are and where they belong — and can recover their own account without human help.","","Sports Secretary, Faculty Coordinator, Student Coordinator, Player","01, 02","P0","M","",""
+"Story","J1-E2-S1","J1-E2","J1 Institution Onboarding","1","Email-first identification","As a Sports Secretary, I want the sign-in screen to recognise my institution from my email, so that I get confirmation I'm in the right place before I type a password.","Given ""iimb.ac.in"" is a verified domain for IIM Bangalore
+When I enter ""akash@iimb.ac.in"" on the sign-in screen
+Then I see ""IIM Bangalore — Organisation identified"" with the institution's logo
+And I am offered only the sign-in methods that institution permits
+
+Given I enter an email whose domain is not claimed by any institution
+Then I am shown the generic sign-in form
+And the response is identical whether or not an account exists for that address","Sports Secretary, Faculty Coordinator, Student Coordinator, Player","01, 02","P0","","",""
+"Story","J1-E2-S2","J1-E2","J1 Institution Onboarding","1","Institution trust stats","As a Sports Secretary, I want to see our record counts on the sign-in screen, so that the workspace feels like our institution's own system of record.","Given my institution is identified from my email domain
+Then I see records kept, events per year and medals won for that institution
+And the figures come from a cached aggregate, not a live count
+And no figure is displayed at all if the aggregate is unavailable","Sports Secretary, Faculty Coordinator, Student Coordinator, Player","01, 02","P0","","",""
+"Story","J1-E2-S3","J1-E2","J1 Institution Onboarding","1","Reset a forgotten password","As a Faculty Coordinator, I want to reset my own password by email, so that I'm not blocked at 11pm before a tournament.","When I request a reset for my address
+Then a single-use token with an expiry is created and only its hash is stored
+And an email is sent via the email service
+And the response and its timing are identical whether or not the address exists
+
+Given I open a valid, unexpired, unconsumed reset link
+When I set a new password
+Then the token is consumed and cannot be reused
+And any existing sessions are invalidated
+
+Given I open a link that is expired or already consumed
+Then I am told it is no longer valid and offered a fresh one
+
+Given I request resets repeatedly
+When I exceed the per-address or per-IP rate limit
+Then further requests are refused without revealing why","Sports Secretary, Faculty Coordinator, Student Coordinator, Player","01, 02","P0","","",""
+"Story","J1-E2-S4","J1-E2","J1 Institution Onboarding","1","Sign in with a one-time code","As a Student Coordinator, I want to sign in with a code emailed to me, so that I don't need to remember another password.","Given my institution permits one-time codes
+When I request a code
+Then a 6-digit code valid for 10 minutes is emailed to me
+And it is single-use
+And after 5 incorrect attempts it is invalidated and I must request another
+And I can switch back to password sign-in at any point","Sports Secretary, Faculty Coordinator, Student Coordinator, Player","01, 02","P0","","",""
+"Epic","J1-E3","","J1 Institution Onboarding","1","Invite the sports office team","Coordinators are invited by email and set their own passwords. No relayed temporary credentials.","","Sports Secretary, Faculty Coordinator","01, 02, 03","P0","M","",""
+"Story","J1-E3-S1","J1-E3","J1 Institution Onboarding","1","Invite a coordinator by email","As a Sports Secretary, I want to invite a faculty coordinator by email address, so that they can join without me handling their password.","When I invite ""priya@iimb.ac.in"" as a Faculty Coordinator
+Then an invitation with a single-use expiring token is created
+And an email is sent containing the acceptance link
+And she appears in my members list as Invited until she accepts
+
+Given the invited address is outside my institution's verified domains
+Then I am warned before the invitation is sent, and may proceed deliberately","Sports Secretary, Faculty Coordinator","01, 02, 03","P0","","",""
+"Story","J1-E3-S2","J1-E3","J1 Institution Onboarding","1","Accept an invitation and set a password","As a Faculty Coordinator, I want to click the invitation link and choose my own password, so that nobody else ever knows my credentials.","Given I open a valid invitation link
+When I set a password
+Then my account is activated with the role stated in the invitation
+And the token is consumed
+And I land on the workspace home, not a participant profile
+
+Given I already have a Sportagon account with that email
+When I open the link
+Then the institution membership is added to my existing account
+And I am not asked to create a second account","Sports Secretary, Faculty Coordinator","01, 02, 03","P0","","",""
+"Story","J1-E3-S3","J1-E3","J1 Institution Onboarding","1","Manage the sports office team","As a Sports Secretary, I want to change a coordinator's role or remove them, so that access matches who is actually on the committee this year.","When I change a member's role
+Then the change takes effect immediately and is written to the audit trail
+
+Given a member is the only remaining active owner or admin
+When I try to demote, deactivate or remove them
+Then it is refused, and I am told to promote someone else first","Sports Secretary, Faculty Coordinator","01, 02, 03","P0","","",""
+"Story","J1-E3-S4","J1-E3","J1 Institution Onboarding","1","Committee handover","As a Sports Secretary, I want to hand ownership to next year's secretary, so that the institution's record survives the committee turning over.","Given I am the owner
+When I promote another active member to owner and step down to admin
+Then they hold full access and I do not
+And the handover is recorded in the audit trail","Sports Secretary, Faculty Coordinator","01, 02, 03","P0","","",""
+"Epic","J2-E1","","J2 Run a Championship","1","Create a championship from a template","An organiser can stand up a fully-configured championship from a template instead of an empty form.","","Championship Organiser, Faculty Coordinator","09","P1","M","",""
+"Story","J2-E1-S1","J2-E1","J2 Run a Championship","1","Start from a template","As a Championship Organiser, I want to pick a championship shape when I start, so that I'm not configuring six sports from an empty form.","Given I start creating a championship
+Then I am offered Multi-sport meet, League tournament, Knockout cup, and Start from scratch
+When I pick one and complete the profile step
+Then a draft championship is created with that template's sports, disciplines, formats and standings rules applied
+And I can change anything the template set before opening registration","Championship Organiser, Faculty Coordinator","09","P1","","",""
+"Story","J2-E1-S2","J2-E1","J2 Run a Championship","1","Classify the championship","As a Championship Organiser, I want to record what kind of event this is, so that it is filterable and reports can group by type.","When I set the type to Inter-Programme
+Then it is stored and shown as a column in the championships list
+And I can filter the list by type
+And leaving it unset is permitted for existing championships","Championship Organiser, Faculty Coordinator","09","P1","","",""
+"Story","J2-E1-S3","J2-E1","J2 Run a Championship","1","Work in draft","As a Championship Organiser, I want to build the event over several sittings, so that I don't lose work or publish something half-finished.","Given a championship is in draft
+Then it is visible only to me and my organising team
+And it does not appear in Discover
+And it cannot be enrolled into
+And I can leave and resume at any step","Championship Organiser, Faculty Coordinator","09","P1","","",""
+"Epic","J2-E3","","J2 Run a Championship","1","Build the competition structure","The championship's sports, disciplines, formats, venues and point system are defined so fixtures can be generated.","","Championship Organiser","09","P0","S","",""
+"Story","J2-E3-S1","J2-E3","J2 Run a Championship","1","Configure sports, disciplines and formats","As a Championship Organiser, I want to define what's being contested and how, so that fixtures can be generated correctly.","When I add a sport, its disciplines, a format and entry rules
+Then squad minimum and maximum resolve as draw override → discipline default → system default
+And the entry type is one of team, individual, doubles or relay","Championship Organiser","09","P0","","",""
+"Story","J2-E3-S2","J2-E3","J2 Run a Championship","1","Venues and grounds","As a Championship Organiser, I want to record venues and their grounds, so that fixtures can be placed somewhere real.","When I add a venue and its grounds
+Then grounds are selectable when scheduling a fixture
+And a venue cannot be deleted while fixtures reference its grounds","Championship Organiser","09","P0","","",""
+"Story","J2-E3-S3","J2-E3","J2 Run a Championship","1","Set the point system","As a Championship Organiser, I want to choose how results become standings points, so that the table reflects our rules.","When I choose league points, placement, medal, custom or ranking
+Then it applies at championship, format or discipline scope
+And the most specific rule wins
+And choosing custom reminds me that I must enter points manually after each result","Championship Organiser","09","P0","","",""
+"Story","J2-E3-S4","J2-E3","J2 Run a Championship","1","Import a whole setup from a sheet","As a Championship Organiser, I want to build the championship from a spreadsheet, so that a large multi-sport meet doesn't take a day of clicking.","Given a sheet of sections against sport/discipline columns
+When I validate it
+Then I see what will be created and what is rejected, with nothing written
+When I apply it
+Then organisations, teams and draws are created, with people matched by phone
+And re-applying the same sheet changes nothing","Championship Organiser","09","P0","","",""
+"Epic","J2-E7","","J2 Run a Championship","1","Submit & lock scorecards","A scorecard can be submitted for review and then locked, after which the result is official and cannot be quietly changed.","","Official, Championship Organiser","06","P0","M","J6-E3","high-leverage"
+"Story","J2-E7-S1","J2-E7","J2 Run a Championship","1","Submit a scorecard","As an Official, I want to submit my completed scorecard, so that it's clear I'm finished and it's ready for review.","Given I have finished scoring
+When I submit the scorecard
+Then its status moves from draft to submitted, stamped with me and the time
+And it appears in the organiser's lock queue
+And I can still correct it while it remains submitted","Official, Championship Organiser","06","P0","","",""
+"Story","J2-E7-S2","J2-E7","J2 Run a Championship","1","Lock a scorecard","As a Championship Organiser, I want to review and lock a submitted scorecard, so that the result becomes official and can no longer be quietly changed.","Given a submitted scorecard with both teams set and scores present
+When I lock it
+Then status becomes locked, stamped with me and the time
+And the fixture is completed and the result published as Verified
+And the bracket advances, standings recompute, lifetime entries are written,
+    achievements are derived, certificates are queued, and an audit entry is written
+And if any of those steps fails, none of them is applied and the scorecard stays submitted","Official, Championship Organiser","06","P0","","",""
+"Story","J2-E7-S3","J2-E7","J2 Run a Championship","1","A locked scorecard cannot be edited","As a Sports Secretary, I want locked results to be immutable, so that our record can be trusted.","Given a locked scorecard
+When anyone attempts to change its result, live state, points, awards or scorecard link
+Then the change is refused with a message explaining that a correction is required
+And this applies to organisers, officials and platform admins alike","Official, Championship Organiser","06","P0","","",""
+"Story","J2-E7-S4","J2-E7","J2 Run a Championship","1","Lock in bulk","As a Championship Organiser, I want to lock many scorecards at once, so that finishing a 90-match meet isn't 90 separate actions.","Given several submitted scorecards
+When I lock the selection
+Then each is locked in its own transaction
+And I get a per-fixture result, with one failure not preventing the rest","Official, Championship Organiser","06","P0","","",""
+"Story","J2-E7-S5","J2-E7","J2 Run a Championship","1","Only locked results read as Verified","As a Player, I want to know which results are final, so that I can tell an official record from a provisional one.","Then results from locked scorecards show a Verified badge
+And unlocked results are labelled Provisional wherever they appear,
+    including standings and the public share page","Official, Championship Organiser","06","P0","","",""
+"Epic","J3-E4","","J3 Enter & Compete","1","Discover competitions to enter","Captains and secretaries can find competitions worth entering, and apply to them.","","Team Captain, Sports Secretary","09","P1","M","",""
+"Story","J3-E4-S1","J3-E4","J3 Enter & Compete","1","Browse open competitions","As a Team Captain, I want to browse competitions I could enter, so that I find opportunities without being told about them.","Then I see public championships that are open for registration
+And I can search and filter by sport and status
+And private championships I'm not involved in do not appear
+And each card shows whether my institution has already applied, and the status","Team Captain, Sports Secretary","09","P1","","",""
+"Story","J3-E4-S2","J3-E4","J3 Enter & Compete","1","Filter by region","As a Sports Secretary, I want to filter competitions by region, so that I can find events we could realistically travel to.","Then I can filter by All, Asia, Europe, Americas or Oceania
+And I see header stats for countries, open competitions and regions
+And championships without a country set are grouped as unspecified rather than hidden","Team Captain, Sports Secretary","09","P1","","",""
+"Story","J3-E4-S3","J3-E4","J3 Enter & Compete","1","Apply to a competition","As a Team Captain, I want to apply on behalf of my institution, so that we can be considered for entry.","Given a championship open for registration
+When I apply on behalf of an institution I administer
+Then a pending application is created and the organiser is notified
+And applying twice for the same institution is refused with a clear message","Team Captain, Sports Secretary","09","P1","","",""
+"Epic","J3-E5","","J3 Enter & Compete","1","My matches & my day","A player can see their own fixtures, follow their live matches, and see how their championship is going.","","Player, Team Captain","09","P0","S","",""
+"Story","J3-E5-S1","J3-E5","J3 Enter & Compete","1","See my upcoming matches","As a Player, I want to see my own fixtures, so that I know where to be and when.","Then I see my upcoming matches with date, time, venue, opponent and sport
+And past matches show the result
+And this covers every championship I'm in, including ones I entered as an individual","Player, Team Captain","09","P0","","",""
+"Story","J3-E5-S2","J3-E5","J3 Enter & Compete","1","Follow a match I'm in","As a Player, I want to see the live score of my match, so that teammates and family can follow it.","Given a match I'm in is live
+Then I see the current score, updating as the official scores it
+And once its scorecard is locked the result shows as Verified","Player, Team Captain","09","P0","","",""
+"Story","J3-E5-S3","J3-E5","J3 Enter & Compete","1","See my championship","As a Player, I want to see the standings and fixtures of a championship I'm in, so that I know how we're doing.","Then I see standings, my team's fixtures and results
+And standings are labelled Provisional while any contributing result is unlocked","Player, Team Captain","09","P0","","",""
+"Epic","J1-E4","","J1 Institution Onboarding","2","Programme & batch structure","The institution's shape is described, so people can be tagged and reports can be broken down.","","Sports Secretary","01","P0","M","J1-E1",""
+"Story","J1-E4-S1","J1-E4","J1 Institution Onboarding","2","Build the structure tree","As a Sports Secretary, I want to define our programmes and their batches, so that people can be placed in the institution's real structure.","When I add a programme ""PGP"" and batches ""PGP 2024"" and ""PGP 2025"" beneath it
+Then the tree renders as Institution → Programme → Batch
+And each node shows a derived member count, never a stored one
+And display order is editable","Sports Secretary","01","P0","","",""
+"Story","J1-E4-S2","J1-E4","J1 Institution Onboarding","2","Edit and remove units","As a Sports Secretary, I want to rename or remove a unit, so that the structure stays accurate as programmes change.","When I rename a programme
+Then everyone assigned to it reflects the new name immediately
+
+Given a unit has members assigned
+When I try to delete it
+Then I am warned how many people are affected and must confirm
+And on confirmation their unit assignment is cleared, not their record","Sports Secretary","01","P0","","",""
+"Epic","J2-E2","","J2 Run a Championship","2","Open registration & approve entrants","Entrants apply, and organisers accept or decline them in bulk, with everyone told the outcome.","","Championship Organiser, Faculty Coordinator","09, 02","P0","M","",""
+"Story","J2-E2-S1","J2-E2","J2 Run a Championship","2","Open registration","As a Championship Organiser, I want to open the championship for entries, so that teams can apply.","When I move the championship from draft to registration_open
+Then public championships appear in Discover
+And private championships remain invite-only and 404 by direct id for uninvolved users
+And only legal status transitions are permitted","Championship Organiser, Faculty Coordinator","09, 02","P0","","",""
+"Story","J2-E2-S2","J2-E2","J2 Run a Championship","2","Approve entrants in bulk","As a Championship Organiser, I want to approve or reject many applications at once, so that twelve programmes across six sports isn't twelve separate clicks per sport.","Given several pending applications
+When I select them and approve the selection
+Then each is approved individually, stamped with reviewer and timestamp
+And each applicant is notified
+And a partial failure reports per-application results rather than failing the batch
+
+When I reject an application
+Then I must supply a note, which is shown to the applicant","Championship Organiser, Faculty Coordinator","09, 02","P0","","",""
+"Story","J2-E2-S3","J2-E2","J2 Run a Championship","2","Invite organisations directly","As a Championship Organiser, I want to invite specific institutions, so that a private inter-college event reaches exactly who I intend.","When I invite an organisation by name from the directory
+Then an invitation appears in their Invitations inbox
+And they are emailed
+And accepting enrols them directly without a separate application","Championship Organiser, Faculty Coordinator","09, 02","P0","","",""
+"Story","J2-E2-S4","J2-E2","J2 Run a Championship","2","Track our outbound applications","As a Faculty Coordinator, I want to see the status of events we've applied to, so that I don't check each championship page one by one.","Then I see every championship my institution has applied to, with status Pending, Approved or Rejected
+And rejections show the organiser's note
+And I am notified when a decision is made","Championship Organiser, Faculty Coordinator","09, 02","P0","","",""
+"Epic","J2-E4","","J2 Run a Championship","2","Schedule fixtures & assign officials","Fixtures exist, are scheduled against real grounds and times, and each has someone responsible for scoring it.","","Championship Organiser","09","P0","S","J2-E3",""
+"Story","J2-E4-S1","J2-E4","J2 Run a Championship","2","Generate fixtures","As a Championship Organiser, I want fixtures generated from the entrants and format, so that I don't build a bracket by hand.","When I generate fixtures for a draw
+Then the correct generator runs for knockout, round-robin, groups or ranking
+And knockout draws pad to a power of two with byes
+And seed order is randomised rather than following registration order
+And an existing generated draw is not silently overwritten","Championship Organiser","09","P0","","",""
+"Story","J2-E4-S2","J2-E4","J2 Run a Championship","2","Schedule and edit","As a Championship Organiser, I want to set times, grounds and durations, so that the meet has a workable timetable.","When I set a fixture's time, ground and duration
+Then it appears on the schedule timeline
+And I can edit a fixture manually without regenerating the draw","Championship Organiser","09","P0","","",""
+"Story","J2-E4-S3","J2-E4","J2 Run a Championship","2","Assign officials","As a Championship Organiser, I want to assign an official to each match, so that somebody is responsible for scoring it.","When I assign an official to a fixture
+Then it appears in their Officiating queue
+And they gain scoring rights for that fixture only
+And they are notified","Championship Organiser","09","P0","","",""
+"Epic","J3-E1","","J3 Enter & Compete","2","Enter without an institution","A person with no institution can enter a competition alone or with friends, without ever meeting the concept of an organisation.","","Player, Team Captain","05","P0","M","J1-E1","high-leverage"
+"Story","J3-E1-S1","J3-E1","J3 Enter & Compete","2","Enter as an individual","As a Player, I want to enter a competition as myself, so that I can compete without belonging to any institution.","Given I am signed in, belong to no institution, and the championship allows individual entry
+When I choose ""Just me"" on a championship that is open for registration
+Then my entry is submitted in a single action
+And I never see the word ""organisation"" anywhere in the flow
+And behind the scenes a personal organisation, enrolment, one-person team and entry are
+    created in one transaction — or none of them are
+
+Given the draw's entry type is ""individual""
+Then I am not asked anything about a squad","Player, Team Captain","05","P0","","",""
+"Story","J3-E1-S2","J3-E1","J3 Enter & Compete","2","Enter as a small group","As a Team Captain, I want to enter with a few friends, so that an ad-hoc five-a-side team can compete.","When I choose ""A group of friends"" and name the squad
+Then the squad is created with me as captain and entered into the championship
+And I get a share link my friends can use to join themselves
+And the squad name is what appears in fixtures and standings
+
+Given the draw's entry type is ""doubles""
+Then I am asked for exactly one partner","Player, Team Captain","05","P0","","",""
+"Story","J3-E1-S3","J3-E1","J3 Enter & Compete","2","I appear as a person, not an organisation","As a Player, I want to be shown by my own name, so that standings and fixtures don't display a fake organisation.","Given I entered as an individual
+Then standings, fixtures, approvals and public share pages show my name and avatar
+And no organisation logo or Verified badge is shown for me
+And in an organisation-aggregated standings table I may be suffixed ""(Individual)""","Player, Team Captain","05","P0","","",""
+"Story","J3-E1-S4","J3-E1","J3 Enter & Compete","2","Personal organisations stay invisible","As a Sports Secretary, I want individual entrants kept out of organisation lists, so that our directory and platform statistics aren't polluted.","Then personal organisations never appear in the organisation directory or typeahead,
+    the platform organisation list, Discover, the invite picker, the join-an-organisation
+    modal, or peer benchmark aggregates
+And platform-level counts of organisations exclude them
+And a user can hold at most one personal organisation","Player, Team Captain","05","P0","","",""
+"Story","J3-E1-S5","J3-E1","J3 Enter & Compete","2","Organisers control individual entry","As a Championship Organiser, I want to decide whether individuals may enter, so that an inter-college championship isn't joined by unaffiliated players.","Given I am configuring a championship
+Then ""Allow individual entries"" defaults to on for public and off for private championships
+When it is off
+Then the individual entry option is not offered and a direct attempt is refused","Player, Team Captain","05","P0","","",""
+"Story","J3-E1-S6","J3-E1","J3 Enter & Compete","2","Individual entries still need approval","As a Championship Organiser, I want individual entrants in my approvals queue, so that I control who competes.","Given an individual has applied
+Then they appear in the approvals queue rendered as a person, not an institution
+And approving or rejecting works identically to an organisation application","Player, Team Captain","05","P0","","",""
+"Epic","J3-E2","","J3 Enter & Compete","2","Build and manage a squad","A captain can assemble a reusable squad with roles, jersey numbers and a coach.","","Team Captain","09","P0","M","",""
+"Story","J3-E2-S1","J3-E2","J3 Enter & Compete","2","Create a team","As a Team Captain, I want to create a team for a sport, so that I have a squad that can enter competitions.","Given I am an owner or admin of my institution
+When I create a team with a name and sport
+Then it belongs to my institution and is reusable across championships
+And it starts in a forming state","Team Captain","09","P0","","",""
+"Story","J3-E2-S2","J3-E2","J3 Enter & Compete","2","Pick the squad","As a Team Captain, I want to add players from our directory, so that I'm choosing from real, verified people.","When I search the directory and add players
+Then each is added with a role of player or substitute
+And squad size is validated against the resolved minimum and maximum for the draw
+And exactly one captain and at most one vice-captain may be assigned
+And jersey numbers are unique within the squad","Team Captain","09","P0","","",""
+"Story","J3-E2-S3","J3-E2","J3 Enter & Compete","2","Record a coach","As a Team Captain, I want to record our coach, so that the team card shows who is responsible for it.","When I assign a coach to the team
+Then the coach appears on the team card and roster
+And the coach is not counted against squad size limits
+And a team may have no coach","Team Captain","09","P0","","",""
+"Story","J3-E2-S4","J3-E2","J3 Enter & Compete","2","Lock the roster for a championship","As a Team Captain, I want to lock my squad for one championship, so that it's final there without freezing the team everywhere.","Given my team is entered in two championships
+When I lock the roster for one of them
+Then that entry's squad cannot change
+And the team's squad for the other championship is unaffected
+And an organiser can unlock it if a genuine change is needed","Team Captain","09","P0","","",""
+"Epic","J4-E1","","J4 The Verified Record","2","Locked results propagate atomically","Locking a result fans out into every downstream record in a single transaction, or not at all.","","Championship Organiser","06","P0","M","J2-E7","high-leverage"
+"Story","J4-E1-S1","J4-E1","J4 The Verified Record","2","One lock, one transaction","As a Championship Organiser, I want locking to either fully succeed or fully fail, so that the record is never half-written.","Given a submitted scorecard
+When I lock it
+Then the result is published, the bracket advances, standings recompute,
+     lifetime entries are written, achievements are derived, certificates are queued,
+     and an audit entry is recorded — all in one transaction
+And if any step fails, none is applied and the scorecard remains submitted
+And I see which step failed","Championship Organiser","06","P0","","",""
+"Story","J4-E1-S2","J4-E1","J4 The Verified Record","2","Notify after commit, never inside","As a Player, I want to be told when my result is official, so that I know it counts.","Given a lock has committed
+Then participants are notified that the result is verified
+And notification failure does not roll back the lock","Championship Organiser","06","P0","","",""
+"Story","J4-E1-S3","J4-E1","J4 The Verified Record","2","Individual competitors are resolved to people","As a Player, I want my swimming result on my profile, so that ranking events count toward my record like team matches do.","Given a ranking event where competitors are held as event data with names and phones
+When the scorecard is locked
+Then each competitor whose phone matches a user gets a lifetime entry
+And unmatched competitors are recorded on the fixture but create no entry","Championship Organiser","06","P0","","",""
+"Epic","J6-E1","","J6 Govern & Administer","2","Roles & permissions","Access is configurable per institution and enforced server-side, replacing hard-coded rules without loosening any of them.","","Sports Secretary","03","P0","L","J1-E1",""
+"Story","J6-E1-S1","J6-E1","J6 Govern & Administer","2","See what can be granted","As a Sports Secretary, I want a clear list of the permissions that exist, so that I can reason about access rather than guess.","Then I see a catalogue of named permissions grouped by area, each with a plain-language label
+And the catalogue is defined in code and cannot be edited or invented through the UI
+And every permission states whether it applies at organisation or championship scope","Sports Secretary","03","P0","","",""
+"Story","J6-E1-S2","J6-E1","J6 Govern & Administer","2","Configure roles as a matrix","As a Sports Secretary, I want to set what each role can do, so that our committee structure maps onto real access.","Given the seeded roles Organisation Owner, Faculty Coordinator and Student Coordinator
+Then I see a matrix of roles against permissions with checkboxes
+And the matrix is generated from the catalogue, never hand-maintained
+When I change a role's permissions
+Then it takes effect for everyone holding that role on their next request
+And the change is written to the audit trail","Sports Secretary","03","P0","","",""
+"Story","J6-E1-S3","J6-E1","J6 Govern & Administer","2","Assign roles to people","As a Sports Secretary, I want to give a coordinator a role, so that they can do their job and nothing more.","When I assign Faculty Coordinator to a member
+Then they immediately gain that role's permissions within my institution only
+And they gain nothing in any other institution they belong to
+And the assignment is audited","Sports Secretary","03","P0","","",""
+"Story","J6-E1-S4","J6-E1","J6 Govern & Administer","2","Enforcement is server-side","As a Sports Secretary, I want permissions enforced on the server, so that hiding a button is not the security model.","Given a user lacks a permission
+When they call the endpoint directly, bypassing the interface
+Then the request is refused
+And the interface hides the action as a convenience only, never as the boundary","Sports Secretary","03","P0","","",""
+"Story","J6-E1-S5","J6-E1","J6 Govern & Administer","2","The retrofit changes no existing behaviour","As a Sports Secretary, I want the new engine to preserve today's access rules exactly, so that nobody silently gains or loses access.","Given the existing guards for championship management, team management, team creation,
+      user management, self-enrolment and fixture scoring
+When each is re-expressed as a call to the permission engine
+Then every existing authorisation test still passes unchanged
+And a team's own captain retains team management rights alongside organisation admins
+And creating teams in bulk still requires rights in every organisation named","Sports Secretary","03","P0","","",""
+"Story","J6-E1-S6","J6-E1","J6 Govern & Administer","2","Role names are not load-bearing strings","As a Sports Secretary, I want to rename a role safely, so that renaming it doesn't break the product.","When I rename a role
+Then authorisation continues to work correctly
+And no behaviour depends on the role's display name","Sports Secretary","03","P0","","","blocked-on-decision"
+"Epic","J6-E4","","J6 Govern & Administer","2","Correct a locked result","A locked result can be corrected by an authorised person, with a stated reason, reversing everything the lock produced.","","Championship Organiser, Sports Secretary","06, 03","P0","M","J2-E7, J6-E3",""
+"Story","J6-E4-S1","J6-E4","J6 Govern & Administer","2","Unlock with a stated reason","As a Championship Organiser, I want to reverse a locked result when it's genuinely wrong, so that an honest mistake isn't permanent.","Given a locked scorecard and the authority to correct it
+When I unlock it
+Then I must supply a reason, and it cannot be blank
+And the scorecard returns to submitted and becomes editable
+And an audit entry records who unlocked it, when, and why","Championship Organiser, Sports Secretary","06, 03","P0","","",""
+"Story","J6-E4-S2","J6-E4","J6 Govern & Administer","2","Everything downstream is reversed","As a Sports Secretary, I want a correction to undo everything the lock produced, so that the record stays consistent.","When a locked result is unlocked
+Then the standings contribution is reversed by full recomputation of the affected scope
+And lifetime entries and achievements derived from it are superseded
+And certificates issued from that lock version are revoked
+And all of it happens in one transaction","Championship Organiser, Sports Secretary","06, 03","P0","","",""
+"Story","J6-E4-S3","J6-E4","J6 Govern & Administer","2","Re-lock the corrected result","As a Championship Organiser, I want to lock the corrected scorecard, so that the amended result becomes official.","When I lock it again
+Then the lock version increments
+And downstream artefacts are regenerated against the new version
+And replacement certificates are queued","Championship Organiser, Sports Secretary","06, 03","P0","","",""
+"Story","J6-E4-S4","J6-E4","J6 Govern & Administer","2","Corrections are visible, not hidden","As a Player, I want to see that a result was amended, so that the record is honest rather than quietly rewritten.","Given a result has been corrected
+Then it shows an amendment notice with the date wherever it appears, including the public page
+And a revoked certificate's verification page explains it was superseded","Championship Organiser, Sports Secretary","06, 03","P0","","",""
+"Story","J6-E4-S5","J6-E4","J6 Govern & Administer","2","Scoring and locking are separate authorities","As a Sports Secretary, I want the person who scores not to be the person who locks, so that locking is a review rather than a rubber stamp.","Given an official has submitted a scorecard
+Then locking requires the lock permission, which officials do not hold by default
+And correcting a locked result requires a further, separately grantable permission","Championship Organiser, Sports Secretary","06, 03","P0","","",""
+"Epic","J1-E5","","J1 Institution Onboarding","3","Bulk-import the student roll","2,000 students in one upload, with a real validation report.","","Sports Secretary, Faculty Coordinator","04a","P0","M","J1-E4",""
+"Story","J1-E5-S1","J1-E5","J1 Institution Onboarding","3","Validate before importing","As a Faculty Coordinator, I want to check my spreadsheet before committing it, so that I fix problems rather than discovering them afterwards.","Given I upload a CSV or XLSX and map its columns
+When I run validation
+Then I get a per-row report of what will be created, matched or rejected
+And nothing is written to the database
+And rows naming a programme or batch that does not exist are rejected with a clear message
+And no org unit is created implicitly
+
+Given the file contains two rows with the same phone number
+Then both are flagged as a duplicate pair in the report before import","Sports Secretary, Faculty Coordinator","04a","P0","","",""
+"Story","J1-E5-S2","J1-E5","J1 Institution Onboarding","3","Import the roll","As a Faculty Coordinator, I want to commit the validated file, so that our students are in the directory.","Given a validated file
+When I apply the import
+Then each person is resolved by user id, then phone, then email, and only otherwise created
+And each is added to my institution with their programme, batch and member code
+And every imported person starts at verification='pending'
+And the import is recorded in the audit trail with a row count
+And re-running the same file makes no further changes","Sports Secretary, Faculty Coordinator","04a","P0","","",""
+"Story","J1-E5-S3","J1-E5","J1 Institution Onboarding","3","Add one person","As a Faculty Coordinator, I want to add a single student, so that a late joiner doesn't require a spreadsheet.","When I add a person with name, email, phone, programme and batch
+Then they are created or matched to an existing account by phone or email
+And they start at verification='pending'
+And their member code is unique within my institution","Sports Secretary, Faculty Coordinator","04a","P0","","",""
+"Story","J1-E5-S4","J1-E5","J1 Institution Onboarding","3","Capture demographics and consent","As a Sports Secretary, I want demographic data collected with recorded consent, so that we can report on inclusion without holding anything we shouldn't.","Given a person is created by import or self-signup
+Then the consent version in force is recorded against their account, with a timestamp
+And date of birth, gender and scholarship status may be supplied
+And ""prefer not to say"" is an available value for gender, stored as itself rather than as a null
+
+Given demographic data has been collected
+Then gender and scholarship status are never displayed against a named individual anywhere
+And they do not appear in the people directory, on a profile, or in any export that names people
+And non-disclosure is reported as its own category, never inferred or silently excluded","Sports Secretary, Faculty Coordinator","04a","P0","","",""
+"Epic","J2-E5","","J2 Run a Championship","3","Score a match live","An official can record a match accurately as it happens, whatever shape that match takes.","","Official","09","P0","M","J2-E4",""
+"Story","J2-E5-S1","J2-E5","J2 Run a Championship","3","Record a match","As an Official, I want to record scoring as the match runs, so that the result is captured accurately and spectators can follow.","Given I am the assigned official and the championship is ongoing
+When I record scoring events
+Then the live state and an append-only log persist as I go
+And viewers of that championship see the updated score
+And I can score single matches, multi-rubber ties, and multi-competitor events
+
+Given the championship is still in draft or registration
+Then scoring is refused with a clear message","Official","09","P0","","",""
+"Story","J2-E5-S2","J2-E5","J2 Run a Championship","3","Record awards","As an Official, I want to record player-of-the-match and similar awards, so that individual performances are captured against the player.","When I record an award for a player
+Then it is stored against the fixture and that player
+And I choose from a catalogue of award types, with free text as a fallback","Official","09","P0","","",""
+"Story","J2-E5-S3","J2-E5","J2 Run a Championship","3","Handle walkovers and byes","As an Official, I want to record a walkover or an unplayed match, so that the draw progresses correctly.","When I record a walkover
+Then the winner advances and the fixture is marked accordingly
+And standings treat it per the configured scheme","Official","09","P0","","",""
+"Epic","J2-E6","","J2 Run a Championship","3","Watch the event as it happens","Anyone following the championship can see what is happening right now, in one place.","","Championship Organiser, Faculty Coordinator, Player","09","P0","M","J2-E5",""
+"Story","J2-E6-S1","J2-E6","J2 Run a Championship","3","A live view of the whole championship","As a Championship Organiser, I want one screen showing every match in progress, so that I can run the day without opening matches one at a time.","Given matches are in progress
+When I open the Live tab
+Then I see a card per live fixture with sport, stage, venue, current score, elapsed time and assigned official
+And the view refreshes automatically
+And clicking a card opens the match console
+And with no live matches I see an empty state listing what's next","Championship Organiser, Faculty Coordinator, Player","09","P0","","",""
+"Story","J2-E6-S2","J2-E6","J2 Run a Championship","3","Elapsed match time","As a Player, I want to see how long a match has been running, so that a live score has context.","Given a fixture went live at a recorded time
+Then the live view shows elapsed minutes since it started","Championship Organiser, Faculty Coordinator, Player","09","P0","","",""
+"Story","J2-E6-S3","J2-E6","J2 Run a Championship","3","Standings update as results land","As a Championship Organiser, I want standings to recompute automatically, so that the table is right without me maintaining it.","When a result is recorded
+Then standings recompute for the affected scopes
+And knockout winners advance and byes propagate
+And while any contributing result is unlocked the table is labelled Provisional","Championship Organiser, Faculty Coordinator, Player","09","P0","","",""
+"Story","J2-E6-S4","J2-E6","J2 Run a Championship","3","Share the event publicly","As a Championship Organiser, I want a public link to the championship, so that people can follow without an account.","When I generate a share link
+Then anyone with it sees overview, standings, fixtures and draws, read-only
+And no personal contact details are exposed
+And revoking the link stops access","Championship Organiser, Faculty Coordinator, Player","09","P0","","",""
+"Epic","J3-E3","","J3 Enter & Compete","3","Enter a squad into competitions","A squad can be entered into the right draws, and reused across championships and seasons.","","Team Captain","09","P0","S","J3-E2, J2-E2",""
+"Story","J3-E3-S1","J3-E3","J3 Enter & Compete","3","Enter a team into a draw","As a Team Captain, I want to enter my squad into a specific sport and discipline, so that we appear in the right draw.","Given my institution's enrolment in the championship is approved
+When I enter my team into a draw
+Then an entry is created linking the team to that championship and draw
+And only one team per organisation may be entered into the same draw
+And the same roster may be entered into several championships at once","Team Captain","09","P0","","",""
+"Story","J3-E3-S2","J3-E3","J3 Enter & Compete","3","Reuse a roster across seasons","As a Team Captain, I want the same team to carry across championships, so that I'm not rebuilding the squad every time.","Given a team from last season
+When I enter it into a new championship
+Then its existing members carry over
+And I can adjust the squad for this entry before locking it","Team Captain","09","P0","","",""
+"Epic","J4-E2","","J4 The Verified Record","3","Lifetime participation timeline","Every player has a permanent, system-written timeline of verified results that survives them leaving the institution.","","Player, Sports Secretary","04b","P0","M","J4-E1",""
+"Story","J4-E2-S1","J4-E2","J4 The Verified Record","3","A timeline built only from locked results","As a Player, I want a timeline of everything I've competed in, so that I have a complete record of my sporting career.","Then I see one entry per event with role, performance, date and any medal or honour chips
+And entries appear only for locked results
+And provisional results do not appear at all
+And entries are ordered most recent first","Player, Sports Secretary","04b","P0","","",""
+"Story","J4-E2-S2","J4-E2","J4 The Verified Record","3","Nobody can edit the timeline","As a Sports Secretary, I want the timeline to be system-written only, so that it is trustworthy as an institutional record.","Then no user interface offers editing or deleting a timeline entry
+And no API endpoint permits it
+And the only route to change one is a correction to the underlying result","Player, Sports Secretary","04b","P0","","",""
+"Story","J4-E2-S3","J4-E2","J4 The Verified Record","3","The record survives leaving","As a Player, I want my record to persist after I graduate, so that it's still provable years later.","Given I am removed from my institution, or the institution is deleted
+Then my lifetime entries remain intact and attributed to me
+And they still name the organisation I represented at the time","Player, Sports Secretary","04b","P0","","",""
+"Story","J4-E2-S4","J4-E2","J4 The Verified Record","3","An admin can view a player's profile","As a Faculty Coordinator, I want to open any of our players' profiles, so that I can answer questions about their record.","Given I hold people.view in an institution the player belongs to
+Then I can open their profile from the directory
+And I see the same timeline, statistics and credentials they see
+
+Given I share no institution with that player
+Then I cannot open their profile","Player, Sports Secretary","04b","P0","","",""
+"Epic","J4-E4","","J4 The Verified Record","3","Achievements from verified results","Medals, placements and awards become typed, countable records rather than free text.","","Player, Sports Secretary","07a","P0","M","J4-E1",""
+"Story","J4-E4-S1","J4-E4","J4 The Verified Record","3","Medals and placements are recorded","As a Player, I want medals recorded when I win, so that ""medals won"" is a real number.","When a final is locked
+Then the winning squad receives gold and the runner-up silver
+And a third-place playoff produces bronze
+And elimination in an earlier knockout round produces a placement such as Semi-finalist
+And a ranking event awards medals by finishing place
+And team achievements fan out to each squad member as individual achievements","Player, Sports Secretary","07a","P0","","",""
+"Story","J4-E4-S2","J4-E4","J4 The Verified Record","3","Award names are countable","As a Sports Secretary, I want awards drawn from a catalogue, so that ""MVP awards"" can be counted.","Given an official is recording an award
+Then they choose from a catalogue such as Player of the Match, MVP, Top Scorer
+And free text remains available as a fallback
+And existing free-text awards are preserved without a type","Player, Sports Secretary","07a","P0","","",""
+"Story","J4-E4-S3","J4-E4","J4 The Verified Record","3","Achievements only from locked results","As a Sports Secretary, I want achievements tied to verified results, so that the Hall of Fame is defensible.","Then an achievement exists only where its source result is locked
+And each records the lock version it derived from
+And unlocking supersedes the achievements it produced","Player, Sports Secretary","07a","P0","","",""
+"Epic","J6-E2","","J6 Govern & Administer","3","Module access by audience","Whole modules can be switched on or off per audience, in one place.","","Sports Secretary","03","P0","S","J6-E1",""
+"Story","J6-E2-S1","J6-E2","J6 Govern & Administer","3","Switch modules on and off per audience","As a Sports Secretary, I want to control which modules staff and students can reach, so that people only see what's relevant to them.","Then I see a grid of modules against the Staff and Students audiences
+When I disable Reports for Students
+Then students no longer see Reports in navigation
+And a student calling a reports endpoint directly is refused
+And staff are unaffected","Sports Secretary","03","P0","","",""
+"Story","J6-E2-S2","J6-E2","J6 Govern & Administer","3","Disabled modules disappear rather than error","As a Student Coordinator, I want modules I can't use to be absent, so that I'm not clicking into dead ends.","Given a module is disabled for my audience
+Then it does not appear in navigation at all
+And a direct link shows a clear ""not available"" page rather than a raw error","Sports Secretary","03","P0","","",""
+"Story","J6-E2-S3","J6-E2","J6 Govern & Administer","3","Module access gates permissions","As a Sports Secretary, I want a disabled module to override individual permissions, so that there's one place to switch something off.","Given a person holds a permission within a module that is disabled for their audience
+Then that permission does not resolve
+And enabling the module restores it without reassigning anything","Sports Secretary","03","P0","","",""
+"Epic","J1-E6","","J1 Institution Onboarding","4","Verify players","""1,847 verified athletes"" becomes a defensible number.","","Faculty Coordinator, Student Coordinator","04a, 02","P0","S","J1-E5",""
+"Story","J1-E6-S1","J1-E6","J1 Institution Onboarding","4","Browse the people directory","As a Faculty Coordinator, I want a searchable directory of our people, so that I can find anyone without going through teams.","Then I see name, member code, programme/batch, primary sport, event count and verification status
+And I can filter by Verified, Pending, Rejected or All, each showing a live count
+And I can search by name and combine it with the status filter
+And clicking a row opens that person's profile","Faculty Coordinator, Student Coordinator","04a, 02","P0","","",""
+"Story","J1-E6-S2","J1-E6","J1 Institution Onboarding","4","Verify and reject","As a Faculty Coordinator, I want to verify people individually or in bulk, so that 2,000 imported rows become a trusted roll.","When I verify a pending person
+Then their status becomes verified, stamped with who verified it and when
+And an audit entry is written
+And they are notified
+
+When I reject a person
+Then I must supply a reason, which is stored and shown to them
+
+Given I select many pending people
+When I verify the selection in one action
+Then each transition is applied and audited individually","Faculty Coordinator, Student Coordinator","04a, 02","P0","","",""
+"Story","J1-E6-S3","J1-E6","J1 Institution Onboarding","4","Verification is per-institution","As a Sports Secretary, I want verification to mean ""verified by us"", so that another organisation's judgement is not inherited into our roll.","Given a person is verified by IIM Bangalore and is also a member of a city cricket club
+Then they show as Verified in IIMB's directory
+And their status in the club's directory is unaffected","Faculty Coordinator, Student Coordinator","04a, 02","P0","","",""
+"Epic","J1-E7","","J1 Institution Onboarding","4","The workspace shell & daily command centre","Akash lands somewhere that tells him what needs doing today.","","Sports Secretary, Faculty Coordinator, Student Coordinator","01","P0","L","J1-E1",""
+"Story","J1-E7-S1","J1-E7","J1 Institution Onboarding","4","An institution workspace shell","As a Sports Secretary, I want a workspace that shows my institution's identity, so that it reads as ours rather than a generic tool.","Given I am an owner or admin of a verified institution
+When I sign in
+Then I land on the institution home, not a participant profile
+And the sidebar shows our logo, name and a ""Sports Org · Verified"" badge
+And navigation covers Home, People, Teams, Events, Discover, Achievements, Certificates, Reports, Administration
+And the Events item carries a live count of matches in progress
+And the top bar shows a breadcrumb, section title and my name and role","Sports Secretary, Faculty Coordinator, Student Coordinator","01","P0","","",""
+"Story","J1-E7-S2","J1-E7","J1 Institution Onboarding","4","Attention-first dashboard","As a Sports Secretary, I want to see what needs my attention, so that I start with decisions rather than navigation.","Then I see live KPIs: total players, active teams, upcoming events, awaiting approval, certificates pending, matches live now
+And ""matches live now"" is visually accented when greater than zero
+And I see a pending-actions queue, each item with a count and a one-tap CTA that deep-links into context
+And an item appears only when its underlying capability exists","Sports Secretary, Faculty Coordinator, Student Coordinator","01","P0","","",""
+"Story","J1-E7-S3","J1-E7","J1 Institution Onboarding","4","Participation trend","As a Sports Secretary, I want to see participation across recent seasons, so that I can answer ""are we growing?"" without building a spreadsheet.","Then I see unique participants per season for the last six seasons
+And a year-on-year delta against the previous season
+And where there is no prior season, the delta shows ""no comparison available"" rather than a percentage","Sports Secretary, Faculty Coordinator, Student Coordinator","01","P0","","",""
+"Story","J1-E7-S4","J1-E7","J1 Institution Onboarding","4","Live and upcoming events","As a Faculty Coordinator, I want current and upcoming events on the home page, so that I can see what's running without hunting.","Then I see date, title, sport summary and a status chip of Live, Registration, Upcoming or Completed
+And there is a link through to the full events list","Sports Secretary, Faculty Coordinator, Student Coordinator","01","P0","","",""
+"Story","J1-E7-S5","J1-E7","J1 Institution Onboarding","4","Sync confidence strip","As a Sports Secretary, I want to see how much data the workspace holds and when it last updated, so that I trust it as our system of record.","Then I see ""synced across N records · updated Xm ago"" with a real count from a cached aggregate
+And if the aggregate is unavailable the strip is hidden entirely","Sports Secretary, Faculty Coordinator, Student Coordinator","01","P0","","",""
+"Story","J1-E7-S6","J1-E7","J1 Institution Onboarding","4","Configurable navigation","As a Sports Secretary, I want to merge or split navigation groupings, so that the workspace matches how we talk about our own operation.","Given I merge Events & Competitions into one item
+Then the sidebar renders one item and both sets of pages remain reachable
+And the same applies to Records & Achievements","Sports Secretary, Faculty Coordinator, Student Coordinator","01","P0","","",""
+"Epic","J2-E8","","J2 Run a Championship","4","Operational status report","An organiser can see and export the operational state of the championship at a glance.","","Championship Organiser, Faculty Coordinator","08a","P1","S","J2-E7",""
+"Story","J2-E8-S1","J2-E8","J2 Run a Championship","4","See operational status at a glance","As a Championship Organiser, I want a single operational view of the championship, so that I know what's done and what's outstanding.","Given I organise the championship
+Then I see KPIs for registrations, approved, pending, matches played, medals awarded and certificates issued
+And progress bars for registrations approved, fixtures scheduled, matches completed, results verified and certificates issued
+And a needs-attention list of outstanding items with links into context
+And the tab is visible only to the organising team
+And figures are labelled as live, not final","Championship Organiser, Faculty Coordinator","08a","P1","","",""
+"Story","J2-E8-S2","J2-E8","J2 Run a Championship","4","Export the status report","As a Faculty Coordinator, I want to export the status report, so that I can circulate it without giving people workspace access.","When I export it
+Then a branded PDF or Excel file is produced server-side
+And generation runs as a job rather than a synchronous request
+And the export is recorded in the audit trail","Championship Organiser, Faculty Coordinator","08a","P1","","",""
+"Epic","J4-E3","","J4 The Verified Record","4","Career statistics per sport","A player's career statistics are aggregated per sport from verified results, and stay correct after a correction.","","Player","04b","P0","M","J4-E2",""
+"Story","J4-E3-S1","J4-E3","J4 The Verified Record","4","Statistics split by sport","As a Player, I want my statistics broken down by sport, so that they mean something.","Then I see appearances, wins, losses and draws per sport
+And medals and awards per sport
+And an overall summary across all sports
+And only locked results contribute","Player","04b","P0","","",""
+"Story","J4-E3-S2","J4-E3","J4 The Verified Record","4","Per-player match contributions","As a Player, I want goals and similar contributions counted, so that my statistics reflect what I actually did.","Given the scoring log attributed events to me
+When the scorecard is locked
+Then those events are projected into queryable per-player rows
+And my statistics include sport-appropriate contributions such as goals or points","Player","04b","P0","","",""
+"Story","J4-E3-S3","J4-E3","J4 The Verified Record","4","Statistics stay correct after a correction","As a Sports Secretary, I want statistics to reflect corrections, so that the numbers never drift from the results.","Given a locked result is corrected
+Then affected career statistics are recomputed as part of that transaction
+And not on a delayed schedule","Player","04b","P0","","",""
+"Epic","J4-E5","","J4 The Verified Record","4","Claim an external achievement","Achievements earned outside the platform can be claimed and validated into the record.","","Player, Faculty Coordinator","07a","P1","M","J4-E4",""
+"Story","J4-E5-S1","J4-E5","J4 The Verified Record","4","Submit a claim","As a Player, I want to claim an achievement earned outside the platform, so that my state selection is part of my record.","When I submit a claim with type, title, date, optional evidence link and a note
+Then it is created as pending against my institution
+And coordinators who can validate claims are notified
+And it does not appear on my profile while pending","Player, Faculty Coordinator","07a","P1","","",""
+"Story","J4-E5-S2","J4-E5","J4 The Verified Record","4","Validate a claim","As a Faculty Coordinator, I want to review claims before they enter the record, so that unverified assertions don't dilute it.","Given a pending claim
+When I approve it
+Then an achievement is created marked as a validated claim, distinguishable from a result-derived one
+And the claimant is notified
+And the decision is audited
+
+When I reject it
+Then I must supply a reason, which is shown to the claimant","Player, Faculty Coordinator","07a","P1","","",""
+"Story","J4-E5-S3","J4-E5","J4 The Verified Record","4","Claims surface on the dashboard","As a Faculty Coordinator, I want pending claims in my attention queue, so that they don't sit unreviewed.","Then the institution dashboard shows a count of pending claims with a Validate action","Player, Faculty Coordinator","07a","P1","","",""
+"Epic","J4-E6","","J4 The Verified Record","4","Certificate templates & branding","An institution can configure branded certificate templates it is willing to issue.","","Sports Secretary","07b","P0","M","J1-E1",""
+"Story","J4-E6-S1","J4-E6","J4 The Verified Record","4","Choose from approved templates","As a Sports Secretary, I want a gallery of certificate templates, so that I can see what we can issue.","Then I see Winner, Runner-up, Participation and Special templates
+And each shows how many certificates have been issued from it
+And I can preview one rendered with sample data without issuing anything","Sports Secretary","07b","P0","","",""
+"Story","J4-E6-S2","J4-E6","J4 The Verified Record","4","Apply our branding","As a Sports Secretary, I want our logo, colours and signatories on certificates, so that they are recognisably ours.","When I configure a template with our logo, background, colours and signatories
+Then a preview reflects it immediately
+And signature images are stored privately and served only through signed URLs","Sports Secretary","07b","P0","","",""
+"Epic","J4-E9","","J4 The Verified Record","4","Organisation Hall of Fame","An institution has a presentable record of what it has won, built from verified achievements.","","Sports Secretary","07a","P1","M","J4-E4",""
+"Story","J4-E9-S1","J4-E9","J4 The Verified Record","4","Institution achievements page","As a Sports Secretary, I want a page of our achievements, so that we can show what the institution has won.","Then I see medals won, records set, selections and a this-season figure
+And team achievements and individual achievements as cards with photo, sport, name, achievement and year
+And only verified achievements appear","Sports Secretary","07a","P1","","",""
+"Story","J4-E9-S2","J4-E9","J4 The Verified Record","4","Achievement feed","As a Faculty Coordinator, I want a reverse-chronological feed of achievements, so that I can see what's happened recently.","Then I see verified wins, records, selections and honours newest first, with timestamps","Sports Secretary","07a","P1","","",""
+"Story","J4-E9-S3","J4-E9","J4 The Verified Record","4","Shareable achievement cards","As a Sports Secretary, I want a branded image for an achievement, so that we can post it.","When I choose Share card
+Then a branded image is generated with our logo and the achievement details
+And I can download it","Sports Secretary","07a","P1","","",""
+"Epic","J5-E1","","J5 Leadership Reporting","4","Participation report","Leadership can answer how many people played, in what, and whether that is growing.","","Sports Secretary, Faculty Coordinator","08b","P0","M","J1-E5, J2-E7",""
+"Story","J5-E1-S1","J5-E1","J5 Leadership Reporting","4","Define our academic year","As a Sports Secretary, I want to set when our sporting year starts, so that year-on-year figures match how we actually report.","When I set our season to start in June
+Then a championship belongs to the season containing its start date
+And seasons are labelled in the form 2025-26
+And every report and every export uses the same definition","Sports Secretary, Faculty Coordinator","08b","P0","","",""
+"Story","J5-E1-S2","J5-E1","J5 Leadership Reporting","4","Headline participation figures","As a Sports Secretary, I want participation KPIs with year-on-year change, so that I can answer ""are we growing?"" in one sentence.","Given a selected season
+Then I see unique participants, events held, matches played and medals won
+And each shows the change against the previous season
+And only locked results contribute to any figure
+And where there is no previous season, the delta reads ""no comparison available"" rather than a percentage","Sports Secretary, Faculty Coordinator","08b","P0","","",""
+"Story","J5-E1-S3","J5-E1","J5 Leadership Reporting","4","Participation by sport and by programme","As a Faculty Coordinator, I want participation broken down, so that I can see which sports and programmes are actually engaged.","Then I see unique participants per sport as a ranked breakdown
+And unique participants per programme, using our structure tree
+And a person who played three sports counts once in the total and once per sport
+And people with no programme assigned are grouped as unassigned rather than dropped","Sports Secretary, Faculty Coordinator","08b","P0","","",""
+"Story","J5-E1-S4","J5-E1","J5 Leadership Reporting","4","Six-season trend","As a Sports Secretary, I want a participation trend across recent seasons, so that the dashboard chart and the report agree.","Then I see unique participants per season for the last six seasons
+And the figures are identical to those on the institution dashboard","Sports Secretary, Faculty Coordinator","08b","P0","","",""
+"Epic","J5-E2","","J5 Leadership Reporting","4","Performance report","Leadership can see competitive performance, not just turnout.","","Sports Secretary, Faculty Coordinator","08b","P1","S","J4-E4",""
+"Story","J5-E2-S1","J5-E2","J5 Leadership Reporting","4","Performance KPIs","As a Sports Secretary, I want our medal and win-rate figures, so that I can report competitive performance, not just turnout.","Then I see total medals, win rate, records set and selections, each with a season-on-season delta
+And medals come from recorded achievements rather than being recomputed from fixtures
+And win rate counts only locked results","Sports Secretary, Faculty Coordinator","08b","P1","","",""
+"Story","J5-E2-S2","J5-E2","J5 Leadership Reporting","4","Medals by sport","As a Faculty Coordinator, I want medals broken down by sport, so that I can see where we're strong.","Then I see gold, silver and bronze counts per sport
+And a total per sport","Sports Secretary, Faculty Coordinator","08b","P1","","",""
+"Story","J5-E2-S3","J5-E2","J5 Leadership Reporting","4","Top performers","As a Sports Secretary, I want a list of our standout athletes, so that I can recognise them.","Then I see players ranked by medals and awards for the season
+And awards are counted using the award-type catalogue, not raw free text
+And each name links to that player's profile","Sports Secretary, Faculty Coordinator","08b","P1","","",""
+"Epic","J5-E3","","J5 Leadership Reporting","4","Diversity & inclusion report","Leadership can report honestly on inclusion, in aggregate and without exposing individuals.","","Sports Secretary, Faculty Coordinator","08b, 04a","P1","M","J1-E5",""
+"Story","J5-E3-S1","J5-E3","J5 Leadership Reporting","4","Women's participation","As a Sports Secretary, I want women's participation figures, so that I can report on inclusion honestly.","Given gender has been captured with consent
+Then I see women's participation as a count and a share, with a year-on-year delta
+And a breakdown by sport
+And people who chose not to disclose are reported as a separate category, never inferred or excluded silently","Sports Secretary, Faculty Coordinator","08b, 04a","P1","","",""
+"Story","J5-E3-S2","J5-E3","J5 Leadership Reporting","4","First-time athletes","As a Faculty Coordinator, I want to know how many people competed for the first time, so that I can measure whether we're widening participation.","Then a person counts as first-time if they have no lifetime entry before this season
+And the figure is shown with a year-on-year delta","Sports Secretary, Faculty Coordinator","08b, 04a","P1","","",""
+"Story","J5-E3-S3","J5-E3","J5 Leadership Reporting","4","Representation by programme","As a Sports Secretary, I want to see which programmes are represented, so that I can spot who we're not reaching.","Then I see participants per programme as a share of that programme's membership
+And programmes with zero participants are shown explicitly rather than omitted","Sports Secretary, Faculty Coordinator","08b, 04a","P1","","",""
+"Story","J5-E3-S4","J5-E3","J5 Leadership Reporting","4","Individuals are never identifiable","As a Sports Secretary, I want demographic data reported only in aggregate, so that we don't expose individuals.","Then gender is never displayed against an individual anywhere in the product
+And any breakdown cell below a minimum cohort size is suppressed rather than shown
+And the same rule applies to scholarship status","Sports Secretary, Faculty Coordinator","08b, 04a","P1","","",""
+"Story","J5-E3-S5","J5-E3","J5 Leadership Reporting","4","Scholarship athletes","As a Sports Secretary, I want to report on scholarship athletes, so that the D&I picture is complete.","Given scholarship status is recorded against a person's membership
+Then I see the count with a year-on-year delta, and the share of total participants
+And the figure is shown only in aggregate
+And no individual is ever identified as a scholarship athlete anywhere in the product or in any export","Sports Secretary, Faculty Coordinator","08b, 04a","P1","","",""
+"Epic","J4-E7","","J4 The Verified Record","5","Generate certificates in bulk","Certificates generate in bulk from verified results with immutable numbering, and recipients are told.","","Sports Secretary, Faculty Coordinator","07b, 02","P0","L","J4-E6, J4-E1",""
+"Story","J4-E7-S1","J4-E7","J4 The Verified Record","5","Generate a batch","As a Faculty Coordinator, I want to generate certificates for everyone in an event at once, so that 300 certificates aren't a day of work.","Given a championship with locked results
+When I generate a batch for all participants, or for winners only, or for chosen people
+Then certificate records are created as queued and I get an immediate response
+And generation proceeds in the background
+And I can watch progress","Sports Secretary, Faculty Coordinator","07b, 02","P0","","",""
+"Story","J4-E7-S2","J4-E7","J4 The Verified Record","5","Immutable, gapless numbering","As a Sports Secretary, I want every certificate uniquely and permanently numbered, so that a registrar can rely on it.","Then each issued certificate carries a number in the form CERT-{ORGCODE}-{YYYY}-{NNNNN}
+And numbers are unique platform-wide
+And numbers are allocated at issue, so a failed render burns no number
+And concurrent generation produces no duplicates and no gaps","Sports Secretary, Faculty Coordinator","07b, 02","P0","","",""
+"Story","J4-E7-S3","J4-E7","J4 The Verified Record","5","The issued register","As a Sports Secretary, I want a register of every certificate, so that I can answer ""was one issued for this student?""","Then I see player, type, event, certificate number and status of Queued, Generating, Issued, Failed or Revoked
+And I can search and filter it
+And failed rows show the error and can be retried","Sports Secretary, Faculty Coordinator","07b, 02","P0","","",""
+"Story","J4-E7-S4","J4-E7","J4 The Verified Record","5","Recipients are told","As a Player, I want to be notified when my certificate is ready, so that I can download it.","Given my certificate is issued
+Then I am notified in-app and by email
+And it appears in the credentials list on my profile
+And I can download it","Sports Secretary, Faculty Coordinator","07b, 02","P0","","",""
+"Story","J4-E7-S5","J4-E7","J4 The Verified Record","5","Certificates freeze what they attest","As a Sports Secretary, I want a certificate to render identically in five years, so that it remains a valid document.","Then the certificate stores a frozen snapshot of name, event, result and date at issue time
+And later changes to the player's name, the team or the championship name do not alter it
+And the verification page displays the frozen snapshot, never a live join","Sports Secretary, Faculty Coordinator","07b, 02","P0","","",""
+"Epic","J4-E8","","J4 The Verified Record","5","Public QR verification","Anyone holding a certificate can confirm it is genuine, without an account.","","Anyone","07b","P1","S","J4-E7",""
+"Story","J4-E8-S1","J4-E8","J4 The Verified Record","5","Scan to verify","As anyone holding a certificate, I want to scan its QR code, so that I can confirm it is genuine.","Given a certificate with a QR code
+When I scan it
+Then I reach a public page needing no account
+And I see player, event, result, certificate number, issuing organisation and issue date
+And the page carries a clear ""Verified by Sportagon EOS"" mark","Anyone","07b","P1","","",""
+"Story","J4-E8-S2","J4-E8","J4 The Verified Record","5","Revoked certificates say so","As a recruiter, I want to know if a certificate was superseded, so that I'm not misled by an out-of-date document.","Given a certificate was revoked because its result was corrected
+When I scan it
+Then I see it was superseded, with the date
+And the page does not 404 or silently disappear","Anyone","07b","P1","","",""
+"Story","J4-E8-S3","J4-E8","J4 The Verified Record","5","Verification leaks nothing","As a Sports Secretary, I want the public page limited to the certificate, so that it isn't an entry point into our data.","Then the page shows only that certificate's frozen details
+And no contact details, no other results and no institution roster are exposed
+And an invalid or tampered token shows a generic not-found page","Anyone","07b","P1","","",""
+"Epic","J5-E4","","J5 Leadership Reporting","5","Anonymised peer benchmark","An institution can see how it compares to its peers without any peer being identifiable.","","Sports Secretary","08b","P1","M","J5-E1, J3-E1",""
+"Story","J5-E4-S1","J5-E4","J5 Leadership Reporting","5","Compare against the platform","As a Sports Secretary, I want to see how we compare to similar institutions, so that I can tell the Director whether we're doing well.","Given peer benchmarking is enabled for my institution
+Then I see us against the platform median and the top decile on participation rate,
+     events per year, women's participation, and medals per 100 athletes
+And I see our percentile on each
+And no other institution is named, ranked or made identifiable","Sports Secretary","08b","P1","","",""
+"Story","J5-E4-S2","J5-E4","J5 Leadership Reporting","5","Refuse to report on thin cohorts","As a Sports Secretary, I want the benchmark to stay silent when the sample is too small, so that we can't reverse-engineer another institution's numbers.","Given fewer than five institutions match a comparison cohort
+Then the benchmark shows ""insufficient data"" rather than a figure
+And my own institution is excluded from the cohort it is compared against
+And personal organisations are excluded from every aggregate","Sports Secretary","08b","P1","","",""
+"Story","J5-E4-S3","J5-E4","J5 Leadership Reporting","5","Benchmarking is opt-in per institution","As a Sports Secretary, I want benchmarking to be a deliberate setting, so that we aren't compared without our knowledge.","Given benchmarking is disabled for my institution
+Then the tab is not shown and the endpoint refuses the request","Sports Secretary","08b","P1","","",""
+"Epic","J5-E5","","J5 Leadership Reporting","5","Annual Sports Impact Report","An institution can produce a branded, exportable annual report from verified data.","","Sports Secretary","08c","P1","L","J5-E1, J4-E7",""
+"Story","J5-E5-S1","J5-E5","J5 Leadership Reporting","5","Generate the report","As a Sports Secretary, I want to generate our annual impact report, so that I have something to put in front of the board.","When I generate the report for a season
+Then it is produced as a background job with a progress indicator
+And the branded output reads ""IIM BANGALORE — SPORTS IMPACT 2025–26 · Powered by Sportagon EOS · Verified data""
+And it contains headline metrics, participation, performance and inclusion sections
+And every figure derives from locked results only","Sports Secretary","08c","P1","","",""
+"Story","J5-E5-S2","J5-E5","J5 Leadership Reporting","5","Auto-drafted executive summary","As a Sports Secretary, I want a written summary I can edit, so that I'm not writing the narrative from scratch.","Then a summary is drafted from the computed figures
+And every number in it matches the charts beside it exactly
+And I can edit it before exporting
+And my edits are preserved on re-export of the same season","Sports Secretary","08c","P1","","",""
+"Story","J5-E5-S3","J5-E5","J5 Leadership Reporting","5","Export in the format I need","As a Sports Secretary, I want PDF and Excel exports, so that I can circulate it and work with the underlying numbers.","When I export
+Then a branded PDF renders server-side with our logo
+And an Excel export carries the underlying figures with formatted headers
+And charts are rendered server-side and embedded as images
+And the export is recorded in the audit trail","Sports Secretary","08c","P1","","",""
+"Story","J5-E5-S4","J5-E5","J5 Leadership Reporting","5","Report and export never disagree","As a Sports Secretary, I want the exported document to match the screen, so that I'm not caught out in the meeting.","Given I view a report and export the same season
+Then every figure is identical
+And both are produced from the same computed result, not two calculation paths","Sports Secretary","08c","P1","","",""
+"Epic","J4-E10","","J4 The Verified Record","held","Right to erasure","A person can have their personal data erased without falsifying anyone else's competition record.","","Player, Sports Secretary","04b","P0","M","J4-E2","blocked-on-decision"
+"Story","J4-E10-S1","J4-E10","J4 The Verified Record","held","Request erasure","As a Player, I want to request erasure of my personal data, so that I can exercise my rights.","When I request erasure
+Then I am shown exactly what will be deleted and what will be retained, and why
+And I must confirm explicitly
+And the request is recorded in the audit trail","Player, Sports Secretary","04b","P0","","",""
+"Story","J4-E10-S2","J4-E10","J4 The Verified Record","held","Erase identity, retain the record","As a Sports Secretary, I want match results to survive an erasure, so that other participants' records aren't falsified.","Given an erasure is executed
+Then name, email, phone, avatar, date of birth and gender are deleted
+And institution memberships are deleted
+And the user row is retained as a tombstone with no personal data
+And lifetime entries, achievements and certificates are retained, displayed as ""Withdrawn participant""
+And fixtures, scores and standings are untouched
+And audit entries are retained, using the denormalised actor label","Player, Sports Secretary","04b","P0","","",""

@@ -1,11 +1,12 @@
 import { Router } from 'express';
-import { assignRoleSchema, bulkAssignRoleSchema, enrollOrganizationSchema, reviewEnrollmentSchema } from '@semp/shared';
+import { assignRoleSchema, bulkAssignRoleSchema, bulkReviewEnrollmentsSchema, enrollOrganizationSchema, reviewEnrollmentSchema } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError, BusinessRuleError } from '../../shared/errors.js';
 import { createNotification } from '../notifications/audience.js';
+import { memoizedAuthorizer, reviewEnrollment, reviewEnrollmentsBulk } from './review.service.js';
 
 export function makeEnrollmentRouter(prisma: Prisma): Router {
   const router = Router();
@@ -48,6 +49,31 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
         status: 'pending',
       },
     });
+
+    // Tell the organising team, or an application sits unseen until somebody happens
+    // to open the Approvals tab. Direct notifications, so only they are pinged.
+    const [org, champ, organisers] = await Promise.all([
+      prisma.organizations.findUnique({ where: { id: req.body.organization_id }, select: { name: true } }),
+      prisma.championships.findUnique({ where: { id: req.params.eventId }, select: { name: true } }),
+      prisma.user_championship_roles.findMany({
+        where: { championship_id: req.params.eventId },
+        select: { user_id: true },
+      }),
+    ]);
+    for (const o of [...new Map(organisers.map((r) => [r.user_id, r])).values()]) {
+      await createNotification(prisma, {
+        championship_id: req.params.eventId,
+        target_user_id: o.user_id,
+        sender_id: req.user!.id,
+        // Something to DO, not something that happened: this is what puts a row in
+        // the organiser's approvals queue.
+        type: 'enrollment_requested',
+        audience: 'all',
+        title: `${org?.name ?? 'An organisation'} applied to ${champ?.name ?? 'your championship'}`,
+        body: 'Review it on the championship’s Approvals tab.',
+      });
+    }
+
     res.status(201).json(row);
   }));
 
@@ -62,37 +88,27 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
     res.json(rows);
   }));
 
+  // Decide a whole selection at once - twelve programmes across six sports is not
+  // seventy-two clicks (J2-E2-S2). Declared before '/:id' or Express would match
+  // 'bulk' as an enrollment id. A selection can span championships, so the organiser
+  // guard runs per enrolment (memoized) rather than once for the route.
+  router.patch('/championship-organizations/bulk', validateBody(bulkReviewEnrollmentsSchema), asyncHandler(async (req, res) => {
+    const { ids, status, rejection_note } = req.body as { ids: string[]; status: 'approved' | 'rejected'; rejection_note?: string };
+    const authorize = req.user!.isSuperAdmin
+      ? undefined
+      : memoizedAuthorizer((championshipId) => guards.organisesChampionship(req.user!.id, championshipId));
+    const results = await reviewEnrollmentsBulk(prisma, req, ids, { status, rejection_note }, authorize);
+    res.json({
+      results,
+      reviewed: results.filter((r) => r.ok).length,
+      failed: results.filter((r) => !r.ok).length,
+    });
+  }));
+
   // Approve / reject an enrollment (stamps reviewer + timestamp).
   router.patch('/championship-organizations/:id', enrollmentOrganiser, validateBody(reviewEnrollmentSchema), asyncHandler(async (req, res) => {
-    const existing = await prisma.championship_organizations.findUnique({
-      where: { id: req.params.id },
-      include: { organizations: { select: { name: true, short_name: true } }, championships: { select: { name: true } } },
-    });
-    if (!existing) throw new NotFoundError('Enrollment');
-    const row = await prisma.championship_organizations.update({
-      where: { id: req.params.id },
-      data: {
-        status: req.body.status,
-        rejection_note: req.body.status === 'rejected' ? req.body.rejection_note ?? null : null,
-        reviewed_by: req.user!.id,
-        reviewed_at: new Date(),
-      },
-    });
-
-    // An approval is announced to everyone in the championship.
-    if (req.body.status === 'approved' && existing.status !== 'approved') {
-      const orgName = existing.organizations?.short_name || existing.organizations?.name || 'An organization';
-      await createNotification(prisma, {
-        championship_id: existing.championship_id,
-        sender_id: req.user!.id,
-        type: 'enrollment_approved',
-        audience: 'all',
-        title: `${orgName} has joined the championship`,
-        body: `${existing.organizations?.name ?? orgName} has been approved to participate${existing.championships?.name ? ` in ${existing.championships.name}` : ''}.`,
-      });
-    }
-
-    res.json(row);
+    const { status, rejection_note } = req.body as { status: 'approved' | 'rejected'; rejection_note?: string };
+    res.json(await reviewEnrollment(prisma, req, req.params.id, { status, rejection_note }));
   }));
 
   // Assign an championship-scoped role to a user (e.g. Captain) via user_championship_roles.
@@ -137,7 +153,17 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
   router.get('/championships/:eventId/roles', asyncHandler(async (req, res) => {
     const rows = await prisma.user_championship_roles.findMany({
       where: { championship_id: req.params.eventId },
-      include: { users_user_championship_roles_user_idTousers: true, roles: true },
+      // NEVER `users: true`. That serialises the whole row - the bcrypt hash, and
+      // since J1-E5 the person's date of birth, gender and consent record too,
+      // none of which may appear against a named individual (J1-E5-S4). The rest
+      // of the codebase uses an explicit projection for exactly this reason; this
+      // was the one site that did not.
+      include: {
+        users_user_championship_roles_user_idTousers: {
+          select: { id: true, name: true, email: true, phone: true, avatar_url: true },
+        },
+        roles: true,
+      },
       orderBy: { assigned_at: 'desc' },
     });
     res.json(rows);

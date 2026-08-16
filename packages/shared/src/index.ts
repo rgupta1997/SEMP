@@ -5,4 +5,7 @@ export * from './event-templates.js';
 export * from './tie.js';
 export * from './tie-templates.js';
 export * from './demo-templates.js';
+export * from './championship-templates.js';
+export * from './regions.js';
+export * from './permissions.js';
 export * from './schemas.js';

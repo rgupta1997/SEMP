@@ -1,16 +1,21 @@
 import { Router } from 'express';
-import { bulkAssignOfficialsSchema, createChampionshipSchema, updateChampionshipSchema, updateChampionshipStatusSchema, type ChampionshipStatus } from '@semp/shared';
+import { applyTemplateSchema, bulkAssignOfficialsSchema, createChampionshipSchema, regionForCountry, saveTemplateSchema, updateChampionshipSchema, updateChampionshipStatusSchema, type ChampionshipStatus } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError } from '../../shared/errors.js';
 import { assertChampionshipTransition } from './domain/championship-lifecycle.js';
+import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
+import { applyChampionshipTemplate } from './apply-template.js';
+import { captureShape, saveTemplate } from './templates.service.js';
 import { createNotification } from '../notifications/audience.js';
 import { recomputeStandings } from '../standings/standings.service.js';
 import { signShareToken } from '../public/share-token.js';
 import { listChampionshipFixtures } from './fixtures-list.js';
+import { championshipLiveView } from './live-view.js';
 import { findUserByPhone } from '../iam/users.helpers.js';
+import { ROLE_CODES, roleWhereByCode } from '../iam/role-codes.js';
 
 // Prisma include that pulls just the sport names offered by a championship, plus a
 // helper that flattens them to a distinct, sorted `sports: string[]` and drops the
@@ -50,7 +55,7 @@ function maskEmail(email?: string | null): string | null {
 async function isChampionshipInsider(prisma: Prisma, userId: string, championshipId: string): Promise<boolean> {
   const [organiser, enrolledOwner] = await Promise.all([
     prisma.user_championship_roles.findFirst({
-      where: { user_id: userId, championship_id: championshipId, roles: { name: 'Organiser' } },
+      where: { user_id: userId, championship_id: championshipId, roles: roleWhereByCode(ROLE_CODES.organiser) },
       select: { id: true },
     }),
     prisma.championship_organizations.findFirst({
@@ -112,8 +117,17 @@ export function makeEventsRouter(prisma: Prisma): Router {
     return ids;
   };
 
-  const canSeeChampionship = async (user: { id: string; isSuperAdmin?: boolean }, championship: { id: string; visibility: string }): Promise<boolean> => {
-    if (championship.visibility !== 'private' || user.isSuperAdmin) return true;
+  // The single predicate for "may this person see this championship at all". Both
+  // halves of the answer live here on purpose: hiding a draft from the browse list
+  // while still serving the whole record to anyone who has the id is not hiding it
+  // (J2-E1-S3). A draft is the organiser's workbench however public its visibility
+  // flag says it will eventually be, so it is gated exactly like a private one.
+  const canSeeChampionship = async (
+    user: { id: string; isSuperAdmin?: boolean },
+    championship: { id: string; visibility: string; status: string },
+  ): Promise<boolean> => {
+    if (user.isSuperAdmin) return true;
+    if (championship.visibility !== 'private' && championship.status !== 'draft') return true;
     return (await involvedChampionshipIds(user.id)).has(championship.id);
   };
 
@@ -123,11 +137,29 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // "Host" and "Championships" views are derived from /mine.
   // -------------------------------------------------------------------------
   router.get('/', asyncHandler(async (req, res) => {
-    const where = req.user!.isSuperAdmin
+    // The SQL form of `canSeeChampionship` above - same rule, expressed as a filter
+    // because this route answers for many rows at once. Change one and change both.
+    const visible = req.user!.isSuperAdmin
       ? {}
-      : { OR: [{ visibility: 'public' }, { id: { in: [...(await involvedChampionshipIds(req.user!.id))] } }] };
+      : {
+        OR: [
+          { visibility: 'public', status: { not: 'draft' } },
+          { id: { in: [...(await involvedChampionshipIds(req.user!.id))] } },
+        ],
+      };
+    // `?region=` narrows the list server-side. The browser filters the same field on
+    // the chips it already has, so this is for callers without that list in hand - and
+    // because a filter parameter that is quietly ignored is worse than one that does
+    // not exist. 'unspecified' selects the rows with no country to derive a region from.
+    const region = typeof req.query.region === 'string' ? req.query.region.trim() : '';
+    const regionFilter = !region
+      ? {}
+      : region === 'unspecified'
+        ? { region: null }
+        : { region };
+
     const championships = await prisma.championships.findMany({
-      where,
+      where: { AND: [visible, regionFilter] },
       orderBy: { created_at: 'desc' },
       include: championshipSportsInclude,
     });
@@ -151,8 +183,8 @@ export function makeEventsRouter(prisma: Prisma): Router {
     // fire all six together rather than awaiting the roles first (each sequential
     // await is a full network round-trip to the remote pooler - ~700ms each).
     const [orgRole, offRole, championshipRoleRows, officialRows, memberRows, enrolledRows] = await Promise.all([
-      prisma.roles.findUnique({ where: { name: 'Organiser' }, select: { id: true } }),
-      prisma.roles.findUnique({ where: { name: 'Official' }, select: { id: true } }),
+      prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser), select: { id: true } }),
+      prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.official), select: { id: true } }),
       prisma.user_championship_roles.findMany({ where: { user_id: userId }, select: { championship_id: true, role_id: true } }),
       prisma.championship_officials.findMany({ where: { user_id: userId, is_active: true }, select: { championship_id: true } }),
       prisma.team_members.findMany({ where: { user_id: userId, is_active: true }, select: { teams: { select: { team_entries: { select: { championship_id: true } } } } } }),
@@ -202,8 +234,19 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // organiser can jump straight to adding sports - they never have to make a season
   // by hand (they can still rename/add more on the Seasons tab).
   router.post('/', validateBody(createChampionshipSchema), asyncHandler(async (req, res) => {
+    // Region is derived, never accepted: a client that could set it independently of
+    // the country is a client that can make the filter lie.
+    if ('country' in req.body) req.body.region = regionForCountry(req.body.country);
+
+    // Individual entry defaults to what the organiser almost certainly means: a
+    // public championship is open to anyone, a private one exists precisely because
+    // only invited institutions should be in it (J3-E1-S5). Either way they can
+    // change it on the settings tab.
+    if (req.body.allow_individual_entry === undefined) {
+      req.body.allow_individual_entry = req.body.visibility !== 'private';
+    }
     const championship = await prisma.championships.create({ data: req.body });
-    const organiserRole = await prisma.roles.findUnique({ where: { name: 'Organiser' } });
+    const organiserRole = await prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser) });
     if (organiserRole) {
       await prisma.user_championship_roles.create({
         data: { championship_id: championship.id, user_id: req.user!.id, role_id: organiserRole.id },
@@ -219,11 +262,42 @@ export function makeEventsRouter(prisma: Prisma): Router {
         data: { championship_id: championship.id, name: championship.venue, city: championship.venue },
       });
     }
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.championshipCreated,
+      target: { type: 'championships', id: championship.id, label: championship.name },
+      championshipId: championship.id,
+      summary: `Created the championship ${championship.name}`,
+      diff: { status: { from: null, to: championship.status } },
+    });
     res.status(201).json(championship);
+  }));
+
+  // Apply a template to a fresh draft (J2-E1-S1): sports, disciplines, formats and
+  // the standings scheme in one call.
+  router.post('/:id/apply-template', ownChampionship, validateBody(applyTemplateSchema), asyncHandler(async (req, res) => {
+    const { template } = req.body as { template: string };
+    res.json(await applyChampionshipTemplate(prisma, req, req.params.id, template));
+  }));
+
+  // The other direction: keep the shape of this championship as a template. This is
+  // where every non-built-in template comes from - the product derives the shape, the
+  // organiser supplies the name.
+  router.post('/:id/save-template', ownChampionship, validateBody(saveTemplateSchema), asyncHandler(async (req, res) => {
+    const { name, description, organization_id } = req.body as { name: string; description?: string | null; organization_id?: string | null };
+    res.status(201).json(await saveTemplate(prisma, req, {
+      championshipId: req.params.id, name, description, organizationId: organization_id ?? null,
+    }));
+  }));
+
+  // What saving would capture, so the "save as template" prompt can show the organiser
+  // what they are about to keep before they name it.
+  router.get('/:id/template-shape', ownChampionship, asyncHandler(async (req, res) => {
+    res.json(await captureShape(prisma, req.params.id));
   }));
 
   // UPDATE championship
   router.patch('/:id', ownChampionship, validateBody(updateChampionshipSchema), asyncHandler(async (req, res) => {
+    if ('country' in req.body) req.body.region = regionForCountry(req.body.country);
     const championship = await prisma.championships.update({ where: { id: req.params.id }, data: req.body });
     res.json(championship);
   }));
@@ -235,6 +309,8 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // automatically through their own FKs.)
   router.delete('/:id', ownChampionship, asyncHandler(async (req, res) => {
     const id = req.params.id;
+    // Named before it goes: after the transaction there is nothing left to describe.
+    const doomed = await prisma.championships.findUnique({ where: { id }, select: { name: true, status: true } });
     await prisma.$transaction([
       // Fixtures sit at the bottom - they reference teams, grounds and disciplines.
       prisma.fixtures.deleteMany({ where: { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: id } } } } }),
@@ -251,6 +327,15 @@ export function makeEventsRouter(prisma: Prisma): Router {
       prisma.user_championship_roles.deleteMany({ where: { championship_id: id } }),
       prisma.championships.delete({ where: { id } }),
     ]);
+    if (doomed) {
+      await audit(prisma, req, {
+        action: AUDIT_ACTIONS.championshipDeleted,
+        target: { type: 'championships', id, label: doomed.name },
+        championshipId: id,
+        summary: `Deleted the championship ${doomed.name} and everything under it`,
+        diff: { status: { from: doomed.status, to: null } },
+      });
+    }
     res.status(204).send();
   }));
 
@@ -260,6 +345,14 @@ export function makeEventsRouter(prisma: Prisma): Router {
     if (!championship) throw new NotFoundError('Championship');
     assertChampionshipTransition(championship.status as ChampionshipStatus, req.body.status as ChampionshipStatus);
     const updated = await prisma.championships.update({ where: { id: req.params.id }, data: { status: req.body.status } });
+
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.championshipStatusChanged,
+      target: { type: 'championships', id: updated.id, label: updated.name },
+      championshipId: updated.id,
+      summary: `Moved ${updated.name} from ${championship.status} to ${updated.status}`,
+      diff: { status: { from: championship.status, to: updated.status } },
+    });
 
     // Freeze a final, accurate snapshot at the moment of completion (fixture-driven
     // recomputes stop once a championship is completed).
@@ -302,6 +395,13 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // powers the schedule timeline (Gantt) view. Shared with the public share page.
   router.get('/:id/fixtures', asyncHandler(async (req, res) => {
     res.json(await listChampionshipFixtures(prisma, req.params.id));
+  }));
+
+  // Everything happening right now, plus what is coming next (J2-E6-S1). Its own
+  // narrow query rather than a filter over the list above: this endpoint is
+  // polled every few seconds and must not drag the whole schedule each time.
+  router.get('/:id/live', asyncHandler(async (req, res) => {
+    res.json(await championshipLiveView(prisma, req.params.id));
   }));
 
   // All grounds across the championship's venues - used to schedule fixtures to a ground.

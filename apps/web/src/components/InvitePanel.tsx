@@ -29,10 +29,12 @@ function OrgPicker({ value, onChange, excludeIds }: { value: Org[]; onChange: (o
     return () => clearTimeout(t);
   }, [query]);
 
-  // No query → first 10 orgs; otherwise search the DB (capped so the dropdown stays light).
+  // No query → first 10 orgs; otherwise search the DB (capped so the dropdown stays
+  // light). Always the directory scope - inviting an organisation needs its name and
+  // city, never anything behind its tenant boundary (J6-E5-S1).
   const path = debounced
-    ? `/organizations?q=${encodeURIComponent(debounced)}&limit=25`
-    : '/organizations?limit=10';
+    ? `/organizations?scope=directory&q=${encodeURIComponent(debounced)}&limit=25`
+    : '/organizations?scope=directory&limit=10';
   const { data: orgs = [], isFetching } = useApi<Org[]>(path);
 
   // Close on any click/tap outside the picker, plus Escape.

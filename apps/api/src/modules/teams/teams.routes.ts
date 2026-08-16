@@ -12,6 +12,7 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { coerceFilter, parsePaging } from '../../http/paging.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
+import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import { resolveEntryRules, type EntryRules } from '../tournaments/domain/entry-rules.js';
 import { assertCanAddMember, assertCanLockRoster } from './domain/roster-policy.js';
 
@@ -88,6 +89,9 @@ const teamFullInclude = {
   organizations: organizationWithOwnersInclude,
   sports: true,
   team_entries: entryInclude,
+  // The coach hangs off the team, not the squad, so they travel with it here rather
+  // than appearing among the members (J3-E2-S3).
+  users: { select: publicUserSelect },
 } as const;
 
 // Per-entry rules from its discipline draw (defaults when no draw linked yet).
@@ -113,7 +117,10 @@ function shapeTeam(team: any) {
         squad_min: Math.min(...team_entries.map((e: any) => e.entry_rules.squad_min)),
         squad_max: Math.max(...team_entries.map((e: any) => e.entry_rules.squad_max)),
       };
-  return { ...team, team_entries, entry_rules };
+  // `users` is Prisma's name for the coach relation on `teams`; surface it as what
+  // it actually is so no caller has to know that.
+  const { users, ...rest } = team;
+  return { ...rest, coach: users ?? null, team_entries, entry_rules };
 }
 
 async function hydrateTeam(prisma: Prisma, id: string) {
@@ -226,6 +233,15 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       }
       return team;
     });
+
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.teamCreated,
+      target: { type: 'teams', id: created.id, label: created.name },
+      organizationId: organization_id,
+      summary: `Created the team ${created.name}`,
+      ...(entryData ? { championshipId: entryData.championship_id } : {}),
+    });
+
     res.status(201).json(await hydrateTeam(prisma, created.id));
   }));
 
@@ -360,29 +376,51 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     res.json(await hydrateTeam(prisma, req.params.id));
   }));
 
-  // Bulk-create teams (one roster + one championship entry per selected discipline),
-  // each with the creator as captain. All-or-nothing so a partial failure never
-  // leaves orphan teams.
+  // Bulk-create teams, each with the creator as captain. All-or-nothing so a
+  // partial failure never leaves orphan teams.
+  //
+  // The championship half is OPTIONAL, exactly as it is on `POST /teams`. A team
+  // is a property of the ORGANISATION, not of a championship: a sports office
+  // builds its squads once and enters them into whatever comes up, sometimes years
+  // later. Requiring an approved enrolment here meant an institution could create
+  // its teams one at a time for its own sake, but had to be entering a
+  // championship before it could create several - which is backwards.
+  //
+  // Give `championship_organization_id` and an entry is made alongside the team
+  // (the "enter one team per selected discipline" flow); leave it out and you
+  // simply get the teams.
   router.post('/teams/bulk', guards.teamCreate, validateBody(bulkCreateTeamsSchema), asyncHandler(async (req, res) => {
     const teams = req.body.teams as Array<{
-      championship_id: string; sport_id: string; organization_id: string;
-      championship_organization_id: string; tournament_discipline_id: string; name: string;
+      sport_id: string; organization_id: string; name: string;
+      championship_id?: string; championship_organization_id?: string; tournament_discipline_id?: string;
     }>;
-    for (const t of teams) {
+
+    // Entering is all-or-nothing per team: naming an enrolment without saying which
+    // draw would create an entry nobody can place.
+    const entering = teams.filter((t) => t.championship_organization_id);
+    for (const t of entering) {
+      if (!t.championship_id || !t.tournament_discipline_id) {
+        throw new BusinessRuleError(`Championship and discipline are required to enter "${t.name}" into a championship`);
+      }
       await assertDisciplineForTeam(prisma, t.tournament_discipline_id, t.championship_id, t.sport_id);
     }
-    const eiIds = [...new Set(teams.map((t) => t.championship_organization_id))];
+    const eiIds = [...new Set(entering.map((t) => t.championship_organization_id!))];
     const eiMap = new Map(
-      (await prisma.championship_organizations.findMany({ where: { id: { in: eiIds } }, select: { id: true, status: true } }))
-        .map((e) => [e.id, e]),
+      eiIds.length
+        ? (await prisma.championship_organizations.findMany({ where: { id: { in: eiIds } }, select: { id: true, status: true } }))
+          .map((e) => [e.id, e] as const)
+        : [],
     );
-    // Reject duplicate draw entries against existing entries (one query) and within the batch.
-    const dupKey = (t: { organization_id: string; championship_id: string; tournament_discipline_id: string }) =>
+    // Reject duplicate draw entries against existing entries (one query) and within
+    // the batch. Only teams that are actually entering have a draw to clash over.
+    const dupKey = (t: { organization_id: string; championship_id?: string; tournament_discipline_id?: string }) =>
       `${t.organization_id}|${t.championship_id}|${t.tournament_discipline_id}`;
-    const existing = await prisma.team_entries.findMany({
-      where: { OR: teams.map((t) => ({ organization_id: t.organization_id, championship_id: t.championship_id, tournament_discipline_id: t.tournament_discipline_id })) },
-      select: { organization_id: true, championship_id: true, tournament_discipline_id: true },
-    });
+    const existing = entering.length
+      ? await prisma.team_entries.findMany({
+        where: { OR: entering.map((t) => ({ organization_id: t.organization_id, championship_id: t.championship_id, tournament_discipline_id: t.tournament_discipline_id })) },
+        select: { organization_id: true, championship_id: true, tournament_discipline_id: true },
+      })
+      : [];
     const seen = new Set(existing.map((e) => `${e.organization_id}|${e.championship_id}|${e.tournament_discipline_id}`));
     // No two teams of the same org may share a name within a sport - check against the
     // existing roster (one query) and within this batch.
@@ -393,12 +431,17 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     });
     const nameSeen = new Set(existingTeams.map((t) => nameKey(t.organization_id, t.sport_id, t.name)));
     for (const t of teams) {
-      const ei = eiMap.get(t.championship_organization_id);
-      if (!ei) throw new NotFoundError('Enrollment');
-      if (ei.status !== 'approved') throw new BusinessRuleError(`Enrollment not approved for "${t.name}"`);
-      const k = dupKey(t);
-      if (seen.has(k)) throw new BusinessRuleError(`A duplicate team for "${t.name}" is in this discipline draw`);
-      seen.add(k);
+      // Enrolment and draw checks apply only to the teams being entered. The name
+      // rule applies to every team, entered or not - it is a property of the
+      // organisation's roster.
+      if (t.championship_organization_id) {
+        const ei = eiMap.get(t.championship_organization_id);
+        if (!ei) throw new NotFoundError('Enrollment');
+        if (ei.status !== 'approved') throw new BusinessRuleError(`Enrollment not approved for "${t.name}"`);
+        const k = dupKey(t);
+        if (seen.has(k)) throw new BusinessRuleError(`A duplicate team for "${t.name}" is in this discipline draw`);
+        seen.add(k);
+      }
       const nk = nameKey(t.organization_id, t.sport_id, t.name);
       if (nameSeen.has(nk)) throw new BusinessRuleError(`A team named "${t.name}" already exists in this sport`);
       nameSeen.add(nk);
@@ -413,10 +456,10 @@ export function makeTeamsRouter(prisma: Prisma): Router {
         const team = await tx.teams.create({
           data: { sport_id: t.sport_id, organization_id: t.organization_id, name: t.name, status: 'forming', invite_token: randomBytes(16).toString('hex') },
         });
-        await tx.team_entries.create({
+        if (t.championship_organization_id) await tx.team_entries.create({
           data: {
-            team_id: team.id, organization_id: t.organization_id, championship_id: t.championship_id,
-            championship_organization_id: t.championship_organization_id, tournament_discipline_id: t.tournament_discipline_id,
+            team_id: team.id, organization_id: t.organization_id, championship_id: t.championship_id!,
+            championship_organization_id: t.championship_organization_id, tournament_discipline_id: t.tournament_discipline_id!,
             status: 'forming',
           },
         });
@@ -431,9 +474,31 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   }));
 
   router.patch('/teams/:id', guards.teamManager, validateBody(updateTeamSchema), asyncHandler(async (req, res) => {
-    const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    const team = await prisma.teams.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, name: true, organization_id: true, status: true, coach_user_id: true },
+    });
     if (!team) throw new NotFoundError('Team');
-    await prisma.teams.update({ where: { id: team.id }, data: { ...req.body } });
+    const updated = await prisma.teams.update({ where: { id: team.id }, data: { ...req.body } });
+
+    // Only the fields that actually moved, so the timeline reads as a change rather
+    // than a restatement of the whole row.
+    const before = team as Record<string, unknown>;
+    const after = updated as unknown as Record<string, unknown>;
+    const diff: Record<string, { from: unknown; to: unknown }> = {};
+    for (const key of Object.keys(req.body)) {
+      if (key in before && before[key] !== after[key]) diff[key] = { from: before[key], to: after[key] };
+    }
+    if (Object.keys(diff).length) {
+      await audit(prisma, req, {
+        action: AUDIT_ACTIONS.teamUpdated,
+        target: { type: 'teams', id: team.id, label: updated.name },
+        organizationId: team.organization_id,
+        summary: `Updated the team ${updated.name}`,
+        diff,
+      });
+    }
+
     res.json(await hydrateTeam(prisma, team.id));
   }));
 
@@ -445,7 +510,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   // everything in one transaction so the parent delete can't hit a stray FK.
   router.delete('/teams/:id', guards.teamManager, asyncHandler(async (req, res) => {
     const teamId = req.params.id;
-    const team = await prisma.teams.findUnique({ where: { id: teamId }, select: { id: true } });
+    const team = await prisma.teams.findUnique({ where: { id: teamId }, select: { id: true, name: true, organization_id: true } });
     if (!team) throw new NotFoundError('Team');
     const cascade = req.query.cascade === 'true' || req.query.cascade === '1';
     const fixtureWhere = { OR: [{ home_team_id: teamId }, { away_team_id: teamId }, { winner_team_id: teamId }] };
@@ -472,6 +537,17 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       prisma.team_entries.deleteMany({ where: { team_id: teamId } }),
       prisma.teams.delete({ where: { id: teamId } }),
     ]);
+
+    // Written AFTER the delete, and carrying the team's name in `target_label`, so the
+    // entry still says what was removed once the row it points at is gone (J6-E3-S4).
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.teamDeleted,
+      target: { type: 'teams', id: teamId, label: team.name },
+      organizationId: team.organization_id,
+      summary: `Deleted the team ${team.name}`,
+      diff: { entries: { from: entryCount, to: 0 }, fixtures: { from: fixtureCount, to: 0 } },
+    });
+
     res.status(204).send();
   }));
 
@@ -501,6 +577,17 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       const existing = await prisma.team_members.findFirst({ where: { team_id: teamId, role: data.role }, select: { id: true } });
       if (existing) throw new BusinessRuleError(`This team already has a ${data.role === 'vice_captain' ? 'vice-captain' : 'captain'}`);
     }
+    // The DB enforces this too (partial unique index), but a duplicate shirt number
+    // is a typo, and a typo deserves a sentence rather than a constraint name.
+    if (data.jersey_number != null) {
+      const taken = await prisma.team_members.findFirst({
+        where: { team_id: teamId, jersey_number: data.jersey_number },
+        select: { id: true },
+      });
+      if (taken) throw new BusinessRuleError(`Shirt number ${data.jersey_number} is already taken in this squad`);
+    }
+    // The coach is deliberately not in this count: they are on `teams`, not in
+    // `team_members`, so squad limits are unaffected by there being one.
     const count = await prisma.team_members.count({ where: { team_id: teamId, is_active: true } });
     assertCanAddMember(looseAddRules(entries), count);
     return prisma.team_members.create({

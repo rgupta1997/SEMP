@@ -17,6 +17,7 @@ import { recomputeStandings } from '../standings/standings.service.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { makeNamePool, type NamePool } from './demo-names.js';
 import { CHAMP_RECIPES, drawStructureFor, scorePair, type ChampRecipe } from './demo-recipes.js';
+import { ROLE_CODES } from '../iam/role-codes.js';
 
 const PLAYERS_PER_TEAM = 5;
 const DAY = 24 * 60 * 60 * 1000;
@@ -70,8 +71,11 @@ export async function seedSandbox(prisma: Prisma, sandboxId: string): Promise<vo
   ]);
   const sportId = new Map(sportsRows.map((s) => [s.name.trim().toLowerCase(), s.id]));
   const knockoutId = formatsRows.find((f) => f.name.toLowerCase().includes('knockout'))?.id;
-  const organiserRoleId = rolesRows.find((r) => r.name === 'Organiser')?.id;
-  const officialRoleId = rolesRows.find((r) => r.name === 'Official')?.id;
+  // Match on the stable code, falling back to the name for a role that predates it.
+  const byCode = (code: string, label: string) =>
+    rolesRows.find((r: any) => r.code === code)?.id ?? rolesRows.find((r) => r.name === label)?.id;
+  const organiserRoleId = byCode(ROLE_CODES.organiser, 'Organiser');
+  const officialRoleId = byCode(ROLE_CODES.official, 'Official');
   if (!knockoutId) throw new BusinessRuleError('Knockout tournament format not found in catalog');
   if (!organiserRoleId) throw new BusinessRuleError('Organiser role not found in catalog');
   for (const s of sports) if (!sportId.get(s.toLowerCase())) throw new BusinessRuleError(`Sport not found in catalog: ${s}`);

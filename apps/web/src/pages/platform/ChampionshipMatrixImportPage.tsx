@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { api, ApiError } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
 import { Badge, Button, Card, Field, Select, Spinner, toast } from '../../components/ui';
-import { downloadCsvTemplate, readFileToMatrix } from '../../lib/import';
+import { downloadCsvTemplate, downloadMatrixTemplate, readFileToMatrix } from '../../lib/import';
 import { parseChampionshipMatrix, type ParsedMatrix } from '../../lib/matrixImport';
 
 interface UnmatchedRow {
@@ -55,12 +55,19 @@ function UnmatchedTable({ rows }: { rows: UnmatchedRow[] }) {
   );
 }
 
-export function ChampionshipMatrixImportPage() {
-  const { data: championships = [] } = useApi<{ id: string; name: string }[]>('/championships');
+// The importer, usable from two places: the platform screen (pick any championship)
+// and inside a championship an organiser runs (J2-E3-S4). The API has always been
+// organiser-guarded - only this UI was locked behind super-admin, which made a
+// day-of-clicking shortcut unreachable by the people who need it most.
+export function ChampionshipMatrixImportPage({ championshipId }: { championshipId?: string } = {}) {
+  const scoped = !!championshipId;
+  const { data: championships = [] } = useApi<{ id: string; name: string }[]>(scoped ? null : '/championships');
   const { data: formats = [] } = useApi<{ id: string; name: string }[]>('/tournament-formats');
-  const { data: organizations = [] } = useApi<{ id: string; name: string }[]>('/organizations');
+  // The directory projection: an organiser importing for their championship needs to
+  // name organisations they don't belong to (J6-E5-S1 narrowed the default scope).
+  const { data: organizations = [] } = useApi<{ id: string; name: string }[]>('/organizations?scope=directory');
 
-  const [champId, setChampId] = useState('');
+  const [champId, setChampId] = useState(championshipId ?? '');
   const [formatId, setFormatId] = useState('');
   const [createOrgId, setCreateOrgId] = useState('');
   const [parsed, setParsed] = useState<ParsedMatrix | null>(null);
@@ -126,12 +133,14 @@ export function ChampionshipMatrixImportPage() {
 
       <Card className="space-y-4 p-5">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Championship">
-            <Select value={champId} onChange={(e) => { setChampId(e.target.value); reset(); }}>
-              <option value="">- select championship -</option>
-              {championships.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </Select>
-          </Field>
+          {!scoped && (
+            <Field label="Championship">
+              <Select value={champId} onChange={(e) => { setChampId(e.target.value); reset(); }}>
+                <option value="">- select championship -</option>
+                {championships.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+            </Field>
+          )}
           <Field label="Default fixture format (applied to every sport)">
             <Select value={formatId} onChange={(e) => { setFormatId(e.target.value); reset(); }}>
               <option value="">- select format -</option>
@@ -160,10 +169,22 @@ export function ChampionshipMatrixImportPage() {
             onChange={(e) => pickFile(e.target.files?.[0])}
           />
           <Button variant="outline" onClick={() => fileInput.current?.click()}>Choose matrix file</Button>
+          {/* Offered next to the picker, not buried in the prose - somebody arriving
+              here for the first time has a blank spreadsheet and a paragraph
+              describing a layout, which is a worse starting point than a filled-in
+              example they can overtype. */}
+          <Button variant="ghost" onClick={async () => {
+            try { await downloadMatrixTemplate(); } catch (e: any) { toast.error(e?.message ?? 'Could not build the sample'); }
+          }}>
+            ↓ Download sample sheet
+          </Button>
           {fileName && <span className="text-sm text-slate-500 dark:text-slate-400">{fileName}</span>}
         </div>
         <p className="text-xs text-slate-400 dark:text-slate-500">
-          Expected layout: a "Name / Phone Number" header row, section columns across, and "Sport (Discipline)" rows with Captain/POC plus an "Overall" block.
+          Sections (one per institution) run across the top, each spanning a <b>Name</b> and <b>Phone Number</b> column.
+          Sports run down the side as <span className="font-mono">Sport (Discipline)</span>, each with a <b>Captain</b> and
+          a <b>POC</b> row, plus an <b>Overall</b> block at the top for section-level POCs. Merged cells are fine — the
+          sample is laid out exactly as your own sheet should be.
         </p>
       </Card>
 
@@ -297,7 +318,7 @@ export function ChampionshipMatrixImportPage() {
         </Card>
       )}
 
-      {(championships.length === 0 || formats.length === 0) && (
+      {((!scoped && championships.length === 0) || formats.length === 0) && (
         <div className="grid h-10 place-items-center"><Spinner /></div>
       )}
     </div>

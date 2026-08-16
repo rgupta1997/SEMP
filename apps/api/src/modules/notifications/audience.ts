@@ -1,5 +1,6 @@
 import type { NotificationAudience, NotificationType } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
+import { ROLE_CODES, roleWhereByCode } from '../iam/role-codes.js';
 
 // Resolves a user's relationship to every championship so the notification feed and the
 // poster guard share one definition of "who belongs to / can post to an championship".
@@ -47,8 +48,8 @@ export async function getUserEventScopes(prisma: Prisma, user: AuthLike): Promis
   }
 
   const [orgRole, offRole] = await Promise.all([
-    prisma.roles.findUnique({ where: { name: 'Organiser' }, select: { id: true } }),
-    prisma.roles.findUnique({ where: { name: 'Official' }, select: { id: true } }),
+    prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser), select: { id: true } }),
+    prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.official), select: { id: true } }),
   ]);
   const roleIds = [orgRole?.id, offRole?.id].filter(Boolean) as string[];
 

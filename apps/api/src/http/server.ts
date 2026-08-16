@@ -8,20 +8,30 @@ import {
   createSponsorSchema, updateSponsorSchema, createTournamentSchema, updateTournamentSchema,
   createTournamentSportSchema, updateTournamentSportSchema,
   createTournamentDisciplineSchema, updateTournamentDisciplineSchema,
+  createOrgDomainSchema, updateOrgDomainSchema,
 } from '@semp/shared';
 import type { Prisma } from '../infra/prisma.js';
 import { env } from '../config/env.js';
 import { makeCrudRouter } from './crud.js';
 import { errorHandler } from './middleware/error.js';
 import { parseAuth, requireAuth, requireSuperAdmin } from './middleware/auth.js';
+import { requestCache } from './middleware/request-cache.js';
+import { emailKey, rateLimit } from './middleware/rate-limit.js';
 import { makeGuards } from './middleware/permissions.js';
 import { makeAuthRouter } from '../modules/iam/auth.routes.js';
 import { makeMeRouter } from '../modules/iam/me.routes.js';
+import { makeRecordsRouter } from '../modules/records/records.routes.js';
+import { makePeopleRouter } from '../modules/people/people.routes.js';
 import { makeUsersRouter } from '../modules/iam/users.routes.js';
 import { makeOrganizationsRouter } from '../modules/iam/organizations.routes.js';
+import { makeAuditRouter } from '../modules/iam/audit.routes.js';
+import { makeOrgUnitsRouter } from '../modules/iam/org-units.routes.js';
+import { makeOrgRolesRouter } from '../modules/iam/org-roles.routes.js';
 import { makeEventsRouter } from '../modules/championships/championships.routes.js';
+import { makeChampionshipTemplatesRouter } from '../modules/championships/templates.routes.js';
 import { makeStandingsRouter } from '../modules/standings/standings.routes.js';
 import { makeEnrollmentRouter } from '../modules/enrollment/enrollment.routes.js';
+import { makeSoloEntryRouter } from '../modules/enrollment/solo-entry.routes.js';
 import { makeInvitationsRouter } from '../modules/enrollment/invitations.routes.js';
 import { makeUserInvitationsRouter } from '../modules/iam/user-invitations.routes.js';
 import { makeTeamsRouter } from '../modules/teams/teams.routes.js';
@@ -48,14 +58,45 @@ export function buildApp(prisma: Prisma) {
     },
   }));
   app.use(express.json());
+  // Must precede anything that resolves permissions: `can()` memoises the module
+  // pre-check's lookups here, and without the store every call re-reads them.
+  app.use(requestCache);
   app.use(parseAuth);
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
 
   const api = Router();
 
-  // Public auth routes
-  api.use('/auth', makeAuthRouter(prisma));
+  // Password guessing deserves a tighter budget than the rest of /auth: ten tries a
+  // quarter of an hour per address is generous for someone who has forgotten their
+  // password and mean to a script. Mounted BEFORE the /auth router - after it, the
+  // router would have already answered and this would never run.
+  api.use(
+    '/auth/login',
+    rateLimit({ windowMs: 900_000, max: 10, localMax: 10, keyOn: emailKey, store: prisma }),
+  );
+
+  // Public auth routes. Rate-limited at the router so every /auth endpoint - including
+  // ones added later - is covered; the limiter keys on IP + the email in the body, so
+  // one shared NAT can't lock out a whole campus.
+  //
+  // `store` is what makes the limit real on Lambda: without it each of the 10
+  // containers keeps its own count and a cold start hands out a fresh budget.
+  //
+  // GET /auth/me is exempt, and must stay exempt. It is a session read the web app
+  // performs on every page load, not a credential attempt - and with no email in the
+  // body its key is the IP alone, so counting it would give one campus NAT a shared
+  // 20-per-minute budget for simply using the product. The client treats a failed
+  // /auth/me as "signed out", so rate-limiting it does not slow an attacker down; it
+  // logs real people out.
+  api.use(
+    '/auth',
+    rateLimit({
+      windowMs: 60_000, max: 20, localMax: 30, keyOn: emailKey, store: prisma,
+      skip: (req) => req.method === 'GET' && req.path === '/me',
+    }),
+    makeAuthRouter(prisma),
+  );
 
   // "Book a demo" leads - the POST is public (the landing page is unauthenticated);
   // reads/triage inside the router are gated to super-admins. Mounted before the
@@ -82,6 +123,15 @@ export function buildApp(prisma: Prisma) {
   // ----- "Me"-scoped read endpoints (resolved from the authenticated user) -----
   api.use('/', makeMeRouter(prisma));
 
+  // ----- The student roll - directory, import, demographics (J1-E5) -----
+  // Mounted under /organizations because every route is institution-scoped.
+  api.use('/organizations', makePeopleRouter(prisma));
+
+  // ----- The permanent record - lifetime timeline + achievements (READ ONLY) -----
+  // Deliberately has no write routes: a timeline entry changes only by correcting
+  // the locked result behind it (J4-E2-S2).
+  api.use('/', makeRecordsRouter(prisma));
+
   // ----- Notifications - global per-user feed + bell (visibility is championship-scoped) -----
   api.use('/', makeNotificationsRouter(prisma));
 
@@ -93,8 +143,13 @@ export function buildApp(prisma: Prisma) {
     name: 'Permission', createSchema: createPermissionSchema, updateSchema: updatePermissionSchema,
     orderBy: { code: 'asc' }, writeGuards: [requireSuperAdmin],
   }));
+  // Platform roles only. An institution's own role definitions live behind
+  // /organizations/:id/role-definitions and must not appear in the platform matrix -
+  // they are not the super admin's to edit, and listing them here would show one
+  // institution's private "Coordinator" to everybody.
   api.use('/roles', makeCrudRouter(prisma.roles, {
     name: 'Role', createSchema: createRoleSchema, updateSchema: updateRoleSchema,
+    listWhere: { organization_id: null },
     orderBy: { name: 'asc' }, writeGuards: [requireSuperAdmin],
   }));
   api.use('/sports', makeCrudRouter(prisma.sports, {
@@ -116,6 +171,34 @@ export function buildApp(prisma: Prisma) {
   // Organizations - open reads; any user can create (becomes owner); member
   // management requires an owner/admin (see organizations.routes).
   api.use('/organizations', makeOrganizationsRouter(prisma));
+  // Programme/batch structure hangs off an organisation (J1-E4).
+  api.use('/organizations', makeOrgUnitsRouter(prisma));
+
+  // Role assignment inside an institution + the permission catalogue (J6-E1). Mounted
+  // at the root: the catalogue and the role matrix are not organisation-scoped.
+  api.use('/', makeOrgRolesRouter(prisma));
+
+  // Audit timelines - mounted at the root because they hang off two different
+  // parents (/organizations/:id/audit and /championships/:id/audit).
+  api.use('/', makeAuditRouter(prisma));
+
+  // Email domain -> organisation registry (FR-AUTH-2). Rows here decide which
+  // institution a person lands in when they sign in with their work address, so
+  // writes are super-admin only and a domain entered here is verified by definition.
+  // Reads stay open to any authed user: the web app resolves an org's domains on
+  // its settings screen, and the rows contain nothing sensitive.
+  api.use('/org-domains', makeCrudRouter(prisma.org_domains, {
+    name: 'Domain', createSchema: createOrgDomainSchema, updateSchema: updateOrgDomainSchema,
+    listFilters: ['organization_id'], orderBy: { domain: 'asc' },
+    include: { organizations: { select: { id: true, name: true, kind: true, verified: true } } },
+    writeGuards: [requireSuperAdmin],
+    audit: {
+      prisma, entity: 'org_domain', targetType: 'org_domains',
+      organizationIdOf: (row) => row.organization_id ?? null,
+      labelOf: (row) => row.domain,
+      summaryOf: (verb, row) => `Email domain ${row.domain} ${verb}`,
+    },
+  }));
 
   // ----- Phase 2: championship creation - setup-resource writes require the championship's organiser -----
   api.use('/championships', makeEventsRouter(prisma));
@@ -123,6 +206,8 @@ export function buildApp(prisma: Prisma) {
   api.use('/championships', makeStandingsRouter(prisma));
   // Matrix import (sections × sport/discipline) - builds the whole setup from a sheet.
   api.use('/championships', makeMatrixImportRouter(prisma));
+  // The template library an organiser starts from: built-ins plus their own saved ones.
+  api.use('/championship-templates', makeChampionshipTemplatesRouter(prisma));
   api.use('/venues', makeVenuesRouter(prisma));
   api.use('/venue-grounds', makeVenueGroundsRouter(prisma));
   api.use('/sponsors', makeCrudRouter(prisma.sponsors, {
@@ -175,6 +260,8 @@ export function buildApp(prisma: Prisma) {
 
   // ----- Phase 3: enrollment, invitations & role assignment -----
   api.use('/', makeEnrollmentRouter(prisma));
+  // Entering without an institution - deliberately its own router; see J3-E1.
+  api.use('/', makeSoloEntryRouter(prisma));
   api.use('/', makeInvitationsRouter(prisma));
   api.use('/', makeUserInvitationsRouter(prisma));
 

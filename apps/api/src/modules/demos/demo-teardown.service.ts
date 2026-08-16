@@ -8,6 +8,7 @@
 
 import type { Prisma } from '../../infra/prisma.js';
 import type { CreateDemoSandboxInput } from '@semp/shared';
+import { ROLE_CODES, roleWhereByCode } from '../iam/role-codes.js';
 
 type SandboxRow = {
   id: string;
@@ -65,7 +66,7 @@ export async function wipeSandbox(prisma: Prisma, sandbox: SandboxRow): Promise<
   // ---- scope: championships (seeded + any the demo organiser created mid-demo)
   const organisedChamps = userIds.size
     ? await prisma.user_championship_roles.findMany({
-        where: { user_id: { in: [...userIds] }, roles: { name: 'Organiser' } },
+        where: { user_id: { in: [...userIds] }, roles: roleWhereByCode(ROLE_CODES.organiser) },
         select: { championship_id: true },
       })
     : [];
@@ -79,7 +80,7 @@ export async function wipeSandbox(prisma: Prisma, sandbox: SandboxRow): Promise<
   // not the sandbox's - only manifest/slug-scoped ones are safe to wipe for them.
   if (attachMode && sandbox.organiser_user_id) {
     const attachedOnly = await prisma.user_championship_roles.findMany({
-      where: { user_id: sandbox.organiser_user_id, roles: { name: 'Organiser' } },
+      where: { user_id: sandbox.organiser_user_id, roles: roleWhereByCode(ROLE_CODES.organiser) },
       select: { championship_id: true },
     });
     const manifestOrSlug = new Set([...ids(manifest, 'championships'), ...slugChamps.map((c) => c.id)]);
@@ -125,6 +126,30 @@ export async function wipeSandbox(prisma: Prisma, sandbox: SandboxRow): Promise<
   const orgList = [...orgIds];
 
   // ---- delete, children -> parents ---------------------------------------------
+
+  // The permanent record comes FIRST, and it is the one delete here that is not
+  // merely tidy-up. `lifetime_entries.user_id` and `achievements.user_id` are
+  // `on delete restrict` precisely so a real player's record cannot be erased by
+  // deleting them (J4-E2-S3) - which means the `users.deleteMany` at the end of
+  // this function would fail outright for any demo whose scorecards were locked.
+  // A sandbox is the one place where the record is disposable, so it is removed
+  // explicitly and by id, rather than by relaxing the constraint that protects
+  // everybody else.
+  if (userList.length || fixtureIds.length) {
+    const recordWhere = {
+      OR: [
+        ...(userList.length ? [{ user_id: { in: userList } }] : []),
+        ...(fixtureIds.length ? [{ fixture_id: { in: fixtureIds } }] : []),
+      ],
+    };
+    await prisma.lifetime_entries.deleteMany({ where: recordWhere });
+    await prisma.achievements.deleteMany({ where: recordWhere });
+  }
+  if (teamList.length) {
+    // Squad achievements for demo teams, which carry no user_id to catch above.
+    await prisma.achievements.deleteMany({ where: { team_id: { in: teamList } } });
+  }
+
   if (fixtureIds.length) {
     await prisma.fixture_awards.deleteMany({ where: { fixture_id: { in: fixtureIds } } });
     await prisma.fixtures.deleteMany({ where: { id: { in: fixtureIds } } });

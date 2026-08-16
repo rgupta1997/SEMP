@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { Trophy } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import { CHAMPIONSHIP_TYPE, CHAMPIONSHIP_TYPE_LABELS } from '@semp/shared';
 import { useApi, useTableControls, fmtDateRange } from '../lib/hooks';
 import { Badge, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge } from '../components/ui';
 import { InvitationsInbox } from '../components/InvitationsInbox';
 
 interface MyChampionship {
-  id: string; name: string; slug: string; status: string;
+  id: string; name: string; slug: string; status: string; type?: string | null;
   venue?: string | null; start_date: string; end_date: string;
   my_roles: string[];
   sports?: string[];
@@ -39,6 +40,7 @@ export function MyChampionshipsPage() {
   const { data: rows = [], isLoading } = useApi<MyChampionship[]>('/championships/mine');
   const [tab, setTab] = useState<string>('all');
   const [sport, setSport] = useState('');
+  const [type, setType] = useState('');
 
   const sportOptions = useMemo(() => {
     const set = new Set<string>();
@@ -49,8 +51,9 @@ export function MyChampionshipsPage() {
   const filtered = useMemo(
     () => rows.filter((c) =>
       (tab === 'all' || c.status === tab) &&
+      (!type || c.type === type) &&
       (!sport || (c.sports ?? []).includes(sport))),
-    [rows, tab, sport],
+    [rows, tab, sport, type],
   );
 
   const tc = useTableControls(filtered, {
@@ -85,6 +88,10 @@ export function MyChampionshipsPage() {
       {rows.length > 0 && (
         <ListToolbar>
           <SearchInput value={tc.query} onChange={tc.setQuery} placeholder="Search championships…" className="w-full sm:w-72" />
+          <Select value={type} onChange={(e) => setType(e.target.value)} className="w-auto" aria-label="Filter by type">
+            <option value="">All types</option>
+            {CHAMPIONSHIP_TYPE.map((t) => <option key={t} value={t}>{CHAMPIONSHIP_TYPE_LABELS[t]}</option>)}
+          </Select>
           <Select value={sport} onChange={(e) => setSport(e.target.value)} className="w-auto" aria-label="Filter by sport">
             <option value="">All sports</option>
             {sportOptions.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -116,6 +123,7 @@ export function MyChampionshipsPage() {
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-slate-900 dark:text-slate-100">{c.name}</span>
                       <StatusBadge status={c.status} />
+                      {c.type && <Badge tone="slate">{CHAMPIONSHIP_TYPE_LABELS[c.type as keyof typeof CHAMPIONSHIP_TYPE_LABELS] ?? c.type}</Badge>}
                     </div>
                     <div className="text-xs text-slate-500 dark:text-slate-400">{c.venue || 'Venue TBD'} · {fmtDateRange(c.start_date, c.end_date)}</div>
                   </div>

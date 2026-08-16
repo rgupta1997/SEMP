@@ -37,7 +37,14 @@ async function main() {
     try { const r = await fn(); console.log(`  ${label}: ${r.count}`); } catch (e: any) { console.log(`  ${label}: ERR ${e.code ?? e.message}`); }
   };
 
-  // children -> parents
+  // children -> parents.
+  //
+  // The permanent record goes first: `lifetime_entries.user_id` and
+  // `achievements.user_id` are `on delete restrict` so a player's record cannot
+  // be erased by deleting them, which would otherwise make the `seed users` step
+  // below fail for any seeded fixture that was locked (J4-E2-S3).
+  await step('lifetime_entries', () => prisma.lifetime_entries.deleteMany({ where: { OR: [{ fixture_id: { in: fixtureIds } }, { user_id: { in: userIds } }] } }));
+  await step('achievements', () => prisma.achievements.deleteMany({ where: { OR: [{ fixture_id: { in: fixtureIds } }, { user_id: { in: userIds } }, { team_id: { in: teamIds } }] } }));
   await step('fixture_awards', () => prisma.fixture_awards.deleteMany({ where: { fixture_id: { in: fixtureIds } } }));
   await step('fixtures', () => prisma.fixtures.deleteMany({ where: { tournament_discipline_id: { in: tdids } } }));
   await step('standings', () => prisma.standings.deleteMany({ where: { championship_id: { in: champIds } } }));

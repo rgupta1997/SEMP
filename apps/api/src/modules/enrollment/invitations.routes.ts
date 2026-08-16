@@ -29,7 +29,7 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
   // Invite an organization picked from the master list. The request goes straight
   // to that org's owners/admins - no POC mobile number.
   router.post('/championships/:eventId/invitations', eventOrganiser, validateBody(createInvitationSchema), asyncHandler(async (req, res) => {
-    const championship = await prisma.championships.findUnique({ where: { id: req.params.eventId }, select: { id: true } });
+    const championship = await prisma.championships.findUnique({ where: { id: req.params.eventId }, select: { id: true, name: true } });
     if (!championship) throw new NotFoundError('Championship');
     const org = await prisma.organizations.findUnique({ where: { id: req.body.organization_id }, select: { id: true, name: true } });
     if (!org) throw new NotFoundError('Organization');
@@ -47,6 +47,20 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
         status: 'pending',
       },
     });
+
+    // Until module 02 wires the email service, an invitation is only as visible as
+    // the invited org's habit of opening its Invitations page. This puts it in front
+    // of the people who can accept it (J2-E2-S3).
+    await createNotification(prisma, {
+      championship_id: req.params.eventId,
+      organization_id: org.id,
+      sender_id: req.user!.id,
+      type: 'org_invitation',
+      audience: 'org_admins',
+      title: `${org.name} is invited to ${championship.name}`,
+      body: 'Accept it from your Invitations page to enter teams - no separate application needed.',
+    });
+
     res.status(201).json(row);
   }));
 
@@ -135,7 +149,8 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
     await createNotification(prisma, {
       championship_id: inv.championship_id,
       sender_id: req.user!.id,
-      type: 'enrollment_approved',
+      // Broadcast news about somebody else, not an approval addressed to the reader.
+      type: 'enrollment_joined',
       audience: 'all',
       title: `${org?.short_name || org?.name || 'An organization'} has joined the championship`,
       body: `${org?.name ?? 'An organization'} accepted the invitation to ${inv.championships?.name ?? 'the championship'} and can now enter teams.`,

@@ -25,7 +25,18 @@ export function makeStandingsRouter(prisma: Prisma): Router {
     }
     const standings = await readStandings(prisma, req.params.id, scope, scopeId);
     const completed_matches = await countCompletedMatches(prisma, req.params.id, scope, scopeId);
-    res.json({ scope, scope_id: scopeId, standings, completed_matches });
+    // How many finished matches have NOT been locked yet. A table computed from
+    // results that can still change is provisional, and every reader of these
+    // numbers - organiser, player, spectator on the public page - is entitled to
+    // know that without needing organiser-only endpoints (J2-E7-S5, J3-E5-S3).
+    const unverified_matches = await prisma.fixtures.count({
+      where: {
+        tournament_disciplines: { tournament_sports: { tournaments: { championship_id: req.params.id } } },
+        status: { in: ['completed', 'walkover'] },
+        scorecard_status: { not: 'locked' },
+      },
+    });
+    res.json({ scope, scope_id: scopeId, standings, completed_matches, unverified_matches });
   }));
 
   // Per-event breakdown for one org in a scope: which draws contributed how many points

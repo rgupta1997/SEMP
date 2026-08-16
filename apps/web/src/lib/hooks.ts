@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
 import { api } from './api';
 
 // Admin-managed reference data that changes rarely - cache it aggressively so the
@@ -18,13 +18,21 @@ function masterStaleTime(path: string | null): number | undefined {
 // GET list/item with the path as the cache key. `opts.refetchInterval` polls the
 // endpoint (ms, or a function of the query so polling can stop when the data
 // settles) - used by screens watching a background job (e.g. demo sandboxes).
-export function useApi<T = any>(path: string | null, enabled = true, opts?: { refetchInterval?: number | false | ((query: any) => number | false) }) {
+// `opts.keepPrevious` holds the last page's rows on screen while the next one
+// loads - for server-paged lists, where the path is part of the key and every
+// page turn would otherwise blank the list and drop focus out of the filters.
+export function useApi<T = any>(
+  path: string | null,
+  enabled = true,
+  opts?: { refetchInterval?: number | false | ((query: any) => number | false); keepPrevious?: boolean },
+) {
   return useQuery<T>({
     queryKey: [path],
     queryFn: () => api('GET', path as string),
     enabled: enabled && path !== null,
     staleTime: masterStaleTime(path),
     refetchInterval: opts?.refetchInterval,
+    placeholderData: opts?.keepPrevious ? keepPreviousData : undefined,
   });
 }
 

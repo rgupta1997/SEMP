@@ -11,25 +11,49 @@ import { EnterChampionshipsPanel } from '../../components/EnterChampionshipsModa
 
 interface BulkResult { added: number; skipped: { label: string; reason: string }[]; total: number }
 
-// Rename a team. Discipline + championship are managed per entry now, not here.
+// Rename a team and record who coaches it. Discipline + championship are managed per
+// entry now, not here.
 function EditTeamModal({ team, onClose }: { team: any; onClose: () => void }) {
   const path = `/teams/${team.id}`;
   const [name, setName] = useState(team.name ?? '');
+  const [coachId, setCoachId] = useState<string>(team.coach?.id ?? '');
   const [error, setError] = useState<string | null>(null);
+  // Coaches come from the owning organisation's people: a coach is someone the
+  // institution knows, not a free-text name nobody can contact. The directory
+  // returns one flat person per row - name/email/phone sit on the row itself.
+  const { data: people = [] } = useApi<any[]>(`/organizations/${team.organization_id}/people`);
+  // Only people actually at the institution. A pending applicant or somebody who
+  // has left should not be offered as this season's coach.
+  const coaches = people.filter((m: any) => m.status === 'active');
   const update = useApiMutation(
-    (body: { name: string }) => api('PATCH', path, body),
+    (body: { name: string; coach_user_id: string | null }) => api('PATCH', path, body),
     [path, `/teams?organization_id=${team.organization_id}`],
   );
 
   const submit = () => {
     setError(null);
     if (!name.trim()) { setError('Team name is required'); return; }
-    update.mutate({ name: name.trim() }, { onSuccess: () => onClose(), onError: (e: any) => setError(e.message) });
+    update.mutate(
+      { name: name.trim(), coach_user_id: coachId || null },
+      { onSuccess: () => onClose(), onError: (e: any) => setError(e.message) },
+    );
   };
 
   return (
     <Modal title="Edit team" onClose={onClose}>
       <Field label="Team name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+      <Field label="Coach" hint="Optional. A coach doesn't take a squad place.">
+        <Select value={coachId} onChange={(e) => setCoachId(e.target.value)}>
+          <option value="">- no coach -</option>
+          {/* Never fall back to the id. A raw uuid in a dropdown is not a person,
+              and it hides the real fault - which is that the name never arrived. */}
+          {coaches.map((m: any) => (
+            <option key={m.user_id} value={m.user_id}>
+              {m.name || m.email || 'Unnamed person'}
+            </option>
+          ))}
+        </Select>
+      </Field>
       {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -63,9 +87,14 @@ function AddPlayersPanel({ teamId, institutionId, existingUserIds, remaining, ta
   // Source from the org's members (organization_members), not the legacy
   // users.organization_id column - a user can belong to several orgs, and members
   // added via the Members page only get an organization_members row.
-  const { data: orgMembers = [], isLoading } = useApi<any[]>(institutionId ? `/organizations/${institutionId}/members` : null);
+  const { data: orgMembers = [], isLoading } = useApi<any[]>(institutionId ? `/organizations/${institutionId}/people` : null);
   const users = useMemo(
-    () => orgMembers.filter((m) => m.users && m.status !== 'pending' && m.status !== 'past').map((m) => m.users),
+    // The directory returns one flat person per row (there is a single shape in
+    // the product now); the picker below wants a user object, so it is built here
+    // rather than by asking the API for a second projection.
+    () => orgMembers
+      .filter((m) => m.user_id && m.status !== 'pending' && m.status !== 'past')
+      .map((m) => ({ id: m.user_id, name: m.name, email: m.email, phone: m.phone })),
     [orgMembers],
   );
   const candidates = useMemo(() => users.filter((u) => !existingUserIds.has(u.id)), [users, existingUserIds]);
@@ -377,6 +406,13 @@ export function RosterPage() {
             {pocs.length > 0 && (
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Point of contact: {pocs.map((u: any) => `${u.name}${u.phone ? ` (${u.phone})` : ''}`).join(', ')}
+              </p>
+            )}
+            {/* A coach is a property of the team, never a squad member - which is
+                why they appear here and not in the squad count above. */}
+            {team.coach && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Coach: {team.coach.name}{team.coach.phone ? ` (${team.coach.phone})` : ''}
               </p>
             )}
           </div>

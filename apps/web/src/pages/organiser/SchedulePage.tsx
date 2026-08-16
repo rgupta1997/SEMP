@@ -12,6 +12,9 @@ import { ScheduleTimeline } from '../../components/ScheduleTimeline';
 interface Ground { id: string; name: string; venue_id?: string | null; venues?: { id?: string; name?: string } }
 interface Venue { id: string; name: string }
 interface Official { id: string; name: string; account_type?: string }
+// A timetable contradiction reported by the server: one ground, team or official in
+// two overlapping matches. Advisory - the organiser decides what to move.
+interface Clash { kind: 'ground' | 'team' | 'official'; fixture_id: string; other_fixture_id: string; subject_id: string }
 
 function toLocalInput(d?: string | null): string {
   if (!d) return '';
@@ -42,7 +45,17 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, venues, officials, tea
   const [error, setError] = useState<string | null>(null);
 
   const save = useApiMutation(
-    (body: any) => (isEdit ? api('PATCH', `/fixtures/${fixture.id}`, body) : api('POST', '/fixtures', body)),
+    async (body: any) => {
+      const saved = isEdit ? await api('PATCH', `/fixtures/${fixture.id}`, body) : await api('POST', '/fixtures', body);
+      // The official goes through its own route: assigning one notifies them and is
+      // what grants scoring rights to this match, neither of which a plain fixture
+      // write does. Only called when it actually changed.
+      const wanted = officialId || null;
+      if (wanted !== (fixture?.official_id ?? null)) {
+        await api('PATCH', `/fixtures/${saved.id}/official`, { official_id: wanted });
+      }
+      return saved;
+    },
     [drawPath],
     onClose,
   );
@@ -57,7 +70,6 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, venues, officials, tea
       venue_ground_id: groundId || null,
       scheduled_at: when ? new Date(when).toISOString() : null,
       duration_minutes: duration ? Number(duration) : null,
-      official_id: officialId || null,
       status,
     };
     if (!isEdit) body.tournament_discipline_id = tdId;
@@ -136,7 +148,9 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, venues, officials, tea
           </Select>
         </Field>
       </div>
-      <Field label="Match official" hint={officials.length === 0 ? 'No officials assigned to this championship yet - add them on the Organising team tab.' : undefined}>
+      <Field label="Match official" hint={officials.length === 0
+        ? 'No officials assigned to this championship yet - add them on the Organising team tab.'
+        : 'They are notified and the match appears in their Officiating queue.'}>
         <Select value={officialId} onChange={(e) => setOfficialId(e.target.value)}>
           <option value="">- unassigned -</option>
           {officials.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
@@ -162,8 +176,8 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, venues, officials, tea
   );
 }
 
-function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, sportName, formatLabel, teamName, teamOrg, grounds, venues, officials, canManage }:
-  { td: any; fixtures: any[]; fixturesLoading: boolean; fixturesPath: string; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
+function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, sportName, formatLabel, teamName, teamOrg, grounds, venues, officials, canManage, clashesFor }:
+  { td: any; fixtures: any[]; fixturesLoading: boolean; fixturesPath: string; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean; clashesFor: (fixtureId: string) => Clash[] }) {
   // The championship-wide list is ordered by schedule; restore the per-draw
   // pool → bracket order the visual (bracket / grid) view needs for layout.
   const fixtures = [...drawFixtures].sort((a, b) => (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0));
@@ -177,7 +191,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
     return ta - tb || (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0);
   });
   const isLoading = fixturesLoading;
-  const generate = useApiMutation(() => api('POST', `/tournament-disciplines/${td.id}/fixtures/generate`, { params: {} }), [fixturesPath]);
+  const generate = useApiMutation((body: any) => api('POST', `/tournament-disciplines/${td.id}/fixtures/generate`, body), [fixturesPath]);
   const [editing, setEditing] = useState<any | null>(null);
   const [creating, setCreating] = useState(false);
   const [view, setView] = useState<'list' | 'visual'>('visual');
@@ -201,6 +215,31 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
 
   const groundLabel = (id: string | null) => { const g = grounds.find((x) => x.id === id); return g ? `${g.venues?.name ? g.venues.name + ' · ' : ''}${g.name}` : null; };
   const officialName = (id: string | null) => officials.find((o) => o.id === id)?.name ?? null;
+
+  // A regenerate discards every fixture in the draw along with its times, grounds and
+  // officials, so it is confirmed here and asked for explicitly server-side. Leagues
+  // extend rather than rebuild, so they need neither.
+  const runGenerate = async () => {
+    const replacing = fixtures.length > 0 && !isLeague;
+    if (replacing && !(await confirmDialog({
+      title: 'Regenerate draw',
+      confirmLabel: 'Regenerate',
+      message: 'This replaces every fixture in this draw, including their scheduled times, grounds and assigned officials. Continue?',
+    }))) return;
+    generate.mutate({ params: {}, replace: replacing }, {
+      onSuccess: () => toast.success(isLeague && fixtures.length ? 'New teams added' : 'Draw generated'),
+      onError: (e: any) => toast.error(e.message),
+    });
+  };
+
+  // Warning marker for a row whose match overlaps another on the same ground, or that
+  // needs a team / official to be in two places at once.
+  const clashBadge = (fixtureId: string) => {
+    const cs = clashesFor(fixtureId);
+    if (cs.length === 0) return null;
+    const kinds = [...new Set(cs.map((c) => c.kind))];
+    return <Badge tone="amber" className="whitespace-nowrap">⚠ {kinds.join(' + ')} clash</Badge>;
+  };
 
   return (
     <Card className="min-w-0 p-4">
@@ -227,7 +266,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
               title={isLeague && fixtures.length
                 ? 'Keeps existing matches and adds fixtures for newly-registered teams.'
                 : hasPlayed ? 'This draw has played matches - regenerating would erase those results.' : undefined}
-              onClick={() => generate.mutate(undefined, { onSuccess: () => toast.success(isLeague && fixtures.length ? 'New teams added' : 'Draw generated'), onError: (e: any) => toast.error(e.message) })}>
+              onClick={runGenerate}>
               {generate.isPending ? 'Generating…' : fixtures.length ? (isLeague ? 'Add new teams' : 'Regenerate') : 'Generate draw'}
             </Button>
           )}
@@ -250,6 +289,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
                   {groundLabel(f.venue_ground_id) ?? 'No ground'} · {f.scheduled_at ? fmtDateTime(f.scheduled_at) : 'Unscheduled'}
                   {officialName(f.official_id) ? ` · ${officialName(f.official_id)}` : ' · No official'}
                 </span>
+                {clashBadge(f.id)}
                 {/* Status + Edit share one row on phone, split 50/50 (status left,
                     Edit right) so they line up across rows regardless of name length;
                     from sm up they fall back to the inline end-of-row layout. */}
@@ -284,6 +324,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
                   {groundLabel(f.venue_ground_id) ?? 'No ground'} · {f.scheduled_at ? fmtDateTime(f.scheduled_at) : 'Unscheduled'}
                   {officialName(f.official_id) ? ` · ${officialName(f.official_id)}` : ' · No official'}
                 </span>
+                {clashBadge(f.id)}
                 {/* Status + Edit share one row on phone, split 50/50 (status left,
                     Edit right) so they line up across rows regardless of name length;
                     from sm up they fall back to the inline end-of-row layout. */}
@@ -302,8 +343,8 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
   );
 }
 
-function SportBlock({ ts, draws, allFixtures, fixturesLoading, fixturesPath, sportName, formatName, teamName, teamOrg, grounds, venues, officials, canManage }:
-  { ts: any; draws: any[]; allFixtures: any[]; fixturesLoading: boolean; fixturesPath: string; sportName: string; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
+function SportBlock({ ts, draws, allFixtures, fixturesLoading, fixturesPath, sportName, formatName, teamName, teamOrg, grounds, venues, officials, canManage, clashesFor }:
+  { ts: any; draws: any[]; allFixtures: any[]; fixturesLoading: boolean; fixturesPath: string; sportName: string; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean; clashesFor: (fixtureId: string) => Clash[] }) {
   if (draws.length === 0) return null;
   // Effective format: the draw's own format wins, else the sport's (matches the
   // generate route's fallback).
@@ -326,6 +367,7 @@ function SportBlock({ ts, draws, allFixtures, fixturesLoading, fixturesPath, spo
             venues={venues}
             officials={officials}
             canManage={canManage}
+            clashesFor={clashesFor}
           />
         ))}
       </div>
@@ -386,6 +428,14 @@ export function SchedulePage() {
   const { data: officialRows = [] } = useApi<{ user: { id: string; name: string } }[]>(`/championships/${eventId}/officials`);
   const officials: Official[] = officialRows.map((o) => ({ id: o.user.id, name: o.user.name }));
   const { data: formats = [] } = useApi<any[]>('/tournament-formats');
+  // Scheduling clashes are computed server-side (one rule set, unit-tested there)
+  // and are organiser-only, like the rest of the scheduling controls. Sharing the
+  // fixtures path prefix means any schedule edit refreshes this too.
+  const { data: clashData } = useApi<{ clashes: Clash[]; by_fixture: Record<string, Clash[]> }>(
+    canManage ? `${fixturesPath}/clashes` : null,
+  );
+  const clashes = clashData?.clashes ?? [];
+  const clashesFor = (fixtureId: string) => clashData?.by_fixture?.[fixtureId] ?? [];
 
   const sportName = (id: string) => sports.find((s) => s.id === id)?.name ?? 'Sport';
   const teamName = (id: string | null) => (id ? teams.find((t) => t.id === id)?.name ?? 'TBD' : 'TBD');
@@ -396,6 +446,25 @@ export function SchedulePage() {
     return o?.short_name || o?.name || '';
   };
   const formatName = (id: string | null | undefined) => (id ? formats.find((f) => f.id === id)?.name ?? null : null);
+
+  // Clash lines for the banner: which two matches, and what they are fighting over.
+  const fixtureById = new Map<string, any>(allFixtures.map((f: any) => [f.id, f]));
+  const matchLabel = (id: string) => {
+    const f = fixtureById.get(id);
+    if (!f) return 'a match';
+    // Ranking events are team-less, so name the event rather than "TBD vs TBD".
+    if (!f.home_team_id && !f.away_team_id) return [f.sport, f.discipline].filter(Boolean).join(' · ') || 'Event';
+    return `${teamName(f.home_team_id)} vs ${teamName(f.away_team_id)}`;
+  };
+  const clashSubject = (c: Clash) => (c.kind === 'ground'
+    ? grounds.find((g) => g.id === c.subject_id)?.name ?? 'The same ground'
+    : c.kind === 'team' ? teamName(c.subject_id)
+      : officials.find((o) => o.id === c.subject_id)?.name ?? 'The same official');
+  const clashLine = (c: Clash) => {
+    const when = fixtureById.get(c.fixture_id)?.scheduled_at;
+    const what = c.kind === 'ground' ? 'is double-booked' : 'is needed in two places at once';
+    return `${clashSubject(c)} ${what}: ${matchLabel(c.fixture_id)} and ${matchLabel(c.other_fixture_id)}${when ? ` — around ${fmtDateTime(when)}` : ''}`;
+  };
 
   // Discipline rows + day tabs for the timeline scheduler.
   const timelineRows = allDraws.map((d: any) => ({
@@ -444,6 +513,19 @@ export function SchedulePage() {
           options={[{ value: 'manage', label: 'Fixtures' }, { value: 'timeline', label: 'Timeline' }]}
         />
       </div>
+      {/* Reported, not enforced: an organiser mid-shuffle is legitimately
+          double-booked for a moment, and only they know which match should move. */}
+      {canManage && clashes.length > 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+          <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+            {clashes.length} scheduling clash{clashes.length === 1 ? '' : 'es'}
+          </p>
+          <ul className="mt-1 space-y-0.5 text-xs text-amber-700 dark:text-amber-200/90">
+            {clashes.slice(0, 8).map((c, i) => <li key={`${c.kind}-${c.fixture_id}-${c.other_fixture_id}-${i}`}>· {clashLine(c)}</li>)}
+            {clashes.length > 8 && <li>· and {clashes.length - 8} more</li>}
+          </ul>
+        </div>
+      )}
       {topView === 'timeline' ? (
         fixturesLoading ? <div className="grid h-40 place-items-center"><Spinner /></div> : (
           <div className="space-y-3">
@@ -465,7 +547,7 @@ export function SchedulePage() {
         <EmptyState icon="⚑" title="No sports configured" description="Add sports & disciplines in Setup, then come back to generate fixtures." />
       ) : (
         <div className="space-y-6">
-          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} fixturesPath={fixturesPath} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManage} />)}
+          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} fixturesPath={fixturesPath} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManage} clashesFor={clashesFor} />)}
         </div>
       )}
     </div>

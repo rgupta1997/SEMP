@@ -77,6 +77,50 @@ export function matrixToRows<T extends Record<string, string>>(
   });
 }
 
+// A filled-in sample of the championship setup matrix, as a real .xlsx.
+//
+// Excel rather than CSV on purpose: the layout's whole shape is MERGED cells - one
+// section name spanning its Name/Phone pair, one sport spanning its Captain and POC
+// rows - and that is exactly what the parser forward-fills. A CSV sample would
+// teach the flattened version and leave people guessing what their own merged
+// sheet is supposed to look like.
+//
+// SheetJS is imported dynamically, as it is for reading, so the (heavy) library
+// stays out of the main bundle.
+export async function downloadMatrixTemplate(filename = 'championship-setup-sample.xlsx'): Promise<void> {
+  const XLSX = await import('xlsx');
+
+  // Two institutions across, two sports down, plus the "Overall" block the parser
+  // reads section-level POCs from.
+  const aoa: string[][] = [
+    ['', '', 'IIM Bangalore', '', 'IIM Ahmedabad', ''],
+    ['', '', 'Name', 'Phone Number', 'Name', 'Phone Number'],
+    ['Overall', 'Overall POC', 'Asha Rao', '9876543210', 'Ravi Kumar', '9876500011'],
+    ['Basketball (Men)', 'Captain', 'Neha Mishra', '9876500022', 'Arjun Nair', '9876500033'],
+    ['', 'POC', 'Kiran Shah', '9876500044', 'Meera Iyer', '9876500055'],
+    ['Basketball (Women)', 'Captain', 'Priya Menon', '9876500066', 'Sana Khan', '9876500077'],
+    ['', 'POC', 'Kiran Shah', '9876500044', 'Meera Iyer', '9876500055'],
+    ['Badminton', 'Captain', 'Rahul Verma', '9876500088', 'Dev Patel', '9876500099'],
+    ['', 'POC', 'Kiran Shah', '9876500044', 'Meera Iyer', '9876500055'],
+  ];
+
+  const sheet = XLSX.utils.aoa_to_sheet(aoa);
+  sheet['!merges'] = [
+    // Each section name spans its own Name + Phone Number pair.
+    { s: { r: 0, c: 2 }, e: { r: 0, c: 3 } },
+    { s: { r: 0, c: 4 }, e: { r: 0, c: 5 } },
+    // Each sport spans its Captain and POC rows.
+    { s: { r: 3, c: 0 }, e: { r: 4, c: 0 } },
+    { s: { r: 5, c: 0 }, e: { r: 6, c: 0 } },
+    { s: { r: 7, c: 0 }, e: { r: 8, c: 0 } },
+  ];
+  sheet['!cols'] = [{ wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 16 }, { wch: 18 }, { wch: 16 }];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, sheet, 'Setup');
+  XLSX.writeFile(wb, filename);
+}
+
 // Trigger a browser download of a CSV template (headers + optional sample rows).
 export function downloadCsvTemplate(filename: string, headers: string[], sample: string[][] = []): void {
   const escape = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);

@@ -1,19 +1,29 @@
 import { Router } from 'express';
 import {
   addOrganizationMemberSchema, bulkAddOrganizationMembersSchema, createOrganizationWithOwnerSchema,
-  updateOrganizationMemberSchema, updateOrganizationSchema,
+  updateOrganizationMemberSchema, updateOrganizationSchema, inviteOrgMemberSchema, ORG_KIND,
 } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { audit, AUDIT_ACTIONS } from './audit.service.js';
+import { inviteToOrganization, listOrganizationInvitations, revokeInvitation } from './org-invitations.service.js';
 import { findUserByPhone, hashProvisionedPassword } from './users.helpers.js';
 import { createNotification } from '../notifications/audience.js';
 
 // Organizations router: list/get are open reads. Any authenticated user can
 // create an organization (they become its first `owner`). Edits, deletes and
 // member management require an owner/admin of that org (or super admin).
+// How a membership reads in the audit trail, captured at write time so the line
+// survives the person being deleted later.
+function memberLabel(m: { users?: { name?: string | null; email?: string | null } | null; user_id?: string }): string {
+  const u = m.users;
+  if (u?.name && u?.email) return `${u.name} (${u.email})`;
+  return u?.name ?? u?.email ?? m.user_id ?? 'a member';
+}
+
 export function makeOrganizationsRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
@@ -35,23 +45,65 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     throw new ForbiddenError('Only the organization owner can delete it');
   });
 
-  // List/search the master org list. `q` matches name/short_name/city/code (used by
-  // the invite picker's server-side typeahead); `limit` caps the result count so the
-  // picker can show just the first handful by default. No params → the full list.
+  // List organisations. TWO SCOPES, and the difference is the tenant boundary (J6-E5-S1):
+  //
+  //   default            - only the organisations the caller belongs to, in full.
+  //                        Super admins see every organisation, because platform
+  //                        administration is their job.
+  //   ?scope=directory   - the public directory: every organisation, but reduced to
+  //                        the fields a stranger may see (name, short name, city,
+  //                        logo, code) and never personal orgs. This is what the
+  //                        "find an organisation to join" and invite pickers use.
+  //
+  // Until this change the default *was* the directory, returning every institution
+  // on the platform in full to any authenticated user - the open cross-tenant read
+  // this story exists to close. Anything richer than the directory projection must
+  // stay behind membership.
   router.get('/', asyncHandler(async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const take = req.query.limit ? Math.min(Math.max(Number(req.query.limit) || 0, 0), 100) : undefined;
+    const directory = req.query.scope === 'directory';
+
+    const search = q
+      ? {
+          OR: [
+            { name: { contains: q, mode: 'insensitive' as const } },
+            { short_name: { contains: q, mode: 'insensitive' as const } },
+            { city: { contains: q, mode: 'insensitive' as const } },
+            { code: { contains: q, mode: 'insensitive' as const } },
+          ],
+        }
+      : {};
+
+    if (directory) {
+      const rows = await prisma.organizations.findMany({
+        // Personal orgs are one hidden person each; they must never be enumerable.
+        where: { ...search, kind: { not: 'personal' } },
+        // The projection IS the boundary here - no membership, no settings, no domains.
+        select: { id: true, name: true, short_name: true, code: true, city: true, logo_url: true, kind: true, verified: true },
+        orderBy: { name: 'asc' },
+        ...(take ? { take } : {}),
+      });
+      res.json(rows);
+      return;
+    }
+
+    // Any membership row, not just active ones: a pending applicant already knows
+    // they applied, and hiding the org they applied to breaks their own view of it.
+    const mine = req.user!.isSuperAdmin
+      ? {}
+      : { organization_members: { some: { user_id: req.user!.id } } };
+
+    // Personal organisations are a person wearing an organisation's clothes so the
+    // entry machinery works (J3-E1). They are not organisations anybody should be
+    // browsing - not in the platform list, not in a picker, not in a count - so they
+    // are excluded here too, not only from the directory. A super admin who genuinely
+    // needs to see them (support, debugging) asks explicitly.
+    const includePersonal = req.user!.isSuperAdmin && req.query.include_personal === 'true';
+    const hidePersonal = includePersonal ? {} : { kind: { not: 'personal' } };
+
     const rows = await prisma.organizations.findMany({
-      where: q
-        ? {
-            OR: [
-              { name: { contains: q, mode: 'insensitive' } },
-              { short_name: { contains: q, mode: 'insensitive' } },
-              { city: { contains: q, mode: 'insensitive' } },
-              { code: { contains: q, mode: 'insensitive' } },
-            ],
-          }
-        : undefined,
+      where: { ...search, ...mine, ...hidePersonal },
       orderBy: { name: 'asc' },
       ...(take ? { take } : {}),
     });
@@ -116,6 +168,14 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       return org;
     });
 
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.orgCreated,
+      target: { type: 'organizations', id: created.id, label: created.name },
+      organizationId: created.id,
+      summary: `Created the organisation ${created.name}`,
+      diff: { kind: { from: null, to: created.kind } },
+    });
+
     // Surface the new login's credentials once so the actor can share them.
     const credentials = owner && provision && owner.name && owner.email
       ? { name: owner.name, email: owner.email, phone: owner.phone ?? null, password: provision.tempPassword }
@@ -124,7 +184,51 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   }));
 
   router.patch('/:id', orgAdmin, validateBody(updateOrganizationSchema), asyncHandler(async (req, res) => {
+    const before = await prisma.organizations.findUnique({ where: { id: req.params.id } });
     const row = await prisma.organizations.update({ where: { id: req.params.id }, data: req.body });
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.orgSettingsChanged,
+      target: { type: 'organizations', id: row.id, label: row.name },
+      organizationId: row.id,
+      summary: `Updated the organisation profile for ${row.name}`,
+      diff: Object.fromEntries(
+        Object.keys(req.body as Record<string, unknown>)
+          .filter((k) => (before as any)?.[k] !== (row as any)[k])
+          .map((k) => [k, { from: (before as any)?.[k] ?? null, to: (row as any)[k] ?? null }]),
+      ),
+    });
+    res.json(row);
+  }));
+
+  // Promote an organization to the institution tier, or demote it back (J1-E1-S3).
+  // SUPER-ADMIN ONLY, deliberately: the Verified badge is a trust signal shown to
+  // everyone who lands in the workspace, so it must not be self-issued. Every change
+  // is audited with who did it and when.
+  router.patch('/:id/verify', asyncHandler(async (req, res) => {
+    if (!req.user!.isSuperAdmin) throw new ForbiddenError('Only Sportagon can verify an organisation');
+    const { verified = true, kind } = req.body as { verified?: boolean; kind?: string };
+
+    const org = await prisma.organizations.findUnique({ where: { id: req.params.id } });
+    if (!org) throw new NotFoundError('Organization');
+
+    // Verifying implies the institution tier; un-verifying drops it back to community
+    // unless the caller says otherwise.
+    const nextKind = kind ?? (verified ? 'institution' : 'community');
+    if (!(ORG_KIND as readonly string[]).includes(nextKind)) throw new BusinessRuleError('Unknown organisation kind');
+
+    const row = await prisma.organizations.update({
+      where: { id: org.id },
+      data: { verified, kind: nextKind },
+    });
+
+    await audit(prisma, req, {
+      action: verified ? AUDIT_ACTIONS.orgVerified : AUDIT_ACTIONS.orgUnverified,
+      target: { type: 'organizations', id: org.id, label: org.name },
+      organizationId: org.id,
+      summary: `${org.name} ${verified ? 'verified' : 'un-verified'} (${org.kind} → ${nextKind})`,
+      diff: { kind: { from: org.kind, to: nextKind }, verified: { from: org.verified, to: verified } },
+    });
+
     res.json(row);
   }));
 
@@ -217,14 +321,16 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   }));
 
   // ---- Members ----
-  router.get('/:id/members', asyncHandler(async (req, res) => {
-    const rows = await prisma.organization_members.findMany({
-      where: { organization_id: req.params.id },
-      include: { users: { select: { id: true, name: true, email: true, phone: true } } },
-      orderBy: { joined_at: 'asc' },
-    });
-    res.json(rows);
-  }));
+  //
+  // The directory READ lives at `GET /organizations/:id/people`
+  // (modules/people/people.routes.ts), which is module 04 §6's path and the only
+  // one now. What used to sit here was a second listing of the same rows with
+  // NO permission check at all - any authenticated user could read any
+  // institution's full membership, names, emails and phone numbers included.
+  // That is the cross-tenant class of hole J6-E5 closed for `GET /organizations`
+  // and this one survived because it was a different route.
+  //
+  // The write routes below stay: they are already guarded by `orgAdmin`.
 
   // Add a member. Users are central: resolve by user_id, then by phone, then by
   // email; provision a new login only if none match. A newly provisioned login is
@@ -258,6 +364,13 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       create: { user_id: resolvedUserId, organization_id: req.params.id, role },
       include: { users: { select: { id: true, name: true, email: true, phone: true } } },
     });
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.memberAdded,
+      target: { type: 'organization_members', id: member.id, label: memberLabel(member) },
+      organizationId: req.params.id,
+      summary: `Added ${memberLabel(member)} as ${role}`,
+      diff: { role: { from: null, to: role }, provisioned_login: { from: null, to: !!credentials } },
+    });
     res.status(201).json({ ...member, poc_credentials: credentials });
   }));
 
@@ -275,6 +388,15 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
         include: { users: { select: { id: true, name: true, email: true, phone: true } } },
       })),
     );
+    for (const m of members) {
+      await audit(prisma, req, {
+        action: AUDIT_ACTIONS.memberAdded,
+        target: { type: 'organization_members', id: m.id, label: memberLabel(m) },
+        organizationId: orgId,
+        summary: `Added ${memberLabel(m)} as ${role} (bulk)`,
+        diff: { role: { from: null, to: role } },
+      });
+    }
     res.status(201).json(members);
   }));
 
@@ -304,6 +426,16 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       data: req.body,
       include: { users: { select: { id: true, name: true, email: true, phone: true } } },
     });
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.memberRoleChanged,
+      target: { type: 'organization_members', id: member.id, label: memberLabel(updated) },
+      organizationId: req.params.id,
+      summary: `Changed ${memberLabel(updated)} from ${member.role}/${member.status} to ${updated.role}/${updated.status}`,
+      diff: {
+        role: { from: member.role, to: updated.role },
+        status: { from: member.status, to: updated.status },
+      },
+    });
     res.json(updated);
   }));
 
@@ -313,8 +445,38 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       select: { id: true, role: true },
     });
     if (member && ['owner', 'admin'].includes(member.role)) await assertNotLastAdmin(req.params.id, member.id);
+    // Read the label before the row goes, or the entry can only name a uuid.
+    const removed = member
+      ? await prisma.organization_members.findUnique({ where: { id: member.id }, include: { users: { select: { name: true, email: true } } } })
+      : null;
     await prisma.organization_members.deleteMany({ where: { id: req.params.memberId, organization_id: req.params.id } });
+    if (removed) {
+      await audit(prisma, req, {
+        action: AUDIT_ACTIONS.memberRemoved,
+        target: { type: 'organization_members', id: removed.id, label: memberLabel(removed) },
+        organizationId: req.params.id,
+        summary: `Removed ${memberLabel(removed)} from the organisation`,
+        diff: { role: { from: removed.role, to: null }, status: { from: removed.status, to: null } },
+      });
+    }
     res.status(204).send();
+  }));
+
+  // ---- Invitations by email (J1-E3) ----
+  // Inviting differs from approving a join request in one way that matters: the
+  // inviter chooses the role, so this is how a coordinator gets approval rights
+  // rather than arriving as a plain member.
+  router.get('/:id/invitations', orgAdmin, asyncHandler(async (req, res) => {
+    res.json(await listOrganizationInvitations(prisma, req.params.id));
+  }));
+
+  router.post('/:id/invitations', orgAdmin, validateBody(inviteOrgMemberSchema), asyncHandler(async (req, res) => {
+    const { email, role } = req.body as { email: string; role: string };
+    res.status(201).json(await inviteToOrganization(prisma, req, { organizationId: req.params.id, email, role }));
+  }));
+
+  router.delete('/:id/invitations/:invitationId', orgAdmin, asyncHandler(async (req, res) => {
+    res.json(await revokeInvitation(prisma, req, req.params.id, req.params.invitationId));
   }));
 
   // ---- Approve / decline a pending join request ----
@@ -340,6 +502,13 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       audience: 'all', // ignored for direct notifications - target_user_id drives visibility
       title: `You’ve been approved to join ${await orgName(req.params.id)}`,
     });
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.memberApproved,
+      target: { type: 'organization_members', id: member.id, label: memberLabel(updated) },
+      organizationId: req.params.id,
+      summary: `Approved ${memberLabel(updated)}'s request to join`,
+      diff: { status: { from: member.status, to: 'active' } },
+    });
     res.json(updated);
   }));
 
@@ -355,6 +524,13 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       type: 'org_join_declined',
       audience: 'all', // ignored for direct notifications - target_user_id drives visibility
       title: `Your request to join ${await orgName(req.params.id)} was declined`,
+    });
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.memberDeclined,
+      target: { type: 'organization_members', id: member.id, label: member.user_id },
+      organizationId: req.params.id,
+      summary: 'Declined a request to join',
+      diff: { status: { from: member.status, to: null } },
     });
     res.json({ ok: true });
   }));

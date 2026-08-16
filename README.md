@@ -2,6 +2,12 @@
 
 Monorepo: **React** frontend + **Node/Express** API (all business logic) + **Supabase** (Postgres only).
 
+**Deployed on AWS Lambda** (API, behind an API Gateway HTTP API) + **Netlify** (web) +
+**Supabase** (Postgres). Render is retired — see [DEPLOYMENT.md](DEPLOYMENT.md).
+Two consequences worth knowing before you write server code: there is **no long-lived
+process** (background work needs SQS/EventBridge, not an interval timer), and a
+synchronous response is capped at the **15s function timeout**.
+
 ```
 packages/shared      # zod schemas, enums, DTO types (shared by web & api)
 apps/api             # Express + Prisma, hexagonal (domain / application / adapters)
@@ -44,12 +50,29 @@ A fully-populated demo event, **Genesis Sports Fest '26**, is seeded so every
 view has live data. Self-serve sign up (organiser / institution) is on the login
 screen.
 
+## Deploy
+
+```bash
+npm run prisma:generate --workspace @semp/api   # needs binaryTargets rhel-openssl-3.0.x
+npm run build:lambda    --workspace @semp/api   # esbuild -> apps/api/dist-lambda.zip
+npm run deploy:lambda   --workspace @semp/api   # idempotent: IAM role + Lambda + HTTP API
+```
+
+Full walkthrough, including the Supabase pooler settings and concurrency caps:
+[DEPLOYMENT.md](DEPLOYMENT.md).
+
 ## Verify
 
 ```bash
-npm run smoke       # replays the TechFest 2025 story across all 5 phases (API must be running)
 npm run test        # Vitest unit tests for the fixture-generation algorithms
 ```
+
+> **Stale commands below/above:** `npm run seed` and `npm run smoke` are referenced in
+> this README but **no longer exist** in any `package.json`. Seeding is now
+> `npx tsx apps/api/scripts/bootstrap-catalog.ts` (global catalog) and
+> `apps/api/scripts/seed-iimb.ts` (disposable demo championship), or the in-app demo
+> sandboxes at `/platform/demos`. The demo-login table above is likewise unverified.
+> Cleanup tracked in [`docs/eos/09-championship-core-deltas.md`](docs/eos/09-championship-core-deltas.md).
 
 ## Architecture notes
 

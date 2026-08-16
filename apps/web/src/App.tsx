@@ -16,19 +16,26 @@ import { EventSetupPage } from './pages/organiser/EventSetupPage';
 import { ApprovalsPage } from './pages/organiser/ApprovalsPage';
 import { SchedulePage } from './pages/organiser/SchedulePage';
 import { ResultsPage } from './pages/organiser/ResultsPage';
+import { LivePage } from './pages/organiser/LivePage';
 import { StandingsPage } from './pages/organiser/StandingsPage';
 import { EventSettingsPage } from './pages/organiser/EventSettingsPage';
 import { EventParticipantsPage } from './pages/organiser/EventParticipantsPage';
 import { EventOrganisersPage } from './pages/organiser/EventOrganisersPage';
+import { EventImportPage } from './pages/organiser/EventImportPage';
 
 // Organizations (multi-org membership + management)
 import { OrganizationsPage } from './pages/OrganizationsPage';
 import { OrgOverviewPage } from './pages/organization/OrgOverviewPage';
 import { TeamsPage } from './pages/organization/TeamsPage';
 import { RosterPage } from './pages/organization/RosterPage';
-import { StudentsPage } from './pages/organization/StudentsPage';
+import { RollImportPage } from './pages/organization/RollImportPage';
 import { PocsPage } from './pages/organization/PocsPage';
 import { InvitationsPage } from './pages/organization/InvitationsPage';
+import { OrgActivityPage } from './pages/organization/OrgActivityPage';
+import { OrgStructurePage } from './pages/organization/OrgStructurePage';
+import { OrgRolesPage } from './pages/organization/OrgRolesPage';
+import { ModuleAccessPage } from './pages/organization/ModuleAccessPage';
+import { ModuleGate } from './lib/permissions';
 
 // Officiating
 import { OfficialFixturesPage } from './pages/official/OfficialFixturesPage';
@@ -40,6 +47,7 @@ import { ParticipantEventPage } from './pages/participant/ParticipantEventPage';
 import { ParticipantMatchesPage } from './pages/participant/ParticipantMatchesPage';
 import { ParticipantMatchPage } from './pages/participant/ParticipantMatchPage';
 import { ParticipantAchievementsPage } from './pages/participant/ParticipantAchievementsPage';
+import { LifetimeRecordPage } from './pages/participant/LifetimeRecordPage';
 import { DiscoverPage } from './pages/DiscoverPage';
 import { MyChampionshipsPage } from './pages/MyChampionshipsPage';
 import { HostPage } from './pages/HostPage';
@@ -47,6 +55,7 @@ import { HostPage } from './pages/HostPage';
 import { DesignShowcase } from './pages/DesignShowcase';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { PlatformResource } from './pages/platform/PlatformResource';
+import { PlatformRolesPage } from './pages/platform/PlatformRolesPage';
 import { PlatformOverview } from './pages/platform/PlatformOverview';
 import { PlatformUsersPage } from './pages/platform/PlatformUsersPage';
 import { PlatformInstitutionsPage } from './pages/platform/PlatformInstitutionsPage';
@@ -55,6 +64,7 @@ import { PlatformFeedbackPage } from './pages/platform/PlatformFeedbackPage';
 import { PlatformDemosPage } from './pages/platform/PlatformDemosPage';
 import { ChampionshipMatrixImportPage } from './pages/platform/ChampionshipMatrixImportPage';
 import { PublicChampionshipPage } from './pages/public/PublicChampionshipPage';
+import { InviteAcceptPage } from './pages/InviteAcceptPage';
 
 function HomeRedirect() {
   const { activeRole } = useAuth();
@@ -77,6 +87,9 @@ function AuthenticatedRoutes() {
         {/* Profile / My Game */}
         <Route path="/profile" element={<ParticipantDashboard />} />
         <Route path="/profile/achievements" element={<ParticipantAchievementsPage />} />
+        {/* The permanent record (J4-E2). Read-only by design - there is no edit route. */}
+        <Route path="/profile/record" element={<LifetimeRecordPage />} />
+        <Route path="/people/:userId/record" element={<LifetimeRecordPage />} />
         <Route path="/profile/matches" element={<ParticipantMatchesPage />} />
         <Route path="/profile/matches/:fixtureId" element={<ParticipantMatchPage />} />
         <Route path="/profile/championships/:championshipId" element={<ParticipantEventPage />} />
@@ -84,11 +97,27 @@ function AuthenticatedRoutes() {
         {/* Organizations */}
         <Route path="/organizations" element={<OrganizationsPage />} />
         <Route path="/organizations/:orgId/overview" element={<OrgOverviewPage />} />
-        <Route path="/organizations/:orgId/teams" element={<TeamsPage />} />
-        <Route path="/organizations/:orgId/teams/:teamId" element={<RosterPage />} />
-        <Route path="/organizations/:orgId/students" element={<StudentsPage />} />
-        <Route path="/organizations/:orgId/members" element={<PocsPage />} />
-        <Route path="/organizations/:orgId/invitations" element={<InvitationsPage />} />
+        {/* Module-gated (J6-E2-S2): a direct link to something the institution
+            has switched off for this audience gets a plain "not available" page,
+            never a raw error or a silently empty screen. */}
+        <Route path="/organizations/:orgId/teams" element={<ModuleGate module="teams"><TeamsPage /></ModuleGate>} />
+        <Route path="/organizations/:orgId/teams/:teamId" element={<ModuleGate module="teams"><RosterPage /></ModuleGate>} />
+        {/* There is one people directory, and it is the People tab. `/students`
+            was a third view of the same institution (team-grouped, which is what
+            the Teams tab already does) and it could not show anyone who was not
+            on a squad - so an imported roll of 2,000 was invisible in it. */}
+        {/* One directory, not three (J1-E5). `relative="path"` matters: these routes are
+            flat siblings, so the default route-relative ".." resolves against the layout
+            and lands on "/members", which does not exist - the catch-all then bounced
+            anyone following an old link to their own profile. */}
+        <Route path="/organizations/:orgId/students" element={<Navigate to="../members" replace relative="path" />} />
+        <Route path="/organizations/:orgId/students/import" element={<ModuleGate module="people"><RollImportPage /></ModuleGate>} />
+        <Route path="/organizations/:orgId/members" element={<ModuleGate module="people"><PocsPage /></ModuleGate>} />
+        <Route path="/organizations/:orgId/invitations" element={<ModuleGate module="people"><InvitationsPage /></ModuleGate>} />
+        <Route path="/organizations/:orgId/activity" element={<ModuleGate module="administration"><OrgActivityPage /></ModuleGate>} />
+        <Route path="/organizations/:orgId/structure" element={<OrgStructurePage />} />
+        <Route path="/organizations/:orgId/roles" element={<OrgRolesPage />} />
+        <Route path="/organizations/:orgId/modules" element={<ModuleAccessPage />} />
 
         {/* Discover + Championships + Host */}
         <Route path="/discover" element={<DiscoverPage />} />
@@ -98,10 +127,12 @@ function AuthenticatedRoutes() {
         <Route path="/championships/:eventId" element={<EventLayout />}>
           <Route index element={<EventDashboard />} />
           <Route path="setup" element={<EventSetupPage />} />
+          <Route path="import" element={<EventImportPage />} />
           <Route path="team" element={<EventOrganisersPage />} />
           <Route path="approvals" element={<ApprovalsPage />} />
           <Route path="participants" element={<EventParticipantsPage />} />
           <Route path="schedule" element={<SchedulePage />} />
+          <Route path="live" element={<LivePage />} />
           <Route path="results" element={<ResultsPage />} />
           <Route path="standings" element={<StandingsPage />} />
           <Route path="settings" element={<EventSettingsPage />} />
@@ -119,6 +150,9 @@ function AuthenticatedRoutes() {
         <Route path="/platform/demos" element={<RequireRole roles={SYSTEM}><PlatformDemosPage /></RequireRole>} />
         <Route path="/platform/organizations" element={<RequireRole roles={SYSTEM}><PlatformInstitutionsPage /></RequireRole>} />
         <Route path="/platform/import-setup" element={<RequireRole roles={SYSTEM}><ChampionshipMatrixImportPage /></RequireRole>} />
+        {/* Before the /platform/:key catch-all, which would otherwise render the
+            generic CRUD screen for "roles" and its raw-JSON textarea. */}
+        <Route path="/platform/roles" element={<RequireRole roles={SYSTEM}><PlatformRolesPage /></RequireRole>} />
         <Route path="/platform/:key" element={<RequireRole roles={SYSTEM}><PlatformResource /></RequireRole>} />
 
         {/* Notifications + help + design system - any authenticated user */}
@@ -134,7 +168,7 @@ function AuthenticatedRoutes() {
 }
 
 function AppRoutes() {
-  const { ctx, loading, justLoggedIn, clearJustLoggedIn, activeRole } = useAuth();
+  const { ctx, loading, justLoggedIn, clearJustLoggedIn, activeRole, landingPath } = useAuth();
 
   // Consume the one-shot login flag once we've acted on it (below).
   useEffect(() => { if (justLoggedIn) clearJustLoggedIn(); }, [justLoggedIn, clearJustLoggedIn]);
@@ -143,6 +177,11 @@ function AppRoutes() {
   // whether the visitor is signed in (so the link works for anyone).
   const publicMatch = useMatch('/c/:token');
   if (publicMatch?.params.token) return <PublicChampionshipPage token={publicMatch.params.token} />;
+
+  // An invitation link has to work for someone who has never signed in - and equally
+  // for someone already signed in as somebody else, hence ahead of the ctx check.
+  const inviteMatch = useMatch('/invite/:token');
+  if (inviteMatch?.params.token && !justLoggedIn) return <InviteAcceptPage token={inviteMatch.params.token} />;
 
   if (loading) return <div className="grid h-screen place-items-center"><Spinner /></div>;
   // Logged out: a public marketing landing page at the root, with the sign-in
@@ -157,8 +196,10 @@ function AppRoutes() {
   // Provisioned logins must set their own password before they can use the app.
   if (ctx.user.must_change_password) return <ChangePasswordPage />;
   // After an explicit login/signup, bounce to the role's home so the previous
-  // session's last-visited URL never renders. Initial token refresh skips this.
-  if (justLoggedIn) return <Navigate to={roleHome(activeRole)} replace />;
+  // session's last-visited URL never renders - unless the sign-in named somewhere
+  // better (a domain-matched code lands on the organisation just joined). Initial
+  // token refresh skips this.
+  if (justLoggedIn) return <Navigate to={landingPath ?? roleHome(activeRole)} replace />;
   return <AuthenticatedRoutes />;
 }
 

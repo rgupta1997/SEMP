@@ -1,8 +1,16 @@
 # Notification Service — Module Plan (Supabase Realtime transport)
 
-Status: proposal, not yet implemented.
+Status: proposal; Supabase Realtime transport (§5) currently under POC.
 Scope: `packages/notifications` (new shared package) + schema additions + migration of existing call sites.
-Transport: Supabase Realtime (already in our stack — no new infra). AWS AppSync is a separate, later track tied to the Lambda migration; it can replace the transport in this plan without touching the rule engine below.
+Transport: Supabase Realtime (already in our stack — no new infra), or AWS AppSync. Either can back this plan without touching the rule engine below.
+
+> **Deployment note (updated).** The API now runs on **AWS Lambda** behind an API Gateway HTTP API (`apps/api/src/lambda.ts` via `serverless-http`, proven on staging). **Render is retired.** This changes one premise of the original draft: AppSync was written up as "a separate, later track tied to the Lambda migration" — **that migration has happened**, so the AppSync-vs-Realtime choice is live now rather than deferred, and the POC in §5 is picking between two available options rather than validating the only one.
+>
+> Two Lambda consequences that bear on §5 specifically:
+> - **No long-lived process.** Anything that would have been an in-process subscriber, fan-out loop or interval job needs SQS/EventBridge instead. The plan's read-time visibility model (no fan-out rows) is a good fit for this and gets *more* attractive under Lambda, not less.
+> - **Per-container DB connection budget of 1** (reserved concurrency 10 × `connection_limit=1`). Any per-recipient fan-out design — see §7's first open question — has to respect that ceiling.
+>
+> See `DEPLOYMENT.md` and `docs/eos/00-index.md` §2.3.
 
 ## 1. Problem with the current system
 
@@ -20,7 +28,7 @@ Today notifications work through one write helper (`createNotification` in `apps
 2. Adding a new **audience rule** ("who should see this") = compose existing primitives, no migration, no CHECK-constraint edit.
 3. A per-user **last-seen watermark**, updated on bell click, driving badge count via a cheap indexed range query instead of an anti-join.
 4. **Live badge/feed updates** via Supabase Realtime instead of 30s polling.
-5. Ship independent of any AWS work — this runs fine against the current Render-deployed API today.
+5. Ship independent of the transport decision — the rule engine, registry and watermark (§3–§4) run unchanged on the current Lambda-deployed API regardless of whether §5 lands on Supabase Realtime, AppSync, or stays on polling.
 
 ## 3. Package layout: `packages/notifications`
 
@@ -165,7 +173,7 @@ Flow:
 3. `NotificationBell` subscribes to its own channel using the short-lived Supabase JWT from step above; on message, it invalidates the `unread-count`/feed TanStack Query keys instead of waiting for the 30s interval.
 4. If the Realtime connection drops, fall back to the existing poll (kept as a safety net, not removed).
 
-This is intentionally decoupled from the rule engine in §3 — if AppSync later replaces this transport (per the AWS/Lambda track), only this section changes; `notify()`, the type registry, and the audience rules stay identical.
+This is intentionally decoupled from the rule engine in §3 — if AppSync replaces this transport, only this section changes; `notify()`, the type registry, and the audience rules stay identical. Now that the API is on Lambda, that swap is a live option rather than a future one: weigh Realtime (no new infra, but needs the externally-signed-JWT spike above) against AppSync (native to the AWS stack we're now on, but new infra and IAM). The POC should produce a recommendation on that, not just a yes/no on Realtime.
 
 ## 6. Migration plan (phased, non-breaking)
 

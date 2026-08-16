@@ -69,6 +69,12 @@ export function ParticipantDashboard() {
         <>
           <CareerStats stats={data.stats} />
 
+          <div className="flex justify-end">
+            <Link to="/profile/record" className="text-sm font-semibold text-brand-600 dark:text-brand-300 hover:text-brand-700 dark:hover:text-brand-200">
+              My full record →
+            </Link>
+          </div>
+
           {achievementGroups.length > 0 && (
             <section>
               <div className="mb-3 flex items-center justify-between">

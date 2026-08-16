@@ -128,7 +128,7 @@ function build(content: StepContent[], cta: Record<string, { label: string; to: 
 
 export function usePocOnboarding(orgId: string, enabled = true): OnboardingState {
   const on = enabled && !!orgId;
-  const members = useApi<any[]>(on ? `/organizations/${orgId}/members` : null);
+  const members = useApi<any[]>(on ? `/organizations/${orgId}/people` : null);
   const teams = useApi<any[]>(on ? `/teams?organization_id=${orgId}` : null);
   const enrollments = useApi<any[]>(on ? `/me/enrollments?organization_id=${orgId}` : null);
 

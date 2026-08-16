@@ -21,7 +21,14 @@ interface StandingRow {
   detail: Record<string, number>;
   rank: number | null;
 }
-interface StandingsResponse { scope: string; scope_id: string | null; standings: StandingRow[]; completed_matches: number }
+interface StandingsResponse {
+  scope: string; scope_id: string | null; standings: StandingRow[];
+  completed_matches: number;
+  // Finished matches whose scorecard the organiser hasn't locked yet. While this is
+  // above zero the table can still change, and saying so is the difference between a
+  // scoreboard and a record.
+  unverified_matches?: number;
+}
 
 const MEDAL = ['🥇', '🥈', '🥉'];
 
@@ -92,6 +99,13 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
         ) : <span />}
         <RefreshBar updatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={() => refetch()} />
       </div>
+
+      {!isLoading && rows.length > 0 && (data?.unverified_matches ?? 0) > 0 && (
+        <p className="rounded-xl bg-amber-50 px-4 py-2.5 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
+          <b>Provisional.</b> {data!.unverified_matches} finished match{data!.unverified_matches === 1 ? '' : 'es'} still
+          {' '}{data!.unverified_matches === 1 ? 'has' : 'have'} to be locked by the organiser, so these numbers can change.
+        </p>
+      )}
 
       {!isLoading && rows.length > 0 && (
         <Tabs active={view} onChange={(v) => setView(v as 'points' | 'medals')}

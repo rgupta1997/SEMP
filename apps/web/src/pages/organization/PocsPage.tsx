@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Users } from 'lucide-react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { ORGANIZATION_MEMBER_ROLE } from '@semp/shared';
 import { useAuth } from '../../lib/auth';
 import { usePermissions } from '../../lib/permissions';
@@ -9,11 +9,18 @@ import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { titleCase } from '../../lib/format';
 import { OrgTabs } from '../../components/OrgTabs';
 import { PeoplePicker } from '../../components/PeoplePicker';
+import { InviteMemberModal } from '../../components/InviteMemberModal';
 import { Avatar, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, toast } from '../../components/ui';
 
+// The single directory shape, from GET /organizations/:id/people. Flat by
+// design: there is one projection of a person in this product, and gender,
+// date of birth and scholarship are deliberately not in it (J1-E5-S4).
 interface Member {
   id: string; user_id: string; role: string; status: string;
-  users: { id: string; name: string; email: string; phone?: string | null } | null;
+  name: string | null; email: string | null; phone?: string | null;
+  member_code?: string | null;
+  verification?: 'pending' | 'verified' | 'rejected';
+  org_unit_name?: string | null;
 }
 
 const ROLE_TONE: Record<string, 'brand' | 'green' | 'amber' | 'slate'> = {
@@ -32,7 +39,7 @@ function AddMemberModal({ orgId, memberUserIds, onClose }: { orgId: string; memb
       assignedUserIds={memberUserIds}
       assignedLabel="Member"
       invite={{ target_type: 'org_member', target_id: orgId, role }}
-      invalidateKeys={[`/organizations/${orgId}/members`]}
+      invalidateKeys={[`/organizations/${orgId}/people`]}
       roleControl={(
         <Field label="Role">
           <Select value={role} onChange={(e) => setRole(e.target.value)} className="w-44">
@@ -51,9 +58,10 @@ export function PocsPage() {
   const { orgId: routeOrgId } = useParams();
   const orgId = routeOrgId ?? ctx?.organization?.id ?? ctx?.user.organization_id ?? '';
   const canManage = usePermissions().canManageOrg(orgId);
-  const path = orgId ? `/organizations/${orgId}/members` : null;
+  const path = orgId ? `/organizations/${orgId}/people` : null;
   const { data: members = [], isLoading } = useApi<Member[]>(path);
   const [adding, setAdding] = useState(false);
+  const [inviting, setInviting] = useState(false);
 
   const setRole = useApiMutation(
     ({ id, role }: { id: string; role: string }) => api('PATCH', `/organizations/${orgId}/members/${id}`, { role }),
@@ -72,14 +80,16 @@ export function PocsPage() {
 
   // Search (name / email / phone) + pagination over the roster list.
   const tc = useTableControls(rosterMembers, {
-    search: (m) => `${m.users?.name ?? ''} ${m.users?.email ?? ''} ${m.users?.phone ?? ''}`,
+    search: (m) => `${m.name ?? ''} ${m.email ?? ''} ${m.phone ?? ''}`,
     pageSize: 15,
   });
 
   return (
     <div>
       {orgId && <OrgTabs orgId={orgId} />}
-      <PageHeader title="Members" subtitle="Everyone in this organization and the role they hold.">
+      <PageHeader title="People" subtitle="Everyone in this institution, the role they hold and where they are placed.">
+        {canManage && <Link to={`/organizations/${orgId}/students/import`} className="self-center text-sm font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-200">Import the roll →</Link>}
+        {canManage && <Button variant="outline" onClick={() => setInviting(true)}>Invite by email</Button>}
         {canManage && <Button onClick={() => setAdding(true)}>+ Add member</Button>}
       </PageHeader>
 
@@ -94,15 +104,15 @@ export function PocsPage() {
               {pendingMembers.map((m) => (
                 <div key={m.id} className="flex items-center justify-between px-5 py-3">
                   <div className="flex items-center gap-3">
-                    <Avatar name={m.users?.name ?? '-'} size={38} />
+                    <Avatar name={m.name ?? '-'} size={38} />
                     <div>
-                      <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{m.users?.name ?? '-'}</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">{m.users?.email}{m.users?.phone ? ` · ${m.users.phone}` : ''}</div>
+                      <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{m.name ?? '-'}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">{m.email}{m.phone ? ` · ${m.phone}` : ''}</div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button size="sm" disabled={approve.isPending || decline.isPending}
-                      onClick={() => approve.mutate(m.id, { onSuccess: () => toast.success(`${m.users?.name ?? 'Member'} approved`), onError: (e: any) => toast.error(e.message) })}>
+                      onClick={() => approve.mutate(m.id, { onSuccess: () => toast.success(`${m.name ?? 'Member'} approved`), onError: (e: any) => toast.error(e.message) })}>
                       Approve
                     </Button>
                     <Button size="sm" variant="outline" disabled={approve.isPending || decline.isPending}
@@ -135,11 +145,25 @@ export function PocsPage() {
             <CardBody className="divide-y divide-slate-100 dark:divide-slate-800 p-0">
               {tc.view.map((m) => (
                 <div key={m.id} className={`flex items-center justify-between px-5 py-3 ${m.status === 'past' ? 'opacity-50' : ''}`}>
-                  <div className="flex items-center gap-3">
-                    <Avatar name={m.users?.name ?? '-'} size={38} />
-                    <div>
-                      <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{m.users?.name ?? '-'}</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">{m.users?.email}{m.users?.phone ? ` · ${m.users.phone}` : ''}</div>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Avatar name={m.name ?? '-'} size={38} />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        {/* The directory is the way in to a person's record
+                            (J4-E2-S4); the endpoint behind it still checks that
+                            the viewer shares this institution. */}
+                        <Link to={`/people/${m.user_id}/record`} className="truncate text-sm font-semibold text-slate-800 hover:text-brand-600 dark:text-slate-200 dark:hover:text-brand-300">
+                          {m.name ?? '-'}
+                        </Link>
+                        {/* Only 'verified' is asserted. Pending is the default for
+                            everyone imported, and shouting it against 2,000 rows
+                            would make the badge mean nothing. */}
+                        {m.verification === 'verified' && <Badge tone="green">Verified</Badge>}
+                        {m.verification === 'rejected' && <Badge tone="rose">Rejected</Badge>}
+                      </div>
+                      <div className="truncate text-xs text-slate-500 dark:text-slate-400">
+                        {[m.email, m.phone, m.org_unit_name, m.member_code].filter(Boolean).join(' · ')}
+                      </div>
                     </div>
                   </div>
                   {canManage ? (
@@ -148,7 +172,7 @@ export function PocsPage() {
                         {ORGANIZATION_MEMBER_ROLE.map((r) => <option key={r} value={r}>{titleCase(r)}</option>)}
                       </Select>
                       <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
-                        onClick={async () => { if (await confirmDialog({ title: 'Remove member', confirmLabel: 'Remove', message: `Remove ${m.users?.name ?? 'this member'} from the organization?` })) remove.mutate(m.id, { onError: (err: any) => toast.error(err.message) }); }}>
+                        onClick={async () => { if (await confirmDialog({ title: 'Remove member', confirmLabel: 'Remove', message: `Remove ${m.name ?? 'this member'} from the organization?` })) remove.mutate(m.id, { onError: (err: any) => toast.error(err.message) }); }}>
                         Remove
                       </Button>
                     </div>
@@ -164,6 +188,7 @@ export function PocsPage() {
       )}
 
       {adding && orgId && <AddMemberModal orgId={orgId} memberUserIds={memberUserIds} onClose={() => setAdding(false)} />}
+      {inviting && orgId && <InviteMemberModal orgId={orgId} onClose={() => setInviting(false)} />}
     </div>
   );
 }

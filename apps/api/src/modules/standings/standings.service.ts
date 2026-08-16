@@ -1,5 +1,5 @@
 import { DEFAULT_STANDINGS_RULE, standingsRuleSchema, type StandingsRule, type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker } from '@semp/shared';
-import type { Prisma } from '../../infra/prisma.js';
+import type { Db } from '../../infra/prisma.js';
 import { accumulate, rankBy, runScheme, type OrgTally, type SchemeFixture } from './domain/schemes.js';
 
 // One accumulator bucket = one standings table (a scope + scope_id pair).
@@ -26,7 +26,7 @@ function parseRule(config: unknown): StandingsRule {
 // championship default → built-in default). Shared by the scheme helper below and the
 // scoring endpoint (which needs a ranking rule's place points).
 export async function resolveRuleForDraw(
-  prisma: Prisma, championshipId: string, disciplineId: string | null, formatId: string | null,
+  prisma: Db, championshipId: string, disciplineId: string | null, formatId: string | null,
 ): Promise<StandingsRule> {
   const ruleRows = await prisma.standings_rules.findMany({ where: { championship_id: championshipId } });
   const byDiscipline = new Map<string, StandingsRule>();
@@ -46,7 +46,7 @@ export async function resolveRuleForDraw(
 }
 
 export async function resolveSchemeForDraw(
-  prisma: Prisma, championshipId: string, disciplineId: string | null, formatId: string | null,
+  prisma: Db, championshipId: string, disciplineId: string | null, formatId: string | null,
 ): Promise<StandingsScheme> {
   return (await resolveRuleForDraw(prisma, championshipId, disciplineId, formatId)).scheme;
 }
@@ -56,7 +56,7 @@ export async function resolveSchemeForDraw(
 // byes are excluded - a bye is an auto-advance, not a played match. Walkovers count (a
 // forfeit is still a real result).
 export async function countCompletedMatches(
-  prisma: Prisma, championshipId: string,
+  prisma: Db, championshipId: string,
   scope: 'championship' | 'tournament' | 'sport' = 'championship', scopeId: string | null = null,
 ): Promise<number> {
   return prisma.fixtures.count({
@@ -77,7 +77,7 @@ export async function countCompletedMatches(
 // Aggregates by organization at three scopes (championship / tournament / sport),
 // each draw scored by its resolved rule. Idempotent: wipes and re-inserts in one
 // transaction.
-export async function recomputeStandings(prisma: Prisma, championshipId: string): Promise<void> {
+export async function recomputeStandings(prisma: Db, championshipId: string): Promise<void> {
   // Editable rules for this championship, indexed for most-specific-wins resolution.
   const ruleRows = await prisma.standings_rules.findMany({ where: { championship_id: championshipId } });
   const byDiscipline = new Map<string, StandingsRule>();
@@ -235,15 +235,20 @@ export async function recomputeStandings(prisma: Prisma, championshipId: string)
     }
   }
 
-  await prisma.$transaction([
-    prisma.standings.deleteMany({ where: { championship_id: championshipId } }),
-    ...(data.length ? [prisma.standings.createMany({ data })] : []),
-  ]);
+  // Replace the materialized table for this championship. Sequential rather than
+  // `$transaction([...])` because this function must be callable from inside an
+  // enclosing transaction (the scorecard lock), and a tx client has no
+  // `$transaction` of its own. When there IS an enclosing transaction these two
+  // statements are already atomic within it; when there isn't, the window between
+  // them is the same one the previous `$transaction([])` had on a recompute that
+  // failed halfway - and a standings recompute is idempotent and re-runnable.
+  await prisma.standings.deleteMany({ where: { championship_id: championshipId } });
+  if (data.length) await prisma.standings.createMany({ data });
 }
 
 // Recompute triggered by a fixture write - resolves the owning championship and
 // skips frozen (completed) championships so final standings don't move.
-export async function recomputeStandingsForFixture(prisma: Prisma, fixtureId: string): Promise<void> {
+export async function recomputeStandingsForFixture(prisma: Db, fixtureId: string): Promise<void> {
   const fx = await prisma.fixtures.findUnique({
     where: { id: fixtureId },
     select: { tournament_disciplines: { select: { tournament_sports: { select: { tournaments: { select: { championship_id: true, championships: { select: { status: true } } } } } } } } },
@@ -284,7 +289,7 @@ export interface BreakdownEvent {
 // Scope filters the draws the same way the materialized buckets are keyed: championship
 // = all, tournament = that tournament's draws, sport = that sport's draws.
 export async function readStandingsBreakdown(
-  prisma: Prisma,
+  prisma: Db,
   championshipId: string,
   scope: StandingsAggScope,
   scopeId: string | null,
@@ -457,7 +462,7 @@ export async function readStandingsBreakdown(
 }
 
 // Read a materialized standings table (org rows joined for display), ordered by rank.
-export async function readStandings(prisma: Prisma, championshipId: string, scope: StandingsAggScope, scopeId: string | null) {
+export async function readStandings(prisma: Db, championshipId: string, scope: StandingsAggScope, scopeId: string | null) {
   const rows = await prisma.standings.findMany({
     where: { championship_id: championshipId, scope_type: scope, scope_id: scopeId },
     include: { organizations: { select: { id: true, name: true, short_name: true, logo_url: true } } },

@@ -47,7 +47,15 @@ function toMatchSummary(f: FixtureRow, myTeamIds: Set<string>) {
     id: f.id,
     round: f.round,
     status: f.status,
+    // 'locked' means the organiser has made the result official - the same
+    // definition of Verified used everywhere else (J3-E5-S2).
+    scorecard_status: f.scorecard_status,
+    amended_at: f.lock_version > 0 ? (f.locked_at ?? f.updated_at) : null,
     scheduled_at: f.scheduled_at,
+    // Where to actually turn up (J3-E5-S1).
+    venue: f.venue_grounds
+      ? [f.venue_grounds.venues?.name, f.venue_grounds.name].filter(Boolean).join(' · ')
+      : null,
     sport: mine?.sports?.name ?? ts?.sports?.name ?? null,
     discipline: f.tournament_disciplines?.disciplines?.name ?? null,
     championship: championship ? { id: championship.id, name: championship.name, slug: championship.slug } : null,
@@ -78,6 +86,9 @@ function tally(fixtures: FixtureRow[], myTeamIds: Set<string>) {
 // draw (not the team). Shape matches toMatchSummary so the same MatchRow renders it.
 const matchSelect = {
   id: true, round: true, status: true, scheduled_at: true,
+  // 'locked' is what Verified means; lock_version > 0 means the result was corrected
+  // after being made official, which has to be visible wherever it appears (J6-E4-S4).
+  scorecard_status: true, lock_version: true, locked_at: true, updated_at: true,
   home_team_id: true, away_team_id: true, home_score: true, away_score: true, winner_team_id: true,
   teams_fixtures_home_team_idToteams: { select: { id: true, name: true, organizations: { select: { short_name: true, name: true } } } },
   teams_fixtures_away_team_idToteams: { select: { id: true, name: true, organizations: { select: { short_name: true, name: true } } } },
@@ -103,6 +114,11 @@ function summariseLean(f: FixtureRow, myTeamIds: Set<string>) {
   const ev = ts?.tournaments?.championships;
   return {
     id: f.id, round: f.round, status: f.status, scheduled_at: f.scheduled_at,
+    scorecard_status: f.scorecard_status,
+    // Null unless this result has actually been corrected - the date is when the
+    // amended result became official again, falling back to the row's own timestamp
+    // rather than dropping the disclosure for want of a date.
+    amended_at: f.lock_version > 0 ? (f.locked_at ?? f.updated_at) : null,
     sport: ts?.sports?.name ?? null,
     discipline: f.tournament_disciplines?.disciplines?.name ?? null,
     championship: ev ? { id: ev.id, name: ev.name, slug: ev.slug } : null,

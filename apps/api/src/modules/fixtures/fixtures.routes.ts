@@ -1,5 +1,9 @@
 import { Router } from 'express';
-import { createFixtureSchema, fixtureAwardsSchema, fixturePointsSchema, fixtureResultSchema, generateFixturesSchema, updateFixtureSchema } from '@semp/shared';
+import type { RequestHandler } from 'express';
+import {
+  assignFixtureOfficialSchema, createFixtureSchema, fixtureAwardsSchema, fixturePointsSchema,
+  fixtureResultSchema, generateDrawSchema, updateFixtureSchema,
+} from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { makeCrudRouter } from '../../http/crud.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -7,8 +11,15 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { generateFixtures, type TeamRef } from './domain/generators/index.js';
+import { clashesByFixture, findClashes } from './domain/clashes.js';
 import { recomputeStandingsForFixture, resolveRuleForDraw, resolveSchemeForDraw } from '../standings/standings.service.js';
 import { createNotification } from '../notifications/audience.js';
+import { advanceWinner, propagateByes } from './bracket.js';
+import { ROLE_CODES, roleWhereByCode } from '../iam/role-codes.js';
+import {
+  assertNotLocked, lockScorecard, lockScorecardsBulk, lockStatusForChampionship,
+  retractScorecard, submitScorecard, unlockScorecard,
+} from './lock.service.js';
 
 // A match can only be recorded once its championship is under way. Resolves the
 // owning championship from the fixture's draw and blocks scoring while it's still
@@ -50,69 +61,6 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-// Single-elimination bracket advancement: put `teamId` into the correct slot of the
-// match that the match at `position` feeds into. Bracket positions are contiguous
-// round-by-round, so the parent is derived from the bracket size (sibling count =
-// size - 1). No-op for non-bracket formats (group/round-robin have null positions),
-// non-power-of-two brackets, the final, or a parent that's already been played.
-async function advanceInBracket(prisma: Prisma, drawId: string, position: number, teamId: string): Promise<void> {
-  const sibs = await prisma.fixtures.findMany({
-    where: { tournament_discipline_id: drawId, bracket_position: { not: null } },
-    select: { id: true, bracket_position: true, status: true },
-  });
-  const size = sibs.length + 1;
-  if (size < 2 || (size & (size - 1)) !== 0) return; // not a clean single-elim bracket
-  const rounds = Math.log2(size);
-  const offsets: number[] = [];
-  let acc = 0;
-  for (let r = 0; r < rounds; r++) { offsets.push(acc); acc += size / 2 ** (r + 1); }
-  let round = -1;
-  let j = -1;
-  for (let ri = 0; ri < rounds; ri++) {
-    const matchesInRound = size / 2 ** (ri + 1);
-    if (position >= offsets[ri] && position < offsets[ri] + matchesInRound) { round = ri; j = position - offsets[ri]; break; }
-  }
-  if (round < 0 || round >= rounds - 1) return; // not found, or it's the final - nowhere to advance
-  const parentPos = offsets[round + 1] + Math.floor(j / 2);
-  const parent = sibs.find((s) => s.bracket_position === parentPos);
-  if (!parent || parent.status === 'completed') return; // don't overwrite a played match
-  // Even child → parent's home slot, odd child → away (mirrors the generator's pairing).
-  await prisma.fixtures.update({ where: { id: parent.id }, data: j % 2 === 0 ? { home_team_id: teamId } : { away_team_id: teamId } });
-}
-
-// After a completed bracket result, push the winner into the next round. Best-effort -
-// the result is already saved, so an advancement hiccup must not fail the request.
-async function advanceWinner(prisma: Prisma, fixtureId: string): Promise<void> {
-  try {
-    const fx = await prisma.fixtures.findUnique({
-      where: { id: fixtureId },
-      select: { tournament_discipline_id: true, bracket_position: true, winner_team_id: true, status: true },
-    });
-    const advancing = fx?.status === 'completed' || fx?.status === 'walkover';
-    if (!fx || !advancing || fx.winner_team_id == null || fx.bracket_position == null) return;
-    await advanceInBracket(prisma, fx.tournament_discipline_id, fx.bracket_position, fx.winner_team_id);
-  } catch (err) {
-    console.error(`[bracket] winner advancement failed for fixture ${fixtureId}:`, err);
-  }
-}
-
-// Round-0 byes: the lone present team auto-advances to the next round. Run right
-// after generation so byes don't leave a permanent TBD in the next round.
-async function propagateByes(prisma: Prisma, drawId: string): Promise<void> {
-  try {
-    const byes = await prisma.fixtures.findMany({
-      where: { tournament_discipline_id: drawId, status: 'bye', bracket_position: { not: null } },
-      select: { bracket_position: true, home_team_id: true, away_team_id: true },
-    });
-    for (const b of byes) {
-      const team = b.home_team_id ?? b.away_team_id;
-      if (team && b.bracket_position != null) await advanceInBracket(prisma, drawId, b.bracket_position, team);
-    }
-  } catch (err) {
-    console.error(`[bracket] bye propagation failed for draw ${drawId}:`, err);
-  }
-}
-
 // When a completed match belongs to a draw scored by the "custom" point system and
 // has no hand-entered points yet, nudge the championship's organiser(s) to add them.
 // Direct (target_user_id) notifications so only organisers are pinged. Best-effort -
@@ -143,7 +91,7 @@ async function remindCustomPointsIfNeeded(prisma: Prisma, fixtureId: string, sen
     const formatId = td?.format_id ?? td?.tournament_sports?.format_id ?? null;
     const scheme = await resolveSchemeForDraw(prisma, championshipId, td?.discipline_id ?? null, formatId);
     if (scheme !== 'custom') return;
-    const organiserRole = await prisma.roles.findUnique({ where: { name: 'Organiser' }, select: { id: true } });
+    const organiserRole = await prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser), select: { id: true } });
     if (!organiserRole) return;
     const organisers = await prisma.user_championship_roles.findMany({
       where: { championship_id: championshipId, role_id: organiserRole.id },
@@ -182,7 +130,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   // Generate (regenerate) the draw using the format's algorithm.
   router.post('/tournament-disciplines/:id/fixtures/generate',
     drawOrganiser,
-    validateBody(generateFixturesSchema),
+    validateBody(generateDrawSchema),
     asyncHandler(async (req, res) => {
       const td = await prisma.tournament_disciplines.findUnique({
         where: { id: req.params.id },
@@ -264,6 +212,13 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         throw new BusinessRuleError('This draw already has played matches - regenerating would erase those results. Edit fixtures individually instead.');
       }
 
+      // Nothing has been played, but the draw still holds an organiser's scheduling and
+      // official assignments. A rebuild discards all of it, so it has to be asked for -
+      // a repeated "Generate draw" click must not quietly destroy a day's work.
+      if (existing.length > 0 && req.body.replace !== true) {
+        throw new BusinessRuleError('This draw already has fixtures. Regenerating replaces them (and their times, grounds and officials) - confirm the rebuild to continue.');
+      }
+
       const generated = generateFixtures(formatName, teams, params);
 
       // Replace any existing fixtures for this draw atomically - a failed insert
@@ -314,6 +269,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   // typed client so standings stay correct; the JSON blobs go via raw SQL (no
   // client regeneration needed). Only the assigned official / organiser / super.
   router.patch('/fixtures/:id/live', guards.fixtureScorer, asyncHandler(async (req, res) => {
+    // A locked result is immutable for everyone - organiser, official and platform
+    // admin alike. Changing it means unlocking it first, with a reason, on the record.
+    await assertNotLocked(prisma, req.params.id);
     await assertChampionshipStarted(prisma, req.params.id);
     const b = req.body ?? {};
     // Only touch fields that were actually sent, so a status-only change (e.g.
@@ -326,11 +284,31 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     if (b.status) data.status = b.status;
     // Scoring a match (going live or completing) requires both teams to be known - a
     // TBD bracket slot can't be played. Fetch once and reuse for the winner check.
-    let fxTeams: { home_team_id: string | null; away_team_id: string | null; tournament_disciplines: { format_config: any } | null } | null = null;
+    let fxTeams: {
+      home_team_id: string | null; away_team_id: string | null;
+      live_started_at: Date | null; tournament_disciplines: { format_config: any } | null;
+    } | null = null;
     const needsTeams = b.status === 'live' || b.status === 'completed';
     if (needsTeams || b.winner_team_id != null) {
-      fxTeams = await prisma.fixtures.findUnique({ where: { id: req.params.id }, select: { home_team_id: true, away_team_id: true, tournament_disciplines: { select: { format_config: true } } } });
+      fxTeams = await prisma.fixtures.findUnique({
+        where: { id: req.params.id },
+        select: {
+          home_team_id: true, away_team_id: true, live_started_at: true,
+          tournament_disciplines: { select: { format_config: true } },
+        },
+      });
       if (!fxTeams) throw new NotFoundError('Fixture');
+    }
+    // Kick-off is stamped ONCE, on the way into 'live' (J2-E6-S2). Every score tap
+    // comes through this same route, so writing it unconditionally would reset the
+    // clock to zero on every point - hence the "only if not already set" test.
+    // Leaving 'live' without finishing (a postponement) clears it so a resumed
+    // match restarts its clock; completing KEEPS it, because how long the match
+    // ran is part of the result.
+    if (b.status === 'live') {
+      if (!fxTeams?.live_started_at) data.live_started_at = new Date();
+    } else if (b.status && b.status !== 'completed') {
+      data.live_started_at = null;
     }
     if (needsTeams && (!fxTeams!.home_team_id || !fxTeams!.away_team_id)) {
       // Multi-competitor events (swimming/powerlifting) are intentionally team-less, so
@@ -414,8 +392,29 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   // Free-text award name + a recipient who plays for one of the two teams. Read +
   // replace-all write, both authorized like scoring. These surface as the
   // recipient's "achievements" on their participant dashboard.
-  const awardView = (a: { id: string; award_name: string; recipient_user_id: string; users?: { name: string } | null }) =>
-    ({ id: a.id, award_name: a.award_name, recipient_user_id: a.recipient_user_id, recipient_name: a.users?.name ?? null });
+  const awardView = (a: {
+    id: string; award_name: string; award_type_id?: string | null;
+    recipient_user_id: string; users?: { name: string } | null;
+  }) => ({
+    id: a.id,
+    award_name: a.award_name,
+    award_type_id: a.award_type_id ?? null,
+    recipient_user_id: a.recipient_user_id,
+    recipient_name: a.users?.name ?? null,
+  });
+
+  // The catalogue an official picks from (J4-E4-S2). Sport-agnostic entries plus
+  // anything registered for this sport; free text stays available as a fallback,
+  // so this list narrows the common case rather than gating it.
+  router.get('/award-types', asyncHandler(async (req, res) => {
+    const sportId = typeof req.query.sport_id === 'string' ? req.query.sport_id : null;
+    const rows = await prisma.award_types.findMany({
+      where: { is_active: true, ...(sportId ? { OR: [{ sport_id: null }, { sport_id: sportId }] } : { sport_id: null }) },
+      select: { id: true, code: true, label: true, sport_id: true },
+      orderBy: [{ sort_order: 'asc' }, { label: 'asc' }],
+    });
+    res.json(rows);
+  }));
 
   router.get('/fixtures/:id/awards', guards.fixtureScorer, asyncHandler(async (req, res) => {
     const rows = await prisma.fixture_awards.findMany({
@@ -427,15 +426,29 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   }));
 
   router.patch('/fixtures/:id/awards', guards.fixtureScorer, validateBody(fixtureAwardsSchema), asyncHandler(async (req, res) => {
+    // A locked result is immutable for everyone - organiser, official and platform
+    // admin alike. Changing it means unlocking it first, with a reason, on the record.
+    await assertNotLocked(prisma, req.params.id);
+    // Same gate as /live, /result and /points had all along - awards were the
+    // one scoring route without it, so a Player of the Match could be recorded
+    // against a championship still in draft (J2-E5-S1).
+    await assertChampionshipStarted(prisma, req.params.id);
     const fixtureId = req.params.id;
     const fixture = await prisma.fixtures.findUnique({ where: { id: fixtureId } });
     if (!fixture) throw new NotFoundError('Fixture');
-    const awards = req.body.awards as { award_name: string; recipient_user_id: string }[];
+    const awards = req.body.awards as { award_name: string; award_type_id?: string | null; recipient_user_id: string }[];
     // Replace-all: wipe the fixture's awards then re-insert, atomically.
     await prisma.$transaction([
       prisma.fixture_awards.deleteMany({ where: { fixture_id: fixtureId } }),
       ...(awards.length
-        ? [prisma.fixture_awards.createMany({ data: awards.map((a) => ({ fixture_id: fixtureId, award_name: a.award_name, recipient_user_id: a.recipient_user_id })) })]
+        ? [prisma.fixture_awards.createMany({
+          data: awards.map((a) => ({
+            fixture_id: fixtureId,
+            award_name: a.award_name,
+            award_type_id: a.award_type_id ?? null,
+            recipient_user_id: a.recipient_user_id,
+          })),
+        })]
         : []),
     ]);
     const rows = await prisma.fixture_awards.findMany({
@@ -447,6 +460,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   }));
 
   router.patch('/fixtures/:id/result', guards.fixtureScorer, validateBody(fixtureResultSchema), asyncHandler(async (req, res) => {
+    // A locked result is immutable for everyone - organiser, official and platform
+    // admin alike. Changing it means unlocking it first, with a reason, on the record.
+    await assertNotLocked(prisma, req.params.id);
     await assertChampionshipStarted(prisma, req.params.id);
     const fixture = await prisma.fixtures.findUnique({ where: { id: req.params.id } });
     if (!fixture) throw new NotFoundError('Fixture');
@@ -492,6 +508,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   // on the fixture's live_state JSON (no migration needed), merged in so live-scoring
   // keys stay intact, then standings recompute.
   router.patch('/fixtures/:id/points', guards.fixtureScorer, validateBody(fixturePointsSchema), asyncHandler(async (req, res) => {
+    // A locked result is immutable for everyone - organiser, official and platform
+    // admin alike. Changing it means unlocking it first, with a reason, on the record.
+    await assertNotLocked(prisma, req.params.id);
     await assertChampionshipStarted(prisma, req.params.id);
     const fx = await prisma.fixtures.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!fx) throw new NotFoundError('Fixture');
@@ -510,6 +529,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   // on live_state.scorecard_url (no migration) and merged so live-scoring keys stay
   // intact. Surfaced as a "View full scorecard" CTA on the match views.
   router.patch('/fixtures/:id/scorecard', guards.fixtureScorer, asyncHandler(async (req, res) => {
+    // A locked result is immutable for everyone - organiser, official and platform
+    // admin alike. Changing it means unlocking it first, with a reason, on the record.
+    await assertNotLocked(prisma, req.params.id);
     const fx = await prisma.fixtures.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!fx) throw new NotFoundError('Fixture');
     const raw = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
@@ -524,16 +546,206 @@ export function makeFixturesRouter(prisma: Prisma): Router {
 
   // Plain CRUD for manual fixture edits / scheduling - writes require the organiser
   // of the championship that owns the fixture's draw.
+  // ---------------------------------------------------------------------------
+  // Scorecard lifecycle (J2-E7)
+  //
+  // Submitting is the scorer's handoff; locking is the organiser's review. They are
+  // deliberately different authorities: a scorer who can lock their own card is not
+  // being reviewed by anyone. Until the permission engine lands (J6-E1), "organiser"
+  // is expressed with the existing championshipManager guard.
+  // ---------------------------------------------------------------------------
+
+  const fixtureOrganiser = guards.championshipManager((req) => guards.resolvers.championshipOfFixture(req.params.id));
+
+  // ---------------------------------------------------------------------------
+  // Assigning the official responsible for a match (J2-E4-S3)
+  //
+  // Its own route rather than a field on the fixture update, because assignment has
+  // three consequences the generic CRUD path cannot deliver: the match has to land
+  // in that person's officiating queue, they have to be told, and the assignment is
+  // exactly what grants them scoring rights to this one fixture (fixtureScorer reads
+  // fixtures.official_id).
+  // ---------------------------------------------------------------------------
+  router.patch('/fixtures/:id/official', fixtureOrganiser, validateBody(assignFixtureOfficialSchema),
+    asyncHandler(async (req, res) => {
+      const fx = await prisma.fixtures.findUnique({
+        where: { id: req.params.id },
+        select: {
+          id: true, official_id: true, scheduled_at: true,
+          teams_fixtures_home_team_idToteams: { select: { name: true } },
+          teams_fixtures_away_team_idToteams: { select: { name: true } },
+          venue_grounds: { select: { name: true, venues: { select: { name: true } } } },
+          tournament_disciplines: {
+            select: {
+              disciplines: { select: { name: true } },
+              tournament_sports: {
+                select: { sports: { select: { name: true } }, tournaments: { select: { championship_id: true } } },
+              },
+            },
+          },
+        },
+      });
+      if (!fx) throw new NotFoundError('Fixture');
+
+      const championshipId = fx.tournament_disciplines?.tournament_sports?.tournaments?.championship_id ?? null;
+      const officialId = req.body.official_id as string | null;
+
+      // GET /me/officiating only lists matches inside championships the user is an
+      // active official of, so assigning someone who isn't on the championship's
+      // officials list would put the match in a queue they can never see. Refuse it
+      // and say where to fix it, rather than assigning into a black hole.
+      if (officialId) {
+        const membership = championshipId
+          ? await prisma.championship_officials.findUnique({
+              where: { championship_id_user_id: { championship_id: championshipId, user_id: officialId } },
+              select: { is_active: true },
+            })
+          : null;
+        if (!membership?.is_active) {
+          throw new BusinessRuleError('Add this person to the championship’s officials first (Organising team → Officials) - otherwise the match won’t appear in their queue.');
+        }
+      }
+
+      if (officialId === fx.official_id) {
+        res.json({ ok: true, official_id: officialId, notified: false });
+        return;
+      }
+
+      const updated = await prisma.fixtures.update({
+        where: { id: fx.id },
+        data: { official_id: officialId },
+        select: { id: true, official_id: true },
+      });
+
+      // Best-effort: the assignment is committed, and a notification failure must not
+      // be reported back as a failed assignment.
+      const home = fx.teams_fixtures_home_team_idToteams?.name ?? 'TBD';
+      const away = fx.teams_fixtures_away_team_idToteams?.name ?? 'TBD';
+      const sport = [fx.tournament_disciplines?.tournament_sports?.sports?.name, fx.tournament_disciplines?.disciplines?.name]
+        .filter(Boolean).join(' · ');
+      const where = fx.venue_grounds ? [fx.venue_grounds.venues?.name, fx.venue_grounds.name].filter(Boolean).join(' · ') : null;
+      const when = fx.scheduled_at ? new Date(fx.scheduled_at).toISOString() : null;
+      const label = [`${home} vs ${away}`, sport].filter(Boolean).join(' — ');
+      const tell = async (userId: string, title: string, body: string) => {
+        try {
+          await createNotification(prisma, {
+            championship_id: championshipId,
+            target_user_id: userId,
+            sender_id: req.user!.id,
+            type: 'manual',
+            audience: 'all', // ignored for direct notifications - target_user_id drives visibility
+            title,
+            body,
+          });
+        } catch (err) {
+          console.error(`[officials] assignment notification failed for fixture ${fx.id}:`, err);
+        }
+      };
+      if (officialId) {
+        const details = [when ? `Scheduled for ${when}.` : 'Not scheduled yet.', where ? `At ${where}.` : null]
+          .filter(Boolean).join(' ');
+        await tell(officialId, `You're officiating ${label}`, `You've been assigned to score this match. ${details} It's in your Officiating queue.`);
+      }
+      // The previous official's queue silently loses a match otherwise, which is how
+      // a match ends up with nobody at it.
+      if (fx.official_id) {
+        await tell(fx.official_id, `No longer officiating ${label}`, 'The organiser has reassigned this match, so it has left your Officiating queue.');
+      }
+
+      res.json({ ok: true, official_id: updated.official_id, notified: true });
+    }));
+
+  // ---------------------------------------------------------------------------
+  // Where the timetable contradicts itself (J2-E4-S2)
+  //
+  // Advisory, not enforcement: an organiser mid-shuffle is legitimately double-booked
+  // for a moment, so this reports clashes and lets them judge, rather than refusing
+  // the write that created one.
+  // ---------------------------------------------------------------------------
+  router.get('/championships/:eventId/fixtures/clashes',
+    guards.championshipManager(async (req) => req.params.eventId),
+    asyncHandler(async (req, res) => {
+      const rows = await prisma.fixtures.findMany({
+        where: { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: req.params.eventId } } } },
+        select: {
+          id: true, scheduled_at: true, duration_minutes: true, venue_ground_id: true,
+          official_id: true, status: true, home_team_id: true, away_team_id: true,
+        },
+      });
+      const clashes = findClashes(rows.map((f) => ({
+        id: f.id,
+        scheduledAt: f.scheduled_at,
+        durationMinutes: f.duration_minutes,
+        groundId: f.venue_ground_id,
+        officialId: f.official_id,
+        teamIds: [f.home_team_id, f.away_team_id],
+        status: f.status,
+      })));
+      res.json({ clashes, by_fixture: clashesByFixture(clashes) });
+    }));
+
+  // draft -> submitted, by whoever may score it
+  router.post('/fixtures/:id/submit', guards.fixtureScorer, asyncHandler(async (req, res) => {
+    res.json(await submitScorecard(prisma, req, req.params.id));
+  }));
+
+  // submitted -> draft, while it is still the scorer's to correct
+  router.post('/fixtures/:id/retract', guards.fixtureScorer, asyncHandler(async (req, res) => {
+    res.json(await retractScorecard(prisma, req, req.params.id));
+  }));
+
+  // -> locked. The transaction; organiser only.
+  router.post('/fixtures/:id/lock', fixtureOrganiser, asyncHandler(async (req, res) => {
+    res.json(await lockScorecard(prisma, req, req.params.id));
+  }));
+
+  // locked -> submitted, with a mandatory reason that lands in the audit trail.
+  router.post('/fixtures/:id/unlock', fixtureOrganiser, asyncHandler(async (req, res) => {
+    const { reason } = req.body as { reason?: string };
+    res.json(await unlockScorecard(prisma, req, req.params.id, reason ?? ''));
+  }));
+
+  // Finishing a 90-match meet is not 90 separate actions. Per-fixture transactions,
+  // looped outside; partial success is the correct outcome.
+  router.post('/championships/:eventId/fixtures/lock-bulk',
+    guards.championshipManager(async (req) => req.params.eventId),
+    asyncHandler(async (req, res) => {
+      const ids = Array.isArray(req.body?.fixture_ids) ? req.body.fixture_ids as string[] : [];
+      if (ids.length === 0) throw new BusinessRuleError('Select at least one scorecard to lock.');
+      if (ids.length > 50) throw new BusinessRuleError('Lock at most 50 scorecards at a time.');
+      const results = await lockScorecardsBulk(prisma, req, ids);
+      res.json({ results, locked: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length });
+    }));
+
+  // Counts by state - the organiser's "N ready to lock" queue.
+  router.get('/championships/:eventId/lock-status',
+    guards.championshipManager(async (req) => req.params.eventId),
+    asyncHandler(async (req, res) => {
+      res.json(await lockStatusForChampionship(prisma, req.params.eventId));
+    }));
+
+  const crudGuard = guards.championshipCrudGuard({
+    body: async (req) => guards.resolvers.championshipOfTournamentDiscipline(req.body?.tournament_discipline_id),
+    byId: guards.resolvers.championshipOfFixture,
+  });
+
+  // The generic update/delete path can set scores, status and schedule just as
+  // /result can, so immutability has to hold here too - otherwise the lock is a
+  // door with the wall missing beside it. Runs after the authorization guard, and
+  // only on the by-id routes (a create has no fixture to be locked).
+  const notLocked: RequestHandler = asyncHandler(async (req, _res, next) => {
+    await assertNotLocked(prisma, req.params.id);
+    next();
+  });
+
   router.use('/fixtures', makeCrudRouter(prisma.fixtures, {
     name: 'Fixture',
     createSchema: createFixtureSchema,
     updateSchema: updateFixtureSchema,
     listFilters: ['tournament_discipline_id'],
     orderBy: [{ pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
-    writeGuards: [guards.championshipCrudGuard({
-      body: async (req) => guards.resolvers.championshipOfTournamentDiscipline(req.body?.tournament_discipline_id),
-      byId: guards.resolvers.championshipOfFixture,
-    })],
+    createGuards: [crudGuard],
+    writeGuards: [crudGuard, notLocked],
   }));
 
   return router;

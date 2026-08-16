@@ -11,7 +11,10 @@ interface Org { id: string; name: string; short_name?: string | null; city?: str
 // user already belongs to or has a pending request for are excluded from the list.
 export function JoinOrgModal({ onClose }: { onClose: () => void }) {
   const { ctx, refresh } = useAuth();
-  const { data: orgs = [], isLoading } = useApi<Org[]>('/organizations');
+  // The public directory, not the full org list: `scope=directory` returns only the
+  // fields a stranger may see and excludes hidden personal orgs. Without it this
+  // read is a cross-tenant enumeration of every customer (J6-E5-S1).
+  const { data: orgs = [], isLoading } = useApi<Org[]>('/organizations?scope=directory');
   const [query, setQuery] = useState('');
   // Track ids requested in this session so the row flips to "Requested" instantly,
   // even before the auth context refresh lands.

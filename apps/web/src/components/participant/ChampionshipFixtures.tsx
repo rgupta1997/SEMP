@@ -1,12 +1,19 @@
 import { useMemo, useState } from 'react';
 import { Calendar, Flag } from 'lucide-react';
 import { useApi, fmtDateTime } from '../../lib/hooks';
-import { Badge, Card, EmptyState, ListToolbar, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
+import { AmendedNotice, Badge, Card, EmptyState, ListToolbar, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
 
 // A flattened fixture from GET /championships/:id/fixtures.
 interface TeamRef { id: string; name: string; organizations?: { short_name: string | null; name: string } | null }
 interface FixtureRow {
   id: string; status: string; round: string | null; scheduled_at: string | null;
+  // 'locked' = the organiser has made this result official. Anything else is
+  // provisional and must not read as though it were final.
+  scorecard_status?: 'draft' | 'submitted' | 'locked';
+  // > 0 once the result has been unlocked for a correction at least once, with
+  // amended_at carrying the date the correction landed.
+  lock_version?: number;
+  amended_at?: string | null;
   entry_type: string | null; home_score: number | null; away_score: number | null; winner_team_id: string | null;
   ground: { id: string; name: string; venue: string | null } | null;
   sport: string | null; sport_icon: string | null;
@@ -165,6 +172,14 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
                   {mode === 'schedule' && f.scheduled_at && <span>{fmtDateTime(f.scheduled_at)}</span>}
                   {mode === 'schedule' && f.ground && <span className="hidden sm:inline">{f.ground.name}</span>}
                   <StatusBadge status={f.status} />
+                  {f.scorecard_status === 'locked' && (
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+                      title="The organiser has locked this scorecard - the result is official">✓ Verified</span>
+                  )}
+                  {/* Shown to spectators and to the public share page alike: a result
+                      that changed after publication is never presented as though it had
+                      always read this way. */}
+                  {(f.lock_version ?? 0) > 0 && <AmendedNotice at={f.amended_at} />}
                 </div>
               </Card>
             );

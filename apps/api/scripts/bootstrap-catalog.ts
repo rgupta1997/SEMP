@@ -15,6 +15,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { DISCIPLINES } from './discipline';
+import { PERMISSIONS } from '@semp/shared';
 
 const prisma = new PrismaClient();
 
@@ -283,10 +284,35 @@ async function bootstrap() {
     await bootstrapTournamentFormats();
     await bootstrapDisciplines();
     await bootstrapRoles();
+    await syncPermissions();
 
     console.log("==================================");
     console.log("Global catalog bootstrap completed.");
     console.log("==================================");
+}
+
+// The permission catalogue is code-owned (packages/shared/src/permissions.ts); this
+// mirrors it into the `permissions` table so the roles matrix and future reports can
+// join against real rows. Additive on purpose: a code removed from the catalogue is
+// left in place rather than deleted, because a role may still reference it and
+// silently dropping a grant is worse than carrying a stale row.
+async function syncPermissions() {
+    let created = 0;
+    for (const [code, def] of Object.entries(PERMISSIONS)) {
+        const existing = await prisma.permissions.findFirst({ where: { code }, select: { id: true } });
+        if (existing) {
+            await prisma.permissions.update({
+                where: { id: existing.id },
+                data: { label: def.label, scope: def.scope, area: def.area },
+            });
+        } else {
+            await prisma.permissions.create({
+                data: { code, label: def.label, scope: def.scope, area: def.area },
+            });
+            created += 1;
+        }
+    }
+    console.log(`Permissions: ${created} created, ${Object.keys(PERMISSIONS).length - created} updated`);
 }
 
 bootstrap()

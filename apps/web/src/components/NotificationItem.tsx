@@ -1,14 +1,19 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Bell, CheckCircle2, Megaphone } from 'lucide-react';
+import { Bell, CheckCircle2, ClipboardCheck, Megaphone, UserPlus, XCircle } from 'lucide-react';
 import { NOTIFICATION_REACTIONS } from '@semp/shared';
 import { api } from '../lib/api';
 import { fmtDateTime } from '../lib/hooks';
 import { notificationMeta, type NotificationDto, type NotificationReactionSummary } from '../lib/notifications';
 import { cn } from './ui';
 
+// Colour carries meaning here, so it is not decoration: something waiting on the
+// reader must not look the same as something already settled.
 const NOTIF_ICONS: Record<string, ReactNode> = {
   'megaphone': <Megaphone size={15} />,
-  'check-circle-2': <CheckCircle2 size={15} />,
+  'check-circle-2': <CheckCircle2 size={15} className="text-emerald-500" />,
+  'clipboard-check': <ClipboardCheck size={15} className="text-amber-500" />,
+  'x-circle': <XCircle size={15} className="text-rose-500" />,
+  'user-plus': <UserPlus size={15} />,
   'bell': <Bell size={15} />,
 };
 

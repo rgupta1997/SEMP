@@ -1,4 +1,5 @@
 import type { Prisma } from '../../infra/prisma.js';
+import { AUDIT_ACTIONS } from '../iam/audit.service.js';
 
 // All fixtures across a championship, flattened with team / org / ground / sport
 // names. Shared by the authed Schedule view and the public share page (no contact
@@ -25,9 +26,43 @@ export async function listChampionshipFixtures(prisma: Prisma, championshipId: s
     },
     orderBy: [{ scheduled_at: 'asc' }, { created_at: 'asc' }],
   });
+
+  // A corrected result has to say so wherever it appears (J6-E4-S4), and saying so
+  // needs a date. `lock_version > 0` is what "has been unlocked at least once" means.
+  // The date the correction landed is the re-lock for a card that is official again;
+  // while the correction is still open there is no re-lock yet, so the unlock itself
+  // is the honest date and that only exists on the audit trail. Hence the lookup is
+  // skipped entirely unless a correction is actually in progress - which is rare.
+  const openCorrections = fixtures.filter((f) => f.lock_version > 0 && !f.locked_at);
+  const unlockedAt = new Map<string, Date>();
+  if (openCorrections.length > 0) {
+    const rows = await prisma.audit_log.findMany({
+      where: {
+        championship_id: championshipId,
+        action: AUDIT_ACTIONS.fixtureUnlocked,
+        target_id: { in: openCorrections.map((f) => f.id) },
+      },
+      select: { target_id: true, at: true },
+      orderBy: { at: 'desc' },
+    });
+    // Most recent first, so the first row seen for a fixture is the latest unlock.
+    for (const r of rows) if (r.target_id && !unlockedAt.has(r.target_id)) unlockedAt.set(r.target_id, r.at);
+  }
+
   return fixtures.map((f) => ({
     id: f.id,
     status: f.status,
+    // Where the paperwork has got to, as opposed to where the match has got to.
+    // 'locked' is what the Verified badge means - everything else is provisional,
+    // on this page and on the public share page alike.
+    scorecard_status: f.scorecard_status,
+    submitted_at: f.submitted_at,
+    locked_at: f.locked_at,
+    lock_version: f.lock_version,
+    // Set only once a result has actually been corrected. Audit writes are
+    // best-effort by design, so fall back to the fixture's own updated_at rather
+    // than dropping the notice - an undated correction still has to be visible.
+    amended_at: f.lock_version > 0 ? (f.locked_at ?? unlockedAt.get(f.id) ?? f.updated_at) : null,
     round: f.round,
     scheduled_at: f.scheduled_at,
     duration_minutes: f.duration_minutes,

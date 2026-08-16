@@ -6,7 +6,7 @@ import { usePermissions } from '../../lib/permissions';
 import { api } from '../../lib/api';
 import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
-import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge } from '../../components/ui';
+import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge, toast } from '../../components/ui';
 import { OrgTabs } from '../../components/OrgTabs';
 
 // A roster can be entered into several championships; these read its team_entries.
@@ -150,50 +150,101 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
   );
 }
 
-// Create a team as a standalone organization asset - just a name and sport. Rendered
-// inline (not a popup) so it sits right in the Teams list. It's entered into a
-// championship & discipline later from the team page.
+// Create teams as standalone organization assets - just a name and sport each.
+// Rendered inline (not a popup) so it sits right in the Teams list. They are
+// entered into a championship & discipline later from the team page.
+//
+// Several at a time, because a squad belongs to the ORGANISATION and a sports
+// office sets its teams up once, in one sitting, long before it knows what it is
+// entering them into. The championship-driven "Enter multiple teams" modal is a
+// different job and still lives alongside this.
+type DraftTeam = { name: string; sportId: string };
+const BLANK_TEAM: DraftTeam = { name: '', sportId: '' };
+
 function InlineCreateTeam({ institutionId, onClose }: { institutionId: string; onClose: () => void }) {
   const navigate = useNavigate();
   const { data: sports = [] } = useApi<any[]>('/sports');
-  const [name, setName] = useState('');
-  const [sportId, setSportId] = useState('');
+  const [rows, setRows] = useState<DraftTeam[]>([{ ...BLANK_TEAM }]);
   const [error, setError] = useState<string | null>(null);
 
-  const create = useApiMutation(
-    (body: any) => api('POST', '/teams', body),
+  const create = useApiMutation<{ teams: any[] }, { created: number; teams: any[] }>(
+    (body) => api('POST', '/teams/bulk', body),
     ['/me/teams', `/teams?organization_id=${institutionId}`],
-    (team: any) => navigate(`/organizations/${institutionId}/teams/${team.id}`),
   );
+
+  const update = (i: number, patch: Partial<DraftTeam>) =>
+    setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  const addRow = () => setRows((r) => [...r, { ...BLANK_TEAM }]);
+  const removeRow = (i: number) => setRows((r) => (r.length === 1 ? r : r.filter((_, idx) => idx !== i)));
+
+  // A half-typed trailing row is ignored rather than treated as an error - people
+  // click "Add another" and then change their mind.
+  const ready = rows.filter((r) => r.name.trim() && r.sportId);
+  const partial = rows.some((r) => (r.name.trim() ? 1 : 0) + (r.sportId ? 1 : 0) === 1);
 
   const submit = () => {
     setError(null);
-    if (!name.trim()) { setError('Team name is required'); return; }
-    if (!sportId) { setError('Pick a sport'); return; }
-    create.mutate({ name: name.trim(), sport_id: sportId, organization_id: institutionId }, { onError: (e: any) => setError(e.message) });
+    if (ready.length === 0) { setError('Give each team a name and a sport'); return; }
+    if (partial) { setError('One row is missing a name or a sport - complete it or remove it'); return; }
+
+    const dupe = ready.find((r, i) =>
+      ready.findIndex((o) => o.sportId === r.sportId && o.name.trim().toLowerCase() === r.name.trim().toLowerCase()) !== i);
+    if (dupe) { setError(`"${dupe.name.trim()}" is listed twice in the same sport`); return; }
+
+    create.mutate(
+      { teams: ready.map((r) => ({ name: r.name.trim(), sport_id: r.sportId, organization_id: institutionId })) },
+      {
+        onSuccess: (res) => {
+          // One team: go straight to it, which is what people expect when they
+          // create a single thing. Several: stay on the list where they all are.
+          if (res.teams?.length === 1) navigate(`/organizations/${institutionId}/teams/${res.teams[0].id}`);
+          else { toast.success(`${res.created} teams created`); onClose(); }
+        },
+        onError: (e: any) => setError(e.message),
+      },
+    );
   };
 
   return (
     <Card className="mb-4 p-5 ring-1 ring-brand-200 dark:ring-brand-500/30">
       <div className="mb-1 flex items-center justify-between">
-        <h3 className="font-semibold text-slate-900 dark:text-slate-100">Create a team</h3>
+        <h3 className="font-semibold text-slate-900 dark:text-slate-100">Create teams</h3>
         <button onClick={onClose} className="text-sm text-slate-500 hover:underline dark:text-slate-400">Cancel</button>
       </div>
-      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">Add a team for your organization, then enter it into a championship &amp; pick a discipline when you’re ready.</p>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-        <label className="block flex-1">
-          <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Team name</span>
-          <Input value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder="e.g. VJTI Titans"
-            onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
-        </label>
-        <label className="block sm:w-56">
-          <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Sport</span>
-          <Select value={sportId} onChange={(e) => setSportId(e.target.value)}>
-            <option value="">- select a sport -</option>
-            {sports.map((s) => <option key={s.id} value={s.id}>{s.icon ? `${s.icon} ` : ''}{s.name}</option>)}
-          </Select>
-        </label>
-        <Button disabled={!name.trim() || !sportId || create.isPending} onClick={submit}>{create.isPending ? 'Creating…' : 'Create team'}</Button>
+      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+        Add teams for your organization — as many as you like. Enter them into a championship &amp;
+        pick a discipline whenever you’re ready.
+      </p>
+
+      <div className="flex flex-col gap-3">
+        {rows.map((row, i) => (
+          <div key={i} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <label className="block flex-1">
+              {i === 0 && <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Team name</span>}
+              <Input value={row.name} autoFocus={i === 0} onChange={(e) => update(i, { name: e.target.value })}
+                placeholder="e.g. VJTI Titans"
+                onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
+            </label>
+            <label className="block sm:w-56">
+              {i === 0 && <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Sport</span>}
+              <Select value={row.sportId} onChange={(e) => update(i, { sportId: e.target.value })}>
+                <option value="">- select a sport -</option>
+                {sports.map((s) => <option key={s.id} value={s.id}>{s.icon ? `${s.icon} ` : ''}{s.name}</option>)}
+              </Select>
+            </label>
+            <Button variant="ghost" size="sm" className="sm:mb-1" disabled={rows.length === 1}
+              onClick={() => removeRow(i)} aria-label={`Remove team ${i + 1}`}>
+              Remove
+            </Button>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <Button variant="outline" size="sm" onClick={addRow}>+ Add another</Button>
+        <Button disabled={ready.length === 0 || create.isPending} onClick={submit}>
+          {create.isPending ? 'Creating…' : ready.length > 1 ? `Create ${ready.length} teams` : 'Create team'}
+        </Button>
       </div>
       {error && <p className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
     </Card>
@@ -312,7 +363,7 @@ export function TeamsPage() {
         subtitle={activeEvent ? 'Teams entered for this championship.' : 'Enter and manage teams across your approved championships.'}
       >
         {canManage && <Button variant="outline" onClick={() => setBulkCreating(true)} disabled={!canEnterTeams}>+ Enter multiple</Button>}
-        {canManage && <Button onClick={() => setCreating(true)}>+ Create team</Button>}
+        {canManage && <Button onClick={() => setCreating(true)}>+ Create teams</Button>}
       </PageHeader>
 
       {approved.length === 0 && (
@@ -338,7 +389,7 @@ export function TeamsPage() {
         </div>
       ) : teams.length === 0 && !eventId ? (
         <EmptyState icon="⚇" title="No teams yet" description="Create a team for your organization, then assign it to a championship."
-          action={canManage ? <Button onClick={() => setCreating(true)}>+ Create team</Button> : undefined} />
+          action={canManage ? <Button onClick={() => setCreating(true)}>+ Create teams</Button> : undefined} />
       ) : (
         <>
           <ListToolbar>
@@ -367,7 +418,7 @@ export function TeamsPage() {
               description={eventId ? 'Enter a team to participate in this championship, or try a different filter.' : 'Try a different search or filter.'}
               action={canManage && tournamentFilter === 'all' ? (
                 <div className="flex flex-wrap justify-center gap-2">
-                  <Button onClick={() => setCreating(true)}>+ Create team</Button>
+                  <Button onClick={() => setCreating(true)}>+ Create teams</Button>
                   {eventId && canEnterTeams && <Button variant="outline" onClick={() => setBulkCreating(true)}>+ Enter multiple</Button>}
                 </div>
               ) : undefined}

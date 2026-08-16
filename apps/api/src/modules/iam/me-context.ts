@@ -1,5 +1,7 @@
+import { MODULE_KEYS, type ModuleKey } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { applyUserInvitations } from './user-invitations.service.js';
+import { audienceOfRole, moduleEnabled, moduleSettingsOf } from './module-access.js';
 
 // Assembles the full authentication context the web app needs to render the
 // unified shell and decide what the user can act on:
@@ -56,15 +58,42 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
     }),
   ]);
 
-  // If the user's primary org field is empty but they own/admin one, use the first.
+  // A personal organisation is one hidden person wearing an organisation's clothes
+  // so the entry machinery works (J3-E1). `GET /organizations` already refuses to
+  // list them - but this context is a second way out of the database, and without
+  // the same filter the hidden org surfaces under the person's OWN NAME in every
+  // picker that reads `ctx.organizations`: "apply as", the org switcher, the
+  // organisations list. The whole point of the epic is that a solo entrant never
+  // meets the word "organisation".
+  const realMemberships = orgMemberships.filter((m) => m.organizations?.kind !== 'personal');
+
+  // If the user's primary org field is empty but they own/admin one, use the first
+  // REAL one - a solo entrant's home institution must not silently become the
+  // hidden workspace created for them.
   const organization = orgFromUser
-    ?? orgMemberships.find((m) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin'))?.organizations
+    ?? realMemberships.find((m) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin'))?.organizations
     ?? null;
+
+  // Which modules this person can reach in each of their institutions (J6-E2-S2).
+  // Computed here rather than fetched separately so navigation renders correctly
+  // on the FIRST paint - a nav that shows a module and then removes it a moment
+  // later is the flicker this story exists to avoid. The server-side `can()`
+  // pre-check remains the boundary; this is only what gets drawn.
+  const modules: Record<string, ModuleKey[]> = {};
+  for (const m of realMemberships) {
+    if (m.status !== 'active') continue;
+    const settings = moduleSettingsOf(m.organizations?.settings);
+    const audience = audienceOfRole(m.role);
+    modules[m.organization_id] = user.is_super_admin
+      ? [...MODULE_KEYS]
+      : MODULE_KEYS.filter((key) => moduleEnabled(settings, key, audience));
+  }
 
   return {
     user: publicUser,
     organization,
-    organizations: orgMemberships.map((m) => ({
+    modules,
+    organizations: realMemberships.map((m) => ({
       id: m.id,
       organization_id: m.organization_id,
       organization: m.organizations,

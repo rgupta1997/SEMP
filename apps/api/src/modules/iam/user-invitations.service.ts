@@ -1,4 +1,5 @@
 import type { Prisma } from '../../infra/prisma.js';
+import { ROLE_CODES, roleWhereByCode } from './role-codes.js';
 
 // Normalize a free-form mobile to its last 10 digits (consistent with the
 // championship_invitations matching) so lookups are an indexed exact match.
@@ -22,7 +23,7 @@ export async function applyUserInvitations(prisma: Prisma, user: { id: string; p
 
     const needsOrganiser = pending.some((p) => p.target_type === 'championship_organiser');
     const organiserRole = needsOrganiser
-      ? await prisma.roles.findFirst({ where: { name: 'Organiser' }, select: { id: true } })
+      ? await prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser), select: { id: true } })
       : null;
 
     for (const inv of pending) {

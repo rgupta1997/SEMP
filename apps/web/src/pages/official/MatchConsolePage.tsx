@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
-import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Select, Spinner, StatusBadge, Textarea, BackButton, cn, confirmDialog, toast } from '../../components/ui';
+import { AmendedNotice, Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Select, Spinner, StatusBadge, Textarea, BackButton, cn, confirmDialog, toast } from '../../components/ui';
 import { awayTeam, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, sportName as sportNameOf, teamLabel, venueLabel } from './fixtureHelpers';
 import {
   cricketScore, headline, hydrate, oversStr, oversToBalls, reduce, sportDef, subLine,
@@ -109,6 +109,34 @@ export function MatchConsolePage() {
             <div className="pt-1"><Button variant="outline" onClick={done}>Back to {backLabel.toLowerCase()}</Button></div>
           </CardBody>
         </Card>
+      ) : fixture.scorecard_status === 'locked' ? (
+        // Read-only by design, and for everyone: the server refuses every write to a
+        // locked card, so showing the scoring controls would only produce errors.
+        <Card className="border-emerald-200 bg-emerald-50/60 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+          <CardBody className="space-y-3 py-8 text-center">
+            <div className="text-4xl" aria-hidden>🔒</div>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">This scorecard is locked</h2>
+            <p className="mx-auto max-w-md text-sm text-slate-600 dark:text-slate-300">
+              The result is official and reads as <b>verified</b> wherever it appears.
+              {fixture.home_score != null && fixture.away_score != null && (
+                <> Final score <b className="tabular-nums">{fixture.home_score}–{fixture.away_score}</b>.</>
+              )}
+            </p>
+            <p className="mx-auto max-w-md text-sm text-slate-500 dark:text-slate-400">
+              It can’t be edited by anyone — organiser, official or platform admin. If it’s wrong, the championship’s
+              organiser can unlock it from the <b>Results</b> tab, stating a reason that goes on the record.
+            </p>
+            {/* This card has already been corrected once. The scorer looking at it
+                should know that before assuming the number in front of them is the
+                original one. */}
+            {(fixture.lock_version ?? 0) > 0 && (
+              <div className="flex justify-center pt-1">
+                <AmendedNotice at={fixture.locked_at} />
+              </div>
+            )}
+            <div className="pt-1"><Button variant="outline" onClick={done}>Back to {backLabel.toLowerCase()}</Button></div>
+          </CardBody>
+        </Card>
       ) : (
         <>
           <ScoringTabs fixture={fixture} fixtureId={fixtureId!} live={live} invalidate={invalidate} onDone={done} />
@@ -128,9 +156,67 @@ export function MatchConsolePage() {
           <div className="mt-5">
             <AwardsPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
           </div>
+
+          <div className="mt-5">
+            <SubmitPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
+          </div>
         </>
       )}
     </div>
+  );
+}
+
+/* ----------------------------- Submit for review ----------------------------- */
+
+// Handing the card over (J2-E7-S1). Submitting is not a commitment - a submitted card
+// is still the scorer's to correct - but it is what puts the match in the organiser's
+// lock queue, and locking is the organiser's call, never the scorer's. That
+// separation is the whole point: a scorer who can lock their own card is reviewed by
+// nobody.
+function SubmitPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixtureId: string; invalidate: (string | null)[] }) {
+  const submitted = fixture.scorecard_status === 'submitted';
+  const submit = useApiMutation(() => api('POST', `/fixtures/${fixtureId}/submit`), invalidate);
+  const retract = useApiMutation(() => api('POST', `/fixtures/${fixtureId}/retract`), invalidate);
+  const scored = fixture.home_score != null && fixture.away_score != null;
+  const decidedWithoutPlay = fixture.status === 'walkover' || fixture.status === 'bye';
+
+  return (
+    <Card className={submitted ? 'border-amber-200 bg-amber-50/50 dark:border-amber-500/30 dark:bg-amber-500/10' : undefined}>
+      <CardHeader title={submitted ? 'Submitted for review' : 'Finished scoring?'} />
+      <CardBody className="flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-xl text-sm text-slate-600 dark:text-slate-300">
+          {submitted
+            ? 'This scorecard is with the organiser to review and lock. You can still take it back and correct it until they do.'
+            : 'Submitting hands the scorecard to the organiser to review and lock. You can still edit it until it’s locked.'}
+        </p>
+        {submitted ? (
+          <Button variant="outline" disabled={retract.isPending}
+            onClick={() => retract.mutate(undefined, {
+              onSuccess: () => toast.success('Taken back', 'The scorecard is editable again.'),
+              onError: (e: any) => toast.error(e.message),
+            })}>
+            Take it back
+          </Button>
+        ) : (
+          <Button disabled={submit.isPending || (!scored && !decidedWithoutPlay)}
+            title={!scored && !decidedWithoutPlay ? 'Record a score first' : undefined}
+            onClick={async () => {
+              const ok = await confirmDialog({
+                title: 'Submit this scorecard?',
+                message: 'It goes to the organiser to review and lock. You can still take it back until they lock it.',
+                confirmLabel: 'Submit',
+              });
+              if (!ok) return;
+              submit.mutate(undefined, {
+                onSuccess: () => toast.success('Submitted', 'The organiser can now review and lock it.'),
+                onError: (e: any) => toast.error(e.message),
+              });
+            }}>
+            Submit scorecard
+          </Button>
+        )}
+      </CardBody>
+    </Card>
   );
 }
 
@@ -363,8 +449,15 @@ function ScorecardPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixt
 }
 
 /* ----------------------------- Awards ----------------------------- */
-type AwardItem = { award_name: string; recipient_user_id: string };
+type AwardItem = { award_name: string; award_type_id: string | null; recipient_user_id: string };
 type AwardRow = AwardItem & { id: string; recipient_name: string | null };
+type AwardType = { id: string; code: string; label: string; sport_id: string | null };
+
+// The sentinel for "not in the catalogue". An official mid-match must never be
+// blocked because the list is missing their award, so free text stays one click
+// away - it is just no longer the default, which is what made "Player of the
+// Match", "player of the match" and "POTM" three different things.
+const AWARD_OTHER = '__other__';
 
 function rosterPeople(team: any): { id: string; name: string; team: string }[] {
   return (team?.team_members ?? [])
@@ -372,35 +465,54 @@ function rosterPeople(team: any): { id: string; name: string; team: string }[] {
     .filter((p: { id?: string }) => !!p.id);
 }
 
-// Free-text awards with a recipient picked from the two teams' rosters. Replace-all
-// save; these surface as the recipient's achievements on their dashboard.
+// Awards with a recipient picked from the two teams' rosters, and a name picked
+// from the catalogue (J4-E4-S2). Replace-all save; these become the recipient's
+// typed achievements the moment the scorecard is locked.
 function AwardsPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixtureId: string; invalidate: (string | null)[] }) {
   const people = [...rosterPeople(homeTeam(fixture)), ...rosterPeople(awayTeam(fixture))];
+  const sportId = fixture?.tournament_disciplines?.tournament_sports?.sports?.id ?? fixture?.sport_id ?? null;
   const { data: existing } = useApi<AwardRow[]>(`/fixtures/${fixtureId}/awards`);
+  const { data: catalogue } = useApi<AwardType[]>(`/award-types${sportId ? `?sport_id=${sportId}` : ''}`);
+  const types = catalogue ?? [];
   const [rows, setRows] = useState<AwardItem[]>([]);
   const seeded = useRef(false);
   useEffect(() => {
     if (!seeded.current && existing) {
-      setRows(existing.map((a) => ({ award_name: a.award_name, recipient_user_id: a.recipient_user_id })));
+      setRows(existing.map((a) => ({ award_name: a.award_name, award_type_id: a.award_type_id ?? null, recipient_user_id: a.recipient_user_id })));
       seeded.current = true;
     }
   }, [existing]);
 
   const saveAwards = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/awards`, body), [`/fixtures/${fixtureId}/awards`, ...invalidate]);
 
-  const addRow = () => setRows((r) => [...r, { award_name: '', recipient_user_id: people[0]?.id ?? '' }]);
+  // A new row starts on the catalogue, not on free text - the default is what
+  // decides whether the number is countable a year from now.
+  const addRow = () => setRows((r) => [...r, {
+    award_name: types[0]?.label ?? '',
+    award_type_id: types[0]?.id ?? null,
+    recipient_user_id: people[0]?.id ?? '',
+  }]);
   const update = (i: number, patch: Partial<AwardItem>) => setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
   const remove = (i: number) => setRows((r) => r.filter((_, idx) => idx !== i));
+
+  // Picking a catalogue entry sets the name too, so what is stored and what the
+  // official saw are the same words.
+  const pickType = (i: number, value: string) => {
+    if (value === AWARD_OTHER) return update(i, { award_type_id: null, award_name: '' });
+    const t = types.find((x) => x.id === value);
+    update(i, { award_type_id: t?.id ?? null, award_name: t?.label ?? '' });
+  };
+
   const save = () => {
     const awards = rows
       .filter((r) => r.award_name.trim() && r.recipient_user_id)
-      .map((r) => ({ award_name: r.award_name.trim(), recipient_user_id: r.recipient_user_id }));
+      .map((r) => ({ award_name: r.award_name.trim(), award_type_id: r.award_type_id, recipient_user_id: r.recipient_user_id }));
     saveAwards.mutate({ awards }, { onSuccess: () => toast.success('Awards saved'), onError: (e: any) => toast.error(e.message) });
   };
 
   return (
     <Card>
-      <CardHeader title="Awards" subtitle="Recognise players - e.g. Player of the Match. Multiple allowed." />
+      <CardHeader title="Awards" subtitle="Recognise players - e.g. Player of the Match. Multiple allowed. Picking from the list keeps them countable on the player's record." />
       <CardBody className="space-y-3">
         {people.length === 0 ? (
           <p className="text-sm text-slate-400 dark:text-slate-500">No players on the team rosters yet - add players to a team to give awards.</p>
@@ -410,7 +522,20 @@ function AwardsPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixture
             {rows.map((row, i) => (
               <div key={i} className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
                 <Field label="Award">
-                  <Input value={row.award_name} onChange={(e) => update(i, { award_name: e.target.value })} placeholder="Player of the Match" />
+                  {types.length === 0 ? (
+                    <Input value={row.award_name} onChange={(e) => update(i, { award_name: e.target.value })} placeholder="Player of the Match" />
+                  ) : (
+                    <div className="space-y-2">
+                      <Select value={row.award_type_id ?? AWARD_OTHER} onChange={(e) => pickType(i, e.target.value)}>
+                        {types.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                        <option value={AWARD_OTHER}>Other…</option>
+                      </Select>
+                      {/* Free text only when they have chosen to go off-catalogue. */}
+                      {!row.award_type_id && (
+                        <Input value={row.award_name} onChange={(e) => update(i, { award_name: e.target.value })} placeholder="Name this award" />
+                      )}
+                    </div>
+                  )}
                 </Field>
                 <Field label="Recipient">
                   <Select value={row.recipient_user_id} onChange={(e) => update(i, { recipient_user_id: e.target.value })}>

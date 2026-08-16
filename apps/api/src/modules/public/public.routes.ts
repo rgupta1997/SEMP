@@ -53,7 +53,17 @@ export function makePublicRouter(prisma: Prisma): Router {
     if (scope !== 'championship' && !scopeId) { res.json({ scope, scope_id: null, standings: [] }); return; }
     const standings = await readStandings(prisma, id, scope, scopeId);
     const completed_matches = await countCompletedMatches(prisma, id, scope, scopeId);
-    res.json({ scope, scope_id: scopeId, standings, completed_matches });
+    // The same caveat the signed-in views carry: a public page showing a table as
+    // final when the organiser hasn't locked the results would be the most damaging
+    // place to overstate it (J2-E7-S5).
+    const unverified_matches = await prisma.fixtures.count({
+      where: {
+        tournament_disciplines: { tournament_sports: { tournaments: { championship_id: id } } },
+        status: { in: ['completed', 'walkover'] },
+        scorecard_status: { not: 'locked' },
+      },
+    });
+    res.json({ scope, scope_id: scopeId, standings, completed_matches, unverified_matches });
   }));
 
   // Per-event breakdown for one org (same shape as the authed route) - drives the

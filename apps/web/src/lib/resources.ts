@@ -89,6 +89,22 @@ export const RESOURCES: Record<string, ResourceConfig> = {
       { name: 'status', label: 'Active', type: 'checkbox' },
     ],
   },
+  // Email domain -> organisation. A row here means anyone signing in with that
+  // domain lands in that organisation automatically, so these are super-admin
+  // managed and verified on entry (FR-AUTH-2 / J1-E1-S2).
+  'org-domains': {
+    key: 'org-domains', title: 'Email Domains', path: '/org-domains',
+    columns: [
+      { key: 'domain', label: 'Domain' },
+      { key: 'organizations.name', label: 'Organisation' },
+      { key: 'verified', label: 'Routes sign-in' },
+    ],
+    fields: [
+      { name: 'organization_id', label: 'Organisation', ...rel('/organizations') },
+      { name: 'domain', label: 'Domain (e.g. iimb.ac.in)' },
+      { name: 'verified', label: 'Routes sign-in', type: 'checkbox', default: true },
+    ],
+  },
   championships: {
     key: 'championships', title: 'Championships', path: '/championships', statusEndpoint: true,
     columns: [{ key: 'name', label: 'Name' }, { key: 'slug', label: 'Slug' }, { key: 'status', label: 'Status' }, { key: 'start_date', label: 'Start' }],

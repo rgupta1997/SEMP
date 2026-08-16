@@ -16,3 +16,7 @@ TESTING_GUIDE.md
 
 # Local Netlify folder
 .netlify
+
+# Playwright run output (traces/screenshots) - regenerated on every run
+apps/web/test-results/
+apps/web/playwright-report/

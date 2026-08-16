@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, CircleDashed, Info, Search, X } from 'lucide-react';
 import { titleCase } from '../lib/format';
+import { fmtDate } from '../lib/hooks';
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
@@ -143,6 +144,25 @@ export function StatusBadge({ status, label }: { status?: string | null; label?:
           : ['registration_open'].includes(s) ? 'brand'
             : 'slate';
   return <Badge tone={tone}>{label ?? (status ? titleCase(status) : '-')}</Badge>;
+}
+
+// A result that was corrected after being made official says so, dated, everywhere
+// it appears - including the public share page (J6-E4-S4). This is what federations
+// do, and it is the reason the "Verified" badge next to it is worth anything: a score
+// that could change quietly would make every other verified result unfalsifiable.
+// Deliberately factual rather than apologetic - a correction is the system working.
+export function AmendedNotice({ at, className = '' }: { at?: string | null; className?: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30',
+        className,
+      )}
+      title="This result was corrected after it was first made official. The correction is on the record."
+    >
+      Result amended{at ? ` ${fmtDate(at)}` : ''}
+    </span>
+  );
 }
 
 // "Updated HH:MM:SS · ↻ Refresh now" control for auto-refreshing tables (e.g.

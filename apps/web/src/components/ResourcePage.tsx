@@ -124,6 +124,12 @@ function ResourceForm({ config, row, onClose }: { config: ResourceConfig; row: a
   );
 }
 
+// Column keys may be dotted, so a resource that eager-loads a relation can show
+// something readable ("organizations.name") instead of a raw foreign key.
+function at(row: any, key: string): any {
+  return key.includes('.') ? key.split('.').reduce((o, k) => (o == null ? o : o[k]), row) : row[key];
+}
+
 function cell(v: any): string {
   if (v === null || v === undefined) return '';
   if (typeof v === 'boolean') return v ? '✓' : '';
@@ -156,13 +162,13 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
   const sorts = useMemo(() => {
     const m: Record<string, (a: any, b: any) => number> = {};
     for (const c of cols) {
-      m[c.key] = (a, b) => String(a[c.key] ?? '').localeCompare(String(b[c.key] ?? ''), undefined, { numeric: true });
+      m[c.key] = (a, b) => String(at(a, c.key) ?? '').localeCompare(String(at(b, c.key) ?? ''), undefined, { numeric: true });
     }
     return m;
   }, [cols]);
 
   const t = useTableControls<any>(data, {
-    search: (row) => cols.map((c) => String(row[c.key] ?? '')).join(' '),
+    search: (row) => cols.map((c) => String(at(row, c.key) ?? '')).join(' '),
     sorts,
     pageSize: 15,
   });
@@ -222,7 +228,7 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
             {rows.map((row: any) => (
               <tr key={row.id} className={`border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 ${selected.has(row.id) ? 'bg-brand-50/50 dark:bg-brand-500/10' : ''}`}>
                 {selectable && <td className="px-3 py-2"><Checkbox checked={selected.has(row.id)} onChange={() => toggle(row.id)} /></td>}
-                {cols.map((c) => <td key={c.key} className="px-3 py-2">{cell(row[c.key])}</td>)}
+                {cols.map((c) => <td key={c.key} className="px-3 py-2">{cell(at(row, c.key))}</td>)}
                 <td className="px-3 py-2 whitespace-nowrap flex gap-1 items-center">
                   {config.statusEndpoint && canManage && (
                     <select className="border rounded text-xs px-1 py-0.5 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100" value={row.status}

@@ -23,9 +23,20 @@ pure `teams[] + params -> GeneratedFixture[]` for Knockout / Round-Robin·League
 Groups / Pool+Knockout.
 
 Run: `npm run dev:api` (4000) + `npm run dev:web` (5173/5174). Login admin@semp.local /
-admin123 (`npm run seed`). Verify: `npm run smoke` (replays TechFest 2025 across all
-5 phases) and `npm run test` (9 Vitest generator tests). API CORS allows any
-`http://localhost:*` in dev.
+admin123. Verify: `npm run test` (Vitest generator tests). API CORS allows any
+`http://localhost:*` in dev. (`npm run seed` / `npm run smoke` are referenced in the
+README but **no longer exist** — use `apps/api/scripts/bootstrap-catalog.ts` and
+`seed-iimb.ts`.)
+
+**Deployment: AWS Lambda + API Gateway HTTP API** (`apps/api/src/lambda.ts` wraps the
+same `buildApp()` Express app via `serverless-http`; `npm run build:lambda` esbuilds it
+to `dist-lambda.zip`, `npm run deploy:lambda` provisions IAM role + function + HTTP API
+idempotently). Web on Netlify, DB on Supabase. **Render is retired** — `render.yaml` and
+the "does not change local/Render behaviour" comment atop `lambda.ts` are stale.
+Two rules this imposes on all server work: **no long-lived process** (background jobs
+need SQS/EventBridge, not `setInterval`), and **synchronous responses cap at the 15s
+function timeout**. Runtime DB load is bounded at reserved concurrency 10 ×
+`connection_limit=1`. See `DEPLOYMENT.md` and [[supabase-project]].
 
 **Why:** captures non-obvious choices (workspaces-not-pnpm, single-role-for-now,
 generic CRUD pattern, SQL-as-migration-source-of-truth) so future sessions don't re-derive them.

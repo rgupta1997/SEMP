@@ -1,30 +1,35 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls, fmtDateTime } from '../../lib/hooks';
-import { Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, Modal, Pagination, SearchInput, SortDirButton, StatusBadge, Table, toast } from '../../components/ui';
+import { Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, Modal, Pagination, SearchInput, SortDirButton, StatusBadge, Table, Textarea, confirmDialog, toast } from '../../components/ui';
+
+// One decision applied to a whole selection. The server decides each enrolment in
+// its own transaction and answers per row, so a batch reports what actually
+// happened rather than collapsing to a single success or failure.
+interface BulkReviewResponse {
+  results: { enrollment_id: string; ok: boolean; error?: string }[];
+  reviewed: number;
+  failed: number;
+}
 
 export function ApprovalsPage() {
   const { eventId } = useEvent();
+  const qc = useQueryClient();
   const path = `/championships/${eventId}/enrollments`;
   const { data: rows = [], isLoading } = useApi<any[]>(path);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
-  const [rejecting, setRejecting] = useState<any | null>(null);
+  // One dialog for both routes into a rejection: the rows being declined.
+  const [rejecting, setRejecting] = useState<any[] | null>(null);
   const [note, setNote] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const review = useApiMutation(
     ({ id, status, rejection_note }: any) => api('PATCH', `/championship-organizations/${id}`, { status, rejection_note }),
     [path],
     () => { setRejecting(null); setNote(''); },
-  );
-  // Bulk review runs the PATCHes in parallel then refetches once.
-  const bulkReview = useApiMutation(
-    async ({ ids, status }: { ids: string[]; status: string }) => {
-      await Promise.all(ids.map((id) => api('PATCH', `/championship-organizations/${id}`, { status })));
-    },
-    [path],
-    () => setSelected(new Set()),
   );
 
   const counts = {
@@ -45,7 +50,9 @@ export function ApprovalsPage() {
     pageSize: 12,
   });
   const visible = t.view;
-  const selectableIds = visible.map((r) => r.id);
+  // Only an undecided application can be swept up in a bulk decision - re-deciding
+  // one that already has an outcome is a single, deliberate act.
+  const selectableIds = visible.filter((r) => r.status === 'pending').map((r) => r.id);
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
 
   const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -55,6 +62,26 @@ export function ApprovalsPage() {
     else selectableIds.forEach((id) => n.add(id));
     return n;
   });
+
+  // Shared by the bulk bar and the reject dialog: one request, a per-row answer.
+  const runBulk = async (ids: string[], status: 'approved' | 'rejected', rejection_note?: string) => {
+    setBulkBusy(true);
+    try {
+      const res = await api<BulkReviewResponse>('PATCH', '/championship-organizations/bulk', { ids, status, rejection_note });
+      const verb = status === 'approved' ? 'approved' : 'rejected';
+      if (res.failed === 0) toast.success(`${res.reviewed} ${verb}`);
+      else toast.error(`${res.reviewed} ${verb}, ${res.failed} could not be`, res.results.find((r) => !r.ok)?.error);
+      setSelected(new Set());
+      return true;
+    } catch (e: any) {
+      toast.error(e.message);
+      return false;
+    } finally { setBulkBusy(false); }
+  };
+
+  const selectedRows = rows.filter((r) => selected.has(r.id));
+  const rejectCount = rejecting?.length ?? 0;
+  const noteTooShort = note.trim().length < 5;
 
   return (
     <div>
@@ -75,12 +102,18 @@ export function ApprovalsPage() {
       </div>
 
       <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
-        <Button size="sm" disabled={bulkReview.isPending}
-          onClick={() => bulkReview.mutate({ ids: [...selected], status: 'approved' }, { onSuccess: () => toast.success(`${selected.size} approved`), onError: (e: any) => toast.error(e.message) })}>
-          Approve selected
+        <Button size="sm" disabled={bulkBusy}
+          onClick={async () => {
+            const ok = await confirmDialog({
+              title: `Approve ${selected.size} application${selected.size === 1 ? '' : 's'}?`,
+              message: 'Each organization is told it can now enter teams.',
+              confirmLabel: 'Approve them',
+            });
+            if (ok) await runBulk([...selected], 'approved');
+          }}>
+          {bulkBusy ? 'Working…' : 'Approve selected'}
         </Button>
-        <Button size="sm" variant="outline" disabled={bulkReview.isPending}
-          onClick={() => bulkReview.mutate({ ids: [...selected], status: 'rejected' }, { onSuccess: () => toast.success(`${selected.size} rejected`), onError: (e: any) => toast.error(e.message) })}>
+        <Button size="sm" variant="outline" disabled={bulkBusy} onClick={() => { setNote(''); setRejecting(selectedRows); }}>
           Reject selected
         </Button>
       </BulkBar>
@@ -101,7 +134,9 @@ export function ApprovalsPage() {
           <tbody>
             {visible.map((r) => (
               <tr key={r.id} className={`border-t border-slate-100 dark:border-slate-800 ${selected.has(r.id) ? 'bg-brand-50/50' : ''}`}>
-                <td className="px-4 py-3"><Checkbox checked={selected.has(r.id)} onChange={() => toggle(r.id)} /></td>
+                <td className="px-4 py-3">
+                  {r.status === 'pending' && <Checkbox checked={selected.has(r.id)} onChange={() => toggle(r.id)} />}
+                </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
                     <Avatar name={r.organizations?.name} size={34} />
@@ -119,7 +154,7 @@ export function ApprovalsPage() {
                       <Button size="sm" onClick={() => review.mutate({ id: r.id, status: 'approved' })} disabled={review.isPending}>Approve</Button>
                     )}
                     {r.status !== 'rejected' && (
-                      <Button size="sm" variant="outline" onClick={() => setRejecting(r)}>Reject</Button>
+                      <Button size="sm" variant="outline" onClick={() => { setNote(''); setRejecting([r]); }}>Reject</Button>
                     )}
                     {r.status === 'rejected' && r.rejection_note && <Badge tone="rose">{r.rejection_note}</Badge>}
                   </div>
@@ -132,14 +167,31 @@ export function ApprovalsPage() {
       {t.total > 0 && <Pagination page={t.page} pageCount={t.pageCount} total={t.total} pageSize={t.pageSize} onPage={t.setPage} />}
 
       {rejecting && (
-        <Modal title={`Reject ${rejecting.organizations?.name}`} onClose={() => setRejecting(null)}>
-          <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Optionally tell the organization why so they can fix and reapply.</p>
-          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Reason (optional)…"
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500" />
+        <Modal
+          title={rejectCount === 1 ? `Reject ${rejecting[0].organizations?.name}` : `Reject ${rejectCount} applications`}
+          onClose={() => setRejecting(null)}
+        >
+          {/* The note is required, not a courtesy: a bare "rejected" tells an
+              applicant nothing they can act on, and this is the only message they get. */}
+          <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
+            Tell {rejectCount === 1 ? 'the organization' : 'these organizations'} why. The note is shown to them on their
+            applications list, so they can fix it and reapply.
+          </p>
+          <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3}
+            placeholder="e.g. Entries closed before this application arrived" />
           <div className="mt-3 flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setRejecting(null)}>Cancel</Button>
-            <Button variant="danger" disabled={review.isPending}
-              onClick={() => review.mutate({ id: rejecting.id, status: 'rejected', rejection_note: note || undefined })}>Reject</Button>
+            <Button variant="danger" disabled={review.isPending || bulkBusy || noteTooShort}
+              onClick={async () => {
+                if (rejectCount === 1) {
+                  review.mutate({ id: rejecting[0].id, status: 'rejected', rejection_note: note.trim() });
+                  return;
+                }
+                const ok = await runBulk(rejecting.map((r) => r.id), 'rejected', note.trim());
+                if (ok) { setRejecting(null); setNote(''); }
+              }}>
+              {rejectCount === 1 ? 'Reject' : `Reject ${rejectCount}`}
+            </Button>
           </div>
         </Modal>
       )}

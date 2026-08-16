@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { fmtDateTime } from '../../lib/hooks';
-import { cn } from '../ui';
+import { AmendedNotice, cn } from '../ui';
 import { ResultBadge } from './ResultBadge';
 import type { MatchSummary } from './types';
 
@@ -38,9 +38,20 @@ export function MatchRow({ match, showEvent = true }: { match: MatchSummary; sho
           {teamLine(oppName, match.opp_score, false, hasScore && lost)}
         </div>
         {match.opponent?.organization && <div className="mt-0.5 truncate text-xs text-slate-400 dark:text-slate-500">{match.opponent.organization}</div>}
-        <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{fmtDateTime(match.scheduled_at)}</div>
+        <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+          {fmtDateTime(match.scheduled_at)}{match.venue ? ` · ${match.venue}` : ''}
+        </div>
+        {/* A corrected result says so to the player too, not only to the organiser -
+            they are the person most entitled to know their number changed. */}
+        {match.amended_at && <div className="mt-1"><AmendedNotice at={match.amended_at} /></div>}
       </div>
-      <div className="flex flex-none items-center">
+      <div className="flex flex-none items-center gap-2">
+        {/* Verified means the organiser locked the scorecard; until then a score on
+            this row is provisional and must not read as final. */}
+        {match.scorecard_status === 'locked' && (
+          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+            title="The organiser has locked this scorecard - the result is official">✓ Verified</span>
+        )}
         <ResultBadge result={match.result} />
       </div>
     </button>

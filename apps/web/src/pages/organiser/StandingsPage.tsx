@@ -15,7 +15,12 @@ interface StandingRow {
   detail: Record<string, number>;
   rank: number | null;
 }
-interface StandingsResponse { scope: string; scope_id: string | null; standings: StandingRow[]; completed_matches: number }
+interface StandingsResponse {
+  scope: string; scope_id: string | null; standings: StandingRow[];
+  completed_matches: number;
+  /** Finished matches not yet locked; above zero means the table can still move. */
+  unverified_matches?: number;
+}
 
 // A draw row (subset of GET /:id/draws) - used only to source the tournament + sport
 // filter options (with their UUIDs, which the materialized scopes are keyed by).
@@ -44,7 +49,7 @@ function RankBadge({ pos }: { pos: number }) {
 }
 
 export function StandingsPage() {
-  const { eventId } = useEvent();
+  const { eventId, canManage } = useEvent();
   const { data: draws = [] } = useApi<DrawRow[]>(`/championships/${eventId}/draws`);
   // Which org's row is expanded to show its per-event points breakdown.
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -77,6 +82,11 @@ export function StandingsPage() {
 
   const query = scopeId ? `?scope=${scope}&scopeId=${scopeId}` : `?scope=${scope}`;
   const { data, isLoading, refetch, dataUpdatedAt, isFetching } = useApi<StandingsResponse>(`/championships/${eventId}/standings${query}`);
+  // A table computed from results that can still change is provisional, and saying
+  // so is the difference between a scoreboard and a record an institution will put
+  // its name to. The count rides along with the standings themselves, so every
+  // reader sees the same caveat - not just the organiser.
+  const unverified = data?.unverified_matches ?? 0;
   const rows = data?.standings ?? [];
 
   // Live-ish standings: re-pull every 10s so completed matches show without a reload.
@@ -112,8 +122,15 @@ export function StandingsPage() {
 
       <Card>
         <CardHeader
-          title="Championship table"
-          subtitle={`${scopeLabel} · computed from completed fixtures, scored by each discipline's rule`}
+          title={<span className="flex flex-wrap items-center gap-2">
+            Championship table
+            {unverified > 0
+              ? <Badge tone="amber">Provisional</Badge>
+              : (data?.completed_matches ?? 0) > 0 ? <Badge tone="green">✓ Verified</Badge> : null}
+          </span>}
+          subtitle={unverified > 0
+            ? `${scopeLabel} · ${unverified} result${unverified === 1 ? '' : 's'} not yet locked, so these numbers can still change`
+            : `${scopeLabel} · computed from completed fixtures, scored by each discipline's rule`}
           action={
             <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
               <RefreshBar updatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={() => refetch()} />

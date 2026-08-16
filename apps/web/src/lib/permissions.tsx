@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
+import { Lock } from 'lucide-react';
+import type { ModuleKey } from '@semp/shared';
 import { useAuth } from './auth';
 import { parseEventId } from './championship-nav';
 
@@ -78,7 +80,48 @@ export function usePermissions() {
     }
   };
 
-  return { can, isSuper, isCaptain, organisesAny, orgAdminAny, isOfficialAny, canManageChampionship, canManageOrg, isOrgOwner, organisesChampionship };
+  // ---- Module access (J6-E2) ---------------------------------------------
+  // Which modules the institution has left switched on for this person's
+  // audience, straight from the auth context so navigation is right on the first
+  // paint. UX only: the server runs the same check inside can() and that is the
+  // boundary.
+  const modulesFor = (id?: string | null): ModuleKey[] | null => {
+    const orgId = id ?? currentOrgId ?? ctx?.organization?.id ?? null;
+    if (!orgId) return null;               // nothing org-scoped in play
+    return (ctx?.modules?.[orgId] as ModuleKey[] | undefined) ?? null;
+  };
+
+  // Absent map = not configured = everything on. Only an explicit list can hide
+  // something, so a context that has not loaded yet never blanks the navigation.
+  const canOpenModule = (module: ModuleKey, id?: string | null): boolean => {
+    if (isSuper) return true;
+    const list = modulesFor(id);
+    return !list || list.includes(module);
+  };
+
+  return {
+    can, isSuper, isCaptain, organisesAny, orgAdminAny, isOfficialAny,
+    canManageChampionship, canManageOrg, isOrgOwner, organisesChampionship,
+    canOpenModule,
+  };
+}
+
+// A whole area of the workspace an institution can switch off (J6-E2-S2).
+// Renders a plain "not available" page rather than letting the route 403 or,
+// worse, render an empty screen the person cannot explain.
+export function ModuleGate({ module, children }: { module: ModuleKey; children: ReactNode }) {
+  const { canOpenModule } = usePermissions();
+  if (canOpenModule(module)) return <>{children}</>;
+  return (
+    <div className="mx-auto max-w-md py-16 text-center">
+      <div className="mb-3 flex justify-center text-slate-400 dark:text-slate-500"><Lock size={28} aria-hidden /></div>
+      <h1 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Not available</h1>
+      <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+        Your institution has turned this section off for your account. Ask a sports office
+        administrator if you think you should have access.
+      </p>
+    </div>
+  );
 }
 
 // Declarative action gate: renders children only if the capability is granted.

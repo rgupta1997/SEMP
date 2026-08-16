@@ -9,9 +9,13 @@ export interface EventNavItem {
 export const EVENT_NAV: EventNavItem[] = [
   { segment: '', label: 'Overview', end: true },
   { segment: 'setup', label: 'Setup', manage: true },
+  { segment: 'import', label: 'Import setup', manage: true },
   { segment: 'team', label: 'Organising team', manage: true },
   { segment: 'approvals', label: 'Approvals', manage: true },
   { segment: 'participants', label: 'Participants' },
+  // Sits before Schedule on purpose: on a match day this is the screen the
+  // organiser lives on, and Schedule is what they consult between sessions.
+  { segment: 'live', label: 'Live' },
   { segment: 'schedule', label: 'Schedule' },
   { segment: 'results', label: 'Results' },
   { segment: 'standings', label: 'Standings' },
