@@ -78,16 +78,16 @@ export function createNotificationHooks(
       // MutationCache fallback to the notification family only.
       meta: { invalidate: ['notifications'] },
 
-      onSuccess: () => {
-        // Only the feed's per-item read state changes here - the badge
-        // count is markSeen's job (see useMarkNotificationsSeen below).
-        // Both fire together on drawer-open; invalidating 'notifications'
-        // (prefix-matches unread-count too) here as well as there caused
-        // two redundant unread-count refetches back to back.
-        queryClient.invalidateQueries({
-          queryKey: ['notifications', 'feed'],
-        });
-      },
+      // onSuccess: () => {
+      //   // Only the feed's per-item read state changes here - the badge
+      //   // count is markSeen's job (see useMarkNotificationsSeen below).
+      //   // Both fire together on drawer-open; invalidating 'notifications'
+      //   // (prefix-matches unread-count too) here as well as there caused
+      //   // two redundant unread-count refetches back to back.
+      //   queryClient.invalidateQueries({
+      //     queryKey: ['notifications', 'feed'],
+      //   });
+      // },
     });
   }
 
