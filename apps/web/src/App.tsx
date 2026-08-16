@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useMatch } from 'react-router-dom';
 import { useAuth, type AppRole } from './lib/auth';
 import { AppShell, roleHome } from './components/AppShell';
+import { useWorkspace, workspaceHome } from './lib/workspace';
 import { ConfirmProvider, Spinner, ToastProvider } from './components/ui';
 import { TourProvider } from './components/onboarding/Tour';
 import { HelpPage } from './pages/HelpPage';
@@ -26,6 +27,7 @@ import { EventImportPage } from './pages/organiser/EventImportPage';
 // Organizations (multi-org membership + management)
 import { OrganizationsPage } from './pages/OrganizationsPage';
 import { OrgOverviewPage } from './pages/organization/OrgOverviewPage';
+import { OrgHomePage } from './pages/organization/OrgHomePage';
 import { TeamsPage } from './pages/organization/TeamsPage';
 import { RosterPage } from './pages/organization/RosterPage';
 import { RollImportPage } from './pages/organization/RollImportPage';
@@ -66,9 +68,14 @@ import { ChampionshipMatrixImportPage } from './pages/platform/ChampionshipMatri
 import { PublicChampionshipPage } from './pages/public/PublicChampionshipPage';
 import { InviteAcceptPage } from './pages/InviteAcceptPage';
 
+// Where "home" is depends on which product this person is in (J1-E7-S1). Someone who
+// runs an institution lands in it rather than on a participant profile they may have
+// no matches on at all.
 function HomeRedirect() {
   const { activeRole } = useAuth();
-  return <Navigate to={roleHome(activeRole)} replace />;
+  const { workspace } = useWorkspace();
+  if (activeRole === 'system') return <Navigate to={roleHome(activeRole)} replace />;
+  return <Navigate to={workspaceHome(workspace)} replace />;
 }
 
 // Route guard for platform-only pages.
@@ -96,6 +103,9 @@ function AuthenticatedRoutes() {
 
         {/* Organizations */}
         <Route path="/organizations" element={<OrganizationsPage />} />
+        {/* The institution home (J1-E7). Distinct from /overview, which is the public-facing
+            profile of an organisation; this is the operator's command centre. */}
+        <Route path="/organizations/:orgId/home" element={<OrgHomePage />} />
         <Route path="/organizations/:orgId/overview" element={<OrgOverviewPage />} />
         {/* Module-gated (J6-E2-S2): a direct link to something the institution
             has switched off for this audience gets a plain "not available" page,

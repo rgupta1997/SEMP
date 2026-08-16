@@ -1,10 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  AtSign, Compass, Flag, FlaskConical, Landmark, Layers, LayoutGrid, LayoutList, Lock,
-  Mail, Medal, Menu, MessageSquare, Moon, Plus, Sun, Trophy, Upload, User, Users, X,
+  AtSign, BarChart3, Check, ChevronsUpDown, Compass, Flag, FlaskConical, History, Home,
+  Landmark, Layers, LayoutGrid, LayoutList, Lock, Mail, Medal, Menu, MessageSquare, Moon,
+  Plus, Shield, Sun, ToggleLeft, Trophy, Upload, User, Users, X,
 } from 'lucide-react';
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
+import { useWorkspace, type Workspace } from '../lib/workspace';
 import { BRAND } from '../lib/brand';
 import { parseEventId } from '../lib/championship-nav';
 import { FeedbackWidget } from './FeedbackWidget';
@@ -20,6 +22,44 @@ interface NavGroup { group: string; items: NavItem[] }
 
 export function roleHome(role: AppRole): string {
   return role === 'system' ? '/platform/sports' : '/profile';
+}
+
+// The institution workspace (J1-E7-S1). A different product from the participant
+// shell, not the same one with extra links: Home first, the operation grouped the way
+// an institution talks about itself, and Discover kept because entering somebody
+// else's championship is part of running your own programme.
+//
+// Filtered by module access so a switched-off section is ABSENT rather than present
+// and refused - the nav and the server read the same `modules` map (J6-E2-S2).
+function institutionNav(orgId: string, modules: string[] | null): NavGroup[] {
+  const on = (m: string) => !modules || modules.includes(m);
+  const groups: NavGroup[] = [{
+    group: 'Institution', items: [
+      { to: `/organizations/${orgId}/home`, label: 'Home', icon: <Home size={16} />, end: true },
+      ...(on('people') ? [{ to: `/organizations/${orgId}/members`, label: 'People', icon: <Users size={16} /> }] : []),
+      ...(on('teams') ? [{ to: `/organizations/${orgId}/teams`, label: 'Teams', icon: <Shield size={16} /> }] : []),
+      ...(on('administration') ? [{ to: `/organizations/${orgId}/structure`, label: 'Structure', icon: <Layers size={16} /> }] : []),
+    ],
+  }, {
+    group: 'Competition', items: [
+      ...(on('championships') ? [{ to: '/championships', label: 'Championships', icon: <Trophy size={16} /> }] : []),
+      { to: '/discover', label: 'Discover', icon: <Compass size={16} /> },
+      ...(on('championships') ? [{ to: '/host', label: 'Host', icon: <Plus size={16} /> }] : []),
+    ],
+  }];
+
+  const admin: NavItem[] = [
+    ...(on('records') ? [{ to: `/organizations/${orgId}/achievements`, label: 'Achievements', icon: <Medal size={16} /> }] : []),
+    ...(on('reports') ? [{ to: `/organizations/${orgId}/reports`, label: 'Reports', icon: <BarChart3 size={16} /> }] : []),
+    ...(on('administration') ? [
+      { to: `/organizations/${orgId}/roles`, label: 'Roles', icon: <Lock size={16} /> },
+      { to: `/organizations/${orgId}/modules`, label: 'Modules', icon: <ToggleLeft size={16} /> },
+      { to: `/organizations/${orgId}/activity`, label: 'Activity', icon: <History size={16} /> },
+    ] : []),
+  ];
+  if (admin.length) groups.push({ group: 'Administration', items: admin });
+  groups.push({ group: '', items: [{ to: '/help', label: 'Help & guide', icon: '?' }] });
+  return groups;
 }
 
 function navFor(role: AppRole): NavGroup[] {
@@ -60,6 +100,77 @@ function navFor(role: AppRole): NavGroup[] {
       { to: '/help', label: 'Help & guide', icon: '?' },
     ],
   }];
+}
+
+// Whose workspace this is, at the top of the sidebar (J1-E7-S1). When the person only
+// ever has one, it is an identity block and not a control - a picker with one option
+// is furniture.
+function WorkspaceHeader({ onNavigate }: { onNavigate: () => void }) {
+  const { workspace, staffedOrganizations, canSwitch, setWorkspace } = useWorkspace();
+  const [open, setOpen] = useState(false);
+  const org = workspace.kind === 'organization' ? workspace.organization : null;
+
+  const label = org ? (org.short_name || org.name) : 'My Game';
+  const options: Workspace[] = [
+    { kind: 'personal' },
+    ...staffedOrganizations.map((o) => ({ kind: 'organization' as const, id: o.id, organization: o })),
+  ];
+
+  const body = (
+    <div className="flex min-w-0 items-center gap-2.5">
+      {org?.logo_url
+        ? <img src={org.logo_url} alt="" className="h-7 w-7 flex-none rounded-md object-cover" />
+        : <div className="grid h-7 w-7 flex-none place-items-center rounded-md bg-[var(--sidebar-active)] text-xs font-bold text-white">
+            {org ? (org.short_name || org.name).slice(0, 2).toUpperCase() : <User size={14} />}
+          </div>}
+      <div className="min-w-0 flex-1 text-left">
+        <div className="truncate text-sm font-semibold text-white">{label}</div>
+        <div className="truncate text-[10px] uppercase tracking-[0.1em] text-slate-500">
+          {org ? (org.verified ? 'Sports Org · Verified' : 'Sports Org') : 'Personal'}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (!canSwitch) {
+    return <div className="border-b px-3 py-3" style={{ borderColor: 'var(--sidebar-border)' }}>{body}</div>;
+  }
+
+  return (
+    <div className="relative border-b px-3 py-3" style={{ borderColor: 'var(--sidebar-border)' }}>
+      <button
+        type="button" onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox" aria-expanded={open}
+        className="flex w-full items-center gap-2 rounded-lg px-1 py-1 text-left transition-colors hover:bg-[var(--sidebar-active)]"
+      >
+        {body}
+        <ChevronsUpDown size={14} className="flex-none text-slate-500" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <ul role="listbox" className="animate-dropdown absolute left-3 right-3 z-20 mt-1 overflow-hidden rounded-xl border border-slate-700 bg-slate-900 py-1 shadow-xl">
+            {options.map((o) => {
+              const id = o.kind === 'personal' ? 'personal' : o.id;
+              const active = o.kind === workspace.kind && (o.kind === 'personal' || o.id === (workspace as any).id);
+              return (
+                <li key={id}>
+                  <button
+                    type="button" role="option" aria-selected={active}
+                    onClick={() => { setOpen(false); onNavigate(); if (!active) setWorkspace(o); }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-800"
+                  >
+                    <span className="flex-none">{active ? <Check size={14} /> : <span className="inline-block w-[14px]" />}</span>
+                    <span className="truncate">{o.kind === 'personal' ? 'My Game' : (o.organization.short_name || o.organization.name)}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+    </div>
+  );
 }
 
 function RoleSwitcher() {
@@ -117,6 +228,7 @@ interface EventSummary { id: string; name: string }
 
 export function AppShell() {
   const { ctx, activeRole, logout } = useAuth();
+  const { workspace, modules } = useWorkspace();
   const { theme, toggle } = useTheme();
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -130,8 +242,15 @@ export function AppShell() {
 
   if (!ctx) return null;
 
-  const groups = navFor(activeRole);
-  const subtitle = championship?.name ?? ROLE_LABELS[activeRole];
+  // The institution shell replaces the participant one entirely - a super admin in the
+  // platform shell keeps theirs, since that is a third product again.
+  const groups = activeRole === 'system' || workspace.kind !== 'organization'
+    ? navFor(activeRole)
+    : institutionNav(workspace.id, modules);
+  const subtitle = championship?.name
+    ?? (workspace.kind === 'organization' && activeRole !== 'system'
+      ? workspace.organization.name
+      : ROLE_LABELS[activeRole]);
 
   // Feedback button: only on overview/landing surfaces (My Game, Discover, My
   // Championships, an org's overview, a championship's overview) - not deep inner
@@ -166,6 +285,7 @@ export function AppShell() {
             <BrandMark variant="white" height={22} />
             <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-[background-color,color,transform] duration-150 hover:bg-[var(--sidebar-active)] hover:text-white active:scale-90 md:hidden" aria-label="Close menu"><X size={16} /></button>
           </div>
+          {activeRole !== 'system' && <WorkspaceHeader onNavigate={() => setSidebarOpen(false)} />}
           <nav className="flex-1 overflow-y-auto px-3 py-4">
             {groups.map((g) => (
               <div key={g.group} className="mb-4">
