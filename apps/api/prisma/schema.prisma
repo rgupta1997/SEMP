@@ -1,8 +1,5 @@
 generator client {
   provider      = "prisma-client-js"
-  // "native" keeps local dev / Render (Debian-based build image) working as-is.
-  // "rhel-openssl-3.0.x" is the engine AWS Lambda's nodejs20.x (Amazon Linux 2023,
-  // x86_64) runtime needs — required so the Lambda bundle ships a matching binary.
   binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
@@ -69,6 +66,7 @@ model championships {
   country                    String?                      @db.VarChar
   region                     String?                      @db.VarChar
   allow_individual_entry     Boolean                      @default(true)
+  certificates               certificates[]
   championship_invitations   championship_invitations[]
   championship_officials     championship_officials[]
   championship_organizations championship_organizations[]
@@ -105,9 +103,6 @@ model fixtures {
   away_score                           Int?
   winner_team_id                       String?                @db.Uuid
   live_state                           Json                   @default("{}")
-  /// When the match actually kicked off (J2-E6-S2). Written once on the move to
-  /// 'live' - NOT updated_at, which every score tap moves.
-  live_started_at                      DateTime?              @db.Timestamptz(6)
   live_log                             Json                   @default("[]")
   scorecard_status                     String                 @default("draft") @db.VarChar
   submitted_at                         DateTime?              @db.Timestamptz(6)
@@ -115,6 +110,10 @@ model fixtures {
   locked_at                            DateTime?              @db.Timestamptz(6)
   locked_by                            String?                @db.Uuid
   lock_version                         Int                    @default(0)
+  /// When the match actually kicked off (J2-E6-S2). Written once on the move to
+  /// 'live' - NOT updated_at, which every score tap moves.
+  live_started_at                      DateTime?              @db.Timestamptz(6)
+  certificates                         certificates[]
   fixture_awards                       fixture_awards[]
   teams_fixtures_away_team_idToteams   teams?                 @relation("fixtures_away_team_idToteams", fields: [away_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   teams_fixtures_home_team_idToteams   teams?                 @relation("fixtures_home_team_idToteams", fields: [home_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -150,6 +149,9 @@ model organizations {
   verified                              Boolean                      @default(false)
   settings                              Json                         @default("{}")
   created_by                            String?                      @db.Uuid
+  certificate_counters                  certificate_counters[]
+  certificate_templates                 certificate_templates[]
+  certificates                          certificates[]
   championship_invitations              championship_invitations[]
   championship_organizations            championship_organizations[]
   championship_templates                championship_templates[]
@@ -168,26 +170,27 @@ model organizations {
 }
 
 model organization_members {
-  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id         String        @db.Uuid
-  organization_id String        @db.Uuid
-  role            String        @default("member") @db.VarChar
-  status          String        @default("active") @db.VarChar
-  joined_at       DateTime      @default(now()) @db.Timestamptz(6)
-  org_unit_id     String?       @db.Uuid
+  id                                            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                                       String        @db.Uuid
+  organization_id                               String        @db.Uuid
+  role                                          String        @default("member") @db.VarChar
+  status                                        String        @default("active") @db.VarChar
+  joined_at                                     DateTime      @default(now()) @db.Timestamptz(6)
+  org_unit_id                                   String?       @db.Uuid
   /// The institution's own view of this person (J1-E5). Verification is per
   /// institution on purpose: one college's judgement must not bind another's.
-  member_code     String?       @db.VarChar(64)
-  verification    String        @default("pending") @db.VarChar
-  verified_by     String?       @db.Uuid
-  verified_at     DateTime?     @db.Timestamptz(6)
-  rejection_note  String?
+  member_code                                   String?       @db.VarChar(64)
+  verification                                  String        @default("pending") @db.VarChar
+  verified_by                                   String?       @db.Uuid
+  verified_at                                   DateTime?     @db.Timestamptz(6)
+  rejection_note                                String?
   /// The institution's classification of its own student - never displayed
   /// against a named individual (J1-E5-S4).
-  scholarship     Boolean?
-  org_units       org_units?    @relation(fields: [org_unit_id], references: [id], onUpdate: NoAction)
-  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users           users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  scholarship                                   Boolean?
+  org_units                                     org_units?    @relation(fields: [org_unit_id], references: [id], onUpdate: NoAction)
+  organizations                                 organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                                         users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_organization_members_verified_byTousers users?        @relation("organization_members_verified_byTousers", fields: [verified_by], references: [id], onUpdate: NoAction)
 
   @@unique([user_id, organization_id])
   @@index([organization_id], map: "idx_organization_members_organization_id")
@@ -240,6 +243,7 @@ model sports {
   name              String              @db.VarChar
   icon              String?             @db.VarChar
   created_at        DateTime            @default(now()) @db.Timestamptz(6)
+  award_types       award_types[]
   disciplines       disciplines[]
   teams             teams[]
   tournament_sports tournament_sports[]
@@ -302,9 +306,6 @@ model team_entries {
   tournament_disciplines       tournament_disciplines?    @relation(fields: [tournament_discipline_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([team_id, championship_id], map: "uq_team_entries_team_championship")
-  /// J3-E3-S1: one team per organisation per draw. Enforced in Postgres as a
-  /// partial unique index (drawless entries are exempt) so every creation path
-  /// is covered, not only the one route that checked by hand.
   @@index([team_id], map: "idx_team_entries_team")
   @@index([championship_id], map: "idx_team_entries_championship")
   @@index([tournament_discipline_id], map: "idx_team_entries_discipline")
@@ -426,7 +427,12 @@ model users {
   consent_version                                                          String?
   /// Set by erasure (J4-E10): identity cleared, lifetime record retained.
   erased_at                                                                DateTime?                    @db.Timestamptz(6)
+  achievements                                                             achievements[]
   auth_tokens                                                              auth_tokens[]
+  certificate_templates                                                    certificate_templates[]
+  certificates_certificates_issued_byTousers                               certificates[]               @relation("certificates_issued_byTousers")
+  certificates_certificates_revoked_byTousers                              certificates[]               @relation("certificates_revoked_byTousers")
+  certificates_certificates_user_idTousers                                 certificates[]               @relation("certificates_user_idTousers")
   championship_invitations_championship_invitations_accepted_byTousers     championship_invitations[]   @relation("championship_invitations_accepted_byTousers")
   championship_invitations_championship_invitations_invited_byTousers      championship_invitations[]   @relation("championship_invitations_invited_byTousers")
   championship_officials_championship_officials_assigned_byTousers         championship_officials[]     @relation("championship_officials_assigned_byTousers")
@@ -443,10 +449,12 @@ model users {
   fixtures_fixtures_locked_byTousers                                       fixtures[]                   @relation("fixtures_locked_byTousers")
   fixtures                                                                 fixtures[]
   fixtures_fixtures_submitted_byTousers                                    fixtures[]                   @relation("fixtures_submitted_byTousers")
+  lifetime_entries                                                         lifetime_entries[]
   notification_reactions                                                   notification_reactions[]
   notification_reads                                                       notification_reads[]
   notifications                                                            notifications[]
   organization_members                                                     organization_members[]
+  organization_members_organization_members_verified_byTousers             organization_members[]       @relation("organization_members_verified_byTousers")
   organizations_organizations_created_byTousers                            organizations[]              @relation("organizations_created_byTousers")
   team_members                                                             team_members[]
   teams                                                                    teams[]
@@ -608,30 +616,21 @@ model user_invitations {
 }
 
 model fixture_awards {
-  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  fixture_id        String   @db.Uuid
-  recipient_user_id String   @db.Uuid
-  award_name        String   @db.VarChar(120)
+  id                String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fixture_id        String       @db.Uuid
+  recipient_user_id String       @db.Uuid
+  award_name        String       @db.VarChar(120)
+  created_at        DateTime     @default(now()) @db.Timestamptz(6)
   /// Catalogue entry when the official picked one; null keeps the free text as
   /// the record (J4-E4-S2). Scalar-only: the FK exists in Postgres.
-  award_type_id     String?  @db.Uuid
-  created_at        DateTime @default(now()) @db.Timestamptz(6)
-  fixtures          fixtures @relation(fields: [fixture_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users             users    @relation(fields: [recipient_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  award_type_id     String?      @db.Uuid
+  award_types       award_types? @relation(fields: [award_type_id], references: [id], onUpdate: NoAction)
+  fixtures          fixtures     @relation(fields: [fixture_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users             users        @relation(fields: [recipient_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([fixture_id], map: "idx_fixture_awards_fixture")
   @@index([recipient_user_id], map: "idx_fixture_awards_recipient")
-  @@index([award_type_id], map: "idx_fixture_awards_type")
 }
-
-/// The permanent record (Wave 3 · J4-E2 / J4-E4). See
-/// supabase/migrations/20260816060000_lifetime_and_achievements.sql.
-///
-/// Deliberately relation-free on the Prisma side: `organization_id`,
-/// `championship_id`, `fixture_id` and `sport_id` are FK-LESS in Postgres so the
-/// record survives its context being deleted (J4-E2-S3). Modelling them as
-/// relations here would invite a cascade Prisma cannot honour and add
-/// back-relations to `users`/`teams` that nothing reads.
 
 /// One entry per person per verified event. System-written only - there is no
 /// update or delete route, by design (J4-E2-S2).
@@ -652,6 +651,7 @@ model lifetime_entries {
   lock_version    Int?
   superseded_at   DateTime? @db.Timestamptz(6)
   created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  users           users     @relation(fields: [user_id], references: [id], onUpdate: NoAction)
 
   @@index([user_id, occurred_on(sort: Desc)], map: "idx_lifetime_user_date")
 }
@@ -675,21 +675,21 @@ model achievements {
   lock_version    Int?
   superseded_at   DateTime? @db.Timestamptz(6)
   created_at      DateTime  @default(now()) @db.Timestamptz(6)
-
-  @@index([user_id, occurred_on(sort: Desc)], map: "idx_achievements_user")
-  @@index([organization_id, occurred_on(sort: Desc)], map: "idx_achievements_org")
+  users           users?    @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 }
 
 /// The catalogue that turns "Player of the Match", "player of the match" and
 /// "POTM" into one countable thing (J4-E4-S2).
 model award_types {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  code       String   @unique
-  label      String
-  sport_id   String?  @db.Uuid
-  is_active  Boolean  @default(true)
-  sort_order Int      @default(100)
-  created_at DateTime @default(now()) @db.Timestamptz(6)
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code           String           @unique
+  label          String
+  sport_id       String?          @db.Uuid
+  is_active      Boolean          @default(true)
+  sort_order     Int              @default(100)
+  created_at     DateTime         @default(now()) @db.Timestamptz(6)
+  sports         sports?          @relation(fields: [sport_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  fixture_awards fixture_awards[]
 
   @@index([sport_id, sort_order], map: "idx_award_types_sport")
 }
@@ -918,4 +918,85 @@ model rate_limits {
 
   @@id([key, window_start])
   @@index([window_start], map: "idx_rate_limits_window")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model certificate_counters {
+  organization_id String        @db.Uuid
+  year            Int           @db.SmallInt
+  code            String        @db.VarChar(8)
+  next_number     Int           @default(1)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([organization_id, year, code])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model certificate_templates {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String         @db.Uuid
+  name            String         @db.VarChar(160)
+  design          Json           @default("{}")
+  code            String?        @db.VarChar(8)
+  is_default      Boolean        @default(false)
+  archived_at     DateTime?      @db.Timestamptz(6)
+  created_by      String?        @db.Uuid
+  created_at      DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime       @default(now()) @db.Timestamptz(6)
+  users           users?         @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  organizations   organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  certificates    certificates[]
+
+  @@index([organization_id, archived_at], map: "idx_certificate_templates_org")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model certificate_verifications {
+  id             BigInt       @id @default(autoincrement())
+  certificate_id String       @db.Uuid
+  verified_at    DateTime     @default(now()) @db.Timestamptz(6)
+  outcome        String       @db.VarChar(24)
+  ip             String?      @db.Inet
+  user_agent     String?
+  certificates   certificates @relation(fields: [certificate_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([certificate_id, verified_at(sort: Desc)], map: "idx_certificate_verifications_cert")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model certificates {
+  id                                   String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                      String                      @db.Uuid
+  template_id                          String?                     @db.Uuid
+  championship_id                      String?                     @db.Uuid
+  fixture_id                           String?                     @db.Uuid
+  user_id                              String?                     @db.Uuid
+  recipient_name                       String                      @db.VarChar(200)
+  serial                               String                      @db.VarChar(40)
+  seq                                  Int
+  year                                 Int                         @db.SmallInt
+  code                                 String                      @db.VarChar(8)
+  payload                              Json                        @default("{}")
+  signature                            String                      @db.VarChar(64)
+  token                                String                      @unique(map: "uq_certificates_token") @db.VarChar(64)
+  issued_by                            String?                     @db.Uuid
+  issued_at                            DateTime                    @default(now()) @db.Timestamptz(6)
+  revoked_at                           DateTime?                   @db.Timestamptz(6)
+  revoked_by                           String?                     @db.Uuid
+  revoked_reason                       String?
+  lock_version                         Int?
+  superseded_at                        DateTime?                   @db.Timestamptz(6)
+  certificate_verifications            certificate_verifications[]
+  championships                        championships?              @relation(fields: [championship_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  fixtures                             fixtures?                   @relation(fields: [fixture_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_certificates_issued_byTousers  users?                      @relation("certificates_issued_byTousers", fields: [issued_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  organizations                        organizations               @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_certificates_revoked_byTousers users?                      @relation("certificates_revoked_byTousers", fields: [revoked_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  certificate_templates                certificate_templates?      @relation(fields: [template_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_certificates_user_idTousers    users?                      @relation("certificates_user_idTousers", fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([organization_id, serial], map: "uq_certificates_serial")
+  @@index([championship_id], map: "idx_certificates_championship")
+  @@index([organization_id, issued_at(sort: Desc)], map: "idx_certificates_org")
+  @@index([user_id, issued_at(sort: Desc)], map: "idx_certificates_user")
 }

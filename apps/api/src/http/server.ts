@@ -23,6 +23,7 @@ import { makeMeRouter } from '../modules/iam/me.routes.js';
 import { makeRecordsRouter } from '../modules/records/records.routes.js';
 import { makeWorkspaceRouter } from '../modules/workspace/workspace.routes.js';
 import { makeReportsRouter } from '../modules/reports/reports.routes.js';
+import { makeCertificatesRouter } from '../modules/certificates/certificates.routes.js';
 import { makePeopleRouter } from '../modules/people/people.routes.js';
 import { makeUsersRouter } from '../modules/iam/users.routes.js';
 import { makeOrganizationsRouter } from '../modules/iam/organizations.routes.js';
@@ -139,6 +140,9 @@ export function buildApp(prisma: Prisma) {
 
   // Leadership reporting (J5-E1/E2/E3) and the organiser status view (J2-E8).
   api.use('/', makeReportsRouter(prisma));
+
+  // Certificates (J4-E6/E7). Public verification lives in the public router above.
+  api.use('/', makeCertificatesRouter(prisma));
 
   // ----- Notifications - global per-user feed + bell (visibility is championship-scoped) -----
   api.use('/', makeNotificationsRouter(prisma));
