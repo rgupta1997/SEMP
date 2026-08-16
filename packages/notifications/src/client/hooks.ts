@@ -67,8 +67,13 @@ export function createNotificationHooks(
       mutationFn: () => client.markAllRead(),
 
       onSuccess: () => {
+        // Only the feed's per-item read state changes here - the badge
+        // count is markSeen's job (see useMarkNotificationsSeen below).
+        // Both fire together on drawer-open; invalidating 'notifications'
+        // (prefix-matches unread-count too) here as well as there caused
+        // two redundant unread-count refetches back to back.
         queryClient.invalidateQueries({
-          queryKey: ['notifications'],
+          queryKey: ['notifications', 'feed'],
         });
       },
     });
