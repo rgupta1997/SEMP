@@ -52,6 +52,14 @@ export function createNotificationHooks(
       mutationFn: (notificationId: string) =>
         client.markRead(notificationId),
 
+      // Without this, the app-wide MutationCache.onSuccess fallback in
+      // main.tsx sees no meta.invalidate and calls invalidateQueries()
+      // with NO filter - refetching every active query in the whole app
+      // (dashboard, postable-championships, everything), not just this
+      // notification family. This scopes that fallback down to just
+      // queries whose key starts with 'notifications'.
+      meta: { invalidate: ['notifications'] },
+
       onSuccess: () => {
         queryClient.invalidateQueries({
           queryKey: ['notifications'],
@@ -65,6 +73,10 @@ export function createNotificationHooks(
 
     return useMutation({
       mutationFn: () => client.markAllRead(),
+
+      // See useMarkNotificationRead above - scopes the global
+      // MutationCache fallback to the notification family only.
+      meta: { invalidate: ['notifications'] },
 
       onSuccess: () => {
         // Only the feed's per-item read state changes here - the badge
@@ -88,6 +100,10 @@ export function createNotificationHooks(
     return useMutation({
       mutationFn: () => client.markSeen(),
 
+      // See useMarkNotificationRead above - scopes the global
+      // MutationCache fallback to the notification family only.
+      meta: { invalidate: ['notifications'] },
+
       onSuccess: () => {
         queryClient.invalidateQueries({
           queryKey: ['notifications', 'unread-count'],
@@ -110,6 +126,10 @@ export function createNotificationHooks(
         body?: string;
       }) => client.sendManual(input),
 
+      // See useMarkNotificationRead above - scopes the global
+      // MutationCache fallback to the notification family only.
+      meta: { invalidate: ['notifications'] },
+
       onSuccess: () => {
         queryClient.invalidateQueries({
           queryKey: ['notifications'],
@@ -130,6 +150,10 @@ export function createNotificationHooks(
         reaction: string;
       }) =>
         client.react(notificationId, reaction),
+
+      // See useMarkNotificationRead above - scopes the global
+      // MutationCache fallback to the notification family only.
+      meta: { invalidate: ['notifications'] },
 
       onSuccess: () => {
         queryClient.invalidateQueries({
