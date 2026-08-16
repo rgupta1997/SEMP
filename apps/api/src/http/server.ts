@@ -22,6 +22,7 @@ import { makeAuthRouter } from '../modules/iam/auth.routes.js';
 import { makeMeRouter } from '../modules/iam/me.routes.js';
 import { makeRecordsRouter } from '../modules/records/records.routes.js';
 import { makeWorkspaceRouter } from '../modules/workspace/workspace.routes.js';
+import { makeReportsRouter } from '../modules/reports/reports.routes.js';
 import { makePeopleRouter } from '../modules/people/people.routes.js';
 import { makeUsersRouter } from '../modules/iam/users.routes.js';
 import { makeOrganizationsRouter } from '../modules/iam/organizations.routes.js';
@@ -135,6 +136,9 @@ export function buildApp(prisma: Prisma) {
 
   // The institution home (J1-E7) - one aggregate behind the workspace's first screen.
   api.use('/', makeWorkspaceRouter(prisma));
+
+  // Leadership reporting (J5-E1/E2/E3) and the organiser status view (J2-E8).
+  api.use('/', makeReportsRouter(prisma));
 
   // ----- Notifications - global per-user feed + bell (visibility is championship-scoped) -----
   api.use('/', makeNotificationsRouter(prisma));

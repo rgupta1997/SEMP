@@ -8,4 +8,5 @@ export * from './demo-templates.js';
 export * from './championship-templates.js';
 export * from './regions.js';
 export * from './permissions.js';
+export * from './seasons.js';
 export * from './schemas.js';
