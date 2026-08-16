@@ -21,13 +21,20 @@ export function createNotificationHooks(
 ) {
   const client = createNotificationClient(request);
 
+  // `enabled` gates the query (e.g. only fetch while a drawer/panel is open)
+  // and is stripped before it's used as part of the query key or sent to the client.
   function useNotificationFeed(params?: {
     championshipId?: string;
     unread?: boolean;
+    take?: number;
+    enabled?: boolean;
   }) {
+    const { enabled = true, ...feedParams } = params ?? {};
+
     return useQuery({
-      queryKey: ['notifications', 'feed', params],
-      queryFn: () => client.getFeed(params),
+      queryKey: ['notifications', 'feed', feedParams],
+      queryFn: () => client.getFeed(feedParams),
+      enabled,
     });
   }
 
@@ -62,6 +69,23 @@ export function createNotificationHooks(
       onSuccess: () => {
         queryClient.invalidateQueries({
           queryKey: ['notifications'],
+        });
+      },
+    });
+  }
+
+  // Updates the cursor (last_seen_at) only - drives the badge count.
+  // Kept as its own mutation, separate from useMarkAllNotificationsRead,
+  // which writes per-item notification_reads rows for feed-list state.
+  function useMarkNotificationsSeen() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+      mutationFn: () => client.markSeen(),
+
+      onSuccess: () => {
+        queryClient.invalidateQueries({
+          queryKey: ['notifications', 'unread-count'],
         });
       },
     });
@@ -126,18 +150,16 @@ export function createNotificationHooks(
         {
           userId,
           onNotification: () => {
-            // Refresh the unread badge immediately.
+            // Refresh the unread badge immediately - only if something is
+            // actively observing it, to avoid waking up unmounted queries.
             void queryClient.refetchQueries({
-              queryKey: ['/notifications/unread-count'],
+              queryKey: ['notifications', 'unread-count'],
               type: 'active',
             });
 
-            // Refresh the existing notification feed.
-            void queryClient.invalidateQueries({
-              queryKey: ['/notifications?take=15'],
-            });
-
-            // Refresh notification package queries.
+            // Prefix-invalidate everything else under the 'notifications'
+            // key - covers the feed (['notifications', 'feed', ...]) and
+            // any other notification-package query, mounted or not.
             void queryClient.invalidateQueries({
               queryKey: ['notifications'],
             });
@@ -159,6 +181,7 @@ export function createNotificationHooks(
     useUnreadCount,
     useMarkNotificationRead,
     useMarkAllNotificationsRead,
+    useMarkNotificationsSeen,
     useSendNotification,
     useReactToNotification,
     useNotificationRealtime,

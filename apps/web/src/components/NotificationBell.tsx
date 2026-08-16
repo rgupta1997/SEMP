@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Bell, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { api } from '../lib/api';
 import { useApi } from '../lib/hooks';
+import { notificationHooks } from '../lib/notification';
 import type {
   NotificationDto,
   PostableEvent,
@@ -19,30 +18,37 @@ import {
   cn,
 } from './ui';
 
-const UNREAD_KEY = '/notifications/unread-count';
-const DRAWER_FEED = '/notifications?take=15';
-
 // Header bell + right-side drawer. Visible to every authenticated user; the feed
 // aggregates notifications from every championship the user belongs to.
+//
+// Reads/mutations go through the shared `notificationHooks` (packages/notifications)
+// instead of a local implementation, so this stays in sync with the rest of the app
+// (Compose modal, Realtime provider) without duplicating query-key logic.
 export function NotificationBell() {
-  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [composing, setComposing] = useState(false);
 
-  const { data: countData } = useQuery<{ count: number }>({
-    queryKey: [UNREAD_KEY],
-    queryFn: () => api('GET', UNREAD_KEY),
+  const { data: unreadCount } = notificationHooks.useUnreadCount();
+  const unread = unreadCount ?? 0;
+
+  // Only fetches while the drawer is open - mirrors the previous
+  // `open ? DRAWER_FEED : null` lazy-fetch behavior.
+  const {
+    data: feedData,
+    isLoading,
+  } = notificationHooks.useNotificationFeed({
+    take: 15,
+    enabled: open,
   });
 
-  const unread = countData?.count ?? 0;
+  // The shared client currently types getFeed's result as `unknown`;
+  // cast at the boundary the same way the rest of the app already
+  // relies on NotificationDto's shape.
+  const items = (feedData as NotificationDto[] | undefined) ?? [];
 
-  const {
-    data: items = [],
-    isLoading,
-  } = useApi<NotificationDto[]>(
-    open ? DRAWER_FEED : null,
-  );
-
+  // postable-championships stays a local fetch - it's app-level
+  // (compose-target listing), not a notifications-package concern,
+  // matching the same choice already made in NotificationComposeModal.
   const {
     data: postable = [],
   } = useApi<PostableEvent[]>(
@@ -51,18 +57,20 @@ export function NotificationBell() {
 
   const canPost = postable.length > 0;
 
-  // Clear the unread badge when the drawer opens (server records the read receipts).
+  const markAllRead = notificationHooks.useMarkAllNotificationsRead();
+  const markSeen = notificationHooks.useMarkNotificationsSeen();
+
+  // Drawer open clears both: per-item read state (markAllRead, for the
+  // feed list) and the cursor watermark (markSeen, for the badge count).
+  // Kept as two separate calls on purpose - see cursor.ts / hooks.ts notes.
   useEffect(() => {
     if (!open) return;
 
-    api('POST', '/notifications/read-all')
-      .then(() => {
-        qc.invalidateQueries({
-          queryKey: [UNREAD_KEY],
-        });
-      })
-      .catch(() => {});
-  }, [open, qc]);
+    markAllRead.mutate();
+    markSeen.mutate();
+    // Only re-run when the drawer opens/closes - not on every mutation identity change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   return (
     <>

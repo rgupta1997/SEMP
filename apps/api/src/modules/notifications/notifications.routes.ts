@@ -9,6 +9,8 @@ import {
   canPostToEvent, canSeeNotification, parseAudienceRule,
   getUserEventScopes, visibilityWhere,
 } from './audience.js';
+import { markSeen, getUnreadCountByCursor } from './cursor.js';
+import { mintRealtimeToken } from './realtime-token.js';
 import { notify } from '@semp/notifications/server/notify.js';
 import { Rules, type AudienceRule } from '@semp/notifications/core/rules.js';
 
@@ -68,13 +70,32 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
   }));
 
   // ----- Unread badge count -----
+  // Cursor-based: cheap range scan against notification_deliveries, compared
+  // to this user's notification_cursors.last_seen_at. See cursor.ts.
   router.get('/notifications/unread-count', asyncHandler(async (req, res) => {
     const user = req.user!;
-    const scopes = await getUserEventScopes(prisma, user);
-    const count = await prisma.notifications.count({
-      where: { ...visibilityWhere(scopes), notification_reads: { none: { user_id: user.id } } },
-    });
+    const count = await getUnreadCountByCursor(prisma, user.id);
     res.json({ count });
+  }));
+
+  // ----- Mark the bell/drawer as seen (updates the cursor only) -----
+  // Kept separate from /notifications/read-all: that route still writes
+  // per-item notification_reads rows for feed-list state. This route only
+  // moves the last_seen_at watermark that powers the badge count.
+  router.post('/notifications/mark-seen', asyncHandler(async (req, res) => {
+    const user = req.user!;
+    await markSeen(prisma, user.id);
+    res.status(204).send();
+  }));
+
+  // ----- Mint a short-lived Supabase-compatible token for the Realtime
+  // connection only. Unrelated to this app's own auth - see realtime-token.ts.
+  // The frontend refetches this before it expires (lib/supabase.ts), so a
+  // long-open tab keeps its live connection without any user-visible gap.
+  router.post('/notifications/realtime-token', asyncHandler(async (req, res) => {
+    const user = req.user!;
+    const result = mintRealtimeToken(user.id);
+    res.json(result);
   }));
 
   // ----- Championships the current user may post into (fills the compose dropdown) -----
@@ -192,7 +213,7 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
     });
     res.json({ reactions: summarizeReactions(all, user.id) });
   }));
-  
+
   // ----- Test compose audience -----
 
   router.post('/notifications/test-compose', asyncHandler(async (req, res) => {
@@ -248,5 +269,3 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
 
   return router;
 }
-
-

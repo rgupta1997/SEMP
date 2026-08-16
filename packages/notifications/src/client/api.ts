@@ -2,6 +2,7 @@ export interface NotificationClient {
   getFeed(params?: {
     championshipId?: string;
     unread?: boolean;
+    take?: number;
   }): Promise<unknown>;
 
   getUnreadCount(): Promise<number>;
@@ -19,6 +20,10 @@ export interface NotificationClient {
   markRead(notificationId: string): Promise<void>;
 
   markAllRead(): Promise<unknown>;
+
+  // Updates the notification_cursors watermark only - separate from
+  // markAllRead, which writes per-item notification_reads rows.
+  markSeen(): Promise<void>;
 
   react(
     notificationId: string,
@@ -47,6 +52,10 @@ export function createNotificationClient(
 
       if (params?.unread) {
         search.set('unread', '1');
+      }
+
+      if (params?.take) {
+        search.set('take', String(params.take));
       }
 
       const query = search.toString();
@@ -84,6 +93,12 @@ export function createNotificationClient(
       request(
         'POST',
         '/notifications/read-all',
+      ),
+
+    markSeen: () =>
+      request(
+        'POST',
+        '/notifications/mark-seen',
       ),
 
     react: (notificationId, reaction) =>

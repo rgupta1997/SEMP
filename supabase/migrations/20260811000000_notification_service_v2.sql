@@ -26,13 +26,14 @@ alter table notifications
           'userId', target_user_id
         )
 
-      when audience = 'all' and championship_id is not null then
+      when audience::text = 'all'
+           and championship_id is not null then
         jsonb_build_object(
           'kind', 'everyone',
           'championshipId', championship_id
         )
 
-      when audience = 'organizations_captains'
+      when audience::text = 'organizations_captains'
            and championship_id is not null then
         jsonb_build_object(
           'kind', 'role',
@@ -40,7 +41,7 @@ alter table notifications
           'championshipId', championship_id
         )
 
-      when audience = 'org_admins'
+      when audience::text = 'org_admins'
            and organization_id is not null then
         jsonb_build_object(
           'kind', 'org_admins',
