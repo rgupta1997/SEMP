@@ -23,6 +23,8 @@ import { makeMeRouter } from '../modules/iam/me.routes.js';
 import { makeRecordsRouter } from '../modules/records/records.routes.js';
 import { makeWorkspaceRouter } from '../modules/workspace/workspace.routes.js';
 import { makeReportsRouter } from '../modules/reports/reports.routes.js';
+import { makeBenchmarkRouter } from '../modules/reports/benchmark.routes.js';
+import { makeImpactRouter, makeImpactBuilder } from '../modules/reports/impact.routes.js';
 import { makeCertificatesRouter } from '../modules/certificates/certificates.routes.js';
 import { makeClaimsRouter } from '../modules/records/claims.routes.js';
 import { makePeopleRouter } from '../modules/people/people.routes.js';
@@ -140,7 +142,14 @@ export function buildApp(prisma: Prisma) {
   api.use('/', makeWorkspaceRouter(prisma));
 
   // Leadership reporting (J5-E1/E2/E3) and the organiser status view (J2-E8).
-  api.use('/', makeReportsRouter(prisma));
+  const reportsRouter = makeReportsRouter(prisma);
+  api.use('/', reportsRouter);
+
+  // Peer benchmark (J5-E4) and the Annual Impact Report (J5-E5). The impact report is
+  // handed the SAME builders the report tabs use, so a board pack and the screen it
+  // was promised on cannot disagree.
+  api.use('/', makeBenchmarkRouter(prisma));
+  api.use('/', makeImpactRouter(prisma, makeImpactBuilder(prisma, (reportsRouter as any).builders)));
 
   // Certificates (J4-E6/E7). Public verification lives in the public router above.
   api.use('/', makeCertificatesRouter(prisma));

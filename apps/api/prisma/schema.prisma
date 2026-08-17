@@ -160,6 +160,7 @@ model organizations {
   org_units                             org_units[]
   organization_members                  organization_members[]
   users_organizations_created_byTousers users?                       @relation("organizations_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction)
+  report_jobs                           report_jobs[]
   roles                                 roles[]
   standings                             standings[]
   team_entries                          team_entries[]
@@ -460,6 +461,7 @@ model users {
   organization_members                                                     organization_members[]
   organization_members_organization_members_verified_byTousers             organization_members[]       @relation("organization_members_verified_byTousers")
   organizations_organizations_created_byTousers                            organizations[]              @relation("organizations_created_byTousers")
+  report_jobs                                                              report_jobs[]
   team_members                                                             team_members[]
   teams                                                                    teams[]
   user_championship_roles_user_championship_roles_assigned_byTousers       user_championship_roles[]    @relation("user_championship_roles_assigned_byTousers")
@@ -1031,4 +1033,24 @@ model achievement_claims {
 
   @@index([organization_id, status, created_at(sort: Desc)], map: "idx_achievement_claims_org")
   @@index([user_id, created_at(sort: Desc)], map: "idx_achievement_claims_user")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model report_jobs {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  kind            String        @db.VarChar(32)
+  season          Int?          @db.SmallInt
+  status          String        @default("queued") @db.VarChar(16)
+  progress        Int           @default(0) @db.SmallInt
+  result          Json?
+  error           String?
+  requested_by    String?       @db.Uuid
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  started_at      DateTime?     @db.Timestamptz(6)
+  finished_at     DateTime?     @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users?        @relation(fields: [requested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([organization_id, created_at(sort: Desc)], map: "idx_report_jobs_org")
 }

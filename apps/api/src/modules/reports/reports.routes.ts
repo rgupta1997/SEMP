@@ -122,11 +122,9 @@ export function makeReportsRouter(prisma: Prisma): Router {
   };
 
   // ---- J5-E1 · participation -------------------------------------------------
-  router.get('/organizations/:id/reports/participation', asyncHandler(async (req, res) => {
-    const organizationId = req.params.id;
-    await gate(req, organizationId);
+  const build_participation = async (organizationId: string, seasonArg?: number) => {
     const { org, startMonth, bySeason } = await scope(organizationId);
-    const season = pickSeason(req, bySeason, startMonth);
+    const season = seasonArg ?? pickSeason({ query: {} }, bySeason, startMonth);
 
     const thisIds = bySeason.get(season) ?? [];
     const prevIds = bySeason.get(season - 1) ?? [];
@@ -165,7 +163,7 @@ export function makeReportsRouter(prisma: Prisma): Router {
       trend.push({ season: s, label: seasonLabel(s, startMonth), participants: uniq(await participantsIn(organizationId, bySeason.get(s) ?? [])) });
     }
 
-    res.json({
+    return ({
       organization: { id: organizationId, name: org.name },
       season, season_label: seasonLabel(season, startMonth), season_start_month: startMonth,
       available_seasons: [...bySeason.keys()].sort((a, b) => b - a).map((s) => ({ season: s, label: seasonLabel(s, startMonth) })),
@@ -180,14 +178,18 @@ export function makeReportsRouter(prisma: Prisma): Router {
       trend,
       basis: 'Locked results only. Figures are for the selected season.',
     });
+  };
+
+  router.get('/organizations/:id/reports/participation', asyncHandler(async (req, res) => {
+    await gate(req, req.params.id);
+    const seasonQ = Number(req.query.season);
+    res.json(await build_participation(req.params.id, Number.isInteger(seasonQ) ? seasonQ : undefined));
   }));
 
   // ---- J5-E2 · performance ---------------------------------------------------
-  router.get('/organizations/:id/reports/performance', asyncHandler(async (req, res) => {
-    const organizationId = req.params.id;
-    await gate(req, organizationId);
+  const build_performance = async (organizationId: string, seasonArg?: number) => {
     const { org, startMonth, bySeason } = await scope(organizationId);
-    const season = pickSeason(req, bySeason, startMonth);
+    const season = seasonArg ?? pickSeason({ query: {} }, bySeason, startMonth);
     const thisIds = bySeason.get(season) ?? [];
     const prevIds = bySeason.get(season - 1) ?? [];
 
@@ -238,7 +240,7 @@ export function makeReportsRouter(prisma: Prisma): Router {
       ? await prisma.users.findMany({ where: { id: { in: topIds } }, select: { id: true, name: true } })
       : []).map((u) => [u.id, u.name]));
 
-    res.json({
+    return ({
       organization: { id: organizationId, name: org.name },
       season, season_label: seasonLabel(season, startMonth),
       available_seasons: [...bySeason.keys()].sort((a, b) => b - a).map((s) => ({ season: s, label: seasonLabel(s, startMonth) })),
@@ -256,14 +258,18 @@ export function makeReportsRouter(prisma: Prisma): Router {
         total_medals: perPerson.get(id)!.gold + perPerson.get(id)!.silver + perPerson.get(id)!.bronze })),
       basis: 'Medals are read from recorded achievements; win rate counts locked results only.',
     });
+  };
+
+  router.get('/organizations/:id/reports/performance', asyncHandler(async (req, res) => {
+    await gate(req, req.params.id);
+    const seasonQ = Number(req.query.season);
+    res.json(await build_performance(req.params.id, Number.isInteger(seasonQ) ? seasonQ : undefined));
   }));
 
   // ---- J5-E3 · diversity & inclusion -----------------------------------------
-  router.get('/organizations/:id/reports/inclusion', asyncHandler(async (req, res) => {
-    const organizationId = req.params.id;
-    await gate(req, organizationId);
+  const build_inclusion = async (organizationId: string, seasonArg?: number) => {
     const { org, startMonth, bySeason } = await scope(organizationId);
-    const season = pickSeason(req, bySeason, startMonth);
+    const season = seasonArg ?? pickSeason({ query: {} }, bySeason, startMonth);
     const thisIds = bySeason.get(season) ?? [];
     const prevIds = bySeason.get(season - 1) ?? [];
 
@@ -319,7 +325,7 @@ export function makeReportsRouter(prisma: Prisma): Router {
       partsByProgramme.set(root, (partsByProgramme.get(root) ?? new Set()).add(r.user_id));
     }
 
-    res.json({
+    return ({
       organization: { id: organizationId, name: org.name },
       season, season_label: seasonLabel(season, startMonth),
       available_seasons: [...bySeason.keys()].sort((a, b) => b - a).map((s) => ({ season: s, label: seasonLabel(s, startMonth) })),
@@ -350,6 +356,12 @@ export function makeReportsRouter(prisma: Prisma): Router {
       ].sort((a, b) => b.participants - a.participants),
       basis: `Aggregate only. Cells below ${MIN_COHORT} people are suppressed, and "prefer not to say" is reported as its own answer.`,
     });
+  };
+
+  router.get('/organizations/:id/reports/inclusion', asyncHandler(async (req, res) => {
+    await gate(req, req.params.id);
+    const seasonQ = Number(req.query.season);
+    res.json(await build_inclusion(req.params.id, Number.isInteger(seasonQ) ? seasonQ : undefined));
   }));
 
   // ---- J2-E8 · the championship's operational status --------------------------
@@ -407,5 +419,7 @@ export function makeReportsRouter(prisma: Prisma): Router {
     });
   }));
 
+  // Exposed so the Annual Impact Report composes these exact figures (J5-E5).
+  (router as any).builders = { participation: build_participation, performance: build_performance, inclusion: build_inclusion };
   return router;
 }
