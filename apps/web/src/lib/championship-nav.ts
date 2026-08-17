@@ -19,6 +19,8 @@ export const EVENT_NAV: EventNavItem[] = [
   { segment: 'schedule', label: 'Schedule' },
   { segment: 'results', label: 'Results' },
   { segment: 'standings', label: 'Standings' },
+  // J2-E8. The figures behind it are live; the screen is parked and says so.
+  { segment: 'status', label: 'Status report', manage: true },
   { segment: 'settings', label: 'Settings', manage: true },
 ];
 

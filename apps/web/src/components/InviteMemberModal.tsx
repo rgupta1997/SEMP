@@ -120,6 +120,10 @@ export function InviteMemberModal({ orgId, onClose }: { orgId: string; onClose: 
   }, [tab, text, matrix]);
   const ready = parsed.filter((p) => !p.error);
   const bad = parsed.length - ready.length;
+  // The role picker is a FALLBACK, not a second place to say the same thing: if the
+  // sheet (or the pasted lines) already name a role for every address, it decides
+  // nothing and shouldn't be sitting there implying it does.
+  const needsDefaultRole = ready.length === 0 || ready.some((p) => !p.role);
 
   const pickFile = async (file: File | undefined) => {
     if (!file) return;
@@ -160,19 +164,26 @@ export function InviteMemberModal({ orgId, onClose }: { orgId: string; onClose: 
         the whole list - nobody has to relay a temporary password.
       </p>
 
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div className="w-44">
-          <Field label="Role for this batch">
-            <Select value={role} onChange={(e) => setRole(e.target.value)}>
-              {ORGANIZATION_MEMBER_ROLE.map((r) => <option key={r} value={r}>{titleCase(r)}</option>)}
-            </Select>
-          </Field>
+      {needsDefaultRole ? (
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div className="w-44">
+            <Field label="Role">
+              <Select value={role} onChange={(e) => setRole(e.target.value)}>
+                {ORGANIZATION_MEMBER_ROLE.map((r) => <option key={r} value={r}>{titleCase(r)}</option>)}
+              </Select>
+            </Field>
+          </div>
+          <p className="mb-3 max-w-xs text-xs text-slate-400 dark:text-slate-500">
+            {parsed.length === 0
+              ? <>For everyone in this batch. To vary it, add a <span className="font-medium">role</span> column or type it after an address.</>
+              : <>For the addresses that don’t name their own — the rest keep what they came with.</>}
+          </p>
         </div>
-        <p className="mb-3 max-w-xs text-xs text-slate-400 dark:text-slate-500">
-          Applies to every address without its own role. Add a <span className="font-medium">role</span> column to set
-          them individually.
+      ) : (
+        <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+          ✓ Every address names its own role, so it’s taken from {tab === 'file' ? 'the file' : 'what you pasted'}.
         </p>
-      </div>
+      )}
 
       <div className="mb-3">
         <Tabs active={tab} onChange={setTab} tabs={[{ id: 'paste', label: 'Type or paste' }, { id: 'file', label: 'Upload CSV / Excel' }]} />

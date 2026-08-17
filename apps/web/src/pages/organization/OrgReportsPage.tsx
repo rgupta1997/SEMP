@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { useApi } from '../../lib/hooks';
 import { Card, PageHeader, Select, Skeleton, cn } from '../../components/ui';
+import { OrgBenchmarkPage, OrgImpactReportPage } from './ParkedSurfaces';
 
 // Leadership reporting (J5-E1/E2/E3).
 //
@@ -14,11 +15,17 @@ import { Card, PageHeader, Select, Skeleton, cn } from '../../components/ui';
 // Every figure here is server-derived. Nothing on this page recomputes anything: if the
 // page and an export could disagree, the page is wrong by construction.
 
-type Tab = 'participation' | 'performance' | 'inclusion';
+type Tab = 'participation' | 'performance' | 'inclusion' | 'benchmark' | 'impact';
+// The last two are parked: their APIs are built and tested, their screens are not
+// scheduled yet. They stay in the tab strip because hiding them makes the gap
+// invisible, and somebody would ask for a report that already exists.
+const PARKED: Tab[] = ['benchmark', 'impact'];
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'participation', label: 'Participation' },
   { key: 'performance', label: 'Performance' },
   { key: 'inclusion', label: 'Diversity & inclusion' },
+  { key: 'benchmark', label: 'Peer benchmark' },
+  { key: 'impact', label: 'Impact report' },
 ];
 
 interface Kpi { value: number | null; delta_pct: number | null }
@@ -95,7 +102,8 @@ export function OrgReportsPage() {
   const [season, setSeason] = useState<string>('');
 
   const q = season ? `?season=${season}` : '';
-  const { data, isLoading } = useApi<any>(orgId ? `/organizations/${orgId}/reports/${tab}${q}` : null);
+  const parked = PARKED.includes(tab);
+  const { data, isLoading } = useApi<any>(orgId && !parked ? `/organizations/${orgId}/reports/${tab}${q}` : null);
   const seasons: SeasonRef[] = data?.available_seasons ?? [];
 
   return (
@@ -113,14 +121,16 @@ export function OrgReportsPage() {
             >{t.label}</button>
           ))}
         </div>
-        {seasons.length > 0 && (
+        {seasons.length > 0 && !parked && (
           <Select value={season || String(data?.season ?? '')} onChange={(e) => setSeason(e.target.value)} className="w-auto" aria-label="Season">
             {seasons.map((s) => <option key={s.season} value={s.season}>{s.label}</option>)}
           </Select>
         )}
       </div>
 
-      {isLoading || !data ? <Skeleton className="h-64" /> : (
+      {parked ? (
+        tab === 'benchmark' ? <OrgBenchmarkPage inline /> : <OrgImpactReportPage inline />
+      ) : isLoading || !data ? <Skeleton className="h-64" /> : (
         <>
           {tab === 'participation' && (
             <div className="grid gap-5">

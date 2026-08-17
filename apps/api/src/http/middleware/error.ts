@@ -30,6 +30,19 @@ export function errorHandler(
     }
   }
 
+  // An upload the body parser refused. This is the caller's problem and it is
+  // recoverable by sending something smaller, so it must not be reported as a server
+  // fault - a 500 tells somebody to come back later, which will not help.
+  if ((err as { type?: string }).type === 'entity.too.large') {
+    res.status(413).json({ error: { code: 'PAYLOAD_TOO_LARGE', message: 'That file is too large. Keep uploads under 3MB.' } });
+    return;
+  }
+  // Malformed JSON is likewise a bad request, not a crash.
+  if (err instanceof SyntaxError && 'body' in err) {
+    res.status(400).json({ error: { code: 'BAD_JSON', message: 'The request body was not valid JSON.' } });
+    return;
+  }
+
   console.error('[unhandled]', err);
   res.status(500).json({ error: { code: 'INTERNAL', message: 'Internal server error' } });
 }

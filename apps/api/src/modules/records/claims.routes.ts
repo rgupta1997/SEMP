@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, json } from 'express';
 import { z } from 'zod';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -95,9 +95,78 @@ export function makeClaimsRouter(prisma: Prisma): Router {
   router.get('/me/claims', asyncHandler(async (req, res) => {
     const rows = await prisma.achievement_claims.findMany({
       where: { user_id: req.user!.id }, orderBy: { created_at: 'desc' }, take: 200,
-      include: { organizations: { select: { name: true } }, sports: { select: { name: true } } },
+      include: {
+        organizations: { select: { name: true } }, sports: { select: { name: true } },
+        claim_evidence: { select: { id: true, filename: true, mime: true, size_bytes: true } },
+      },
     });
     res.json({ rows });
+  }));
+
+  // ---- evidence ----------------------------------------------------------------
+  //
+  // Uploaded as base64 JSON rather than multipart: it avoids a body-parser dependency
+  // for one endpoint, and the files here are small and few. The larger body limit is
+  // scoped to THIS route - raising it globally would widen every other endpoint's
+  // exposure for the sake of one that needs it.
+  const MAX_BYTES = 3 * 1024 * 1024;
+  const ALLOWED = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'];
+
+  const evidenceSchema = z.object({
+    filename: z.string().min(1).max(255),
+    mime: z.string().refine((m) => ALLOWED.includes(m), 'Upload an image or a PDF.'),
+    data: z.string().min(1),
+  });
+
+  router.post('/claims/:claimId/evidence', json({ limit: '5mb' }), validateBody(evidenceSchema),
+    asyncHandler(async (req, res) => {
+      const claim = await prisma.achievement_claims.findUnique({
+        where: { id: req.params.claimId },
+        select: { id: true, user_id: true, status: true },
+      });
+      if (!claim) throw new NotFoundError('Claim');
+      // Only the claimant, and only while it is still theirs to change. Letting evidence
+      // be added after a decision would mean the decision was made against a different
+      // claim from the one now on file.
+      if (claim.user_id !== req.user!.id) throw new ForbiddenError('This claim belongs to somebody else.');
+      if (claim.status !== 'pending') throw new BusinessRuleError('This claim has already been decided, so its evidence is fixed.');
+
+      const body = req.body as z.infer<typeof evidenceSchema>;
+      const bytes = Buffer.from(body.data.replace(/^data:[^;]+;base64,/, ''), 'base64');
+      if (!bytes.length) throw new BusinessRuleError('That file appears to be empty.');
+      if (bytes.length > MAX_BYTES) throw new BusinessRuleError('Keep the file under 3MB.');
+
+      const count = await prisma.claim_evidence.count({ where: { claim_id: claim.id } });
+      if (count >= 5) throw new BusinessRuleError('Five files is enough to make a case.');
+
+      const row = await prisma.claim_evidence.create({
+        data: {
+          claim_id: claim.id, filename: body.filename.slice(0, 255), mime: body.mime,
+          size_bytes: bytes.length, bytes, uploaded_by: req.user!.id,
+        },
+        select: { id: true, filename: true, mime: true, size_bytes: true },
+      });
+      res.status(201).json(row);
+    }));
+
+  /** The file itself. The claimant and the institution's validators, nobody else. */
+  router.get('/claim-evidence/:evidenceId', asyncHandler(async (req, res) => {
+    const ev = await prisma.claim_evidence.findUnique({
+      where: { id: req.params.evidenceId },
+      include: { achievement_claims: { select: { user_id: true, organization_id: true } } },
+    });
+    if (!ev) throw new NotFoundError('Evidence');
+
+    if (ev.achievement_claims.user_id !== req.user!.id) {
+      await assertValidator(req, ev.achievement_claims.organization_id);
+    }
+
+    res.set('Content-Type', ev.mime);
+    // Never inline HTML-ish content, and never let a browser sniff its way to executing
+    // an upload. The allow-list already blocks it; this is the second lock.
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Content-Disposition', `${req.query.download === '1' ? 'attachment' : 'inline'}; filename="${ev.filename.replace(/["\r\n]/g, '')}"`);
+    res.send(Buffer.from(ev.bytes));
   }));
 
   // ---- review (J4-E5-S2) ------------------------------------------------------
@@ -107,7 +176,11 @@ export function makeClaimsRouter(prisma: Prisma): Router {
     const rows = await prisma.achievement_claims.findMany({
       where: { organization_id: req.params.id, ...(status === 'all' ? {} : { status }) },
       orderBy: { created_at: 'desc' }, take: 300,
-      include: { users_achievement_claims_user_idTousers: { select: { id: true, name: true, email: true } }, sports: { select: { name: true } } },
+      include: {
+        users_achievement_claims_user_idTousers: { select: { id: true, name: true, email: true } },
+        sports: { select: { name: true } },
+        claim_evidence: { select: { id: true, filename: true, mime: true, size_bytes: true } },
+      },
     });
     const pending = await prisma.achievement_claims.count({ where: { organization_id: req.params.id, status: 'pending' } });
     res.json({ rows, pending });

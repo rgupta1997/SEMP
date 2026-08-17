@@ -5,6 +5,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { can } from '../../http/middleware/can.js';
 import { authorizeRecordView } from './records.access.js';
 import { provisionalEntriesFor } from './provisional.service.js';
+import { achievementTimeline, achievementYears } from './timeline.js';
 
 // Reading the permanent record (J4-E2).
 //
@@ -203,6 +204,77 @@ export function makeRecordsRouter(prisma: Prisma): Router {
   // An institution's own honours board - what module 08's reports and the Hall of
   // Fame (J4-E9) both read. Team rows are kept here: at org level the squad medal
   // is the fact, and its per-player copies would triple-count it.
+  /**
+   * Materialised career statistics (J4-E3).
+   *
+   * The same numbers `/people/:id/profile` derives on the fly, but read from the table
+   * the lock maintains - so a player page is one indexed lookup rather than a scan, and
+   * the discipline and format breakdowns exist at all.
+   */
+  router.get('/people/:userId/career-stats', asyncHandler(async (req, res) => {
+    await authorize(req.user!.id, !!req.user!.isSuperAdmin, req.params.userId);
+    const grain = ['sport', 'discipline', 'format'].includes(String(req.query.grain))
+      ? String(req.query.grain) : 'sport';
+
+    const rows = await prisma.career_stats.findMany({
+      where: {
+        user_id: req.params.userId,
+        grain,
+        ...(typeof req.query.organization_id === 'string' ? { organization_id: req.query.organization_id } : {}),
+      },
+      orderBy: [{ last_on: 'desc' }],
+      include: {
+        sports: { select: { id: true, name: true } },
+        disciplines: { select: { id: true, name: true } },
+        organizations: { select: { id: true, name: true } },
+      },
+    });
+
+    res.json({
+      grain,
+      rows: rows.map((r) => ({
+        sport: r.sports?.name ?? null,
+        sport_id: r.sport_id,
+        discipline: r.disciplines?.name ?? null,
+        format: r.format,
+        organization: r.organizations?.name ?? null,
+        played: r.played, won: r.won, lost: r.lost, drawn: r.drawn,
+        gold: r.gold, silver: r.silver, bronze: r.bronze, awards: r.awards,
+        total_medals: r.gold + r.silver + r.bronze,
+        // A win rate over nothing is not 0%, it is unanswerable - so it is null.
+        win_rate: r.played > 0 ? Math.round((r.won / r.played) * 100) : null,
+        first_on: r.first_on, last_on: r.last_on, computed_at: r.computed_at,
+      })),
+    });
+  }));
+
+  /** The chronological view of the same honours - the Achievement Timeline. */
+  router.get('/organizations/:id/achievements/timeline', asyncHandler(async (req, res) => {
+    const organizationId = req.params.id;
+    const allowed = await can(prisma, 'people.view', {
+      user: { id: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin },
+      scope: { organizationId },
+      fallback: async () => !!(await prisma.organization_members.findFirst({
+        where: { user_id: req.user!.id, organization_id: organizationId, status: 'active' },
+        select: { id: true },
+      })),
+    });
+    if (!allowed) throw new ForbiddenError('You do not have permission to view this institution\'s achievements.');
+
+    const q = req.query as Record<string, string | undefined>;
+    const year = q.year && /^\d{4}$/.test(q.year) ? Number(q.year) : null;
+    const [page, years] = await Promise.all([
+      achievementTimeline(prisma, organizationId, {
+        year,
+        cursorDate: q.cursor_date ?? null,
+        cursorId: q.cursor_id ?? null,
+        limit: q.limit ? Number(q.limit) : 20,
+      }),
+      achievementYears(prisma, organizationId),
+    ]);
+    res.json({ ...page, years });
+  }));
+
   router.get('/organizations/:id/achievements', asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
     const allowed = await can(prisma, 'people.view', {

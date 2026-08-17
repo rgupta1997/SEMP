@@ -18,6 +18,7 @@ model disciplines {
   squad_min              Int                      @default(1) @db.SmallInt
   squad_max              Int                      @default(15) @db.SmallInt
   display_order          Int                      @default(0)
+  career_stats           career_stats[]
   sports                 sports                   @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   tournament_disciplines tournament_disciplines[]
 
@@ -150,6 +151,7 @@ model organizations {
   settings                              Json                         @default("{}")
   created_by                            String?                      @db.Uuid
   achievement_claims                    achievement_claims[]
+  career_stats                          career_stats[]
   certificate_counters                  certificate_counters[]
   certificate_templates                 certificate_templates[]
   certificates                          certificates[]
@@ -247,6 +249,7 @@ model sports {
   created_at         DateTime             @default(now()) @db.Timestamptz(6)
   achievement_claims achievement_claims[]
   award_types        award_types[]
+  career_stats       career_stats[]
   disciplines        disciplines[]
   teams              teams[]
   tournament_sports  tournament_sports[]
@@ -434,6 +437,7 @@ model users {
   achievement_claims_achievement_claims_user_idTousers                     achievement_claims[]         @relation("achievement_claims_user_idTousers")
   achievements                                                             achievements[]
   auth_tokens                                                              auth_tokens[]
+  career_stats                                                             career_stats[]
   certificate_templates                                                    certificate_templates[]
   certificates_certificates_issued_byTousers                               certificates[]               @relation("certificates_issued_byTousers")
   certificates_certificates_revoked_byTousers                              certificates[]               @relation("certificates_revoked_byTousers")
@@ -445,6 +449,7 @@ model users {
   championship_organizations_championship_organizations_applied_byTousers  championship_organizations[] @relation("championship_organizations_applied_byTousers")
   championship_organizations_championship_organizations_reviewed_byTousers championship_organizations[] @relation("championship_organizations_reviewed_byTousers")
   championship_templates                                                   championship_templates[]
+  claim_evidence                                                           claim_evidence[]
   demo_requests                                                            demo_requests[]
   demo_sandboxes_demo_sandboxes_created_byTousers                          demo_sandboxes[]             @relation("demo_sandboxes_created_byTousers")
   demo_sandboxes_demo_sandboxes_organiser_user_idTousers                   demo_sandboxes[]             @relation("demo_sandboxes_organiser_user_idTousers")
@@ -1010,26 +1015,27 @@ model certificates {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model achievement_claims {
-  id                                         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id                                    String        @db.Uuid
-  organization_id                            String        @db.Uuid
-  kind                                       String        @default("achievement") @db.VarChar(24)
-  title                                      String        @db.VarChar(200)
+  id                                         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                                    String           @db.Uuid
+  organization_id                            String           @db.Uuid
+  kind                                       String           @default("achievement") @db.VarChar(24)
+  title                                      String           @db.VarChar(200)
   detail                                     String?
-  sport_id                                   String?       @db.Uuid
-  occurred_on                                DateTime      @db.Date
+  sport_id                                   String?          @db.Uuid
+  occurred_on                                DateTime         @db.Date
   evidence_url                               String?
-  status                                     String        @default("pending") @db.VarChar(16)
-  decided_by                                 String?       @db.Uuid
-  decided_at                                 DateTime?     @db.Timestamptz(6)
+  status                                     String           @default("pending") @db.VarChar(16)
+  decided_by                                 String?          @db.Uuid
+  decided_at                                 DateTime?        @db.Timestamptz(6)
   decision_note                              String?
-  achievement_id                             String?       @db.Uuid
-  created_at                                 DateTime      @default(now()) @db.Timestamptz(6)
-  achievements                               achievements? @relation(fields: [achievement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  users_achievement_claims_decided_byTousers users?        @relation("achievement_claims_decided_byTousers", fields: [decided_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  organizations                              organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  sports                                     sports?       @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  users_achievement_claims_user_idTousers    users         @relation("achievement_claims_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  achievement_id                             String?          @db.Uuid
+  created_at                                 DateTime         @default(now()) @db.Timestamptz(6)
+  achievements                               achievements?    @relation(fields: [achievement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_achievement_claims_decided_byTousers users?           @relation("achievement_claims_decided_byTousers", fields: [decided_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  organizations                              organizations    @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sports                                     sports?          @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_achievement_claims_user_idTousers    users            @relation("achievement_claims_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  claim_evidence                             claim_evidence[]
 
   @@index([organization_id, status, created_at(sort: Desc)], map: "idx_achievement_claims_org")
   @@index([user_id, created_at(sort: Desc)], map: "idx_achievement_claims_user")
@@ -1053,4 +1059,52 @@ model report_jobs {
   users           users?        @relation(fields: [requested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([organization_id, created_at(sort: Desc)], map: "idx_report_jobs_org")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model claim_evidence {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  claim_id           String             @db.Uuid
+  filename           String             @db.VarChar(255)
+  mime               String             @db.VarChar(100)
+  size_bytes         Int
+  bytes              Bytes
+  uploaded_by        String             @db.Uuid
+  uploaded_at        DateTime           @default(now()) @db.Timestamptz(6)
+  achievement_claims achievement_claims @relation(fields: [claim_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users              users              @relation(fields: [uploaded_by], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([claim_id, uploaded_at], map: "idx_claim_evidence_claim")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model career_stats {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id         String        @db.Uuid
+  organization_id String        @db.Uuid
+  sport_id        String        @db.Uuid
+  discipline_id   String?       @db.Uuid
+  format          String?       @db.VarChar(40)
+  grain           String        @db.VarChar(12)
+  played          Int           @default(0)
+  won             Int           @default(0)
+  lost            Int           @default(0)
+  drawn           Int           @default(0)
+  gold            Int           @default(0)
+  silver          Int           @default(0)
+  bronze          Int           @default(0)
+  awards          Int           @default(0)
+  first_on        DateTime?     @db.Date
+  last_on         DateTime?     @db.Date
+  computed_at     DateTime      @default(now()) @db.Timestamptz(6)
+  disciplines     disciplines?  @relation(fields: [discipline_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sports          sports        @relation(fields: [sport_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([organization_id, sport_id, grain], map: "idx_career_stats_org_sport")
+  @@index([user_id, grain, last_on(sort: Desc)], map: "idx_career_stats_user")
 }

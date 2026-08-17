@@ -7,6 +7,7 @@ import { createNotification } from '../notifications/audience.js';
 import { advanceWinnerStrict } from './bracket.js';
 import { deriveAchievements, queueCertificates, writeLifetimeEntries } from './downstream.js';
 import { resolveFixtureParticipants, type FixtureParticipants } from './participants.js';
+import { refreshCareerStatsForFixture } from '../records/career-stats.service.js';
 
 // The scorecard state machine - the spine of every "verified" claim in the product.
 //
@@ -261,6 +262,13 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
   // very thing it announces.
   await notifyParticipants(prisma, req, { fixture: fx, label, championshipId, participants });
 
+  // Career statistics, refreshed for exactly the people this result touched (J4-E3).
+  // Outside the transaction and deliberately not awaited into the lock's success: the
+  // lock is the fact, and a statistics table that is briefly behind must never be the
+  // reason a scorecard refuses to become official. The recompute is idempotent, so the
+  // next lock on any of their fixtures repairs a miss.
+  await refreshCareerStatsForFixture(prisma, fx.id);
+
   return fx;
 }
 
@@ -359,6 +367,11 @@ export async function unlockScorecard(prisma: Prisma, req: Request, fixtureId: s
       reason: { from: null, to: trimmed },
     },
   });
+
+  // An unlock supersedes the entries and medals this fixture produced, so the career
+  // totals have to come back down too. A record that keeps a medal from a result that
+  // was withdrawn is precisely the thing the supersede model exists to prevent.
+  await refreshCareerStatsForFixture(prisma, fx.id);
 
   return fx;
 }

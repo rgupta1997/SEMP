@@ -63,7 +63,12 @@ export function buildApp(prisma: Prisma) {
       else cb(new Error('Not allowed by CORS'));
     },
   }));
-  app.use(express.json());
+  // Everything gets the small default limit. Claim evidence carries a file, so that one
+  // route installs its own larger parser and is skipped here - a global 5MB ceiling
+  // would hand every other endpoint on the API a 50x bigger body to choke on.
+  const carriesAFile = /\/claims\/[^/]+\/evidence$/;
+  const smallJson = express.json();
+  app.use((req, res, next) => (carriesAFile.test(req.path) ? next() : smallJson(req, res, next)));
   // Must precede anything that resolves permissions: `can()` memoises the module
   // pre-check's lookups here, and without the store every call re-reads them.
   app.use(requestCache);

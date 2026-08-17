@@ -30,6 +30,10 @@ import { OrgOverviewPage } from './pages/organization/OrgOverviewPage';
 import { OrgHomePage } from './pages/organization/OrgHomePage';
 import { OrgReportsPage } from './pages/organization/OrgReportsPage';
 import { OrgAchievementsPage } from './pages/organization/OrgAchievementsPage';
+import { AchievementsLayout } from './pages/organization/AchievementsLayout';
+import { AchievementTimeline } from './pages/organization/AchievementTimeline';
+import { ClaimsReviewPage } from './pages/organization/ClaimsReviewPage';
+import { EventStatusReportPage } from './pages/organization/ParkedSurfaces';
 import { OrgAdministrationPage } from './pages/organization/OrgAdministrationPage';
 import { CertificatesDashboard } from './pages/organization/certificates/CertificatesDashboard';
 import { IssuedRegisterPage } from './pages/organization/certificates/IssuedRegisterPage';
@@ -118,7 +122,13 @@ function AuthenticatedRoutes() {
         <Route path="/organizations/:orgId/home" element={<OrgHomePage />} />
         <Route path="/organizations/:orgId/overview" element={<OrgOverviewPage />} />
         {/* Wave 4 surfaces. Records and reports are module-gated the same way the rest is. */}
-        <Route path="/organizations/:orgId/achievements" element={<ModuleGate module="records"><OrgAchievementsPage /></ModuleGate>} />
+        {/* Achievements is three views of one record: the timeline is the landing
+            view, per the design; the Hall of Fame and the claims queue sit beside it. */}
+        <Route path="/organizations/:orgId/achievements" element={<ModuleGate module="records"><AchievementsLayout /></ModuleGate>}>
+          <Route index element={<AchievementTimeline />} />
+          <Route path="hall-of-fame" element={<OrgAchievementsPage />} />
+          <Route path="claims" element={<ClaimsReviewPage />} />
+        </Route>
         <Route path="/organizations/:orgId/reports" element={<ModuleGate module="reports"><OrgReportsPage /></ModuleGate>} />
         {/* Certificates is four screens, not one: the manager's dashboard, the register,
             the template gallery, and a single certificate. Ordered so the literal
@@ -167,6 +177,8 @@ function AuthenticatedRoutes() {
           <Route path="live" element={<LivePage />} />
           <Route path="results" element={<ResultsPage />} />
           <Route path="standings" element={<StandingsPage />} />
+          {/* Parked: J2-E8's figures are built and tested, its screen is not. */}
+          <Route path="status" element={<EventStatusReportPage />} />
           <Route path="settings" element={<EventSettingsPage />} />
         </Route>
 
