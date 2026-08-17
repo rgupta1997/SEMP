@@ -2,10 +2,15 @@ import { useMemo, useState } from 'react';
 import { Plus, Trophy } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApi, fmtDate } from '../../lib/hooks';
-import { Badge, BackButton, Button, Card, CardBody, CardHeader, EmptyState, PageHeader, Spinner, cn } from '../../components/ui';
+import { Badge, Button, Card, CardBody, CardHeader, EmptyState, PageHeader, Spinner, cn } from '../../components/ui';
 import type { Achievement } from '../../components/participant/types';
 import { ClaimAchievementModal } from './ClaimAchievementModal';
 import { EvidenceChip } from '../organization/ClaimsReviewPage';
+
+// Two of the three views in a person's Achievements area (the third is the timeline,
+// in ParticipantAchievementsLayout). They mirror the institution's Hall of Fame and
+// Claims queue: same words, same order, one person's scope instead of an
+// institution's.
 
 interface AchievementsResponse { achievements: Achievement[] }
 
@@ -28,13 +33,10 @@ const RESULT_STYLE: Record<string, string> = {
   pending: 'text-slate-400 dark:text-slate-500',
 };
 
-// Full, drilled-down view of every award the participant has earned - grouped by
-// award name, each occurrence linking to its match. Reached from the dashboard's
-// "All achievements →" link.
-export function ParticipantAchievementsPage() {
+// Every award the participant has earned, grouped by award name, each occurrence
+// linking to its match - the person-scoped answer to "what have I won?".
+export function ParticipantAwardsPage() {
   const { data, isLoading } = useApi<AchievementsResponse>('/me/achievements');
-  const claims = useApi<{ rows: MyClaim[] }>('/me/claims');
-  const [claiming, setClaiming] = useState(false);
 
   const groups = useMemo(() => {
     const map = new Map<string, Achievement[]>();
@@ -50,47 +52,7 @@ export function ParticipantAchievementsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Achievements" subtitle="Every award you've earned across your championships.">
-        <BackButton to="/profile" className="mb-0">Dashboard</BackButton>
-        <Button onClick={() => setClaiming(true)}><Plus size={15} aria-hidden />Claim an achievement</Button>
-      </PageHeader>
-
-      {/* Claims live above the earned awards, and stay visible after a decision: the
-          rejection note is the most useful thing on this page to the person who got one. */}
-      {(claims.data?.rows.length ?? 0) > 0 && (
-        <Card>
-          <CardHeader title="Claimed elsewhere" subtitle="Achievements you asked your institution to vouch for." />
-          <CardBody>
-            <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-              {claims.data!.rows.map((c) => {
-                const s = CLAIM_STATUS[c.status] ?? { label: c.status, cls: 'bg-slate-100 text-slate-700' };
-                return (
-                  <li key={c.id} className="grid gap-1.5 py-3 first:pt-0 last:pb-0">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{c.title}</span>
-                      <span className={cn('rounded-full px-2 py-0.5 text-xs font-semibold', s.cls)}>{s.label}</span>
-                    </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {fmtDate(c.occurred_on)}{c.sports?.name ? ` · ${c.sports.name}` : ''}
-                      {c.organizations?.name ? ` · reviewed by ${c.organizations.name}` : ''}
-                    </p>
-                    {c.decision_note && (
-                      <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-400">
-                        {c.decision_note}
-                      </p>
-                    )}
-                    {c.claim_evidence.length > 0 && (
-                      <div className="flex flex-wrap gap-2">{c.claim_evidence.map((e) => <EvidenceChip key={e.id} e={e} />)}</div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </CardBody>
-        </Card>
-      )}
-
-      {claiming && <ClaimAchievementModal onClose={() => setClaiming(false)} invalidate={['/me/claims']} />}
+      <PageHeader title="Awards" subtitle="Your record · every award you've earned across your championships." />
 
       {isLoading ? <Spinner /> : groups.length === 0 ? (
         <EmptyState icon={<Trophy size={24} />} title="No achievements yet" description="Awards you receive from match officials will appear here." />
@@ -142,6 +104,64 @@ export function ParticipantAchievementsPage() {
             </Card>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+// What this person has asked an institution to vouch for. The mirror of the
+// institution's Claims queue, from the other side of the same decision - and it stays
+// visible after a decision, because the rejection note is the most useful thing on
+// this page to the person who got one.
+export function ParticipantClaimsPage() {
+  const claims = useApi<{ rows: MyClaim[] }>('/me/claims');
+  const [claiming, setClaiming] = useState(false);
+  const rows = claims.data?.rows ?? [];
+
+  return (
+    <div className="space-y-5">
+      <PageHeader title="Claims" subtitle="Your record · achievements you've asked an institution to vouch for.">
+        <Button onClick={() => setClaiming(true)}><Plus size={15} aria-hidden />Claim an achievement</Button>
+      </PageHeader>
+
+      {claiming && <ClaimAchievementModal onClose={() => setClaiming(false)} invalidate={['/me/claims']} />}
+
+      {claims.isLoading ? <Spinner /> : rows.length === 0 ? (
+        <EmptyState
+          icon={<Trophy size={24} />}
+          title="Nothing claimed yet"
+          description="Won something outside this platform? Claim it, attach your evidence, and your institution can validate it onto your record."
+        />
+      ) : (
+        <Card>
+          <CardBody>
+            <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+              {rows.map((c) => {
+                const s = CLAIM_STATUS[c.status] ?? { label: c.status, cls: 'bg-slate-100 text-slate-700' };
+                return (
+                  <li key={c.id} className="grid gap-1.5 py-3 first:pt-0 last:pb-0">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{c.title}</span>
+                      <span className={cn('rounded-full px-2 py-0.5 text-xs font-semibold', s.cls)}>{s.label}</span>
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {fmtDate(c.occurred_on)}{c.sports?.name ? ` · ${c.sports.name}` : ''}
+                      {c.organizations?.name ? ` · reviewed by ${c.organizations.name}` : ''}
+                    </p>
+                    {c.decision_note && (
+                      <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-400">
+                        {c.decision_note}
+                      </p>
+                    )}
+                    {c.claim_evidence.length > 0 && (
+                      <div className="flex flex-wrap gap-2">{c.claim_evidence.map((e) => <EvidenceChip key={e.id} e={e} />)}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </CardBody>
+        </Card>
       )}
     </div>
   );

@@ -11,6 +11,7 @@ import { BRAND } from '../lib/brand';
 import { parseEventId } from '../lib/championship-nav';
 import { FeedbackWidget } from './FeedbackWidget';
 import { useFilterBar, FilterProvider } from '../lib/filters';
+import { usePermissions } from '../lib/permissions';
 import { useApi } from '../lib/hooks';
 import { useTheme } from '../lib/theme';
 import { Avatar, cn } from './ui';
@@ -24,30 +25,64 @@ export function roleHome(role: AppRole): string {
   return role === 'system' ? '/platform/sports' : '/profile';
 }
 
-// The institution workspace (J1-E7-S1). A different product from the participant
-// shell, not the same one with extra links: Home first, the operation grouped the way
-// an institution talks about itself, and Discover kept because entering somebody
-// else's championship is part of running your own programme.
+// The institution workspace (J1-E7-S1). ONE shell for everybody in an institution -
+// a student, a captain and the sports office see the same navigation with different
+// things in it, not two unrelated products.
 //
-// Filtered by module access so a switched-off section is ABSENT rather than present
-// and refused - the nav and the server read the same `modules` map (J6-E2-S2).
-function institutionNav(orgId: string, modules: string[] | null): NavGroup[] {
+// Two filters, and both are needed:
+//   - MODULE, what the institution has switched on for this person's audience
+//     (J6-E2-S2). This is the students column on the Module access screen finally
+//     doing something visible: switch People off for students and it leaves their
+//     navigation, rather than only refusing them if they type the URL.
+//   - ROLE, what this person could actually do once they arrived. A module left on
+//     by default must not offer a student Reports or Certificates, whose endpoints
+//     fall back to owner/admin - a nav entry that 403s is the thing S2 forbids.
+//
+// So: an item is present only when its module is on AND its audience can use it.
+//
+// ONE LIST, ONE VOCABULARY. A student's sidebar is this list with entries missing,
+// never a different set of words for the same places - the sports office and the
+// student both call a championship a championship, and both reach it at the same
+// place in the same order. Everything personal to the account - which institutions
+// you belong to - lives in the account menu, not as a nav entry, because inside an
+// institution's workspace a link called "Organizations" is a question already
+// answered by the sidebar header.
+function institutionNav(orgId: string, modules: string[] | null, who: { staff: boolean; official: boolean }): NavGroup[] {
   const on = (m: string) => !modules || modules.includes(m);
+  const { staff, official } = who;
   // One flat list, in the designed order. Grouping it read as three small products;
-  // an institution thinks of this as one workspace with nine places in it.
+  // an institution thinks of this as one workspace with places in it.
   return [{
     group: '', items: [
+      // Everyone opens here. It is the institution's shape - who is in it, what is
+      // running - and it is the operator's queues that are staff-only, not the page.
       { to: `/organizations/${orgId}/home`, label: 'Home', icon: <Home size={16} />, end: true },
+      // Everybody's own record and fixtures, staff included. This is what stops the
+      // shell being two worlds: the personal surface is always one click away.
+      { to: '/profile', label: 'My Game', icon: <User size={16} />, end: true },
+      // Shown to whoever actually officiates, staff or not. It used to be permanent
+      // in the participant shell so a fresh assignment could be found without signing
+      // in again; a permanent entry for the whole institution is noise, and the
+      // context that carries the assignment is refetched on sign-in either way.
+      ...(official && on('results') ? [{ to: '/officiating', label: 'Officiating', icon: <Flag size={16} /> }] : []),
+      // The directory is readable by any active member (the endpoint's fallback), so
+      // this one is module-gated only - that switch is the institution's to make.
       ...(on('people') ? [{ to: `/organizations/${orgId}/members`, label: 'People', icon: <Users size={16} /> }] : []),
       ...(on('teams') ? [{ to: `/organizations/${orgId}/teams`, label: 'Teams', icon: <Shield size={16} /> }] : []),
-      // "Events" is the institution's word for these. "Championships" is the
-      // platform's, and it is the participant shell that keeps it.
-      ...(on('championships') ? [{ to: '/championships', label: 'Events', icon: <Trophy size={16} /> }] : []),
-      { to: '/discover', label: 'Discover', icon: <Compass size={16} /> },
+      // One word for one thing. The org shell used to say "Events" for the page every
+      // other surface - the route, the page itself, Discover's copy - calls
+      // championships, so the same place had two names depending on who signed in.
+      ...(on('championships') ? [{ to: '/championships', label: 'Championships', icon: <Trophy size={16} /> }] : []),
+      ...(on('championships') ? [{ to: '/discover', label: 'Discover', icon: <Compass size={16} /> }] : []),
+      // Anyone may host one; an institution switching championships off switches off
+      // the whole area, hosting included.
+      ...(on('championships') ? [{ to: '/host', label: 'Host', icon: <Plus size={16} /> }] : []),
       ...(on('records') ? [{ to: `/organizations/${orgId}/achievements`, label: 'Achievements', icon: <Medal size={16} /> }] : []),
-      ...(on('records') ? [{ to: `/organizations/${orgId}/certificates`, label: 'Certificates', icon: <Award size={16} /> }] : []),
-      ...(on('reports') ? [{ to: `/organizations/${orgId}/reports`, label: 'Reports', icon: <BarChart3 size={16} /> }] : []),
-      ...(on('administration') ? [{ to: `/organizations/${orgId}/administration`, label: 'Administration', icon: <Settings size={16} /> }] : []),
+      // Issuing certificates and reading reports both fall back to owner/admin on the
+      // server, so they are staff entries however the modules are set.
+      ...(staff && on('records') ? [{ to: `/organizations/${orgId}/certificates`, label: 'Certificates', icon: <Award size={16} /> }] : []),
+      ...(staff && on('reports') ? [{ to: `/organizations/${orgId}/reports`, label: 'Reports', icon: <BarChart3 size={16} /> }] : []),
+      ...(staff && on('administration') ? [{ to: `/organizations/${orgId}/administration`, label: 'Administration', icon: <Settings size={16} /> }] : []),
       { to: '/help', label: 'Help & guide', icon: '?' },
     ],
   }];
@@ -96,16 +131,19 @@ function navFor(role: AppRole): NavGroup[] {
 // Whose workspace this is, at the top of the sidebar (J1-E7-S1). When the person only
 // ever has one, it is an identity block and not a control - a picker with one option
 // is furniture.
+//
+// It lists institutions only. "Personal" used to sit here as a thirteenth option, but
+// My Game is now a nav item inside every institution shell, so offering it as a
+// separate workspace to switch INTO was the fork this design set out to close.
 function WorkspaceHeader({ onNavigate }: { onNavigate: () => void }) {
-  const { workspace, staffedOrganizations, canSwitch, setWorkspace } = useWorkspace();
+  const { workspace, organizations, canSwitch, setWorkspace } = useWorkspace();
   const [open, setOpen] = useState(false);
   const org = workspace.kind === 'organization' ? workspace.organization : null;
 
   const label = org ? (org.short_name || org.name) : 'My Game';
-  const options: Workspace[] = [
-    { kind: 'personal' },
-    ...staffedOrganizations.map((o) => ({ kind: 'organization' as const, id: o.id, organization: o })),
-  ];
+  const options: Extract<Workspace, { kind: 'organization' }>[] = organizations.map((o) => ({
+    kind: 'organization', id: o.id, role: o.role, organization: o.organization,
+  }));
 
   const body = (
     <div className="flex min-w-0 items-center gap-2.5">
@@ -142,17 +180,16 @@ function WorkspaceHeader({ onNavigate }: { onNavigate: () => void }) {
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <ul role="listbox" className="animate-dropdown absolute left-3 right-3 z-20 mt-1 overflow-hidden rounded-xl border border-slate-700 bg-slate-900 py-1 shadow-xl">
             {options.map((o) => {
-              const id = o.kind === 'personal' ? 'personal' : o.id;
-              const active = o.kind === workspace.kind && (o.kind === 'personal' || o.id === (workspace as any).id);
+              const active = workspace.kind === 'organization' && workspace.id === o.id;
               return (
-                <li key={id}>
+                <li key={o.id}>
                   <button
                     type="button" role="option" aria-selected={active}
                     onClick={() => { setOpen(false); onNavigate(); if (!active) setWorkspace(o); }}
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-800"
                   >
                     <span className="flex-none">{active ? <Check size={14} /> : <span className="inline-block w-[14px]" />}</span>
-                    <span className="truncate">{o.kind === 'personal' ? 'My Game' : (o.organization.short_name || o.organization.name)}</span>
+                    <span className="truncate">{o.organization.short_name || o.organization.name}</span>
                   </button>
                 </li>
               );
@@ -219,7 +256,8 @@ interface EventSummary { id: string; name: string }
 
 export function AppShell() {
   const { ctx, activeRole, logout } = useAuth();
-  const { workspace, modules } = useWorkspace();
+  const { workspace, modules, isStaff } = useWorkspace();
+  const { isOfficialAny } = usePermissions();
   const { theme, toggle } = useTheme();
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -233,11 +271,12 @@ export function AppShell() {
 
   if (!ctx) return null;
 
-  // The institution shell replaces the participant one entirely - a super admin in the
-  // platform shell keeps theirs, since that is a third product again.
+  // One shell for anybody who belongs to an institution, whatever they are in it.
+  // `navFor` is now only two cases: the platform admin, who is genuinely a third
+  // product, and a solo player with no institution at all (J3-E1).
   const groups = activeRole === 'system' || workspace.kind !== 'organization'
     ? navFor(activeRole)
-    : institutionNav(workspace.id, modules);
+    : institutionNav(workspace.id, modules, { staff: isStaff, official: isOfficialAny });
   const subtitle = championship?.name
     ?? (workspace.kind === 'organization' && activeRole !== 'system'
       ? workspace.organization.name
@@ -256,7 +295,7 @@ export function AppShell() {
     fbPath === '/discover' ||
     fbPath === '/championships' ||
     isChampionshipOverview ||
-    (fbSegs.length === 3 && fbSegs[0] === 'organizations' && fbSegs[2] === 'overview');
+    (fbSegs.length === 3 && fbSegs[0] === 'organizations' && fbSegs[2] === 'home');
 
   return (
     <FilterProvider>
@@ -334,6 +373,17 @@ export function AppShell() {
                         <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.email}</div>
                         {ctx.user.phone && <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.phone}</div>}
                       </div>
+                      {/* Which institutions this ACCOUNT belongs to - joining another,
+                          withdrawing from one. It is a property of the person, not a
+                          place inside any one institution's workspace, so it sits
+                          beside their name rather than in the sidebar. */}
+                      <NavLink
+                        to="/organizations"
+                        onClick={() => setMenuOpen(false)}
+                        className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                      >
+                        <Landmark size={14} aria-hidden /> My institutions
+                      </NavLink>
                       <button onClick={signOut} className="w-full px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">Sign out</button>
                     </div>
                   </>

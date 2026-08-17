@@ -60,7 +60,7 @@ export function InviteAcceptPage({ token }: { token: string }) {
       toast.success(`You’ve joined ${invite.organization.name}`);
       // Establishes the session and lands them in the organisation they just joined -
       // never on a participant profile (J1-E3-S2).
-      applyInviteSession(res, `/organizations/${res.joined_organization.id}/overview`);
+      applyInviteSession(res, `/organizations/${res.joined_organization.id}/home`);
     } catch (err: any) {
       setError(err.message ?? 'Could not accept this invitation');
     } finally { setBusy(false); }

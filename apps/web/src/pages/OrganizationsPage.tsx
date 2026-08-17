@@ -123,7 +123,7 @@ function Section({ title, memberships }: { title: string; memberships: any[] }) 
               <div className="flex flex-col items-end gap-2">
                 <Badge tone="brand">{m.role}</Badge>
                 {/* Owners/admins manage; members (and other roles) can still view the org's teams + members. */}
-                <Link to={`/organizations/${m.organization_id}/overview`} className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300">
+                <Link to={`/organizations/${m.organization_id}/home`} className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300">
                   {canManage ? 'Manage →' : 'View →'}
                 </Link>
               </div>

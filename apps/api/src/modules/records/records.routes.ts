@@ -5,7 +5,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { can } from '../../http/middleware/can.js';
 import { authorizeRecordView } from './records.access.js';
 import { provisionalEntriesFor } from './provisional.service.js';
-import { achievementTimeline, achievementYears } from './timeline.js';
+import { achievementTimeline, achievementYears, type TimelineScope } from './timeline.js';
 
 // Reading the permanent record (J4-E2).
 //
@@ -248,6 +248,22 @@ export function makeRecordsRouter(prisma: Prisma): Router {
     });
   }));
 
+  /** Query parsing + both reads, shared by every scope the timeline is asked about. */
+  async function timelinePage(req: any, scope: TimelineScope) {
+    const q = req.query as Record<string, string | undefined>;
+    const year = q.year && /^\d{4}$/.test(q.year) ? Number(q.year) : null;
+    const [page, years] = await Promise.all([
+      achievementTimeline(prisma, scope, {
+        year,
+        cursorDate: q.cursor_date ?? null,
+        cursorId: q.cursor_id ?? null,
+        limit: q.limit ? Number(q.limit) : 20,
+      }),
+      achievementYears(prisma, scope),
+    ]);
+    return { ...page, years };
+  }
+
   /** The chronological view of the same honours - the Achievement Timeline. */
   router.get('/organizations/:id/achievements/timeline', asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
@@ -261,18 +277,24 @@ export function makeRecordsRouter(prisma: Prisma): Router {
     });
     if (!allowed) throw new ForbiddenError('You do not have permission to view this institution\'s achievements.');
 
-    const q = req.query as Record<string, string | undefined>;
-    const year = q.year && /^\d{4}$/.test(q.year) ? Number(q.year) : null;
-    const [page, years] = await Promise.all([
-      achievementTimeline(prisma, organizationId, {
-        year,
-        cursorDate: q.cursor_date ?? null,
-        cursorId: q.cursor_id ?? null,
-        limit: q.limit ? Number(q.limit) : 20,
-      }),
-      achievementYears(prisma, organizationId),
-    ]);
-    res.json({ ...page, years });
+    res.json(await timelinePage(req, { organizationId }));
+  }));
+
+  // The same timeline, asked about a person instead of an institution (J4-E4).
+  //
+  // Somebody who plays for their institution AND runs it has two histories, and they
+  // are genuinely different: the org's includes every squad medal the institution has
+  // won, theirs includes only what they were part of. Two scopes of one read, so the
+  // two can never disagree about what a milestone is.
+  router.get('/me/achievements/timeline', asyncHandler(async (req, res) => {
+    res.json(await timelinePage(req, { userId: req.user!.id }));
+  }));
+
+  router.get('/people/:userId/achievements/timeline', asyncHandler(async (req, res) => {
+    // Same authorisation as the rest of a person's record: their own, or somebody who
+    // coordinates them. A coordinator is never shown more than the player can see.
+    await authorize(req.user!.id, !!req.user!.isSuperAdmin, req.params.userId);
+    res.json(await timelinePage(req, { userId: req.params.userId }));
   }));
 
   router.get('/organizations/:id/achievements', asyncHandler(async (req, res) => {

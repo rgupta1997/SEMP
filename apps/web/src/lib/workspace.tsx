@@ -1,67 +1,86 @@
 import { useCallback, useMemo } from 'react';
 import { useAuth, type Organization } from './auth';
 
-// Which product a person is looking at (J1-E7).
+// Which institution a person is looking at, and what they are in it (J1-E7).
 //
-// The same account can be two quite different things: a player with a record and a
-// fixture list, and the person who runs an institution. Those are not one screen with
-// extra buttons - they have different homes, different navigation and different first
-// questions ("when do I play?" vs "what needs me today?"). So the shell has a
-// WORKSPACE, and everything downstream reads it.
+// There is ONE shell. A student, a captain and the sports office are not three
+// products - they are one workspace seen from three positions, so the navigation is
+// filtered by role and module rather than swapped for a different shell. Splitting
+// them made a captain sign in and land somewhere that shared nothing with the place
+// their sports office works in, which read as two unrelated apps.
 //
-// Staff is owner or admin. A plain member of an institution is a participant in it,
-// not an operator of it, and giving them the operator shell would be a worse lie than
-// hiding it - every tile would be empty or refused.
+// `role` rides along on the workspace because it decides what the nav offers and
+// where sign-in lands: staff open on the institution's command centre, everybody
+// else on their own game. The server is still the boundary - this only decides what
+// gets drawn.
 
 export type Workspace =
   | { kind: 'personal' }
-  | { kind: 'organization'; id: string; organization: Organization };
+  | { kind: 'organization'; id: string; role: string; organization: Organization };
 
 const KEY = 'semp_workspace';
 const STAFF_ROLES = ['owner', 'admin'];
 
+/** Do they run this institution, as opposed to belong to it? */
+export function isWorkspaceStaff(w: Workspace): boolean {
+  return w.kind === 'organization' && STAFF_ROLES.includes(w.role);
+}
+
+export interface WorkspaceOption { id: string; role: string; organization: Organization }
+
 export function useWorkspace() {
   const { ctx } = useAuth();
 
-  /** Institutions this person operates, as opposed to belongs to. */
-  const staffed = useMemo(
+  /** Every institution this person is actively part of, whatever they are in it. */
+  const options = useMemo<WorkspaceOption[]>(
     () => (ctx?.organizations ?? [])
-      .filter((m) => m.status === 'active' && STAFF_ROLES.includes(m.role))
+      .filter((m) => m.status === 'active' && m.organization)
       // A personal workspace is an implementation detail of solo entry (J3-E1). It is
       // never somewhere to "switch into" - the person is already there.
       .filter((m) => m.organization?.kind !== 'personal')
-      .map((m) => m.organization),
+      .map((m) => ({ id: m.organization_id, role: m.role, organization: m.organization }))
+      // Operators first: somebody who runs one institution and studies at another
+      // should find the one they run at the top of the list.
+      .sort((a, b) => Number(STAFF_ROLES.includes(b.role)) - Number(STAFF_ROLES.includes(a.role))),
     [ctx],
   );
+
+  /** The institution on the account itself - their college, not a team they play for. */
+  const primaryOrgId = ctx?.organization?.id ?? ctx?.user.organization_id ?? null;
 
   const stored = (() => {
     try { return localStorage.getItem(KEY); } catch { return null; }
   })();
 
   const active: Workspace = useMemo(() => {
-    if (stored === 'personal') return { kind: 'personal' };
-    const chosen = stored ? staffed.find((o) => o.id === stored) : null;
-    // Nobody has chosen, or they chose an institution they no longer staff: land in
-    // the institution when there is exactly one, because that is what they signed in
-    // to do. With several, the choice is real and personal is the safe default.
-    const fallback = staffed.length === 1 ? staffed[0] : null;
-    const org = chosen ?? fallback;
-    return org ? { kind: 'organization', id: org.id, organization: org } : { kind: 'personal' };
-  }, [stored, staffed]);
+    // An institution is not a mode to opt out of: belonging to one IS the workspace.
+    // Only somebody with no institution at all gets the personal shell, and a stale
+    // "personal" choice from before the shells merged is ignored rather than obeyed.
+    const chosen = stored ? options.find((o) => o.id === stored) : null;
+    // Failing that, their HOME institution (`users.organization_id`), not whichever
+    // membership the context happened to list first. A student who competes for a
+    // section holds a membership in that section too - it is a real organisation in
+    // this model, since sections are what enter championships against each other -
+    // and landing them in it rather than in their college would be wrong every time.
+    const home = primaryOrgId ? options.find((o) => o.id === primaryOrgId) : null;
+    const m = chosen ?? home ?? options[0] ?? null;
+    return m ? { kind: 'organization', id: m.id, role: m.role, organization: m.organization } : { kind: 'personal' };
+  }, [stored, options, primaryOrgId]);
 
   const setWorkspace = useCallback((next: Workspace) => {
     try { localStorage.setItem(KEY, next.kind === 'personal' ? 'personal' : next.id); } catch { /* private mode */ }
-    // A hard navigation, not a state update: the two shells render different route
-    // trees, and letting React reconcile between them leaves the previous shell's
-    // page mounted under the new navigation.
-    window.location.assign(next.kind === 'personal' ? '/profile' : `/organizations/${next.id}/home`);
+    // A hard navigation, not a state update: switching institution changes every
+    // org-scoped fetch on the page, and letting React reconcile leaves the previous
+    // institution's data mounted under the new one's navigation.
+    window.location.assign(workspaceHome(next));
   }, []);
 
   return {
     workspace: active,
-    staffedOrganizations: staffed,
+    organizations: options,
     /** True when the switcher is worth rendering at all. */
-    canSwitch: staffed.length > 0,
+    canSwitch: options.length > 1,
+    isStaff: isWorkspaceStaff(active),
     setWorkspace,
     /** Modules this person may reach in the active institution (J6-E2). */
     modules: active.kind === 'organization' ? (ctx?.modules?.[active.id] ?? null) : null,
@@ -70,5 +89,8 @@ export function useWorkspace() {
 
 /** Where a session should land, given what it is. */
 export function workspaceHome(w: Workspace): string {
+  // Everybody in an institution opens on its Home - same first screen, fewer things
+  // on it for people with fewer decisions to make. Only somebody with no institution
+  // at all lands on their own game, because there is nothing else to land on.
   return w.kind === 'organization' ? `/organizations/${w.id}/home` : '/profile';
 }

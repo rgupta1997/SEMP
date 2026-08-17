@@ -1,6 +1,9 @@
 import { Link, useParams } from 'react-router-dom';
 import { ArrowRight, BadgeCheck, Radio } from 'lucide-react';
 import { useApi } from '../../lib/hooks';
+import { usePermissions } from '../../lib/permissions';
+import { usePocOnboarding } from '../../lib/onboarding';
+import { GettingStarted } from '../../components/onboarding/GettingStarted';
 import { Card, PageHeader, Skeleton, cn } from '../../components/ui';
 
 // The institution home (J1-E7) - decisions first, navigation second.
@@ -8,6 +11,10 @@ import { Card, PageHeader, Skeleton, cn } from '../../components/ui';
 // One fetch, because six tiles from six endpoints is six spinners on the screen a
 // person sees most often. Everything on it is either a real number or absent; there is
 // no placeholder tile, and no zero standing in for "we haven't built this yet".
+//
+// This is also where the old /overview tab landed: a workspace with a Home in the
+// sidebar does not also need an Overview beside it, so the getting-started checklist
+// moved here and /overview now redirects.
 
 interface Dashboard {
   organization: { id: string; name: string; short_name: string | null; logo_url: string | null; verified: boolean; city: string | null };
@@ -62,6 +69,8 @@ function Kpi({ label, value, accent }: { label: string; value: number | null; ac
 export function OrgHomePage() {
   const { orgId } = useParams();
   const { data, isLoading } = useApi<Dashboard>(orgId ? `/organizations/${orgId}/dashboard` : null);
+  const canManage = usePermissions().canManageOrg(orgId ?? '');
+  const onboarding = usePocOnboarding(orgId ?? '', canManage);
 
   if (isLoading || !data) {
     return <div className="grid gap-4"><Skeleton className="h-24" /><Skeleton className="h-40" /></div>;
@@ -76,8 +85,12 @@ export function OrgHomePage() {
         subtitle={[org.city, org.verified ? 'Verified sports organisation' : null].filter(Boolean).join(' · ') || undefined}
       />
 
-      {/* J1-E7-S2: what needs a decision, before anything else on the page. */}
-      {actions.length > 0 && (
+      {/* J1-E7-S2: what needs a decision, before anything else on the page.
+          Staff only - every item in the queue is an approval, a verification or a
+          lock, and offering a student "Applications awaiting your decision" would be
+          a queue they cannot act on. They reach this page from the Organizations
+          list, so the guard is on the page, not only on the navigation. */}
+      {canManage && actions.length > 0 && (
         <Card className="border-amber-300 bg-amber-50 p-0 dark:border-amber-800 dark:bg-amber-950/30">
           <div className="border-b border-amber-200 px-4 py-2.5 text-sm font-semibold text-amber-900 dark:border-amber-900 dark:text-amber-200">
             Needs your attention
@@ -98,14 +111,28 @@ export function OrgHomePage() {
         </Card>
       )}
 
+      {/* Sign-up to a locked roster, for whoever runs the place. Collapses to its
+          header once every step is done, so it never crowds an established workspace. */}
+      {canManage && (
+        <GettingStarted
+          title="Get your organization match-ready"
+          subtitle="A few steps to go from sign-up to a locked roster."
+          state={onboarding}
+          storageKey={`onboarding-poc-${orgId}`}
+          completeNote="That covered one team. If your organization fields multiple teams, repeat these steps for each - create another team, enter it into a championship, then build and lock its roster."
+        />
+      )}
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi label="People" value={kpis.people} />
         <Kpi label="Teams" value={kpis.teams} />
         <Kpi label="Championships" value={kpis.championships} />
         <Kpi label="Matches live now" value={kpis.matches_live_now} accent />
-        <Kpi label="Awaiting approval" value={kpis.awaiting_approval} />
-        <Kpi label="Pending verification" value={kpis.pending_verification} />
-        <Kpi label="Certificates pending" value={kpis.certificates_pending} />
+        {/* The backlog tiles are the sports office's workload, not the institution's
+            shape - a student reads them as three numbers nobody asked them about. */}
+        {canManage && <Kpi label="Awaiting approval" value={kpis.awaiting_approval} />}
+        {canManage && <Kpi label="Pending verification" value={kpis.pending_verification} />}
+        {canManage && <Kpi label="Certificates pending" value={kpis.certificates_pending} />}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">

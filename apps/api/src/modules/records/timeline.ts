@@ -6,6 +6,12 @@ import type { Prisma } from '../../infra/prisma.js';
 // and when?". Same rows, different question - which is why it is a separate read
 // rather than a re-sort of the board: the board deliberately keeps team rows only, and
 // a timeline that hid every individual milestone would be a strange history.
+//
+// ONE READ, TWO SCOPES. An institution's history and a person's are the same rows
+// asked a different way, so they are the same function with a different WHERE. The
+// alternative - a second, person-shaped timeline query - is how the two views start
+// disagreeing about what counts as a milestone, and somebody who both plays and runs
+// the place would be the first to notice.
 
 export interface TimelineItem {
   id: string;
@@ -22,6 +28,19 @@ export interface TimelineItem {
   tags: string[];
 }
 
+/**
+ * Whose history this is.
+ *
+ * An organisation's timeline keeps the squad rows - at institution level the team
+ * medal IS the fact. A person's keeps only rows written against them, which is the
+ * per-player copy the lock fans out. Reading both from one scope would double-count
+ * every squad medal at org level and attribute team rows to nobody at person level.
+ */
+export type TimelineScope = { organizationId: string } | { userId: string };
+
+const scopeWhere = (scope: TimelineScope) =>
+  'organizationId' in scope ? { organization_id: scope.organizationId } : { user_id: scope.userId };
+
 const titleCase = (s: string) => s.replace(/(^|[\s-])(\w)/g, (_, a, b) => a + b.toUpperCase());
 
 /**
@@ -31,7 +50,7 @@ const titleCase = (s: string) => s.replace(/(^|[\s-])(\w)/g, (_, a, b) => a + b.
  * offset would silently skip or repeat a row whenever something new was locked between
  * two clicks, and a history that reorders under the reader is worse than a short one.
  */
-export async function achievementTimeline(prisma: Prisma, organizationId: string, opts: {
+export async function achievementTimeline(prisma: Prisma, scope: TimelineScope, opts: {
   year?: number | null;
   cursorDate?: string | null;
   cursorId?: string | null;
@@ -55,7 +74,7 @@ export async function achievementTimeline(prisma: Prisma, organizationId: string
     : {};
 
   const where = {
-    organization_id: organizationId,
+    ...scopeWhere(scope),
     superseded_at: null,
     ...yearWindow,
     ...after,
@@ -111,9 +130,9 @@ export async function achievementTimeline(prisma: Prisma, organizationId: string
 }
 
 /** Years that actually have something in them, for the design's year chips. */
-export async function achievementYears(prisma: Prisma, organizationId: string): Promise<number[]> {
+export async function achievementYears(prisma: Prisma, scope: TimelineScope): Promise<number[]> {
   const rows = await prisma.achievements.findMany({
-    where: { organization_id: organizationId, superseded_at: null },
+    where: { ...scopeWhere(scope), superseded_at: null },
     select: { occurred_on: true },
     orderBy: { occurred_on: 'desc' },
     take: 2000,

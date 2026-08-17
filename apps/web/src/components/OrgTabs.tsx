@@ -7,8 +7,13 @@ import { api } from '../lib/api';
 import { InstitutionFormModal, type InstitutionFormBody } from './InstitutionFormModal';
 import { BackButton, Button, cn, confirmDialog, toast } from './ui';
 
-// Sub-navigation for an organization's management pages, plus a shared back link
-// and (for owners/admins) an Edit-organization action.
+// Sub-navigation for the Administration section, plus a shared back link and (for
+// owners/admins) the Edit-organization action.
+//
+// It used to head every organization page, People and Teams included, which made it a
+// second navigation competing with the workspace sidebar for the same destinations.
+// It now appears only inside Administration and lists only Administration's five
+// sections - the sidebar is the way to People, Teams and Home.
 export function OrgTabs({ orgId }: { orgId: string }) {
   const navigate = useNavigate();
   const { refresh } = useAuth();
@@ -50,11 +55,8 @@ export function OrgTabs({ orgId }: { orgId: string }) {
   // A tab switched off for this person's audience is absent, not a link that
   // 403s (J6-E2-S2). The `module` on each entry is what the institution toggles
   // on the Modules screen.
+  // The same five sections the Administration page lists, in the same order.
   const tabs = [
-    { to: `/organizations/${orgId}/overview`, label: 'Overview', badge: 0 },
-    { to: `/organizations/${orgId}/teams`, label: 'Teams', badge: 0, module: 'teams' as const },
-    { to: `/organizations/${orgId}/members`, label: 'People', badge: 0, module: 'people' as const },
-    ...(canManage ? [{ to: `/organizations/${orgId}/invitations`, label: 'Invitations', badge: pendingInvites, module: 'people' as const }] : []),
     // Everyone can see the structure they are placed in; only owners/admins edit it.
     { to: `/organizations/${orgId}/structure`, label: 'Structure', badge: 0, module: 'administration' as const },
     // What each role means HERE. Owner/admin only - it decides what everyone else can do.
@@ -62,13 +64,20 @@ export function OrgTabs({ orgId }: { orgId: string }) {
     // Deliberately NOT module-gated: the screen that switches modules off must
     // never be reachable only through a module somebody has switched off.
     ...(canManage ? [{ to: `/organizations/${orgId}/modules`, label: 'Modules', badge: 0 }] : []),
+    ...(canManage ? [{ to: `/organizations/${orgId}/invitations`, label: 'Invitations', badge: pendingInvites, module: 'people' as const }] : []),
     // The audit trail is owner/admin-only, matching the endpoint behind it.
     ...(canManage ? [{ to: `/organizations/${orgId}/activity`, label: 'Activity', badge: 0, module: 'administration' as const }] : []),
   ].filter((t) => !('module' in t) || !t.module || canOpenModule(t.module, orgId));
+
+  const canAdmin = canOpenModule('administration', orgId);
+  const backTo = canAdmin ? `/organizations/${orgId}/administration` : '/organizations';
+  const backLabel = canAdmin ? 'Back to Administration' : 'Back to organizations';
   return (
     <div className="mb-5">
       <div className="flex items-center justify-between gap-2">
-        <BackButton onClick={() => navigate('/organizations')}>Back to organizations</BackButton>
+        {/* Back to where these five were opened from - the Administration hub - rather
+            than out of the workspace altogether. */}
+        <BackButton onClick={() => navigate(backTo)}>{backLabel}</BackButton>
         {org && (canManage || canDelete) && (
           <div className="flex items-center gap-2">
             {canManage && <Button size="sm" variant="outline" onClick={() => setEditing(true)}>Edit organization</Button>}

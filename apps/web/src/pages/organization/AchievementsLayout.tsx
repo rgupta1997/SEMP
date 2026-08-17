@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useParams } from 'react-router-dom';
+import { Link, NavLink, Outlet, useParams } from 'react-router-dom';
 import { useApi } from '../../lib/hooks';
 import { useAuth } from '../../lib/auth';
 import { cn } from '../../components/ui';
@@ -11,6 +11,11 @@ import { cn } from '../../components/ui';
 //
 // The claims tab only exists for the people who can actually decide - a queue you can
 // read but not action is an invitation to ask somebody else to do it.
+//
+// The person reading this may also be IN it. A sports secretary who still competes has
+// two histories - the institution's and their own - and they are different records,
+// not two renderings of one. So the scope is named in every subtitle, and the other
+// scope is one link away rather than something to go hunting for in the sidebar.
 
 export function AchievementsLayout() {
   const { orgId } = useParams();
@@ -31,7 +36,7 @@ export function AchievementsLayout() {
 
   return (
     <div className="grid gap-5">
-      <nav className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800" aria-label="Achievements views">
+      <nav className="flex flex-wrap items-center gap-1 border-b border-slate-200 dark:border-slate-800" aria-label="Achievements views">
         {tabs.map((t) => (
           <NavLink
             key={t.label}
@@ -52,6 +57,15 @@ export function AchievementsLayout() {
             )}
           </NavLink>
         ))}
+        {/* Whoever is reading this has a record of their own, whether or not it has
+            anything in it yet. Explicitly labelled "your own" so it can never be
+            mistaken for another view of the institution's. */}
+        <Link
+          to="/profile/achievements"
+          className="ml-auto px-3 py-2 text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
+        >
+          Your own record →
+        </Link>
       </nav>
       <Outlet />
     </div>

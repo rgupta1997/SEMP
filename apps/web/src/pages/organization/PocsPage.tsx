@@ -7,7 +7,6 @@ import { usePermissions } from '../../lib/permissions';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { titleCase } from '../../lib/format';
-import { OrgTabs } from '../../components/OrgTabs';
 import { PeoplePicker } from '../../components/PeoplePicker';
 import { InviteMemberModal } from '../../components/InviteMemberModal';
 import { Avatar, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, toast } from '../../components/ui';
@@ -86,7 +85,6 @@ export function PocsPage() {
 
   return (
     <div>
-      {orgId && <OrgTabs orgId={orgId} />}
       <PageHeader title="People" subtitle="Everyone in this institution, the role they hold and where they are placed.">
         {canManage && <Link to={`/organizations/${orgId}/students/import`} className="self-center text-sm font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-200">Import the roll →</Link>}
         {canManage && <Button variant="outline" onClick={() => setInviting(true)}>Invite by email</Button>}

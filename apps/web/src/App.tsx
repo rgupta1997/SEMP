@@ -26,7 +26,6 @@ import { EventImportPage } from './pages/organiser/EventImportPage';
 
 // Organizations (multi-org membership + management)
 import { OrganizationsPage } from './pages/OrganizationsPage';
-import { OrgOverviewPage } from './pages/organization/OrgOverviewPage';
 import { OrgHomePage } from './pages/organization/OrgHomePage';
 import { OrgReportsPage } from './pages/organization/OrgReportsPage';
 import { OrgAchievementsPage } from './pages/organization/OrgAchievementsPage';
@@ -60,7 +59,8 @@ import { ParticipantDashboard } from './pages/participant/ParticipantDashboard';
 import { ParticipantEventPage } from './pages/participant/ParticipantEventPage';
 import { ParticipantMatchesPage } from './pages/participant/ParticipantMatchesPage';
 import { ParticipantMatchPage } from './pages/participant/ParticipantMatchPage';
-import { ParticipantAchievementsPage } from './pages/participant/ParticipantAchievementsPage';
+import { ParticipantAwardsPage, ParticipantClaimsPage } from './pages/participant/ParticipantAchievementsPage';
+import { ParticipantAchievementsLayout, ParticipantTimelinePage } from './pages/participant/ParticipantAchievementsLayout';
 import { LifetimeRecordPage } from './pages/participant/LifetimeRecordPage';
 import { DiscoverPage } from './pages/DiscoverPage';
 import { MyChampionshipsPage } from './pages/MyChampionshipsPage';
@@ -107,7 +107,13 @@ function AuthenticatedRoutes() {
       <Route element={<AppShell />}>
         {/* Profile / My Game */}
         <Route path="/profile" element={<ParticipantDashboard />} />
-        <Route path="/profile/achievements" element={<ParticipantAchievementsPage />} />
+        {/* A person's Achievements area - the same three views the institution has
+            (AchievementsLayout), scoped to one person instead of a whole place. */}
+        <Route path="/profile/achievements" element={<ParticipantAchievementsLayout />}>
+          <Route index element={<ParticipantTimelinePage />} />
+          <Route path="awards" element={<ParticipantAwardsPage />} />
+          <Route path="claims" element={<ParticipantClaimsPage />} />
+        </Route>
         {/* The permanent record (J4-E2). Read-only by design - there is no edit route. */}
         <Route path="/profile/record" element={<LifetimeRecordPage />} />
         <Route path="/people/:userId/record" element={<LifetimeRecordPage />} />
@@ -117,10 +123,11 @@ function AuthenticatedRoutes() {
 
         {/* Organizations */}
         <Route path="/organizations" element={<OrganizationsPage />} />
-        {/* The institution home (J1-E7). Distinct from /overview, which is the public-facing
-            profile of an organisation; this is the operator's command centre. */}
+        {/* The institution home (J1-E7) - the operator's command centre. `/overview`
+            was a second landing page beside it; its checklist moved onto Home and the
+            old path redirects, because saved links and invitation emails still use it. */}
         <Route path="/organizations/:orgId/home" element={<OrgHomePage />} />
-        <Route path="/organizations/:orgId/overview" element={<OrgOverviewPage />} />
+        <Route path="/organizations/:orgId/overview" element={<Navigate to="../home" replace relative="path" />} />
         {/* Wave 4 surfaces. Records and reports are module-gated the same way the rest is. */}
         {/* Achievements is three views of one record: the timeline is the landing
             view, per the design; the Hall of Fame and the claims queue sit beside it. */}
