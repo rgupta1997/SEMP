@@ -74,6 +74,12 @@ export function makeWorkspaceRouter(prisma: Prisma): Router {
       prisma.achievements.count({ where: { organization_id: organizationId, superseded_at: null } }),
     ]);
 
+    // J4-E5-S3. The queue grows as capabilities land - this one could not exist until
+    // claims did, which is exactly the rule the queue is built on.
+    const pendingClaims = await prisma.achievement_claims.count({
+      where: { organization_id: organizationId, status: 'pending' },
+    });
+
     // Live and upcoming, in one list the home page can render as-is (J1-E7-S4).
     const events = champIds.length
       ? await prisma.championships.findMany({
@@ -126,6 +132,8 @@ export function makeWorkspaceRouter(prisma: Prisma): Router {
         cta: 'Lock results', href: champIds.length === 1 ? `/championships/${champIds[0]}/results` : '/championships' },
       { key: 'verify_people', label: 'People awaiting verification', count: unverifiedPeople,
         cta: 'Verify', href: `/organizations/${organizationId}/members?verification=pending` },
+      { key: 'validate_claims', label: 'Achievement claims to validate', count: pendingClaims,
+        cta: 'Validate', href: `/organizations/${organizationId}/achievements?tab=claims` },
     ].filter((a) => a.count > 0);
 
     // The strip is a count of what the workspace actually holds. It is emitted only

@@ -97,6 +97,9 @@ export const NOTIFICATION_TYPE = [
   'entry_submitted',
   'org_join_request', 'org_join_approved', 'org_join_declined',
   'org_invitation',
+  // J4-E5 - three, not one: the validator's 'somebody is waiting on you' and the
+  // claimant's 'you were turned down, here is why' are different messages.
+  'claim_submitted', 'claim_approved', 'claim_rejected',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[number];
 
