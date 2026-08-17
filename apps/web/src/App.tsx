@@ -75,6 +75,7 @@ import { PlatformDemosPage } from './pages/platform/PlatformDemosPage';
 import { ChampionshipMatrixImportPage } from './pages/platform/ChampionshipMatrixImportPage';
 import { PublicChampionshipPage } from './pages/public/PublicChampionshipPage';
 import { VerifyCertificatePage } from './pages/public/VerifyCertificatePage';
+import { VerifyLookupPage } from './pages/public/VerifyLookupPage';
 import { InviteAcceptPage } from './pages/InviteAcceptPage';
 
 // Where "home" is depends on which product this person is in (J1-E7-S1). Someone who
@@ -204,20 +205,28 @@ function AppRoutes() {
   // Consume the one-shot login flag once we've acted on it (below).
   useEffect(() => { if (justLoggedIn) clearJustLoggedIn(); }, [justLoggedIn, clearJustLoggedIn]);
 
+  // Every route match is resolved BEFORE the first early return below. Interleaving
+  // hooks with returns changes the hook order between renders as the URL changes,
+  // which is exactly the bug React's rules-of-hooks exists to prevent.
+  const publicMatch = useMatch('/c/:token');
+  const verifyMatch = useMatch('/verify/:token');
+  const verifyLookup = useMatch('/verify');
+  const inviteMatch = useMatch('/invite/:token');
+
   // Public, view-only share link - rendered with no sidebar/login, regardless of
   // whether the visitor is signed in (so the link works for anyone).
-  const publicMatch = useMatch('/c/:token');
   if (publicMatch?.params.token) return <PublicChampionshipPage token={publicMatch.params.token} />;
 
   // Certificate verification (J4-E8). Ahead of every auth check for the same reason
   // the share link is: the people who most need to verify a certificate - an employer,
   // another institution - have no account here and never will.
-  const verifyMatch = useMatch('/verify/:token');
   if (verifyMatch?.params.token) return <VerifyCertificatePage token={verifyMatch.params.token} />;
+  // Reached from a desktop with a printed certificate in hand, rather than from a
+  // phone that has already scanned the code.
+  if (verifyLookup) return <VerifyLookupPage />;
 
   // An invitation link has to work for someone who has never signed in - and equally
   // for someone already signed in as somebody else, hence ahead of the ctx check.
-  const inviteMatch = useMatch('/invite/:token');
   if (inviteMatch?.params.token && !justLoggedIn) return <InviteAcceptPage token={inviteMatch.params.token} />;
 
   if (loading) return <div className="grid h-screen place-items-center"><Spinner /></div>;
