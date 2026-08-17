@@ -31,7 +31,11 @@ import { OrgHomePage } from './pages/organization/OrgHomePage';
 import { OrgReportsPage } from './pages/organization/OrgReportsPage';
 import { OrgAchievementsPage } from './pages/organization/OrgAchievementsPage';
 import { OrgAdministrationPage } from './pages/organization/OrgAdministrationPage';
-import { OrgCertificatesPage } from './pages/organization/OrgCertificatesPage';
+import { CertificatesDashboard } from './pages/organization/certificates/CertificatesDashboard';
+import { IssuedRegisterPage } from './pages/organization/certificates/IssuedRegisterPage';
+import { TemplateGalleryPage } from './pages/organization/certificates/TemplateGalleryPage';
+import { TemplatePreviewPage } from './pages/organization/certificates/TemplatePreviewPage';
+import { CertificateDetailPage } from './pages/organization/certificates/CertificateDetailPage';
 import { TeamsPage } from './pages/organization/TeamsPage';
 import { RosterPage } from './pages/organization/RosterPage';
 import { RollImportPage } from './pages/organization/RollImportPage';
@@ -115,7 +119,14 @@ function AuthenticatedRoutes() {
         {/* Wave 4 surfaces. Records and reports are module-gated the same way the rest is. */}
         <Route path="/organizations/:orgId/achievements" element={<ModuleGate module="records"><OrgAchievementsPage /></ModuleGate>} />
         <Route path="/organizations/:orgId/reports" element={<ModuleGate module="reports"><OrgReportsPage /></ModuleGate>} />
-        <Route path="/organizations/:orgId/certificates" element={<ModuleGate module="records"><OrgCertificatesPage /></ModuleGate>} />
+        {/* Certificates is four screens, not one: the manager's dashboard, the register,
+            the template gallery, and a single certificate. Ordered so the literal
+            segments win over :certId. */}
+        <Route path="/organizations/:orgId/certificates" element={<ModuleGate module="records"><CertificatesDashboard /></ModuleGate>} />
+        <Route path="/organizations/:orgId/certificates/register" element={<ModuleGate module="records"><IssuedRegisterPage /></ModuleGate>} />
+        <Route path="/organizations/:orgId/certificates/templates" element={<ModuleGate module="records"><TemplateGalleryPage /></ModuleGate>} />
+        <Route path="/organizations/:orgId/certificates/templates/:templateId" element={<ModuleGate module="records"><TemplatePreviewPage /></ModuleGate>} />
+        <Route path="/organizations/:orgId/certificates/:certId" element={<ModuleGate module="records"><CertificateDetailPage /></ModuleGate>} />
         <Route path="/organizations/:orgId/administration" element={<ModuleGate module="administration"><OrgAdministrationPage /></ModuleGate>} />
         {/* Module-gated (J6-E2-S2): a direct link to something the institution
             has switched off for this audience gets a plain "not available" page,

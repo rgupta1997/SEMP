@@ -9,7 +9,9 @@ import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import {
   allocateNumber, codeFor, formatSerial, newToken, signCertificate, type CertificateFacts,
 } from './certificates.service.js';
-import { renderCertificateHtml } from './render.js';
+import { renderCertificateHtml, sampleFacts } from './render.js';
+import { CERTIFICATE_PRESETS, presetById } from './presets.js';
+import { certificateActivity, certificateOverview, certificateTrail, statusOf } from './overview.js';
 import { env } from '../../config/env.js';
 
 // Certificates: templates (J4-E6), bulk issue (J4-E7), and the register behind them.
@@ -49,6 +51,16 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     if (!allowed) throw new ForbiddenError('You do not have permission to issue certificates for this institution.');
   };
 
+  // ---- the manager's dashboard ------------------------------------------------
+  router.get('/organizations/:id/certificates/overview', asyncHandler(async (req, res) => {
+    await assertIssuer(req, req.params.id);
+    const [stats, activity] = await Promise.all([
+      certificateOverview(prisma, req.params.id),
+      certificateActivity(prisma, req.params.id),
+    ]);
+    res.json({ ...stats, activity });
+  }));
+
   // ---- templates (J4-E6) -----------------------------------------------------
   router.get('/organizations/:id/certificate-templates', asyncHandler(async (req, res) => {
     await assertIssuer(req, req.params.id);
@@ -56,7 +68,103 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
       where: { organization_id: req.params.id, archived_at: null },
       orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
     });
-    res.json({ rows });
+    // "Used N times" on the gallery card, counted rather than stored - a denormalised
+    // counter here would drift the first time a certificate is deleted.
+    const used = await prisma.certificates.groupBy({
+      by: ['template_id'],
+      where: { organization_id: req.params.id },
+      _count: { _all: true },
+    });
+    const byTemplate = new Map(used.map((u) => [u.template_id, u._count._all]));
+    res.json({ rows: rows.map((r) => ({ ...r, used_count: byTemplate.get(r.id) ?? 0 })) });
+  }));
+
+  /** The starter designs. Not rows yet - an institution copies the one it wants. */
+  router.get('/organizations/:id/certificate-presets', asyncHandler(async (req, res) => {
+    await assertIssuer(req, req.params.id);
+    const mine = await prisma.certificate_templates.findMany({
+      where: { organization_id: req.params.id, archived_at: null },
+      select: { design: true },
+    });
+    const taken = new Set(mine.map((t) => (t.design as any)?.layout).filter(Boolean));
+    res.json({
+      rows: CERTIFICATE_PRESETS.map((p) => ({
+        id: p.id, name: p.name, category: p.category, blurb: p.blurb, design: p.design,
+        // Already copied? Say so, rather than letting somebody make five Classic Laurels.
+        in_use: taken.has(p.id),
+      })),
+    });
+  }));
+
+  router.post('/organizations/:id/certificate-templates/from-preset', validateBody(z.object({
+    preset_id: z.string().min(1), name: z.string().min(1).max(160).optional(), is_default: z.boolean().optional(),
+  })), asyncHandler(async (req, res) => {
+    const organizationId = req.params.id;
+    await assertIssuer(req, organizationId);
+    const preset = presetById(req.body.preset_id);
+    if (!preset) throw new NotFoundError('Certificate design');
+
+    const name = req.body.name ?? preset.name;
+    const row = await prisma.$transaction(async (tx) => {
+      if (req.body.is_default) {
+        await tx.certificate_templates.updateMany({
+          where: { organization_id: organizationId, is_default: true }, data: { is_default: false },
+        });
+      }
+      const count = await tx.certificate_templates.count({ where: { organization_id: organizationId, archived_at: null } });
+      return tx.certificate_templates.create({
+        data: {
+          organization_id: organizationId,
+          name,
+          code: codeFor(name).toUpperCase().slice(0, 8),
+          // Copied, not referenced: editing the wording later must not require us to
+          // ship a release, and a preset changing upstream must not silently restyle
+          // certificates an institution has already approved.
+          design: preset.design as object,
+          is_default: req.body.is_default ?? count === 0,
+          created_by: req.user!.id,
+        },
+      });
+    });
+
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.certificateTemplateCreated,
+      target: { type: 'certificate_templates', id: row.id, label: row.name },
+      organizationId,
+      summary: `Added the certificate template ${row.name} from the ${preset.name} design`,
+    });
+    res.status(201).json(row);
+  }));
+
+  /** What a design actually looks like, on sample facts. Powers the gallery tiles
+   *  and the full-size preview screen - the thumbnail IS the template, so it can
+   *  never drift from what gets printed. */
+  const previewHtml = async (res: any, organizationName: string, design: any, bare: boolean) => {
+    const html = await renderCertificateHtml({
+      facts: sampleFacts(organizationName),
+      verifyUrl: `${env.WEB_ORIGIN}/verify/sample`,
+      design, bare,
+    });
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  };
+
+  router.get('/organizations/:id/certificate-presets/:presetId/preview', asyncHandler(async (req, res) => {
+    await assertIssuer(req, req.params.id);
+    const preset = presetById(req.params.presetId);
+    if (!preset) throw new NotFoundError('Certificate design');
+    const org = await prisma.organizations.findUnique({ where: { id: req.params.id }, select: { name: true } });
+    await previewHtml(res, org?.name ?? 'Your institution', preset.design, req.query.bare === '1');
+  }));
+
+  router.get('/certificate-templates/:templateId/preview', asyncHandler(async (req, res) => {
+    const tpl = await prisma.certificate_templates.findUnique({
+      where: { id: req.params.templateId },
+      include: { organizations: { select: { name: true } } },
+    });
+    if (!tpl) throw new NotFoundError('Certificate template');
+    await assertIssuer(req, tpl.organization_id);
+    await previewHtml(res, tpl.organizations?.name ?? 'Your institution', tpl.design, req.query.bare === '1');
   }));
 
   router.post('/organizations/:id/certificate-templates', validateBody(templateSchema), asyncHandler(async (req, res) => {
@@ -262,34 +370,141 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     res.json({ issued, skipped, template: { id: template.id, name: template.name }, results });
   }));
 
-  // ---- the register ----------------------------------------------------------
+  // ---- the issued register -----------------------------------------------------
+  const registerWhere = (organizationId: string, query: Record<string, string | undefined>) => {
+    const { championship_id: championshipId, sport, status, q } = query;
+    return {
+      organization_id: organizationId,
+      ...(championshipId ? { championship_id: championshipId } : {}),
+      // Sport lives in the frozen payload, not a column - the certificate says what it
+      // said on the day, even if the discipline is renamed afterwards.
+      ...(sport ? { payload: { path: ['sport'], equals: sport } } : {}),
+      ...(status === 'withdrawn' ? { revoked_at: { not: null } } : {}),
+      ...(status === 'live' ? { revoked_at: null, superseded_at: null } : {}),
+      ...(status === 'superseded' ? { superseded_at: { not: null } } : {}),
+      ...(q ? {
+        OR: [
+          { recipient_name: { contains: q, mode: 'insensitive' as const } },
+          { serial: { contains: q, mode: 'insensitive' as const } },
+        ],
+      } : {}),
+    };
+  };
+
+  const REGISTER_SELECT = {
+    id: true, serial: true, recipient_name: true, issued_at: true, revoked_at: true,
+    revoked_reason: true, superseded_at: true, token: true, payload: true,
+    championships: { select: { id: true, name: true } },
+    certificate_templates: { select: { id: true, name: true } },
+  } as const;
+
+  /** Scans per certificate, so the register can show VERIFIED rather than guess it. */
+  const scanCounts = async (ids: string[]) => {
+    if (!ids.length) return new Map<string, number>();
+    const g = await prisma.certificate_verifications.groupBy({
+      by: ['certificate_id'], where: { certificate_id: { in: ids }, outcome: 'authentic' }, _count: { _all: true },
+    });
+    return new Map(g.map((r) => [r.certificate_id, r._count._all]));
+  };
+
   router.get('/organizations/:id/certificates', asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
     await assertIssuer(req, organizationId);
-    const { championship_id: championshipId, q } = req.query as Record<string, string | undefined>;
+    const query = req.query as Record<string, string | undefined>;
+    const where = registerWhere(organizationId, query) as any;
 
-    const rows = await prisma.certificates.findMany({
-      where: {
-        organization_id: organizationId,
-        ...(championshipId ? { championship_id: championshipId } : {}),
-        ...(q ? { OR: [{ recipient_name: { contains: q, mode: 'insensitive' } }, { serial: { contains: q, mode: 'insensitive' } }] } : {}),
-      },
-      orderBy: [{ issued_at: 'desc' }],
-      take: 500,
-      select: {
-        id: true, serial: true, recipient_name: true, issued_at: true, revoked_at: true,
-        revoked_reason: true, superseded_at: true, token: true, payload: true,
-        championships: { select: { id: true, name: true } },
-      },
-    });
+    const pageSize = Math.min(Math.max(Number(query.page_size) || 25, 1), 200);
+    const page = Math.max(Number(query.page) || 1, 1);
 
-    const [total, revoked, scans] = await Promise.all([
+    const [rows, matching, total, revoked, scans] = await Promise.all([
+      prisma.certificates.findMany({
+        where, orderBy: [{ issued_at: 'desc' }],
+        skip: (page - 1) * pageSize, take: pageSize, select: REGISTER_SELECT,
+      }),
+      prisma.certificates.count({ where }),
       prisma.certificates.count({ where: { organization_id: organizationId } }),
       prisma.certificates.count({ where: { organization_id: organizationId, revoked_at: { not: null } } }),
       prisma.certificate_verifications.count({ where: { certificates: { organization_id: organizationId } } }),
     ]);
 
-    res.json({ rows, summary: { total, revoked, live: total - revoked, verification_scans: scans } });
+    const byCert = await scanCounts(rows.map((r) => r.id));
+    res.json({
+      rows: rows.map((r) => ({
+        ...r,
+        sport: (r.payload as any)?.sport ?? null,
+        title: (r.payload as any)?.title ?? null,
+        scans: byCert.get(r.id) ?? 0,
+        status: statusOf({ ...r, _scans: byCert.get(r.id) ?? 0 }),
+      })),
+      page: { page, page_size: pageSize, matching, pages: Math.max(Math.ceil(matching / pageSize), 1) },
+      summary: { total, revoked, live: total - revoked, verification_scans: scans },
+    });
+  }));
+
+  /** The register's Export button. CSV, because the next stop is always a spreadsheet. */
+  router.get('/organizations/:id/certificates/export', asyncHandler(async (req, res) => {
+    const organizationId = req.params.id;
+    await assertIssuer(req, organizationId);
+    const where = registerWhere(organizationId, req.query as Record<string, string | undefined>) as any;
+
+    const rows = await prisma.certificates.findMany({
+      where, orderBy: [{ issued_at: 'desc' }], take: 5000, select: REGISTER_SELECT,
+    });
+    const byCert = await scanCounts(rows.map((r) => r.id));
+
+    // Quote everything: a recipient called "Rao, Meera" must not become two columns.
+    const cell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = ['Certificate ID', 'Recipient', 'Event', 'Sport', 'Achievement', 'Issue Date', 'Status', 'Verification scans', 'Verify URL'];
+    const body = rows.map((r) => [
+      r.serial, r.recipient_name, r.championships?.name ?? '', (r.payload as any)?.sport ?? '',
+      (r.payload as any)?.title ?? '', r.issued_at.toISOString().slice(0, 10),
+      statusOf({ ...r, _scans: byCert.get(r.id) ?? 0 }), byCert.get(r.id) ?? 0,
+      `${env.WEB_ORIGIN}/verify/${r.token}`,
+    ].map(cell).join(','));
+
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="certificates-${new Date().toISOString().slice(0, 10)}.csv"`);
+    // BOM so Excel opens UTF-8 names correctly rather than mangling them.
+    res.send(`﻿${[header.map(cell).join(','), ...body].join('\r\n')}`);
+  }));
+
+  /** One certificate, with its own timeline - the detail screen. */
+  router.get('/certificates/:certId', asyncHandler(async (req, res) => {
+    const cert = await prisma.certificates.findUnique({
+      where: { id: req.params.certId },
+      select: {
+        ...REGISTER_SELECT, organization_id: true, championship_id: true, user_id: true,
+        fixture_id: true, signature: true, lock_version: true,
+        organizations: { select: { id: true, name: true } },
+        users_certificates_issued_byTousers: { select: { id: true, name: true } },
+      },
+    });
+    if (!cert) throw new NotFoundError('Certificate');
+    await assertIssuer(req, cert.organization_id);
+
+    const [trail, byCert, team] = await Promise.all([
+      certificateTrail(prisma, cert.id),
+      scanCounts([cert.id]),
+      // "Team" on the design's information panel - real if the honour came from one.
+      cert.user_id && cert.championship_id
+        ? prisma.team_members.findFirst({
+          where: { user_id: cert.user_id, teams: { team_entries: { some: { championship_id: cert.championship_id } } } },
+          select: { teams: { select: { id: true, name: true } } },
+        })
+        : null,
+    ]);
+
+    res.json({
+      ...cert,
+      sport: (cert.payload as any)?.sport ?? null,
+      title: (cert.payload as any)?.title ?? null,
+      scans: byCert.get(cert.id) ?? 0,
+      status: statusOf({ ...cert, _scans: byCert.get(cert.id) ?? 0 }),
+      team: team?.teams ?? null,
+      issued_by_name: cert.users_certificates_issued_byTousers?.name ?? null,
+      verify_url: `${env.WEB_ORIGIN}/verify/${cert.token}`,
+      trail,
+    });
   }));
 
   // ---- the artefact -----------------------------------------------------------
