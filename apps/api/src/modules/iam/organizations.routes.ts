@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import {
-  addOrganizationMemberSchema, bulkAddOrganizationMembersSchema, createOrganizationWithOwnerSchema,
-  updateOrganizationMemberSchema, updateOrganizationSchema, inviteOrgMemberSchema, ORG_KIND,
+  addOrganizationMemberSchema, bulkAddOrganizationMembersSchema, bulkInviteOrgMembersSchema,
+  createOrganizationWithOwnerSchema, updateOrganizationMemberSchema, updateOrganizationSchema,
+  inviteOrgMemberSchema, ORG_KIND,
 } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -9,7 +10,9 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { audit, AUDIT_ACTIONS } from './audit.service.js';
-import { inviteToOrganization, listOrganizationInvitations, revokeInvitation } from './org-invitations.service.js';
+import {
+  inviteManyToOrganization, inviteToOrganization, listOrganizationInvitations, revokeInvitation,
+} from './org-invitations.service.js';
 import { findUserByPhone, hashProvisionedPassword } from './users.helpers.js';
 import { createNotification } from '../notifications/audience.js';
 
@@ -473,6 +476,17 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   router.post('/:id/invitations', orgAdmin, validateBody(inviteOrgMemberSchema), asyncHandler(async (req, res) => {
     const { email, role } = req.body as { email: string; role: string };
     res.status(201).json(await inviteToOrganization(prisma, req, { organizationId: req.params.id, email, role }));
+  }));
+
+  // The same, for a pasted list or an uploaded CSV/sheet. Returns what was sent AND
+  // what was skipped with the reason - a batch never fails whole because one address
+  // is already a member.
+  router.post('/:id/invitations/bulk', orgAdmin, validateBody(bulkInviteOrgMembersSchema), asyncHandler(async (req, res) => {
+    const { invites, role } = req.body as { invites: { email: string; role?: string }[]; role: string };
+    res.status(201).json(await inviteManyToOrganization(prisma, req, {
+      organizationId: req.params.id,
+      invites: invites.map((i) => ({ email: i.email, role: i.role ?? role })),
+    }));
   }));
 
   router.delete('/:id/invitations/:invitationId', orgAdmin, asyncHandler(async (req, res) => {

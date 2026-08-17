@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Request } from 'express';
+import { z } from 'zod';
 import type { Prisma } from '../../infra/prisma.js';
 import { env } from '../../config/env.js';
 import { BusinessRuleError, ConflictError, NotFoundError, UnauthorizedError } from '../../shared/errors.js';
@@ -53,17 +54,31 @@ export interface CreatedInvitation {
   outside_claimed_domain: boolean;
 }
 
-export async function inviteToOrganization(
-  prisma: Prisma, req: Request,
-  { organizationId, email, role }: { organizationId: string; email: string; role: string },
-): Promise<CreatedInvitation> {
-  const addr = normalizeEmail(email);
+// The organisation as the invitation flow needs it: the name for the email, and the
+// claimed domains for the outside-our-domain warning. Loaded once per request, so a
+// batch of 200 does not re-read it 200 times.
+type InvitingOrg = { id: string; name: string; org_domains: { domain: string; verified: boolean }[] };
 
+async function loadInvitingOrg(prisma: Prisma, organizationId: string): Promise<InvitingOrg> {
   const org = await prisma.organizations.findUnique({
     where: { id: organizationId },
     select: { id: true, name: true, org_domains: { select: { domain: true, verified: true } } },
   });
   if (!org) throw new NotFoundError('Organization');
+  return org;
+}
+
+export async function inviteToOrganization(
+  prisma: Prisma, req: Request,
+  { organizationId, email, role }: { organizationId: string; email: string; role: string },
+): Promise<CreatedInvitation> {
+  return inviteOne(prisma, req, await loadInvitingOrg(prisma, organizationId), email, role);
+}
+
+async function inviteOne(
+  prisma: Prisma, req: Request, org: InvitingOrg, email: string, role: string,
+): Promise<CreatedInvitation> {
+  const addr = normalizeEmail(email);
 
   const existingUser = await prisma.users.findFirst({
     where: { email: { equals: addr, mode: 'insensitive' } },
@@ -146,6 +161,49 @@ export async function inviteToOrganization(
     notified_in_app: notified,
     outside_claimed_domain: !claimed,
   };
+}
+
+export interface BulkInviteResult {
+  sent: CreatedInvitation[];
+  skipped: { email: string; reason: string }[];
+}
+
+// Invite a whole list in one request - a pasted set of addresses or an uploaded
+// sheet. Deliberately PARTIALLY successful: one address that is already a member, or
+// already has a live invitation, or is repeated in the sheet, is reported and
+// stepped over rather than taking the rest of the batch down with it. Whoever pasted
+// 40 addresses should not have to work out which one the 400 was about.
+//
+// Sequential on purpose: each invitation writes a row, an audit entry and possibly a
+// notification, and firing 200 of those at a pooled connection concurrently is how
+// you exhaust the pool. The schema caps the list at 200 to keep this inside the
+// request budget.
+export async function inviteManyToOrganization(
+  prisma: Prisma, req: Request,
+  { organizationId, invites }: { organizationId: string; invites: { email: string; role: string }[] },
+): Promise<BulkInviteResult> {
+  const org = await loadInvitingOrg(prisma, organizationId);
+  const result: BulkInviteResult = { sent: [], skipped: [] };
+  const seen = new Set<string>();
+
+  for (const { email, role } of invites) {
+    const addr = normalizeEmail(email);
+    if (!z.string().email().safeParse(addr).success) {
+      result.skipped.push({ email: email.trim().slice(0, 80), reason: 'Not a valid email address' });
+      continue;
+    }
+    if (seen.has(addr)) {
+      result.skipped.push({ email: addr, reason: 'Listed more than once' });
+      continue;
+    }
+    seen.add(addr);
+    try {
+      result.sent.push(await inviteOne(prisma, req, org, addr, role));
+    } catch (e) {
+      result.skipped.push({ email: addr, reason: e instanceof Error ? e.message : 'Could not be invited' });
+    }
+  }
+  return result;
 }
 
 export async function listOrganizationInvitations(prisma: Prisma, organizationId: string) {

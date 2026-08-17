@@ -141,6 +141,23 @@ export const inviteOrgMemberSchema = z.object({
   role: z.enum(ORGANIZATION_MEMBER_ROLE).default('member'),
 });
 
+// The same thing for a pasted list or an uploaded sheet. A per-row role is optional
+// because most batches are one role for everybody; rows without one take the
+// top-level `role`. Partial success is the point: one bad or duplicate address must
+// not cost the other 199 their invitation, so the route reports per address rather
+// than failing the batch.
+export const bulkInviteOrgMembersSchema = z.object({
+  invites: z.array(z.object({
+    // Deliberately NOT .email() here, unlike the single-invite schema: a rejected
+    // body is all-or-nothing, so one typo in a pasted list of 200 would 400 the
+    // other 199. The address is checked per row in the service instead, where a bad
+    // one lands in `skipped` with the rest of the batch still sent.
+    email: z.string().min(1).max(320),
+    role: z.enum(ORGANIZATION_MEMBER_ROLE).optional(),
+  })).min(1).max(200),
+  role: z.enum(ORGANIZATION_MEMBER_ROLE).default('member'),
+});
+
 // Accepting. Name/phone/password are required only when the address has no account
 // yet - the server decides, since only it knows.
 export const acceptInvitationSchema = z.object({

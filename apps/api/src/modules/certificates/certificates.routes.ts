@@ -9,6 +9,8 @@ import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import {
   allocateNumber, codeFor, formatSerial, newToken, signCertificate, type CertificateFacts,
 } from './certificates.service.js';
+import { renderCertificateHtml } from './render.js';
+import { env } from '../../config/env.js';
 
 // Certificates: templates (J4-E6), bulk issue (J4-E7), and the register behind them.
 // Public verification lives in the public router - it must be reachable with no account.
@@ -288,6 +290,63 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     ]);
 
     res.json({ rows, summary: { total, revoked, live: total - revoked, verification_scans: scans } });
+  }));
+
+  // ---- the artefact -----------------------------------------------------------
+  //
+  // Two doors to the same document. The recipient reaches their own without needing
+  // anyone's permission - a certificate you have to ask an administrator for every
+  // time is not really yours - and staff reach any of their institution's.
+  const renderFor = async (req: any, res: any, certId: string, opts: { asOwner: boolean }) => {
+    const cert = await prisma.certificates.findUnique({
+      where: { id: certId },
+      include: { certificate_templates: { select: { design: true } } },
+    });
+    if (!cert) throw new NotFoundError('Certificate');
+
+    if (opts.asOwner) {
+      if (cert.user_id !== req.user!.id) throw new ForbiddenError('This certificate belongs to somebody else.');
+    } else {
+      await assertIssuer(req, cert.organization_id);
+    }
+
+    const html = await renderCertificateHtml({
+      facts: cert.payload as unknown as CertificateFacts,
+      verifyUrl: `${env.WEB_ORIGIN}/verify/${cert.token}`,
+      design: (cert.certificate_templates?.design ?? null) as any,
+      // A withdrawn certificate still renders - so the holder can see what happened -
+      // but it is stamped, because handing back a clean copy of a revoked document is
+      // exactly how a revoked document keeps circulating.
+      invalid: cert.revoked_at ? 'withdrawn' : cert.superseded_at ? 'superseded' : null,
+    });
+
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    // Inline so "Print → Save as PDF" works in one step; ?download=1 for the file.
+    if (req.query.download === '1') {
+      res.set('Content-Disposition', `attachment; filename="${cert.serial}.html"`);
+    }
+    res.send(html);
+  };
+
+  router.get('/certificates/:certId/render', asyncHandler(async (req, res) => {
+    await renderFor(req, res, req.params.certId, { asOwner: false });
+  }));
+
+  /** A recipient's own certificates - the only list they need and the only one they get. */
+  router.get('/me/certificates', asyncHandler(async (req, res) => {
+    const rows = await prisma.certificates.findMany({
+      where: { user_id: req.user!.id },
+      orderBy: { issued_at: 'desc' },
+      select: {
+        id: true, serial: true, issued_at: true, revoked_at: true, superseded_at: true, token: true,
+        payload: true, organizations: { select: { name: true } }, championships: { select: { name: true } },
+      },
+    });
+    res.json({ rows });
+  }));
+
+  router.get('/me/certificates/:certId/render', asyncHandler(async (req, res) => {
+    await renderFor(req, res, req.params.certId, { asOwner: true });
   }));
 
   router.post('/certificates/:certId/revoke', validateBody(z.object({ reason: z.string().min(5).max(500) })), asyncHandler(async (req, res) => {
