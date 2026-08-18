@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, tokenStore } from './api';
+import { supabase } from './supabase';
 
 // Every login is a `user`; `system` is the platform super-admin shell. There are
 // no per-account-type shells any more - what a user can do is derived per
@@ -94,6 +95,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     const res = await api<{ token: string } & AuthContext>('POST', '/auth/login', { email, password });
     tokenStore.set(res.token);
+    // Supabase is created before login, when its custom access-token callback
+    // cannot authenticate. Refresh it now so the first Realtime channel join
+    // carries this user's token rather than the anon key.
+    await supabase.realtime.setAuth();
     localStorage.removeItem(ACTIVE_ROLE_KEY);
     qc.clear(); // drop the previous user's cached queries so nothing leaks across sessions
     applyContext(res);
@@ -103,6 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signup = async (body: SignupBody) => {
     const res = await api<{ token: string } & AuthContext>('POST', '/auth/signup', body);
     tokenStore.set(res.token);
+    await supabase.realtime.setAuth();
     localStorage.removeItem(ACTIVE_ROLE_KEY);
     qc.clear();
     applyContext(res);
