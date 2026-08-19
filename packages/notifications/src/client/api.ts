@@ -73,7 +73,7 @@ export function createNotificationClient(
       ).then((result) => result.count),
 
     sendManual: (input) =>
-      request('POST', '/notifications/test-compose', {
+      request('POST', '/notifications/compose', {
         championship_id: input.championshipId,
         organization_id: input.organizationId,
         team_id: input.teamId,

@@ -214,9 +214,9 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
     res.json({ reactions: summarizeReactions(all, user.id) });
   }));
 
-  // ----- Test compose audience -----
+  // ----- Test compose audience ----
 
-  router.post('/notifications/test-compose', asyncHandler(async (req, res) => {
+  router.post('/notifications/compose', asyncHandler(async (req, res) => {
     const {
       championship_id,
       audience,
