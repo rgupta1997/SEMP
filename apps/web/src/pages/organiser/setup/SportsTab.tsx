@@ -7,6 +7,13 @@ import { ENTRY_TYPE, TOURNAMENT_DISCIPLINE_STATUS } from '@semp/shared';
 import { usePermissions } from '../../../lib/permissions';
 import { eventTemplateFor } from '../../../features/scoring/templates';
 import { Badge, Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge, toast } from '../../../components/ui';
+import { StageConfigWizard } from '../../../components/StageConfigWizard';
+
+// Only group/pool-shaped formats have pools to branch out of - a plain Knockout or
+// League format has nothing for the stage wizard to configure, so it stays on the
+// existing single-stage flow entirely. Mirrors the substring test
+// apps/api/.../fixtures/domain/generators/index.ts uses to dispatch to generateGroups.
+const isPoolShapedFormat = (name?: string | null) => !!name && (name.trim().toLowerCase().includes('pool') || name.trim().toLowerCase().includes('group'));
 
 // Ranking/event sports (powerlifting, swimming, athletics) have no head-to-head matches,
 // so they're locked to the "Rankings" format. `eventTemplateFor` is the same per-sport
@@ -546,6 +553,7 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [editingSport, setEditingSport] = useState(false);
+  const [configuringStages, setConfiguringStages] = useState<any | null>(null);
   const disciplines = draws; // this sport's draws, sliced from the championship-wide fetch
   // Effective format for a discipline: its own override, else the sport's.
   const effectiveFormat = (d: any) => formats.find((f) => f.id === (d.format_id ?? ts.format_id))?.name;
@@ -602,6 +610,9 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
                         <span className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700 transition group-hover:bg-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:group-hover:bg-brand-500/25">✎ Edit</span>
                       </div>
                     </button>
+                    {isPoolShapedFormat(effectiveFormat(d)) && (
+                      <Button size="sm" variant="ghost" className="ml-2 shrink-0" onClick={() => setConfiguringStages(d)}>Configure stages</Button>
+                    )}
                     <button type="button" title="Delete discipline" disabled={removeDiscipline.isPending} onClick={() => confirmRemoveDiscipline(d)}
                       className="ml-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-base text-rose-600 transition hover:bg-rose-50 dark:text-white dark:hover:bg-rose-500/20">🗑</button>
                   </div>
@@ -611,6 +622,11 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
           )}
           {adding && <AddDisciplineModal tournamentSport={ts} existing={disciplines} venues={venues} formats={formats} drawsPath={drawsPath} onClose={() => setAdding(false)} />}
           {editing && <EditDisciplineModal discipline={editing} sportName={sportName} sportFormatId={ts.format_id} venues={venues} formats={formats} path={drawsPath} onClose={() => setEditing(null)} />}
+          {configuringStages && (
+            <Modal title="Configure stages" onClose={() => setConfiguringStages(null)} wide>
+              <StageConfigWizard tournamentDisciplineId={configuringStages.id} onGenerated={() => setConfiguringStages(null)} />
+            </Modal>
+          )}
         </div>
       )}
       {editingSport && <EditSportModal ts={ts} sportName={sportName} formats={formats} onClose={() => setEditingSport(false)} />}

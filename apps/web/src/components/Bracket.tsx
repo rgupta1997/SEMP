@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { cn, StatusBadge } from './ui';
 import { fmtDateTime } from '../lib/hooks';
+import { describeSlot, describeTieBlocked, isTieBlockedFor } from '../lib/stageTree';
 
 // A fixture as returned by GET /tournament-disciplines/:id/fixtures. Only the
 // fields the bracket needs are typed; the rest are passed straight through.
@@ -10,6 +11,15 @@ export interface BracketFixture {
   bracket_position: number | null;
   home_team_id: string | null;
   away_team_id: string | null;
+  // Present once a discipline uses the stage-config wizard: a placeholder ("A1",
+  // "L3") for a side not yet resolved to a real team. Null/absent once resolved,
+  // or on any single-stage discipline.
+  home_slot_label?: string | null;
+  away_slot_label?: string | null;
+  // Set by stage-resolver.ts when the pool feeding this slot finished but ended in
+  // a tie it can't break automatically - the slot is stuck until an organiser
+  // intervenes (e.g. editing a result to break the tie).
+  live_state?: { tie_blocked?: { pool: number; rank: number } } | null;
   home_score?: number | null;
   away_score?: number | null;
   winner_team_id?: string | null;
@@ -48,19 +58,21 @@ function roundTitle(round: string | null, teamsInRound: number): string {
   }
 }
 
-function TeamRow({ name, org, score, isWinner, decided }:
-  { name: string; org?: string; score: number | null | undefined; isWinner: boolean; decided: boolean }) {
+function TeamRow({ name, org, score, isWinner, decided, warning }:
+  { name: string; org?: string; score: number | null | undefined; isWinner: boolean; decided: boolean; warning?: boolean }) {
   return (
     <div
       className={cn(
         'flex items-center justify-between gap-2 px-2.5',
-        isWinner ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400',
-        decided && !isWinner && 'opacity-60',
+        warning ? 'text-amber-600 dark:text-amber-400' : isWinner ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400',
+        decided && !isWinner && !warning && 'opacity-60',
       )}
       style={{ height: ROW_H }}
+      title={warning ? name : undefined}
     >
       <span className="flex min-w-0 items-center gap-1.5">
         {isWinner && <span className="text-[10px] text-brand-500" aria-hidden>▶</span>}
+        {warning && <span aria-hidden>⚠</span>}
         <span className="min-w-0">
           <span className="block truncate leading-tight">{name}</span>
           {org && <span className="block truncate text-[10px] font-normal leading-tight text-slate-400 dark:text-slate-500">{org}</span>}
@@ -75,8 +87,16 @@ function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect }:
   { fixture: BracketFixture; x: number; top: number; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; onSelect?: (f: BracketFixture) => void }) {
   const isBye = fixture.status === 'bye';
   const decided = fixture.winner_team_id != null;
-  const home = teamName(fixture.home_team_id);
-  const away = isBye ? 'Bye' : teamName(fixture.away_team_id);
+  const tieBlocked = fixture.live_state?.tie_blocked ?? null;
+  const homeTieMsg = !fixture.home_team_id && isTieBlockedFor(fixture.home_slot_label, tieBlocked) ? describeTieBlocked(tieBlocked) : null;
+  const awayTieMsg = !fixture.away_team_id && isTieBlockedFor(fixture.away_slot_label, tieBlocked) ? describeTieBlocked(tieBlocked) : null;
+  // A null team id normally means "TBD" (an unplayed round-1 bracket slot on a
+  // single-stage draw). On a stage-config draw it more specifically means "not
+  // resolved yet" - show what it's waiting on (e.g. "1st in Pool A"), or - if the
+  // producing pool finished tied with no way to break it automatically - a warning
+  // instead, so the organiser knows this slot needs their attention.
+  const home = fixture.home_team_id ? teamName(fixture.home_team_id) : (homeTieMsg ?? describeSlot(fixture.home_slot_label) ?? 'TBD');
+  const away = isBye ? 'Bye' : fixture.away_team_id ? teamName(fixture.away_team_id) : (awayTieMsg ?? describeSlot(fixture.away_slot_label) ?? 'TBD');
   const homeOrg = teamOrg?.(fixture.home_team_id) ?? '';
   const awayOrg = isBye ? '' : teamOrg?.(fixture.away_team_id) ?? '';
   // Any match can be opened to edit - a real match to schedule it (even a later-round
@@ -93,9 +113,9 @@ function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect }:
         {fixture.status && fixture.status !== 'bye' && <StatusBadge status={fixture.status} label={fixtureStatusLabel(fixture.status)} />}
       </div>
       <div className="border-t border-slate-100 dark:border-slate-800">
-        <TeamRow name={home} org={homeOrg} score={fixture.home_score} isWinner={decided && fixture.winner_team_id === fixture.home_team_id} decided={decided} />
+        <TeamRow name={home} org={homeOrg} score={fixture.home_score} isWinner={decided && fixture.winner_team_id === fixture.home_team_id} decided={decided} warning={!!homeTieMsg} />
         <div className="border-t border-slate-100 dark:border-slate-800" />
-        <TeamRow name={away} org={awayOrg} score={isBye ? null : fixture.away_score} isWinner={decided && fixture.winner_team_id === fixture.away_team_id} decided={decided} />
+        <TeamRow name={away} org={awayOrg} score={isBye ? null : fixture.away_score} isWinner={decided && fixture.winner_team_id === fixture.away_team_id} decided={decided} warning={!!awayTieMsg} />
       </div>
     </>
   );

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createFixtureSchema, fixtureAwardsSchema, fixturePointsSchema, fixtureResultSchema, generateFixturesSchema, updateFixtureSchema } from '@semp/shared';
+import { createFixtureSchema, fixtureAwardsSchema, fixturePointsSchema, fixtureResultSchema, generateAllStagesSchema, generateFixturesSchema, updateFixtureSchema } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { makeCrudRouter } from '../../http/crud.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -7,6 +7,8 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { generateFixtures, type TeamRef } from './domain/generators/index.js';
+import { generateAllStages } from './domain/stage-orchestrator.js';
+import { resolveStageAdvancement } from './domain/stage-resolver.js';
 import { recomputeStandingsForFixture, resolveRuleForDraw, resolveSchemeForDraw } from '../standings/standings.service.js';
 import { notify } from '@semp/notifications/server/notify.js';
 // A match can only be recorded once its championship is under way. Resolves the
@@ -49,18 +51,16 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-// Single-elimination bracket advancement: put `teamId` into the correct slot of the
-// match that the match at `position` feeds into. Bracket positions are contiguous
-// round-by-round, so the parent is derived from the bracket size (sibling count =
-// size - 1). No-op for non-bracket formats (group/round-robin have null positions),
-// non-power-of-two brackets, the final, or a parent that's already been played.
-async function advanceInBracket(prisma: Prisma, drawId: string, position: number, teamId: string): Promise<void> {
-  const sibs = await prisma.fixtures.findMany({
-    where: { tournament_discipline_id: drawId, bracket_position: { not: null } },
-    select: { id: true, bracket_position: true, status: true },
-  });
-  const size = sibs.length + 1;
-  if (size < 2 || (size & (size - 1)) !== 0) return; // not a clean single-elim bracket
+// Pure bracket arithmetic: given how many bracket-position siblings exist in the same
+// stage and which position just got decided, returns the parent match's
+// bracket_position and which slot (home/away) the winner fills - or null if there's
+// no parent (not a clean single-elim bracket, position not found, or it's the
+// final). Extracted as a pure function so it's unit-testable with no DB involved -
+// this is what lets a regression test prove the stage_sequence filter added to
+// advanceInBracket below never changes this arithmetic for existing brackets.
+export function computeParentPosition(siblingCount: number, position: number): { parentPos: number; slot: 'home' | 'away' } | null {
+  const size = siblingCount + 1;
+  if (size < 2 || (size & (size - 1)) !== 0) return null; // not a clean single-elim bracket
   const rounds = Math.log2(size);
   const offsets: number[] = [];
   let acc = 0;
@@ -71,12 +71,30 @@ async function advanceInBracket(prisma: Prisma, drawId: string, position: number
     const matchesInRound = size / 2 ** (ri + 1);
     if (position >= offsets[ri] && position < offsets[ri] + matchesInRound) { round = ri; j = position - offsets[ri]; break; }
   }
-  if (round < 0 || round >= rounds - 1) return; // not found, or it's the final - nowhere to advance
+  if (round < 0 || round >= rounds - 1) return null; // not found, or it's the final - nowhere to advance
   const parentPos = offsets[round + 1] + Math.floor(j / 2);
-  const parent = sibs.find((s) => s.bracket_position === parentPos);
-  if (!parent || parent.status === 'completed') return; // don't overwrite a played match
   // Even child → parent's home slot, odd child → away (mirrors the generator's pairing).
-  await prisma.fixtures.update({ where: { id: parent.id }, data: j % 2 === 0 ? { home_team_id: teamId } : { away_team_id: teamId } });
+  return { parentPos, slot: j % 2 === 0 ? 'home' : 'away' };
+}
+
+// Single-elimination bracket advancement: put `teamId` into the correct slot of the
+// match that the match at `position` feeds into. `stageSequence` scopes the sibling
+// query to one knockout stage - a draw can have more than one independent bracket
+// (branches), each with its own bracket_position starting at 0, so mixing them
+// together would corrupt the round-offset arithmetic. Defaults to 1 (today's only
+// value for every existing single-stage tournament), so this is a no-op change for
+// them. No-op for non-bracket formats (group/round-robin have null positions),
+// non-power-of-two brackets, the final, or a parent that's already been played.
+export async function advanceInBracket(prisma: Prisma, drawId: string, position: number, teamId: string, stageSequence = 1): Promise<void> {
+  const sibs = await prisma.fixtures.findMany({
+    where: { tournament_discipline_id: drawId, bracket_position: { not: null }, stage_sequence: stageSequence },
+    select: { id: true, bracket_position: true, status: true },
+  });
+  const result = computeParentPosition(sibs.length, position);
+  if (!result) return;
+  const parent = sibs.find((s) => s.bracket_position === result.parentPos);
+  if (!parent || parent.status === 'completed') return; // don't overwrite a played match
+  await prisma.fixtures.update({ where: { id: parent.id }, data: result.slot === 'home' ? { home_team_id: teamId } : { away_team_id: teamId } });
 }
 
 // After a completed bracket result, push the winner into the next round. Best-effort -
@@ -85,11 +103,11 @@ async function advanceWinner(prisma: Prisma, fixtureId: string): Promise<void> {
   try {
     const fx = await prisma.fixtures.findUnique({
       where: { id: fixtureId },
-      select: { tournament_discipline_id: true, bracket_position: true, winner_team_id: true, status: true },
+      select: { tournament_discipline_id: true, bracket_position: true, winner_team_id: true, status: true, stage_sequence: true },
     });
     const advancing = fx?.status === 'completed' || fx?.status === 'walkover';
     if (!fx || !advancing || fx.winner_team_id == null || fx.bracket_position == null) return;
-    await advanceInBracket(prisma, fx.tournament_discipline_id, fx.bracket_position, fx.winner_team_id);
+    await advanceInBracket(prisma, fx.tournament_discipline_id, fx.bracket_position, fx.winner_team_id, fx.stage_sequence ?? 1);
   } catch (err) {
     console.error(`[bracket] winner advancement failed for fixture ${fixtureId}:`, err);
   }
@@ -101,11 +119,11 @@ async function propagateByes(prisma: Prisma, drawId: string): Promise<void> {
   try {
     const byes = await prisma.fixtures.findMany({
       where: { tournament_discipline_id: drawId, status: 'bye', bracket_position: { not: null } },
-      select: { bracket_position: true, home_team_id: true, away_team_id: true },
+      select: { bracket_position: true, home_team_id: true, away_team_id: true, stage_sequence: true },
     });
     for (const b of byes) {
       const team = b.home_team_id ?? b.away_team_id;
-      if (team && b.bracket_position != null) await advanceInBracket(prisma, drawId, b.bracket_position, team);
+      if (team && b.bracket_position != null) await advanceInBracket(prisma, drawId, b.bracket_position, team, b.stage_sequence ?? 1);
     }
   } catch (err) {
     console.error(`[bracket] bye propagation failed for draw ${drawId}:`, err);
@@ -298,6 +316,58 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       res.status(201).json(rows);
     }));
 
+  // Generate EVERY stage of a stage-config tree (group + knockout wizard) up front -
+  // later stages are created as TBD placeholders (home_slot_label/away_slot_label)
+  // that stage-resolver.ts fills in automatically as earlier stages finish. Separate
+  // from /fixtures/generate above, which only ever produces one flat stage and is
+  // untouched by this feature.
+  router.post('/tournament-disciplines/:id/fixtures/generate-all',
+    drawOrganiser,
+    validateBody(generateAllStagesSchema),
+    asyncHandler(async (req, res) => {
+      const td = await prisma.tournament_disciplines.findUnique({ where: { id: req.params.id } });
+      if (!td) throw new NotFoundError('Tournament discipline');
+
+      let teams: TeamRef[];
+      if (req.body.team_ids?.length) {
+        teams = req.body.team_ids.map((id: string) => ({ teamId: id }));
+      } else {
+        const registered = await prisma.team_entries.findMany({
+          where: { tournament_discipline_id: td.id },
+          select: { team_id: true },
+        });
+        teams = shuffle(registered.map((e) => ({ teamId: e.team_id })));
+      }
+
+      const existing = await prisma.fixtures.findMany({
+        where: { tournament_discipline_id: td.id },
+        select: { id: true, status: true, home_score: true, away_score: true },
+      });
+      const played = existing.some((f) => ['completed', 'walkover', 'bye'].includes(f.status) || f.home_score != null || f.away_score != null);
+      if (played) {
+        throw new BusinessRuleError('This draw already has played matches - regenerating would erase those results. Edit fixtures individually instead.');
+      }
+
+      const { inserts } = generateAllStages(req.body.config.root, teams, req.body.config.manualAllocation ?? []);
+
+      await prisma.$transaction([
+        prisma.fixtures.deleteMany({ where: { tournament_discipline_id: td.id } }),
+        prisma.fixtures.createMany({ data: inserts.map((f) => ({ tournament_discipline_id: td.id, ...f })) }),
+        // Persisted so stage-resolver.ts can re-derive the tree later (format_config
+        // already exists as a free-form jsonb column on this row).
+        prisma.tournament_disciplines.update({ where: { id: td.id }, data: { format_config: req.body.config } }),
+      ]);
+
+      await propagateByes(prisma, td.id); // stage-1 byes only, unchanged signature (default stageSequence = 1)
+      await resolveStageAdvancement(prisma, td.id); // resolves anything stage 1 already decided (e.g. a fully-bye pool)
+
+      const rows = await prisma.fixtures.findMany({
+        where: { tournament_discipline_id: td.id },
+        orderBy: [{ stage_sequence: 'asc' }, { pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
+      });
+      res.status(201).json(rows);
+    }));
+
   // Record a result from the match console. Derives the winner from scores when
   // not given explicitly, and defaults the status to completed.
   // ---- Live scoring state (official console) ----
@@ -375,7 +445,11 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     if (headlineChanged) await refreshStandings(prisma, req.params.id);
     // Completing a bracket match (or a walkover with a winner) → advance the winner;
     // custom-points → remind organiser.
-    if (b.status === 'completed' || b.status === 'walkover') await advanceWinner(prisma, req.params.id);
+    if (b.status === 'completed' || b.status === 'walkover') {
+      await advanceWinner(prisma, req.params.id);
+      const fx = await prisma.fixtures.findUnique({ where: { id: req.params.id }, select: { tournament_discipline_id: true } });
+      if (fx) await resolveStageAdvancement(prisma, fx.tournament_discipline_id);
+    }
     if (b.status === 'completed') await remindCustomPointsIfNeeded(prisma, req.params.id, req.user!.id);
     res.json({ ok: true, persisted });
   }));
@@ -487,6 +561,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     await refreshStandings(prisma, req.params.id);
     if ((req.body.status ?? 'completed') === 'completed') {
       await advanceWinner(prisma, req.params.id);
+      await resolveStageAdvancement(prisma, updated.tournament_discipline_id);
       await remindCustomPointsIfNeeded(prisma, req.params.id, req.user!.id);
     }
     res.json(updated);
