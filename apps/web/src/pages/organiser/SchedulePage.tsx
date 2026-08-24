@@ -282,16 +282,22 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
           <div className="space-y-6">
             {stageGroups.map(([seq, group]) => {
               const groupHasBracket = group.some((f) => f.bracket_position != null);
+              const content = groupHasBracket
+                ? <Bracket fixtures={group} teamName={teamName} teamOrg={teamOrg} onSelect={canManage ? setEditing : () => {}} />
+                : <RoundRobinGrid fixtures={group} teamName={teamName} teamOrg={teamOrg} onSelect={canManage ? setEditing : () => {}} />;
+              if (!multiStage) return <div key={seq}>{content}</div>;
+              // Every stage numbers its OWN pools fresh (Pool A, B, C...), so a later
+              // stage's "Pool B" is a completely different pool from an earlier
+              // stage's "Pool B" - a small caption is too easy to scroll past and read
+              // as one continuous, oddly-restarting pool. A bordered box with a named
+              // badge makes the stage boundary impossible to miss.
               return (
-                <div key={seq}>
-                  {multiStage && (
-                    <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      {stageLabel(seq, groupHasBracket)}
-                    </div>
-                  )}
-                  {groupHasBracket
-                    ? <Bracket fixtures={group} teamName={teamName} teamOrg={teamOrg} onSelect={canManage ? setEditing : () => {}} />
-                    : <RoundRobinGrid fixtures={group} teamName={teamName} teamOrg={teamOrg} onSelect={canManage ? setEditing : () => {}} />}
+                <div key={seq} className="rounded-xl border-2 border-slate-200 p-4 dark:border-slate-700">
+                  <div className="mb-3 flex items-center gap-2">
+                    <Badge tone="violet">{stageLabel(seq, groupHasBracket)}</Badge>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Stage {seq}</span>
+                  </div>
+                  {content}
                 </div>
               );
             })}

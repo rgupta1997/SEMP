@@ -27,14 +27,18 @@ export function resolveBranchLabels(formatConfig: unknown): Map<number, string> 
 // from Pool A; "L3" = the loser of the semifinal at bracket position 3.
 export function describeSlot(label: string | null | undefined): string | null {
   if (!label) return null;
+  // Check the loser-reference pattern FIRST - "L0"/"L1" would otherwise also match
+  // the pool-qualifier pattern below (L is a valid single uppercase letter too),
+  // misreading a 3rd-place slot as "0th/1st in Pool L" instead of what it actually
+  // is: the loser of a specific semifinal.
+  const loser = label.match(/^L(\d+)$/);
+  if (loser) return `Loser of match ${Number(loser[1]) + 1}`;
   const pool = label.match(/^([A-Z])(\d+)$/);
   if (pool) {
     const rank = Number(pool[2]);
     const ord = rank === 1 ? '1st' : rank === 2 ? '2nd' : rank === 3 ? '3rd' : `${rank}th`;
     return `${ord} in Pool ${pool[1]}`;
   }
-  const loser = label.match(/^L(\d+)$/);
-  if (loser) return `Loser of match ${Number(loser[1]) + 1}`;
   return null;
 }
 

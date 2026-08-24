@@ -279,9 +279,14 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       }
 
       // Rebuild: wipe and regenerate from scratch - refuse if any fixture has already
-      // been played (completed/walkover/bye, or a score recorded). Discarding those
+      // been played (completed/walkover, or a score recorded). Discarding those
       // would corrupt results and standings. Mirrors the cascade-delete safety rule.
-      const played = existing.some((f) => ['completed', 'walkover', 'bye'].includes(f.status) || f.home_score != null || f.away_score != null);
+      // A bye carries no result (no score, nothing competitive happened - it's just
+      // "this team had no opponent this round/slot"), so it must not count as
+      // "played": an odd-sized pool/league or a non-power-of-two knockout produces
+      // byes the instant it's generated, before any real match is played, which
+      // would otherwise permanently block ever regenerating that draw again.
+      const played = existing.some((f) => ['completed', 'walkover'].includes(f.status) || f.home_score != null || f.away_score != null);
       if (played) {
         throw new BusinessRuleError('This draw already has played matches - regenerating would erase those results. Edit fixtures individually instead.');
       }
@@ -343,7 +348,12 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         where: { tournament_discipline_id: td.id },
         select: { id: true, status: true, home_score: true, away_score: true },
       });
-      const played = existing.some((f) => ['completed', 'walkover', 'bye'].includes(f.status) || f.home_score != null || f.away_score != null);
+      // A bye carries no result (no score, nothing competitive happened - it's just
+      // "this team had no opponent this round/slot"), so it must not count as
+      // "played": an odd-sized pool/league or a non-power-of-two knockout produces
+      // byes the instant it's generated, before any real match is played, which
+      // would otherwise permanently block ever regenerating that draw again.
+      const played = existing.some((f) => ['completed', 'walkover'].includes(f.status) || f.home_score != null || f.away_score != null);
       if (played) {
         throw new BusinessRuleError('This draw already has played matches - regenerating would erase those results. Edit fixtures individually instead.');
       }

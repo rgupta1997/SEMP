@@ -4,7 +4,7 @@ import {
   type AudienceRole,
   type AudienceRule,
 } from '@semp/notifications/client';
-import { notificationHooks } from '../lib/notifications.ts';
+import { notificationHooks } from '../lib/notification.ts';
 
 const AUDIENCES: AudienceRole[] = [
   'poc',
