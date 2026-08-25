@@ -209,6 +209,26 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // Organiser, and a default season (named after the championship) is created so the
   // organiser can jump straight to adding sports - they never have to make a season
   // by hand (they can still rename/add more on the Seasons tab).
+  /**
+   * May this caller put an event's name against that organisation?
+   *
+   * Hosting decides whose signature ends up on the event's certificates, so it is
+   * not something an event's organiser can assign to an institution they have no
+   * standing in. Checked on create AND on update - the update path accepts the same
+   * field, and a guard on only one of them is not a guard.
+   */
+  async function assertMayHost(userId: string, isSuper: boolean, organizationId: string) {
+    if (isSuper) return;
+    const may = await prisma.organization_members.findFirst({
+      where: {
+        user_id: userId, organization_id: organizationId,
+        status: 'active', role: { in: ['owner', 'admin'] },
+      },
+      select: { id: true },
+    });
+    if (!may) throw new ForbiddenError('You cannot host an event on behalf of that organisation');
+  }
+
   router.post('/', validateBody(createChampionshipSchema), asyncHandler(async (req, res) => {
     // Who is hosting. Sent explicitly when the organiser is creating from inside an
     // organisation; otherwise inferred, but only when there is exactly one candidate.
@@ -216,16 +236,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
     // guesses is how an event ends up filed under the wrong college.
     let hostOrgId: string | null = req.body.host_organization_id ?? null;
     if (hostOrgId) {
-      const may = await prisma.organization_members.findFirst({
-        where: {
-          user_id: req.user!.id, organization_id: hostOrgId,
-          status: 'active', role: { in: ['owner', 'admin'] },
-        },
-        select: { id: true },
-      });
-      if (!may && !req.user!.isSuperAdmin) {
-        throw new ForbiddenError('You cannot host an event on behalf of that organisation');
-      }
+      await assertMayHost(req.user!.id, !!req.user!.isSuperAdmin, hostOrgId);
     } else {
       const admin = await prisma.organization_members.findMany({
         where: { user_id: req.user!.id, status: 'active', role: { in: ['owner', 'admin'] } },
@@ -259,6 +270,24 @@ export function makeEventsRouter(prisma: Prisma): Router {
 
   // UPDATE championship
   router.patch('/:id', ownChampionship, validateBody(updateChampionshipSchema), asyncHandler(async (req, res) => {
+    // Hosting can be changed only by somebody with standing in the organisation on
+    // BOTH sides of the change. Naming one is a claim; removing one is a claim on
+    // that institution's behalf that it is no longer involved - and an organiser
+    // who is not an administrator there could otherwise strip a college's name off
+    // its own event, orphaning every certificate it has issued for it.
+    if ('host_organization_id' in req.body) {
+      const current = await prisma.championships.findUnique({
+        where: { id: req.params.id },
+        select: { host_organization_id: true },
+      });
+      const next = req.body.host_organization_id ?? null;
+      if (current?.host_organization_id !== next) {
+        if (current?.host_organization_id) {
+          await assertMayHost(req.user!.id, !!req.user!.isSuperAdmin, current.host_organization_id);
+        }
+        if (next) await assertMayHost(req.user!.id, !!req.user!.isSuperAdmin, next);
+      }
+    }
     const championship = await prisma.championships.update({ where: { id: req.params.id }, data: req.body });
     res.json(championship);
   }));

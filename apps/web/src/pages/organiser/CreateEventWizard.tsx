@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useApi, useApiMutation } from '../../lib/hooks';
-import { BackButton, Button, Card, Field, Input, Pills, Spinner, Stepper, Textarea, toast } from '../../components/ui';
+import { BackButton, Button, Card, Field, Input, Pills, Select, Spinner, Stepper, Textarea, toast } from '../../components/ui';
+import { useWorkspace } from '../../lib/useWorkspace';
 import { SportsTab } from './setup/SportsTab';
 import { InvitePanel } from '../../components/InvitePanel';
 
@@ -31,6 +32,17 @@ export function CreateEventWizard() {
   const [description, setDescription] = useState('');
   const [visibility, setVisibility] = useState<'public' | 'private'>('public');
   const [error, setError] = useState<string | null>(null);
+
+  // Who is hosting. An event is hosted BY an organisation, and that decides whose
+  // name is on its certificates - so when the answer is ambiguous it is asked
+  // rather than guessed. Somebody who administers exactly one institution is not
+  // asked at all; the server infers it, and a question with one answer is a
+  // question not worth putting on the screen.
+  const ws = useWorkspace();
+  const hostable = ws.contexts.filter(
+    (c) => c.kind === 'org' && c.roleCodes.some((r) => r === 'owner' || r === 'org_admin'),
+  );
+  const [hostOrgId, setHostOrgId] = useState<string>('');
   const effectiveSlug = slugTouched ? slug : slugify(name);
 
   const create = useApiMutation((body: any) => api('POST', '/championships', body), ['/championships']);
@@ -48,7 +60,13 @@ export function CreateEventWizard() {
     setError(null);
     if (!venue.trim()) { setError('Host city is required'); return; }
     if (!startDate || !endDate) { setError('Start and end dates are required'); return; }
-    const body = { name, slug: effectiveSlug, venue: venue.trim(), description: description || undefined, start_date: startDate, end_date: endDate, visibility };
+    const body = {
+      name, slug: effectiveSlug, venue: venue.trim(), description: description || undefined,
+      start_date: startDate, end_date: endDate, visibility,
+      // Sent only when there was a choice to make. Omitted, the server infers it
+      // from a sole administered organisation, or leaves it null for an individual.
+      ...(hostable.length > 1 ? { host_organization_id: hostOrgId || null } : {}),
+    };
     if (eventId) {
       update.mutate(body, {
         onSuccess: () => setStep(1),
@@ -102,6 +120,17 @@ export function CreateEventWizard() {
                 <Field label="End date"><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} required /></Field>
               </div>
               <Field label="Host city" hint="Required - used as your championship's default venue."><Input value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="Mumbai" required /></Field>
+              {hostable.length > 1 && (
+                <Field
+                  label="Hosted by"
+                  hint="Whose event this is. It decides which organisation's name and signature go on its certificates."
+                >
+                  <Select value={hostOrgId} onChange={(e) => setHostOrgId(e.target.value)}>
+                    <option value="">Just me — no organisation</option>
+                    {hostable.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  </Select>
+                </Field>
+              )}
               <Field label="Description"><Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="A short summary of the championship…" /></Field>
               <Field label="Visibility" hint={visibility === 'private'
                 ? 'Hidden from Discover - organizations can only join through your invitations.'
