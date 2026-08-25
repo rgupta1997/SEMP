@@ -41,6 +41,7 @@ describe('subscription gates are mounted, not merely written', () => {
     ['peer benchmark', 'benchmarking', 'benchmark'],
     ['campuses and units', 'multi_campus', 'units'],
     ['audit log', 'audit_logs', 'audit'],
+    ['bulk roster import', 'bulk_player_upload', 'import'],
   ])('%s is gated on %s', (_label, capability, segment) => {
     const found = gates.filter((g) => g.name === `capability:${capability}`
       && g.path.includes(segment)
@@ -52,7 +53,7 @@ describe('subscription gates are mounted, not merely written', () => {
     // If Express changed how it stores mounts, or the naming were dropped, every
     // assertion above would fail rather than pass vacuously - but this states the
     // expectation directly so the reason is legible when it does.
-    expect(gates.length).toBeGreaterThanOrEqual(5);
+    expect(gates.length).toBeGreaterThanOrEqual(6);
     expect(all.length).toBeGreaterThan(20);
   });
 });

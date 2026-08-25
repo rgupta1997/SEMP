@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Award, FileText, LayoutTemplate, QrCode, ScanLine, Sparkles, Upload } from 'lucide-react';
 import { useApi } from '../../../lib/hooks';
 import { Button, Card, EmptyState, PageHeader, Skeleton, cn } from '../../../components/ui';
-import { useAuth } from '../../../lib/auth';
+import { useWorkspace } from '../../../lib/useWorkspace';
 import { GenerateModal } from './GenerateModal';
 import { KpiTile, whenish, type Delta, type Template } from './shared';
 
@@ -19,14 +19,9 @@ interface Overview {
   activity: Array<{ id: string; at: string; kind: string; title: string; detail: string | null; tone: string }>;
 }
 
-const greeting = () => {
-  const h = new Date().getHours();
-  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
-};
-
 export function CertificatesDashboard() {
   const { orgId } = useParams();
-  const { ctx } = useAuth();
+  const ws = useWorkspace();
   const [gen, setGen] = useState(false);
 
   const overviewPath = orgId ? `/organizations/${orgId}/certificates/overview` : null;
@@ -35,11 +30,13 @@ export function CertificatesDashboard() {
   const templates = useApi<{ rows: Template[] }>(templatesPath);
 
   const k = overview.data?.kpis;
-  const firstName = (ctx?.user?.name ?? '').trim().split(/\s+/)[0];
+  // The audit trail is a max-tier capability, so the link to it only appears when
+  // it would open. A link that 403s is worse than no link.
+  const canAudit = ws.granted.has('audit_logs');
 
   const actions = [
     { to: '#generate', icon: Sparkles, label: 'Generate certificates', hint: 'From a locked championship', onClick: () => setGen(true) },
-    { to: `/organizations/${orgId}/people`, icon: Upload, label: 'Upload participants', hint: 'CSV import on the People page' },
+    { to: `/organizations/${orgId}/students/import`, icon: Upload, label: 'Upload participants', hint: 'Import a roll on the Players page' },
     { to: `/organizations/${orgId}/certificates/templates`, icon: LayoutTemplate, label: 'Certificate templates', hint: `${templates.data?.rows.length ?? 0} in use` },
     { to: `/organizations/${orgId}/certificates/register`, icon: FileText, label: 'Issued register', hint: `${k?.issued.value ?? 0} issued` },
     { to: '/verify', icon: QrCode, label: 'QR verifier', hint: 'Check a certificate is real' },
@@ -48,7 +45,7 @@ export function CertificatesDashboard() {
   return (
     <div className="grid gap-5">
       <PageHeader
-        title={firstName ? `${greeting()}, ${firstName}` : 'Certificates'}
+        title="Certificates"
         subtitle="Issue, withdraw and verify — every one carries a signature a stranger can check."
       >
         <Button variant="ghost" onClick={() => window.open('/verify', '_blank', 'noopener')}>
@@ -70,9 +67,11 @@ export function CertificatesDashboard() {
         <Card className="p-0">
           <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5 dark:border-slate-800">
             <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Recent activity</h2>
-            <Link to={`/organizations/${orgId}/administration`} className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
-              Full audit log
-            </Link>
+            {canAudit && (
+              <Link to={`/organizations/${orgId}/admin?tab=audit`} className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
+                Full audit log
+              </Link>
+            )}
           </div>
           {overview.isLoading ? <Skeleton className="h-48" /> : (overview.data?.activity.length ?? 0) === 0 ? (
             <EmptyState

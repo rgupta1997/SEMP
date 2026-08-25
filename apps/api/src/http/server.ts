@@ -199,19 +199,28 @@ export function buildApp(prisma: Prisma) {
 
   // ----- Records, certificates, people and reports (lifted from the wave branch) -----
 
-  // Mounted under /organizations because every route is institution-scoped.
-  api.use('/organizations', makePeopleRouter(prisma));
-
-  // Role grants inside an organisation, and the catalogue the matrix is generated
-  // from. Mounted at the root because its paths are already fully qualified.
-  // What this caller's subscription makes available, on both ladders. The shell
-  // renders every lock from this one payload rather than asking per capability.
+  // The subscription gate. Declared before anything it guards, because a gate has
+  // to be mounted ahead of the router it stands in front of - Express matches in
+  // mount order, and a guard added afterwards would never run.
   const ents = makeEntitlementGuards(prisma);
-  api.get('/me/entitlements', ents.readSnapshot);
 
   /** Gate on the organisation named in the path, not on the caller's own. */
   const orgParam = { organizationIdFrom: (req: any) => req.params.id as string | undefined };
 
+  // What this caller's subscription makes available, on both ladders. The shell
+  // renders every lock from this one payload rather than asking per capability.
+  api.get('/me/entitlements', ents.readSnapshot);
+
+  // Mounted under /organizations because every route is institution-scoped.
+  //
+  // Importing a roll from a file is a paid capability; adding people one at a time
+  // is not. The gate goes on the import paths only, so a free organisation is
+  // never locked out of having members - just out of the bulk route to them.
+  api.use('/organizations/:id/people/import', ents.requireCapability('bulk_player_upload', orgParam));
+  api.use('/organizations', makePeopleRouter(prisma));
+
+  // Role grants inside an organisation, and the catalogue the matrix is generated
+  // from. Mounted at the root because its paths are already fully qualified.
   api.use('/', makeOrgRolesRouter(prisma));
 
   // The audit trail. 864 entries were already being written with nothing to read them.

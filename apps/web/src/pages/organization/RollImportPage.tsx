@@ -2,6 +2,8 @@ import { useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Upload, ShieldAlert, KeyRound } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
+import { useWorkspace } from '../../lib/useWorkspace';
+import { CapabilityLock } from '../../components/CapabilityLock';
 import { downloadCsvTemplate, matrixToRows, readFileToMatrix, type ImportColumn } from '../../lib/import';
 import {
   Badge, BackButton, Button, Card, CardBody, CardHeader, PageHeader, Spinner, toast,
@@ -61,6 +63,7 @@ const VERDICT_LABEL = {
 
 export function RollImportPage() {
   const { orgId } = useParams();
+  const ws = useWorkspace();
   const fileRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -117,13 +120,25 @@ export function RollImportPage() {
     credentials.map((c) => [c.name, c.email, c.phone ?? '', c.password]),
   );
 
+  // The server refuses the import without this capability, so the file picker is
+  // replaced rather than left to fail on submit. Adding people one at a time is
+  // never gated - only the bulk route to them.
+  if (!ws.loading && !ws.granted.has('bulk_player_upload')) {
+    return (
+      <div className="space-y-5">
+        <PageHeader title="Import the student roll" />
+        <CapabilityLock capability="bulk_player_upload" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader
         title="Import the student roll"
         subtitle="Upload a CSV or Excel file. Nothing is written until you have seen what the import will do."
       >
-        <BackButton to={`/organizations/${orgId}/members`} className="mb-0">People</BackButton>
+        <BackButton to={`/organizations/${orgId}/students`} className="mb-0">Players</BackButton>
       </PageHeader>
 
       <Card>
