@@ -33,6 +33,7 @@ import { makeTeamsRouter } from '../modules/teams/teams.routes.js';
 import { makeMatrixImportRouter } from '../modules/import/matrix-import.routes.js';
 import { makePublicRouter } from '../modules/public/public.routes.js';
 import { makeVenuesRouter, makeVenueGroundsRouter } from '../modules/venues/venues.routes.js';
+import { makeProfileRouter } from '../modules/records/profile.routes.js';
 import { makeRecordsRouter } from '../modules/records/records.routes.js';
 import { makeClaimsRouter } from '../modules/records/claims.routes.js';
 import { makeCertificatesRouter } from '../modules/certificates/certificates.routes.js';
@@ -216,6 +217,10 @@ export function buildApp(prisma: Prisma) {
   // The permanent record - lifetime timeline + achievements, READ ONLY. A timeline
   // entry changes only by correcting the locked result behind it.
   api.use('/', makeRecordsRouter(prisma));
+
+  // The controlled half of a sports profile, kept apart from the verified half so
+  // an edit can never reach a locked record.
+  api.use('/', makeProfileRouter(prisma));
 
   // Leadership reporting. The impact report is handed the SAME builders the report
   // tabs use, so a board pack and the screen it was promised on cannot disagree.
