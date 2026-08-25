@@ -3,7 +3,7 @@ import { useAuth } from '../../lib/auth';
 import { useApi, fmtDateRange } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
 import { usePocOnboarding } from '../../lib/onboarding';
-import { OrgTabs } from '../../components/OrgTabs';
+import { OrgHeader } from '../../components/OrgHeader';
 import { GettingStarted } from '../../components/onboarding/GettingStarted';
 import { Card, CardBody, CardHeader, EmptyState, StatusBadge } from '../../components/ui';
 
@@ -23,7 +23,7 @@ export function OrgOverviewPage() {
 
   return (
     <div>
-      {orgId && <OrgTabs orgId={orgId} />}
+      {orgId && <OrgHeader orgId={orgId} />}
       {canManage ? (
         <GettingStarted
           title="Get your organization match-ready"

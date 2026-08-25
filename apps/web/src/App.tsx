@@ -30,6 +30,12 @@ import { StudentsPage } from './pages/organization/StudentsPage';
 import { RolesPage } from './pages/organization/RolesPage';
 import { SportsProfilePage } from './pages/participant/SportsProfilePage';
 import { MyGamePage } from './pages/MyGamePage';
+import { OrgEventsPage } from './pages/organization/OrgEventsPage';
+import { OrgAchievementsPage } from './pages/organization/OrgAchievementsPage';
+import { OrgReportsPage } from './pages/organization/OrgReportsPage';
+import { RollImportPage } from './pages/organization/RollImportPage';
+import { CertificatesDashboard } from './pages/organization/certificates/CertificatesDashboard';
+import { IssuedRegisterPage } from './pages/organization/certificates/IssuedRegisterPage';
 import { AdminPage } from './pages/organization/AdminPage';
 import { MembersPage } from './pages/organization/MembersPage';
 import { PocsPage } from './pages/organization/PocsPage';
@@ -96,6 +102,12 @@ function AuthenticatedRoutes() {
         <Route path="/organizations/:orgId/members" element={<MembersPage />} />
         <Route path="/organizations/:orgId/roles" element={<RolesPage />} />
         <Route path="/organizations/:orgId/admin" element={<AdminPage />} />
+        <Route path="/organizations/:orgId/events" element={<OrgEventsPage />} />
+        <Route path="/organizations/:orgId/achievements" element={<OrgAchievementsPage />} />
+        <Route path="/organizations/:orgId/reports" element={<OrgReportsPage />} />
+        <Route path="/organizations/:orgId/certificates" element={<CertificatesDashboard />} />
+        <Route path="/organizations/:orgId/certificates/register" element={<IssuedRegisterPage />} />
+        <Route path="/organizations/:orgId/students/import" element={<RollImportPage />} />
         <Route path="/organizations/:orgId/invitations" element={<InvitationsPage />} />
 
         {/* Discover + Championships + Host */}

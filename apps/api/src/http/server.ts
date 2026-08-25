@@ -18,6 +18,7 @@ import { makeGuards } from './middleware/permissions.js';
 import { makeEntitlementGuards } from './middleware/entitlements.js';
 import { makeOrgUnitsRouter } from '../modules/iam/org-units.routes.js';
 import { makeAuditRouter } from '../modules/iam/audit.routes.js';
+import { makeOrgEventsRouter } from '../modules/enrollment/org-events.routes.js';
 import { makeOrgRolesRouter } from '../modules/iam/org-roles.routes.js';
 import { makeSignInRouter } from '../modules/iam/signin.routes.js';
 import { makeAuthRouter } from '../modules/iam/auth.routes.js';
@@ -213,6 +214,7 @@ export function buildApp(prisma: Prisma) {
 
   // Campuses and units - the concrete scopes a campus_unit role is granted against.
   api.use('/organizations', makeOrgUnitsRouter(prisma));
+  api.use('/organizations', makeOrgEventsRouter(prisma));
 
   // The permanent record - lifetime timeline + achievements, READ ONLY. A timeline
   // entry changes only by correcting the locked result behind it.

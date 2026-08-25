@@ -1,15 +1,21 @@
 import { useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useApi } from '../lib/hooks';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { InstitutionFormModal, type InstitutionFormBody } from './InstitutionFormModal';
-import { BackButton, Button, cn, confirmDialog, toast } from './ui';
+import { BackButton, Button, confirmDialog, toast } from './ui';
 
-// Sub-navigation for an organization's management pages, plus a shared back link
-// and (for owners/admins) an Edit-organization action.
-export function OrgTabs({ orgId }: { orgId: string }) {
+// The organisation's identity strip: who you are looking at, and the two actions
+// that belong to the organisation as a whole rather than to any one page.
+//
+// It used to carry a tab rail as well. That rail is gone, and deliberately: the
+// sidebar now navigates the organisation (Dashboard, Players, Teams, Events...)
+// and Administration owns the settings surfaces its own rail lists. Two navs over
+// one workspace, with different names for the same destinations, teaches people
+// that neither one is complete.
+export function OrgHeader({ orgId }: { orgId: string }) {
   const navigate = useNavigate();
   const { refresh } = useAuth();
   const perms = usePermissions();
@@ -17,9 +23,6 @@ export function OrgTabs({ orgId }: { orgId: string }) {
   const canDelete = perms.isOrgOwner(orgId);
   // Open read - fetch for everyone so the organization's name/title always shows.
   const { data: org } = useApi<any>(`/organizations/${orgId}`);
-  // Pending championship invitations addressed to this org → badge on the Invitations tab.
-  const { data: allInvites = [] } = useApi<any[]>(canManage ? '/me/invitations' : null);
-  const pendingInvites = allInvites.filter((i) => i.organization_id === orgId).length;
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -46,14 +49,6 @@ export function OrgTabs({ orgId }: { orgId: string }) {
     }
   }
 
-  const tabs = [
-    { to: `/organizations/${orgId}/overview`, label: 'Overview', badge: 0 },
-    { to: `/organizations/${orgId}/teams`, label: 'Teams', badge: 0 },
-    { to: `/organizations/${orgId}/members`, label: 'Members', badge: 0 },
-    ...(canManage ? [{ to: `/organizations/${orgId}/invitations`, label: 'Invitations', badge: pendingInvites }] : []),
-    // Only an admin can change what a role grants, so only they see the tab.
-    ...(canManage ? [{ to: `/organizations/${orgId}/roles`, label: 'Roles', badge: 0 }] : []),
-  ];
   return (
     <div className="mb-5">
       <div className="flex items-center justify-between gap-2">
@@ -78,32 +73,6 @@ export function OrgTabs({ orgId }: { orgId: string }) {
           </div>
         </div>
       )}
-      <div className="mt-4 flex gap-2">
-        {tabs.map((t) => (
-          <NavLink
-            key={t.to}
-            to={t.to}
-            className={({ isActive }) => cn(
-              'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold',
-              isActive
-                ? 'bg-brand-600 text-white'
-                : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700',
-            )}
-          >
-            {({ isActive }) => (
-              <>
-                {t.label}
-                {t.badge > 0 && (
-                  <span className={cn(
-                    'grid h-5 min-w-5 place-items-center rounded-full px-1 text-xs font-bold',
-                    isActive ? 'bg-white/25 text-white' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300',
-                  )}>{t.badge}</span>
-                )}
-              </>
-            )}
-          </NavLink>
-        ))}
-      </div>
 
       {editing && org && (
         <InstitutionFormModal

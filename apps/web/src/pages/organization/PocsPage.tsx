@@ -7,7 +7,7 @@ import { usePermissions } from '../../lib/permissions';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { titleCase } from '../../lib/format';
-import { OrgTabs } from '../../components/OrgTabs';
+import { OrgHeader } from '../../components/OrgHeader';
 import { PeoplePicker } from '../../components/PeoplePicker';
 import { Avatar, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, toast } from '../../components/ui';
 
@@ -81,7 +81,7 @@ export function PocsPage() {
 
   return (
     <div>
-      {orgId && <OrgTabs orgId={orgId} />}
+      {orgId && <OrgHeader orgId={orgId} />}
       <PageHeader title="Members" subtitle="Everyone in this organization and the role they hold.">
         {canManage && <Button onClick={() => setAdding(true)}>+ Add member</Button>}
       </PageHeader>

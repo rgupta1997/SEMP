@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import type { CapabilityKey } from '@semp/entitlements';
 import { useAuth } from './auth';
 import { useApi } from './hooks';
@@ -24,6 +25,16 @@ export function useWorkspace() {
   const { ctx } = useAuth();
   const ent = useApi<EntitlementSnapshot>('/me/entitlements', !!ctx);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const { pathname } = useLocation();
+
+  // A context-scoped URL IS a context choice. Following a link to an event from a
+  // notification, or deep-linking into an organisation, has to move the whole
+  // workspace - otherwise the URL says one thing and the sidebar says another,
+  // which breaks the second rule the product is built on.
+  const routeContextId = useMemo(() => {
+    const m = /^\/(?:organizations|championships)\/([0-9a-fA-F-]{36})(?:\/|$)/.exec(pathname);
+    return m ? m[1] : null;
+  }, [pathname]);
 
   const contexts = useMemo<WorkspaceContext[]>(() => {
     if (!ctx?.user) return [];
@@ -83,9 +94,18 @@ export function useWorkspace() {
 
   useEffect(() => {
     if (!storeKey || contexts.length === 0) return;
+
+    // The URL wins when it names a context this person actually holds, and the
+    // choice is written through - so leaving that page keeps you where you went,
+    // rather than snapping back to whatever you last picked from the switcher.
+    if (routeContextId && contexts.some((c) => c.id === routeContextId)) {
+      localStorage.setItem(storeKey, routeContextId);
+      setActiveId(routeContextId);
+      return;
+    }
     const stored = localStorage.getItem(storeKey);
     setActiveId(stored && contexts.some((c) => c.id === stored) ? stored : contexts[0].id);
-  }, [storeKey, contexts.length]);
+  }, [storeKey, contexts.length, routeContextId]);
 
   const active = contexts.find((c) => c.id === activeId) ?? contexts[0] ?? null;
 
