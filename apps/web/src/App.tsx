@@ -37,6 +37,10 @@ import { OrgReportsPage } from './pages/organization/OrgReportsPage';
 import { RollImportPage } from './pages/organization/RollImportPage';
 import { CertificatesDashboard } from './pages/organization/certificates/CertificatesDashboard';
 import { IssuedRegisterPage } from './pages/organization/certificates/IssuedRegisterPage';
+import { CertificateDetailPage } from './pages/organization/certificates/CertificateDetailPage';
+import { TemplateGalleryPage } from './pages/organization/certificates/TemplateGalleryPage';
+import { TemplatePreviewPage } from './pages/organization/certificates/TemplatePreviewPage';
+import { VerifyCertificatePage } from './pages/public/VerifyCertificatePage';
 import { AdminPage } from './pages/organization/AdminPage';
 import { MembersPage } from './pages/organization/MembersPage';
 import { PocsPage } from './pages/organization/PocsPage';
@@ -109,6 +113,9 @@ function AuthenticatedRoutes() {
         <Route path="/organizations/:orgId/reports" element={<OrgReportsPage />} />
         <Route path="/organizations/:orgId/certificates" element={<CertificatesDashboard />} />
         <Route path="/organizations/:orgId/certificates/register" element={<IssuedRegisterPage />} />
+        <Route path="/organizations/:orgId/certificates/templates" element={<TemplateGalleryPage />} />
+        <Route path="/organizations/:orgId/certificates/templates/:templateId" element={<TemplatePreviewPage />} />
+        <Route path="/organizations/:orgId/certificates/:certId" element={<CertificateDetailPage />} />
         <Route path="/organizations/:orgId/students/import" element={<RollImportPage />} />
         <Route path="/organizations/:orgId/invitations" element={<InvitationsPage />} />
 
@@ -165,6 +172,17 @@ function AppRoutes() {
   // whether the visitor is signed in (so the link works for anyone).
   const publicMatch = useMatch('/c/:token');
   if (publicMatch?.params.token) return <PublicChampionshipPage token={publicMatch.params.token} />;
+
+  // Certificate verification, outside the shell and outside auth for the same
+  // reason: the whole value of a certificate is that a STRANGER can check it. An
+  // employer or a selector has no account here, and a verifier that asked them to
+  // sign in would verify nothing for the people who most need it. Matched before
+  // the signed-out redirect below so it works whoever opens it.
+  // Both matches are read unconditionally - a hook behind an `if` changes the hook
+  // order between renders, which React does not forgive.
+  const verifyMatch = useMatch('/verify/:token');
+  const verifyRoot = useMatch('/verify');
+  if (verifyMatch || verifyRoot) return <VerifyCertificatePage token={verifyMatch?.params.token} />;
 
   if (loading) return <div className="grid h-screen place-items-center"><Spinner /></div>;
   // Logged out: a public marketing landing page at the root, with the sign-in
