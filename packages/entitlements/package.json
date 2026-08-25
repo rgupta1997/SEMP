@@ -1,0 +1,20 @@
+{
+  "name": "@semp/entitlements",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./core": "./src/core/index.ts",
+    "./core/*": "./src/core/*",
+    "./server": "./src/server/index.ts",
+    "./server/*": "./src/server/*",
+    "./client": "./src/client/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}
