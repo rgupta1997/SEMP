@@ -109,6 +109,10 @@ export function useWorkspace() {
     const assignments: WorkspaceContext[] = (officiating.data ?? [])
       .filter((f) => {
         if (f.status === 'completed' || f.status === 'cancelled') return false;
+        // A bye is a team advancing because there was nobody to play. There is no
+        // match, so there is nothing to officiate - listing it as an assignment
+        // sends somebody to a console for a game that will never be played.
+        if (f.status === 'bye') return false;
         // A bracket slot with neither side decided is not yet a match anybody can
         // officiate. Listing it would fill the switcher with "TBD v TBD" and bury
         // the assignments that are real.
