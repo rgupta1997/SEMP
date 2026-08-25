@@ -164,15 +164,18 @@ export function createNotificationHooks(
   }
 
   function useNotificationRealtime(
+    // Null when Realtime is not configured. Delivery is an enhancement, so the
+    // absence of a client is a no-op rather than an error - see the note in the
+    // web app's lib/supabase.ts.
     supabase: Parameters<
       typeof subscribeToNotifications
-    >[0],
+    >[0] | null,
     userId: string | undefined,
   ) {
     const queryClient = useQueryClient();
 
     useEffect(() => {
-      if (!userId) return;
+      if (!userId || !supabase) return;
 
       const channel = subscribeToNotifications(
         supabase,

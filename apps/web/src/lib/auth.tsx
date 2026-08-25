@@ -92,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // join (main.tsx) racing against this token fetch - any event that fires in
     // that window is silently missed until something else (e.g. a page refresh)
     // gives the fetch enough time to land first.
-    await supabase.realtime.setAuth();
+    await supabase?.realtime.setAuth();
     applyContext(c);
   };
 
@@ -107,7 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Supabase is created before login, when its custom access-token callback
     // cannot authenticate. Refresh it now so the first Realtime channel join
     // carries this user's token rather than the anon key.
-    await supabase.realtime.setAuth();
+    await supabase?.realtime.setAuth();
     localStorage.removeItem(ACTIVE_ROLE_KEY);
     qc.clear(); // drop the previous user's cached queries so nothing leaks across sessions
     applyContext(res);
@@ -117,7 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signup = async (body: SignupBody) => {
     const res = await api<{ token: string } & AuthContext>('POST', '/auth/signup', body);
     tokenStore.set(res.token);
-    await supabase.realtime.setAuth();
+    await supabase?.realtime.setAuth();
     localStorage.removeItem(ACTIVE_ROLE_KEY);
     qc.clear();
     applyContext(res);

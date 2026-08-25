@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 import { api } from './api';
 
@@ -6,13 +6,26 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabasePublishableKey =
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-if (!supabaseUrl) {
-  throw new Error('VITE_SUPABASE_URL is not configured');
-}
+// Realtime is an enhancement: without it the notification bell stops updating
+// on its own and the feed refreshes when a page does. Everything else in the
+// product - championships, scoring, certificates, the whole workspace - has no
+// dependency on it at all.
+//
+// So the missing-config path must not throw. This module is imported by main.tsx
+// and by the auth provider, which is to say at the very root of the render tree:
+// a throw here is not a broken bell, it is a WHITE PAGE with a console error, and
+// nothing else in the app gets a chance to load. Degrading instead means a
+// developer without Supabase credentials still gets a working application, and
+// the one feature that genuinely needs them says so.
+export const realtimeConfigured = Boolean(
+  supabaseUrl && supabasePublishableKey,
+);
 
-if (!supabasePublishableKey) {
-  throw new Error(
-    'VITE_SUPABASE_PUBLISHABLE_KEY is not configured',
+if (!realtimeConfigured && import.meta.env.DEV) {
+  console.warn(
+    '[notifications] Realtime is off: set VITE_SUPABASE_URL and ' +
+      'VITE_SUPABASE_PUBLISHABLE_KEY in apps/web/.env.local to enable live ' +
+      'notification delivery. The rest of the app is unaffected.',
   );
 }
 
@@ -73,10 +86,13 @@ async function fetchRealtimeToken(): Promise<string | null> {
   return inflight;
 }
 
-export const supabase = createClient(
-  supabaseUrl,
-  supabasePublishableKey,
-  {
-    accessToken: fetchRealtimeToken,
-  },
-);
+/**
+ * `null` when Realtime is not configured. Callers must handle that - which is
+ * two call sites, both of them notification delivery, and both a no-op without
+ * a client.
+ */
+export const supabase: SupabaseClient | null = realtimeConfigured
+  ? createClient(supabaseUrl, supabasePublishableKey, {
+      accessToken: fetchRealtimeToken,
+    })
+  : null;
