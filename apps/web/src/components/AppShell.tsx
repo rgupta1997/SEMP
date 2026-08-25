@@ -200,7 +200,10 @@ export function AppShell() {
                 <NavLink
                   key={it.key}
                   to={href}
-                  end={it.end && !eventId}
+                  // `it.end` alone: suppressing it inside an event left the event
+                  // root matching every section under it, so Overview stayed lit
+                  // wherever you were.
+                  end={it.end}
                   onClick={() => setSidebarOpen(false)}
                   title={it.locked ? `Needs ${it.needs}` : undefined}
                   className={({ isActive }) => cn(

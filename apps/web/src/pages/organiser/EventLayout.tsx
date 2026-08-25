@@ -1,9 +1,10 @@
-import { NavLink, Navigate, Outlet, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { Navigate, Outlet, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateRange } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
-import { EVENT_NAV, eventNavPath, MANAGE_SEGMENTS, parseEventSegment } from '../../lib/championship-nav';
-import { BackButton, Button, cn, Spinner, StatusBadge, toast } from '../../components/ui';
+import { useWorkspace } from '../../lib/useWorkspace';
+import { mayOpenSegment, parseEventSegment } from '../../lib/championship-nav';
+import { BackButton, Button, Spinner, StatusBadge, toast } from '../../components/ui';
 
 export interface EventDetail {
   id: string; name: string; slug: string; status: string;
@@ -27,6 +28,8 @@ export function EventLayout() {
   const navigate = useNavigate();
   const { canManageChampionship } = usePermissions();
   const canManage = canManageChampionship(eventId);
+  const ws = useWorkspace();
+  const roleCodes = ws.contexts.find((c) => c.id === eventId)?.roleCodes ?? [];
   const { data: championship, isLoading } = useApi<EventDetail>(`/championships/${eventId}`);
   const statusMut = useApiMutation(
     (status: string) => api('PATCH', `/championships/${eventId}/status`, { status }),
@@ -35,9 +38,12 @@ export function EventLayout() {
 
   if (isLoading || !championship) return <Spinner />;
 
-  // Spectators / participants can view read-only tabs but not the management ones.
+  // A section reachable by URL that the sidebar does not offer is an access bug
+  // waiting to happen, so both are answered from the same list. The server still
+  // guards every write; this only stops somebody landing on a page built for a
+  // role they do not hold.
   const segment = parseEventSegment(pathname, eventId!);
-  if (!canManage && MANAGE_SEGMENTS.has(segment)) {
+  if (!canManage && !mayOpenSegment(roleCodes, segment)) {
     return <Navigate to={`/championships/${eventId}`} replace />;
   }
 
@@ -63,25 +69,6 @@ export function EventLayout() {
           </Button>
         )}
       </div>
-
-      {/* Section tabs - the championship's own navigation, as horizontal pills. */}
-      <nav className="mb-6 flex flex-wrap gap-2">
-        {EVENT_NAV.filter((it) => canManage || !it.manage).map((it) => (
-          <NavLink
-            key={it.segment || 'overview'}
-            to={eventNavPath(eventId!, it.segment)}
-            end={it.end}
-            className={({ isActive }) => cn(
-              'rounded-lg border px-4 py-2 text-sm font-semibold transition-colors',
-              isActive
-                ? 'border-brand-500 bg-brand-500 text-white shadow-sm'
-                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:text-slate-100',
-            )}
-          >
-            {it.label}
-          </NavLink>
-        ))}
-      </nav>
 
       <Outlet context={{ championship, eventId: eventId!, canManage } satisfies EventCtx} />
     </div>

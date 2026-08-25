@@ -184,10 +184,17 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // GET single championship. A private one 404s for outsiders (same as not existing,
   // so its presence is never leaked by direct id).
   router.get('/:id', asyncHandler(async (req, res) => {
-    const championship = await prisma.championships.findUnique({ where: { id: req.params.id } });
+    const championship = await prisma.championships.findUnique({
+      where: { id: req.params.id },
+      // The host organisation comes with it: it is who issues this event's
+      // certificates, so a screen that has the event should not need a second
+      // round trip to find out whether anybody can issue at all.
+      include: { organizations: { select: { id: true, name: true, verified: true } } },
+    });
     if (!championship) throw new NotFoundError('Championship');
     if (!(await canSeeChampionship(req.user!, championship))) throw new NotFoundError('Championship');
-    res.json(championship);
+    const { organizations, ...rest } = championship;
+    res.json({ ...rest, host_organization: organizations });
   }));
 
   // The view-only public share token for this championship (organiser/super only).

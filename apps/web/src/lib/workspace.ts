@@ -58,11 +58,16 @@ export const NAV: Record<ContextKind, NavItem[]> = {
     { key: 'admin', label: 'Administration', to: '/organizations/:id/admin' },
   ],
   orgGuest: [
-    { key: 'publicorg', label: 'Organization', to: '/organizations/:id/public' },
+    // `end` matters wherever one item's path is a prefix of another's: without it
+    // this stays highlighted while you are on Public events, and the sidebar reports
+    // you are in two places at once.
+    { key: 'publicorg', label: 'Organization', to: '/organizations/:id/public', end: true },
     { key: 'events', label: 'Public events', to: '/organizations/:id/public/events' },
   ],
   event: [
-    { key: 'overview', label: 'Overview', to: '/championships/:id' },
+    // The event root is a prefix of every other section here, so it must match
+    // exactly - see the note on the guest nav above.
+    { key: 'overview', label: 'Overview', to: '/championships/:id', end: true },
     { key: 'setup', label: 'Setup', to: '/championships/:id/setup' },
     { key: 'organisers', label: 'Organising team', to: '/championships/:id/organisers' },
     { key: 'approvals', label: 'Approvals', to: '/championships/:id/approvals' },
@@ -75,7 +80,7 @@ export const NAV: Record<ContextKind, NavItem[]> = {
     { key: 'settings', label: 'Settings', to: '/championships/:id/settings' },
   ],
   eventDraft: [
-    { key: 'overview', label: 'Overview', to: '/championships/:id' },
+    { key: 'overview', label: 'Overview', to: '/championships/:id', end: true },
     { key: 'setup', label: 'Event setup', to: '/championships/:id/setup' },
   ],
   assignment: [

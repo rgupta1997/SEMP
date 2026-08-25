@@ -18,6 +18,8 @@ import { SchedulePage } from './pages/organiser/SchedulePage';
 import { ResultsPage } from './pages/organiser/ResultsPage';
 import { StandingsPage } from './pages/organiser/StandingsPage';
 import { EventSettingsPage } from './pages/organiser/EventSettingsPage';
+import { EventCommunicationsPage } from './pages/organiser/EventCommunicationsPage';
+import { EventCertificatesPage } from './pages/organiser/EventCertificatesPage';
 import { EventParticipantsPage } from './pages/organiser/EventParticipantsPage';
 import { EventOrganisersPage } from './pages/organiser/EventOrganisersPage';
 
@@ -127,12 +129,14 @@ function AuthenticatedRoutes() {
         <Route path="/championships/:eventId" element={<EventLayout />}>
           <Route index element={<EventDashboard />} />
           <Route path="setup" element={<EventSetupPage />} />
-          <Route path="team" element={<EventOrganisersPage />} />
+          <Route path="organisers" element={<EventOrganisersPage />} />
           <Route path="approvals" element={<ApprovalsPage />} />
           <Route path="participants" element={<EventParticipantsPage />} />
           <Route path="schedule" element={<SchedulePage />} />
           <Route path="results" element={<ResultsPage />} />
           <Route path="standings" element={<StandingsPage />} />
+          <Route path="communications" element={<EventCommunicationsPage />} />
+          <Route path="certificates" element={<EventCertificatesPage />} />
           <Route path="settings" element={<EventSettingsPage />} />
         </Route>
 

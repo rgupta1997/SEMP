@@ -186,7 +186,7 @@ export function useOrganiserOnboarding(eventId: string, status?: string, enabled
       draws: { label: 'Configure sports', to: `${setupHref}?tab=sports` },
       venue: { label: 'Add a venue', to: `${setupHref}?tab=venues` },
       invite: { label: 'Invite organizations', to: `${setupHref}?tab=invite` },
-      officials: { label: 'Assign officials', to: `/championships/${eventId}/team` },
+      officials: { label: 'Assign officials', to: `/championships/${eventId}/organisers` },
       open: { label: 'Open registration', to: `/championships/${eventId}/settings` },
     },
     {
