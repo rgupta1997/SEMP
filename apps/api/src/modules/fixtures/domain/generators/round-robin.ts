@@ -22,24 +22,29 @@ export function generateRoundRobin(
 
   const fixtures: GeneratedFixture[] = [];
   let order = arr.slice();
-  let roundNo = 0;
+  // Numbers every emitted fixture individually - NOT the round it plays in. A
+  // round-robin round can have several matches happening simultaneously (e.g. 4
+  // teams -> 2 matches per round), so numbering by round would stamp two different
+  // matches with the same "Match N" label, which read as duplicated/confusing.
+  let matchNo = 0;
 
   const emitRound = (slots: (TeamRef | null)[], swap: boolean) => {
-    roundNo += 1;
     for (let i = 0; i < half; i++) {
       let home = slots[i];
       let away = slots[n - 1 - i];
       if (swap) [home, away] = [away, home];
       if (home && away) {
+        matchNo += 1;
         fixtures.push({
-          round: `${labelPrefix} ${roundNo}`, poolNumber: null, bracketPosition: null,
+          round: `${labelPrefix} ${matchNo}`, poolNumber: null, bracketPosition: null,
           homeTeamId: home.teamId, awayTeamId: away.teamId, status: 'scheduled',
         });
       } else {
         const real = home ?? away;
         if (real) {
+          matchNo += 1;
           fixtures.push({
-            round: `${labelPrefix} ${roundNo}`, poolNumber: null, bracketPosition: null,
+            round: `${labelPrefix} ${matchNo}`, poolNumber: null, bracketPosition: null,
             homeTeamId: real.teamId, awayTeamId: null, status: 'bye',
           });
         }

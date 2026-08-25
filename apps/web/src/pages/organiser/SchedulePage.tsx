@@ -4,10 +4,11 @@ import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { usePageFilters, useFilterBar } from '../../lib/filters';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
-import { Badge, Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Segmented, Select, Spinner, StatusBadge, StatusLegend, toast } from '../../components/ui';
+import { Badge, Button, Card, cn, confirmDialog, EmptyState, Field, Input, Modal, Segmented, Select, Spinner, StatusBadge, StatusLegend, toast } from '../../components/ui';
 import { Bracket, fixtureStatusLabel } from '../../components/Bracket';
 import { RoundRobinGrid } from '../../components/RoundRobinGrid';
 import { ScheduleTimeline } from '../../components/ScheduleTimeline';
+import { describeSlot, describeTieBlocked, isTieBlockedFor, resolveBranchLabels } from '../../lib/stageTree';
 
 interface Ground { id: string; name: string; venue_id?: string | null; venues?: { id?: string; name?: string } }
 interface Venue { id: string; name: string }
@@ -199,6 +200,23 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
   const visualLabel = hasBracket ? 'Bracket' : 'Grid';
   const showVisual = !isRanking && fixtures.length > 0 && view === 'visual';
 
+  // A discipline built with the stage-config wizard has more than one
+  // stage_sequence (a pool stage + one or more knockout branches) - each stage is
+  // its own independent bracket/pool-set and must be rendered separately, or two
+  // branches' identically-labelled "Final" rows would visually merge into one
+  // broken bracket. Every existing single-stage discipline collapses to exactly
+  // one group here (stage_sequence defaults to 1), so this is a no-op for them.
+  const byStage = new Map<number, any[]>();
+  for (const f of fixtures) {
+    const seq = f.stage_sequence ?? 1;
+    (byStage.get(seq) ?? byStage.set(seq, []).get(seq)!).push(f);
+  }
+  const stageGroups: [number, any[]][] = [...byStage.entries()].sort((a, b) => a[0] - b[0]);
+  const multiStage = stageGroups.length > 1;
+  const branchLabels = resolveBranchLabels(td.format_config);
+  const stageLabel = (seq: number, groupHasBracket: boolean) =>
+    branchLabels.get(seq) ?? (seq === 1 ? (groupHasBracket ? 'Bracket' : 'Pools') : `Stage ${seq}`);
+
   const groundLabel = (id: string | null) => { const g = grounds.find((x) => x.id === id); return g ? `${g.venues?.name ? g.venues.name + ' · ' : ''}${g.name}` : null; };
   const officialName = (id: string | null) => officials.find((o) => o.id === id)?.name ?? null;
 
@@ -261,22 +279,54 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
             ))}
           </div>
         ) : showVisual ? (
-          hasBracket
-            ? <Bracket fixtures={fixtures} teamName={teamName} teamOrg={teamOrg} onSelect={canManage ? setEditing : () => {}} />
-            : <RoundRobinGrid fixtures={fixtures} teamName={teamName} teamOrg={teamOrg} onSelect={canManage ? setEditing : () => {}} />
+          <div className="space-y-6">
+            {stageGroups.map(([seq, group]) => {
+              const groupHasBracket = group.some((f) => f.bracket_position != null);
+              const content = groupHasBracket
+                ? <Bracket fixtures={group} teamName={teamName} teamOrg={teamOrg} onSelect={canManage ? setEditing : () => {}} />
+                : <RoundRobinGrid fixtures={group} teamName={teamName} teamOrg={teamOrg} onSelect={canManage ? setEditing : () => {}} />;
+              if (!multiStage) return <div key={seq}>{content}</div>;
+              // Every stage numbers its OWN pools fresh (Pool A, B, C...), so a later
+              // stage's "Pool B" is a completely different pool from an earlier
+              // stage's "Pool B" - a small caption is too easy to scroll past and read
+              // as one continuous, oddly-restarting pool. A bordered box with a named
+              // badge makes the stage boundary impossible to miss.
+              return (
+                <div key={seq} className="rounded-xl border-2 border-slate-200 p-4 dark:border-slate-700">
+                  <div className="mb-3 flex items-center gap-2">
+                    <Badge tone="violet">{stageLabel(seq, groupHasBracket)}</Badge>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Stage {seq}</span>
+                  </div>
+                  {content}
+                </div>
+              );
+            })}
+          </div>
         ) : (
           <div className="space-y-1.5">
             {listFixtures.map((f) => (
               <div key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-sm">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 w-20">{f.round || 'Match'}</span>
                 <span className="flex flex-1 min-w-[180px] items-center gap-2 font-medium text-slate-700 dark:text-slate-300">
-                  <span className="inline-flex flex-col">
-                    <span className="leading-tight">{teamName(f.home_team_id)}</span>
+                  <span className={cn('inline-flex flex-col', !f.home_team_id && isTieBlockedFor(f.home_slot_label, f.live_state?.tie_blocked) && 'text-amber-600 dark:text-amber-400')}>
+                    <span className="leading-tight">
+                      {f.home_team_id ? teamName(f.home_team_id) : (
+                        isTieBlockedFor(f.home_slot_label, f.live_state?.tie_blocked)
+                          ? `⚠ ${describeTieBlocked(f.live_state?.tie_blocked)}`
+                          : (describeSlot(f.home_slot_label) ?? 'TBD')
+                      )}
+                    </span>
                     {teamOrg(f.home_team_id) && <span className="text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{teamOrg(f.home_team_id)}</span>}
                   </span>
                   <span className="text-slate-400 dark:text-slate-500">vs</span>
-                  <span className="inline-flex flex-col">
-                    <span className="leading-tight">{teamName(f.away_team_id)}</span>
+                  <span className={cn('inline-flex flex-col', !f.away_team_id && isTieBlockedFor(f.away_slot_label, f.live_state?.tie_blocked) && 'text-amber-600 dark:text-amber-400')}>
+                    <span className="leading-tight">
+                      {f.away_team_id ? teamName(f.away_team_id) : (
+                        isTieBlockedFor(f.away_slot_label, f.live_state?.tie_blocked)
+                          ? `⚠ ${describeTieBlocked(f.live_state?.tie_blocked)}`
+                          : (describeSlot(f.away_slot_label) ?? 'TBD')
+                      )}
+                    </span>
                     {teamOrg(f.away_team_id) && <span className="text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{teamOrg(f.away_team_id)}</span>}
                   </span>
                 </span>

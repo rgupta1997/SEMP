@@ -50,6 +50,16 @@ function ApplyModal({ championship, onClose }: { championship: Championship; onC
       // Query keys are full URLs; refresh every /me/enrollments* variant (the Discover
       // list uses ?scope=all) so the CTA flips to "Your application" immediately.
       await qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('/me/enrollments') });
+      // This call goes straight through api() rather than useApiMutation(), so it
+      // never reaches the app-wide MutationCache fallback in main.tsx that normally
+      // auto-invalidates everything (including notifications) after a mutation with
+      // no explicit meta.invalidate - it only gets the /me/enrollments refresh above.
+      // Enrolling can make an already-existing notification (e.g. "Registration is
+      // open", posted before this org had any relationship to the championship)
+      // newly visible to this user, so the bell badge needs an explicit nudge here
+      // too, or it silently sits stale until something unrelated happens to open the
+      // notification drawer and invalidate it as a side effect.
+      await qc.invalidateQueries({ queryKey: ['notifications'] });
       toast.success('Application submitted', 'You can enter teams once the organiser approves you.');
       onClose();
     } catch (e: any) { setError(e.message); }

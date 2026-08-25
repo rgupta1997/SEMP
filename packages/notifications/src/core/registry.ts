@@ -23,7 +23,14 @@ export const NOTIFICATION_TYPES: Record<string, NotificationTypeDef> = {
         throw new Error('championshipId is required for event_lifecycle');
       }
 
-      return Rules.role('captain', ctx.championshipId);
+      // Matches the pre-refactor 'organizations_captains' audience (POCs + team
+      // captains/vice-captains) - the migration to notify() had narrowed this to
+      // captains only, silently dropping organization owners from every lifecycle
+      // announcement (registration opening, going live, completion).
+      return Rules.compose([
+        Rules.role('poc', ctx.championshipId),
+        Rules.role('captain', ctx.championshipId),
+      ]);
     },
 
     titleTemplate: (data) => {

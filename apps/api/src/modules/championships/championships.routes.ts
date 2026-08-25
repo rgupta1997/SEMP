@@ -268,14 +268,20 @@ export function makeEventsRouter(prisma: Prisma): Router {
       catch (err) { console.error(`[standings] final recompute failed for ${updated.id}:`, err); }
     }
 
-await notify(prisma, {
-  type: 'event_lifecycle',
-  championshipId: updated.id,
-  senderId: req.user!.id,
-  data: {
-    status: req.body.status,
-  },
-});
+    // Best-effort, matching every other side-effect notification in this codebase -
+    // the status change already committed above, so a notify() failure (e.g. an
+    // audience that resolves to nobody yet, or a status the templates don't cover)
+    // must never turn into a failed response for a status change that already happened.
+    try {
+      await notify(prisma, {
+        type: 'event_lifecycle',
+        championshipId: updated.id,
+        senderId: req.user!.id,
+        data: { status: req.body.status },
+      });
+    } catch (err) {
+      console.error(`[notifications] event_lifecycle notify failed for ${updated.id}:`, err);
+    }
 
     res.json(updated);
   }));

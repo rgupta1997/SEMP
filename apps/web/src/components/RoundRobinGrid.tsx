@@ -1,12 +1,32 @@
 import { useMemo } from 'react';
 import { cn } from './ui';
 import type { BracketFixture } from './Bracket';
+import { describeSlot, describeTieBlocked, isTieBlockedFor } from '../lib/stageTree';
 
 // Short column code for a team: initials of up to 3 words, else first 3 chars.
 function shortCode(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
   if (words.length >= 2) return words.slice(0, 3).map((w) => w[0]?.toUpperCase()).join('');
   return name.slice(0, 3).toUpperCase();
+}
+
+// A crosstable participant key is either a real team_id, or - on a chained
+// group→group→knockout draw whose inner pool hasn't resolved yet - the raw slot
+// label ("A1") standing in for it. Resolves either into a display name/org and a
+// compact column code, without ever dropping the unresolved side from the grid.
+// `tieBlocked` (looked up by the caller from any fixture referencing this same
+// label) overrides the name with a warning once the producing pool is stuck tied.
+function resolveEntrant(
+  key: string, teamName: (id: string | null) => string, teamOrg?: (id: string | null) => string,
+  tieBlocked?: { pool: number; rank: number } | null,
+) {
+  const slot = describeSlot(key);
+  if (slot) {
+    const tieMsg = isTieBlockedFor(key, tieBlocked) ? describeTieBlocked(tieBlocked) : null;
+    return { name: tieMsg ?? slot, org: '', code: key, warning: !!tieMsg };
+  }
+  const name = teamName(key);
+  return { name, org: teamOrg?.(key) ?? '', code: shortCode(name), warning: false };
 }
 
 // Cell at (row team vs column team). The same match appears in both mirrored
@@ -20,8 +40,10 @@ function ResultCell({ fixture, teamId, opponentId, onSelect }:
   const live = fixture.status === 'live';
   const hasScore = fixture.home_score != null && fixture.away_score != null;
 
-  // Orient scores to the row team, regardless of which side it played on.
-  const rowIsHome = fixture.home_team_id === teamId;
+  // Orient scores to the row team, regardless of which side it played on. teamId
+  // may be a slot label (unresolved side) rather than a real team_id - matching on
+  // either is safe since the two id spaces never collide (real ids are uuids).
+  const rowIsHome = fixture.home_team_id === teamId || fixture.home_slot_label === teamId;
   const rowScore = rowIsHome ? fixture.home_score : fixture.away_score;
   const oppScore = rowIsHome ? fixture.away_score : fixture.home_score;
 
@@ -57,17 +79,36 @@ function Crosstable({ fixtures, teamName, teamOrg, onSelect, caption }:
     const ids: string[] = [];
     const seen = new Set<string>();
     for (const f of fixtures) {
-      for (const id of [f.home_team_id, f.away_team_id]) {
+      // Fall back to the slot label when a side isn't resolved to a real team yet
+      // (a chained group→group→knockout draw whose inner pool is still pending) -
+      // otherwise that side would be silently dropped from the grid entirely.
+      for (const id of [f.home_team_id ?? f.home_slot_label, f.away_team_id ?? f.away_slot_label]) {
         if (id && !seen.has(id)) { seen.add(id); ids.push(id); }
       }
     }
-    ids.sort((a, b) => teamName(a).localeCompare(teamName(b)));
+    ids.sort((a, b) => resolveEntrant(a, teamName, teamOrg).name.localeCompare(resolveEntrant(b, teamName, teamOrg).name));
     const lookup = new Map<string, BracketFixture>();
     for (const f of fixtures) {
-      if (f.home_team_id && f.away_team_id) lookup.set(`${f.home_team_id}|${f.away_team_id}`, f);
+      const home = f.home_team_id ?? f.home_slot_label;
+      const away = f.away_team_id ?? f.away_slot_label;
+      if (home && away) lookup.set(`${home}|${away}`, f);
     }
     return { teamIds: ids, lookup };
-  }, [fixtures, teamName]);
+  }, [fixtures, teamName, teamOrg]);
+
+  // A slot label's tie-blocked state is a property of the pool that produces it, not
+  // of any one downstream fixture - so any fixture in this set that references the
+  // label carries the same flag. Looked up once here rather than per-cell.
+  const tieBlockedByLabel = useMemo(() => {
+    const m = new Map<string, { pool: number; rank: number }>();
+    for (const f of fixtures) {
+      const tb = (f as any).live_state?.tie_blocked;
+      if (!tb) continue;
+      if (f.home_slot_label && isTieBlockedFor(f.home_slot_label, tb)) m.set(f.home_slot_label, tb);
+      if (f.away_slot_label && isTieBlockedFor(f.away_slot_label, tb)) m.set(f.away_slot_label, tb);
+    }
+    return m;
+  }, [fixtures]);
 
   if (teamIds.length === 0) return null;
 
@@ -80,19 +121,24 @@ function Crosstable({ fixtures, teamName, teamOrg, onSelect, caption }:
             <th className="sticky left-0 z-10 min-w-[10rem] border border-slate-100 bg-slate-50 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-400">
               Home ╲ Away
             </th>
-            {teamIds.map((id) => (
-              <th key={id} title={teamName(id)} className="h-11 w-14 border border-slate-100 bg-slate-50 px-1 text-center text-[10px] font-bold uppercase text-slate-500 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-400">
-                {shortCode(teamName(id))}
-              </th>
-            ))}
+            {teamIds.map((id) => {
+              const entrant = resolveEntrant(id, teamName, teamOrg, tieBlockedByLabel.get(id));
+              return (
+                <th key={id} title={entrant.name} className={cn('h-11 w-14 border border-slate-100 bg-slate-50 px-1 text-center text-[10px] font-bold uppercase dark:border-slate-800 dark:bg-slate-800/60', entrant.warning ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400')}>
+                  {entrant.warning && '⚠'}{entrant.code}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
-          {teamIds.map((rowId) => (
+          {teamIds.map((rowId) => {
+            const entrant = resolveEntrant(rowId, teamName, teamOrg, tieBlockedByLabel.get(rowId));
+            return (
             <tr key={rowId}>
-              <th className="sticky left-0 z-10 min-w-[10rem] border border-slate-100 bg-white px-3 py-2 text-left font-medium text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
-                <span className="block truncate leading-tight" title={teamName(rowId)}>{teamName(rowId)}</span>
-                {teamOrg?.(rowId) && <span className="block truncate text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{teamOrg(rowId)}</span>}
+              <th className={cn('sticky left-0 z-10 min-w-[10rem] border border-slate-100 bg-white px-3 py-2 text-left font-medium dark:border-slate-800 dark:bg-slate-900', entrant.warning ? 'text-amber-600 dark:text-amber-400' : 'text-slate-700 dark:text-slate-200')}>
+                <span className="block truncate leading-tight" title={entrant.name}>{entrant.warning && '⚠ '}{entrant.name}</span>
+                {entrant.org && <span className="block truncate text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{entrant.org}</span>}
               </th>
               {teamIds.map((colId) =>
                 rowId === colId ? (
@@ -111,7 +157,8 @@ function Crosstable({ fixtures, teamName, teamOrg, onSelect, caption }:
                 ),
               )}
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

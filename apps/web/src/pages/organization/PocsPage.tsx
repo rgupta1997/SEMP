@@ -32,7 +32,10 @@ function AddMemberModal({ orgId, memberUserIds, onClose }: { orgId: string; memb
       assignedUserIds={memberUserIds}
       assignedLabel="Member"
       invite={{ target_type: 'org_member', target_id: orgId, role }}
-      invalidateKeys={[`/organizations/${orgId}/members`]}
+      // Also refresh the bell - a newly-added owner immediately becomes a POC for
+      // every championship this org is enrolled in, and may already be eligible for
+      // a pre-existing 'poc'-audience notification there.
+      invalidateKeys={[`/organizations/${orgId}/members`, 'notifications']}
       roleControl={(
         <Field label="Role">
           <Select value={role} onChange={(e) => setRole(e.target.value)} className="w-44">
