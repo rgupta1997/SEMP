@@ -1,0 +1,371 @@
+import { Router } from 'express';
+import type { Prisma } from '../../infra/prisma.js';
+import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { asyncHandler } from '../../http/middleware/error.js';
+import { can } from '../../http/middleware/can.js';
+import { authorizeRecordView } from './records.access.js';
+import { provisionalEntriesFor } from './provisional.service.js';
+import { achievementTimeline, achievementYears, type TimelineScope } from './timeline.js';
+
+// Reading the permanent record (J4-E2).
+//
+// THIS ROUTER IS READ-ONLY, and that is a requirement rather than an oversight
+// (J4-E2-S2): "no user interface offers editing or deleting a timeline entry, and
+// no API endpoint permits it. The only route to change one is a correction to the
+// underlying result." So there is no POST, PATCH or DELETE here and there must
+// never be one - a timeline an admin can quietly edit is not evidence of
+// anything. Corrections go through the audited unlock → fix → relock cycle, which
+// supersedes the old rows and writes new ones.
+//
+// The privacy boundary lives in `records.access.ts`, where it can be tested
+// directly rather than only through a route.
+
+export function makeRecordsRouter(prisma: Prisma): Router {
+  const router = Router();
+
+  const authorize = (viewerId: string, isSuper: boolean, subjectId: string) =>
+    authorizeRecordView(prisma, { id: viewerId, isSuperAdmin: isSuper }, subjectId);
+
+  // Only live rows, ever. A superseded entry is history the database keeps, not
+  // something a profile claims is true.
+  const LIVE = { superseded_at: null } as const;
+
+  const entryView = (e: {
+    id: string; occurred_on: Date; kind: string; title: string; detail: unknown;
+    organization_id: string | null; championship_id: string | null; fixture_id: string | null;
+    sport_id: string | null; source: string;
+  }) => ({
+    id: e.id,
+    date: e.occurred_on,
+    kind: e.kind,
+    title: e.title,
+    detail: e.detail,
+    organization_id: e.organization_id,
+    championship_id: e.championship_id,
+    fixture_id: e.fixture_id,
+    sport_id: e.sport_id,
+    source: e.source,
+    // Every lock-derived row IS a verified result - that is the only way it got
+    // written. Stated explicitly so the client never has to infer it.
+    verified: e.source === 'locked_result',
+  });
+
+  const achievementView = (a: {
+    id: string; occurred_on: Date; kind: string; medal: string | null; title: string; detail: unknown;
+    organization_id: string | null; championship_id: string | null; fixture_id: string | null; sport_id: string | null; source: string;
+  }) => ({
+    id: a.id,
+    date: a.occurred_on,
+    kind: a.kind,
+    medal: a.medal,
+    title: a.title,
+    detail: a.detail,
+    organization_id: a.organization_id,
+    championship_id: a.championship_id,
+    fixture_id: a.fixture_id,
+    sport_id: a.sport_id,
+    source: a.source,
+  });
+
+  async function loadProfile(userId: string) {
+    const user = await prisma.users.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, email: true, phone: true },
+    });
+    if (!user) throw new NotFoundError('Person');
+
+    const [entries, achievements] = await Promise.all([
+      prisma.lifetime_entries.findMany({
+        where: { user_id: userId, ...LIVE },
+        orderBy: [{ occurred_on: 'desc' }, { created_at: 'desc' }],
+        take: 500,
+      }),
+      prisma.achievements.findMany({
+        // Team rows are excluded: a squad medal already fanned out to a row of
+        // its own for each member, and counting both would double every medal.
+        where: { user_id: userId, ...LIVE },
+        orderBy: [{ occurred_on: 'desc' }, { created_at: 'desc' }],
+        take: 500,
+      }),
+    ]);
+
+    // Played but not yet official. Shown on the same timeline, badged - see
+    // provisional.service.ts for why both belong on one page.
+    const provisional = await provisionalEntriesFor(prisma, userId);
+
+    // The headline numbers FR-PRO-3 asks for. Derived from live rows on the way
+    // out rather than cached, because they are small and a cache that drifts
+    // from the record is worse than a join.
+    //
+    // VERIFIED ROWS ONLY. Provisional results are on the page but never in the
+    // count - "medals won" has to be a number the institution can defend, and a
+    // medal from a scorecard that is still editable is not one.
+    const medals = { gold: 0, silver: 0, bronze: 0 };
+    let awards = 0;
+    for (const a of achievements) {
+      if (a.medal && a.medal in medals) medals[a.medal as keyof typeof medals] += 1;
+      if (a.kind === 'award') awards += 1;
+    }
+    const outcomes = { won: 0, lost: 0, drew: 0 };
+    for (const e of entries) {
+      const outcome = (e.detail as { outcome?: string } | null)?.outcome;
+      if (outcome && outcome in outcomes) outcomes[outcome as keyof typeof outcomes] += 1;
+    }
+
+    // The same numbers again, split by sport (J4-E3). One global career total answers
+    // "how much have they played"; only the per-sport split answers "what are they",
+    // which is the question a coach, a selector and the player all actually ask.
+    // Derived from the rows already loaded rather than re-queried - the split has to
+    // add up to the totals above, and two queries is how that stops being true.
+    const sportIds = [...new Set([...entries, ...achievements].map((r) => r.sport_id).filter((s): s is string => !!s))];
+    const sportNames = sportIds.length
+      ? new Map((await prisma.sports.findMany({ where: { id: { in: sportIds } }, select: { id: true, name: true } }))
+        .map((s) => [s.id, s.name]))
+      : new Map<string, string>();
+
+    const bySport = new Map<string, {
+      sport_id: string | null; sport: string; events: number;
+      won: number; lost: number; drew: number;
+      medals: { gold: number; silver: number; bronze: number }; awards: number;
+    }>();
+    const bucket = (sportId: string | null) => {
+      const key = sportId ?? 'unattributed';
+      if (!bySport.has(key)) {
+        bySport.set(key, {
+          sport_id: sportId,
+          // Rows that predate sport attribution are grouped honestly rather than
+          // dropped, so the split still sums to the career total.
+          sport: sportId ? (sportNames.get(sportId) ?? 'Unknown sport') : 'Unattributed',
+          events: 0, won: 0, lost: 0, drew: 0,
+          medals: { gold: 0, silver: 0, bronze: 0 }, awards: 0,
+        });
+      }
+      return bySport.get(key)!;
+    };
+    for (const e of entries) {
+      const b = bucket(e.sport_id);
+      b.events += 1;
+      const outcome = (e.detail as { outcome?: string } | null)?.outcome;
+      if (outcome === 'won' || outcome === 'lost' || outcome === 'drew') b[outcome] += 1;
+    }
+    for (const a of achievements) {
+      const b = bucket(a.sport_id);
+      if (a.medal && a.medal in b.medals) b.medals[a.medal as keyof typeof b.medals] += 1;
+      if (a.kind === 'award') b.awards += 1;
+    }
+    const per_sport = [...bySport.values()]
+      .map((s) => ({ ...s, total_medals: s.medals.gold + s.medals.silver + s.medals.bronze }))
+      .sort((a, b) => b.total_medals - a.total_medals || b.events - a.events || a.sport.localeCompare(b.sport));
+
+    return {
+      person: user,
+      stats: {
+        events: entries.length,
+        ...outcomes,
+        medals,
+        awards,
+        total_medals: medals.gold + medals.silver + medals.bronze,
+        // Counted separately and never folded in, so the page can say "12
+        // verified, 4 awaiting an organiser" instead of one number that is
+        // quietly neither.
+        provisional: provisional.length,
+      },
+      per_sport,
+      // One list, already ordered - the client badges each row by `verified`
+      // rather than re-sorting two arrays and risking a different order per
+      // viewer.
+      timeline: [...entries.map(entryView), ...provisional]
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+      achievements: achievements.map(achievementView),
+    };
+  }
+
+  // The player's own record. Same payload as the admin view, from one code path,
+  // so what a coordinator sees and what the player sees can never diverge.
+  router.get('/me/profile', asyncHandler(async (req, res) => {
+    res.json(await loadProfile(req.user!.id));
+  }));
+
+  router.get('/people/:userId/profile', asyncHandler(async (req, res) => {
+    await authorize(req.user!.id, !!req.user!.isSuperAdmin, req.params.userId);
+    res.json(await loadProfile(req.params.userId));
+  }));
+
+  router.get('/people/:userId/achievements', asyncHandler(async (req, res) => {
+    await authorize(req.user!.id, !!req.user!.isSuperAdmin, req.params.userId);
+    const rows = await prisma.achievements.findMany({
+      where: { user_id: req.params.userId, ...LIVE },
+      orderBy: [{ occurred_on: 'desc' }, { created_at: 'desc' }],
+      take: 500,
+    });
+    res.json(rows.map(achievementView));
+  }));
+
+  // An institution's own honours board - what module 08's reports and the Hall of
+  // Fame (J4-E9) both read. Team rows are kept here: at org level the squad medal
+  // is the fact, and its per-player copies would triple-count it.
+  /**
+   * Materialised career statistics (J4-E3).
+   *
+   * The same numbers `/people/:id/profile` derives on the fly, but read from the table
+   * the lock maintains - so a player page is one indexed lookup rather than a scan, and
+   * the discipline and format breakdowns exist at all.
+   */
+  router.get('/people/:userId/career-stats', asyncHandler(async (req, res) => {
+    await authorize(req.user!.id, !!req.user!.isSuperAdmin, req.params.userId);
+    const grain = ['sport', 'discipline', 'format'].includes(String(req.query.grain))
+      ? String(req.query.grain) : 'sport';
+
+    const rows = await prisma.career_stats.findMany({
+      where: {
+        user_id: req.params.userId,
+        grain,
+        ...(typeof req.query.organization_id === 'string' ? { organization_id: req.query.organization_id } : {}),
+      },
+      orderBy: [{ last_on: 'desc' }],
+      include: {
+        sports: { select: { id: true, name: true } },
+        disciplines: { select: { id: true, name: true } },
+        organizations: { select: { id: true, name: true } },
+      },
+    });
+
+    res.json({
+      grain,
+      rows: rows.map((r) => ({
+        sport: r.sports?.name ?? null,
+        sport_id: r.sport_id,
+        discipline: r.disciplines?.name ?? null,
+        format: r.format,
+        organization: r.organizations?.name ?? null,
+        played: r.played, won: r.won, lost: r.lost, drawn: r.drawn,
+        gold: r.gold, silver: r.silver, bronze: r.bronze, awards: r.awards,
+        total_medals: r.gold + r.silver + r.bronze,
+        // A win rate over nothing is not 0%, it is unanswerable - so it is null.
+        win_rate: r.played > 0 ? Math.round((r.won / r.played) * 100) : null,
+        first_on: r.first_on, last_on: r.last_on, computed_at: r.computed_at,
+      })),
+    });
+  }));
+
+  /** Query parsing + both reads, shared by every scope the timeline is asked about. */
+  async function timelinePage(req: any, scope: TimelineScope) {
+    const q = req.query as Record<string, string | undefined>;
+    const year = q.year && /^\d{4}$/.test(q.year) ? Number(q.year) : null;
+    const [page, years] = await Promise.all([
+      achievementTimeline(prisma, scope, {
+        year,
+        cursorDate: q.cursor_date ?? null,
+        cursorId: q.cursor_id ?? null,
+        limit: q.limit ? Number(q.limit) : 20,
+      }),
+      achievementYears(prisma, scope),
+    ]);
+    return { ...page, years };
+  }
+
+  /** The chronological view of the same honours - the Achievement Timeline. */
+  router.get('/organizations/:id/achievements/timeline', asyncHandler(async (req, res) => {
+    const organizationId = req.params.id;
+    const allowed = await can(prisma, 'people.view', {
+      user: { id: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin },
+      scope: { organizationId },
+      fallback: async () => !!(await prisma.organization_members.findFirst({
+        where: { user_id: req.user!.id, organization_id: organizationId, status: 'active' },
+        select: { id: true },
+      })),
+    });
+    if (!allowed) throw new ForbiddenError('You do not have permission to view this institution\'s achievements.');
+
+    res.json(await timelinePage(req, { organizationId }));
+  }));
+
+  // The same timeline, asked about a person instead of an institution (J4-E4).
+  //
+  // Somebody who plays for their institution AND runs it has two histories, and they
+  // are genuinely different: the org's includes every squad medal the institution has
+  // won, theirs includes only what they were part of. Two scopes of one read, so the
+  // two can never disagree about what a milestone is.
+  router.get('/me/achievements/timeline', asyncHandler(async (req, res) => {
+    res.json(await timelinePage(req, { userId: req.user!.id }));
+  }));
+
+  router.get('/people/:userId/achievements/timeline', asyncHandler(async (req, res) => {
+    // Same authorisation as the rest of a person's record: their own, or somebody who
+    // coordinates them. A coordinator is never shown more than the player can see.
+    await authorize(req.user!.id, !!req.user!.isSuperAdmin, req.params.userId);
+    res.json(await timelinePage(req, { userId: req.params.userId }));
+  }));
+
+  router.get('/organizations/:id/achievements', asyncHandler(async (req, res) => {
+    const organizationId = req.params.id;
+    const allowed = await can(prisma, 'people.view', {
+      user: { id: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin },
+      scope: { organizationId },
+      fallback: async () => !!(await prisma.organization_members.findFirst({
+        where: { user_id: req.user!.id, organization_id: organizationId, status: 'active' },
+        select: { id: true },
+      })),
+    });
+    if (!allowed) throw new ForbiddenError('You do not have permission to view this institution\'s achievements.');
+
+    // The Hall of Fame reads both halves of the same board (J4-E9): team honours, and
+    // the individuals behind them. They are separate scopes rather than one merged
+    // list because a squad medal already fanned out to a row per member - showing both
+    // at once would count every team honour once for the team and again for each
+    // player, which is how an honours board stops being countable.
+    const scope = req.query.scope === 'individuals' ? 'individuals' : 'teams';
+    const sportId = typeof req.query.sport_id === 'string' ? req.query.sport_id : null;
+
+    const rows = await prisma.achievements.findMany({
+      where: {
+        organization_id: organizationId,
+        ...(scope === 'teams' ? { team_id: { not: null } } : { user_id: { not: null } }),
+        ...(sportId ? { sport_id: sportId } : {}),
+        ...LIVE,
+      },
+      orderBy: [{ occurred_on: 'desc' }, { created_at: 'desc' }],
+      take: 500,
+    });
+
+    // Names, so the board reads as people and squads rather than uuids.
+    const userIds = [...new Set(rows.map((r) => r.user_id).filter((v): v is string => !!v))];
+    const teamIds = [...new Set(rows.map((r) => r.team_id).filter((v): v is string => !!v))];
+    const sportIds = [...new Set(rows.map((r) => r.sport_id).filter((v): v is string => !!v))];
+    const [users, teams, sports] = await Promise.all([
+      userIds.length ? prisma.users.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [],
+      teamIds.length ? prisma.teams.findMany({ where: { id: { in: teamIds } }, select: { id: true, name: true } }) : [],
+      sportIds.length ? prisma.sports.findMany({ where: { id: { in: sportIds } }, select: { id: true, name: true } }) : [],
+    ]);
+    const userName = new Map(users.map((u) => [u.id, u.name]));
+    const teamName = new Map(teams.map((t) => [t.id, t.name]));
+    const sportName = new Map(sports.map((s) => [s.id, s.name]));
+
+    // The spotlight: who holds the most, weighted so a gold outranks three bronzes.
+    const tally = new Map<string, { user_id: string; name: string; gold: number; silver: number; bronze: number; awards: number }>();
+    for (const r of rows) {
+      if (!r.user_id) continue;
+      const t = tally.get(r.user_id) ?? { user_id: r.user_id, name: userName.get(r.user_id) ?? 'Unknown', gold: 0, silver: 0, bronze: 0, awards: 0 };
+      if (r.medal && r.medal in t) t[r.medal as 'gold' | 'silver' | 'bronze'] += 1;
+      if (r.kind === 'award') t.awards += 1;
+      tally.set(r.user_id, t);
+    }
+    const weight = (t: { gold: number; silver: number; bronze: number; awards: number }) => t.gold * 3 + t.silver * 2 + t.bronze + t.awards;
+
+    res.json({
+      scope,
+      rows: rows.map((r) => ({
+        ...achievementView(r),
+        recipient: r.user_id ? (userName.get(r.user_id) ?? null) : (r.team_id ? (teamName.get(r.team_id) ?? null) : null),
+        sport: r.sport_id ? (sportName.get(r.sport_id) ?? null) : null,
+      })),
+      leaderboard: [...tally.values()].sort((a, b) => weight(b) - weight(a)).slice(0, 5)
+        .map((t) => ({ ...t, total_medals: t.gold + t.silver + t.bronze })),
+      // Only the sports this institution has actually won something in - a filter
+      // offering thirty-six sports it has never entered is a filter nobody uses.
+      sports: [...sportName.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
+    });
+  }));
+
+  return router;
+}

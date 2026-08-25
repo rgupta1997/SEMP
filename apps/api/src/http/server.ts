@@ -28,6 +28,13 @@ import { makeTeamsRouter } from '../modules/teams/teams.routes.js';
 import { makeMatrixImportRouter } from '../modules/import/matrix-import.routes.js';
 import { makePublicRouter } from '../modules/public/public.routes.js';
 import { makeVenuesRouter, makeVenueGroundsRouter } from '../modules/venues/venues.routes.js';
+import { makeRecordsRouter } from '../modules/records/records.routes.js';
+import { makeClaimsRouter } from '../modules/records/claims.routes.js';
+import { makeCertificatesRouter } from '../modules/certificates/certificates.routes.js';
+import { makePeopleRouter } from '../modules/people/people.routes.js';
+import { makeReportsRouter } from '../modules/reports/reports.routes.js';
+import { makeBenchmarkRouter } from '../modules/reports/benchmark.routes.js';
+import { makeImpactRouter, makeImpactBuilder } from '../modules/reports/impact.routes.js';
 import { makeFixturesRouter } from '../modules/fixtures/fixtures.routes.js';
 import { makeNotificationsRouter } from '../modules/notifications/notifications.routes.js';
 import { makeDemoRequestsRouter } from '../modules/marketing/demo-requests.routes.js';
@@ -183,6 +190,29 @@ export function buildApp(prisma: Prisma) {
 
   // ----- Phase 5: fixtures -----
   api.use('/', makeFixturesRouter(prisma));
+
+  // ----- Records, certificates, people and reports (lifted from the wave branch) -----
+
+  // Mounted under /organizations because every route is institution-scoped.
+  api.use('/organizations', makePeopleRouter(prisma));
+
+  // The permanent record - lifetime timeline + achievements, READ ONLY. A timeline
+  // entry changes only by correcting the locked result behind it.
+  api.use('/', makeRecordsRouter(prisma));
+
+  // Leadership reporting. The impact report is handed the SAME builders the report
+  // tabs use, so a board pack and the screen it was promised on cannot disagree.
+  const reportsRouter = makeReportsRouter(prisma);
+  api.use('/', reportsRouter);
+  api.use('/', makeBenchmarkRouter(prisma));
+  api.use('/', makeImpactRouter(prisma, makeImpactBuilder(prisma, (reportsRouter as any).builders)));
+
+  // Certificates. Public verification lives in the public router above.
+  api.use('/', makeCertificatesRouter(prisma));
+
+  // External achievement claims.
+  api.use('/', makeClaimsRouter(prisma));
+
 
   app.use('/api', api);
   app.use(errorHandler);
