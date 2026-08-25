@@ -25,7 +25,9 @@ function AddOrganiserModal({ eventId, roleId, assignedIds, onClose }:
       assignedUserIds={assignedIds}
       assignedLabel="Organiser"
       invite={{ target_type: 'championship_organiser', target_id: eventId }}
-      invalidateKeys={[`/championships/${eventId}/roles`]}
+      // Also refresh the bell - a newly-added organiser may already be eligible
+      // for a pre-existing 'organiser'-audience notification for this championship.
+      invalidateKeys={[`/championships/${eventId}/roles`, 'notifications']}
       onAssignUsers={assignUsers}
       onClose={onClose}
     />

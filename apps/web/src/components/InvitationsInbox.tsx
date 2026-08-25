@@ -25,8 +25,11 @@ export function InvitationsInbox({ organizationId, className = '' }: { organizat
   const accept = useApiMutation(
     (id: string) => api('POST', `/invitations/${id}/accept`),
     // Auto-approved on accept (the host invited them) - refresh enrollments too so the
-    // org immediately shows as approved and can enter teams.
-    ['/me/invitations', '/championships/mine', '/me/enrollments'],
+    // org immediately shows as approved and can enter teams. Also refresh the bell -
+    // accepting fires an 'enrollment_approved' notification (audience: everyone
+    // related to the championship) in the same request, and the accepting org owner
+    // immediately qualifies as a POC, so the badge needs a nudge or it sits stale.
+    ['/me/invitations', '/championships/mine', '/me/enrollments', 'notifications'],
   );
   const decline = useApiMutation((id: string) => api('POST', `/invitations/${id}/decline`), ['/me/invitations']);
 

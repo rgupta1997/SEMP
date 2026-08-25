@@ -116,6 +116,22 @@ function collectStageTreeIssues(node: StageNode, path: (string | number)[]): Arr
     }
     issues.push(...collectStageTreeIssues(branch.childStage, [...path, 'branches', i, 'childStage']));
   });
+  // Sibling branches off the same group stage must not claim overlapping ranks - two
+  // branches both resolving e.g. "1st in Pool A" would both receive that same real
+  // team once the pool finishes (stage-resolver.ts matches purely by label string,
+  // with no awareness of which branch "should" own a given rank).
+  for (let i = 0; i < node.branches.length; i++) {
+    for (let j = i + 1; j < node.branches.length; j++) {
+      const a = node.branches[i];
+      const b = node.branches[j];
+      if (a.rankFrom <= b.rankTo && b.rankFrom <= a.rankTo) {
+        issues.push({
+          path: [...path, 'branches', j, 'rankFrom'],
+          message: `Branch "${b.label || b.id}" (ranks ${b.rankFrom}-${b.rankTo}) overlaps "${a.label || a.id}" (ranks ${a.rankFrom}-${a.rankTo}) - each rank can only feed one branch`,
+        });
+      }
+    }
+  }
   return issues;
 }
 

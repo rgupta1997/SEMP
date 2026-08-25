@@ -70,6 +70,18 @@ function validateNode(node: StageNodeDraft, entrants: TokenEntrant[], label: str
     if (entrants.length < node.numGroups * 2) return `${label}: needs at least ${node.numGroups * 2} entrants for ${node.numGroups} pool${node.numGroups === 1 ? '' : 's'} (has ${entrants.length})`;
     if (node.branches.length === 0) return `${label}: add at least one branch`;
     const poolSize = Math.floor(entrants.length / node.numGroups);
+    // Sibling branches off this same pool stage must not claim overlapping ranks -
+    // e.g. Cup=1-2 and Plate=1-2 would both resolve to the same real teams once the
+    // pool finishes (see stage-config.ts's collectStageTreeIssues for the server-side
+    // mirror of this check).
+    for (let i = 0; i < node.branches.length; i++) {
+      for (let j = i + 1; j < node.branches.length; j++) {
+        const a = node.branches[i]; const b = node.branches[j];
+        if (a.rankFrom <= b.rankTo && b.rankFrom <= a.rankTo) {
+          return `${label}: "${a.label || 'a branch'}" (ranks ${a.rankFrom}-${a.rankTo}) overlaps "${b.label || 'another branch'}" (ranks ${b.rankFrom}-${b.rankTo}) - each rank can only feed one branch`;
+        }
+      }
+    }
     for (const b of node.branches) {
       if (b.rankTo < b.rankFrom) return `${label} → ${b.label || 'a branch'}: "to" rank must be ≥ "from" rank`;
       if (b.rankTo > poolSize) return `${label} → ${b.label || 'a branch'}: rank ${b.rankTo} exceeds this pool's size (${poolSize})`;
