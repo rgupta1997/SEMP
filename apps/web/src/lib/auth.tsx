@@ -42,6 +42,8 @@ interface AuthState {
   activeRole: AppRole;
   setActiveRole: (r: AppRole) => void;
   login: (email: string, password: string) => Promise<void>;
+  /** Adopt a token from the phone-first flow (sign-in, chooser or signup). */
+  adoptSession: (token: string) => Promise<void>;
   signup: (body: SignupBody) => Promise<void>;
   changePassword: (newPassword: string, currentPassword?: string) => Promise<void>;
   refresh: () => Promise<void>;
@@ -101,6 +103,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refresh().catch(() => tokenStore.clear()).finally(() => setLoading(false));
   }, []);
 
+  /**
+   * Adopt a session minted by the phone-first flow.
+   *
+   * That flow's endpoints return a token and nothing else - unlike the legacy
+   * /auth/login, which returns the whole context inline. So the order matters and
+   * lives here rather than in each screen: store the token, re-auth Realtime,
+   * drop the previous user's cached queries, then fetch the context. Fetching
+   * before storing would go out unauthenticated; not clearing would leak the
+   * previous account's data into this one, which under Option B is the same
+   * person's *other* account and therefore very easy to miss in testing.
+   */
+  const adoptSession = async (token: string) => {
+    tokenStore.set(token);
+    await supabase?.realtime.setAuth();
+    localStorage.removeItem(ACTIVE_ROLE_KEY);
+    qc.clear();
+    await refresh();
+    setJustLoggedIn(true);
+  };
+
   const login = async (email: string, password: string) => {
     const res = await api<{ token: string } & AuthContext>('POST', '/auth/login', { email, password });
     tokenStore.set(res.token);
@@ -154,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const availableRoles = useMemo(() => (ctx ? rolesFor(ctx) : []), [ctx]);
 
   return (
-    <Ctx.Provider value={{ ctx, loading, availableRoles, activeRole, setActiveRole, login, signup, changePassword, refresh, logout, justLoggedIn, clearJustLoggedIn: () => setJustLoggedIn(false) }}>
+    <Ctx.Provider value={{ ctx, loading, availableRoles, activeRole, setActiveRole, login, signup, adoptSession, changePassword, refresh, logout, justLoggedIn, clearJustLoggedIn: () => setJustLoggedIn(false) }}>
       {children}
     </Ctx.Provider>
   );

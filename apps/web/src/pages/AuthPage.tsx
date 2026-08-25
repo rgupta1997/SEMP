@@ -1,17 +1,18 @@
-import { useState, type CSSProperties } from 'react';
+import { useCallback, useState, type CSSProperties } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { BRAND } from '../lib/brand';
 import { useTheme } from '../lib/theme';
+import { SignInFlow } from '../features/auth/SignInFlow';
 
 // Landing-page palette.
 const C = {
   blue: '#004AAD', blue8: '#013C8B', blue50: '#F1F6FE', teal: '#5CE1E6',
   teal6: '#159FA6', navy: '#0A1A33', fg2: '#374459', fg3: '#6E7E96',
 };
-const POP = "'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif";
-const HANK = "'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif";
-const MONO = "'IBM Plex Mono',ui-monospace,monospace";
+const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
+const HANK = "'Hanken Grotesk',ui-sans-serif,system-ui,sans-serif";
+const MONO = "'JetBrains Mono',ui-monospace,monospace";
 
 const RAIL_POINTS = [
   'Set up a multi-sport championship in minutes',
@@ -107,9 +108,13 @@ export function AuthPage() {
     cursor: 'pointer', fontSize: 16,
   };
 
-  const heading = mode === 'login' ? 'Welcome back' : 'Create your account';
+  // The sign-in flow owns its own copy per step, so the page takes the heading
+  // from it rather than deciding from `mode` alone.
+  const [flowHeading, setFlowHeading] = useState({ title: 'Welcome back', sub: '' });
+  const onHeading = useCallback((h: { title: string; sub: string }) => setFlowHeading(h), []);
+  const heading = mode === 'login' ? flowHeading.title : 'Create your account';
   const sub = mode === 'login'
-    ? `Sign in to your ${BRAND.name} ${BRAND.productBadge} workspace.`
+    ? (flowHeading.sub || `Sign in to your ${BRAND.name} ${BRAND.productBadge} workspace.`)
     : 'Start hosting or join a championship in minutes.';
 
   return (
@@ -183,44 +188,55 @@ export function AuthPage() {
             <h2 style={{ fontFamily: POP, fontWeight: 800, fontSize: 30, lineHeight: 1.12, letterSpacing: '-.02em', color: t.fg }}>{heading}</h2>
             <p style={{ fontSize: 15, color: t.body, margin: '8px 0 0' }}>{sub}</p>
 
-            <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 28 }}>
-              {mode === 'signup' && (
-                <div>
-                  <label htmlFor="auth-name" style={labelStyle}>Full name</label>
-                  <input id="auth-name" className="field" style={inputStyle} value={name}
-                    onChange={(e) => setName(e.target.value)} placeholder="Your name" autoComplete="name" required />
-                </div>
-              )}
-              <div>
-                <label htmlFor="auth-email" style={labelStyle}>Email</label>
-                <input id="auth-email" className="field" style={inputStyle} type="email" value={email}
-                  onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" required />
-              </div>
-              {mode === 'signup' && (
-                <div>
-                  <label htmlFor="auth-phone" style={labelStyle}>Phone number</label>
-                  <input id="auth-phone" className="field" style={inputStyle} type="tel" value={phone}
-                    onChange={(e) => setPhone(e.target.value)} placeholder="+91 98000 00000" autoComplete="tel" required />
-                </div>
-              )}
-              <div>
-                <label htmlFor="auth-password" style={labelStyle}>Password</label>
-                <input id="auth-password" className="field" style={inputStyle} type="password" value={password}
-                  onChange={(e) => setPassword(e.target.value)} placeholder="••••••••"
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required />
-              </div>
-
-              {error && (
-                <p role="alert" style={{ borderRadius: 4, background: dark ? 'rgba(222,58,58,.12)' : '#FBE6E6', border: `1px solid ${dark ? 'rgba(222,58,58,.3)' : '#F3C9C9'}`, padding: '10px 13px', fontSize: 13.5, fontWeight: 600, color: dark ? '#F4A8A8' : '#B23636', margin: 0 }}>{error}</p>
-              )}
-
-              <button type="submit" disabled={busy} className="cta" style={{ height: 50, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, background: C.blue, color: '#fff', fontFamily: POP, fontWeight: 700, fontSize: 15.5, borderRadius: 6, border: 'none', boxShadow: '0 14px 30px -12px rgba(0,74,173,.55)' }}>
-                {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
-                {!busy && (
-                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
+            {mode === 'login' ? (
+              <SignInFlow
+                dark={dark}
+                inputStyle={inputStyle}
+                labelStyle={labelStyle}
+                t={{ fg: t.fg, body: t.body }}
+                onHeading={onHeading}
+                onWantSignup={() => { setMode('signup'); setError(null); }}
+              />
+            ) : (
+              <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 28 }}>
+                {mode === 'signup' && (
+                  <div>
+                    <label htmlFor="auth-name" style={labelStyle}>Full name</label>
+                    <input id="auth-name" className="field" style={inputStyle} value={name}
+                      onChange={(e) => setName(e.target.value)} placeholder="Your name" autoComplete="name" required />
+                  </div>
                 )}
-              </button>
-            </form>
+                <div>
+                  <label htmlFor="auth-email" style={labelStyle}>Email</label>
+                  <input id="auth-email" className="field" style={inputStyle} type="email" value={email}
+                    onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" required />
+                </div>
+                {mode === 'signup' && (
+                  <div>
+                    <label htmlFor="auth-phone" style={labelStyle}>Phone number</label>
+                    <input id="auth-phone" className="field" style={inputStyle} type="tel" value={phone}
+                      onChange={(e) => setPhone(e.target.value)} placeholder="+91 98000 00000" autoComplete="tel" required />
+                  </div>
+                )}
+                <div>
+                  <label htmlFor="auth-password" style={labelStyle}>Password</label>
+                  <input id="auth-password" className="field" style={inputStyle} type="password" value={password}
+                    onChange={(e) => setPassword(e.target.value)} placeholder="••••••••"
+                    autoComplete="new-password" required />
+                </div>
+
+                {error && (
+                  <p role="alert" style={{ borderRadius: 4, background: dark ? 'rgba(222,58,58,.12)' : '#FBE6E6', border: `1px solid ${dark ? 'rgba(222,58,58,.3)' : '#F3C9C9'}`, padding: '10px 13px', fontSize: 13.5, fontWeight: 600, color: dark ? '#F4A8A8' : '#B23636', margin: 0 }}>{error}</p>
+                )}
+
+                <button type="submit" disabled={busy} className="cta" style={{ height: 50, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, background: C.blue, color: '#fff', fontFamily: POP, fontWeight: 700, fontSize: 15.5, borderRadius: 6, border: 'none', boxShadow: '0 14px 30px -12px rgba(0,74,173,.55)' }}>
+                  {busy ? 'Please wait…' : 'Create account'}
+                  {!busy && (
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
+                  )}
+                </button>
+              </form>
+            )}
 
             <p style={{ textAlign: 'center', fontSize: 14, color: t.body, marginTop: 18 }}>
               {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
