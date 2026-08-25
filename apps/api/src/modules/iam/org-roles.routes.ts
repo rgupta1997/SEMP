@@ -34,6 +34,10 @@ const setRolePermissionsSchema = z.object({
   // Only catalogue codes. A permission the product cannot enforce is not a
   // permission, so an unknown code is rejected rather than stored and ignored.
   permission_ids: z.array(z.enum(PERMISSION_CODES as [string, ...string[]])),
+  // How far the role reaches. The owner sets this too: "Sports Admin" scoped to the
+  // whole organisation and scoped to one campus are different jobs, and which one an
+  // institution means is theirs to decide, not the platform's.
+  scope: z.enum(['whole_org', 'campus_unit', 'single_event']).optional(),
 });
 
 export function makeOrgRolesRouter(prisma: Prisma): Router {
@@ -134,9 +138,11 @@ export function makeOrgRolesRouter(prisma: Prisma): Router {
         code: r.code,
         description: r.description,
         permission_ids: r.permission_ids,
+        kind: r.kind,
+        scope: r.scope,
         // What the reader needs to know before they click: is this ours, and can we
         // change it here?
-        scope: r.organization_id ? 'organisation' : 'platform',
+        owner: r.organization_id ? 'organisation' : 'platform',
         editable: !!r.organization_id,
       })));
   }));
@@ -188,7 +194,10 @@ export function makeOrgRolesRouter(prisma: Prisma): Router {
 
       const row = await prisma.roles.update({
         where: { id: before.id },
-        data: { permission_ids: req.body.permission_ids },
+        data: {
+          permission_ids: req.body.permission_ids,
+          ...(req.body.scope ? { scope: req.body.scope } : {}),
+        },
       });
       await audit(prisma, req, {
         action: AUDIT_ACTIONS.rolePermissionsChanged,
@@ -200,6 +209,9 @@ export function makeOrgRolesRouter(prisma: Prisma): Router {
             from: (before.permission_ids as unknown as string[]) ?? [],
             to: req.body.permission_ids,
           },
+          ...(req.body.scope && req.body.scope !== before.scope
+            ? { scope: { from: before.scope, to: req.body.scope } }
+            : {}),
         },
       });
       res.json(row);
@@ -242,7 +254,10 @@ export function makeOrgRolesRouter(prisma: Prisma): Router {
 
       const row = await prisma.roles.update({
         where: { id: before.id },
-        data: { permission_ids: req.body.permission_ids },
+        data: {
+          permission_ids: req.body.permission_ids,
+          ...(req.body.scope ? { scope: req.body.scope } : {}),
+        },
       });
 
       await audit(prisma, req, {
@@ -254,6 +269,9 @@ export function makeOrgRolesRouter(prisma: Prisma): Router {
             from: (before.permission_ids as unknown as string[]) ?? [],
             to: req.body.permission_ids,
           },
+          ...(req.body.scope && req.body.scope !== before.scope
+            ? { scope: { from: before.scope, to: req.body.scope } }
+            : {}),
         },
       });
 
