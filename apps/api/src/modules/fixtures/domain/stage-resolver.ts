@@ -1,7 +1,7 @@
 import { stageConfigSchema, type StandingsTiebreaker } from '@semp/shared';
 import type { Prisma } from '../../../infra/prisma.js';
 import { resolveRuleForDraw } from '../../standings/standings.service.js';
-import { advanceInBracket } from '../fixtures.routes.js';
+import { advanceInBracket } from '../bracket.js';
 import { computePoolStandings, isPoolComplete, tiedRanks, type PoolFixture, type PoolStanding } from './generators/pool-standings.js';
 import { assignStageSequence, type AssignedStageTree } from './stage-tree.js';
 

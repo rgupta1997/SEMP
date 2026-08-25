@@ -5,7 +5,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError } from '../../shared/errors.js';
-import { readStandings, readStandingsBreakdown, recomputeStandings, countCompletedMatches } from './standings.service.js';
+import { readStandings, readStandingsBreakdown, recomputeStandingsAtomic, countCompletedMatches } from './standings.service.js';
 
 // Standings = materialized org-level tables (read) + editable scoring rules (write).
 // Mounted under /championships alongside the events router.
@@ -100,7 +100,7 @@ export function makeStandingsRouter(prisma: Prisma): Router {
       ? await prisma.standings_rules.update({ where: { id: existing.id }, data: { config, updated_at: new Date() } })
       : await prisma.standings_rules.create({ data: { championship_id: championshipId, scope_type, scope_id, config } });
 
-    await recomputeStandings(prisma, championshipId);
+    await recomputeStandingsAtomic(prisma, championshipId);
     res.json({ id: row.id, scope_type: row.scope_type, scope_id: row.scope_id, config: row.config });
   }));
 
@@ -109,7 +109,7 @@ export function makeStandingsRouter(prisma: Prisma): Router {
     const rule = await prisma.standings_rules.findUnique({ where: { id: req.params.ruleId }, select: { championship_id: true } });
     if (!rule || rule.championship_id !== req.params.id) throw new NotFoundError('Standings rule');
     await prisma.standings_rules.delete({ where: { id: req.params.ruleId } });
-    await recomputeStandings(prisma, req.params.id);
+    await recomputeStandingsAtomic(prisma, req.params.id);
     res.json({ ok: true });
   }));
 

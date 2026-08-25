@@ -13,7 +13,7 @@ import {
   type CreateDemoSandboxInput, type DemoChampKind,
 } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
-import { recomputeStandings } from '../standings/standings.service.js';
+import { recomputeStandingsAtomic } from '../standings/standings.service.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { makeNamePool, type NamePool } from './demo-names.js';
 import { CHAMP_RECIPES, drawStructureFor, scorePair, type ChampRecipe } from './demo-recipes.js';
@@ -398,7 +398,7 @@ async function seedChampionship(prisma: Prisma, ctx: ChampCtx): Promise<void> {
   await flush();
 
   // -- standings + final status ------------------------------------------------
-  await recomputeStandings(prisma, champId);
+  await recomputeStandingsAtomic(prisma, champId);
   const standingsRows = await prisma.standings.findMany({ where: { championship_id: champId }, select: { id: true } });
   track('standings', standingsRows.map((s) => s.id));
 

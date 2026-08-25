@@ -117,6 +117,7 @@ model fixtures {
   away_slot_label                      String?                @db.VarChar
   certificates                         certificates[]
   fixture_awards                       fixture_awards[]
+  fixture_events                       fixture_events[]
   teams_fixtures_away_team_idToteams   teams?                 @relation("fixtures_away_team_idToteams", fields: [away_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   teams_fixtures_home_team_idToteams   teams?                 @relation("fixtures_home_team_idToteams", fields: [home_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users_fixtures_locked_byTousers      users?                 @relation("fixtures_locked_byTousers", fields: [locked_by], references: [id], onUpdate: NoAction)
@@ -453,6 +454,7 @@ model users {
   feedback                                                                 feedback[]
   feedback_feedback_user_idTousers                                         feedback[]                   @relation("feedback_user_idTousers")
   fixture_awards                                                           fixture_awards[]
+  fixture_events                                                           fixture_events[]
   fixtures_fixtures_locked_byTousers                                       fixtures[]                   @relation("fixtures_locked_byTousers")
   fixtures                                                                 fixtures[]
   fixtures_fixtures_submitted_byTousers                                    fixtures[]                   @relation("fixtures_submitted_byTousers")
@@ -1128,6 +1130,28 @@ model user_org_roles {
   @@unique([user_id, organization_id, role_id], map: "uq_user_org_roles")
   @@index([organization_id], map: "idx_user_org_roles_org")
   @@index([user_id], map: "idx_user_org_roles_user")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model fixture_events {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fixture_id     String   @db.Uuid
+  rubber_key     String?  @db.VarChar(40)
+  team_side      String?  @db.Char(1)
+  event_key      String   @db.VarChar(40)
+  label          String   @db.VarChar(120)
+  points         Int      @default(0)
+  player_user_id String?  @db.Uuid
+  segment        String?  @db.VarChar(40)
+  seq            Int      @default(0)
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  fixtures       fixtures @relation(fields: [fixture_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users          users?   @relation(fields: [player_user_id], references: [id], onUpdate: NoAction)
+
+  @@index([fixture_id], map: "idx_fixture_events_fixture")
+  @@index([event_key], map: "idx_fixture_events_key")
+  @@index([player_user_id], map: "idx_fixture_events_player")
 }
 
 enum tier {

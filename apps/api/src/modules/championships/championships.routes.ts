@@ -7,7 +7,7 @@ import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError } from '../../shared/errors.js';
 import { assertChampionshipTransition } from './domain/championship-lifecycle.js';
 import { notify } from '@semp/notifications/server/notify.js';
-import { recomputeStandings } from '../standings/standings.service.js';
+import { recomputeStandingsAtomic } from '../standings/standings.service.js';
 import { signShareToken } from '../public/share-token.js';
 import { listChampionshipFixtures } from './fixtures-list.js';
 import { findUserByPhone } from '../iam/users.helpers.js';
@@ -265,7 +265,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
     // Freeze a final, accurate snapshot at the moment of completion (fixture-driven
     // recomputes stop once a championship is completed).
     if (req.body.status === 'completed') {
-      try { await recomputeStandings(prisma, updated.id); }
+      try { await recomputeStandingsAtomic(prisma, updated.id); }
       catch (err) { console.error(`[standings] final recompute failed for ${updated.id}:`, err); }
     }
 
