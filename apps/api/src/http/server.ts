@@ -15,6 +15,7 @@ import { makeCrudRouter } from './crud.js';
 import { errorHandler } from './middleware/error.js';
 import { parseAuth, requireAuth, requireSuperAdmin } from './middleware/auth.js';
 import { makeGuards } from './middleware/permissions.js';
+import { makeSignInRouter } from '../modules/iam/signin.routes.js';
 import { makeAuthRouter } from '../modules/iam/auth.routes.js';
 import { makeMeRouter } from '../modules/iam/me.routes.js';
 import { makeUsersRouter } from '../modules/iam/users.routes.js';
@@ -62,6 +63,9 @@ export function buildApp(prisma: Prisma) {
   const api = Router();
 
   // Public auth routes
+  // Phone-first sign-in (Option B): identify, code, chooser, session, signup.
+  // Mounted before the legacy email+password router so its routes win on overlap.
+  api.use('/auth', makeSignInRouter(prisma));
   api.use('/auth', makeAuthRouter(prisma));
 
   // "Book a demo" leads - the POST is public (the landing page is unauthenticated);

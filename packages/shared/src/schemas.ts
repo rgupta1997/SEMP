@@ -102,6 +102,73 @@ export const resetPasswordSchema = z.object({
   password: z.string().min(6),
 });
 
+
+// ---------- Phone-first sign-in (Option B) ----------
+//
+// A phone number can belong to more than one account, so every phone-keyed step
+// answers about the NUMBER and the account is chosen afterwards. An email is still
+// unique and identifies exactly one account.
+
+/** Who a request is about: a phone number or an email address, never both. */
+export const subjectSchema = z.union([
+  z.object({ phone: requiredPhone, email: z.undefined().optional() }),
+  z.object({ email: z.string().email(), phone: z.undefined().optional() }),
+]);
+export type Subject = z.infer<typeof subjectSchema>;
+
+/** What a one-time code is being asked for. */
+export const OTP_PURPOSE = ['sign_in', 'signup', 'password_reset', 'verify_email', 'verify_phone'] as const;
+export type OtpPurpose = (typeof OTP_PURPOSE)[number];
+
+/** Step 1: which doors are open for this subject - password, code, or sign up. */
+export const identifySubjectSchema = subjectSchema;
+
+/** Step 2: send a code to this subject. */
+export const otpSendSchema = z.intersection(
+  subjectSchema,
+  z.object({ purpose: z.enum(OTP_PURPOSE).default('sign_in') }),
+);
+
+/** Step 3: check it. Returns a short-lived ticket, never a session. */
+export const otpCheckSchema = z.intersection(
+  subjectSchema,
+  z.object({
+    code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
+    purpose: z.enum(OTP_PURPOSE).default('sign_in'),
+  }),
+);
+
+/**
+ * Sign in with a password. A phone resolves to a SET of accounts, so the password
+ * disambiguates only when they differ - the chooser has to stay reachable from
+ * this path, not just the code path.
+ */
+export const passwordSignInSchema = z.intersection(
+  subjectSchema,
+  z.object({ password: z.string().min(1) }),
+);
+
+/**
+ * Turn a proof into a session. `account_id` is required only when the subject
+ * resolved to more than one account and the person has picked.
+ */
+export const sessionSchema = z.object({
+  verification_token: z.string().min(1),
+  account_id: uuid.optional(),
+});
+
+/**
+ * Sign up: all four are required, and both addresses are verified independently.
+ * The verified one comes from its ticket, never from the body, so a caller cannot
+ * prove one address and register another.
+ */
+export const phoneSignupSchema = z.object({
+  phone_token: z.string().min(1),
+  email_token: z.string().min(1),
+  name: z.string().min(1),
+  password: z.string().min(6),
+});
+
 // ---------- Organisation email domains (super-admin managed) ----------
 // Normalised on the way in so "@IIMB.ac.in", "www.iimb.ac.in" and "iimb.ac.in " all
 // store as one value - the DB's unique index is on lower(domain), and sign-in looks
