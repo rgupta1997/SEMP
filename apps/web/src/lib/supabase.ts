@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-import { api } from './api';
+import { api, tokenStore } from './api';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabasePublishableKey =
@@ -48,6 +48,14 @@ let inflight: Promise<string | null> | null = null;
 // times" - the cache + in-flight guard below avoid hammering the backend
 // on every call while still always returning a token with real time left.
 async function fetchRealtimeToken(): Promise<string | null> {
+  // Nobody is signed in yet - on the login screen, or on a cold load before the
+  // stored session is read. Asking for a token here can only 401, and a request
+  // whose sole outcome is an error in everyone's console is worth not making.
+  if (!tokenStore.get()) {
+    tokenCache = null;
+    return null;
+  }
+
   const now = Date.now();
 
   if (tokenCache && tokenCache.expiresAt - now > REFRESH_BUFFER_MS) {

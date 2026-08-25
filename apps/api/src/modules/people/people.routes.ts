@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Prisma as PrismaNS } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import type { Prisma } from '../../infra/prisma.js';
@@ -93,6 +94,11 @@ export function makePeopleRouter(prisma: Prisma): Router {
     org_unit_id: m.org_unit_id,
     org_unit_name: m.org_units?.name ?? null,
     joined_at: m.joined_at,
+    // The Sportagon ID is the whole point of the directory: it is what makes this
+    // person the same person at the next institution, so it travels with the row.
+    sportagon_id: m.users?.sportagon_id ?? null,
+    sports: m.sports ?? 0,
+    events: m.events ?? 0,
   });
 
   /** Everything the pure validator needs, in four queries regardless of file size. */
@@ -368,14 +374,39 @@ export function makePeopleRouter(prisma: Prisma): Router {
       select: {
         id: true, user_id: true, role: true, status: true, member_code: true,
         verification: true, verified_at: true, org_unit_id: true, joined_at: true,
-        users: { select: { name: true, email: true, phone: true } },
+        users: { select: { name: true, email: true, phone: true, sportagon_id: true } },
         org_units: { select: { name: true } },
         // Deliberately NOT selected: gender, date_of_birth, scholarship.
       },
       orderBy: [{ joined_at: 'desc' }],
       take: 2000,
     });
-    res.json(rows.map(personView));
+
+    // How much sport each person has actually played for this institution. One
+    // grouped query rather than two per row - the directory is allowed to hold
+    // two thousand people, and a per-row lookup at that size is a page that
+    // never finishes loading.
+    const userIds = rows.map((r) => r.user_id);
+    const activity = userIds.length
+      ? await prisma.$queryRaw<Array<{ user_id: string; sports: bigint; events: bigint }>>(PrismaNS.sql`
+          select tm.user_id,
+                 count(distinct ts.sport_id) as sports,
+                 count(distinct te.championship_id) as events
+            from team_members tm
+            join team_entries te on te.team_id = tm.team_id
+            join tournament_disciplines td on td.id = te.tournament_discipline_id
+            join tournament_sports ts on ts.id = td.tournament_sport_id
+           where te.organization_id = ${organizationId}::uuid
+             and tm.user_id in (${PrismaNS.join(userIds.map((id) => PrismaNS.sql`${id}::uuid`))})
+           group by tm.user_id`)
+      : [];
+    const byUser = new Map(activity.map((a) => [a.user_id, a]));
+
+    res.json(rows.map((r) => personView({
+      ...r,
+      sports: Number(byUser.get(r.user_id)?.sports ?? 0),
+      events: Number(byUser.get(r.user_id)?.events ?? 0),
+    })));
   }));
 
   // Verifying people (J1-E6). Verification is the institution's own judgement about

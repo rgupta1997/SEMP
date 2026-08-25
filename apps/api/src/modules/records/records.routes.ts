@@ -70,7 +70,13 @@ export function makeRecordsRouter(prisma: Prisma): Router {
   async function loadProfile(userId: string) {
     const user = await prisma.users.findUnique({
       where: { id: userId },
-      select: { id: true, name: true, email: true, phone: true },
+      select: {
+        id: true, name: true, email: true, phone: true,
+        // The controlled half. Sent alongside the verified half so a viewer can see
+        // the line between them - which is the point of the split, and impossible to
+        // show if the two arrive from different endpoints at different times.
+        sportagon_id: true, handle: true, tagline: true, preferred_sports: true, avatar_url: true,
+      },
     });
     if (!user) throw new NotFoundError('Person');
 
