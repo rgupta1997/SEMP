@@ -11,6 +11,7 @@ import { generateAllStages } from './domain/stage-orchestrator.js';
 import { resolveStageAdvancement } from './domain/stage-resolver.js';
 import { recomputeStandingsForFixture, resolveRuleForDraw, resolveSchemeForDraw } from '../standings/standings.service.js';
 import { notify } from '@semp/notifications/server/notify.js';
+import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
 // A match can only be recorded once its championship is under way. Resolves the
 // owning championship from the fixture's draw and blocks scoring while it's still
 // in draft or registration - nothing should be played before the event starts.
@@ -160,7 +161,7 @@ async function remindCustomPointsIfNeeded(prisma: Prisma, fixtureId: string, sen
     const formatId = td?.format_id ?? td?.tournament_sports?.format_id ?? null;
     const scheme = await resolveSchemeForDraw(prisma, championshipId, td?.discipline_id ?? null, formatId);
     if (scheme !== 'custom') return;
-    const organiserRole = await prisma.roles.findUnique({ where: { name: 'Organiser' }, select: { id: true } });
+    const organiserRole = await prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser), select: { id: true } });
     if (!organiserRole) return;
     const organisers = await prisma.user_championship_roles.findMany({
       where: { championship_id: championshipId, role_id: organiserRole.id },

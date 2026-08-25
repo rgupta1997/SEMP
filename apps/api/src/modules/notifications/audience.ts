@@ -3,6 +3,7 @@ import type { Prisma } from '../../infra/prisma.js';
 import type { JsonValue } from '@prisma/client/runtime/library';
 import type { AudienceRule } from '@semp/notifications/core/rules.js';
 import { matches } from '@semp/notifications/server/matches.js';
+import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
 
 
 // Resolves a user's relationship to every championship so the notification feed and the
@@ -89,19 +90,15 @@ export async function getUserEventScopes(
   }
 
   const [orgRole, offRole] = await Promise.all([
-    prisma.roles.findUnique({
-      where: {
-        name: 'Organiser',
-      },
+    prisma.roles.findFirst({
+      where: roleWhereByCode(ROLE_CODES.organiser),
       select: {
         id: true,
       },
     }),
 
-    prisma.roles.findUnique({
-      where: {
-        name: 'Official',
-      },
+    prisma.roles.findFirst({
+      where: roleWhereByCode(ROLE_CODES.official),
       select: {
         id: true,
       },

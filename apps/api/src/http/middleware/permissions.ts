@@ -2,6 +2,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from './error.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
 
 // Server-side authorization. The client mirrors these rules for UX, but this is
 // the real boundary: every mutation must pass through here. Authority is
@@ -11,7 +12,7 @@ export function makeGuards(prisma: Prisma) {
   let organiserRoleId: string | null | undefined;
   async function getOrganiserRoleId(): Promise<string | null> {
     if (organiserRoleId === undefined) {
-      const r = await prisma.roles.findUnique({ where: { name: 'Organiser' }, select: { id: true } });
+      const r = await prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser), select: { id: true } });
       organiserRoleId = r?.id ?? null;
     }
     return organiserRoleId;

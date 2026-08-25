@@ -7,3 +7,4 @@ export * from './tie.js';
 export * from './tie-templates.js';
 export * from './demo-templates.js';
 export * from './schemas.js';
+export * from './role-codes.js';

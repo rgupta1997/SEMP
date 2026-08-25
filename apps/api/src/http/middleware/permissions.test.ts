@@ -18,7 +18,10 @@ function fakePrisma(over: {
 } = {}): any {
   const isAdmin = (userId: string, orgId: string) => (over.orgAdmins ?? []).includes(`${userId}|${orgId}`);
   return {
-    roles: { findUnique: async () => ({ id: 'role-org' }) },
+    // findFirst, not findUnique: roles are org-scoped, so the organiser role is
+    // resolved by stable code against the platform rows (see @semp/shared
+    // role-codes), which is not a unique-key lookup.
+    roles: { findFirst: async () => ({ id: 'role-org' }) },
     user_championship_roles: {
       findFirst: async (args: any) =>
         (over.organiserChampionshipIds ?? []).includes(args.where.championship_id) && args.where.user_id === over.organiserUserId
