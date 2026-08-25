@@ -412,6 +412,94 @@ export function makeMeRouter(prisma: Prisma): Router {
 
   // GET /me/achievements - every award the user has received, newest first, with
   // full match context. Powers the dedicated achievements detail page.
+
+  // ---- My Game (F-040..F-044) -------------------------------------------
+  // The personal context's landing screen. One request, because it is the first
+  // thing rendered after sign-in and four round trips there is four chances to
+  // show a half-drawn page.
+  //
+  // Everything here is derived from team membership. A person with no team gets
+  // empty arrays rather than an error - "you have not played yet" is a legitimate
+  // state, and the screen says so rather than looking broken.
+  router.get('/me/home', asyncHandler(async (req, res) => {
+    const { memberships, teamIds } = await loadMembershipMeta(req.user!.id);
+    const ids = [...teamIds];
+
+    const empty = {
+      next: null, live: [], pending: [], recent: [], teams: [],
+      stats: { games: 0, events: 0, sports: 0, wins: 0 },
+    };
+    if (ids.length === 0) { res.json(empty); return; }
+
+    const mine = { OR: [{ home_team_id: { in: ids } }, { away_team_id: { in: ids } }] };
+
+    const [upcoming, live, played, officiating] = await Promise.all([
+      // Next fixture: the soonest one still to come. Unscheduled fixtures have a
+      // null scheduled_at and are deliberately excluded - "next" has to have a when.
+      prisma.fixtures.findMany({
+        where: { ...mine, status: 'scheduled', scheduled_at: { gte: new Date() } },
+        select: matchSelect, orderBy: { scheduled_at: 'asc' }, take: 1,
+      }),
+      prisma.fixtures.findMany({
+        where: { ...mine, status: 'live' },
+        select: matchSelect, orderBy: { scheduled_at: 'asc' }, take: 4,
+      }),
+      prisma.fixtures.findMany({
+        where: { ...mine, status: { in: ['completed', 'walkover'] } },
+        select: matchSelect, orderBy: [{ scheduled_at: 'desc' }, { created_at: 'desc' }], take: 5,
+      }),
+      // Anything this person is the official on that still owes a scorecard. This is
+      // the one pending action the data can actually answer today; the rest of the
+      // queue (availability, invitations) needs tables that do not exist yet.
+      prisma.fixtures.findMany({
+        where: {
+          official_id: req.user!.id,
+          status: { in: ['live', 'completed'] },
+          scorecard_status: { in: ['draft', 'submitted'] },
+        },
+        select: { ...matchSelect, scorecard_status: true },
+        orderBy: { scheduled_at: 'desc' }, take: 5,
+      }),
+    ]);
+
+    const sportIds = new Set<string>();
+    const eventIds = new Set<string>();
+    for (const m of memberships) {
+      if (m.teams?.sports?.id) sportIds.add(m.teams.sports.id);
+      for (const e of m.teams?.team_entries ?? []) {
+        if (e.championships?.id) eventIds.add(e.championships.id);
+      }
+    }
+
+    // Counted from completed fixtures only, so the strip agrees with the record
+    // rather than with what is merely scheduled.
+    const wins = played.filter((f) => resultFor(f as FixtureRow, teamIds) === 'won').length;
+    const allPlayed = await prisma.fixtures.count({
+      where: { ...mine, status: { in: ['completed', 'walkover'] } },
+    });
+    const allWins = await prisma.fixtures.count({
+      where: { ...mine, status: { in: ['completed', 'walkover'] }, winner_team_id: { in: ids } },
+    });
+
+    res.json({
+      next: upcoming[0] ? summariseLean(upcoming[0] as FixtureRow, teamIds) : null,
+      live: live.map((f) => summariseLean(f as FixtureRow, teamIds)),
+      recent: played.map((f) => summariseLean(f as FixtureRow, teamIds)),
+      pending: officiating.map((f) => ({
+        ...summariseLean(f as FixtureRow, teamIds),
+        reason: f.scorecard_status === 'draft' ? 'Submit the scorecard' : 'Awaiting lock',
+      })),
+      teams: memberships.map((m) => ({
+        id: m.team_id,
+        name: (m.teams as any)?.name ?? null,
+        organization: m.teams?.organizations?.short_name ?? m.teams?.organizations?.name ?? null,
+        sport: m.teams?.sports?.name ?? null,
+        role: (m as any).role ?? 'player',
+      })),
+      stats: { games: allPlayed, events: eventIds.size, sports: sportIds.size, wins: allWins },
+    });
+  }));
+
   router.get('/me/achievements', asyncHandler(async (req, res) => {
     const { teamIds } = await loadMembershipMeta(req.user!.id);
     if (teamIds.size === 0) {

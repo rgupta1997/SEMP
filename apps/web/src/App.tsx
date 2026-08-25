@@ -28,6 +28,7 @@ import { TeamsPage } from './pages/organization/TeamsPage';
 import { RosterPage } from './pages/organization/RosterPage';
 import { StudentsPage } from './pages/organization/StudentsPage';
 import { RolesPage } from './pages/organization/RolesPage';
+import { MyGamePage } from './pages/MyGamePage';
 import { MembersPage } from './pages/organization/MembersPage';
 import { PocsPage } from './pages/organization/PocsPage';
 import { InvitationsPage } from './pages/organization/InvitationsPage';
@@ -77,6 +78,7 @@ function AuthenticatedRoutes() {
     <Routes>
       <Route element={<AppShell />}>
         {/* Profile / My Game */}
+        <Route path="/home" element={<MyGamePage />} />
         <Route path="/profile" element={<ParticipantDashboard />} />
         <Route path="/profile/achievements" element={<ParticipantAchievementsPage />} />
         <Route path="/profile/matches" element={<ParticipantMatchesPage />} />

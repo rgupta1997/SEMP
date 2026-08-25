@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Compass, Flag, FlaskConical, Landmark, Layers, LayoutGrid, LayoutList, Lock,
   Mail, Medal, Menu, MessageSquare, Moon, Plus, Sun, Trophy, Upload, User, Users, X,
+  Zap,
 } from 'lucide-react';
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
 import { BRAND } from '../lib/brand';
@@ -19,7 +20,9 @@ interface NavItem { to: string; label: string; icon: ReactNode; end?: boolean }
 interface NavGroup { group: string; items: NavItem[] }
 
 export function roleHome(role: AppRole): string {
-  return role === 'system' ? '/platform/sports' : '/profile';
+  // The personal context lands on My Game, per the prototype - not the profile.
+  // The profile is a record of what you have done; My Game is what you do next.
+  return role === 'system' ? '/platform/sports' : '/home';
 }
 
 function navFor(role: AppRole): NavGroup[] {
@@ -48,7 +51,8 @@ function navFor(role: AppRole): NavGroup[] {
   }
   return [{
     group: BRAND.name, items: [
-      { to: '/profile', label: 'My Game', icon: <User size={16} />, end: true },
+      { to: '/home', label: 'My Game', icon: <Zap size={16} />, end: true },
+      { to: '/profile', label: 'My Sports Profile', icon: <User size={16} /> },
       // Officials reach their assigned matches here. Always shown so a freshly-assigned
       // official finds it without re-logging in (the page itself is empty until assigned).
       { to: '/officiating', label: 'Officiating', icon: <Flag size={16} /> },
