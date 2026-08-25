@@ -15,6 +15,7 @@ import { makeCrudRouter } from './crud.js';
 import { errorHandler } from './middleware/error.js';
 import { parseAuth, requireAuth, requireSuperAdmin } from './middleware/auth.js';
 import { makeGuards } from './middleware/permissions.js';
+import { makeOrgRolesRouter } from '../modules/iam/org-roles.routes.js';
 import { makeSignInRouter } from '../modules/iam/signin.routes.js';
 import { makeAuthRouter } from '../modules/iam/auth.routes.js';
 import { makeMeRouter } from '../modules/iam/me.routes.js';
@@ -194,6 +195,10 @@ export function buildApp(prisma: Prisma) {
 
   // Mounted under /organizations because every route is institution-scoped.
   api.use('/organizations', makePeopleRouter(prisma));
+
+  // Role grants inside an organisation, and the catalogue the matrix is generated
+  // from. Mounted at the root because its paths are already fully qualified.
+  api.use('/', makeOrgRolesRouter(prisma));
 
   // The permanent record - lifetime timeline + achievements, READ ONLY. A timeline
   // entry changes only by correcting the locked result behind it.

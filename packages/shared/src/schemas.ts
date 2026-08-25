@@ -485,7 +485,26 @@ export const reviewEnrollmentSchema = z.object({
   status: z.enum(['approved', 'rejected'] as const),
   rejection_note: z.string().optional(),
 });
-export const assignRoleSchema = z.object({ user_id: uuid, role_id: uuid });
+/**
+ * Assigning an organisation role.
+ *
+ * `scope_ref` is the concrete instance a scoped role applies to - a campus id for a
+ * campus_unit role, an event id for single_event. Null means the whole organisation.
+ * Role plus scope is the permission unit: "Sports Admin" alone does not say where.
+ */
+export const ROLE_GRANT_STATUS = ['ACTIVE', 'INVITED', 'SUSPENDED'] as const;
+export type RoleGrantStatus = (typeof ROLE_GRANT_STATUS)[number];
+
+export const assignRoleSchema = z.object({
+  user_id: uuid,
+  role_id: uuid,
+  scope_ref: z.string().max(64).nullable().optional(),
+  status: z.enum(ROLE_GRANT_STATUS).default('ACTIVE'),
+});
+
+export const updateRoleGrantSchema = z.object({
+  status: z.enum(ROLE_GRANT_STATUS),
+});
 // Bulk-assign one championship role to several users at once (multi-select picker).
 export const bulkAssignRoleSchema = z.object({ user_ids: z.array(uuid).min(1).max(200), role_id: uuid });
 // Bulk-assign several users as championship officials at once (multi-select picker).
