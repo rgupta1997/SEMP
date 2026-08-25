@@ -1,9 +1,10 @@
 import { useCallback, useState, type CSSProperties } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useAuth } from '../lib/auth';
 import { BRAND } from '../lib/brand';
 import { useTheme } from '../lib/theme';
 import { SignInFlow } from '../features/auth/SignInFlow';
+import { SignUpFlow } from '../features/auth/SignUpFlow';
+import { ResetPasswordFlow } from '../features/auth/ResetPasswordFlow';
 
 // Landing-page palette.
 const C = {
@@ -45,40 +46,21 @@ const css = (dark: boolean) => `
 `;
 
 export function AuthPage() {
-  const { login, signup } = useAuth();
   const { theme, toggle } = useTheme();
   const dark = theme === 'dark';
   const location = useLocation();
   // The landing page can deep-link here in signup mode (Sign up button); default is login.
-  const [mode, setMode] = useState<'login' | 'signup'>(
+  const [mode, setMode] = useState<'login' | 'signup' | 'reset'>(
     (location.state as { mode?: string } | null)?.mode === 'signup'
       || new URLSearchParams(location.search).get('mode') === 'signup'
       ? 'signup' : 'login',
   );
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   // Redirect after auth is handled centrally in AppRoutes (it stays mounted across
   // the unauthenticated -> authenticated switch, unlike this page).
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null); setBusy(true);
-    try {
-      if (mode === 'login') {
-        await login(email, password);
-      } else {
-        await signup({ name, email, password, phone: phone || undefined });
-      }
-      // AppRoutes redirects to the role's home once auth context updates.
-    } catch (err: any) {
-      setError(err.message ?? 'Something went wrong');
-    } finally { setBusy(false); }
-  };
 
   // Theme-aware tokens. Navy rail stays constant.
   const t = {
@@ -112,10 +94,9 @@ export function AuthPage() {
   // from it rather than deciding from `mode` alone.
   const [flowHeading, setFlowHeading] = useState({ title: 'Welcome back', sub: '' });
   const onHeading = useCallback((h: { title: string; sub: string }) => setFlowHeading(h), []);
-  const heading = mode === 'login' ? flowHeading.title : 'Create your account';
-  const sub = mode === 'login'
-    ? (flowHeading.sub || `Sign in to your ${BRAND.name} ${BRAND.productBadge} workspace.`)
-    : 'Start hosting or join a championship in minutes.';
+  // Every flow reports its own per-step copy, so the page just renders it.
+  const heading = flowHeading.title;
+  const sub = flowHeading.sub || `Sign in to your ${BRAND.name} ${BRAND.productBadge} workspace.`;
 
   return (
     <div className="auth" style={{ minHeight: '100vh', fontFamily: HANK, background: t.formBg, color: t.fg }}>
@@ -188,7 +169,7 @@ export function AuthPage() {
             <h2 style={{ fontFamily: POP, fontWeight: 800, fontSize: 30, lineHeight: 1.12, letterSpacing: '-.02em', color: t.fg }}>{heading}</h2>
             <p style={{ fontSize: 15, color: t.body, margin: '8px 0 0' }}>{sub}</p>
 
-            {mode === 'login' ? (
+            {mode === 'login' && (
               <SignInFlow
                 dark={dark}
                 inputStyle={inputStyle}
@@ -196,48 +177,30 @@ export function AuthPage() {
                 t={{ fg: t.fg, body: t.body }}
                 onHeading={onHeading}
                 onWantSignup={() => { setMode('signup'); setError(null); }}
+                onWantReset={() => { setMode('reset'); setError(null); }}
               />
-            ) : (
-              <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 28 }}>
-                {mode === 'signup' && (
-                  <div>
-                    <label htmlFor="auth-name" style={labelStyle}>Full name</label>
-                    <input id="auth-name" className="field" style={inputStyle} value={name}
-                      onChange={(e) => setName(e.target.value)} placeholder="Your name" autoComplete="name" required />
-                  </div>
-                )}
-                <div>
-                  <label htmlFor="auth-email" style={labelStyle}>Email</label>
-                  <input id="auth-email" className="field" style={inputStyle} type="email" value={email}
-                    onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" required />
-                </div>
-                {mode === 'signup' && (
-                  <div>
-                    <label htmlFor="auth-phone" style={labelStyle}>Phone number</label>
-                    <input id="auth-phone" className="field" style={inputStyle} type="tel" value={phone}
-                      onChange={(e) => setPhone(e.target.value)} placeholder="+91 98000 00000" autoComplete="tel" required />
-                  </div>
-                )}
-                <div>
-                  <label htmlFor="auth-password" style={labelStyle}>Password</label>
-                  <input id="auth-password" className="field" style={inputStyle} type="password" value={password}
-                    onChange={(e) => setPassword(e.target.value)} placeholder="••••••••"
-                    autoComplete="new-password" required />
-                </div>
-
-                {error && (
-                  <p role="alert" style={{ borderRadius: 4, background: dark ? 'rgba(222,58,58,.12)' : '#FBE6E6', border: `1px solid ${dark ? 'rgba(222,58,58,.3)' : '#F3C9C9'}`, padding: '10px 13px', fontSize: 13.5, fontWeight: 600, color: dark ? '#F4A8A8' : '#B23636', margin: 0 }}>{error}</p>
-                )}
-
-                <button type="submit" disabled={busy} className="cta" style={{ height: 50, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, background: C.blue, color: '#fff', fontFamily: POP, fontWeight: 700, fontSize: 15.5, borderRadius: 6, border: 'none', boxShadow: '0 14px 30px -12px rgba(0,74,173,.55)' }}>
-                  {busy ? 'Please wait…' : 'Create account'}
-                  {!busy && (
-                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
-                  )}
-                </button>
-              </form>
+            )}
+            {mode === 'signup' && (
+              <SignUpFlow
+                dark={dark}
+                inputStyle={inputStyle}
+                labelStyle={labelStyle}
+                t={{ fg: t.fg, body: t.body }}
+                onHeading={onHeading}
+              />
+            )}
+            {mode === 'reset' && (
+              <ResetPasswordFlow
+                dark={dark}
+                inputStyle={inputStyle}
+                labelStyle={labelStyle}
+                t={{ fg: t.fg, body: t.body }}
+                onHeading={onHeading}
+                onDone={() => { setMode('login'); setError(null); }}
+              />
             )}
 
+            {mode !== 'reset' && (
             <p style={{ textAlign: 'center', fontSize: 14, color: t.body, marginTop: 18 }}>
               {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
               <button type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(null); }}
@@ -245,6 +208,7 @@ export function AuthPage() {
                 {mode === 'login' ? 'Sign up' : 'Sign in'}
               </button>
             </p>
+            )}
           </div>
         </main>
       </div>

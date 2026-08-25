@@ -34,9 +34,10 @@ export interface SignInFlowProps {
   t: { fg: string; body: string };
   onHeading: (h: { title: string; sub: string }) => void;
   onWantSignup: () => void;
+  onWantReset: () => void;
 }
 
-export function SignInFlow({ dark, inputStyle, labelStyle, t, onHeading, onWantSignup }: SignInFlowProps) {
+export function SignInFlow({ dark, inputStyle, labelStyle, t, onHeading, onWantSignup, onWantReset }: SignInFlowProps) {
   const { adoptSession } = useAuth();
 
   const [step, setStep] = useState<Step>('subject');
@@ -179,11 +180,12 @@ export function SignInFlow({ dark, inputStyle, labelStyle, t, onHeading, onWantS
       <button type="submit" disabled={busy || !password} className="cta" style={cta}>
         {busy ? 'Signing in…' : 'Sign in'}
       </button>
-      {methods.includes('otp') && (
-        <button type="button" onClick={requestCode} disabled={busy} style={{ ...ghost, marginTop: 2 }}>
-          Send me a code instead
-        </button>
-      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
+        {methods.includes('otp') ? (
+          <button type="button" onClick={requestCode} disabled={busy} style={ghost}>Send me a code instead</button>
+        ) : <span />}
+        <button type="button" onClick={onWantReset} style={{ ...ghost, fontWeight: 600, color: t.body }}>Forgotten it?</button>
+      </div>
     </form>
   );
 
