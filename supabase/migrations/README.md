@@ -33,16 +33,36 @@ If you add a migration, date it later than `20260825000030`.
 `varchar` to `jsonb`, rewriting every existing row into an `AudienceRule`. It has only ever
 run against a database with no EOS data in it.
 
-Its `CASE` handles `'all'`, `'org_admins'` and `'organizations_captains'` — which is exactly
-the set the EOS `notifications_audience_check` constraint allows, so no row can fall through
-to the `ELSE`. One edge remains: the `'all'` branch requires `championship_id is not null`,
-and an org-scoped row would not have one. Run this first and expect `0`:
+Its `CASE` handles `'all'`, `'org_admins'` and `'organizations_captains'` — exactly the set
+the EOS `notifications_audience_check` constraint allows. The hazard is the `ELSE`, which
+produces `{"kind":"everyone","championshipId": championship_id}`; if that column is null the
+rule resolves to nobody and the notification silently disappears.
+
+A row only reaches the `ELSE` if it has **no** `target_user_id` (the first branch, which
+takes precedence over everything) and does not satisfy one of the three audience branches.
+So the check has to exclude direct-user rows:
 
 ```sql
 select count(*) from notifications
-where audience::text = 'all' and championship_id is null;
+where target_user_id is null
+  and championship_id is null
+  and not (audience::text = 'org_admins' and organization_id is not null);
 ```
 
-If it returns anything, those rows need a rule of their own before the conversion runs —
-the `ELSE` would give them `{"kind":"everyone","championshipId":null}`, which resolves to
-nobody.
+**Verified 2026-08-25 against the live EOS database: this returns 0.** The conversion is
+safe here. For the record, the 567 rows distribute as:
+
+| audience | championship_id | organization_id | target_user_id | rows | converts to |
+|---|---|---|---|---|---|
+| `all` | set | null | set | 372 | `direct_user` |
+| `all` | null | set | set | 124 | `direct_user` |
+| `organizations_captains` | set | null | null | 26 | `role` / captain |
+| `all` | set | null | null | 24 | `everyone` |
+| `org_admins` | set | set | null | 20 | `org_admins` |
+| `org_admins` | null | set | null | 3 | `org_admins` |
+| `all` | null | null | set | 1 | `direct_user` |
+
+The 125 rows with a null `championship_id` and `audience = 'all'` look alarming and are
+fine — every one carries a `target_user_id`, so the first branch claims them before the
+`'all'` branch is ever evaluated. A naive count that ignores that precedence reports a
+false positive; the query above is the one to trust.
