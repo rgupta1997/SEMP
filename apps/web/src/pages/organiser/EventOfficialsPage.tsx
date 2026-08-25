@@ -32,7 +32,9 @@ function AssignOfficialModal({ eventId, existingIds, onClose }: { eventId: strin
       assignedUserIds={existingIds}
       assignedLabel="Official"
       invite={{ target_type: 'championship_official', target_id: eventId }}
-      invalidateKeys={[`/championships/${eventId}/officials`]}
+      // Also refresh the bell - a newly-added official may already be eligible
+      // for a pre-existing 'official'-audience notification for this championship.
+      invalidateKeys={[`/championships/${eventId}/officials`, 'notifications']}
       onAssignUsers={assignUsers}
       onClose={onClose}
     />

@@ -6,6 +6,7 @@ import {
   TEAM_STATUS, TOURNAMENT_DISCIPLINE_STATUS, TOURNAMENT_STATUS,
 } from './enums.js';
 import { disciplineFormatConfigSchema } from './scoring.js';
+import { stageConfigSchema } from './stage-config.js';
 
 const uuid = z.string().uuid();
 const json = z.record(z.any());
@@ -405,6 +406,13 @@ export const generateFixturesSchema = z.object({
   // ordered team ids = seed order; empty -> use teams registered to the discipline
   team_ids: z.array(uuid).optional(),
   params: json.default({}),
+});
+
+// Generate every stage of a stage-config tree (group + knockout wizard) up front -
+// same seed-order-override semantics as generateFixturesSchema, plus the tree itself.
+export const generateAllStagesSchema = z.object({
+  team_ids: z.array(uuid).optional(),
+  config: stageConfigSchema,
 });
 const fixtureFields = z.object({
   tournament_discipline_id: uuid,

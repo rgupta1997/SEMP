@@ -6,6 +6,7 @@ export interface GroupsParams {
   numGroups: number;
   advancePerGroup?: number; // used later to seed the knockout stage, not at generation
   teamsPerGroup?: number;
+  doubleRound?: boolean;
 }
 
 // Group / pool stage: snake-distribute teams into N groups, then round-robin
@@ -26,7 +27,7 @@ export function generateGroups(teams: TeamRef[], params: GroupsParams): Generate
   const fixtures: GeneratedFixture[] = [];
   groups.forEach((groupTeams, gi) => {
     const letter = String.fromCharCode(65 + gi);
-    const rr = generateRoundRobin(groupTeams, {}, `Pool ${letter} - Match`);
+    const rr = generateRoundRobin(groupTeams, { doubleRound: params.doubleRound }, `Pool ${letter} - Match`);
     rr.forEach((f) => fixtures.push({ ...f, poolNumber: gi + 1 }));
   });
 

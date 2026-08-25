@@ -84,6 +84,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = async () => {
     const c = await api<AuthContext>('GET', '/auth/me');
+    // Same priming login()/signup() do below, and for the same reason: this runs
+    // on every normal page load that restores a session from an already-stored
+    // token (not just an explicit login click), and Supabase's Realtime client
+    // still has no valid token until this resolves. Without it, applyContext(c)
+    // sets ctx.user, which immediately triggers the notification channel's first
+    // join (main.tsx) racing against this token fetch - any event that fires in
+    // that window is silently missed until something else (e.g. a page refresh)
+    // gives the fetch enough time to land first.
+    await supabase.realtime.setAuth();
     applyContext(c);
   };
 

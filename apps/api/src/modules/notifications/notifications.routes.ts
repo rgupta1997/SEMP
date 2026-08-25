@@ -74,7 +74,8 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
   // to this user's notification_cursors.last_seen_at. See cursor.ts.
   router.get('/notifications/unread-count', asyncHandler(async (req, res) => {
     const user = req.user!;
-    const count = await getUnreadCountByCursor(prisma, user.id);
+    const scopes = await getUserEventScopes(prisma, user);
+    const count = await getUnreadCountByCursor(prisma, user.id, scopes);
     res.json({ count });
   }));
 

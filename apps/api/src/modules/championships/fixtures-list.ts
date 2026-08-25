@@ -42,6 +42,14 @@ export async function listChampionshipFixtures(prisma: Prisma, championshipId: s
     official_id: f.official_id,
     pool_number: f.pool_number,
     bracket_position: f.bracket_position,
+    // Which stage of a group+knockout draw this row belongs to, and its
+    // not-yet-resolved placeholder (e.g. "A1", "1st in Pool A") if the real team
+    // isn't known yet - without these, every fixture reads as stage 1 on the
+    // frontend, which merges a pool stage and its knockout stage into one bucket.
+    stage_sequence: f.stage_sequence,
+    home_slot_label: f.home_slot_label,
+    away_slot_label: f.away_slot_label,
+    live_state: f.live_state,
     ground: f.venue_grounds ? { id: f.venue_grounds.id, name: f.venue_grounds.name, venue: f.venue_grounds.venues?.name ?? null } : null,
     sport: f.tournament_disciplines?.tournament_sports?.sports?.name ?? null,
     sport_icon: f.tournament_disciplines?.tournament_sports?.sports?.icon ?? null,
