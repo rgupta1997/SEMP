@@ -15,6 +15,7 @@ import { makeCrudRouter } from './crud.js';
 import { errorHandler } from './middleware/error.js';
 import { parseAuth, requireAuth, requireSuperAdmin } from './middleware/auth.js';
 import { makeGuards } from './middleware/permissions.js';
+import { makeEntitlementGuards } from './middleware/entitlements.js';
 import { makeOrgUnitsRouter } from '../modules/iam/org-units.routes.js';
 import { makeOrgRolesRouter } from '../modules/iam/org-roles.routes.js';
 import { makeSignInRouter } from '../modules/iam/signin.routes.js';
@@ -199,6 +200,10 @@ export function buildApp(prisma: Prisma) {
 
   // Role grants inside an organisation, and the catalogue the matrix is generated
   // from. Mounted at the root because its paths are already fully qualified.
+  // What this caller's subscription makes available, on both ladders. The shell
+  // renders every lock from this one payload rather than asking per capability.
+  api.get('/me/entitlements', makeEntitlementGuards(prisma).readSnapshot);
+
   api.use('/', makeOrgRolesRouter(prisma));
 
   // Campuses and units - the concrete scopes a campus_unit role is granted against.
