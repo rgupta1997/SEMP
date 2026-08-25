@@ -67,11 +67,13 @@ model championships {
   country                    String?                      @db.VarChar
   region                     String?                      @db.VarChar
   allow_individual_entry     Boolean                      @default(true)
+  host_organization_id       String?                      @db.Uuid
   certificates               certificates[]
   championship_invitations   championship_invitations[]
   championship_officials     championship_officials[]
   championship_organizations championship_organizations[]
   championship_templates     championship_templates[]
+  organizations              organizations?               @relation(fields: [host_organization_id], references: [id], onUpdate: NoAction)
   feedback                   feedback[]
   notifications              notifications[]
   standings                  standings[]
@@ -161,6 +163,7 @@ model organizations {
   championship_invitations              championship_invitations[]
   championship_organizations            championship_organizations[]
   championship_templates                championship_templates[]
+  championships                         championships[]
   org_domains                           org_domains[]
   org_units                             org_units[]
   organization_members                  organization_members[]

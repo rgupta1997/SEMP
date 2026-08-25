@@ -26,7 +26,7 @@ interface Row {
 }
 
 const REL_TONE: Record<string, 'brand' | 'green' | 'amber' | 'rose' | 'slate'> = {
-  participating: 'green', pending: 'amber', rejected: 'rose', withdrawn: 'slate',
+  hosting: 'brand', participating: 'green', pending: 'amber', rejected: 'rose', withdrawn: 'slate',
 };
 
 // Invitations sit here rather than on a page of their own: an invitation is an
@@ -35,6 +35,7 @@ const REL_TONE: Record<string, 'brand' | 'green' | 'amber' | 'rose' | 'slate'> =
 // to carry it duplicated the sidebar and has been removed.
 const TABS = [
   { key: 'all', label: 'All' },
+  { key: 'hosting', label: 'Hosting' },
   { key: 'participating', label: 'Participating' },
   { key: 'pending', label: 'Awaiting approval' },
   { key: 'invitations', label: 'Invitations' },
@@ -54,6 +55,7 @@ export function OrgEventsPage() {
   const rows = data?.rows ?? [];
   const counts = useMemo(() => ({
     all: rows.length,
+    hosting: rows.filter((r) => r.relationship === 'hosting').length,
     participating: rows.filter((r) => r.relationship === 'participating').length,
     pending: rows.filter((r) => r.relationship === 'pending').length,
     invitations: invites.length,

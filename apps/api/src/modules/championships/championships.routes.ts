@@ -4,7 +4,7 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
-import { NotFoundError } from '../../shared/errors.js';
+import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { assertChampionshipTransition } from './domain/championship-lifecycle.js';
 import { notify } from '@semp/notifications/server/notify.js';
 import { recomputeStandingsAtomic } from '../standings/standings.service.js';
@@ -203,7 +203,34 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // organiser can jump straight to adding sports - they never have to make a season
   // by hand (they can still rename/add more on the Seasons tab).
   router.post('/', validateBody(createChampionshipSchema), asyncHandler(async (req, res) => {
-    const championship = await prisma.championships.create({ data: req.body });
+    // Who is hosting. Sent explicitly when the organiser is creating from inside an
+    // organisation; otherwise inferred, but only when there is exactly one candidate.
+    // Belonging to two institutions makes the answer a question, and a question that
+    // guesses is how an event ends up filed under the wrong college.
+    let hostOrgId: string | null = req.body.host_organization_id ?? null;
+    if (hostOrgId) {
+      const may = await prisma.organization_members.findFirst({
+        where: {
+          user_id: req.user!.id, organization_id: hostOrgId,
+          status: 'active', role: { in: ['owner', 'admin'] },
+        },
+        select: { id: true },
+      });
+      if (!may && !req.user!.isSuperAdmin) {
+        throw new ForbiddenError('You cannot host an event on behalf of that organisation');
+      }
+    } else {
+      const admin = await prisma.organization_members.findMany({
+        where: { user_id: req.user!.id, status: 'active', role: { in: ['owner', 'admin'] } },
+        select: { organization_id: true },
+        take: 2,
+      });
+      if (admin.length === 1) hostOrgId = admin[0].organization_id;
+    }
+
+    const championship = await prisma.championships.create({
+      data: { ...req.body, host_organization_id: hostOrgId },
+    });
     const organiserRole = await prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser) });
     if (organiserRole) {
       await prisma.user_championship_roles.create({

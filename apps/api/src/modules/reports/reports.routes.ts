@@ -7,6 +7,7 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { can } from '../../http/middleware/can.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { orgScope, participantsIn, pickSeason } from './participation.service.js';
 
 // Leadership reporting (J5-E1/E2/E3) and the championship's own operational view
 // (J2-E8).
@@ -36,61 +37,6 @@ export function makeReportsRouter(prisma: Prisma): Router {
     });
     if (!allowed) throw new ForbiddenError('You do not have permission to view reports for this institution.');
   };
-
-  /** The championships this institution ran or entered, with the season each sits in. */
-  async function scope(organizationId: string) {
-    const org = await prisma.organizations.findUnique({ where: { id: organizationId }, select: { settings: true, name: true } });
-    if (!org) throw new NotFoundError('Organisation');
-    const startMonth = seasonStartMonthOf(org.settings);
-
-    const [hosted, entered] = await Promise.all([
-      prisma.user_championship_roles.findMany({
-        where: { roles: { code: 'organiser' },
-                 users_user_championship_roles_user_idTousers: { organization_members: { some: { organization_id: organizationId, status: 'active' } } } },
-        select: { championship_id: true },
-      }),
-      prisma.championship_organizations.findMany({
-        where: { organization_id: organizationId, status: 'approved' }, select: { championship_id: true },
-      }),
-    ]);
-    const ids = [...new Set([...hosted.map((h) => h.championship_id), ...entered.map((e) => e.championship_id)])];
-    const champs = ids.length
-      ? await prisma.championships.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, start_date: true, status: true } })
-      : [];
-    const bySeason = new Map<number, string[]>();
-    for (const c of champs) {
-      const s = seasonOf(c.start_date, startMonth);
-      bySeason.set(s, [...(bySeason.get(s) ?? []), c.id]);
-    }
-    return { org, startMonth, champs, bySeason, allIds: ids };
-  }
-
-  /** Season to report on: the one asked for, else the most recent with anything in it. */
-  const pickSeason = (req: any, bySeason: Map<number, string[]>, startMonth: number) => {
-    const asked = Number(req.query.season);
-    if (Number.isInteger(asked)) return asked;
-    const seasons = [...bySeason.keys()].sort((a, b) => b - a);
-    return seasons[0] ?? seasonOf(new Date(), startMonth as any);
-  };
-
-  /**
-   * Unique people who actually took part for this institution in a set of
-   * championships. Counted once each however many sports they played (J5-E1-S3).
-   */
-  async function participantsIn(organizationId: string, champIds: string[]) {
-    if (!champIds.length) return [] as Array<{ user_id: string; sport: string; org_unit_id: string | null }>;
-    return prisma.$queryRaw<Array<{ user_id: string; sport: string; org_unit_id: string | null }>>(PrismaNS.sql`
-      select distinct tm.user_id, s.name as sport, om.org_unit_id
-        from team_entries te
-        join tournament_disciplines td on td.id = te.tournament_discipline_id
-        join tournament_sports ts on ts.id = td.tournament_sport_id
-        join sports s on s.id = ts.sport_id
-        join team_members tm on tm.team_id = te.team_id
-        left join organization_members om
-               on om.user_id = tm.user_id and om.organization_id = ${organizationId}::uuid
-       where te.organization_id = ${organizationId}::uuid
-         and te.championship_id in (${PrismaNS.join(champIds.map((id) => PrismaNS.sql`${id}::uuid`))})`);
-  }
 
   /** Locked matches only - rule 1. */
   async function lockedStats(organizationId: string, champIds: string[]) {
@@ -123,12 +69,12 @@ export function makeReportsRouter(prisma: Prisma): Router {
 
   // ---- J5-E1 · participation -------------------------------------------------
   const build_participation = async (organizationId: string, seasonArg?: number) => {
-    const { org, startMonth, bySeason } = await scope(organizationId);
-    const season = seasonArg ?? pickSeason({ query: {} }, bySeason, startMonth);
+    const { org, startMonth, bySeason } = await orgScope(prisma, organizationId);
+    const season = seasonArg ?? pickSeason(undefined, bySeason, startMonth);
 
     const thisIds = bySeason.get(season) ?? [];
     const prevIds = bySeason.get(season - 1) ?? [];
-    const [now, before] = await Promise.all([participantsIn(organizationId, thisIds), participantsIn(organizationId, prevIds)]);
+    const [now, before] = await Promise.all([participantsIn(prisma, organizationId, thisIds), participantsIn(prisma, organizationId, prevIds)]);
     const [lockedNow, lockedPrev] = await Promise.all([lockedStats(organizationId, thisIds), lockedStats(organizationId, prevIds)]);
     const [medalsNow, medalsPrev] = await Promise.all([
       thisIds.length ? prisma.achievements.findMany({ where: { organization_id: organizationId, championship_id: { in: thisIds }, superseded_at: null, medal: { not: null } }, select: { medal: true } }) : [],
@@ -160,7 +106,7 @@ export function makeReportsRouter(prisma: Prisma): Router {
     const seasons = [...bySeason.keys()].sort((a, b) => a - b).slice(-6);
     const trend = [] as Array<{ season: number; label: string; participants: number }>;
     for (const s of seasons) {
-      trend.push({ season: s, label: seasonLabel(s, startMonth), participants: uniq(await participantsIn(organizationId, bySeason.get(s) ?? [])) });
+      trend.push({ season: s, label: seasonLabel(s, startMonth), participants: uniq(await participantsIn(prisma, organizationId, bySeason.get(s) ?? [])) });
     }
 
     return ({
@@ -188,8 +134,8 @@ export function makeReportsRouter(prisma: Prisma): Router {
 
   // ---- J5-E2 · performance ---------------------------------------------------
   const build_performance = async (organizationId: string, seasonArg?: number) => {
-    const { org, startMonth, bySeason } = await scope(organizationId);
-    const season = seasonArg ?? pickSeason({ query: {} }, bySeason, startMonth);
+    const { org, startMonth, bySeason } = await orgScope(prisma, organizationId);
+    const season = seasonArg ?? pickSeason(undefined, bySeason, startMonth);
     const thisIds = bySeason.get(season) ?? [];
     const prevIds = bySeason.get(season - 1) ?? [];
 
@@ -268,12 +214,12 @@ export function makeReportsRouter(prisma: Prisma): Router {
 
   // ---- J5-E3 · diversity & inclusion -----------------------------------------
   const build_inclusion = async (organizationId: string, seasonArg?: number) => {
-    const { org, startMonth, bySeason } = await scope(organizationId);
-    const season = seasonArg ?? pickSeason({ query: {} }, bySeason, startMonth);
+    const { org, startMonth, bySeason } = await orgScope(prisma, organizationId);
+    const season = seasonArg ?? pickSeason(undefined, bySeason, startMonth);
     const thisIds = bySeason.get(season) ?? [];
     const prevIds = bySeason.get(season - 1) ?? [];
 
-    const [now, before] = await Promise.all([participantsIn(organizationId, thisIds), participantsIn(organizationId, prevIds)]);
+    const [now, before] = await Promise.all([participantsIn(prisma, organizationId, thisIds), participantsIn(prisma, organizationId, prevIds)]);
     const ids = [...new Set(now.map((r) => r.user_id))];
     const people = ids.length
       ? await prisma.users.findMany({ where: { id: { in: ids } }, select: { id: true, gender: true } })

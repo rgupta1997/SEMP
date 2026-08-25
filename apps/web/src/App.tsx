@@ -23,13 +23,13 @@ import { EventOrganisersPage } from './pages/organiser/EventOrganisersPage';
 
 // Organizations (multi-org membership + management)
 import { OrganizationsPage } from './pages/OrganizationsPage';
-import { OrgOverviewPage } from './pages/organization/OrgOverviewPage';
 import { TeamsPage } from './pages/organization/TeamsPage';
 import { RosterPage } from './pages/organization/RosterPage';
 import { StudentsPage } from './pages/organization/StudentsPage';
 import { RolesPage } from './pages/organization/RolesPage';
 import { SportsProfilePage } from './pages/participant/SportsProfilePage';
 import { MyGamePage } from './pages/MyGamePage';
+import { OrgDashboardPage } from './pages/organization/OrgDashboardPage';
 import { OrgEventsPage } from './pages/organization/OrgEventsPage';
 import { OrgAchievementsPage } from './pages/organization/OrgAchievementsPage';
 import { OrgReportsPage } from './pages/organization/OrgReportsPage';
@@ -95,7 +95,7 @@ function AuthenticatedRoutes() {
 
         {/* Organizations */}
         <Route path="/organizations" element={<OrganizationsPage />} />
-        <Route path="/organizations/:orgId/overview" element={<OrgOverviewPage />} />
+        <Route path="/organizations/:orgId/overview" element={<OrgDashboardPage />} />
         <Route path="/organizations/:orgId/teams" element={<TeamsPage />} />
         <Route path="/organizations/:orgId/teams/:teamId" element={<RosterPage />} />
         <Route path="/organizations/:orgId/students" element={<StudentsPage />} />

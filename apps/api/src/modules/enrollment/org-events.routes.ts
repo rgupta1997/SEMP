@@ -28,29 +28,22 @@ export function makeOrgEventsRouter(prisma: Prisma): Router {
       || await guards.orgRole(u.id, orgId, ['owner', 'admin', 'member', 'viewer']);
     if (!member) throw new ForbiddenError('You are not a member of this organisation');
 
+    const select = {
+      id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true,
+      _count: { select: { championship_organizations: true } },
+    } as const;
+
     const [hosted, entries] = await Promise.all([
-      // Hosting: created by somebody in this organisation. `created_by` is the only
-      // link a championship carries back to an org today - there is no host_org_id
-      // yet, which the schema audit flagged as a column the event table still needs.
+      // Hosting is now a fact on the event itself rather than something inferred
+      // from which organisation an organiser happens to belong to.
       prisma.championships.findMany({
-        where: { championship_organizations: { some: { organization_id: orgId, status: 'approved' } } },
-        select: {
-          id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true,
-          _count: { select: { championship_organizations: true } },
-        },
+        where: { host_organization_id: orgId },
+        select,
         orderBy: { start_date: 'desc' },
       }),
       prisma.championship_organizations.findMany({
         where: { organization_id: orgId },
-        select: {
-          status: true, applied_at: true,
-          championships: {
-            select: {
-              id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true,
-              _count: { select: { championship_organizations: true } },
-            },
-          },
-        },
+        select: { status: true, applied_at: true, championships: { select } },
         orderBy: { applied_at: 'desc' },
       }),
     ]);
@@ -64,15 +57,34 @@ export function makeOrgEventsRouter(prisma: Prisma): Router {
     });
     const teamsByEvent = new Map(teamCounts.map((t) => [t.championship_id, t._count._all]));
 
-    const rows = entries
-      .filter((e) => e.championships)
-      .map((e) => ({
-        ...e.championships!,
-        relationship: e.status === 'approved' ? 'participating' : e.status,
-        applied_at: e.applied_at,
-        our_teams: teamsByEvent.get(e.championships!.id) ?? 0,
-        participant_count: e.championships!._count.championship_organizations,
-      }));
+    const shape = (c: (typeof hosted)[number], relationship: string, applied_at: Date | null) => ({
+      id: c.id,
+      name: c.name,
+      slug: c.slug,
+      status: c.status,
+      start_date: c.start_date,
+      end_date: c.end_date,
+      venue: c.venue,
+      relationship,
+      applied_at,
+      our_teams: teamsByEvent.get(c.id) ?? 0,
+      participant_count: c._count.championship_organizations,
+    });
+
+    // An organisation can host an event AND enter it, which is normal at an
+    // inter-college fixture. Hosting is the stronger claim, so it wins the row -
+    // one event, one line, rather than the same name twice with two verbs.
+    const hostedIds = new Set(hosted.map((c) => c.id));
+    const rows = [
+      ...hosted.map((c) => shape(c, 'hosting', null)),
+      ...entries
+        .filter((e) => e.championships && !hostedIds.has(e.championships.id))
+        .map((e) => shape(
+          e.championships!,
+          e.status === 'approved' ? 'participating' : e.status,
+          e.applied_at,
+        )),
+    ];
 
     res.json({ rows, hosted_count: hosted.length });
   }));
