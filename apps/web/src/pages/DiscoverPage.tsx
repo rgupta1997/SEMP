@@ -20,7 +20,12 @@ const STATUS_LABELS: Record<string, string> = {
 // Apply to participate - pick which of your organizations to apply as, or create one
 // on the fly. Players with no organization land straight in "create" mode, so anyone
 // can apply directly to a championship.
-function ApplyModal({ championship, onClose }: { championship: Championship; onClose: () => void }) {
+function ApplyModal({ championship, presetOrgId, onClose }: {
+  championship: Championship;
+  /** Chosen by the entry-mode selector, so the answer is not asked twice. */
+  presetOrgId?: string;
+  onClose: () => void;
+}) {
   const { ctx, refresh } = useAuth();
   const qc = useQueryClient();
   const myOrgs = useMemo(
@@ -28,7 +33,7 @@ function ApplyModal({ championship, onClose }: { championship: Championship; onC
     [ctx],
   );
   const [mode, setMode] = useState<'pick' | 'create'>(myOrgs.length ? 'pick' : 'create');
-  const [orgId, setOrgId] = useState(myOrgs[0]?.organization_id ?? '');
+  const [orgId, setOrgId] = useState(presetOrgId ?? myOrgs[0]?.organization_id ?? '');
   const [newName, setNewName] = useState('');
   const [newCity, setNewCity] = useState('');
   const [busy, setBusy] = useState(false);
@@ -112,6 +117,18 @@ export function DiscoverPage() {
   const [status, setStatus] = useState('');
   const [applying, setApplying] = useState<Championship | null>(null);
 
+  // Entry mode (F-052). The same listing, two different questions: am I looking for
+  // something to play, or am I entering my organisation into it? It changes the CTA
+  // on every card, so it belongs above the list rather than inside each one - asking
+  // per card would mean answering the same question a dozen times.
+  const { ctx } = useAuth();
+  const enterableOrgs = useMemo(
+    () => (ctx?.organizations ?? []).filter((m: any) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin')),
+    [ctx],
+  );
+  const [entryOrgId, setEntryOrgId] = useState<string>('');
+  const entryOrg = enterableOrgs.find((m: any) => m.organization_id === entryOrgId);
+
   const enrollmentStatusFor = (eventId: string) =>
     enrollments.find((e) => e.championship_id === eventId)?.status as string | undefined;
 
@@ -145,7 +162,35 @@ export function DiscoverPage() {
   return (
     // pb-20 keeps the bottom pagination clear of the floating Feedback button.
     <div className="pb-20">
-      <PageHeader title="Find your next game" subtitle="Championships, organizations & teams looking for players." />
+      <PageHeader title="Discover" subtitle="Championships open to you - to play in yourself, or to enter your organisation into." />
+
+      {enterableOrgs.length > 0 && (
+        <div className="mb-4 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-slate-500">Entering as</span>
+            <button
+              onClick={() => setEntryOrgId('')}
+              className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${!entryOrgId ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}
+            >
+              Myself
+            </button>
+            {enterableOrgs.map((m: any) => (
+              <button
+                key={m.organization_id}
+                onClick={() => setEntryOrgId(m.organization_id)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${entryOrgId === m.organization_id ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}
+              >
+                {m.organization?.short_name ?? m.organization?.name}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-[13px] text-slate-500">
+            {entryOrg
+              ? `Applications will be made on behalf of ${entryOrg.organization?.name}, and its teams will be entered.`
+              : 'You are entering as yourself. Switch to an organisation to enter its teams instead.'}
+          </p>
+        </div>
+      )}
       {championships.length > 0 && (
         <ListToolbar>
           <SearchInput value={tc.query} onChange={tc.setQuery} placeholder="Search championships…" className="w-full sm:w-72" />
@@ -199,7 +244,11 @@ export function DiscoverPage() {
                   }
                   if (c.status === 'registration_open') {
                     return (
-                      <Button className="mb-2 w-full" onClick={() => setApplying(c)}>Apply to participate</Button>
+                      <Button className="mb-2 w-full" onClick={() => setApplying(c)}>
+                        {entryOrg
+                          ? `Request as ${entryOrg.organization?.short_name ?? entryOrg.organization?.name}`
+                          : 'Register'}
+                      </Button>
                     );
                   }
                   return null;
@@ -212,7 +261,7 @@ export function DiscoverPage() {
         </>
       )}
 
-      {applying && <ApplyModal championship={applying} onClose={() => setApplying(null)} />}
+      {applying && <ApplyModal championship={applying} presetOrgId={entryOrgId || undefined} onClose={() => setApplying(null)} />}
     </div>
   );
 }
