@@ -74,7 +74,6 @@ model championships {
   championship_templates     championship_templates[]
   feedback                   feedback[]
   notifications              notifications[]
-  sponsors                   sponsors[]
   standings                  standings[]
   standings_rules            standings_rules[]
   team_entries               team_entries[]
@@ -226,21 +225,6 @@ model roles {
   organizations           organizations?            @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   user_championship_roles user_championship_roles[]
   user_org_roles          user_org_roles[]
-}
-
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-model sponsors {
-  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  championship_id String        @db.Uuid
-  name            String        @db.VarChar
-  logo_url        String?
-  tier            String        @default("community") @db.VarChar
-  website_url     String?
-  display_order   Int           @default(0)
-  created_at      DateTime      @default(now()) @db.Timestamptz(6)
-  championships   championships @relation(fields: [championship_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "sponsors_event_id_fkey")
-
-  @@index([championship_id], map: "idx_sponsors_event_id")
 }
 
 model sports {

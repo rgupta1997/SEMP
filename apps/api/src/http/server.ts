@@ -5,7 +5,7 @@ import {
   createPermissionSchema, createRoleSchema, createSportSchema, updateDisciplineSchema,
   updateFormatSchema, updatePermissionSchema, updateRoleSchema,
   updateSportSchema,
-  createSponsorSchema, updateSponsorSchema, createTournamentSchema, updateTournamentSchema,
+  createTournamentSchema, updateTournamentSchema,
   createTournamentSportSchema, updateTournamentSportSchema,
   createTournamentDisciplineSchema, updateTournamentDisciplineSchema,
 } from '@semp/shared';
@@ -132,11 +132,6 @@ export function buildApp(prisma: Prisma) {
   api.use('/championships', makeMatrixImportRouter(prisma));
   api.use('/venues', makeVenuesRouter(prisma));
   api.use('/venue-grounds', makeVenueGroundsRouter(prisma));
-  api.use('/sponsors', makeCrudRouter(prisma.sponsors, {
-    name: 'Sponsor', createSchema: createSponsorSchema, updateSchema: updateSponsorSchema,
-    listFilters: ['championship_id'], orderBy: { display_order: 'asc' },
-    writeGuards: [guards.championshipCrudGuard({ body: async (req) => req.body?.championship_id, byId: guards.resolvers.championshipOfSponsor })],
-  }));
   api.use('/tournaments', makeCrudRouter(prisma.tournaments, {
     name: 'Tournament', createSchema: createTournamentSchema, updateSchema: updateTournamentSchema,
     listFilters: ['championship_id'], orderBy: { created_at: 'desc' },

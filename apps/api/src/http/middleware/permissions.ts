@@ -44,8 +44,6 @@ export function makeGuards(prisma: Prisma) {
   // ---- championship resolvers (walk a resource back to its owning championship) ----
   const championshipOfTournament = async (id?: string | null) =>
     id ? (await prisma.tournaments.findUnique({ where: { id }, select: { championship_id: true } }))?.championship_id : null;
-  const championshipOfSponsor = async (id?: string | null) =>
-    id ? (await prisma.sponsors.findUnique({ where: { id }, select: { championship_id: true } }))?.championship_id : null;
   const championshipOfVenue = async (id?: string | null) =>
     id ? (await prisma.venues.findUnique({ where: { id }, select: { championship_id: true } }))?.championship_id : null;
   const championshipOfVenueGround = async (id?: string | null) =>
@@ -164,7 +162,7 @@ export function makeGuards(prisma: Prisma) {
     organisesChampionship,
     orgRole,
     resolvers: {
-      championshipOfTournament, championshipOfSponsor, championshipOfVenue, championshipOfVenueGround,
+      championshipOfTournament, championshipOfVenue, championshipOfVenueGround,
       championshipOfTournamentSport, championshipOfTournamentDiscipline, championshipOfFixture,
     },
   };

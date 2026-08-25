@@ -188,7 +188,6 @@ export async function wipeSandbox(prisma: Prisma, sandbox: SandboxRow): Promise<
   }
   if (tournamentIds.length) await prisma.tournaments.deleteMany({ where: { id: { in: tournamentIds } } });
   if (champList.length) {
-    await prisma.sponsors.deleteMany({ where: { championship_id: { in: champList } } });
     await prisma.championships.deleteMany({ where: { id: { in: champList } } });
   }
   if (orgList.length || userList.length) {

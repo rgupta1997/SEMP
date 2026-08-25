@@ -3,7 +3,7 @@ import {
   AUTH_METHOD, PUBLIC_EMAIL_DOMAINS,
   DEMO_REQUEST_STATUS, FEEDBACK_STATUS, ENTRY_TYPE, ENROLLMENT_STATUS, CHAMPIONSHIP_STATUS, CHAMPIONSHIP_VISIBILITY, FIXTURE_STATUS, GROUND_TYPE,
   CHAMPIONSHIP_TYPE, NOTIFICATION_AUDIENCE, NOTIFICATION_REACTIONS, ORGANIZATION_MEMBER_ROLE,
-  SPONSOR_TIER, STANDINGS_RULE_SCOPE, STANDINGS_TIEBREAKER, TEAM_MEMBER_ROLE,
+  STANDINGS_RULE_SCOPE, STANDINGS_TIEBREAKER, TEAM_MEMBER_ROLE,
   TEAM_STATUS, TOURNAMENT_DISCIPLINE_STATUS, TOURNAMENT_STATUS,
 } from './enums.js';
 import { disciplineFormatConfigSchema } from './scoring.js';
@@ -379,15 +379,6 @@ export const bulkCreateGroundsSchema = z.object({
   message: 'All grounds must belong to the same venue',
 });
 
-export const createSponsorSchema = z.object({
-  championship_id: uuid,
-  name: z.string().min(1),
-  logo_url: z.string().optional(),
-  tier: z.enum(SPONSOR_TIER).default('community'),
-  website_url: z.string().optional(),
-  display_order: z.number().int().default(0),
-});
-export const updateSponsorSchema = createSponsorSchema.partial();
 
 export const createTournamentSchema = z.object({
   championship_id: uuid,

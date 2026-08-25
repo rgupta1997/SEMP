@@ -20,8 +20,6 @@ export const FIXTURE_STATUS = [
 ] as const;
 export type FixtureStatus = (typeof FIXTURE_STATUS)[number];
 
-export const SPONSOR_TIER = ['title', 'gold', 'silver', 'community'] as const;
-export type SponsorTier = (typeof SPONSOR_TIER)[number];
 
 export const GROUND_TYPE = ['court', 'field', 'pool', 'track', 'ring', 'table'] as const;
 export type GroundType = (typeof GROUND_TYPE)[number];

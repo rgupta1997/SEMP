@@ -248,7 +248,6 @@ export function makeEventsRouter(prisma: Prisma): Router {
       prisma.venue_grounds.deleteMany({ where: { venues: { championship_id: id } } }),
       prisma.venues.deleteMany({ where: { championship_id: id } }),
       prisma.championship_organizations.deleteMany({ where: { championship_id: id } }),
-      prisma.sponsors.deleteMany({ where: { championship_id: id } }),
       prisma.user_championship_roles.deleteMany({ where: { championship_id: id } }),
       prisma.championships.delete({ where: { id } }),
     ]);
