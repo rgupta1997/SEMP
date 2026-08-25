@@ -29,9 +29,17 @@ export function useWorkspace() {
     if (!ctx?.user) return [];
 
     const personal: WorkspaceContext = {
-      id: 'me', kind: 'personal', name: ctx.user.name, roleCode: null,
+      id: 'me', kind: 'personal', name: ctx.user.name, roleCodes: [],
       sub: 'My Space',
     };
+
+    // Explicit grants, keyed by organisation. Several per org is normal - Sports
+    // Admin at two campuses is two grants.
+    const grantsByOrg = new Map<string, string[]>();
+    for (const g of (ctx as any).org_roles ?? []) {
+      if (!g.code) continue;
+      grantsByOrg.set(g.organization_id, [...(grantsByOrg.get(g.organization_id) ?? []), g.code]);
+    }
 
     const orgs: WorkspaceContext[] = (ctx.organizations ?? [])
       .filter((m: any) => m.status === 'active')
@@ -39,10 +47,14 @@ export function useWorkspace() {
         id: m.organization_id,
         kind: 'org' as const,
         name: m.organization?.name ?? 'Organisation',
-        // Membership implies a role; an explicit grant would refine it, but the
-        // membership string is what every account has and what the engine falls
-        // back to, so the nav agrees with the permission check.
-        roleCode: m.role === 'owner' ? 'owner' : m.role === 'admin' ? 'org_admin' : 'viewer',
+        // The implied role from membership, UNIONED with anything explicitly
+        // granted. Union rather than override, because losing a grant must not
+        // also strip the baseline access being a member already carries - and
+        // because this is exactly what can() does on the server.
+        roleCodes: [
+          m.role === 'owner' ? 'owner' : m.role === 'admin' ? 'org_admin' : 'viewer',
+          ...(grantsByOrg.get(m.organization_id) ?? []),
+        ],
         sub: m.organization?.city ?? undefined,
         verified: m.organization?.verified ?? false,
       }));
@@ -51,7 +63,7 @@ export function useWorkspace() {
       id: r.championship_id,
       kind: (r.championship?.status === 'draft' ? 'eventDraft' : 'event') as ContextKind,
       name: r.championship?.name ?? 'Event',
-      roleCode: r.role?.code ?? null,
+      roleCodes: r.role?.code ? [r.role.code] : [],
       sub: r.championship?.status ?? undefined,
     }));
 
@@ -59,7 +71,7 @@ export function useWorkspace() {
     const assignments: WorkspaceContext[] = (ctx.official_championship_ids ?? [])
       .filter((id: string) => !events.some((e) => e.id === id))
       .map((id: string) => ({
-        id, kind: 'assignment' as const, name: 'Officiating', roleCode: 'official', sub: 'Assigned match',
+        id, kind: 'assignment' as const, name: 'Officiating', roleCodes: ['official'], sub: 'Assigned match',
       }));
 
     return [personal, ...orgs, ...events, ...assignments];

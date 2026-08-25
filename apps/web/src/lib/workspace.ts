@@ -115,8 +115,12 @@ export interface WorkspaceContext {
   id: string;
   kind: ContextKind;
   name: string;
-  /** The role code this person holds here. Drives ROLE_NAV. */
-  roleCode: string | null;
+  /**
+   * Every role code this person holds here. Plural on purpose: someone can be a
+   * member AND hold an explicit grant, or hold Sports Admin at two campuses, and
+   * the nav has to be the union - exactly as the permission engine unions grants.
+   */
+  roleCodes: string[];
   /** What to show under the name in the switcher. */
   sub?: string;
   /** Organisations carry a verification state; it is a trust signal, not a gate. */
@@ -138,8 +142,19 @@ export function resolveNav(
   granted: ReadonlySet<CapabilityKey>,
 ): Array<NavItem & { locked: boolean }> {
   const all = NAV[ctx.kind] ?? [];
-  const allowed = ctx.roleCode ? ROLE_NAV[ctx.roleCode] : undefined;
-  const byRole = allowed == null ? all : all.filter((i) => allowed.includes(i.key));
+
+  // No role at all (the personal context) means no role filter.
+  const codes = ctx.roleCodes.filter((c) => c in ROLE_NAV);
+  if (codes.length === 0) {
+    return all.map((i) => ({ ...i, locked: !!i.needs && !granted.has(i.needs) }));
+  }
+
+  // A single unfiltered role (Owner, Org Admin, Organiser) opens the whole context,
+  // and it wins over any narrower one held alongside it.
+  const unrestricted = codes.some((c) => ROLE_NAV[c] === null);
+  const union = new Set(codes.flatMap((c) => ROLE_NAV[c] ?? []));
+  const byRole = unrestricted ? all : all.filter((i) => union.has(i.key));
+
   return byRole.map((i) => ({ ...i, locked: !!i.needs && !granted.has(i.needs) }));
 }
 

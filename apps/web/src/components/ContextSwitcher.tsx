@@ -122,7 +122,9 @@ export function ContextSwitcher({
                         )}
                       </span>
                       <span style={{ display: 'block', fontSize: 11.5, color: '#6E7E96', marginTop: 1 }}>
-                        {c.roleCode ? c.roleCode.replace(/_/g, ' ') : c.sub ?? 'My Space'}
+                        {c.roleCodes.length
+                          ? [...new Set(c.roleCodes)].map((r) => r.replace(/_/g, ' ')).join(' · ')
+                          : c.sub ?? 'My Space'}
                       </span>
                     </span>
                   </button>
