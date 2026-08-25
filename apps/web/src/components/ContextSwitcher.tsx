@@ -15,7 +15,10 @@ import type { CapabilityKey } from '@semp/entitlements';
 const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
 const MONO = "'JetBrains Mono',ui-monospace,monospace";
 
-const initials = (s: string) => s.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+// Letters and digits only. Splitting on whitespace alone turns "Carrom (Mixed)"
+// into "C(" - a tile that reads as a typo rather than a name.
+const initials = (s: string) => s.split(/[^A-Za-z0-9]+/).filter(Boolean)
+  .slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 
 export function ContextSwitcher({
   contexts, active, granted, onSwitch,

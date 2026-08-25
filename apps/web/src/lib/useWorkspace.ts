@@ -16,6 +16,18 @@ import { landingFor, type ContextKind, type WorkspaceContext } from './workspace
 
 const KEY = 'semp_context';
 
+/** One fixture this person has been assigned to officiate. */
+interface AssignedFixture {
+  id: string;
+  status: string;
+  scheduled_at: string | null;
+  teams_fixtures_home_team_idToteams?: { name?: string } | null;
+  teams_fixtures_away_team_idToteams?: { name?: string } | null;
+  tournament_disciplines?: {
+    tournament_sports?: { sports?: { name?: string } | null } | null;
+  } | null;
+}
+
 interface EntitlementSnapshot {
   org: { tier: string; capabilities: CapabilityKey[] };
   personal: { tier: string; capabilities: CapabilityKey[] };
@@ -24,6 +36,15 @@ interface EntitlementSnapshot {
 export function useWorkspace() {
   const { ctx } = useAuth();
   const ent = useApi<EntitlementSnapshot>('/me/entitlements', !!ctx);
+  // Assignments are per MATCH, which is the tightest scope in the product and the
+  // only one whose nav goes straight to the console. Read from the fixtures this
+  // person is actually the official on.
+  // Only asked for when this person officiates somewhere - `official_championship_ids`
+  // is already on the auth context, so the empty case costs nothing.
+  const officiating = useApi<AssignedFixture[]>(
+    '/me/officiating',
+    (ctx?.official_championship_ids?.length ?? 0) > 0,
+  );
   const [activeId, setActiveId] = useState<string | null>(null);
   const { pathname } = useLocation();
 
@@ -79,14 +100,38 @@ export function useWorkspace() {
     }));
 
     // An assignment is the tightest scope in the product: one match, nothing else.
-    const assignments: WorkspaceContext[] = (ctx.official_championship_ids ?? [])
-      .filter((id: string) => !events.some((e) => e.id === id))
-      .map((id: string) => ({
-        id, kind: 'assignment' as const, name: 'Officiating', roleCodes: ['official'], sub: 'Assigned match',
-      }));
+    //
+    // It used to be built from championship ids, which made its Match Operations
+    // link - /score/:id - point at a championship where the route expects a
+    // fixture, and made every assignment duplicate an event context the person
+    // already had. One row per match, and only matches still to be played:
+    // a finished fixture is a record, not an assignment.
+    const assignments: WorkspaceContext[] = (officiating.data ?? [])
+      .filter((f) => {
+        if (f.status === 'completed' || f.status === 'cancelled') return false;
+        // A bracket slot with neither side decided is not yet a match anybody can
+        // officiate. Listing it would fill the switcher with "TBD v TBD" and bury
+        // the assignments that are real.
+        return !!(f.teams_fixtures_home_team_idToteams || f.teams_fixtures_away_team_idToteams);
+      })
+      .map((f) => {
+        const home = f.teams_fixtures_home_team_idToteams?.name ?? 'TBD';
+        const away = f.teams_fixtures_away_team_idToteams?.name ?? 'TBD';
+        const sport = f.tournament_disciplines?.tournament_sports?.sports?.name;
+        const when = f.scheduled_at
+          ? new Date(f.scheduled_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+          : 'Time TBD';
+        return {
+          id: f.id,
+          kind: 'assignment' as const,
+          name: `${home} v ${away}`,
+          roleCodes: ['official'],
+          sub: [sport, when].filter(Boolean).join(' · '),
+        };
+      });
 
     return [personal, ...orgs, ...events, ...assignments];
-  }, [ctx]);
+  }, [ctx, officiating.data]);
 
   // The stored choice is namespaced by account, so Option B's second account does
   // not inherit the first one's workspace.

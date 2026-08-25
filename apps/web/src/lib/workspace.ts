@@ -111,7 +111,11 @@ export const ROLE_NAV: Record<string, string[] | null> = {
 
   organiser: null,
   captain: ['overview', 'participants', 'schedule', 'results', 'standings'],
-  official: ['overview', 'schedule', 'results'],
+  // The list is the union across every context kind this role can stand in, and an
+  // official stands in two: the event (read-only) and the assignment (the console).
+  // Leaving the assignment keys out emptied its nav entirely - the context existed
+  // with nothing in it.
+  official: ['overview', 'schedule', 'results', 'matchops', 'help'],
   participant: ['overview', 'schedule', 'results', 'standings'],
   poc: ['overview', 'approvals', 'participants', 'schedule', 'results', 'standings'],
 };
