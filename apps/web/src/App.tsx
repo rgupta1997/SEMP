@@ -27,6 +27,7 @@ import { OrgOverviewPage } from './pages/organization/OrgOverviewPage';
 import { TeamsPage } from './pages/organization/TeamsPage';
 import { RosterPage } from './pages/organization/RosterPage';
 import { StudentsPage } from './pages/organization/StudentsPage';
+import { MembersPage } from './pages/organization/MembersPage';
 import { PocsPage } from './pages/organization/PocsPage';
 import { InvitationsPage } from './pages/organization/InvitationsPage';
 
@@ -87,7 +88,7 @@ function AuthenticatedRoutes() {
         <Route path="/organizations/:orgId/teams" element={<TeamsPage />} />
         <Route path="/organizations/:orgId/teams/:teamId" element={<RosterPage />} />
         <Route path="/organizations/:orgId/students" element={<StudentsPage />} />
-        <Route path="/organizations/:orgId/members" element={<PocsPage />} />
+        <Route path="/organizations/:orgId/members" element={<MembersPage />} />
         <Route path="/organizations/:orgId/invitations" element={<InvitationsPage />} />
 
         {/* Discover + Championships + Host */}
