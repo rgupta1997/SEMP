@@ -17,6 +17,7 @@ import { parseAuth, requireAuth, requireSuperAdmin } from './middleware/auth.js'
 import { makeGuards } from './middleware/permissions.js';
 import { makeEntitlementGuards } from './middleware/entitlements.js';
 import { makeOrgUnitsRouter } from '../modules/iam/org-units.routes.js';
+import { makeAuditRouter } from '../modules/iam/audit.routes.js';
 import { makeOrgRolesRouter } from '../modules/iam/org-roles.routes.js';
 import { makeSignInRouter } from '../modules/iam/signin.routes.js';
 import { makeAuthRouter } from '../modules/iam/auth.routes.js';
@@ -205,6 +206,9 @@ export function buildApp(prisma: Prisma) {
   api.get('/me/entitlements', makeEntitlementGuards(prisma).readSnapshot);
 
   api.use('/', makeOrgRolesRouter(prisma));
+
+  // The audit trail. 864 entries were already being written with nothing to read them.
+  api.use('/', makeAuditRouter(prisma));
 
   // Campuses and units - the concrete scopes a campus_unit role is granted against.
   api.use('/organizations', makeOrgUnitsRouter(prisma));

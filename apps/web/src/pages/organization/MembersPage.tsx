@@ -120,8 +120,14 @@ function GrantModal({
   );
 }
 
-export function MembersPage() {
-  const { orgId = '' } = useParams();
+/**
+ * Rendered standalone at its own route, and embedded inside the Administration
+ * rail. `embedded` suppresses the page header and org tabs - the rail already
+ * says where you are, and two sets of navigation is one too many.
+ */
+export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; orgId?: string } = {}) {
+  const params = useParams();
+  const orgId = orgIdProp ?? params.orgId ?? '';
   const [granting, setGranting] = useState<Member | null>(null);
 
   const members = useApi<Member[]>(`/organizations/${orgId}/members`);
@@ -180,8 +186,12 @@ export function MembersPage() {
 
   return (
     <>
-      <PageHeader title="Members" subtitle="Who belongs to this organisation, and what each of them may do." />
-      <OrgTabs orgId={orgId} />
+      {!embedded && (
+        <>
+          <PageHeader title="Members" subtitle="Who belongs to this organisation, and what each of them may do." />
+          <OrgTabs orgId={orgId} />
+        </>
+      )}
 
       <Card>
         <CardBody>

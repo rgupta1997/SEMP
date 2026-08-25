@@ -55,7 +55,7 @@ export const NAV: Record<ContextKind, NavItem[]> = {
     // The whole Reports page sits behind advanced_reports - a locked page here names
     // the capability, never the price.
     { key: 'reports', label: 'Reports', to: '/organizations/:id/reports', needs: 'advanced_reports' },
-    { key: 'admin', label: 'Administration', to: '/organizations/:id/members' },
+    { key: 'admin', label: 'Administration', to: '/organizations/:id/admin' },
   ],
   orgGuest: [
     { key: 'publicorg', label: 'Organization', to: '/organizations/:id/public' },

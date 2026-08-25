@@ -46,8 +46,14 @@ const SCOPE_HELP: Record<RoleScope, string> = {
 
 interface Area { area: string; permissions: Array<{ code: string; label: string; scope: string }> }
 
-export function RolesPage() {
-  const { orgId = '' } = useParams();
+/**
+ * Rendered standalone at its own route, and embedded inside the Administration
+ * rail. `embedded` suppresses the page header and org tabs - the rail already
+ * says where you are, and two sets of navigation is one too many.
+ */
+export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; orgId?: string } = {}) {
+  const params = useParams();
+  const orgId = orgIdProp ?? params.orgId ?? '';
   const defs = useApi<RoleDef[]>(`/organizations/${orgId}/role-definitions`);
   const catalogue = useApi<Area[]>('/permission-catalogue');
 
@@ -128,11 +134,15 @@ export function RolesPage() {
 
   return (
     <>
-      <PageHeader
-        title="Roles & permissions"
-        subtitle="What each role may do here. Permissions come from the product; which ones a role holds is yours to set."
-      />
-      <OrgTabs orgId={orgId} />
+      {!embedded && (
+        <>
+          <PageHeader
+            title="Roles & permissions"
+            subtitle="What each role may do here. Permissions come from the product; which ones a role holds is yours to set."
+          />
+          <OrgTabs orgId={orgId} />
+        </>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
         {/* ---- the roles ---- */}
