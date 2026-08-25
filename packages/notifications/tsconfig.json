@@ -3,19 +3,13 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ES2022"],
-    "types": ["node"],
+    "lib": ["ES2022", "DOM"],
     "strict": true,
-    "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": [
-  "src",
-  "scripts",
-  "../../packages/shared/src"
-]
+  "include": ["src"]
 }

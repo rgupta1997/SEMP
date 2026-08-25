@@ -1,14 +1,11 @@
 generator client {
-  provider      = "prisma-client-js"
-  // "native" keeps local dev / Render (Debian-based build image) working as-is.
-  // "rhel-openssl-3.0.x" is the engine AWS Lambda's nodejs20.x (Amazon Linux 2023,
-  // x86_64) runtime needs — required so the Lambda bundle ships a matching binary.
-  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -62,9 +59,9 @@ model championships {
   start_date                 DateTime                     @db.Date
   end_date                   DateTime                     @db.Date
   status                     String                       @default("draft") @db.VarChar
-  visibility                 String                       @default("public") @db.VarChar
   created_at                 DateTime                     @default(now()) @db.Timestamptz(6)
   updated_at                 DateTime                     @default(now()) @db.Timestamptz(6)
+  visibility                 String                       @default("public") @db.VarChar
   championship_invitations   championship_invitations[]
   championship_officials     championship_officials[]
   championship_organizations championship_organizations[]
@@ -102,6 +99,7 @@ model fixtures {
   live_state                           Json                   @default("{}")
   live_log                             Json                   @default("[]")
   fixture_awards                       fixture_awards[]
+  fixture_events                       fixture_events[]
   teams_fixtures_away_team_idToteams   teams?                 @relation("fixtures_away_team_idToteams", fields: [away_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   teams_fixtures_home_team_idToteams   teams?                 @relation("fixtures_home_team_idToteams", fields: [home_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users                                users?                 @relation(fields: [official_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -375,7 +373,10 @@ model users {
   feedback                                                                 feedback[]
   feedback_feedback_user_idTousers                                         feedback[]                   @relation("feedback_user_idTousers")
   fixture_awards                                                           fixture_awards[]
+  fixture_events                                                           fixture_events[]
   fixtures                                                                 fixtures[]
+  notification_cursors                                                     notification_cursors?
+  notification_deliveries                                                  notification_deliveries[]
   notification_reactions                                                   notification_reactions[]
   notification_reads                                                       notification_reads[]
   notifications                                                            notifications[]
@@ -471,25 +472,50 @@ model notification_reads {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model notifications {
-  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  championship_id        String?                  @db.Uuid
-  sender_id              String?                  @db.Uuid
-  type                   String                   @default("manual") @db.VarChar
-  audience               String                   @default("all") @db.VarChar
-  title                  String                   @db.VarChar
-  body                   String?
-  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
-  organization_id        String?                  @db.Uuid
-  target_user_id         String?                  @db.Uuid
-  notification_reactions notification_reactions[]
-  notification_reads     notification_reads[]
-  championships          championships?           @relation(fields: [championship_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "notifications_event_id_fkey")
-  users                  users?                   @relation(fields: [sender_id], references: [id], onUpdate: NoAction)
+  id                      String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  championship_id         String?                   @db.Uuid
+  sender_id               String?                   @db.Uuid
+  type                    String                    @default("manual") @db.VarChar
+  audience                Json
+  title                   String                    @db.VarChar
+  body                    String?
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  organization_id         String?                   @db.Uuid
+  target_user_id          String?                   @db.Uuid
+  notification_cursors    notification_cursors[]
+  notification_deliveries notification_deliveries[]
+  notification_reactions  notification_reactions[]
+  notification_reads      notification_reads[]
+  championships           championships?            @relation(fields: [championship_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "notifications_event_id_fkey")
+  users                   users?                    @relation(fields: [sender_id], references: [id], onUpdate: NoAction)
 
   @@index([championship_id, created_at(sort: Desc)], map: "idx_notifications_event_created")
   @@index([championship_id], map: "idx_notifications_event_id")
   @@index([organization_id], map: "idx_notifications_organization")
   @@index([target_user_id], map: "idx_notifications_target_user")
+  @@index([audience(ops: JsonbPathOps)], map: "idx_notifications_audience_gin", type: Gin)
+}
+
+model notification_deliveries {
+  notification_id String        @db.Uuid
+  user_id         String        @db.Uuid
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  notifications   notifications @relation(fields: [notification_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([notification_id, user_id])
+  @@index([user_id, created_at(sort: Desc)], map: "idx_notification_deliveries_user_created")
+}
+
+model notification_cursors {
+  user_id                      String         @id @db.Uuid
+  last_seen_at                 DateTime       @default(dbgenerated("'1970-01-01 00:00:00+00'::timestamp with time zone")) @db.Timestamptz(6)
+  last_clicked_notification_id String?        @db.Uuid
+  updated_at                   DateTime       @default(now()) @db.Timestamptz(6)
+  notifications                notifications? @relation(fields: [last_clicked_notification_id], references: [id], onUpdate: NoAction)
+  users                        users          @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id], map: "idx_notification_cursors_user")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -644,4 +670,25 @@ model demo_sandboxes {
   users_demo_sandboxes_organiser_user_idTousers users?    @relation("demo_sandboxes_organiser_user_idTousers", fields: [organiser_user_id], references: [id], onUpdate: NoAction)
 
   @@index([created_at(sort: Desc)], map: "idx_demo_sandboxes_created")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model fixture_events {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fixture_id     String   @db.Uuid
+  rubber_key     String?  @db.VarChar(40)
+  team_side      String?  @db.Char(1)
+  event_key      String   @db.VarChar(40)
+  label          String   @db.VarChar(120)
+  points         Int      @default(0)
+  player_user_id String?  @db.Uuid
+  segment        String?  @db.VarChar(40)
+  seq            Int      @default(0)
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  fixtures       fixtures @relation(fields: [fixture_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users          users?   @relation(fields: [player_user_id], references: [id], onUpdate: NoAction)
+
+  @@index([fixture_id], map: "idx_fixture_events_fixture")
+  @@index([event_key], map: "idx_fixture_events_key")
+  @@index([player_user_id], map: "idx_fixture_events_player")
 }

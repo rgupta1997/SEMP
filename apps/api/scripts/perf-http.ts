@@ -15,7 +15,7 @@ async function main() {
   const login = await fetch(`${BASE}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'seed.host@iimb.test', password: 'Passw0rd!' }) });
   const loginMs = Date.now() - t;
   if (!login.ok) throw new Error('login failed: ' + login.status + ' ' + await login.text());
-  const { token } = await login.json();
+  const { token } = (await login.json()) as { token: string };
   const H = { 'content-type': 'application/json', authorization: `Bearer ${token}` };
   console.log('login:', loginMs, 'ms  (token ok)');
 

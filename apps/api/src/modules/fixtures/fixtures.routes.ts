@@ -8,8 +8,7 @@ import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { generateFixtures, type TeamRef } from './domain/generators/index.js';
 import { recomputeStandingsForFixture, resolveRuleForDraw, resolveSchemeForDraw } from '../standings/standings.service.js';
-import { createNotification } from '../notifications/audience.js';
-
+import { notify } from '@semp/notifications/server/notify.js';
 // A match can only be recorded once its championship is under way. Resolves the
 // owning championship from the fixture's draw and blocks scoring while it's still
 // in draft or registration - nothing should be played before the event starts.
@@ -150,15 +149,20 @@ async function remindCustomPointsIfNeeded(prisma: Prisma, fixtureId: string, sen
       select: { user_id: true },
     });
     const label = [td?.tournament_sports?.sports?.name, td?.disciplines?.name].filter(Boolean).join(' · ') || 'a discipline';
-    await Promise.all(organisers.map((o) => createNotification(prisma, {
-      championship_id: championshipId,
-      target_user_id: o.user_id,
-      sender_id: senderId,
-      type: 'manual',
-      audience: 'all', // ignored for direct notifications - target_user_id drives visibility
-      title: 'A result needs championship points',
-      body: `A completed ${label} match still needs custom points. Open it on the Results page to award them.`,
-    })));
+    await Promise.all(
+      organisers.map((o) =>
+        notify(prisma, {
+          type: 'manual',
+          championshipId,
+          userId: o.user_id,
+          senderId,
+          data: {
+            title: 'A result needs championship points',
+            body: `A completed ${label} match still needs custom points. Open it on the Results page to award them.`,
+          },
+        }),
+      ),
+    );
   } catch (err) {
     console.error(`[points] custom-points reminder failed for fixture ${fixtureId}:`, err);
   }

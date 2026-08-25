@@ -4,11 +4,15 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { parsePaging } from '../../http/paging.js';
-import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import {
-  canPostToEvent, canSeeNotification, createNotification,
+  canPostToEvent, canSeeNotification, parseAudienceRule,
   getUserEventScopes, visibilityWhere,
 } from './audience.js';
+import { markSeen, getUnreadCountByCursor } from './cursor.js';
+import { mintRealtimeToken } from './realtime-token.js';
+import { notify } from '@semp/notifications/server/notify.js';
+import { Rules, type AudienceRule } from '@semp/notifications/core/rules.js';
 
 // Group raw reaction rows into { emoji, count, mine } for the current user.
 function summarizeReactions(rows: { reaction: string; user_id: string }[], userId: string) {
@@ -66,13 +70,32 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
   }));
 
   // ----- Unread badge count -----
+  // Cursor-based: cheap range scan against notification_deliveries, compared
+  // to this user's notification_cursors.last_seen_at. See cursor.ts.
   router.get('/notifications/unread-count', asyncHandler(async (req, res) => {
     const user = req.user!;
-    const scopes = await getUserEventScopes(prisma, user);
-    const count = await prisma.notifications.count({
-      where: { ...visibilityWhere(scopes), notification_reads: { none: { user_id: user.id } } },
-    });
+    const count = await getUnreadCountByCursor(prisma, user.id);
     res.json({ count });
+  }));
+
+  // ----- Mark the bell/drawer as seen (updates the cursor only) -----
+  // Kept separate from /notifications/read-all: that route still writes
+  // per-item notification_reads rows for feed-list state. This route only
+  // moves the last_seen_at watermark that powers the badge count.
+  router.post('/notifications/mark-seen', asyncHandler(async (req, res) => {
+    const user = req.user!;
+    await markSeen(prisma, user.id);
+    res.status(204).send();
+  }));
+
+  // ----- Mint a short-lived Supabase-compatible token for the Realtime
+  // connection only. Unrelated to this app's own auth - see realtime-token.ts.
+  // The frontend refetches this before it expires (lib/supabase.ts), so a
+  // long-open tab keeps its live connection without any user-visible gap.
+  router.post('/notifications/realtime-token', asyncHandler(async (req, res) => {
+    const user = req.user!;
+    const result = mintRealtimeToken(user.id);
+    res.json(result);
   }));
 
   // ----- Championships the current user may post into (fills the compose dropdown) -----
@@ -97,17 +120,37 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
   router.post('/notifications', validateBody(createNotificationSchema), asyncHandler(async (req, res) => {
     const user = req.user!;
     const scopes = await getUserEventScopes(prisma, user);
+
     if (!canPostToEvent(scopes, req.body.championship_id)) {
       throw new ForbiddenError('You cannot post notifications for this championship');
     }
-    const n = await createNotification(prisma, {
-      championship_id: req.body.championship_id,
-      sender_id: user.id,
+
+    let audience: AudienceRule;
+
+    switch (req.body.audience) {
+      case 'all':
+        audience = Rules.everyone(req.body.championship_id);
+        break;
+
+      case 'organizations_captains':
+        audience = Rules.role('captain', req.body.championship_id);
+        break;
+
+      default:
+        throw new BusinessRuleError('Unsupported notification audience');
+    }
+
+    const n = await notify(prisma, {
       type: 'manual',
-      audience: req.body.audience,
-      title: req.body.title,
-      body: req.body.body ?? null,
+      championshipId: req.body.championship_id,
+      senderId: user.id,
+      audience,
+      data: {
+        title: req.body.title,
+        body: req.body.body,
+      },
     });
+
     res.status(201).json(n);
   }));
 
@@ -169,6 +212,59 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
       where: { notification_id: n.id }, select: { reaction: true, user_id: true },
     });
     res.json({ reactions: summarizeReactions(all, user.id) });
+  }));
+
+  // ----- Test compose audience ----
+
+  router.post('/notifications/compose', asyncHandler(async (req, res) => {
+    const {
+      championship_id,
+      audience,
+      title,
+      body,
+    } = req.body;
+
+    const scopes = await getUserEventScopes(prisma, req.user!);
+    const parsedAudience = parseAudienceRule(audience);
+
+    if (!championship_id || !canPostToEvent(scopes, championship_id)) {
+      throw new ForbiddenError('You cannot post notifications for this championship');
+    }
+
+    // This endpoint is used by the new audience picker. Do not accept an
+    // arbitrary JSON payload that could bypass the audience rule engine.
+    if (!parsedAudience) {
+      throw new BusinessRuleError('Invalid notification audience');
+    }
+
+    const belongsToChampionship = (rule: AudienceRule): boolean => {
+      switch (rule.kind) {
+        case 'everyone':
+        case 'role':
+          return rule.championshipId === championship_id;
+        case 'compose':
+          return rule.rules.length > 0 && rule.rules.every(belongsToChampionship);
+        default:
+          return false;
+      }
+    };
+
+    if (!belongsToChampionship(parsedAudience)) {
+      throw new BusinessRuleError('Audience must belong to the selected championship');
+    }
+
+    const n = await notify(prisma, {
+      type: 'manual',
+      championshipId: championship_id,
+      senderId: req.user!.id,
+      audience: parsedAudience,
+      data: {
+        title: title ?? 'NOTIFICATION TEST',
+        body: body ?? null,
+      },
+    });
+
+    res.status(201).json(n);
   }));
 
   return router;

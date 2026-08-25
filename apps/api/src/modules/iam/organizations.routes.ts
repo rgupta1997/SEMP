@@ -9,8 +9,7 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { findUserByPhone, hashProvisionedPassword } from './users.helpers.js';
-import { createNotification } from '../notifications/audience.js';
-
+import { notify } from '@semp/notifications/server/notify.js';
 // Organizations router: list/get are open reads. Any authenticated user can
 // create an organization (they become its first `owner`). Edits, deletes and
 // member management require an owner/admin of that org (or super admin).
@@ -44,13 +43,13 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     const rows = await prisma.organizations.findMany({
       where: q
         ? {
-            OR: [
-              { name: { contains: q, mode: 'insensitive' } },
-              { short_name: { contains: q, mode: 'insensitive' } },
-              { city: { contains: q, mode: 'insensitive' } },
-              { code: { contains: q, mode: 'insensitive' } },
-            ],
-          }
+          OR: [
+            { name: { contains: q, mode: 'insensitive' } },
+            { short_name: { contains: q, mode: 'insensitive' } },
+            { city: { contains: q, mode: 'insensitive' } },
+            { code: { contains: q, mode: 'insensitive' } },
+          ],
+        }
         : undefined,
       orderBy: { name: 'asc' },
       ...(take ? { take } : {}),
@@ -197,13 +196,14 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
 
     const actor = await prisma.users.findUnique({ where: { id: userId }, select: { name: true, email: true } });
     const who = actor?.name || actor?.email || 'Someone';
-    await createNotification(prisma, {
-      organization_id: orgId,
-      sender_id: userId,
+    await notify(prisma, {
       type: 'org_join_request',
-      audience: 'org_admins',
-      title: `${who} requested to join ${org.name}`,
-      body: 'Review the request on your organization’s Members page.',
+      organizationId: orgId,
+      senderId: userId,
+      data: {
+        who,
+        organizationName: org.name,
+      },
     });
     res.status(201).json(member);
   }));
@@ -333,12 +333,13 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       data: { status: 'active' },
       include: { users: { select: { id: true, name: true, email: true, phone: true } } },
     });
-    await createNotification(prisma, {
-      target_user_id: member.user_id,
-      sender_id: req.user!.id,
+    await notify(prisma, {
       type: 'org_join_approved',
-      audience: 'all', // ignored for direct notifications - target_user_id drives visibility
-      title: `You’ve been approved to join ${await orgName(req.params.id)}`,
+      userId: member.user_id,
+      senderId: req.user!.id,
+      data: {
+        organizationName: await orgName(req.params.id),
+      },
     });
     res.json(updated);
   }));
@@ -349,12 +350,13 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     });
     if (!member) throw new NotFoundError('Member');
     await prisma.organization_members.delete({ where: { id: member.id } });
-    await createNotification(prisma, {
-      target_user_id: member.user_id,
-      sender_id: req.user!.id,
+    await notify(prisma, {
       type: 'org_join_declined',
-      audience: 'all', // ignored for direct notifications - target_user_id drives visibility
-      title: `Your request to join ${await orgName(req.params.id)} was declined`,
+      userId: member.user_id,
+      senderId: req.user!.id,
+      data: {
+        organizationName: await orgName(req.params.id),
+      },
     });
     res.json({ ok: true });
   }));

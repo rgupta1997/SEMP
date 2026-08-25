@@ -9,7 +9,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@semp/notifications": "^0.0.0",
     "@semp/shared": "*",
+    "@supabase/supabase-js": "^2.112.3",
     "@tanstack/react-query": "=5.59.0",
     "lucide-react": "^1.20.0",
     "react": "=18.3.1",

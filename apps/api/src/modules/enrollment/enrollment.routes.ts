@@ -5,7 +5,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError, BusinessRuleError } from '../../shared/errors.js';
-import { createNotification } from '../notifications/audience.js';
+import { notify } from '@semp/notifications/server/notify.js';
 
 export function makeEnrollmentRouter(prisma: Prisma): Router {
   const router = Router();
@@ -82,13 +82,15 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
     // An approval is announced to everyone in the championship.
     if (req.body.status === 'approved' && existing.status !== 'approved') {
       const orgName = existing.organizations?.short_name || existing.organizations?.name || 'An organization';
-      await createNotification(prisma, {
-        championship_id: existing.championship_id,
-        sender_id: req.user!.id,
+      await notify(prisma, {
         type: 'enrollment_approved',
-        audience: 'all',
-        title: `${orgName} has joined the championship`,
-        body: `${existing.organizations?.name ?? orgName} has been approved to participate${existing.championships?.name ? ` in ${existing.championships.name}` : ''}.`,
+        championshipId: existing.championship_id,
+        senderId: req.user!.id,
+        data: {
+          orgName,
+          bodyOrgName: existing.organizations?.name ?? orgName,
+          championshipName: existing.championships?.name,
+        },
       });
     }
 
