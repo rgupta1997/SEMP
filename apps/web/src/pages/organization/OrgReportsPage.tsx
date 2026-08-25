@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { useApi } from '../../lib/hooks';
+import { useWorkspace } from '../../lib/useWorkspace';
 import { Card, PageHeader, Select, Skeleton, cn } from '../../components/ui';
+import { CapabilityLock } from '../../components/CapabilityLock';
 import { OrgBenchmarkPage, OrgImpactReportPage } from './ParkedSurfaces';
 
 // Leadership reporting (J5-E1/E2/E3).
@@ -98,13 +100,31 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 
 export function OrgReportsPage() {
   const { orgId } = useParams();
+  const ws = useWorkspace();
   const [tab, setTab] = useState<Tab>('participation');
   const [season, setSeason] = useState<string>('');
 
+  // The server refuses this without the capability, so asking would return a 403
+  // and paint an error where a locked state belongs. The nav shows this page with
+  // a padlock; opening it has to say the same thing, not something worse.
+  const entitled = ws.granted.has('advanced_reports');
+
   const q = season ? `?season=${season}` : '';
   const parked = PARKED.includes(tab);
-  const { data, isLoading } = useApi<any>(orgId && !parked ? `/organizations/${orgId}/reports/${tab}${q}` : null);
+  const { data, isLoading } = useApi<any>(
+    orgId && entitled && !parked ? `/organizations/${orgId}/reports/${tab}${q}` : null,
+  );
   const seasons: SeasonRef[] = data?.available_seasons ?? [];
+
+  if (ws.loading) return <Skeleton className="h-64" />;
+  if (!entitled) {
+    return (
+      <div className="grid gap-5">
+        <PageHeader title="Reports" subtitle="Derived from locked results only." />
+        <CapabilityLock capability="advanced_reports" />
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-5">

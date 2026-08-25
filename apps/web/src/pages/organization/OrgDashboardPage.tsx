@@ -5,7 +5,6 @@ import { useApi } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
 import { usePocOnboarding } from '../../lib/onboarding';
 import { useWorkspace } from '../../lib/useWorkspace';
-import { OrgHeader } from '../../components/OrgHeader';
 import { GettingStarted } from '../../components/onboarding/GettingStarted';
 import { Badge, Spinner, StatusBadge } from '../../components/ui';
 
@@ -76,7 +75,6 @@ export function OrgDashboardPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 60 }}>
-      {orgId && <OrgHeader orgId={orgId} />}
 
       {/* ---- hero ---- */}
       <div style={{

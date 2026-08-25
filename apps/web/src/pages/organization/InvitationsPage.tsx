@@ -2,7 +2,6 @@ import { useParams } from 'react-router-dom';
 import { useAuth } from '../../lib/auth';
 import { usePermissions } from '../../lib/permissions';
 import { useApi } from '../../lib/hooks';
-import { OrgHeader } from '../../components/OrgHeader';
 import { InvitationsInbox } from '../../components/InvitationsInbox';
 import { EmptyState, PageHeader, Spinner } from '../../components/ui';
 
@@ -19,7 +18,6 @@ export function InvitationsPage() {
 
   return (
     <div>
-      {orgId && <OrgHeader orgId={orgId} />}
       <PageHeader title="Invitations" subtitle="Championships that have invited this organization. Accept to join and start entering teams." />
 
       {!canManage ? (

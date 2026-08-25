@@ -206,14 +206,20 @@ export function buildApp(prisma: Prisma) {
   // from. Mounted at the root because its paths are already fully qualified.
   // What this caller's subscription makes available, on both ladders. The shell
   // renders every lock from this one payload rather than asking per capability.
-  api.get('/me/entitlements', makeEntitlementGuards(prisma).readSnapshot);
+  const ents = makeEntitlementGuards(prisma);
+  api.get('/me/entitlements', ents.readSnapshot);
+
+  /** Gate on the organisation named in the path, not on the caller's own. */
+  const orgParam = { organizationIdFrom: (req: any) => req.params.id as string | undefined };
 
   api.use('/', makeOrgRolesRouter(prisma));
 
   // The audit trail. 864 entries were already being written with nothing to read them.
+  api.use('/organizations/:id/audit', ents.requireCapability('audit_logs', orgParam));
   api.use('/', makeAuditRouter(prisma));
 
   // Campuses and units - the concrete scopes a campus_unit role is granted against.
+  api.use('/organizations/:id/units', ents.requireCapability('multi_campus', orgParam));
   api.use('/organizations', makeOrgUnitsRouter(prisma));
   api.use('/organizations', makeOrgEventsRouter(prisma));
   api.use('/organizations', makeOrgDashboardRouter(prisma));
@@ -228,8 +234,19 @@ export function buildApp(prisma: Prisma) {
 
   // Leadership reporting. The impact report is handed the SAME builders the report
   // tabs use, so a board pack and the screen it was promised on cannot disagree.
+  //
+  // Gated on the subscription as well as on the permission. Until now the padlock
+  // on the Reports nav item was the only thing standing between an unentitled org
+  // and the whole report - which is to say, nothing at all, since the route was
+  // reachable by typing the URL. The permission gate inside each handler still
+  // applies; this asks the prior question of whether the tenant has it to permit.
   const reportsRouter = makeReportsRouter(prisma);
+  api.use('/organizations/:id/reports', ents.requireCapability('advanced_reports', orgParam));
+  api.use('/organizations/:id/report-jobs', ents.requireCapability('advanced_reports', orgParam));
   api.use('/', reportsRouter);
+  // Benchmarking is its own capability one tier higher: comparing yourself against
+  // peer institutions is a different product from reporting on yourself.
+  api.use('/organizations/:id/reports/benchmark', ents.requireCapability('benchmarking', orgParam));
   api.use('/', makeBenchmarkRouter(prisma));
   api.use('/', makeImpactRouter(prisma, makeImpactBuilder(prisma, (reportsRouter as any).builders)));
 

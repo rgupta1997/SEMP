@@ -1,11 +1,10 @@
 import { useMemo } from 'react';
-import { Lock } from 'lucide-react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import type { CapabilityKey } from '@semp/entitlements';
-import { CAPABILITIES } from '@semp/entitlements';
 import { useAuth } from '../../lib/auth';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { PageHeader, Spinner } from '../../components/ui';
+import { CapabilityLock } from '../../components/CapabilityLock';
 import { MembersPanel } from './admin/MembersPanel';
 import { RolesPanel } from './admin/RolesPanel';
 import { OrgProfilePanel } from './admin/OrgProfilePanel';
@@ -57,31 +56,6 @@ const ROLE_ADMIN: Record<string, string[] | null> = {
 const C = { line: '#E1E7F0', line2: '#C8D2E0', warn: '#E9920B', warnSoft: '#FCF0DB', fg4: '#6E7E96' };
 const MONO = "'JetBrains Mono',ui-monospace,monospace";
 const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
-
-function LockedTab({ tab }: { tab: Tab }) {
-  const def = tab.needs ? CAPABILITIES[tab.needs] : null;
-  return (
-    <div style={{
-      background: '#fff', border: `1px dashed ${C.line2}`, borderRadius: 14,
-      padding: 44, textAlign: 'center',
-    }}>
-      <div aria-hidden style={{
-        width: 44, height: 44, margin: '0 auto 16px', borderRadius: 12,
-        background: C.warnSoft, color: C.warn, display: 'grid', placeItems: 'center',
-      }}><Lock size={20} /></div>
-      <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 19 }}>{tab.label} is not on this plan</div>
-      {/* Names the capability, not a price. The plan page is the one screen where
-          naming what it costs is the whole job. */}
-      <div style={{
-        fontSize: 13.5, color: C.fg4, marginTop: 8, maxWidth: 420,
-        marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6,
-      }}>
-        {def?.surface ?? 'This area'} needs <span style={{ fontFamily: MONO, fontSize: 12 }}>{tab.needs}</span>,
-        which is not granted on your current plan.
-      </div>
-    </div>
-  );
-}
 
 export function AdminPage() {
   const { orgId = '' } = useParams();
@@ -160,7 +134,7 @@ export function AdminPage() {
 
         {/* ---- the body ---- */}
         <div style={{ flex: '1 1 420px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {locked ? <LockedTab tab={active} /> : (
+          {locked ? <CapabilityLock capability={active.needs!} title={active.label} /> : (
             <>
               {active.key === 'profile' && <OrgProfilePanel orgId={orgId} />}
               {active.key === 'campuses' && <CampusesPanel orgId={orgId} />}

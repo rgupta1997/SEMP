@@ -7,7 +7,6 @@ import { api } from '../../lib/api';
 import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge } from '../../components/ui';
-import { OrgHeader } from '../../components/OrgHeader';
 
 // A roster can be entered into several championships; these read its team_entries.
 function teamEntries(team: any): any[] { return team.team_entries ?? []; }
@@ -306,7 +305,6 @@ export function TeamsPage() {
 
   return (
     <div>
-      {institutionId && <OrgHeader orgId={institutionId} />}
       <PageHeader
         title={activeEvent ? `${activeEvent.championships?.name ?? 'Championship'} teams` : 'Teams'}
         subtitle={activeEvent ? 'Teams entered for this championship.' : 'Enter and manage teams across your approved championships.'}

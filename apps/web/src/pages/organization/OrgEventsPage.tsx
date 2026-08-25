@@ -3,7 +3,6 @@ import { Mail, Trophy } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { useApi, useTableControls, fmtDateRange } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
-import { OrgHeader } from '../../components/OrgHeader';
 import { InvitationsInbox } from '../../components/InvitationsInbox';
 import {
   Badge, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Spinner, StatusBadge,
@@ -77,7 +76,6 @@ export function OrgEventsPage() {
 
   return (
     <div className="pb-20">
-      <OrgHeader orgId={orgId} />
       <PageHeader title="Events" subtitle="Everything this organisation is entered in, hosting, or waiting on." />
 
       <div className="mb-4 mt-4 flex flex-wrap gap-2">

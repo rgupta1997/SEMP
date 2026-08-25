@@ -3,7 +3,6 @@ import { Lock, RotateCcw, ShieldCheck } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
-import { OrgHeader } from '../../components/OrgHeader';
 import {
   Badge, Button, Card, CardBody, confirmDialog, PageHeader, Spinner, toast,
 } from '../../components/ui';
@@ -140,7 +139,6 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
             title="Roles & permissions"
             subtitle="What each role may do here. Permissions come from the product; which ones a role holds is yours to set."
           />
-          <OrgHeader orgId={orgId} />
         </>
       )}
 

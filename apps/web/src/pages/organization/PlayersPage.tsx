@@ -5,7 +5,6 @@ import { useAuth } from '../../lib/auth';
 import { useApi, useTableControls } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
 import { api } from '../../lib/api';
-import { OrgHeader } from '../../components/OrgHeader';
 import {
   Avatar, Badge, Button, EmptyState, ListToolbar, PageHeader, Pagination,
   SearchInput, Spinner, confirmDialog, toast,
@@ -107,7 +106,6 @@ export function PlayersPage() {
 
   return (
     <div className="pb-20">
-      {orgId && <OrgHeader orgId={orgId} />}
       <PageHeader title="Players" subtitle="Everyone who belongs to this organisation, and what they have played.">
         {canManage && (
           <>

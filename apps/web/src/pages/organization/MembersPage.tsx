@@ -3,7 +3,6 @@ import { Lock, ShieldCheck, Users } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useTableControls } from '../../lib/hooks';
-import { OrgHeader } from '../../components/OrgHeader';
 import {
   Avatar, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field,
   ListToolbar, Modal, PageHeader, SearchInput, Select, Spinner, toast,
@@ -189,7 +188,6 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
       {!embedded && (
         <>
           <PageHeader title="Members" subtitle="Who belongs to this organisation, and what each of them may do." />
-          <OrgHeader orgId={orgId} />
         </>
       )}
 
