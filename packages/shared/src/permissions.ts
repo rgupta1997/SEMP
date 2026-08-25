@@ -25,6 +25,10 @@ export const PERMISSIONS = {
 
   'people.view': { label: 'View the people directory', scope: 'org', area: 'People' },
   'people.verify': { label: 'Verify players', scope: 'org', area: 'People' },
+  'people.edit': { label: 'Add & edit people', scope: 'org', area: 'People' },
+  // Separate from people.edit because it is a different risk: one row at a time
+  // versus a file that can create hundreds, against a duplicate-matching rule.
+  'people.import': { label: 'Bulk upload rosters', scope: 'org', area: 'People' },
 
   'team.manage': { label: 'Manage teams & squads', scope: 'org', area: 'Teams' },
   'team.create': { label: 'Create teams', scope: 'org', area: 'Teams' },
@@ -38,6 +42,8 @@ export const PERMISSIONS = {
   // permission by mistake.
   'event.enroll': { label: 'Enter this organisation into championships', scope: 'org', area: 'Championships' },
 
+  // Deciding WHO scores a match, which is not the same as scoring one.
+  'official.assign': { label: 'Assign officials', scope: 'championship', area: 'Results' },
   'fixture.score': { label: 'Record scores', scope: 'championship', area: 'Results' },
   'fixture.lock': { label: 'Lock a scorecard', scope: 'championship', area: 'Results' },
   // Deliberately separate from fixture.lock: locking is a review, correcting a
@@ -48,6 +54,13 @@ export const PERMISSIONS = {
   'achievement.validate': { label: 'Validate achievement claims', scope: 'org', area: 'Records' },
   'certificate.issue': { label: 'Issue certificates', scope: 'org', area: 'Records' },
   'report.view': { label: 'View reports', scope: 'org', area: 'Reports' },
+
+  // Administration, split out of org.manage. The breakdown asks for these to be
+  // separately grantable, and it is right to: a Billing Admin who can also change
+  // the security policy is not a Billing Admin.
+  'role.manage': { label: 'Manage roles & permissions', scope: 'org', area: 'Administration' },
+  'billing.manage': { label: 'Manage billing & subscription', scope: 'org', area: 'Administration' },
+  'security.manage': { label: 'Manage security, SSO & data', scope: 'org', area: 'Administration' },
 } as const satisfies Record<string, PermissionDef>;
 
 export type PermissionCode = keyof typeof PERMISSIONS;

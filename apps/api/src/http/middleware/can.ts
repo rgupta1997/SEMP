@@ -43,10 +43,14 @@ export interface CanContext {
 // Membership role -> the role row that says what it grants. An organisation can edit
 // those rows; it cannot invent a fourth kind of membership, which is why this mapping
 // is code and the grants behind it are data.
+// The membership strings are NOT changing - 'member' is written by the join and
+// invite paths and read by the notification audience resolver. Only the roles they
+// point at were renamed (org_owner -> owner, org_member -> viewer), so this mapping
+// is the single place that moves.
 export const MEMBERSHIP_ROLE_CODES: Record<string, string> = {
-  owner: 'org_owner',
+  owner: 'owner',
   admin: 'org_admin',
-  member: 'org_member',
+  member: 'viewer',
 };
 
 // Which roles does this person hold in this scope, and what do those roles grant?
