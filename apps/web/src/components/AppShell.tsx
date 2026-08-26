@@ -142,7 +142,7 @@ export function AppShell() {
   // flat nav. Everyone else navigates by context.
   const isPlatform = activeRole === 'system';
   const groups = isPlatform ? navFor(activeRole) : [];
-  const contextNav = !isPlatform && ws.active ? resolveNav(ws.active, ws.granted) : [];
+  const contextNav = !isPlatform && ws.active ? resolveNav(ws.active, ws.granted, ws.navFacts) : [];
   const subtitle = championship?.name ?? (isPlatform ? ROLE_LABELS[activeRole] : ws.active?.name ?? '');
 
   // Feedback button: only on overview/landing surfaces (My Game, Discover, My
@@ -185,6 +185,7 @@ export function AppShell() {
                 contexts={ws.contexts}
                 active={ws.active}
                 granted={ws.granted}
+                navFacts={ws.navFacts}
                 onSwitch={(id) => { ws.switchTo(id); setSidebarOpen(false); }}
               />
             </div>
@@ -267,8 +268,8 @@ export function AppShell() {
                 {menuOpen && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                    <div className="animate-dropdown absolute right-0 z-20 mt-2 w-52 rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
-                      <div className="border-b border-slate-100 px-4 py-2.5 dark:border-slate-700">
+                    <div className="animate-dropdown absolute right-0 z-20 mt-2 w-52 rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-800 dark:bg-slate-900">
+                      <div className="border-b border-slate-100 px-4 py-2.5 dark:border-slate-800">
                         <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{ctx.user.name}</div>
                         <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.email}</div>
                         {ctx.user.phone && <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.phone}</div>}

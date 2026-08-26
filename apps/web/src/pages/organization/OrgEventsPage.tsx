@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Mail, Trophy } from 'lucide-react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { useApi, useTableControls, fmtDateRange } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
+import { useWorkspace } from '../../lib/useWorkspace';
 import { InvitationsInbox } from '../../components/InvitationsInbox';
 import {
-  Badge, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Spinner, StatusBadge,
+  Badge, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Spinner, StatusBadge, SURFACE, FilterChips,
 } from '../../components/ui';
 
 // Organisation > Events (F-068).
@@ -42,6 +43,8 @@ const TABS = [
 
 export function OrgEventsPage() {
   const { orgId = '' } = useParams();
+  const { pathname } = useLocation();
+  const ws = useWorkspace();
   const { data, isLoading } = useApi<{ rows: Row[] }>(`/organizations/${orgId}/events`);
   const [tab, setTab] = useState<string>('all');
 
@@ -78,20 +81,12 @@ export function OrgEventsPage() {
     <div className="pb-20">
       <PageHeader title="Events" subtitle="Everything this organisation is entered in, hosting, or waiting on." />
 
-      <div className="mb-4 mt-4 flex flex-wrap gap-2">
-        {TABS.filter((t) => t.key !== 'invitations' || canManage).map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold ${tab === t.key ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700'}`}
-          >
-            {t.label}
-            <span className={`font-mono text-[11px] ${tab === t.key ? 'text-white/75' : 'text-slate-400'}`}>
-              {counts[t.key as keyof typeof counts]}
-            </span>
-          </button>
-        ))}
-      </div>
+      <FilterChips
+        value={tab}
+        onChange={setTab}
+        options={TABS.filter((t) => t.key !== 'invitations' || canManage)
+          .map((t) => ({ key: t.key, label: t.label, count: counts[t.key as keyof typeof counts] }))}
+      />
 
       {tab === 'invitations' ? (
         invites.length === 0 ? (
@@ -117,10 +112,10 @@ export function OrgEventsPage() {
             <SearchInput value={tc.query} onChange={tc.setQuery} placeholder="Search events…" className="w-full sm:w-72" />
           </ListToolbar>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+          <div className={`overflow-x-auto ${SURFACE}`}>
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 dark:border-slate-700">
+                <tr className="border-b border-slate-200 text-left font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 dark:border-slate-800">
                   <th className="px-4 py-3">Event</th>
                   <th className="px-4 py-3">Relationship</th>
                   <th className="px-4 py-3">Our teams</th>
@@ -130,9 +125,15 @@ export function OrgEventsPage() {
               </thead>
               <tbody>
                 {tc.view.map((r) => (
-                  <tr key={r.id} className="border-b border-slate-100 last:border-0 dark:border-slate-700/60">
+                  <tr key={r.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
                     <td className="px-4 py-3">
-                      <Link to={`/championships/${r.id}`} className="font-semibold text-slate-900 hover:text-brand-600 dark:text-slate-100">
+                      {/* Opening an event moves the whole workspace into it, and
+                          remembers this institution so its Back returns here. */}
+                      <Link
+                        to={`/championships/${r.id}`}
+                        onClick={(e) => { e.preventDefault(); ws.enter(r.id, `/championships/${r.id}`, pathname); }}
+                        className="font-semibold text-slate-900 hover:text-brand-600 dark:text-slate-100"
+                      >
                         {r.name}
                       </Link>
                       <div className="text-xs text-slate-500">

@@ -1,4 +1,4 @@
-import { Navigate, Outlet, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { Navigate, Outlet, useLocation, useOutletContext, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateRange } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
@@ -24,8 +24,7 @@ const NEXT_STATUS: Record<string, { to: string; label: string } | null> = {
 
 export function EventLayout() {
   const { eventId } = useParams();
-  const { pathname } = useLocation();
-  const navigate = useNavigate();
+  const { pathname, state } = useLocation();
   const { canManageChampionship } = usePermissions();
   const canManage = canManageChampionship(eventId);
   const ws = useWorkspace();
@@ -42,16 +41,32 @@ export function EventLayout() {
   // waiting to happen, so both are answered from the same list. The server still
   // guards every write; this only stops somebody landing on a page built for a
   // role they do not hold.
+  //
+  // Only a SECTION is ever refused. The overview is the redirect target, so
+  // refusing it would bounce somebody to the page that refused them and render
+  // nothing at all - a guard must never send anyone somewhere it would itself
+  // turn away.
   const segment = parseEventSegment(pathname, eventId!);
-  if (!canManage && !mayOpenSegment(roleCodes, segment)) {
+  if (segment && !canManage && !mayOpenSegment(roleCodes, segment)) {
     return <Navigate to={`/championships/${eventId}`} replace />;
   }
 
   const next = NEXT_STATUS[championship.status];
 
+  // Back goes where they came from - workspace and all. Entering an event moves
+  // the whole workspace, so leaving it has to move the workspace back, otherwise
+  // somebody who opened an event from their institution lands on My Events with
+  // the event's own sidebar still showing.
+  //
+  // The fallback is My Events, which is where an event opened from a notification
+  // or a pasted URL sensibly ends.
+  const from = (state as { from?: string } | null)?.from ?? '/championships';
+  const fromCtx = ws.contexts.find((c) => c.id === (/^\/organizations\/([0-9a-fA-F-]{36})/.exec(from)?.[1] ?? ''));
+  const backLabel = fromCtx ? fromCtx.name : 'All events';
+
   return (
     <div>
-      <BackButton onClick={() => navigate('/championships')}>All championships</BackButton>
+      <BackButton onClick={() => ws.leaveTo(from)}>{backLabel}</BackButton>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">

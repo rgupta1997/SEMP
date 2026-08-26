@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import type { CapabilityKey } from '@semp/entitlements';
-import { NAV, ROLE_NAV, hrefFor, landingFor, resolveNav, type WorkspaceContext } from './workspace';
+import { EVENT_VIEW, NAV, ROLE_NAV, hrefFor, landingFor, resolveNav, type WorkspaceContext } from './workspace';
+
+// Every person-level fact on, so a test about ROLES is not also a test about facts.
+const OFFICIATES = { officiates: true };
 import { mayOpenSegment } from './championship-nav';
 
 // Nav resolution: the three filters that decide what somebody sees, and the guard
@@ -47,7 +50,7 @@ describe('resolveNav · role filter', () => {
   });
 
   it('applies no role filter at all in the personal context', () => {
-    const items = resolveNav(ctx({ kind: 'personal', roleCodes: [] }), ALL);
+    const items = resolveNav(ctx({ kind: 'personal', roleCodes: [] }), ALL, OFFICIATES);
     expect(keys(items)).toEqual(keys(NAV.personal));
   });
 
@@ -107,9 +110,90 @@ describe('the assignment context is reachable', () => {
     expect(keys(items)).toEqual(['matchops', 'help']);
   });
 
-  it('and still gives the same official the read-only event view', () => {
+  it('and still gives the same official the match, and only the match', () => {
+    // What is on, what happened, where that leaves the table. An official has no
+    // business in the event's approvals, communications or certificates.
     const items = resolveNav(ctx({ id: 'e1', kind: 'event', roleCodes: ['official'] }), NONE);
-    expect(keys(items)).toEqual(['overview', 'schedule', 'results']);
+    expect(keys(items)).toEqual(['overview', 'schedule', 'results', 'standings']);
+  });
+});
+
+describe('being involved in an event without holding a role in it', () => {
+  // A player on an entered team and a member of an enrolled institution hold no
+  // event role. Treating that as "nobody" gave them a workspace with no sidebar;
+  // treating it as "no filter" would have offered them Setup and Settings.
+  const involved = (roleCodes: string[]) => resolveNav(ctx({ id: 'e1', kind: 'event', roleCodes }), NONE);
+
+  it('shows the event as published, and none of the operations that run it', () => {
+    expect(keys(involved([]))).toEqual(EVENT_VIEW);
+    for (const op of ['setup', 'settings', 'organisers', 'approvals', 'communications', 'certificates']) {
+      expect(keys(involved([])), op).not.toContain(op);
+    }
+  });
+
+  it('reads player and member as no role rather than as an unknown one', () => {
+    // They say how somebody reached the event, not what they hold in it.
+    expect(keys(involved(['player', 'member']))).toEqual(EVENT_VIEW);
+  });
+
+  it.each([['owner'], ['org_admin'], ['sports_admin'], ['viewer']])(
+    'does not let the organisation role %s decide an event',
+    (code) => {
+      // An event role overrides an org one, and holding only an org role in an
+      // event is holding nothing there. This is the case that was reported: the
+      // owner of an enrolled institution opened an event and was handed every
+      // organiser operation in it, because `owner` is unrestricted - in its own
+      // context.
+      expect(keys(involved([code]))).toEqual(EVENT_VIEW);
+    },
+  );
+
+  it('every key in the view set is a section that exists', () => {
+    // The list is written out rather than derived, so it can name a tab that was
+    // renamed or removed - which reads as "withheld" and is invisible until
+    // somebody notices the gap.
+    const sections = new Set(keys(NAV.event));
+    for (const key of EVENT_VIEW) expect(sections, key).toContain(key);
+  });
+
+  it('leaves the personal context unfiltered', () => {
+    expect(keys(resolveNav(ctx({ id: 'me', kind: 'personal', roleCodes: [] }), ALL, OFFICIATES))).toEqual(keys(NAV.personal));
+  });
+});
+
+describe('items that depend on the person rather than the context', () => {
+  const personal = (facts?: { officiates?: boolean }) =>
+    keys(resolveNav(ctx({ id: 'me', kind: 'personal', roleCodes: [] }), ALL, facts));
+
+  it('hides Officiating from somebody who officiates nothing', () => {
+    // The personal context has no roles, so it is not role-filtered - which meant
+    // every account in the institution carried a tab to a page built for its
+    // handful of officials, and empty for everyone else.
+    expect(personal({ officiates: false })).not.toContain('officiating');
+  });
+
+  it('shows it to somebody who does', () => {
+    expect(personal({ officiates: true })).toContain('officiating');
+  });
+
+  it('hides it when the caller passes no facts at all', () => {
+    // The safe direction: a call site that forgot shows too little, not too much.
+    expect(personal()).not.toContain('officiating');
+  });
+
+  it('does not send anybody to a landing page they cannot see', () => {
+    // landingFor picks the first item, so it has to apply the same filter -
+    // otherwise the switcher drops an official-less account on /officiating.
+    const me = ctx({ id: 'me', kind: 'personal', roleCodes: [] });
+    for (const facts of [{ officiates: false }, { officiates: true }]) {
+      const landing = landingFor(me, ALL, facts);
+      expect(resolveNav(me, ALL, facts).map((i) => hrefFor(me, i))).toContain(landing);
+    }
+  });
+
+  it('leaves the rest of the personal nav alone either way', () => {
+    const others = keys(NAV.personal).filter((k) => k !== 'officiating');
+    expect(personal({ officiates: false })).toEqual(others);
   });
 });
 
@@ -139,15 +223,36 @@ describe('mayOpenSegment · the URL guard agrees with the sidebar', () => {
     (_key, segment) => expect(mayOpenSegment(['organiser'], segment)).toBe(true),
   );
 
-  it('lets an official open exactly what their sidebar offers', () => {
-    const offered = new Set(ROLE_NAV.official ?? []);
-    for (const item of NAV.event) {
-      expect(mayOpenSegment(['official'], seg(item.to))).toBe(offered.has(item.key));
+  it('opens exactly what the sidebar offers, for every role', () => {
+    // The two answers come from the same lists and must not be able to drift: a
+    // section the sidebar hides but the URL opens is an access bug, and one the
+    // sidebar offers but the URL refuses is a dead link.
+    for (const roleCodes of [[], ['player', 'member'], ['owner'], ['organiser'], ['official'], ['poc'], ['captain'], ['participant']]) {
+      const offered = new Set(keys(resolveNav(ctx({ id: 'e1', kind: 'event', roleCodes }), NONE)));
+      for (const item of NAV.event) {
+        expect(mayOpenSegment(roleCodes, seg(item.to)), `${roleCodes.join(',') || 'no role'} → ${item.key}`)
+          .toBe(offered.has(item.key));
+      }
     }
   });
 
   it('refuses somebody holding no role in this event', () => {
     expect(mayOpenSegment([], 'settings')).toBe(false);
+  });
+
+  it('opens the overview to somebody holding no role here', () => {
+    // The overview is the front page of the event AND the page every refusal
+    // above redirects to. Refusing it sent people to the page that had just
+    // refused them, so the workspace rendered nothing at all.
+    expect(mayOpenSegment([], '')).toBe(true);
+  });
+
+  it('never refuses its own redirect target', () => {
+    // The invariant behind the case above, stated for every role: whatever the
+    // guard turns away, it must be willing to open where it sends them.
+    for (const codes of [[], ['official'], ['captain'], ['participant'], ['poc'], ['organiser']]) {
+      expect(mayOpenSegment(codes, ''), `${codes.join(',') || 'no role'}`).toBe(true);
+    }
   });
 
   it('allows a segment it has never heard of', () => {
