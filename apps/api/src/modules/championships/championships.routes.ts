@@ -1,15 +1,18 @@
 import { Router } from 'express';
-import { bulkAssignOfficialsSchema, createChampionshipSchema, updateChampionshipSchema, updateChampionshipStatusSchema, type ChampionshipStatus } from '@semp/shared';
+import { applyTemplateSchema, bulkAssignOfficialsSchema, type ChampionshipStatus, createChampionshipSchema, saveTemplateSchema, updateChampionshipSchema, updateChampionshipStatusSchema } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
-import { NotFoundError } from '../../shared/errors.js';
+import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { assertChampionshipTransition } from './domain/championship-lifecycle.js';
 import { notify } from '@semp/notifications/server/notify.js';
 import { recomputeStandingsAtomic } from '../standings/standings.service.js';
 import { signShareToken } from '../public/share-token.js';
 import { listChampionshipFixtures } from './fixtures-list.js';
+import { managedChampionshipIds } from './manage-access.js';
+import { applyChampionshipTemplate } from './apply-template.js';
+import { captureShape, saveTemplate } from './templates.service.js';
 import { findUserByPhone } from '../iam/users.helpers.js';
 import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
 
@@ -137,7 +140,9 @@ export function makeEventsRouter(prisma: Prisma): Router {
 
   // -------------------------------------------------------------------------
   // MINE - championships the user is involved in, each tagged with the roles
-  // they hold (organiser / official / player / member). Powers the
+  // they hold: the code of any event role assigned to them (organiser / official /
+  // captain / participant / poc), plus 'player' for a team they are on and
+  // 'member' for an organisation of theirs that is enrolled. Powers the
   // "Championships" page and (filtered to organiser) the "Host" page.
   // -------------------------------------------------------------------------
   router.get('/mine', asyncHandler(async (req, res) => {
@@ -148,13 +153,15 @@ export function makeEventsRouter(prisma: Prisma): Router {
       roles.get(id)!.add(role);
     };
 
-    // One round-trip, not two: the role lookups don't depend on the data queries, so
-    // fire all six together rather than awaiting the roles first (each sequential
-    // await is a full network round-trip to the remote pooler - ~700ms each).
-    const [orgRole, offRole, championshipRoleRows, officialRows, memberRows, enrolledRows] = await Promise.all([
-      prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser), select: { id: true } }),
-      prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.official), select: { id: true } }),
-      prisma.user_championship_roles.findMany({ where: { user_id: userId }, select: { championship_id: true, role_id: true } }),
+    // One round trip's worth of waiting, not five: none of these depend on each
+    // other, and each sequential await is a full network round-trip to the remote
+    // pooler (~700ms each).
+    const [managedIds, championshipRoleRows, officialRows, memberRows, enrolledRows] = await Promise.all([
+      managedChampionshipIds(prisma, userId),
+      prisma.user_championship_roles.findMany({
+        where: { user_id: userId },
+        select: { championship_id: true, roles: { select: { code: true, name: true } } },
+      }),
       prisma.championship_officials.findMany({ where: { user_id: userId, is_active: true }, select: { championship_id: true } }),
       prisma.team_members.findMany({ where: { user_id: userId, is_active: true }, select: { teams: { select: { team_entries: { select: { championship_id: true } } } } } }),
       prisma.championship_organizations.findMany({
@@ -163,10 +170,18 @@ export function makeEventsRouter(prisma: Prisma): Router {
       }),
     ]);
 
+    // The role's own code, not a guess. This used to ask only "is it Official?" and
+    // call everything else 'organiser', which handed a Captain, a Participant and a
+    // POC the organiser's badge, the organiser's Host page and the organiser's
+    // workspace - the destination of "View details" is decided from this list.
     for (const r of championshipRoleRows) {
-      if (offRole && r.role_id === offRole.id) add(r.championship_id, 'official');
-      else add(r.championship_id, 'organiser');
+      add(r.championship_id, r.roles?.code ?? r.roles?.name?.toLowerCase() ?? 'member');
     }
+    // Managing the event outranks every other way of being in it. This is also the
+    // only source that knows about an institution's own events: hosting one gives
+    // its senior staff the organiser's authority over it without an Organiser row,
+    // and without this they would not see the event here at all.
+    for (const id of managedIds) add(id, 'organiser');
     for (const o of officialRows) add(o.championship_id, 'official');
     for (const m of memberRows) for (const e of m.teams?.team_entries ?? []) add(e.championship_id, 'player');
     for (const e of enrolledRows) add(e.championship_id, 'member');
@@ -184,10 +199,17 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // GET single championship. A private one 404s for outsiders (same as not existing,
   // so its presence is never leaked by direct id).
   router.get('/:id', asyncHandler(async (req, res) => {
-    const championship = await prisma.championships.findUnique({ where: { id: req.params.id } });
+    const championship = await prisma.championships.findUnique({
+      where: { id: req.params.id },
+      // The host organisation comes with it: it is who issues this event's
+      // certificates, so a screen that has the event should not need a second
+      // round trip to find out whether anybody can issue at all.
+      include: { organizations: { select: { id: true, name: true, verified: true } } },
+    });
     if (!championship) throw new NotFoundError('Championship');
     if (!(await canSeeChampionship(req.user!, championship))) throw new NotFoundError('Championship');
-    res.json(championship);
+    const { organizations, ...rest } = championship;
+    res.json({ ...rest, host_organization: organizations });
   }));
 
   // The view-only public share token for this championship (organiser/super only).
@@ -202,8 +224,46 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // Organiser, and a default season (named after the championship) is created so the
   // organiser can jump straight to adding sports - they never have to make a season
   // by hand (they can still rename/add more on the Seasons tab).
+  /**
+   * May this caller put an event's name against that organisation?
+   *
+   * Hosting decides whose signature ends up on the event's certificates, so it is
+   * not something an event's organiser can assign to an institution they have no
+   * standing in. Checked on create AND on update - the update path accepts the same
+   * field, and a guard on only one of them is not a guard.
+   */
+  async function assertMayHost(userId: string, isSuper: boolean, organizationId: string) {
+    if (isSuper) return;
+    const may = await prisma.organization_members.findFirst({
+      where: {
+        user_id: userId, organization_id: organizationId,
+        status: 'active', role: { in: ['owner', 'admin'] },
+      },
+      select: { id: true },
+    });
+    if (!may) throw new ForbiddenError('You cannot host an event on behalf of that organisation');
+  }
+
   router.post('/', validateBody(createChampionshipSchema), asyncHandler(async (req, res) => {
-    const championship = await prisma.championships.create({ data: req.body });
+    // Who is hosting. Sent explicitly when the organiser is creating from inside an
+    // organisation; otherwise inferred, but only when there is exactly one candidate.
+    // Belonging to two institutions makes the answer a question, and a question that
+    // guesses is how an event ends up filed under the wrong college.
+    let hostOrgId: string | null = req.body.host_organization_id ?? null;
+    if (hostOrgId) {
+      await assertMayHost(req.user!.id, !!req.user!.isSuperAdmin, hostOrgId);
+    } else {
+      const admin = await prisma.organization_members.findMany({
+        where: { user_id: req.user!.id, status: 'active', role: { in: ['owner', 'admin'] } },
+        select: { organization_id: true },
+        take: 2,
+      });
+      if (admin.length === 1) hostOrgId = admin[0].organization_id;
+    }
+
+    const championship = await prisma.championships.create({
+      data: { ...req.body, host_organization_id: hostOrgId },
+    });
     const organiserRole = await prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser) });
     if (organiserRole) {
       await prisma.user_championship_roles.create({
@@ -223,8 +283,49 @@ export function makeEventsRouter(prisma: Prisma): Router {
     res.status(201).json(championship);
   }));
 
+  // Apply a template to a fresh draft (J2-E1-S1): sports, disciplines, formats and
+  // the standings scheme in one call.
+  router.post('/:id/apply-template', ownChampionship, validateBody(applyTemplateSchema), asyncHandler(async (req, res) => {
+    const { template } = req.body as { template: string };
+    res.json(await applyChampionshipTemplate(prisma, req, req.params.id, template));
+  }));
+
+  // The other direction: keep the shape of this championship as a template. This is
+  // where every non-built-in template comes from - the product derives the shape, the
+  // organiser supplies the name.
+  router.post('/:id/save-template', ownChampionship, validateBody(saveTemplateSchema), asyncHandler(async (req, res) => {
+    const { name, description, organization_id } = req.body as { name: string; description?: string | null; organization_id?: string | null };
+    res.status(201).json(await saveTemplate(prisma, req, {
+      championshipId: req.params.id, name, description, organizationId: organization_id ?? null,
+    }));
+  }));
+
+  // What saving would capture, so the "save as template" prompt can show the organiser
+  // what they are about to keep before they name it.
+  router.get('/:id/template-shape', ownChampionship, asyncHandler(async (req, res) => {
+    res.json(await captureShape(prisma, req.params.id));
+  }));
+
   // UPDATE championship
   router.patch('/:id', ownChampionship, validateBody(updateChampionshipSchema), asyncHandler(async (req, res) => {
+    // Hosting can be changed only by somebody with standing in the organisation on
+    // BOTH sides of the change. Naming one is a claim; removing one is a claim on
+    // that institution's behalf that it is no longer involved - and an organiser
+    // who is not an administrator there could otherwise strip a college's name off
+    // its own event, orphaning every certificate it has issued for it.
+    if ('host_organization_id' in req.body) {
+      const current = await prisma.championships.findUnique({
+        where: { id: req.params.id },
+        select: { host_organization_id: true },
+      });
+      const next = req.body.host_organization_id ?? null;
+      if (current?.host_organization_id !== next) {
+        if (current?.host_organization_id) {
+          await assertMayHost(req.user!.id, !!req.user!.isSuperAdmin, current.host_organization_id);
+        }
+        if (next) await assertMayHost(req.user!.id, !!req.user!.isSuperAdmin, next);
+      }
+    }
     const championship = await prisma.championships.update({ where: { id: req.params.id }, data: req.body });
     res.json(championship);
   }));

@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useAuth } from '../lib/auth';
+import { useWorkspace } from '../lib/useWorkspace';
 import { api } from '../lib/api';
 import { useApi, useTableControls, fmtDateRange } from '../lib/hooks';
 import { Button, Card, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge, toast } from '../components/ui';
@@ -13,18 +14,63 @@ interface Championship {
   visibility?: string; // private ones appear only for people already involved
 }
 
+/** One of the user's organisation memberships, as the auth context carries it. */
+interface OrgMembership {
+  organization_id: string;
+  status: string;
+  role: string;
+  organization?: { name?: string; short_name?: string } | null;
+}
+
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Draft', registration_open: 'Registration open', ongoing: 'Live', completed: 'Completed',
 };
 
-// Apply to participate - pick which of your organizations to apply as, or create one
-// on the fly. Players with no organization land straight in "create" mode, so anyone
-// can apply directly to a championship.
-function ApplyModal({ championship, onClose }: { championship: Championship; onClose: () => void }) {
+/**
+ * Who may enter an organisation into an event: an active owner or admin.
+ *
+ * The same test the enroll guard makes on the server, mirrored here for the UX - an
+ * org role GRANT (Sports Admin) is not a membership role, so it opens Discover
+ * without opening this.
+ */
+const canEnter = (m: OrgMembership) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin');
+
+const orgLabel = (m?: OrgMembership) => m?.organization?.short_name ?? m?.organization?.name ?? 'your organisation';
+
+/**
+ * Everything that goes stale the moment an application exists.
+ *
+ * Query keys are full URLs; refresh every /me/enrollments* variant (the Discover list
+ * uses ?scope=all) so the CTA flips to "Your application" immediately.
+ *
+ * These calls go straight through api() rather than useApiMutation(), so they never
+ * reach the app-wide MutationCache fallback in main.tsx that normally auto-invalidates
+ * everything (including notifications) after a mutation with no explicit
+ * meta.invalidate. Enrolling can make an already-existing notification (e.g.
+ * "Registration is open", posted before this org had any relationship to the
+ * championship) newly visible to this user, so the bell badge needs an explicit nudge
+ * here too, or it silently sits stale until something unrelated happens to open the
+ * notification drawer and invalidate it as a side effect.
+ */
+async function refreshAfterEnroll(qc: QueryClient) {
+  await qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('/me/enrollments') });
+  await qc.invalidateQueries({ queryKey: ['notifications'] });
+}
+
+// Apply to participate FROM MY SPACE - pick which of your organizations to apply as,
+// or create one on the fly. Players with no organization land straight in "create"
+// mode, so anyone can apply directly to a championship.
+//
+// This popup only exists in personal space. An organisation workspace has already
+// answered the question it asks.
+function ApplyModal({ championship, onClose }: {
+  championship: Championship;
+  onClose: () => void;
+}) {
   const { ctx, refresh } = useAuth();
   const qc = useQueryClient();
   const myOrgs = useMemo(
-    () => (ctx?.organizations ?? []).filter((m) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin')),
+    () => ((ctx?.organizations ?? []) as OrgMembership[]).filter(canEnter),
     [ctx],
   );
   const [mode, setMode] = useState<'pick' | 'create'>(myOrgs.length ? 'pick' : 'create');
@@ -47,19 +93,7 @@ function ApplyModal({ championship, onClose }: { championship: Championship; onC
       }
       if (!applyOrgId) { setError('Pick an organization to apply as'); setBusy(false); return; }
       await api('POST', `/championships/${championship.id}/enroll`, { organization_id: applyOrgId });
-      // Query keys are full URLs; refresh every /me/enrollments* variant (the Discover
-      // list uses ?scope=all) so the CTA flips to "Your application" immediately.
-      await qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).startsWith('/me/enrollments') });
-      // This call goes straight through api() rather than useApiMutation(), so it
-      // never reaches the app-wide MutationCache fallback in main.tsx that normally
-      // auto-invalidates everything (including notifications) after a mutation with
-      // no explicit meta.invalidate - it only gets the /me/enrollments refresh above.
-      // Enrolling can make an already-existing notification (e.g. "Registration is
-      // open", posted before this org had any relationship to the championship)
-      // newly visible to this user, so the bell badge needs an explicit nudge here
-      // too, or it silently sits stale until something unrelated happens to open the
-      // notification drawer and invalidate it as a side effect.
-      await qc.invalidateQueries({ queryKey: ['notifications'] });
+      await refreshAfterEnroll(qc);
       toast.success('Application submitted', 'You can enter teams once the organiser approves you.');
       onClose();
     } catch (e: any) { setError(e.message); }
@@ -102,8 +136,21 @@ function ApplyModal({ championship, onClose }: { championship: Championship; onC
 
 // Discover - every championship on the platform, open to any signed-in user.
 // Searchable and filterable by sport / status so the list never dumps everything.
-// Anyone can apply to participate via the per-card CTA (choosing or creating an org).
+//
+// WHO IS ENTERING IS THE WORKSPACE'S QUESTION (F-052), not this page's. The listing is
+// the same either way; the CTA is not:
+//
+//   My Space  - you are here as yourself, so Register opens the popup, and that popup
+//               is where the organisation to compete under is picked or created.
+//   An org    - you chose that organisation when you entered its workspace. Register
+//               enters it, and no popup asks a question already answered.
+//
+// An "entering as" selector above the list used to ask it a third time, and then had
+// to hand its answer down into the popup to stop it being asked twice.
 export function DiscoverPage() {
+  const ws = useWorkspace();
+  const { ctx } = useAuth();
+  const qc = useQueryClient();
   const { data: championships = [], isLoading } = useApi<Championship[]>('/championships');
   // scope=all so an application made under ANY of the user's orgs (incl. one just
   // created via the apply flow) flips the card's CTA to "Your application".
@@ -111,9 +158,38 @@ export function DiscoverPage() {
   const [sport, setSport] = useState('');
   const [status, setStatus] = useState('');
   const [applying, setApplying] = useState<Championship | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
+  // The organisation this Discover belongs to, if any. Undefined in personal space,
+  // and in an event or assignment workspace - neither of which enters anybody.
+  const activeOrg = useMemo(() => {
+    if (ws.active?.kind !== 'org') return undefined;
+    const id = ws.active.id;
+    return ((ctx?.organizations ?? []) as OrgMembership[]).find((m) => m.organization_id === id);
+  }, [ws.active, ctx]);
+  const mayEnter = !activeOrg || canEnter(activeOrg);
+
+  // In an organisation, only ITS application counts: one made under another of your
+  // organisations is not this one's, and reporting it here would tell an org it had
+  // applied when it had not.
   const enrollmentStatusFor = (eventId: string) =>
-    enrollments.find((e) => e.championship_id === eventId)?.status as string | undefined;
+    enrollments.find((e) =>
+      e.championship_id === eventId && (!activeOrg || e.organization_id === activeOrg.organization_id),
+    )?.status as string | undefined;
+
+  const registerActiveOrg = async (c: Championship) => {
+    if (!activeOrg) return;
+    setBusyId(c.id);
+    try {
+      await api('POST', `/championships/${c.id}/enroll`, { organization_id: activeOrg.organization_id });
+      await refreshAfterEnroll(qc);
+      toast.success('Application submitted', `${orgLabel(activeOrg)} has applied to ${c.name}. You can enter teams once the organiser approves.`);
+    } catch (e: any) {
+      toast.error('Could not register', e.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const sportOptions = useMemo(() => {
     const set = new Set<string>();
@@ -145,7 +221,13 @@ export function DiscoverPage() {
   return (
     // pb-20 keeps the bottom pagination clear of the floating Feedback button.
     <div className="pb-20">
-      <PageHeader title="Find your next game" subtitle="Championships, organizations & teams looking for players." />
+      <PageHeader
+        title="Discover"
+        subtitle={activeOrg
+          ? `Championships open to ${activeOrg.organization?.name ?? 'your organisation'} - registering enters this organisation.`
+          : 'Championships open to you - to play in yourself, or to enter an organisation into.'}
+      />
+
       {championships.length > 0 && (
         <ListToolbar>
           <SearchInput value={tc.query} onChange={tc.setQuery} placeholder="Search championships…" className="w-full sm:w-72" />
@@ -192,17 +274,32 @@ export function DiscoverPage() {
                   if (applied) {
                     return (
                       <div className="mb-2 flex items-center gap-2">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Your application</span>
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                          {activeOrg ? `Application from ${orgLabel(activeOrg)}` : 'Your application'}
+                        </span>
                         <StatusBadge status={applied} />
                       </div>
                     );
                   }
-                  if (c.status === 'registration_open') {
+                  if (c.status !== 'registration_open') return null;
+                  if (activeOrg) {
+                    // Discover reaches Sports Admin, who holds the org by grant rather
+                    // than by membership - the server would refuse the application, so
+                    // name who can make it instead of offering a button that fails.
+                    if (!mayEnter) {
+                      return (
+                        <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+                          An owner or admin of {orgLabel(activeOrg)} can enter it into this championship.
+                        </p>
+                      );
+                    }
                     return (
-                      <Button className="mb-2 w-full" onClick={() => setApplying(c)}>Apply to participate</Button>
+                      <Button className="mb-2 w-full" disabled={busyId === c.id} onClick={() => registerActiveOrg(c)}>
+                        {busyId === c.id ? 'Registering…' : `Register ${orgLabel(activeOrg)}`}
+                      </Button>
                     );
                   }
-                  return null;
+                  return <Button className="mb-2 w-full" onClick={() => setApplying(c)}>Register</Button>;
                 })()}
                 <Link to={`/championships/${c.id}`} className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300">View details →</Link>
               </Card>

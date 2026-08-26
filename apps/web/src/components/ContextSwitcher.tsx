@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, ChevronsUpDown } from 'lucide-react';
-import { KIND_META, landingFor, type WorkspaceContext } from '../lib/workspace';
+import { KIND_META, landingFor, type NavFacts, type WorkspaceContext } from '../lib/workspace';
 import type { CapabilityKey } from '@semp/entitlements';
 
 // The context switcher (F-012).
@@ -15,14 +15,32 @@ import type { CapabilityKey } from '@semp/entitlements';
 const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
 const MONO = "'JetBrains Mono',ui-monospace,monospace";
 
-const initials = (s: string) => s.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+// A switcher is not a directory. Two of each kind is enough to recognise where
+// you are and to hop back to the one you just left; somebody with fourteen
+// organisations is not choosing from a scroll box with no search in it. The full
+// list already has a page - Organizations, My Events, Officiating - so "show
+// all" goes there instead of growing this one.
+const VISIBLE_PER_GROUP = 2;
+
+const MORE: Record<string, { to: string; noun: string }> = {
+  Organizations: { to: '/organizations', noun: 'organizations' },
+  Events: { to: '/championships', noun: 'events' },
+  Assignments: { to: '/officiating', noun: 'assignments' },
+};
+
+// Letters and digits only. Splitting on whitespace alone turns "Carrom (Mixed)"
+// into "C(" - a tile that reads as a typo rather than a name.
+const initials = (s: string) => s.split(/[^A-Za-z0-9]+/).filter(Boolean)
+  .slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 
 export function ContextSwitcher({
-  contexts, active, granted, onSwitch,
+  contexts, active, granted, navFacts, onSwitch,
 }: {
   contexts: WorkspaceContext[];
   active: WorkspaceContext | null;
   granted: ReadonlySet<CapabilityKey>;
+  /** Person-level facts the landing page depends on - see resolveNav. */
+  navFacts: NavFacts;
   onSwitch: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -43,7 +61,18 @@ export function ContextSwitcher({
   const pick = (c: WorkspaceContext) => {
     onSwitch(c.id);
     setOpen(false);
-    nav(landingFor(c, granted));
+    nav(landingFor(c, granted, navFacts));
+  };
+
+  // Those full lists live in personal space, so the workspace moves with the
+  // page. Navigating without switching would leave the sidebar describing an
+  // organisation while the page in front of you lists all of them.
+  const showAll = (group: string) => {
+    const dest = MORE[group];
+    if (!dest) return;
+    onSwitch('me');
+    setOpen(false);
+    nav(dest.to);
   };
 
   // Preserve the order the contexts arrived in within each group, so the list does
@@ -87,13 +116,22 @@ export function ContextSwitcher({
           background: '#fff', border: '1px solid #E1E7F0', borderRadius: 12,
           boxShadow: '0 18px 40px -18px rgba(10,26,51,.45)', padding: 6, maxHeight: 380, overflowY: 'auto',
         }}>
-          {groups.map((g) => (
+          {groups.map((g) => {
+            const head = g.items.slice(0, VISIBLE_PER_GROUP);
+            // Where you are is always in the list, even when it sorts past the
+            // cap. A switcher that hides the workspace you are standing in reads
+            // as having lost it.
+            const shown = g.items.some((c) => c.id === active.id) && !head.some((c) => c.id === active.id)
+              ? [...head, g.items.find((c) => c.id === active.id)!]
+              : head;
+            const hidden = g.items.length - shown.length;
+            return (
             <div key={g.group}>
               <div style={{
                 fontFamily: MONO, fontSize: 9, letterSpacing: '.14em', textTransform: 'uppercase',
                 color: '#9BA9BE', padding: '8px 9px 4px',
               }}>{g.group}</div>
-              {g.items.map((c) => {
+              {shown.map((c) => {
                 const m = KIND_META[c.kind];
                 const isActive = c.id === active.id;
                 return (
@@ -130,8 +168,22 @@ export function ContextSwitcher({
                   </button>
                 );
               })}
+
+              {hidden > 0 && MORE[g.group] && (
+                <button
+                  onClick={() => showAll(g.group)}
+                  style={{
+                    display: 'block', width: '100%', cursor: 'pointer', textAlign: 'left',
+                    padding: '5px 9px 8px', border: 'none', background: 'transparent',
+                    fontFamily: POP, fontWeight: 700, fontSize: 11.5, color: '#004AAD',
+                  }}
+                >
+                  Show all {g.items.length} {MORE[g.group].noun}
+                </button>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

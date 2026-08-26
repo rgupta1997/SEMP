@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { CapabilityKey } from '@semp/entitlements';
 import { useAuth } from './auth';
 import { useApi } from './hooks';
-import { landingFor, type ContextKind, type WorkspaceContext } from './workspace';
+import { EVENT_ROLE_CODES, landingFor, type ContextKind, type NavFacts, type WorkspaceContext } from './workspace';
 
 // Turning one account into the list of workspaces it can enter.
 //
@@ -15,15 +16,62 @@ import { landingFor, type ContextKind, type WorkspaceContext } from './workspace
 
 const KEY = 'semp_context';
 
+/** One fixture this person has been assigned to officiate. */
+interface AssignedFixture {
+  id: string;
+  status: string;
+  scheduled_at: string | null;
+  teams_fixtures_home_team_idToteams?: { name?: string } | null;
+  teams_fixtures_away_team_idToteams?: { name?: string } | null;
+  tournament_disciplines?: {
+    tournament_sports?: { sports?: { name?: string } | null } | null;
+  } | null;
+}
+
 interface EntitlementSnapshot {
   org: { tier: string; capabilities: CapabilityKey[] };
   personal: { tier: string; capabilities: CapabilityKey[] };
 }
 
+/** One row of GET /championships/mine - every event this person is involved in. */
+interface MyEvent {
+  id: string;
+  name: string;
+  status: string;
+  /** organiser / official / poc / captain / participant, plus player / member. */
+  my_roles: string[];
+}
+
 export function useWorkspace() {
   const { ctx } = useAuth();
   const ent = useApi<EntitlementSnapshot>('/me/entitlements', !!ctx);
+  // Assignments are per MATCH, which is the tightest scope in the product and the
+  // only one whose nav goes straight to the console. Read from the fixtures this
+  // person is actually the official on.
+  // Only asked for when this person officiates somewhere - `official_championship_ids`
+  // is already on the auth context, so the empty case costs nothing.
+  const officiating = useApi<AssignedFixture[]>(
+    '/me/officiating',
+    (ctx?.official_championship_ids?.length ?? 0) > 0,
+  );
+  // Every event this account is involved in, whatever the involvement. The auth
+  // context only carries assigned ROLES, which left the two commonest ways of
+  // being in an event - playing for an entered team, belonging to an enrolled
+  // institution - with no workspace to enter. People could open such an event
+  // from My Events and arrive with the personal sidebar still showing.
+  const mine = useApi<MyEvent[]>('/championships/mine', !!ctx);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+
+  // A context-scoped URL IS a context choice. Following a link to an event from a
+  // notification, or deep-linking into an organisation, has to move the whole
+  // workspace - otherwise the URL says one thing and the sidebar says another,
+  // which breaks the second rule the product is built on.
+  const routeContextId = useMemo(() => {
+    const m = /^\/(?:organizations|championships)\/([0-9a-fA-F-]{36})(?:\/|$)/.exec(pathname);
+    return m ? m[1] : null;
+  }, [pathname]);
 
   const contexts = useMemo<WorkspaceContext[]>(() => {
     if (!ctx?.user) return [];
@@ -67,15 +115,64 @@ export function useWorkspace() {
       sub: r.championship?.status ?? undefined,
     }));
 
+    // The rest of them. Assigned roles arrive with the auth context, so they are
+    // built above and appear instantly; these need a request, so they are merged in
+    // rather than replacing the list - an organiser should not watch their own
+    // events pop in a moment late.
+    //
+    // Only EVENT roles are carried. An event role overrides an organisation one:
+    // administering an institution says nothing about an event you were entered
+    // into, and 'player' / 'member' say how you got here rather than what you hold,
+    // so both resolve to the view set instead of to an org role's nav.
+    const seen = new Set(events.map((e) => e.id));
+    for (const c of mine.data ?? []) {
+      if (seen.has(c.id)) continue;
+      events.push({
+        id: c.id,
+        kind: (c.status === 'draft' ? 'eventDraft' : 'event') as ContextKind,
+        name: c.name,
+        roleCodes: (c.my_roles ?? []).filter((r) => EVENT_ROLE_CODES.includes(r)),
+        sub: c.status,
+      });
+    }
+
     // An assignment is the tightest scope in the product: one match, nothing else.
-    const assignments: WorkspaceContext[] = (ctx.official_championship_ids ?? [])
-      .filter((id: string) => !events.some((e) => e.id === id))
-      .map((id: string) => ({
-        id, kind: 'assignment' as const, name: 'Officiating', roleCodes: ['official'], sub: 'Assigned match',
-      }));
+    //
+    // It used to be built from championship ids, which made its Match Operations
+    // link - /score/:id - point at a championship where the route expects a
+    // fixture, and made every assignment duplicate an event context the person
+    // already had. One row per match, and only matches still to be played:
+    // a finished fixture is a record, not an assignment.
+    const assignments: WorkspaceContext[] = (officiating.data ?? [])
+      .filter((f) => {
+        if (f.status === 'completed' || f.status === 'cancelled') return false;
+        // A bye is a team advancing because there was nobody to play. There is no
+        // match, so there is nothing to officiate - listing it as an assignment
+        // sends somebody to a console for a game that will never be played.
+        if (f.status === 'bye') return false;
+        // A bracket slot with neither side decided is not yet a match anybody can
+        // officiate. Listing it would fill the switcher with "TBD v TBD" and bury
+        // the assignments that are real.
+        return !!(f.teams_fixtures_home_team_idToteams || f.teams_fixtures_away_team_idToteams);
+      })
+      .map((f) => {
+        const home = f.teams_fixtures_home_team_idToteams?.name ?? 'TBD';
+        const away = f.teams_fixtures_away_team_idToteams?.name ?? 'TBD';
+        const sport = f.tournament_disciplines?.tournament_sports?.sports?.name;
+        const when = f.scheduled_at
+          ? new Date(f.scheduled_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+          : 'Time TBD';
+        return {
+          id: f.id,
+          kind: 'assignment' as const,
+          name: `${home} v ${away}`,
+          roleCodes: ['official'],
+          sub: [sport, when].filter(Boolean).join(' · '),
+        };
+      });
 
     return [personal, ...orgs, ...events, ...assignments];
-  }, [ctx]);
+  }, [ctx, officiating.data, mine.data]);
 
   // The stored choice is namespaced by account, so Option B's second account does
   // not inherit the first one's workspace.
@@ -83,11 +180,28 @@ export function useWorkspace() {
 
   useEffect(() => {
     if (!storeKey || contexts.length === 0) return;
+
+    // The URL wins when it names a context this person actually holds, and the
+    // choice is written through - so leaving that page keeps you where you went,
+    // rather than snapping back to whatever you last picked from the switcher.
+    if (routeContextId && contexts.some((c) => c.id === routeContextId)) {
+      localStorage.setItem(storeKey, routeContextId);
+      setActiveId(routeContextId);
+      return;
+    }
     const stored = localStorage.getItem(storeKey);
     setActiveId(stored && contexts.some((c) => c.id === stored) ? stored : contexts[0].id);
-  }, [storeKey, contexts.length]);
+  }, [storeKey, contexts.length, routeContextId]);
 
   const active = contexts.find((c) => c.id === activeId) ?? contexts[0] ?? null;
+
+  // What is true of this PERSON, for the nav items that depend on it rather than
+  // on the context. Read from the auth context, so somebody added to an event's
+  // officials list mid-session sees Officiating appear on the next /me rather than
+  // having to sign in again.
+  const navFacts = useMemo<NavFacts>(() => ({
+    officiates: (ctx?.official_championship_ids?.length ?? 0) > 0,
+  }), [ctx?.official_championship_ids]);
 
   /** Capabilities for the ladder governing the ACTIVE context, not the account. */
   const granted = useMemo<ReadonlySet<CapabilityKey>>(() => {
@@ -101,13 +215,43 @@ export function useWorkspace() {
     setActiveId(id);
   }, [storeKey]);
 
+  /**
+   * Open a context: make it active AND land on its own first page.
+   *
+   * Navigating without switching leaves the sidebar showing the workspace you
+   * came from while the page shows the one you opened. The two disagree, and the
+   * person is left looking at an event with no way to reach the rest of it.
+   *
+   * `from` is remembered on the location so the page you land on can offer a way
+   * back that returns the workspace too, not just the URL.
+   */
+  const enter = useCallback((id: string, fallback: string, from?: string) => {
+    const target = contexts.find((c) => c.id === id);
+    switchTo(id);
+    navigate(target ? landingFor(target, granted, navFacts) : fallback, from ? { state: { from } } : undefined);
+  }, [contexts, granted, navFacts, switchTo, navigate]);
+
+  /**
+   * Go back to where somebody came from, workspace and all. A path naming a
+   * context returns to it; anything else is personal space, which is where every
+   * route that names no context lives.
+   */
+  const leaveTo = useCallback((path: string) => {
+    const m = /^\/(?:organizations|championships)\/([0-9a-fA-F-]{36})(?:\/|$)/.exec(path);
+    switchTo(m && contexts.some((c) => c.id === m[1]) ? m[1] : 'me');
+    navigate(path);
+  }, [contexts, switchTo, navigate]);
+
   return {
     contexts,
     active,
     granted,
+    navFacts,
     switchTo,
+    enter,
+    leaveTo,
     /** Where a context opens - its first item this role can actually use. */
-    landing: active ? landingFor(active, granted) : '/home',
+    landing: active ? landingFor(active, granted, navFacts) : '/home',
     loading: ent.isLoading,
     tiers: ent.data ? { org: ent.data.org.tier, personal: ent.data.personal.tier } : null,
   };

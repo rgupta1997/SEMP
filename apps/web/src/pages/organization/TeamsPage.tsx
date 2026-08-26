@@ -6,8 +6,7 @@ import { usePermissions } from '../../lib/permissions';
 import { api } from '../../lib/api';
 import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
-import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge } from '../../components/ui';
-import { OrgTabs } from '../../components/OrgTabs';
+import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge, INSET} from '../../components/ui';
 
 // A roster can be entered into several championships; these read its team_entries.
 function teamEntries(team: any): any[] { return team.team_entries ?? []; }
@@ -121,7 +120,7 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
           {draws.length === 0 ? 'No disciplines configured for this championship yet. The organiser must add draws in Setup before teams can be entered.' : 'You have already entered every available discipline.'}
         </p>
       ) : (
-        <div className="max-h-72 overflow-auto rounded-xl border border-slate-200 dark:border-slate-800">
+        <div className={`max-h-72 overflow-auto ${INSET}`}>
           <label className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 px-4 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
             <Checkbox checked={allChecked} indeterminate={selected.size > 0 && !allChecked}
               onChange={(v) => setSelected(v ? new Set(available.map((d) => d.id)) : new Set())} />
@@ -306,7 +305,6 @@ export function TeamsPage() {
 
   return (
     <div>
-      {institutionId && <OrgTabs orgId={institutionId} />}
       <PageHeader
         title={activeEvent ? `${activeEvent.championships?.name ?? 'Championship'} teams` : 'Teams'}
         subtitle={activeEvent ? 'Teams entered for this championship.' : 'Enter and manage teams across your approved championships.'}

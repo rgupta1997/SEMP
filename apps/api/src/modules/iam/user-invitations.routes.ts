@@ -19,7 +19,7 @@ export function makeUserInvitationsRouter(prisma: Prisma): Router {
     if (isSuper) return;
     if (targetType === 'org_member') {
       if (await guards.orgRole(userId, targetId, ['owner', 'admin'])) return;
-    } else if (await guards.organisesChampionship(userId, targetId)) {
+    } else if (await guards.managesChampionship(userId, targetId)) {
       return;
     }
     throw new ForbiddenError('You do not manage this target');

@@ -96,6 +96,10 @@ export function useTableControls<T>(rows: T[], opts: TableControlsOpts<T> = {}) 
     sortKey, dir, toggleSort, setSortKey, setDir,
     page: safePage, setPage, pageCount, pageSize, total,
     view,
+    // Every row matching the current search, not just the page in front of you.
+    // A "select all" that silently stopped at the page boundary would misdescribe
+    // what the next action is about to touch.
+    all: sorted,
   };
 }
 

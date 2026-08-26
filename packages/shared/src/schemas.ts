@@ -391,6 +391,10 @@ export const createChampionshipSchema = z.object({
   // Whether people with no institution may enter (J3-E1-S5). Omitted on create means
   // "decide from the visibility", which is what an organiser almost always means.
   allow_individual_entry: z.boolean().optional(),
+  // Which organisation is running this. Null is a real answer - an individual coach
+  // hosting a local event has no institution behind them - so it is nullable rather
+  // than required. The server verifies the caller may actually host on its behalf.
+  host_organization_id: uuid.nullable().optional(),
 });
 
 // Applying a template to a fresh draft: sports, disciplines, formats and the

@@ -58,7 +58,7 @@ export function makeEntitlementGuards(prisma: EntitlementsPrisma) {
   ): RequestHandler {
     const { allowSuperAdmin = true, organizationIdFrom } = options;
 
-    return (req, _res, next) => {
+    const guard: RequestHandler = (req, _res, next) => {
       const user = req.user;
       if (!user) return next(new UnauthorizedError());
       if (allowSuperAdmin && user.isSuperAdmin) return next();
@@ -73,6 +73,13 @@ export function makeEntitlementGuards(prisma: EntitlementsPrisma) {
           next(err instanceof CapabilityRequiredError ? new CapabilityError(err) : err),
         );
     };
+
+    // Express copies a handler's function name onto the layer, which is the only
+    // way to tell a mounted gate apart from the router it stands in front of.
+    // Naming it makes "is this surface gated?" an answerable question - see
+    // entitlement-mounts.test.ts, which exists because it once was not.
+    Object.defineProperty(guard, 'name', { value: `capability:${capability}` });
+    return guard;
   }
 
   /**

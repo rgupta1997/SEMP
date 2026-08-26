@@ -1,5 +1,6 @@
 import type { Prisma } from '../../infra/prisma.js';
 import { applyUserInvitations } from './user-invitations.service.js';
+import { managedChampionshipIds } from '../championships/manage-access.js';
 
 // Assembles the full authentication context the web app needs to render the
 // unified shell and decide what the user can act on:
@@ -7,6 +8,8 @@ import { applyUserInvitations } from './user-invitations.service.js';
 //   - the user's home organization (optional) + every org they're a member of
 //   - championship-scoped role assignments (user_championship_roles)
 //   - team memberships (captain / player rows)
+//   - the championships they may MANAGE, which is not derivable from the above:
+//     it also covers the events their institution hosts
 export async function buildAuthContext(prisma: Prisma, user: any) {
   const { password_hash, ...publicUser } = user;
 
@@ -84,6 +87,11 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
       joined_at: m.joined_at,
     })),
     official_championship_ids: officialRows.map((o) => o.championship_id),
+    // Answered here rather than on the client, which was deciding it by role NAME
+    // against a table that has a rename screen, and could only ever see half of it
+    // - an institution's owner manages the events it hosts without holding an
+    // Organiser row on any of them.
+    managed_championship_ids: await managedChampionshipIds(prisma, user.id),
     // What this person was explicitly GRANTED per organisation, as opposed to what
     // their membership implies. The shell unions the two: a Sports Admin grant has
     // to widen the nav, and losing it must not silently remove the member's own

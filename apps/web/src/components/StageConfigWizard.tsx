@@ -149,7 +149,7 @@ function KnockoutEditor({ node, onChange, entrants }: { node: KnockoutDraft; onC
     onChange({ ...node, manualPairs: node.manualPairs.map((p, idx) => (idx === i ? { ...p, [side]: token || null } : p)) });
 
   return (
-    <div className="space-y-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+    <div className="space-y-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800">
       <p className="text-xs text-slate-400 dark:text-slate-500">
         {n} entrant{n === 1 ? '' : 's'} · single elimination{node.thirdPlaceMatch ? ' + 3rd place' : ''} (double elimination isn't supported yet).
       </p>
@@ -211,7 +211,7 @@ function GroupEditor({ node, onChange, entrants, depth }: { node: GroupDraft; on
   const poolSize = entrants.length ? Math.floor(entrants.length / node.numGroups) : null;
 
   return (
-    <div className="space-y-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+    <div className="space-y-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800">
       <div className="grid grid-cols-2 gap-3">
         <Field label="Number of pools">
           <Input type="number" min={1} value={node.numGroups} onChange={(e) => onChange({ ...node, numGroups: Math.max(1, Number(e.target.value) || 1) })} />
@@ -315,7 +315,7 @@ export function StageConfigWizard({ tournamentDisciplineId, onGenerated }: { tou
       <GroupEditor node={root} onChange={setRoot} entrants={rootEntrants} depth={0} />
 
       {teams.length > 0 && (
-        <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+        <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
           <button type="button" className="flex w-full items-center justify-between text-left" onClick={() => setShowManualAllocation((v) => !v)}>
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Manual team placement (optional)</span>
             <span className="text-xs font-medium text-brand-600 dark:text-brand-400">{showManualAllocation ? 'Hide' : 'Show'}</span>

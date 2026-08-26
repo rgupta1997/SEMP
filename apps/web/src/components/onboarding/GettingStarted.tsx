@@ -65,7 +65,7 @@ export function GettingStarted({ title, subtitle, state, storageKey, completeNot
                   className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${
                     s.done
                       ? 'border-transparent bg-white/40 dark:bg-slate-800/30'
-                      : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/60'
+                      : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-800/60'
                   }`}
                 >
                   <span

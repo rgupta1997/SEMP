@@ -3,6 +3,7 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from './error.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
+import { hostOrgManages } from '../../modules/championships/manage-access.js';
 
 // Server-side authorization. The client mirrors these rules for UX, but this is
 // the real boundary: every mutation must pass through here. Authority is
@@ -26,6 +27,13 @@ export function makeGuards(prisma: Prisma) {
       select: { id: true },
     });
     return !!row;
+  }
+
+  // The real question every management guard is asking. An event is run by its
+  // organising team OR by the institution hosting it - see manage-access.ts for
+  // why the second is not a shortcut but the normal case.
+  async function managesChampionship(userId: string, championshipId: string): Promise<boolean> {
+    return (await organisesChampionship(userId, championshipId)) || hostOrgManages(prisma, userId, championshipId);
   }
 
   // Does the user hold one of `roles` in this organization? Replaces the old
@@ -70,7 +78,7 @@ export function makeGuards(prisma: Prisma) {
       if (user.isSuperAdmin) return next();
       const championshipId = await resolveChampionshipId(req);
       if (!championshipId) throw new NotFoundError('Championship');
-      if (!(await organisesChampionship(user.id, championshipId))) throw new ForbiddenError('You do not manage this championship');
+      if (!(await managesChampionship(user.id, championshipId))) throw new ForbiddenError('You do not manage this championship');
       next();
     });
   }
@@ -147,7 +155,7 @@ export function makeGuards(prisma: Prisma) {
     if (!fx) throw new NotFoundError('Fixture');
     if (fx.official_id === u.id) return next();
     const championshipId = fx.tournament_disciplines?.tournament_sports?.tournaments?.championship_id;
-    if (championshipId && (await organisesChampionship(u.id, championshipId))) return next();
+    if (championshipId && (await managesChampionship(u.id, championshipId))) return next();
     throw new ForbiddenError('Not authorized to score this fixture');
   });
 
@@ -160,6 +168,7 @@ export function makeGuards(prisma: Prisma) {
     enrollSelf,
     fixtureScorer,
     organisesChampionship,
+    managesChampionship,
     orgRole,
     resolvers: {
       championshipOfTournament, championshipOfVenue, championshipOfVenueGround,

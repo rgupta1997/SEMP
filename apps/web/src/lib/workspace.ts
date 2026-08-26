@@ -24,8 +24,34 @@ export interface NavItem {
   to: string;
   /** Capability this item needs. Absent means everyone in the context sees it. */
   needs?: CapabilityKey;
+  /**
+   * A fact about the PERSON that has to hold for this item to appear at all.
+   *
+   * Deliberately not the same as `needs`. A capability you lack is rendered
+   * LOCKED, because the product does the thing and you may well want it. A
+   * section that would be empty because you hold no assignments is not locked and
+   * not for sale - it is simply not yours, and showing it to everybody sends the
+   * whole institution to a page built for its handful of officials.
+   */
+  when?: NavFactKey;
   end?: boolean;
 }
+
+/**
+ * Facts about the person, as opposed to the context they are standing in.
+ *
+ * One entry so far, and it is worth stating why it is not a role: officiating is
+ * not something you ARE in your own space, it is something you have been given.
+ * The list lives in `official_championship_ids` on the auth context, which is the
+ * same gate GET /me/officiating applies - so the tab is present exactly when the
+ * page behind it has something in it.
+ */
+export interface NavFacts {
+  /** Is this person on any championship's officials list? */
+  officiates?: boolean;
+}
+
+export type NavFactKey = keyof NavFacts;
 
 /**
  * What each kind of context offers, before role or tier is considered.
@@ -40,7 +66,7 @@ export const NAV: Record<ContextKind, NavItem[]> = {
     { key: 'events', label: 'My Events', to: '/championships' },
     { key: 'profile', label: 'My Sports Profile', to: '/profile' },
     { key: 'discover', label: 'Discover', to: '/discover' },
-    { key: 'officiating', label: 'Officiating', to: '/officiating' },
+    { key: 'officiating', label: 'Officiating', to: '/officiating', when: 'officiates' },
     { key: 'orgs', label: 'Organizations', to: '/organizations' },
     { key: 'help', label: 'Help & guides', to: '/help' },
   ],
@@ -58,11 +84,16 @@ export const NAV: Record<ContextKind, NavItem[]> = {
     { key: 'admin', label: 'Administration', to: '/organizations/:id/admin' },
   ],
   orgGuest: [
-    { key: 'publicorg', label: 'Organization', to: '/organizations/:id/public' },
+    // `end` matters wherever one item's path is a prefix of another's: without it
+    // this stays highlighted while you are on Public events, and the sidebar reports
+    // you are in two places at once.
+    { key: 'publicorg', label: 'Organization', to: '/organizations/:id/public', end: true },
     { key: 'events', label: 'Public events', to: '/organizations/:id/public/events' },
   ],
   event: [
-    { key: 'overview', label: 'Overview', to: '/championships/:id' },
+    // The event root is a prefix of every other section here, so it must match
+    // exactly - see the note on the guest nav above.
+    { key: 'overview', label: 'Overview', to: '/championships/:id', end: true },
     { key: 'setup', label: 'Setup', to: '/championships/:id/setup' },
     { key: 'organisers', label: 'Organising team', to: '/championships/:id/organisers' },
     { key: 'approvals', label: 'Approvals', to: '/championships/:id/approvals' },
@@ -75,7 +106,7 @@ export const NAV: Record<ContextKind, NavItem[]> = {
     { key: 'settings', label: 'Settings', to: '/championships/:id/settings' },
   ],
   eventDraft: [
-    { key: 'overview', label: 'Overview', to: '/championships/:id' },
+    { key: 'overview', label: 'Overview', to: '/championships/:id', end: true },
     { key: 'setup', label: 'Event setup', to: '/championships/:id/setup' },
   ],
   assignment: [
@@ -83,6 +114,47 @@ export const NAV: Record<ContextKind, NavItem[]> = {
     { key: 'help', label: 'Guides', to: '/help' },
   ],
 };
+
+/**
+ * The event as PUBLISHED: who is in it, when they play, what happened, and where
+ * that leaves the table. What somebody sees when they are involved in an event
+ * without running it.
+ *
+ * Everything left out is an operation rather than a view - approving entries,
+ * naming the organising team, sending communications, issuing certificates,
+ * configuring the event at all. Being an owner of an enrolled institution says
+ * nothing about whether you may do any of that HERE, and until this list existed
+ * it handed you all eleven sections: an event context with no role in it fell
+ * through the "no role, no filter" branch meant for personal space.
+ *
+ * Written out rather than derived from NAV.event, because the safe default for a
+ * section nobody has classified yet is to withhold it. A new tab is invisible to
+ * viewers until somebody adds it here, which is a missing tab; the other way round
+ * is an access bug.
+ */
+export const EVENT_VIEW = ['overview', 'participants', 'schedule', 'results', 'standings'];
+
+/**
+ * The roles that mean something INSIDE an event.
+ *
+ * An event context carries these and nothing else, which is how an event role
+ * overrides an organisation one: being an Owner or Sports Admin at an institution
+ * says what you may do THERE, and says nothing about an event you were entered
+ * into as a Participant. Letting the org code through would quietly hand the
+ * organiser's nav to anybody who happened to administer an institution.
+ */
+export const EVENT_ROLE_CODES = ['organiser', 'official', 'poc', 'captain', 'participant'];
+
+/**
+ * Of everything somebody holds, the part that decides an EVENT.
+ *
+ * Applied wherever an event's nav is resolved, so the override is structural
+ * rather than a convention each caller has to remember. Without it, an Org Admin
+ * who happened to be entered into an event got the organiser's whole nav there,
+ * Settings included, because `org_admin` is an unrestricted role - in its own
+ * context.
+ */
+export const eventRoleCodes = (roleCodes: string[]) => roleCodes.filter((c) => EVENT_ROLE_CODES.includes(c));
 
 /**
  * The second filter: what each role may reach inside a context.
@@ -105,10 +177,18 @@ export const ROLE_NAV: Record<string, string[] | null> = {
   viewer: ['dashboard', 'events', 'achievements'],
 
   organiser: null,
-  captain: ['overview', 'participants', 'schedule', 'results', 'standings'],
-  official: ['overview', 'schedule', 'results'],
-  participant: ['overview', 'schedule', 'results', 'standings'],
-  poc: ['overview', 'approvals', 'participants', 'schedule', 'results', 'standings'],
+  // An official's business is the match: what is on, what happened, and where that
+  // leaves the table. Not the event's participants, approvals or communications.
+  //
+  // The list spans two contexts, because an official stands in two - the event and
+  // the match console - and a list written for one of them emptied the other.
+  official: ['overview', 'schedule', 'results', 'standings', 'matchops', 'help'],
+  // Everyone else involved in an event sees the event, and operates none of it.
+  captain: EVENT_VIEW,
+  participant: EVENT_VIEW,
+  // The one exception: a POC approves their own institution's entries, which is
+  // the job the role exists to do.
+  poc: [...EVENT_VIEW, 'approvals'],
 };
 
 export interface WorkspaceContext {
@@ -140,13 +220,26 @@ export interface WorkspaceContext {
 export function resolveNav(
   ctx: WorkspaceContext,
   granted: ReadonlySet<CapabilityKey>,
+  facts: NavFacts = {},
 ): Array<NavItem & { locked: boolean }> {
-  const all = NAV[ctx.kind] ?? [];
+  // Before any of the three filters: items that are not this person's at all.
+  // Omitting `facts` therefore hides them, which is the safe direction - a caller
+  // that forgot to pass it shows too little rather than too much.
+  const all = (NAV[ctx.kind] ?? []).filter((i) => !i.when || !!facts[i.when]);
 
-  // No role at all (the personal context) means no role filter.
-  const codes = ctx.roleCodes.filter((c) => c in ROLE_NAV);
+  // No role this map recognises. In the personal context that is the normal case -
+  // there are no roles to hold there, so nothing is filtered.
+  //
+  // In an EVENT it means somebody involved without a role in it: a player on an
+  // entered team, a member of an enrolled institution. They are not nobody, and
+  // handing them the unfiltered nav offered them the organiser's whole console, so
+  // they get the published view - the same list the URL guard gives them.
+  const isEvent = ctx.kind === 'event' || ctx.kind === 'eventDraft';
+  const held = isEvent ? eventRoleCodes(ctx.roleCodes) : ctx.roleCodes;
+  const codes = held.filter((c) => c in ROLE_NAV);
   if (codes.length === 0) {
-    return all.map((i) => ({ ...i, locked: !!i.needs && !granted.has(i.needs) }));
+    const items = isEvent ? all.filter((i) => EVENT_VIEW.includes(i.key)) : all;
+    return items.map((i) => ({ ...i, locked: !!i.needs && !granted.has(i.needs) }));
   }
 
   // A single unfiltered role (Owner, Org Admin, Organiser) opens the whole context,
@@ -162,8 +255,8 @@ export function resolveNav(
 export const hrefFor = (ctx: WorkspaceContext, item: NavItem) => item.to.replace(':id', ctx.id);
 
 /** Where a context opens: its first item the role can actually use. */
-export function landingFor(ctx: WorkspaceContext, granted: ReadonlySet<CapabilityKey>): string {
-  const items = resolveNav(ctx, granted);
+export function landingFor(ctx: WorkspaceContext, granted: ReadonlySet<CapabilityKey>, facts: NavFacts = {}): string {
+  const items = resolveNav(ctx, granted, facts);
   const first = items.find((i) => !i.locked) ?? items[0];
   return first ? hrefFor(ctx, first) : '/home';
 }

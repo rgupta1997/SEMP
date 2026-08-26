@@ -18,6 +18,8 @@ import { makeGuards } from './middleware/permissions.js';
 import { makeEntitlementGuards } from './middleware/entitlements.js';
 import { makeOrgUnitsRouter } from '../modules/iam/org-units.routes.js';
 import { makeAuditRouter } from '../modules/iam/audit.routes.js';
+import { makeOrgEventsRouter } from '../modules/enrollment/org-events.routes.js';
+import { makeOrgDashboardRouter } from '../modules/enrollment/org-dashboard.routes.js';
 import { makeOrgRolesRouter } from '../modules/iam/org-roles.routes.js';
 import { makeSignInRouter } from '../modules/iam/signin.routes.js';
 import { makeAuthRouter } from '../modules/iam/auth.routes.js';
@@ -25,6 +27,7 @@ import { makeMeRouter } from '../modules/iam/me.routes.js';
 import { makeUsersRouter } from '../modules/iam/users.routes.js';
 import { makeOrganizationsRouter } from '../modules/iam/organizations.routes.js';
 import { makeEventsRouter } from '../modules/championships/championships.routes.js';
+import { makeChampionshipTemplatesRouter } from '../modules/championships/templates.routes.js';
 import { makeStandingsRouter } from '../modules/standings/standings.routes.js';
 import { makeEnrollmentRouter } from '../modules/enrollment/enrollment.routes.js';
 import { makeInvitationsRouter } from '../modules/enrollment/invitations.routes.js';
@@ -33,6 +36,7 @@ import { makeTeamsRouter } from '../modules/teams/teams.routes.js';
 import { makeMatrixImportRouter } from '../modules/import/matrix-import.routes.js';
 import { makePublicRouter } from '../modules/public/public.routes.js';
 import { makeVenuesRouter, makeVenueGroundsRouter } from '../modules/venues/venues.routes.js';
+import { makeProfileRouter } from '../modules/records/profile.routes.js';
 import { makeRecordsRouter } from '../modules/records/records.routes.js';
 import { makeClaimsRouter } from '../modules/records/claims.routes.js';
 import { makeCertificatesRouter } from '../modules/certificates/certificates.routes.js';
@@ -134,6 +138,7 @@ export function buildApp(prisma: Prisma) {
 
   // ----- Phase 2: championship creation - setup-resource writes require the championship's organiser -----
   api.use('/championships', makeEventsRouter(prisma));
+  api.use('/championship-templates', makeChampionshipTemplatesRouter(prisma));
   // Standings (materialized tables + scoring rules) - also under /championships/:id.
   api.use('/championships', makeStandingsRouter(prisma));
   // Matrix import (sections × sport/discipline) - builds the whole setup from a sheet.
@@ -196,31 +201,63 @@ export function buildApp(prisma: Prisma) {
 
   // ----- Records, certificates, people and reports (lifted from the wave branch) -----
 
+  // The subscription gate. Declared before anything it guards, because a gate has
+  // to be mounted ahead of the router it stands in front of - Express matches in
+  // mount order, and a guard added afterwards would never run.
+  const ents = makeEntitlementGuards(prisma);
+
+  /** Gate on the organisation named in the path, not on the caller's own. */
+  const orgParam = { organizationIdFrom: (req: any) => req.params.id as string | undefined };
+
+  // What this caller's subscription makes available, on both ladders. The shell
+  // renders every lock from this one payload rather than asking per capability.
+  api.get('/me/entitlements', ents.readSnapshot);
+
   // Mounted under /organizations because every route is institution-scoped.
+  //
+  // Importing a roll from a file is a paid capability; adding people one at a time
+  // is not. The gate goes on the import paths only, so a free organisation is
+  // never locked out of having members - just out of the bulk route to them.
+  api.use('/organizations/:id/people/import', ents.requireCapability('bulk_player_upload', orgParam));
   api.use('/organizations', makePeopleRouter(prisma));
 
   // Role grants inside an organisation, and the catalogue the matrix is generated
   // from. Mounted at the root because its paths are already fully qualified.
-  // What this caller's subscription makes available, on both ladders. The shell
-  // renders every lock from this one payload rather than asking per capability.
-  api.get('/me/entitlements', makeEntitlementGuards(prisma).readSnapshot);
-
   api.use('/', makeOrgRolesRouter(prisma));
 
   // The audit trail. 864 entries were already being written with nothing to read them.
+  api.use('/organizations/:id/audit', ents.requireCapability('audit_logs', orgParam));
   api.use('/', makeAuditRouter(prisma));
 
   // Campuses and units - the concrete scopes a campus_unit role is granted against.
+  api.use('/organizations/:id/units', ents.requireCapability('multi_campus', orgParam));
   api.use('/organizations', makeOrgUnitsRouter(prisma));
+  api.use('/organizations', makeOrgEventsRouter(prisma));
+  api.use('/organizations', makeOrgDashboardRouter(prisma));
 
   // The permanent record - lifetime timeline + achievements, READ ONLY. A timeline
   // entry changes only by correcting the locked result behind it.
   api.use('/', makeRecordsRouter(prisma));
 
+  // The controlled half of a sports profile, kept apart from the verified half so
+  // an edit can never reach a locked record.
+  api.use('/', makeProfileRouter(prisma));
+
   // Leadership reporting. The impact report is handed the SAME builders the report
   // tabs use, so a board pack and the screen it was promised on cannot disagree.
+  //
+  // Gated on the subscription as well as on the permission. Until now the padlock
+  // on the Reports nav item was the only thing standing between an unentitled org
+  // and the whole report - which is to say, nothing at all, since the route was
+  // reachable by typing the URL. The permission gate inside each handler still
+  // applies; this asks the prior question of whether the tenant has it to permit.
   const reportsRouter = makeReportsRouter(prisma);
+  api.use('/organizations/:id/reports', ents.requireCapability('advanced_reports', orgParam));
+  api.use('/organizations/:id/report-jobs', ents.requireCapability('advanced_reports', orgParam));
   api.use('/', reportsRouter);
+  // Benchmarking is its own capability one tier higher: comparing yourself against
+  // peer institutions is a different product from reporting on yourself.
+  api.use('/organizations/:id/reports/benchmark', ents.requireCapability('benchmarking', orgParam));
   api.use('/', makeBenchmarkRouter(prisma));
   api.use('/', makeImpactRouter(prisma, makeImpactBuilder(prisma, (reportsRouter as any).builders)));
 

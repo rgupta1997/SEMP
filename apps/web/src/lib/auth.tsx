@@ -21,7 +21,7 @@ export interface AuthUser {
 }
 
 export interface ChampionshipRef { id: string; name: string; slug: string; status: string }
-export interface ChampionshipRole { id: string; championship_id: string; championship: ChampionshipRef; role: { id: string; name: string } }
+export interface ChampionshipRole { id: string; championship_id: string; championship: ChampionshipRef; role: { id: string; name: string; code: string | null } }
 export interface Membership { id: string; team_id: string; role: string; jersey_number: number | null; team: any }
 export interface Organization { id: string; name: string; short_name?: string | null; code?: string | null; city?: string | null; logo_url?: string | null }
 export interface OrgMembership { id: string; organization_id: string; organization: Organization; role: string; status: string; joined_at: string }
@@ -31,6 +31,12 @@ export interface AuthContext {
   organization: Organization | null;
   organizations: OrgMembership[];
   official_championship_ids: string[];
+  /**
+   * Championships this account may manage - as their organiser, or as senior
+   * staff of the institution hosting them. Resolved on the server, because the
+   * second route is not visible from `championship_roles`.
+   */
+  managed_championship_ids: string[];
   championship_roles: ChampionshipRole[];
   memberships: Membership[];
 }
