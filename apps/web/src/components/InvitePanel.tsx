@@ -82,7 +82,7 @@ function OrgPicker({ value, onChange, excludeIds }: { value: Org[]; onChange: (o
         placeholder="Search organizations…"
       />
       {open && (
-          <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+          <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-800 dark:bg-slate-900">
             {isFetching && results.length === 0 ? (
               <div className="grid h-16 place-items-center"><Spinner /></div>
             ) : results.length === 0 ? (
@@ -169,7 +169,7 @@ export function InvitePanel({ eventId }: { eventId: string }) {
       </div>
 
       {isLoading ? <Spinner /> : invites.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400 dark:border-slate-700 dark:text-slate-500">
+        <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400 dark:border-slate-800 dark:text-slate-500">
           No organizations yet. Add at least two to auto-generate fixtures - or invite them later.
         </div>
       ) : (

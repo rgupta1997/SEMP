@@ -127,7 +127,7 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
             const isSel = s.id in selected;
             return (
               <button key={s.id} type="button" onClick={() => toggle(s.id)}
-                className={`relative flex flex-col items-center gap-1 rounded-xl border p-3 text-center transition ${isSel ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/15' : 'border-slate-200 hover:border-brand-300 dark:border-slate-700 dark:hover:border-brand-500/50'}`}>
+                className={`relative flex flex-col items-center gap-1 rounded-xl border p-3 text-center transition ${isSel ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/15' : 'border-slate-200 hover:border-brand-300 dark:border-slate-800 dark:hover:border-brand-500/50'}`}>
                 <span className="text-2xl">{s.icon || '◇'}</span>
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{s.name}</span>
                 {isSel && <span className="absolute right-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-brand-500 text-xs text-white">✓</span>}
@@ -311,7 +311,7 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, d
     const added = addedIds.has(id);
     return (
       <button type="button" disabled={added} onClick={() => toggle(id)}
-        className={`relative flex flex-col items-start gap-0.5 rounded-xl border p-3 text-left transition ${added ? 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-60 dark:border-slate-800 dark:bg-slate-800/40' : sel ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/15' : 'border-slate-200 hover:border-brand-300 dark:border-slate-700 dark:hover:border-brand-500/50'}`}>
+        className={`relative flex flex-col items-start gap-0.5 rounded-xl border p-3 text-left transition ${added ? 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-60 dark:border-slate-800 dark:bg-slate-800/40' : sel ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/15' : 'border-slate-200 hover:border-brand-300 dark:border-slate-800 dark:hover:border-brand-500/50'}`}>
         <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{title}</span>
         <span className="text-xs text-slate-400 dark:text-slate-500">{added ? 'already added' : subtitle}</span>
         {sel && !added && <span className="absolute right-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-brand-500 text-xs text-white">✓</span>}

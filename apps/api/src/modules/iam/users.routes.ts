@@ -146,7 +146,7 @@ export function makeUsersRouter(prisma: Prisma): Router {
     const orgId = await assertCanProvision(actor.id, actor.isSuperAdmin, organization_id ?? null);
 
     // Validate the role mapping up front: the actor must organise the championship.
-    if (championship_id && role_id && !actor.isSuperAdmin && !(await guards.organisesChampionship(actor.id, championship_id))) {
+    if (championship_id && role_id && !actor.isSuperAdmin && !(await guards.managesChampionship(actor.id, championship_id))) {
       throw new ForbiddenError('You do not manage this championship');
     }
 

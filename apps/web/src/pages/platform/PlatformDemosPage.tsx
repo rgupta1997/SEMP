@@ -87,7 +87,7 @@ export function PlatformDemosPage() {
                   <tr key={r.id}>
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-2">
-                        {r.brand_color && <span className="inline-block h-3.5 w-3.5 rounded-full border border-slate-200 dark:border-slate-700" style={{ background: r.brand_color }} />}
+                        {r.brand_color && <span className="inline-block h-3.5 w-3.5 rounded-full border border-slate-200 dark:border-slate-800" style={{ background: r.brand_color }} />}
                         <span className="font-medium text-slate-700 dark:text-slate-200">{r.client_name}</span>
                         {r.visibility === 'private' && <Badge tone="violet">private</Badge>}
                       </div>
@@ -281,7 +281,7 @@ function CreateSandboxModal({ onClose }: { onClose: () => void }) {
               return (
                 <button key={s.id} type="button"
                   onClick={() => setSports((cur) => (isSel ? cur.filter((x) => x !== s.name) : [...cur, s.name]))}
-                  className={`relative flex flex-col items-center gap-1 rounded-xl border p-3 text-center transition ${isSel ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/15' : 'border-slate-200 hover:border-brand-300 dark:border-slate-700 dark:hover:border-brand-500/50'}`}>
+                  className={`relative flex flex-col items-center gap-1 rounded-xl border p-3 text-center transition ${isSel ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/15' : 'border-slate-200 hover:border-brand-300 dark:border-slate-800 dark:hover:border-brand-500/50'}`}>
                   <span className="text-2xl">{s.icon || '◇'}</span>
                   <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{s.name}</span>
                   {isSel && <span className="absolute right-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-brand-500 text-xs text-white">✓</span>}
@@ -291,7 +291,7 @@ function CreateSandboxModal({ onClose }: { onClose: () => void }) {
           </div>
         </Field>
 
-        <details className="rounded-lg border border-slate-200 dark:border-slate-700">
+        <details className="rounded-lg border border-slate-200 dark:border-slate-800">
           <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300">
             Participating organizations (defaults shown — edit if the client wants specific names)
           </summary>

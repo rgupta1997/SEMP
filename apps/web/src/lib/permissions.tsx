@@ -23,15 +23,22 @@ export function usePermissions() {
   const { pathname } = useLocation();
   const isSuper = !!ctx?.user.is_super_admin;
 
-  const organisesAny = !!ctx?.championship_roles?.some((r) => r.role.name === 'Organiser');
+  // Resolved by the server (manage-access.ts), for two reasons. It used to match
+  // on the role's display NAME against a table with a rename screen, so renaming
+  // "Organiser" silently revoked every organiser. And it could only ever see one
+  // of the two ways of managing an event: an institution's owner manages the
+  // events it hosts without holding an Organiser row on any of them.
+  const managedIds = ctx?.managed_championship_ids ?? [];
+  const organisesAny = managedIds.length > 0;
   const officialIds = ctx?.official_championship_ids ?? [];
-  const isOfficialAny = officialIds.length > 0 || !!ctx?.championship_roles?.some((r) => r.role.name === 'Official');
+  // By CODE, not display name - the roles table has a rename screen, and matching
+  // on the label is how renaming a role silently revokes everybody holding it.
+  const isOfficialAny = officialIds.length > 0 || !!ctx?.championship_roles?.some((r) => r.role.code === 'official');
   const orgAdminAny = !!ctx?.organizations?.some((m) => m.role === 'owner' || m.role === 'admin');
   const isCaptain = !!ctx?.memberships?.some((m) => m.role === 'captain' || m.role === 'vice_captain');
 
   // Per-entity checks (preferred for new code).
-  const organisesChampionship = (id?: string | null) =>
-    isSuper || (!!id && !!ctx?.championship_roles?.some((r) => r.championship_id === id && r.role.name === 'Organiser'));
+  const organisesChampionship = (id?: string | null) => isSuper || (!!id && managedIds.includes(id));
   const canManageChampionship = (id?: string | null) => (id ? organisesChampionship(id) : isSuper || organisesAny);
   const canManageOrg = (id?: string | null) =>
     isSuper || (id

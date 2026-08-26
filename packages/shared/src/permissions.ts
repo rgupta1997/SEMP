@@ -51,6 +51,12 @@ export const PERMISSIONS = {
   // grantable.
   'fixture.unlock': { label: 'Reverse a locked result', scope: 'championship', area: 'Results' },
 
+  // The honours board is a RECORD, not a directory. It names people, but what is
+  // being read is what the institution has won - so it belongs to the Records
+  // module. Reading it through people.view put it in the People module instead,
+  // which meant an institution that limits its directory to staff also hid its own
+  // Hall of Fame from every student in it.
+  'achievement.view': { label: 'View the honours board', scope: 'org', area: 'Records' },
   'achievement.validate': { label: 'Validate achievement claims', scope: 'org', area: 'Records' },
   'certificate.issue': { label: 'Issue certificates', scope: 'org', area: 'Records' },
   'report.view': { label: 'View reports', scope: 'org', area: 'Reports' },

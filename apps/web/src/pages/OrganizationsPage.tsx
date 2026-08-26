@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Landmark } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import { useWorkspace } from '../lib/useWorkspace';
 import { api } from '../lib/api';
 import { useApiMutation } from '../lib/hooks';
 import { InstitutionFormModal } from '../components/InstitutionFormModal';
@@ -100,6 +101,15 @@ function PendingSection({ memberships }: { memberships: any[] }) {
 }
 
 function Section({ title, memberships }: { title: string; memberships: any[] }) {
+  const ws = useWorkspace();
+  const { pathname } = useLocation();
+
+  // Opening an organisation SWITCHES CONTEXT rather than just following a link
+  // (F-054). Navigating without switching leaves the sidebar showing the personal
+  // nav while the page shows an organisation - the two disagree, and the person is
+  // left unable to reach the rest of the org they just opened.
+  const open = (orgId: string) => ws.enter(orgId, `/organizations/${orgId}/overview`, pathname);
+
   if (memberships.length === 0) return null;
   return (
     <section>
@@ -123,9 +133,12 @@ function Section({ title, memberships }: { title: string; memberships: any[] }) 
               <div className="flex flex-col items-end gap-2">
                 <Badge tone="brand">{m.role}</Badge>
                 {/* Owners/admins manage; members (and other roles) can still view the org's teams + members. */}
-                <Link to={`/organizations/${m.organization_id}/overview`} className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300">
+                <button
+                  onClick={() => open(m.organization_id)}
+                  className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300"
+                >
                   {canManage ? 'Manage →' : 'View →'}
-                </Link>
+                </button>
               </div>
             </Card>
           );

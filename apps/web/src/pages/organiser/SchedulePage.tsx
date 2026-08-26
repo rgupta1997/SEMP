@@ -292,7 +292,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
               // as one continuous, oddly-restarting pool. A bordered box with a named
               // badge makes the stage boundary impossible to miss.
               return (
-                <div key={seq} className="rounded-xl border-2 border-slate-200 p-4 dark:border-slate-700">
+                <div key={seq} className="rounded-xl border-2 border-slate-200 p-4 dark:border-slate-800">
                   <div className="mb-3 flex items-center gap-2">
                     <Badge tone="violet">{stageLabel(seq, groupHasBracket)}</Badge>
                     <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Stage {seq}</span>

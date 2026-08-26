@@ -18,16 +18,32 @@ import { SchedulePage } from './pages/organiser/SchedulePage';
 import { ResultsPage } from './pages/organiser/ResultsPage';
 import { StandingsPage } from './pages/organiser/StandingsPage';
 import { EventSettingsPage } from './pages/organiser/EventSettingsPage';
+import { EventCommunicationsPage } from './pages/organiser/EventCommunicationsPage';
+import { EventCertificatesPage } from './pages/organiser/EventCertificatesPage';
 import { EventParticipantsPage } from './pages/organiser/EventParticipantsPage';
 import { EventOrganisersPage } from './pages/organiser/EventOrganisersPage';
 
 // Organizations (multi-org membership + management)
 import { OrganizationsPage } from './pages/OrganizationsPage';
-import { OrgOverviewPage } from './pages/organization/OrgOverviewPage';
 import { TeamsPage } from './pages/organization/TeamsPage';
 import { RosterPage } from './pages/organization/RosterPage';
-import { StudentsPage } from './pages/organization/StudentsPage';
 import { RolesPage } from './pages/organization/RolesPage';
+import { SportsProfilePage } from './pages/participant/SportsProfilePage';
+import { MyGamePage } from './pages/MyGamePage';
+import { OrgDashboardPage } from './pages/organization/OrgDashboardPage';
+import { PlayersPage } from './pages/organization/PlayersPage';
+import { PlayerDetailPage } from './pages/organization/PlayerDetailPage';
+import { OrgEventsPage } from './pages/organization/OrgEventsPage';
+import { OrgAchievementsPage } from './pages/organization/OrgAchievementsPage';
+import { OrgReportsPage } from './pages/organization/OrgReportsPage';
+import { RollImportPage } from './pages/organization/RollImportPage';
+import { CertificatesDashboard } from './pages/organization/certificates/CertificatesDashboard';
+import { IssuedRegisterPage } from './pages/organization/certificates/IssuedRegisterPage';
+import { CertificateDetailPage } from './pages/organization/certificates/CertificateDetailPage';
+import { TemplateGalleryPage } from './pages/organization/certificates/TemplateGalleryPage';
+import { TemplatePreviewPage } from './pages/organization/certificates/TemplatePreviewPage';
+import { VerifyCertificatePage } from './pages/public/VerifyCertificatePage';
+import { AdminPage } from './pages/organization/AdminPage';
 import { MembersPage } from './pages/organization/MembersPage';
 import { PocsPage } from './pages/organization/PocsPage';
 import { InvitationsPage } from './pages/organization/InvitationsPage';
@@ -77,7 +93,8 @@ function AuthenticatedRoutes() {
     <Routes>
       <Route element={<AppShell />}>
         {/* Profile / My Game */}
-        <Route path="/profile" element={<ParticipantDashboard />} />
+        <Route path="/home" element={<MyGamePage />} />
+        <Route path="/profile" element={<SportsProfilePage />} />
         <Route path="/profile/achievements" element={<ParticipantAchievementsPage />} />
         <Route path="/profile/matches" element={<ParticipantMatchesPage />} />
         <Route path="/profile/matches/:fixtureId" element={<ParticipantMatchPage />} />
@@ -85,12 +102,23 @@ function AuthenticatedRoutes() {
 
         {/* Organizations */}
         <Route path="/organizations" element={<OrganizationsPage />} />
-        <Route path="/organizations/:orgId/overview" element={<OrgOverviewPage />} />
+        <Route path="/organizations/:orgId/overview" element={<OrgDashboardPage />} />
         <Route path="/organizations/:orgId/teams" element={<TeamsPage />} />
         <Route path="/organizations/:orgId/teams/:teamId" element={<RosterPage />} />
-        <Route path="/organizations/:orgId/students" element={<StudentsPage />} />
+        <Route path="/organizations/:orgId/students" element={<PlayersPage />} />
+        <Route path="/organizations/:orgId/people/:userId" element={<PlayerDetailPage />} />
         <Route path="/organizations/:orgId/members" element={<MembersPage />} />
         <Route path="/organizations/:orgId/roles" element={<RolesPage />} />
+        <Route path="/organizations/:orgId/admin" element={<AdminPage />} />
+        <Route path="/organizations/:orgId/events" element={<OrgEventsPage />} />
+        <Route path="/organizations/:orgId/achievements" element={<OrgAchievementsPage />} />
+        <Route path="/organizations/:orgId/reports" element={<OrgReportsPage />} />
+        <Route path="/organizations/:orgId/certificates" element={<CertificatesDashboard />} />
+        <Route path="/organizations/:orgId/certificates/register" element={<IssuedRegisterPage />} />
+        <Route path="/organizations/:orgId/certificates/templates" element={<TemplateGalleryPage />} />
+        <Route path="/organizations/:orgId/certificates/templates/:templateId" element={<TemplatePreviewPage />} />
+        <Route path="/organizations/:orgId/certificates/:certId" element={<CertificateDetailPage />} />
+        <Route path="/organizations/:orgId/students/import" element={<RollImportPage />} />
         <Route path="/organizations/:orgId/invitations" element={<InvitationsPage />} />
 
         {/* Discover + Championships + Host */}
@@ -101,12 +129,14 @@ function AuthenticatedRoutes() {
         <Route path="/championships/:eventId" element={<EventLayout />}>
           <Route index element={<EventDashboard />} />
           <Route path="setup" element={<EventSetupPage />} />
-          <Route path="team" element={<EventOrganisersPage />} />
+          <Route path="organisers" element={<EventOrganisersPage />} />
           <Route path="approvals" element={<ApprovalsPage />} />
           <Route path="participants" element={<EventParticipantsPage />} />
           <Route path="schedule" element={<SchedulePage />} />
           <Route path="results" element={<ResultsPage />} />
           <Route path="standings" element={<StandingsPage />} />
+          <Route path="communications" element={<EventCommunicationsPage />} />
+          <Route path="certificates" element={<EventCertificatesPage />} />
           <Route path="settings" element={<EventSettingsPage />} />
         </Route>
 
@@ -146,6 +176,17 @@ function AppRoutes() {
   // whether the visitor is signed in (so the link works for anyone).
   const publicMatch = useMatch('/c/:token');
   if (publicMatch?.params.token) return <PublicChampionshipPage token={publicMatch.params.token} />;
+
+  // Certificate verification, outside the shell and outside auth for the same
+  // reason: the whole value of a certificate is that a STRANGER can check it. An
+  // employer or a selector has no account here, and a verifier that asked them to
+  // sign in would verify nothing for the people who most need it. Matched before
+  // the signed-out redirect below so it works whoever opens it.
+  // Both matches are read unconditionally - a hook behind an `if` changes the hook
+  // order between renders, which React does not forgive.
+  const verifyMatch = useMatch('/verify/:token');
+  const verifyRoot = useMatch('/verify');
+  if (verifyMatch || verifyRoot) return <VerifyCertificatePage token={verifyMatch?.params.token} />;
 
   if (loading) return <div className="grid h-screen place-items-center"><Spinner /></div>;
   // Logged out: a public marketing landing page at the root, with the sign-in

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Flag } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useEvent } from './EventLayout';
+import { useAuth } from '../../lib/auth';
 import { usePageFilters } from '../../lib/filters';
 import { useApi } from '../../lib/hooks';
 import { Badge, Card, EmptyState, Spinner, StatusBadge, cn } from '../../components/ui';
@@ -10,6 +11,8 @@ import { Badge, Card, EmptyState, Spinner, StatusBadge, cn } from '../../compone
 interface ResultRow {
   id: string;
   status: string;
+  /** Whoever was assigned to score this match, if anyone. */
+  official_id: string | null;
   round: string | null;
   entry_type: string | null;
   home_score: number | null;
@@ -37,7 +40,7 @@ function TeamChip({ team, winner }: { team: ResultRow['home']; winner?: boolean 
   if (!team) {
     return (
       <span
-        className="grid h-9 min-w-9 place-items-center rounded-lg border border-dashed border-slate-300 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:border-slate-700 dark:text-slate-500"
+        className="grid h-9 min-w-9 place-items-center rounded-lg border border-dashed border-slate-300 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:border-slate-800 dark:text-slate-500"
         title="To be decided"
       >
         TBD
@@ -59,6 +62,7 @@ function TeamChip({ team, winner }: { team: ResultRow['home']; winner?: boolean 
 
 export function ResultsPage() {
   const { eventId, canManage } = useEvent();
+  const { ctx } = useAuth();
   const navigate = useNavigate();
   const { data: fixtures = [], isLoading, isFetching } = useApi<ResultRow[]>(`/championships/${eventId}/fixtures`);
   // Is this championship awarding custom (hand-entered) points anywhere? If so, the
@@ -110,8 +114,21 @@ export function ResultsPage() {
     return [...map.values()];
   }, [rows]);
 
+  // Who may open the console for THIS match: the organiser, or the official the
+  // match was assigned to. Per match, not per championship, because that is the
+  // rule the server enforces (permissions.ts, fixtureScorer) - an official offered
+  // a row they are not on would be refused the moment the console loaded.
+  //
+  // Officials could previously reach Results and see every match, and tap none of
+  // them: the whole tab was gated on canManage, which only an organiser holds. The
+  // one person actually there to record the score had to leave the event and find
+  // the match again in their own Officiating queue.
+  const myId = ctx?.user?.id;
+  const canScore = (f: ResultRow) => canManage || (!!myId && f.official_id === myId);
+  const scoresAny = canManage || rows.some(canScore);
+
   const open = (f: ResultRow) => {
-    if (!canManage) return;
+    if (!canScore(f)) return;
     navigate(`/score/${f.id}`, { state: { from: `/championships/${eventId}/results` } });
   };
 
@@ -121,7 +138,9 @@ export function ResultsPage() {
         <p className="text-sm text-slate-500 dark:text-slate-400">
           {canManage
             ? 'Tap a match to enter its result. Standings recalculate instantly.'
-            : 'Live scores and final results across the championship.'}
+            : scoresAny
+              ? 'Tap a match you are officiating to record its result.'
+              : 'Live scores and final results across the championship.'}
         </p>
         {/* Background refresh (e.g. returning here right after a sign-off) keeps the
             list visible but signals that the latest scores are being pulled. */}
@@ -170,7 +189,7 @@ export function ResultsPage() {
                   // is pinned (sticky) so it stays reachable. The inner wrapper uses
                   // `sm:contents` so on larger screens the three cells fall back into
                   // the original 1fr / auto / 1fr grid unchanged.
-                  <Card key={f.id} interactive={canManage} onClick={() => open(f)} className="block overflow-x-auto sm:grid sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center sm:gap-x-4 sm:overflow-visible sm:p-4">
+                  <Card key={f.id} interactive={canScore(f)} onClick={() => open(f)} className="block overflow-x-auto sm:grid sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center sm:gap-x-4 sm:overflow-visible sm:p-4">
                     <div className="flex w-max items-center gap-x-2 py-3 pl-3 sm:contents">
                     {/* Left cell (1fr): match type — always shown in full.
                         Both outer cells are equal 1fr so the auto center column is

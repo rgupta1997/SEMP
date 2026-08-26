@@ -3,9 +3,14 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Compass, Flag, FlaskConical, Landmark, Layers, LayoutGrid, LayoutList, Lock,
   Mail, Medal, Menu, MessageSquare, Moon, Plus, Sun, Trophy, Upload, User, Users, X,
+  Zap,
 } from 'lucide-react';
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
 import { BRAND } from '../lib/brand';
+import { ContextSwitcher } from './ContextSwitcher';
+import { useWorkspace } from '../lib/useWorkspace';
+import { hrefFor, resolveNav } from '../lib/workspace';
+import { Lock as LockIcon } from 'lucide-react';
 import { parseEventId } from '../lib/championship-nav';
 import { FeedbackWidget } from './FeedbackWidget';
 import { useFilterBar, FilterProvider } from '../lib/filters';
@@ -19,7 +24,9 @@ interface NavItem { to: string; label: string; icon: ReactNode; end?: boolean }
 interface NavGroup { group: string; items: NavItem[] }
 
 export function roleHome(role: AppRole): string {
-  return role === 'system' ? '/platform/sports' : '/profile';
+  // The personal context lands on My Game, per the prototype - not the profile.
+  // The profile is a record of what you have done; My Game is what you do next.
+  return role === 'system' ? '/platform/sports' : '/home';
 }
 
 function navFor(role: AppRole): NavGroup[] {
@@ -48,7 +55,8 @@ function navFor(role: AppRole): NavGroup[] {
   }
   return [{
     group: BRAND.name, items: [
-      { to: '/profile', label: 'My Game', icon: <User size={16} />, end: true },
+      { to: '/home', label: 'My Game', icon: <Zap size={16} />, end: true },
+      { to: '/profile', label: 'My Sports Profile', icon: <User size={16} /> },
       // Officials reach their assigned matches here. Always shown so a freshly-assigned
       // official finds it without re-logging in (the page itself is empty until assigned).
       { to: '/officiating', label: 'Officiating', icon: <Flag size={16} /> },
@@ -116,6 +124,7 @@ interface EventSummary { id: string; name: string }
 
 export function AppShell() {
   const { ctx, activeRole, logout } = useAuth();
+  const ws = useWorkspace();
   const { theme, toggle } = useTheme();
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -129,8 +138,12 @@ export function AppShell() {
 
   if (!ctx) return null;
 
-  const groups = navFor(activeRole);
-  const subtitle = championship?.name ?? ROLE_LABELS[activeRole];
+  // The platform console is not a context - it is the whole tenant, so it keeps its
+  // flat nav. Everyone else navigates by context.
+  const isPlatform = activeRole === 'system';
+  const groups = isPlatform ? navFor(activeRole) : [];
+  const contextNav = !isPlatform && ws.active ? resolveNav(ws.active, ws.granted, ws.navFacts) : [];
+  const subtitle = championship?.name ?? (isPlatform ? ROLE_LABELS[activeRole] : ws.active?.name ?? '');
 
   // Feedback button: only on overview/landing surfaces (My Game, Discover, My
   // Championships, an org's overview, a championship's overview) - not deep inner
@@ -165,7 +178,46 @@ export function AppShell() {
             <BrandMark variant="white" height={22} />
             <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-[background-color,color,transform] duration-150 hover:bg-[var(--sidebar-active)] hover:text-white active:scale-90 md:hidden" aria-label="Close menu"><X size={16} /></button>
           </div>
+          {/* The switcher sits above the nav because it changes what the nav IS. */}
+          {!isPlatform && ws.contexts.length > 0 && (
+            <div className="px-3 pt-3">
+              <ContextSwitcher
+                contexts={ws.contexts}
+                active={ws.active}
+                granted={ws.granted}
+                navFacts={ws.navFacts}
+                onSwitch={(id) => { ws.switchTo(id); setSidebarOpen(false); }}
+              />
+            </div>
+          )}
           <nav className="flex-1 overflow-y-auto px-3 py-4">
+            {!isPlatform && ws.active && contextNav.map((it) => {
+              const href = hrefFor(ws.active!, it);
+              // A locked item is shown, not hidden. Hiding it would leave someone
+              // unable to discover the product does the thing at all - which loses
+              // an upgrade rather than earning one. The page it opens names the
+              // missing capability, never the price.
+              return (
+                <NavLink
+                  key={it.key}
+                  to={href}
+                  // `it.end` alone: suppressing it inside an event left the event
+                  // root matching every section under it, so Overview stayed lit
+                  // wherever you were.
+                  end={it.end}
+                  onClick={() => setSidebarOpen(false)}
+                  title={it.locked ? `Needs ${it.needs}` : undefined}
+                  className={({ isActive }) => cn(
+                    'mb-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-[background-color,color] duration-150',
+                    isActive ? 'bg-[var(--sidebar-active)] text-white' : 'text-slate-400 hover:bg-[var(--sidebar-active)] hover:text-white',
+                    it.locked && 'opacity-60',
+                  )}
+                >
+                  <span className="flex-1">{it.label}</span>
+                  {it.locked && <LockIcon size={12} className="flex-none opacity-80" />}
+                </NavLink>
+              );
+            })}
             {groups.map((g) => (
               <div key={g.group} className="mb-4">
                 <div className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">{g.group}</div>
@@ -216,8 +268,8 @@ export function AppShell() {
                 {menuOpen && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                    <div className="animate-dropdown absolute right-0 z-20 mt-2 w-52 rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
-                      <div className="border-b border-slate-100 px-4 py-2.5 dark:border-slate-700">
+                    <div className="animate-dropdown absolute right-0 z-20 mt-2 w-52 rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-800 dark:bg-slate-900">
+                      <div className="border-b border-slate-100 px-4 py-2.5 dark:border-slate-800">
                         <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{ctx.user.name}</div>
                         <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.email}</div>
                         {ctx.user.phone && <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.phone}</div>}

@@ -5,7 +5,8 @@ import { api } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
 import { CHAMPIONSHIP_STATUS } from '@semp/shared';
 import { titleCase } from '../../lib/format';
-import { Button, Card, CardBody, CardHeader, confirmDialog, Field, Input, Pills, Progress, StatusBadge, Textarea, toast } from '../../components/ui';
+import { Button, Card, CardBody, CardHeader, confirmDialog, Field, Input, Pills, Progress, Select, StatusBadge, Textarea, toast } from '../../components/ui';
+import { useWorkspace } from '../../lib/useWorkspace';
 import { StandingsRulesCard } from '../../components/StandingsRulesCard';
 
 export function EventSettingsPage() {
@@ -18,6 +19,17 @@ export function EventSettingsPage() {
   const [endDate, setEndDate] = useState(championship.end_date?.slice(0, 10) ?? '');
   const [visibility, setVisibility] = useState<'public' | 'private'>(championship.visibility === 'private' ? 'private' : 'public');
   const [saved, setSaved] = useState(false);
+
+  // Which organisation is running this. It decides whose signature goes on the
+  // event's certificates, so the Certificates page points people here when it is
+  // unset - which means this control has to exist.
+  const ws = useWorkspace();
+  const hostable = ws.contexts.filter(
+    (c) => c.kind === 'org' && c.roleCodes.some((r) => r === 'owner' || r === 'org_admin'),
+  );
+  const [hostOrgId, setHostOrgId] = useState<string>(
+    (championship as any).host_organization_id ?? '',
+  );
 
   const save = useApiMutation(
     (body: any) => api('PATCH', `/championships/${eventId}`, body),
@@ -43,6 +55,24 @@ export function EventSettingsPage() {
             <Field label="End date"><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} /></Field>
           </div>
           <Field label="Host city / venue"><Input value={venue} onChange={(e) => setVenue(e.target.value)} /></Field>
+          {/* Only offered to somebody who could actually host on an organisation's
+              behalf - the server refuses any other choice, and an option that is
+              always rejected is worse than no option. */}
+          {hostable.length > 0 ? (
+            <Field
+              label="Hosted by"
+              hint="Whose event this is. Certificates for it carry this organisation's name and signature."
+            >
+              <Select value={hostOrgId} onChange={(e) => setHostOrgId(e.target.value)}>
+                <option value="">Nobody — an individual is hosting</option>
+                {hostable.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </Select>
+            </Field>
+          ) : (championship as any).host_organization ? (
+            <Field label="Hosted by" hint="Only an owner or administrator of that organisation can change this.">
+              <Input value={(championship as any).host_organization.name} readOnly />
+            </Field>
+          ) : null}
           <Field label="Description"><Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
           <Field label="Visibility" hint={visibility === 'private'
             ? 'Hidden from Discover - organizations can only join through your invitations.'
@@ -55,7 +85,11 @@ export function EventSettingsPage() {
           <div className="flex items-center justify-end gap-3">
             {saved && <span className="text-sm font-medium text-emerald-600">Saved ✓</span>}
             <Button disabled={save.isPending}
-              onClick={() => save.mutate({ name, venue: venue || undefined, description: description || undefined, start_date: startDate, end_date: endDate, visibility }, { onSuccess: () => toast.success('Championship saved'), onError: (e: any) => toast.error(e.message) })}>
+              onClick={() => save.mutate({
+                name, venue: venue || undefined, description: description || undefined,
+                start_date: startDate, end_date: endDate, visibility,
+                ...(hostable.length > 0 ? { host_organization_id: hostOrgId || null } : {}),
+              }, { onSuccess: () => toast.success('Championship saved'), onError: (e: any) => toast.error(e.message) })}>
               {save.isPending ? 'Saving…' : 'Save changes'}
             </Button>
           </div>

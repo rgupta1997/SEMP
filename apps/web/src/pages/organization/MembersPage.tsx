@@ -3,7 +3,6 @@ import { Lock, ShieldCheck, Users } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useTableControls } from '../../lib/hooks';
-import { OrgTabs } from '../../components/OrgTabs';
 import {
   Avatar, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field,
   ListToolbar, Modal, PageHeader, SearchInput, Select, Spinner, toast,
@@ -120,8 +119,14 @@ function GrantModal({
   );
 }
 
-export function MembersPage() {
-  const { orgId = '' } = useParams();
+/**
+ * Rendered standalone at its own route, and embedded inside the Administration
+ * rail. `embedded` suppresses the page header and org tabs - the rail already
+ * says where you are, and two sets of navigation is one too many.
+ */
+export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; orgId?: string } = {}) {
+  const params = useParams();
+  const orgId = orgIdProp ?? params.orgId ?? '';
   const [granting, setGranting] = useState<Member | null>(null);
 
   const members = useApi<Member[]>(`/organizations/${orgId}/members`);
@@ -180,8 +185,11 @@ export function MembersPage() {
 
   return (
     <>
-      <PageHeader title="Members" subtitle="Who belongs to this organisation, and what each of them may do." />
-      <OrgTabs orgId={orgId} />
+      {!embedded && (
+        <>
+          <PageHeader title="Members" subtitle="Who belongs to this organisation, and what each of them may do." />
+        </>
+      )}
 
       <Card>
         <CardBody>
@@ -196,7 +204,7 @@ export function MembersPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 text-left font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 dark:border-slate-700">
+                  <tr className="border-b border-slate-200 text-left font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 dark:border-slate-800">
                     <th className="px-3 py-2.5">Member</th>
                     <th className="px-3 py-2.5">Membership</th>
                     <th className="px-3 py-2.5">Roles &amp; scope</th>

@@ -144,7 +144,7 @@ function TabBar<T extends string>({ value, onChange, options, label }:
   return (
     <div>
       <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</div>
-      <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-800/60">
+      <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-800/60">
         {options.map((o) => (
           <button key={o.value} type="button" onClick={() => onChange(o.value)}
             className={cn('rounded-lg px-3 py-1.5 text-sm font-medium transition',
@@ -860,7 +860,7 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
                       className={cn('flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition',
                         isActive ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10'
                           : dead ? 'border-slate-200 opacity-60 hover:opacity-100 dark:border-slate-800'
-                            : 'border-slate-200 hover:border-brand-300 dark:border-slate-700')}>
+                            : 'border-slate-200 hover:border-brand-300 dark:border-slate-800')}>
                       <span className="font-medium text-slate-700 dark:text-slate-200">{r.label}</span>
                       <span className={cn('text-xs font-semibold', r.winner ? 'text-brand-600 dark:text-brand-300' : 'text-slate-400 dark:text-slate-500')}>{rubberScore(r, i)}</span>
                     </button>

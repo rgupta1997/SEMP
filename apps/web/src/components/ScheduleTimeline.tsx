@@ -184,7 +184,7 @@ function cardTint(status: string, live: boolean): string {
       return 'border-dashed border-slate-300 bg-slate-50 dark:border-slate-600 dark:bg-slate-800/60';
     case 'postponed':
     case 'cancelled':
-      return 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60';
+      return 'border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/60';
     default:
       return 'border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10';
   }
@@ -357,14 +357,14 @@ export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, onU
                         aria-label={`Schedule ${row.sport} ${row.discipline} at ${pad(h)}:${pad(q * 15)}`}
                         className={cn(
                           'group absolute top-0 grid place-items-center text-slate-300 transition-colors hover:bg-brand-50 dark:text-slate-600 dark:hover:bg-brand-500/10',
-                          q === 0 ? 'border-l border-slate-200 dark:border-slate-700/80' : 'border-l border-dashed border-slate-100 dark:border-slate-800/60',
+                          q === 0 ? 'border-l border-slate-200 dark:border-slate-800' : 'border-l border-dashed border-slate-100 dark:border-slate-800/60',
                         )}
                         style={{ left: hi * HOUR_PX + q * QUARTER_PX, width: QUARTER_PX, height: rowH }}
                       >
                         <span className="text-xs opacity-0 transition-opacity group-hover:opacity-100">+</span>
                       </button>
                     ) : (
-                      <div key={`${h}-${q}`} className={cn('absolute top-0', q === 0 ? 'border-l border-slate-200 dark:border-slate-700/80' : 'border-l border-dashed border-slate-100 dark:border-slate-800/60')}
+                      <div key={`${h}-${q}`} className={cn('absolute top-0', q === 0 ? 'border-l border-slate-200 dark:border-slate-800' : 'border-l border-dashed border-slate-100 dark:border-slate-800/60')}
                         style={{ left: hi * HOUR_PX + q * QUARTER_PX, width: QUARTER_PX, height: rowH }} />
                     )
                   )))}

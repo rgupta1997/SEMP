@@ -16,6 +16,11 @@ export const ROLE_CODES = {
   official: 'official',
   captain: 'captain',
   participant: 'participant',
+  // The point of contact an institution nominates for an event. It exists as a
+  // role row, the web nav has an entry for it, and the breakdown lists it beside
+  // the other four - it was simply missing here, which left it the one event role
+  // the server could not resolve by code.
+  poc: 'poc',
 } as const;
 
 export type RoleCode = (typeof ROLE_CODES)[keyof typeof ROLE_CODES];

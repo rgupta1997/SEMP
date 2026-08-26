@@ -50,6 +50,12 @@
   --color-eos-bad:      #DE3A3A;
   --color-eos-bad-soft: #FBE6E6;
   --color-eos-cyan:     #5CE1E6;
+  /* ---- One panel radius, everywhere ----
+     The EOS prototype draws every card at 14px, and the Tailwind half of the app
+     had drifted to rounded-2xl (16) for cards, rounded-xl (12) for tables and
+     rounded-md (6) for toolbars - three edges on one screen. This is the single
+     knob; `rounded-card` is the only radius a page-level surface should use. */
+  --radius-card: 14px;
 }
 
 :root {

@@ -1,5 +1,6 @@
 import type { Prisma } from '../../infra/prisma.js';
 import { applyUserInvitations } from './user-invitations.service.js';
+import { managedChampionshipIds } from '../championships/manage-access.js';
 
 // Assembles the full authentication context the web app needs to render the
 // unified shell and decide what the user can act on:
@@ -7,6 +8,8 @@ import { applyUserInvitations } from './user-invitations.service.js';
 //   - the user's home organization (optional) + every org they're a member of
 //   - championship-scoped role assignments (user_championship_roles)
 //   - team memberships (captain / player rows)
+//   - the championships they may MANAGE, which is not derivable from the above:
+//     it also covers the events their institution hosts
 export async function buildAuthContext(prisma: Prisma, user: any) {
   const { password_hash, ...publicUser } = user;
 
@@ -17,7 +20,7 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
 
   // These reads are independent - run them together rather than serially, since
   // this context is assembled on every login and every /me hit.
-  const [orgFromUser, orgMemberships, championshipRoleRows, officialRows, memberships] = await Promise.all([
+  const [orgFromUser, orgMemberships, championshipRoleRows, officialRows, orgRoleRows, memberships] = await Promise.all([
     user.organization_id
       ? prisma.organizations.findUnique({ where: { id: user.organization_id } })
       : Promise.resolve(null),
@@ -30,13 +33,24 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
       where: { user_id: user.id },
       include: {
         championships: { select: { id: true, name: true, slug: true, status: true } },
-        roles: { select: { id: true, name: true } },
+        roles: { select: { id: true, name: true, code: true } },
       },
       orderBy: { assigned_at: 'desc' },
     }),
     prisma.championship_officials.findMany({
       where: { user_id: user.id, is_active: true },
       select: { championship_id: true },
+    }),
+    // Explicit organisation role grants. Only ACTIVE ones: a SUSPENDED grant keeps
+    // its scope and history but must grant nothing while it is suspended, and an
+    // INVITED one has not been accepted yet.
+    prisma.user_org_roles.findMany({
+      where: { user_id: user.id, status: 'ACTIVE' },
+      select: {
+        organization_id: true,
+        scope_ref: true,
+        roles: { select: { code: true, name: true } },
+      },
     }),
     prisma.team_members.findMany({
       where: { user_id: user.id, is_active: true },
@@ -73,6 +87,21 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
       joined_at: m.joined_at,
     })),
     official_championship_ids: officialRows.map((o) => o.championship_id),
+    // Answered here rather than on the client, which was deciding it by role NAME
+    // against a table that has a rename screen, and could only ever see half of it
+    // - an institution's owner manages the events it hosts without holding an
+    // Organiser row on any of them.
+    managed_championship_ids: await managedChampionshipIds(prisma, user.id),
+    // What this person was explicitly GRANTED per organisation, as opposed to what
+    // their membership implies. The shell unions the two: a Sports Admin grant has
+    // to widen the nav, and losing it must not silently remove the member's own
+    // baseline access.
+    org_roles: orgRoleRows.map((g) => ({
+      organization_id: g.organization_id,
+      code: g.roles?.code ?? null,
+      name: g.roles?.name ?? null,
+      scope_ref: g.scope_ref,
+    })),
     championship_roles: championshipRoleRows.map((r) => ({
       id: r.id,
       championship_id: r.championship_id,

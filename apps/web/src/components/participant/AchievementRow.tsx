@@ -29,7 +29,7 @@ export function AchievementRow({ group }: { group: AchievementGroup }) {
       {/* Hover tooltip - per-occurrence meta (championship · tournament · match). */}
       <div
         role="tooltip"
-        className="invisible absolute left-0 top-full z-20 mt-2 w-[min(30rem,90vw)] rounded-xl border border-slate-200 bg-white p-3 text-left opacity-0 shadow-xl transition-opacity duration-150 group-hover:visible group-hover:opacity-100 dark:border-slate-700 dark:bg-slate-800"
+        className="invisible absolute left-0 top-full z-20 mt-2 w-[min(30rem,90vw)] rounded-xl border border-slate-200 bg-white p-3 text-left opacity-0 shadow-xl transition-opacity duration-150 group-hover:visible group-hover:opacity-100 dark:border-slate-800 dark:bg-slate-900"
       >
         <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
           {group.award_name} · {group.count} {group.count === 1 ? 'time' : 'times'}
