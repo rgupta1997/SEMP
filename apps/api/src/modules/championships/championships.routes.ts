@@ -10,6 +10,7 @@ import { notify } from '@semp/notifications/server/notify.js';
 import { recomputeStandingsAtomic } from '../standings/standings.service.js';
 import { signShareToken } from '../public/share-token.js';
 import { listChampionshipFixtures } from './fixtures-list.js';
+import { managedChampionshipIds } from './manage-access.js';
 import { findUserByPhone } from '../iam/users.helpers.js';
 import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
 
@@ -137,7 +138,9 @@ export function makeEventsRouter(prisma: Prisma): Router {
 
   // -------------------------------------------------------------------------
   // MINE - championships the user is involved in, each tagged with the roles
-  // they hold (organiser / official / player / member). Powers the
+  // they hold: the code of any event role assigned to them (organiser / official /
+  // captain / participant / poc), plus 'player' for a team they are on and
+  // 'member' for an organisation of theirs that is enrolled. Powers the
   // "Championships" page and (filtered to organiser) the "Host" page.
   // -------------------------------------------------------------------------
   router.get('/mine', asyncHandler(async (req, res) => {
@@ -148,13 +151,15 @@ export function makeEventsRouter(prisma: Prisma): Router {
       roles.get(id)!.add(role);
     };
 
-    // One round-trip, not two: the role lookups don't depend on the data queries, so
-    // fire all six together rather than awaiting the roles first (each sequential
-    // await is a full network round-trip to the remote pooler - ~700ms each).
-    const [orgRole, offRole, championshipRoleRows, officialRows, memberRows, enrolledRows] = await Promise.all([
-      prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser), select: { id: true } }),
-      prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.official), select: { id: true } }),
-      prisma.user_championship_roles.findMany({ where: { user_id: userId }, select: { championship_id: true, role_id: true } }),
+    // One round trip's worth of waiting, not five: none of these depend on each
+    // other, and each sequential await is a full network round-trip to the remote
+    // pooler (~700ms each).
+    const [managedIds, championshipRoleRows, officialRows, memberRows, enrolledRows] = await Promise.all([
+      managedChampionshipIds(prisma, userId),
+      prisma.user_championship_roles.findMany({
+        where: { user_id: userId },
+        select: { championship_id: true, roles: { select: { code: true, name: true } } },
+      }),
       prisma.championship_officials.findMany({ where: { user_id: userId, is_active: true }, select: { championship_id: true } }),
       prisma.team_members.findMany({ where: { user_id: userId, is_active: true }, select: { teams: { select: { team_entries: { select: { championship_id: true } } } } } }),
       prisma.championship_organizations.findMany({
@@ -163,10 +168,18 @@ export function makeEventsRouter(prisma: Prisma): Router {
       }),
     ]);
 
+    // The role's own code, not a guess. This used to ask only "is it Official?" and
+    // call everything else 'organiser', which handed a Captain, a Participant and a
+    // POC the organiser's badge, the organiser's Host page and the organiser's
+    // workspace - the destination of "View details" is decided from this list.
     for (const r of championshipRoleRows) {
-      if (offRole && r.role_id === offRole.id) add(r.championship_id, 'official');
-      else add(r.championship_id, 'organiser');
+      add(r.championship_id, r.roles?.code ?? r.roles?.name?.toLowerCase() ?? 'member');
     }
+    // Managing the event outranks every other way of being in it. This is also the
+    // only source that knows about an institution's own events: hosting one gives
+    // its senior staff the organiser's authority over it without an Organiser row,
+    // and without this they would not see the event here at all.
+    for (const id of managedIds) add(id, 'organiser');
     for (const o of officialRows) add(o.championship_id, 'official');
     for (const m of memberRows) for (const e of m.teams?.team_entries ?? []) add(e.championship_id, 'player');
     for (const e of enrolledRows) add(e.championship_id, 'member');

@@ -11,17 +11,38 @@ const PLAYER: User = { id: 'p1', isSuperAdmin: false, organizationId: 'org-a' };
 const OWNER: User = { id: 's1', isSuperAdmin: false, organizationId: 'org-a' };
 
 // `orgAdmins`: list of "<userId>|<orgId>" the fake treats as owner/admin members.
+//
+// `hostOrg` / `hostOrgManagers` model the second route into a championship: an
+// event is hosted BY an institution, and whoever holds `event.manage` there
+// manages it. That goes through the permission engine, so the fake has to answer
+// what the engine reads - the membership, its implied role, and that role's
+// permission list.
 function fakePrisma(over: {
   organiserChampionshipIds?: string[]; organiserUserId?: string;
   orgAdmins?: string[];
+  /** The institution hosting every championship this fake is asked about. */
+  hostOrg?: string | null;
+  /** "<userId>|<orgId>" pairs who are Owner of that institution. */
+  hostOrgManagers?: string[];
   team?: any; fixture?: any;
 } = {}): any {
   const isAdmin = (userId: string, orgId: string) => (over.orgAdmins ?? []).includes(`${userId}|${orgId}`);
+  const manages = (userId: string, orgId: string) => (over.hostOrgManagers ?? []).includes(`${userId}|${orgId}`);
   return {
     // findFirst, not findUnique: roles are org-scoped, so the organiser role is
     // resolved by stable code against the platform rows (see @semp/shared
     // role-codes), which is not a unique-key lookup.
-    roles: { findFirst: async () => ({ id: 'role-org' }) },
+    roles: {
+      findFirst: async () => ({ id: 'role-org' }),
+      // What being an Owner grants. `event.manage` sits in permission_ids rather
+      // than in a role list in code, which is the whole point: an institution
+      // moves it on its own Roles & Permissions screen.
+      findMany: async (args: any) =>
+        JSON.stringify(args?.where ?? {}).includes('"owner"')
+          ? [{ code: 'owner', organization_id: null, permission_ids: ['event.manage'] }]
+          : [],
+    },
+    user_org_roles: { findMany: async () => [] },
     user_championship_roles: {
       findFirst: async (args: any) =>
         (over.organiserChampionshipIds ?? []).includes(args.where.championship_id) && args.where.user_id === over.organiserUserId
@@ -29,8 +50,13 @@ function fakePrisma(over: {
     },
     organization_members: {
       findFirst: async (args: any) =>
-        isAdmin(args.where.user_id, args.where.organization_id) ? { id: 'om' } : null,
+        isAdmin(args.where.user_id, args.where.organization_id) || manages(args.where.user_id, args.where.organization_id)
+          ? { id: 'om', role: manages(args.where.user_id, args.where.organization_id) ? 'owner' : 'member' }
+          : null,
     },
+    // No module switches configured, so nothing is gated off.
+    organizations: { findUnique: async () => ({ settings: null }) },
+    championships: { findUnique: async () => ({ host_organization_id: over.hostOrg ?? null }) },
     teams: { findUnique: async () => over.team ?? null },
     fixtures: { findUnique: async () => over.fixture ?? null },
   };
@@ -91,6 +117,34 @@ describe('championshipManager', () => {
     expect(r.ok).toBe(false);
     expect(r.status).toBe(403);
   });
+
+  // The second route in. An event is run BY an institution, and until this existed
+  // the only answer was an Organiser row on the event itself - so the owner of the
+  // institution hosting it had no authority over its own event, and whoever was
+  // named Organiser held it personally.
+  it('allows the owner of the institution hosting it, with no Organiser row', async () => {
+    const g = makeGuards(fakePrisma({ hostOrg: 'org-a', hostOrgManagers: ['s1|org-a'] }));
+    expect((await run(g.championshipManager(async () => 'c1'), OWNER)).ok).toBe(true);
+  });
+
+  it('denies the owner of an institution that is not hosting it', async () => {
+    const g = makeGuards(fakePrisma({ hostOrg: 'org-b', hostOrgManagers: ['s1|org-a'] }));
+    const r = await run(g.championshipManager(async () => 'c1'), OWNER);
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe(403);
+  });
+
+  it('denies a plain member of the hosting institution', async () => {
+    // Being at the institution is not running its events - `event.manage` is.
+    const g = makeGuards(fakePrisma({ hostOrg: 'org-a' }));
+    expect((await run(g.championshipManager(async () => 'c1'), PLAYER)).ok).toBe(false);
+  });
+
+  it('denies everybody when an individual is hosting', async () => {
+    // No host institution to inherit authority from - a real case, not missing data.
+    const g = makeGuards(fakePrisma({ hostOrg: null, hostOrgManagers: ['s1|org-a'] }));
+    expect((await run(g.championshipManager(async () => 'c1'), OWNER)).ok).toBe(false);
+  });
 });
 
 describe('teamManager', () => {
@@ -122,6 +176,10 @@ describe('fixtureScorer', () => {
   it('allows the championship organiser', async () => {
     const g = makeGuards(fakePrisma({ fixture, organiserChampionshipIds: ['c1'], organiserUserId: 'org1' }));
     expect((await run(g.fixtureScorer, ORGANISER, { params: { id: 'f1' } })).ok).toBe(true);
+  });
+  it('allows the owner of the hosting institution', async () => {
+    const g = makeGuards(fakePrisma({ fixture, hostOrg: 'org-a', hostOrgManagers: ['s1|org-a'] }));
+    expect((await run(g.fixtureScorer, OWNER, { params: { id: 'f1' } })).ok).toBe(true);
   });
   it('denies an unrelated user', async () => {
     const g = makeGuards(fakePrisma({ fixture }));
