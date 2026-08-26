@@ -5,6 +5,8 @@ import {
 } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
+import { assertStaffSeatAvailable } from '../billing/usage.js';
+import { audienceOfRole } from './module-access.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
@@ -252,6 +254,17 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     }
     if (!resolvedUserId) throw new BusinessRuleError('Provide a user, a registered phone, or an email to create one');
 
+    // Staff seats are a plan ceiling. Charged only when somebody crosses INTO
+    // staff - re-adding an existing admin occupies no new seat.
+    const existingMember = await prisma.organization_members.findUnique({
+      where: { user_id_organization_id: { user_id: resolvedUserId, organization_id: req.params.id } },
+      select: { role: true, status: true },
+    });
+    await assertStaffSeatAvailable(
+      prisma, req.params.id, role,
+      existingMember?.status === 'active' && audienceOfRole(existingMember.role) === 'staff',
+    );
+
     const member = await prisma.organization_members.upsert({
       where: { user_id_organization_id: { user_id: resolvedUserId, organization_id: req.params.id } },
       update: { role, status: 'active' },
@@ -299,6 +312,14 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       (req.body.status !== undefined && req.body.status !== 'active')
     );
     if (losesAdmin) await assertNotLastAdmin(req.params.id, member.id);
+    // A promotion into staff takes a seat; a change between two staff roles, or
+    // anything that does not touch the role at all, does not.
+    if (req.body.role !== undefined) {
+      await assertStaffSeatAvailable(
+        prisma, req.params.id, req.body.role,
+        member.status === 'active' && audienceOfRole(member.role) === 'staff',
+      );
+    }
     const updated = await prisma.organization_members.update({
       where: { id: member.id },
       data: req.body,

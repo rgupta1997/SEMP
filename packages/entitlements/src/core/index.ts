@@ -8,6 +8,11 @@ import { atLeast, TIER_LABEL, type Ladder, type Tier } from './tiers.js';
 
 export * from './registry.js';
 export * from './tiers.js';
+export * from './limits.js';
+// The catalogue - prices and ceilings. Kept out of the guard path on purpose:
+// nothing that decides an entitlement imports it, so a price cannot reach a
+// locked surface by accident.
+export * from './plans.js';
 
 /** The entitlement check. One comparison, used by the API guard and the UI alike. */
 export function granted(held: Tier, key: CapabilityKey): boolean {

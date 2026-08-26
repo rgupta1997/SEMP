@@ -1,27 +1,19 @@
 import { Card, CardBody } from '../../../components/ui';
 
-// Admin > Billing & Subscription, and Admin > Security (PG-28e, PG-28f).
+// Admin > Security (PG-28f).
 //
-// Both are read-only for now, and say so. The alternative - switches that flip and
-// persist nothing, or a Change plan button with no checkout behind it - teaches
-// people that controls in this product are decorative, which is expensive to unlearn.
+// Read-only for now, and says so. The alternative - switches that flip and persist
+// nothing - teaches people that controls in this product are decorative, which is
+// expensive to unlearn.
+//
+// Billing used to share this component and no longer does: it has a real panel
+// with a real checkout behind it (BillingPanel). What was left here was its old
+// copy, still saying checkout was not wired - the kind of stale text that is read
+// as current long after it stopped being true.
 
 const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
-const MONO = "'JetBrains Mono',ui-monospace,monospace";
-
-const TIER_LABEL: Record<string, string> = { free: 'Free', pro: 'Pro', max: 'Enterprise' };
 
 const CONTENT = {
-  billing: {
-    title: 'Billing & subscription',
-    blurb: 'The plan governing this organisation, and what it grants.',
-    rows: [
-      ['Billing contact', 'Not set'],
-      ['Payment method', 'Not set'],
-      ['Renews', '—'],
-    ],
-    note: 'Checkout is not wired yet. To change plan, contact play@sportagon.in.',
-  },
   security: {
     title: 'Security',
     blurb: 'Policy that applies to everyone in this organisation.',
@@ -34,7 +26,7 @@ const CONTENT = {
   },
 } as const;
 
-export function PolicyPanel({ kind, tier }: { kind: 'billing' | 'security'; orgId: string; tier: string }) {
+export function PolicyPanel({ kind }: { kind: 'security'; orgId: string }) {
   const c = CONTENT[kind];
   return (
     <Card>
@@ -44,12 +36,6 @@ export function PolicyPanel({ kind, tier }: { kind: 'billing' | 'security'; orgI
             <h3 style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, margin: 0 }}>{c.title}</h3>
             <p style={{ margin: '2px 0 0', fontSize: 13, color: '#6E7E96' }}>{c.blurb}</p>
           </div>
-          {kind === 'billing' && (
-            <span style={{
-              fontFamily: MONO, fontSize: 10, letterSpacing: '.12em', textTransform: 'uppercase',
-              padding: '5px 10px', borderRadius: 999, background: '#DFEAFB', color: '#004AAD',
-            }}>{TIER_LABEL[tier] ?? tier}</span>
-          )}
         </div>
 
         <div style={{ marginTop: 14 }}>

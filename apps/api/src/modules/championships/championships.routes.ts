@@ -15,6 +15,8 @@ import { applyChampionshipTemplate } from './apply-template.js';
 import { captureShape, saveTemplate } from './templates.service.js';
 import { findUserByPhone } from '../iam/users.helpers.js';
 import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
+import { assertWithinOrgLimit } from '@semp/entitlements/server';
+import { countActiveEvents } from '../billing/usage.js';
 
 // Prisma include that pulls just the sport names offered by a championship, plus a
 // helper that flattens them to a distinct, sorted `sports: string[]` and drops the
@@ -259,6 +261,16 @@ export function makeEventsRouter(prisma: Prisma): Router {
         take: 2,
       });
       if (admin.length === 1) hostOrgId = admin[0].organization_id;
+    }
+
+    // How many events an institution may run AT ONCE is a plan limit, and this is
+    // the point it bites. Only when there is a host: an event created by a person
+    // with no institution behind it is not charged to anybody's ceiling.
+    //
+    // A soft limit - it stops the next creation and nothing else. Finishing an
+    // event frees its slot, which is why the count is of unfinished ones.
+    if (hostOrgId) {
+      await assertWithinOrgLimit(prisma, 'active_events', hostOrgId, await countActiveEvents(prisma, hostOrgId));
     }
 
     const championship = await prisma.championships.create({

@@ -1,4 +1,4 @@
-import express, { Router } from 'express';
+import express, { Router, type RequestHandler } from 'express';
 import cors from 'cors';
 import {
   createDisciplineSchema, createFormatSchema,
@@ -49,6 +49,8 @@ import { makeNotificationsRouter } from '../modules/notifications/notifications.
 import { makeDemoRequestsRouter } from '../modules/marketing/demo-requests.routes.js';
 import { makeFeedbackRouter } from '../modules/marketing/feedback.routes.js';
 import { makeDemosRouter } from '../modules/demos/demos.routes.js';
+import { makeBillingRouter } from '../modules/billing/billing.routes.js';
+import { applyDuePlanChanges } from '../modules/billing/subscription.service.js';
 import { BusinessRuleError } from '../shared/errors.js';
 
 export function buildApp(prisma: Prisma) {
@@ -209,9 +211,33 @@ export function buildApp(prisma: Prisma) {
   /** Gate on the organisation named in the path, not on the caller's own. */
   const orgParam = { organizationIdFrom: (req: any) => req.params.id as string | undefined };
 
+  /**
+   * Land any plan change that has come due for this caller, before the snapshot
+   * is taken.
+   *
+   * A downgrade is scheduled for the end of a paid period, and the API has no
+   * long-lived process to fire a timer on - it runs as a Lambda. So the change
+   * is applied lazily, on the read that would otherwise report a stale tier.
+   * This is that read: the shell fetches it once per session, which makes it the
+   * earliest point at which a stale plan could be seen.
+   *
+   * Scoped to the caller, and a no-op when nothing is due - one indexed query
+   * against a partial index. Errors are swallowed: a sweep that fails must not
+   * take the whole workspace down with it, and /billing/sweep is the safety net.
+   */
+  const landDuePlanChanges: RequestHandler = (req, _res, next) => {
+    if (!req.user) return next();
+    applyDuePlanChanges(prisma, { userId: req.user.id, organizationId: req.user.organizationId ?? undefined })
+      .then(() => next())
+      .catch(() => next());
+  };
+
   // What this caller's subscription makes available, on both ladders. The shell
   // renders every lock from this one payload rather than asking per capability.
-  api.get('/me/entitlements', ents.readSnapshot);
+  api.get('/me/entitlements', landDuePlanChanges, ents.readSnapshot);
+
+  // ----- Plans, checkout, invoices - both ladders (guards are inside) -----
+  api.use('/billing', makeBillingRouter(prisma));
 
   // Mounted under /organizations because every route is institution-scoped.
   //

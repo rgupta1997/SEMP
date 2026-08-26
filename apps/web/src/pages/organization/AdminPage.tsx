@@ -11,6 +11,7 @@ import { OrgProfilePanel } from './admin/OrgProfilePanel';
 import { AuditLogPanel } from './admin/AuditLogPanel';
 import { CampusesPanel } from './admin/CampusesPanel';
 import { PolicyPanel } from './admin/PolicyPanel';
+import { BillingPanel } from './admin/BillingPanel';
 
 // Administration (PG-28).
 //
@@ -140,8 +141,8 @@ export function AdminPage() {
               {active.key === 'campuses' && <CampusesPanel orgId={orgId} />}
               {active.key === 'members' && <MembersPanel orgId={orgId} />}
               {active.key === 'roles' && <RolesPanel orgId={orgId} />}
-              {active.key === 'billing' && <PolicyPanel kind="billing" orgId={orgId} tier={ws.tiers?.org ?? 'free'} />}
-              {active.key === 'security' && <PolicyPanel kind="security" orgId={orgId} tier={ws.tiers?.org ?? 'free'} />}
+              {active.key === 'billing' && <BillingPanel orgId={orgId} />}
+              {active.key === 'security' && <PolicyPanel kind="security" orgId={orgId} />}
               {active.key === 'audit' && <AuditLogPanel orgId={orgId} />}
             </>
           )}

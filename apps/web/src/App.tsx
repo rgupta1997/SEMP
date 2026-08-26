@@ -5,6 +5,7 @@ import { AppShell, roleHome } from './components/AppShell';
 import { ConfirmProvider, Spinner, ToastProvider } from './components/ui';
 import { TourProvider } from './components/onboarding/Tour';
 import { HelpPage } from './pages/HelpPage';
+import { PlanPage } from './pages/PlanPage';
 import { AuthPage } from './pages/AuthPage';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
 
@@ -156,6 +157,7 @@ function AuthenticatedRoutes() {
 
         {/* Notifications + help + design system - any authenticated user */}
         <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/plans" element={<PlanPage />} />
         <Route path="/help" element={<HelpPage />} />
         <Route path="/design" element={<DesignShowcase />} />
 

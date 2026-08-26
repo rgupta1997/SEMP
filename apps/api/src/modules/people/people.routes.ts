@@ -4,6 +4,8 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
+import { assertWithinOrgLimit } from '@semp/entitlements/server';
+import { countPeople } from '../billing/usage.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { ForbiddenError } from '../../shared/errors.js';
 import { can } from '../../http/middleware/can.js';
@@ -152,6 +154,17 @@ export function makePeopleRouter(prisma: Prisma): Router {
     const report = validateRoster(rows, await loadContext(organizationId, rows));
     const applicable = report.rows.filter((r) => r.verdict !== 'reject');
 
+    // The roll ceiling, against the WHOLE file rather than one row at a time.
+    // Importing 900 people into an institution with 200 already on a plan that
+    // includes 1,000 must be refused before anything is written - a bulk import
+    // that stops halfway leaves a coordinator with no idea which half landed.
+    // `current + incoming - 1` because the limit asks whether there is room for
+    // one more, and here "one more" is the last row of the file.
+    if (applicable.length > 0) {
+      const already = await countPeople(prisma, organizationId);
+      await assertWithinOrgLimit(prisma, 'people', organizationId, already + applicable.length - 1);
+    }
+
     // Passwords are hashed OUTSIDE the transaction. bcrypt is CPU-bound, and
     // 2,000 hashes inside an open transaction is a guaranteed Lambda timeout.
     const toCreate = await Promise.all(
@@ -293,6 +306,9 @@ export function makePeopleRouter(prisma: Prisma): Router {
   // ---- J1-E5-S3 · one person ---------------------------------------------
   router.post('/:id/people', requireManage, validateBody(addPersonSchema), asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
+    // The roll ceiling. Checked before any user is provisioned, so a refusal does
+    // not leave an orphaned account behind it.
+    await assertWithinOrgLimit(prisma, 'people', organizationId, await countPeople(prisma, organizationId));
     const rows = [req.body as RosterRow];
     const report = validateRoster(rows, await loadContext(organizationId, rows));
     const row = report.rows[0];

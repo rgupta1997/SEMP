@@ -274,6 +274,14 @@ export function AppShell() {
                         <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.email}</div>
                         {ctx.user.phone && <div className="truncate text-xs text-slate-500 dark:text-slate-400">{ctx.user.phone}</div>}
                       </div>
+                      {/* My plan (PG-07). The PERSONAL ladder - an institution's
+                          plan lives on its own Billing & Subscription tab, where the
+                          people who can buy it are. Two independent ladders, and a
+                          single menu item reaching both would imply otherwise. */}
+                      <button
+                        onClick={() => { setMenuOpen(false); navigate('/plans'); }}
+                        className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >My plan</button>
                       <button onClick={signOut} className="w-full px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">Sign out</button>
                     </div>
                   </>

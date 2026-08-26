@@ -155,6 +155,12 @@ model organizations {
   settings                              Json                         @default("{}")
   created_by                            String?                      @db.Uuid
   plan                                  tier                         @default(free)
+  billing_name                          String?
+  billing_email                         String?
+  billing_phone                         String?
+  billing_address                       String?
+  billing_gstin                         String?
+  billing_state_code                    String?
   achievement_claims                    achievement_claims[]
   career_stats                          career_stats[]
   certificate_counters                  certificate_counters[]
@@ -1166,6 +1172,88 @@ model profile_privacy {
   discoverable   Boolean  @default(true)
   updated_at     DateTime @default(now()) @db.Timestamptz(6)
   users          users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// Added by 20260826000040_plans_and_billing. Written by hand rather than pulled
+/// so the API could be built before the migration is applied; `db pull` will
+/// reproduce these. FKs are declared as plain scalars on purpose - modelling them
+/// as relations would rewrite the back-relation lists on organizations and users.
+model subscriptions {
+  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ladder               String
+  organization_id      String?             @db.Uuid
+  user_id              String?             @db.Uuid
+  plan                 tier
+  period               billing_period
+  status               subscription_status @default(active)
+  current_period_start DateTime            @default(now()) @db.Timestamptz(6)
+  current_period_end   DateTime            @db.Timestamptz(6)
+  pending_plan         tier?
+  pending_effective_at DateTime?           @db.Timestamptz(6)
+  provider             String              @default("none")
+  provider_ref         String?
+  created_by           String?             @db.Uuid
+  cancelled_at         DateTime?           @db.Timestamptz(6)
+  created_at           DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime            @default(now()) @db.Timestamptz(6)
+
+  @@index([current_period_end], map: "idx_subscriptions_due")
+}
+
+model invoices {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subscription_id String         @db.Uuid
+  number          String         @unique(map: "idx_invoices_number")
+  ladder          String
+  organization_id String?        @db.Uuid
+  user_id         String?        @db.Uuid
+  plan            tier
+  period          billing_period
+  currency        String         @default("INR")
+  subtotal_paise  BigInt
+  tax_rate_bp     Int            @default(1800)
+  tax_paise       BigInt
+  total_paise     BigInt
+  buyer_name      String?
+  buyer_email     String?
+  buyer_address   String?
+  buyer_gstin     String?
+  place_of_supply String?
+  sac_code        String         @default("998314")
+  status          String         @default("paid")
+  provider        String         @default("none")
+  provider_ref    String?
+  issued_at       DateTime       @default(now()) @db.Timestamptz(6)
+  paid_at         DateTime?      @db.Timestamptz(6)
+  created_at      DateTime       @default(now()) @db.Timestamptz(6)
+
+  @@index([subscription_id, issued_at(sort: Desc)], map: "idx_invoices_subscription")
+}
+
+model subscription_events {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subscription_id String    @db.Uuid
+  kind            String
+  from_plan       tier?
+  to_plan         tier?
+  actor_id        String?   @db.Uuid
+  note            String?
+  effective_at    DateTime? @db.Timestamptz(6)
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([subscription_id, created_at(sort: Desc)], map: "idx_subscription_events_sub")
+}
+
+enum billing_period {
+  monthly
+  annual
+}
+
+enum subscription_status {
+  active
+  pending_downgrade
+  cancelled
+  expired
 }
 
 enum tier {

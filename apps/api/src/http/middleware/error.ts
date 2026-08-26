@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
+import { PlanLimitError } from '@semp/entitlements/server';
 import { DomainError } from '../../shared/errors.js';
 
 // Central error handler: the only place that knows HTTP status codes.
@@ -11,6 +12,21 @@ export function errorHandler(
 ): void {
   if (err instanceof DomainError) {
     res.status(err.status).json({ error: { code: err.code, message: err.message, details: err.details } });
+    return;
+  }
+
+  // A plan ceiling, not a permission. 402 rather than 403 because the caller is
+  // not forbidden - they may do this, they have used up how many of it their plan
+  // includes. The client renders the two differently, so the codes must differ:
+  // a capability wall replaces the surface, a limit wall disables one button.
+  if (err instanceof PlanLimitError) {
+    res.status(err.status).json({
+      error: {
+        code: 'PLAN_LIMIT_REACHED',
+        message: err.message,
+        details: { limit: err.limit, cap: err.cap, current: err.current },
+      },
+    });
     return;
   }
 

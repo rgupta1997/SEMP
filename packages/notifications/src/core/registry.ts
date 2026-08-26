@@ -114,6 +114,110 @@ export const NOTIFICATION_TYPES: Record<string, NotificationTypeDef> = {
       return data.body == null ? null : String(data.body);
     },
   },
+  // ---- Billing (20260826000040) ------------------------------------------
+  //
+  // All four go to the people who can act on them, which for an institution is
+  // the owners and admins - the same set `billing.manage` falls back to. A plan
+  // change is shared: somebody who did not buy it will notice the capability
+  // move, and a feed that explains why is cheaper than the support ticket that
+  // otherwise follows.
+  //
+  // Note these DO name the plan. The rule that a locked surface must never name
+  // a tier is about walls; a billing notification is the other case, where
+  // saying "you are now on Pro" is the entire message.
+
+  plan_changed: {
+    key: 'plan_changed',
+
+    defaultAudience: (ctx) => {
+      if (!ctx.organizationId) {
+        throw new Error('organizationId is required for plan_changed');
+      }
+
+      return Rules.orgAdmins(ctx.organizationId);
+    },
+
+    titleTemplate: (data) => `${String(data.organizationName ?? 'Your institution')} is now on ${String(data.to ?? 'a new plan')}`,
+
+    bodyTemplate: (data) => {
+      const from = data.from ? String(data.from) : null;
+      return from
+        ? `Changed from ${from}. Everything the new plan includes is available now.`
+        : 'Everything the new plan includes is available now.';
+    },
+  },
+
+  plan_downgrade_scheduled: {
+    key: 'plan_downgrade_scheduled',
+
+    defaultAudience: (ctx) => {
+      if (!ctx.organizationId) {
+        throw new Error('organizationId is required for plan_downgrade_scheduled');
+      }
+
+      return Rules.orgAdmins(ctx.organizationId);
+    },
+
+    titleTemplate: (data) => `${String(data.organizationName ?? 'Your institution')} will move to ${String(data.to ?? 'a lower plan')}`,
+
+    // The date is the point of this message. Somebody has until then to change
+    // their mind, and the feed is where most people will first learn of it.
+    bodyTemplate: (data) => {
+      const at = data.effectiveAt ? new Date(String(data.effectiveAt)) : null;
+      const when = at && !Number.isNaN(at.getTime())
+        ? at.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+        : 'the end of the current period';
+
+      return `Nothing changes until ${when} - the plan you have paid for runs to the end of its term. Nothing you have created will be deleted.`;
+    },
+  },
+
+  plan_downgrade_applied: {
+    key: 'plan_downgrade_applied',
+
+    defaultAudience: (ctx) => {
+      if (!ctx.organizationId) {
+        throw new Error('organizationId is required for plan_downgrade_applied');
+      }
+
+      return Rules.orgAdmins(ctx.organizationId);
+    },
+
+    titleTemplate: (data) => `${String(data.organizationName ?? 'Your institution')} has moved to ${String(data.to ?? 'a lower plan')}`,
+
+    bodyTemplate: () => 'Anything created on the previous plan is still there, and becomes available again if you resubscribe.',
+  },
+
+  plan_upgrade_requested: {
+    key: 'plan_upgrade_requested',
+
+    defaultAudience: (ctx) => {
+      if (!ctx.organizationId) {
+        throw new Error('organizationId is required for plan_upgrade_requested');
+      }
+
+      return Rules.orgAdmins(ctx.organizationId);
+    },
+
+    titleTemplate: (data) => {
+      const who = String(data.who ?? 'Somebody');
+      const capability = data.capability ? String(data.capability) : null;
+
+      return capability
+        ? `${who} needs ${capability}`
+        : `${who} asked about upgrading the plan`;
+    },
+
+    bodyTemplate: (data) => {
+      const note = data.note ? String(data.note) : null;
+      const where = `Review it on ${String(data.organizationName ?? 'your institution')}’s Billing & Subscription page.`;
+
+      return note ? `“${note}”
+
+${where}` : where;
+    },
+  },
+
   org_join_request: {
     key: 'org_join_request',
 

@@ -61,8 +61,14 @@ async function grantedPermissions(db: Db, ctx: CanContext): Promise<Set<string>>
   const roleCodes: string[] = [];
 
   if (scope?.organizationId) {
+    // ACTIVE only. A grant has three states and two of them grant nothing: a
+    // SUSPENDED one keeps its scope and its history precisely so it can be handed
+    // back, and an INVITED one has not been accepted yet. Reading them all was the
+    // engine disagreeing with the auth context, which has always filtered here -
+    // so suspending somebody's Sports Admin removed the nav and left every
+    // permission behind it intact.
     const rows = await db.user_org_roles.findMany({
-      where: { user_id: user.id, organization_id: scope.organizationId },
+      where: { user_id: user.id, organization_id: scope.organizationId, status: 'ACTIVE' },
       select: { role_id: true },
     });
     roleIds.push(...rows.map((r) => r.role_id));

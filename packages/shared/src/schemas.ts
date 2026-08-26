@@ -910,3 +910,67 @@ export type GenerateDrawInput = z.infer<typeof generateDrawSchema>;
 export const assignFixtureOfficialSchema = z.object({
   official_id: uuid.nullable(),
 });
+
+// ---------------------------------------------------------------------------
+// Billing (20260826000040)
+//
+// The tier and period vocabularies are restated here as literals rather than
+// imported from @semp/entitlements: shared is the wire contract and must not
+// depend on the entitlement package, which itself depends on nothing.
+//
+// They must not drift from it either, so billing.routes.ts asserts the two lists
+// assign to each other at the type level. A divergence is then a build failure
+// in the one package that imports both, rather than a request rejected at runtime.
+// ---------------------------------------------------------------------------
+
+export const PLAN_TIERS = ['free', 'pro', 'max'] as const;
+export const PLAN_PERIODS = ['monthly', 'annual'] as const;
+
+/** Buy or move up. The period is chosen at checkout, not derived. */
+export const subscribeSchema = z.object({
+  plan: z.enum(PLAN_TIERS),
+  period: z.enum(PLAN_PERIODS),
+});
+
+/**
+ * Schedule a move down. No period: a downgrade lands at the end of the period
+ * already paid for, and choosing a new billing cycle is the next purchase's job.
+ */
+export const scheduleDowngradeSchema = z.object({
+  plan: z.enum(PLAN_TIERS),
+  note: z.string().max(500).optional(),
+});
+
+/**
+ * The billing contact. Every field optional so a panel can save one row at a
+ * time, but a GSTIN is checked when given - a malformed one on an issued invoice
+ * is a document that has to be reissued.
+ */
+export const billingContactSchema = z
+  .object({
+    billing_name: z.string().max(160).nullable().optional(),
+    billing_email: z.string().email().max(160).nullable().optional(),
+    billing_phone: z.string().max(40).nullable().optional(),
+    billing_address: z.string().max(600).nullable().optional(),
+    billing_gstin: z
+      .string()
+      .regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/, 'That does not look like a GSTIN')
+      .nullable()
+      .optional(),
+    billing_state_code: z.string().regex(/^[0-9]{2}$/).nullable().optional(),
+  })
+  .refine((d) => Object.keys(d).length > 0, { message: 'Nothing to update' });
+
+/**
+ * Asking somebody who can buy to buy.
+ *
+ * `capability` is what the person hit the wall on, and is what makes the request
+ * worth sending: "we need Reports" is actionable in a way that "please upgrade"
+ * is not. Optional, because the request can also start from the plan page, where
+ * nothing was blocked.
+ */
+export const requestUpgradeSchema = z.object({
+  capability: z.string().max(64).optional(),
+  plan: z.enum(PLAN_TIERS).optional(),
+  note: z.string().max(500).optional(),
+});
