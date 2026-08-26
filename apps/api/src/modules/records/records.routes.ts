@@ -273,7 +273,7 @@ export function makeRecordsRouter(prisma: Prisma): Router {
   /** The chronological view of the same honours - the Achievement Timeline. */
   router.get('/organizations/:id/achievements/timeline', asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
-    const allowed = await can(prisma, 'people.view', {
+    const allowed = await can(prisma, 'achievement.view', {
       user: { id: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin },
       scope: { organizationId },
       fallback: async () => !!(await prisma.organization_members.findFirst({
@@ -305,7 +305,7 @@ export function makeRecordsRouter(prisma: Prisma): Router {
 
   router.get('/organizations/:id/achievements', asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
-    const allowed = await can(prisma, 'people.view', {
+    const allowed = await can(prisma, 'achievement.view', {
       user: { id: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin },
       scope: { organizationId },
       fallback: async () => !!(await prisma.organization_members.findFirst({
