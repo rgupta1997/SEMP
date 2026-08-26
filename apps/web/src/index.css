@@ -10,29 +10,54 @@
    declared for future use.
    ============================================================ */
 @theme {
-  /* Brand ramp anchored to the dashboard design's blue (#3182ce ≈ brand-500). */
-  --color-brand-50:  oklch(0.972 0.013 252);
-  --color-brand-100: oklch(0.936 0.030 252);
-  --color-brand-200: oklch(0.882 0.055 252);
-  --color-brand-300: oklch(0.806 0.085 252);
-  --color-brand-400: oklch(0.700 0.115 252);
-  --color-brand-500: oklch(0.585 0.137 252);
-  --color-brand-600: oklch(0.520 0.140 252);
-  --color-brand-700: oklch(0.455 0.125 252);
-  --color-brand-800: oklch(0.395 0.105 252);
-  --color-brand-900: oklch(0.335 0.082 252);
+  /* Brand ramp taken from the EOS prototype, in hex rather than oklch so the
+     screens match the mockups exactly. brand-600 IS #004AAD - the 234-use
+     primary - and 100/200/300 are the prototype's own tints, not interpolations. */
+  --color-brand-50:  #F7FAFF;
+  --color-brand-100: #F1F6FE;
+  --color-brand-200: #DFEAFB;
+  --color-brand-300: #BCD2F6;
+  --color-brand-400: #7FA5E8;
+  --color-brand-500: #3D74CE;
+  --color-brand-600: #004AAD;
+  --color-brand-700: #00337A;
+  --color-brand-800: #14233B;
+  --color-brand-900: #0A1A33;
 
-  --font-display: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Three faces, as the prototype uses them: Poppins for headings and anything
+     that carries weight, Hanken Grotesk for running text, JetBrains Mono for
+     data, codes, labels and timestamps. */
+  --font-display: "Poppins", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* ---- EOS semantic colours, straight from the prototype ---- */
+  --color-eos-ink:      #0A1A33;
+  --color-eos-ink-2:    #14233B;
+  --color-eos-ink-3:    #374459;
+  --color-eos-ink-4:    #4F5F77;
+  --color-eos-muted:    #6E7E96;
+  --color-eos-faint:    #9BA9BE;
+  --color-eos-line:     #E1E7F0;
+  --color-eos-line-2:   #C8D2E0;
+  --color-eos-surface:  #EFF2F7;
+  --color-eos-ground:   #F7F9FC;
+  --color-eos-ok:       #1E9E5A;
+  --color-eos-ok-soft:  #E4F6EC;
+  --color-eos-ok-deep:  #1E6E45;
+  --color-eos-warn:     #E9920B;
+  --color-eos-warn-soft:#FCF0DB;
+  --color-eos-bad:      #DE3A3A;
+  --color-eos-bad-soft: #FBE6E6;
+  --color-eos-cyan:     #5CE1E6;
 }
 
 :root {
   /* -- Dashboard design system surfaces -- */
-  --canvas: #f4f7fe;                 /* app page background */
-  --sidebar-bg: #1a2236;             /* dark navy sidebar */
-  --sidebar-active: #2d3748;         /* active/hover nav item */
-  --sidebar-border: #11182b;         /* sidebar dividers */
+  --canvas: #F7F9FC;                 /* app page background (prototype body) */
+  --sidebar-bg: #0A1A33;             /* prototype sidebar */
+  --sidebar-active: #004AAD;         /* prototype: active item is brand, not a grey */
+  --sidebar-border: #14233B;         /* sidebar dividers */
   --card-shadow: 0 2px 4px rgba(0, 0, 0, 0.02), 0 1px 2px rgba(0, 0, 0, 0.04);
 
   /* Stat card gradient (blue, white text) */

@@ -5,7 +5,7 @@ import {
   createPermissionSchema, createRoleSchema, createSportSchema, updateDisciplineSchema,
   updateFormatSchema, updatePermissionSchema, updateRoleSchema,
   updateSportSchema,
-  createSponsorSchema, updateSponsorSchema, createTournamentSchema, updateTournamentSchema,
+  createTournamentSchema, updateTournamentSchema,
   createTournamentSportSchema, updateTournamentSportSchema,
   createTournamentDisciplineSchema, updateTournamentDisciplineSchema,
 } from '@semp/shared';
@@ -15,6 +15,9 @@ import { makeCrudRouter } from './crud.js';
 import { errorHandler } from './middleware/error.js';
 import { parseAuth, requireAuth, requireSuperAdmin } from './middleware/auth.js';
 import { makeGuards } from './middleware/permissions.js';
+import { makeOrgUnitsRouter } from '../modules/iam/org-units.routes.js';
+import { makeOrgRolesRouter } from '../modules/iam/org-roles.routes.js';
+import { makeSignInRouter } from '../modules/iam/signin.routes.js';
 import { makeAuthRouter } from '../modules/iam/auth.routes.js';
 import { makeMeRouter } from '../modules/iam/me.routes.js';
 import { makeUsersRouter } from '../modules/iam/users.routes.js';
@@ -28,6 +31,13 @@ import { makeTeamsRouter } from '../modules/teams/teams.routes.js';
 import { makeMatrixImportRouter } from '../modules/import/matrix-import.routes.js';
 import { makePublicRouter } from '../modules/public/public.routes.js';
 import { makeVenuesRouter, makeVenueGroundsRouter } from '../modules/venues/venues.routes.js';
+import { makeRecordsRouter } from '../modules/records/records.routes.js';
+import { makeClaimsRouter } from '../modules/records/claims.routes.js';
+import { makeCertificatesRouter } from '../modules/certificates/certificates.routes.js';
+import { makePeopleRouter } from '../modules/people/people.routes.js';
+import { makeReportsRouter } from '../modules/reports/reports.routes.js';
+import { makeBenchmarkRouter } from '../modules/reports/benchmark.routes.js';
+import { makeImpactRouter, makeImpactBuilder } from '../modules/reports/impact.routes.js';
 import { makeFixturesRouter } from '../modules/fixtures/fixtures.routes.js';
 import { makeNotificationsRouter } from '../modules/notifications/notifications.routes.js';
 import { makeDemoRequestsRouter } from '../modules/marketing/demo-requests.routes.js';
@@ -55,6 +65,9 @@ export function buildApp(prisma: Prisma) {
   const api = Router();
 
   // Public auth routes
+  // Phone-first sign-in (Option B): identify, code, chooser, session, signup.
+  // Mounted before the legacy email+password router so its routes win on overlap.
+  api.use('/auth', makeSignInRouter(prisma));
   api.use('/auth', makeAuthRouter(prisma));
 
   // "Book a demo" leads - the POST is public (the landing page is unauthenticated);
@@ -125,11 +138,6 @@ export function buildApp(prisma: Prisma) {
   api.use('/championships', makeMatrixImportRouter(prisma));
   api.use('/venues', makeVenuesRouter(prisma));
   api.use('/venue-grounds', makeVenueGroundsRouter(prisma));
-  api.use('/sponsors', makeCrudRouter(prisma.sponsors, {
-    name: 'Sponsor', createSchema: createSponsorSchema, updateSchema: updateSponsorSchema,
-    listFilters: ['championship_id'], orderBy: { display_order: 'asc' },
-    writeGuards: [guards.championshipCrudGuard({ body: async (req) => req.body?.championship_id, byId: guards.resolvers.championshipOfSponsor })],
-  }));
   api.use('/tournaments', makeCrudRouter(prisma.tournaments, {
     name: 'Tournament', createSchema: createTournamentSchema, updateSchema: updateTournamentSchema,
     listFilters: ['championship_id'], orderBy: { created_at: 'desc' },
@@ -183,6 +191,36 @@ export function buildApp(prisma: Prisma) {
 
   // ----- Phase 5: fixtures -----
   api.use('/', makeFixturesRouter(prisma));
+
+  // ----- Records, certificates, people and reports (lifted from the wave branch) -----
+
+  // Mounted under /organizations because every route is institution-scoped.
+  api.use('/organizations', makePeopleRouter(prisma));
+
+  // Role grants inside an organisation, and the catalogue the matrix is generated
+  // from. Mounted at the root because its paths are already fully qualified.
+  api.use('/', makeOrgRolesRouter(prisma));
+
+  // Campuses and units - the concrete scopes a campus_unit role is granted against.
+  api.use('/organizations', makeOrgUnitsRouter(prisma));
+
+  // The permanent record - lifetime timeline + achievements, READ ONLY. A timeline
+  // entry changes only by correcting the locked result behind it.
+  api.use('/', makeRecordsRouter(prisma));
+
+  // Leadership reporting. The impact report is handed the SAME builders the report
+  // tabs use, so a board pack and the screen it was promised on cannot disagree.
+  const reportsRouter = makeReportsRouter(prisma);
+  api.use('/', reportsRouter);
+  api.use('/', makeBenchmarkRouter(prisma));
+  api.use('/', makeImpactRouter(prisma, makeImpactBuilder(prisma, (reportsRouter as any).builders)));
+
+  // Certificates. Public verification lives in the public router above.
+  api.use('/', makeCertificatesRouter(prisma));
+
+  // External achievement claims.
+  api.use('/', makeClaimsRouter(prisma));
+
 
   app.use('/api', api);
   app.use(errorHandler);

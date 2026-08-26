@@ -1,5 +1,5 @@
 import {
-  ENTRY_TYPE, CHAMPIONSHIP_STATUS, FIXTURE_STATUS, GROUND_TYPE, SPONSOR_TIER,
+  ENTRY_TYPE, CHAMPIONSHIP_STATUS, FIXTURE_STATUS, GROUND_TYPE,
   TOURNAMENT_DISCIPLINE_STATUS, TOURNAMENT_STATUS,
 } from '@semp/shared';
 
@@ -124,18 +124,6 @@ export const RESOURCES: Record<string, ResourceConfig> = {
       { name: 'capacity', label: 'Capacity', type: 'number' },
       { name: 'display_order', label: 'Display order', type: 'number', default: 0 },
       { name: 'is_active', label: 'Active', type: 'checkbox', default: true },
-    ],
-  },
-  sponsors: {
-    key: 'sponsors', title: 'Sponsors', path: '/sponsors',
-    columns: [{ key: 'name', label: 'Name' }, { key: 'tier', label: 'Tier' }],
-    fields: [
-      { name: 'championship_id', label: 'Championship', ...rel('/championships') },
-      { name: 'name', label: 'Name' },
-      { name: 'tier', label: 'Tier', ...sel(SPONSOR_TIER), default: 'community' },
-      { name: 'website_url', label: 'Website URL' },
-      { name: 'logo_url', label: 'Logo URL' },
-      { name: 'display_order', label: 'Display order', type: 'number', default: 0 },
     ],
   },
   tournaments: {

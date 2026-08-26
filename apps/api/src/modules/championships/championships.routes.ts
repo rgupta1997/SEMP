@@ -7,10 +7,11 @@ import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError } from '../../shared/errors.js';
 import { assertChampionshipTransition } from './domain/championship-lifecycle.js';
 import { notify } from '@semp/notifications/server/notify.js';
-import { recomputeStandings } from '../standings/standings.service.js';
+import { recomputeStandingsAtomic } from '../standings/standings.service.js';
 import { signShareToken } from '../public/share-token.js';
 import { listChampionshipFixtures } from './fixtures-list.js';
 import { findUserByPhone } from '../iam/users.helpers.js';
+import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
 
 // Prisma include that pulls just the sport names offered by a championship, plus a
 // helper that flattens them to a distinct, sorted `sports: string[]` and drops the
@@ -151,8 +152,8 @@ export function makeEventsRouter(prisma: Prisma): Router {
     // fire all six together rather than awaiting the roles first (each sequential
     // await is a full network round-trip to the remote pooler - ~700ms each).
     const [orgRole, offRole, championshipRoleRows, officialRows, memberRows, enrolledRows] = await Promise.all([
-      prisma.roles.findUnique({ where: { name: 'Organiser' }, select: { id: true } }),
-      prisma.roles.findUnique({ where: { name: 'Official' }, select: { id: true } }),
+      prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser), select: { id: true } }),
+      prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.official), select: { id: true } }),
       prisma.user_championship_roles.findMany({ where: { user_id: userId }, select: { championship_id: true, role_id: true } }),
       prisma.championship_officials.findMany({ where: { user_id: userId, is_active: true }, select: { championship_id: true } }),
       prisma.team_members.findMany({ where: { user_id: userId, is_active: true }, select: { teams: { select: { team_entries: { select: { championship_id: true } } } } } }),
@@ -203,7 +204,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // by hand (they can still rename/add more on the Seasons tab).
   router.post('/', validateBody(createChampionshipSchema), asyncHandler(async (req, res) => {
     const championship = await prisma.championships.create({ data: req.body });
-    const organiserRole = await prisma.roles.findUnique({ where: { name: 'Organiser' } });
+    const organiserRole = await prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser) });
     if (organiserRole) {
       await prisma.user_championship_roles.create({
         data: { championship_id: championship.id, user_id: req.user!.id, role_id: organiserRole.id },
@@ -247,7 +248,6 @@ export function makeEventsRouter(prisma: Prisma): Router {
       prisma.venue_grounds.deleteMany({ where: { venues: { championship_id: id } } }),
       prisma.venues.deleteMany({ where: { championship_id: id } }),
       prisma.championship_organizations.deleteMany({ where: { championship_id: id } }),
-      prisma.sponsors.deleteMany({ where: { championship_id: id } }),
       prisma.user_championship_roles.deleteMany({ where: { championship_id: id } }),
       prisma.championships.delete({ where: { id } }),
     ]);
@@ -264,7 +264,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
     // Freeze a final, accurate snapshot at the moment of completion (fixture-driven
     // recomputes stop once a championship is completed).
     if (req.body.status === 'completed') {
-      try { await recomputeStandings(prisma, updated.id); }
+      try { await recomputeStandingsAtomic(prisma, updated.id); }
       catch (err) { console.error(`[standings] final recompute failed for ${updated.id}:`, err); }
     }
 

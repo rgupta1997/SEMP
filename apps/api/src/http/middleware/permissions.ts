@@ -2,6 +2,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from './error.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
 
 // Server-side authorization. The client mirrors these rules for UX, but this is
 // the real boundary: every mutation must pass through here. Authority is
@@ -11,7 +12,7 @@ export function makeGuards(prisma: Prisma) {
   let organiserRoleId: string | null | undefined;
   async function getOrganiserRoleId(): Promise<string | null> {
     if (organiserRoleId === undefined) {
-      const r = await prisma.roles.findUnique({ where: { name: 'Organiser' }, select: { id: true } });
+      const r = await prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser), select: { id: true } });
       organiserRoleId = r?.id ?? null;
     }
     return organiserRoleId;
@@ -43,8 +44,6 @@ export function makeGuards(prisma: Prisma) {
   // ---- championship resolvers (walk a resource back to its owning championship) ----
   const championshipOfTournament = async (id?: string | null) =>
     id ? (await prisma.tournaments.findUnique({ where: { id }, select: { championship_id: true } }))?.championship_id : null;
-  const championshipOfSponsor = async (id?: string | null) =>
-    id ? (await prisma.sponsors.findUnique({ where: { id }, select: { championship_id: true } }))?.championship_id : null;
   const championshipOfVenue = async (id?: string | null) =>
     id ? (await prisma.venues.findUnique({ where: { id }, select: { championship_id: true } }))?.championship_id : null;
   const championshipOfVenueGround = async (id?: string | null) =>
@@ -163,7 +162,7 @@ export function makeGuards(prisma: Prisma) {
     organisesChampionship,
     orgRole,
     resolvers: {
-      championshipOfTournament, championshipOfSponsor, championshipOfVenue, championshipOfVenueGround,
+      championshipOfTournament, championshipOfVenue, championshipOfVenueGround,
       championshipOfTournamentSport, championshipOfTournamentDiscipline, championshipOfFixture,
     },
   };

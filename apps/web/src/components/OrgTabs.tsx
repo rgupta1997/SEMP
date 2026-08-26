@@ -51,6 +51,8 @@ export function OrgTabs({ orgId }: { orgId: string }) {
     { to: `/organizations/${orgId}/teams`, label: 'Teams', badge: 0 },
     { to: `/organizations/${orgId}/members`, label: 'Members', badge: 0 },
     ...(canManage ? [{ to: `/organizations/${orgId}/invitations`, label: 'Invitations', badge: pendingInvites }] : []),
+    // Only an admin can change what a role grants, so only they see the tab.
+    ...(canManage ? [{ to: `/organizations/${orgId}/roles`, label: 'Roles', badge: 0 }] : []),
   ];
   return (
     <div className="mb-5">

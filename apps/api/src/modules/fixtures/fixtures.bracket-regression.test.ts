@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeParentPosition } from './fixtures.routes.js';
+import { computeParentPosition } from './bracket.js';
 
 // Required regression coverage for the stage_sequence fix to advanceInBracket/
 // propagateByes: proves the parent-position arithmetic itself is byte-for-byte

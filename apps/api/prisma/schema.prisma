@@ -18,6 +18,7 @@ model disciplines {
   squad_min              Int                      @default(1) @db.SmallInt
   squad_max              Int                      @default(15) @db.SmallInt
   display_order          Int                      @default(0)
+  career_stats           career_stats[]
   sports                 sports                   @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   tournament_disciplines tournament_disciplines[]
 
@@ -62,12 +63,17 @@ model championships {
   created_at                 DateTime                     @default(now()) @db.Timestamptz(6)
   updated_at                 DateTime                     @default(now()) @db.Timestamptz(6)
   visibility                 String                       @default("public") @db.VarChar
+  type                       String?                      @db.VarChar
+  country                    String?                      @db.VarChar
+  region                     String?                      @db.VarChar
+  allow_individual_entry     Boolean                      @default(true)
+  certificates               certificates[]
   championship_invitations   championship_invitations[]
   championship_officials     championship_officials[]
   championship_organizations championship_organizations[]
+  championship_templates     championship_templates[]
   feedback                   feedback[]
   notifications              notifications[]
-  sponsors                   sponsors[]
   standings                  standings[]
   standings_rules            standings_rules[]
   team_entries               team_entries[]
@@ -98,14 +104,24 @@ model fixtures {
   winner_team_id                       String?                @db.Uuid
   live_state                           Json                   @default("{}")
   live_log                             Json                   @default("[]")
+  scorecard_status                     String                 @default("draft") @db.VarChar
+  submitted_at                         DateTime?              @db.Timestamptz(6)
+  submitted_by                         String?                @db.Uuid
+  locked_at                            DateTime?              @db.Timestamptz(6)
+  locked_by                            String?                @db.Uuid
+  lock_version                         Int                    @default(0)
+  live_started_at                      DateTime?              @db.Timestamptz(6)
   stage_sequence                       Int                    @default(1) @db.SmallInt
   home_slot_label                      String?                @db.VarChar
   away_slot_label                      String?                @db.VarChar
+  certificates                         certificates[]
   fixture_awards                       fixture_awards[]
   fixture_events                       fixture_events[]
   teams_fixtures_away_team_idToteams   teams?                 @relation("fixtures_away_team_idToteams", fields: [away_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   teams_fixtures_home_team_idToteams   teams?                 @relation("fixtures_home_team_idToteams", fields: [home_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_fixtures_locked_byTousers      users?                 @relation("fixtures_locked_byTousers", fields: [locked_by], references: [id], onUpdate: NoAction)
   users                                users?                 @relation(fields: [official_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_fixtures_submitted_byTousers   users?                 @relation("fixtures_submitted_byTousers", fields: [submitted_by], references: [id], onUpdate: NoAction)
   tournament_disciplines               tournament_disciplines @relation(fields: [tournament_discipline_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   venue_grounds                        venue_grounds?         @relation(fields: [venue_ground_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   teams_fixtures_winner_team_idToteams teams?                 @relation("fixtures_winner_team_idToteams", fields: [winner_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -119,41 +135,73 @@ model fixtures {
   @@index([tournament_discipline_id, pool_number, bracket_position, created_at], map: "idx_fixtures_draw_ordering")
   @@index([official_id, scheduled_at], map: "idx_fixtures_official_scheduled")
   @@index([tournament_discipline_id, stage_sequence, pool_number], map: "idx_fixtures_stage_sequence")
+  @@index([tournament_discipline_id, scorecard_status], map: "idx_fixtures_scorecard_status")
 }
 
 model organizations {
-  id                         String                       @id(map: "institutions_pkey") @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                       String                       @db.VarChar
-  short_name                 String?                      @db.VarChar
-  code                       String?                      @unique(map: "institutions_code_key") @db.VarChar
-  logo_url                   String?
-  city                       String?                      @db.VarChar
-  status                     Boolean?
-  country                    String                       @default("India") @db.VarChar
-  created_at                 DateTime                     @default(now()) @db.Timestamptz(6)
-  championship_invitations   championship_invitations[]
-  championship_organizations championship_organizations[]
-  organization_members       organization_members[]
-  standings                  standings[]
-  team_entries               team_entries[]
-  teams                      teams[]
-  users                      users[]
+  id                                    String                       @id(map: "institutions_pkey") @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                                  String                       @db.VarChar
+  short_name                            String?                      @db.VarChar
+  code                                  String?                      @unique(map: "institutions_code_key") @db.VarChar
+  logo_url                              String?
+  city                                  String?                      @db.VarChar
+  status                                Boolean?
+  country                               String                       @default("India") @db.VarChar
+  created_at                            DateTime                     @default(now()) @db.Timestamptz(6)
+  kind                                  String                       @default("community") @db.VarChar
+  verified                              Boolean                      @default(false)
+  settings                              Json                         @default("{}")
+  created_by                            String?                      @db.Uuid
+  plan                                  tier                         @default(free)
+  achievement_claims                    achievement_claims[]
+  career_stats                          career_stats[]
+  certificate_counters                  certificate_counters[]
+  certificate_templates                 certificate_templates[]
+  certificates                          certificates[]
+  championship_invitations              championship_invitations[]
+  championship_organizations            championship_organizations[]
+  championship_templates                championship_templates[]
+  org_domains                           org_domains[]
+  org_units                             org_units[]
+  organization_members                  organization_members[]
+  users_organizations_created_byTousers users?                       @relation("organizations_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction)
+  report_jobs                           report_jobs[]
+  roles                                 roles[]
+  standings                             standings[]
+  team_entries                          team_entries[]
+  teams                                 teams[]
+  user_org_roles                        user_org_roles[]
+  users                                 users[]
+
+  @@index([kind], map: "idx_organizations_kind")
+  @@index([plan], map: "idx_organizations_plan")
 }
 
 model organization_members {
-  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id         String        @db.Uuid
-  organization_id String        @db.Uuid
-  role            String        @default("member") @db.VarChar
-  status          String        @default("active") @db.VarChar
-  joined_at       DateTime      @default(now()) @db.Timestamptz(6)
-  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users           users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id                                            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                                       String        @db.Uuid
+  organization_id                               String        @db.Uuid
+  role                                          String        @default("member") @db.VarChar
+  status                                        String        @default("active") @db.VarChar
+  joined_at                                     DateTime      @default(now()) @db.Timestamptz(6)
+  org_unit_id                                   String?       @db.Uuid
+  member_code                                   String?       @db.VarChar(64)
+  verification                                  String        @default("pending") @db.VarChar
+  verified_by                                   String?       @db.Uuid
+  verified_at                                   DateTime?     @db.Timestamptz(6)
+  rejection_note                                String?
+  scholarship                                   Boolean?
+  org_units                                     org_units?    @relation(fields: [org_unit_id], references: [id], onUpdate: NoAction)
+  organizations                                 organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                                         users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_organization_members_verified_byTousers users?        @relation("organization_members_verified_byTousers", fields: [verified_by], references: [id], onUpdate: NoAction)
 
   @@unique([user_id, organization_id])
   @@index([organization_id], map: "idx_organization_members_organization_id")
   @@index([user_id], map: "idx_organization_members_user_id")
   @@index([organization_id, status], map: "idx_organization_members_org_status")
+  @@index([organization_id, verification], map: "idx_org_members_verification")
+  @@index([org_unit_id], map: "idx_organization_members_unit")
 }
 
 model permissions {
@@ -162,40 +210,37 @@ model permissions {
   label      String   @db.VarChar
   rules      Json[]   @default([])
   created_at DateTime @default(now()) @db.Timestamptz(6)
+  scope      String?  @db.VarChar
+  area       String?  @db.VarChar
 }
 
 model roles {
   id                      String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                    String                    @unique @db.VarChar
+  name                    String                    @db.VarChar
   description             String?                   @db.VarChar
-  permission_ids          String[]                  @default([]) @db.Uuid
+  permission_ids          String[]                  @default([])
   created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  code                    String?                   @db.VarChar
+  organization_id         String?                   @db.Uuid
+  kind                    role_kind?
+  scope                   role_scope?
+  is_system               Boolean                   @default(false)
+  organizations           organizations?            @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   user_championship_roles user_championship_roles[]
-}
-
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-model sponsors {
-  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  championship_id String        @db.Uuid
-  name            String        @db.VarChar
-  logo_url        String?
-  tier            String        @default("community") @db.VarChar
-  website_url     String?
-  display_order   Int           @default(0)
-  created_at      DateTime      @default(now()) @db.Timestamptz(6)
-  championships   championships @relation(fields: [championship_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "sponsors_event_id_fkey")
-
-  @@index([championship_id], map: "idx_sponsors_event_id")
+  user_org_roles          user_org_roles[]
 }
 
 model sports {
-  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name              String              @db.VarChar
-  icon              String?             @db.VarChar
-  created_at        DateTime            @default(now()) @db.Timestamptz(6)
-  disciplines       disciplines[]
-  teams             teams[]
-  tournament_sports tournament_sports[]
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name               String               @db.VarChar
+  icon               String?              @db.VarChar
+  created_at         DateTime             @default(now()) @db.Timestamptz(6)
+  achievement_claims achievement_claims[]
+  award_types        award_types[]
+  career_stats       career_stats[]
+  disciplines        disciplines[]
+  teams              teams[]
+  tournament_sports  tournament_sports[]
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -225,11 +270,13 @@ model teams {
   invite_token                            String?        @unique @db.VarChar
   created_at                              DateTime       @default(now()) @db.Timestamptz(6)
   updated_at                              DateTime       @default(now()) @db.Timestamptz(6)
+  coach_user_id                           String?        @db.Uuid
   fixtures_fixtures_away_team_idToteams   fixtures[]     @relation("fixtures_away_team_idToteams")
   fixtures_fixtures_home_team_idToteams   fixtures[]     @relation("fixtures_home_team_idToteams")
   fixtures_fixtures_winner_team_idToteams fixtures[]     @relation("fixtures_winner_team_idToteams")
   team_entries                            team_entries[]
   team_members                            team_members[]
+  users                                   users?         @relation(fields: [coach_user_id], references: [id], onUpdate: NoAction)
   organizations                           organizations  @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "teams_institution_id_fkey")
   sports                                  sports         @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -365,12 +412,34 @@ model users {
   organization_id                                                          String?                      @db.Uuid
   account_type                                                             String?                      @default("participant") @db.VarChar
   must_change_password                                                     Boolean                      @default(false)
+  date_of_birth                                                            DateTime?                    @db.Date
+  gender                                                                   String?
+  consent_at                                                               DateTime?                    @db.Timestamptz(6)
+  consent_version                                                          String?
+  erased_at                                                                DateTime?                    @db.Timestamptz(6)
+  personal_plan                                                            tier                         @default(free)
+  sportagon_id                                                             String?                      @unique(map: "uq_users_sportagon_id") @db.VarChar(20)
+  handle                                                                   String?                      @db.VarChar(64)
+  officiates                                                               Boolean                      @default(false)
+  email_verified_at                                                        DateTime?                    @db.Timestamptz(6)
+  phone_verified_at                                                        DateTime?                    @db.Timestamptz(6)
+  achievement_claims_achievement_claims_decided_byTousers                  achievement_claims[]         @relation("achievement_claims_decided_byTousers")
+  achievement_claims_achievement_claims_user_idTousers                     achievement_claims[]         @relation("achievement_claims_user_idTousers")
+  achievements                                                             achievements[]
+  auth_tokens                                                              auth_tokens[]
+  career_stats                                                             career_stats[]
+  certificate_templates                                                    certificate_templates[]
+  certificates_certificates_issued_byTousers                               certificates[]               @relation("certificates_issued_byTousers")
+  certificates_certificates_revoked_byTousers                              certificates[]               @relation("certificates_revoked_byTousers")
+  certificates_certificates_user_idTousers                                 certificates[]               @relation("certificates_user_idTousers")
   championship_invitations_championship_invitations_accepted_byTousers     championship_invitations[]   @relation("championship_invitations_accepted_byTousers")
   championship_invitations_championship_invitations_invited_byTousers      championship_invitations[]   @relation("championship_invitations_invited_byTousers")
   championship_officials_championship_officials_assigned_byTousers         championship_officials[]     @relation("championship_officials_assigned_byTousers")
   championship_officials_championship_officials_user_idTousers             championship_officials[]     @relation("championship_officials_user_idTousers")
   championship_organizations_championship_organizations_applied_byTousers  championship_organizations[] @relation("championship_organizations_applied_byTousers")
   championship_organizations_championship_organizations_reviewed_byTousers championship_organizations[] @relation("championship_organizations_reviewed_byTousers")
+  championship_templates                                                   championship_templates[]
+  claim_evidence                                                           claim_evidence[]
   demo_requests                                                            demo_requests[]
   demo_sandboxes_demo_sandboxes_created_byTousers                          demo_sandboxes[]             @relation("demo_sandboxes_created_byTousers")
   demo_sandboxes_demo_sandboxes_organiser_user_idTousers                   demo_sandboxes[]             @relation("demo_sandboxes_organiser_user_idTousers")
@@ -378,22 +447,32 @@ model users {
   feedback_feedback_user_idTousers                                         feedback[]                   @relation("feedback_user_idTousers")
   fixture_awards                                                           fixture_awards[]
   fixture_events                                                           fixture_events[]
+  fixtures_fixtures_locked_byTousers                                       fixtures[]                   @relation("fixtures_locked_byTousers")
   fixtures                                                                 fixtures[]
+  fixtures_fixtures_submitted_byTousers                                    fixtures[]                   @relation("fixtures_submitted_byTousers")
+  lifetime_entries                                                         lifetime_entries[]
   notification_cursors                                                     notification_cursors?
   notification_deliveries                                                  notification_deliveries[]
   notification_reactions                                                   notification_reactions[]
   notification_reads                                                       notification_reads[]
   notifications                                                            notifications[]
   organization_members                                                     organization_members[]
+  organization_members_organization_members_verified_byTousers             organization_members[]       @relation("organization_members_verified_byTousers")
+  organizations_organizations_created_byTousers                            organizations[]              @relation("organizations_created_byTousers")
+  report_jobs                                                              report_jobs[]
   team_members                                                             team_members[]
+  teams                                                                    teams[]
   user_championship_roles_user_championship_roles_assigned_byTousers       user_championship_roles[]    @relation("user_championship_roles_assigned_byTousers")
   user_championship_roles_user_championship_roles_user_idTousers           user_championship_roles[]    @relation("user_championship_roles_user_idTousers")
   user_invitations_user_invitations_accepted_user_idTousers                user_invitations[]           @relation("user_invitations_accepted_user_idTousers")
   user_invitations_user_invitations_invited_byTousers                      user_invitations[]           @relation("user_invitations_invited_byTousers")
+  user_org_roles_user_org_roles_assigned_byTousers                         user_org_roles[]             @relation("user_org_roles_assigned_byTousers")
+  user_org_roles_user_org_roles_user_idTousers                             user_org_roles[]             @relation("user_org_roles_user_idTousers")
   organizations                                                            organizations?               @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "users_institution_id_fkey")
 
   @@index([organization_id], map: "idx_users_organization_id")
   @@index([organization_id, account_type], map: "idx_users_institution_account_type")
+  @@index([personal_plan], map: "idx_users_personal_plan")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -545,7 +624,7 @@ model championship_invitations {
 
 model user_invitations {
   id                                             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  mobile                                         String    @db.VarChar
+  mobile                                         String?   @db.VarChar
   target_type                                    String    @db.VarChar
   target_id                                      String    @db.Uuid
   role                                           String?   @db.VarChar
@@ -554,6 +633,10 @@ model user_invitations {
   accepted_user_id                               String?   @db.Uuid
   created_at                                     DateTime  @default(now()) @db.Timestamptz(6)
   responded_at                                   DateTime? @db.Timestamptz(6)
+  email                                          String?   @db.VarChar
+  token_hash                                     String?   @db.VarChar
+  expires_at                                     DateTime? @db.Timestamptz(6)
+  revoked_at                                     DateTime? @db.Timestamptz(6)
   users_user_invitations_accepted_user_idTousers users?    @relation("user_invitations_accepted_user_idTousers", fields: [accepted_user_id], references: [id], onUpdate: NoAction)
   users_user_invitations_invited_byTousers       users     @relation("user_invitations_invited_byTousers", fields: [invited_by], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
@@ -562,13 +645,15 @@ model user_invitations {
 }
 
 model fixture_awards {
-  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  fixture_id        String   @db.Uuid
-  recipient_user_id String   @db.Uuid
-  award_name        String   @db.VarChar(120)
-  created_at        DateTime @default(now()) @db.Timestamptz(6)
-  fixtures          fixtures @relation(fields: [fixture_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users             users    @relation(fields: [recipient_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id                String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fixture_id        String       @db.Uuid
+  recipient_user_id String       @db.Uuid
+  award_name        String       @db.VarChar(120)
+  created_at        DateTime     @default(now()) @db.Timestamptz(6)
+  award_type_id     String?      @db.Uuid
+  award_types       award_types? @relation(fields: [award_type_id], references: [id], onUpdate: NoAction)
+  fixtures          fixtures     @relation(fields: [fixture_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users             users        @relation(fields: [recipient_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([fixture_id], map: "idx_fixture_awards_fixture")
   @@index([recipient_user_id], map: "idx_fixture_awards_recipient")
@@ -675,7 +760,377 @@ model demo_sandboxes {
   @@index([created_at(sort: Desc)], map: "idx_demo_sandboxes_created")
 }
 
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model achievement_claims {
+  id                                         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                                    String           @db.Uuid
+  organization_id                            String           @db.Uuid
+  kind                                       String           @default("achievement") @db.VarChar(24)
+  title                                      String           @db.VarChar(200)
+  detail                                     String?
+  sport_id                                   String?          @db.Uuid
+  occurred_on                                DateTime         @db.Date
+  evidence_url                               String?
+  status                                     String           @default("pending") @db.VarChar(16)
+  decided_by                                 String?          @db.Uuid
+  decided_at                                 DateTime?        @db.Timestamptz(6)
+  decision_note                              String?
+  achievement_id                             String?          @db.Uuid
+  created_at                                 DateTime         @default(now()) @db.Timestamptz(6)
+  achievements                               achievements?    @relation(fields: [achievement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_achievement_claims_decided_byTousers users?           @relation("achievement_claims_decided_byTousers", fields: [decided_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  organizations                              organizations    @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sports                                     sports?          @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_achievement_claims_user_idTousers    users            @relation("achievement_claims_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  claim_evidence                             claim_evidence[]
+
+  @@index([organization_id, status, created_at(sort: Desc)], map: "idx_achievement_claims_org")
+  @@index([user_id, created_at(sort: Desc)], map: "idx_achievement_claims_user")
+}
+
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model achievements {
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id            String?              @db.Uuid
+  team_id            String?              @db.Uuid
+  organization_id    String?              @db.Uuid
+  championship_id    String?              @db.Uuid
+  fixture_id         String?              @db.Uuid
+  sport_id           String?              @db.Uuid
+  kind               String
+  medal              String?
+  title              String
+  detail             Json                 @default("{}")
+  occurred_on        DateTime             @db.Date
+  source             String               @default("locked_result")
+  lock_version       Int?
+  superseded_at      DateTime?            @db.Timestamptz(6)
+  created_at         DateTime             @default(now()) @db.Timestamptz(6)
+  achievement_claims achievement_claims[]
+  users              users?               @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model audit_log {
+  id              BigInt   @id(map: "audit_log_pkey1") @default(autoincrement())
+  at              DateTime @default(now()) @db.Timestamptz(6)
+  actor_user_id   String?  @db.Uuid
+  actor_label     String?
+  organization_id String?  @db.Uuid
+  championship_id String?  @db.Uuid
+  action          String
+  target_type     String
+  target_id       String?  @db.Uuid
+  target_label    String?
+  summary         String?
+  diff            Json?
+  ip              String?  @db.Inet
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([actor_user_id, at(sort: Desc)], map: "idx_audit_actor_at")
+  @@index([championship_id, at(sort: Desc)], map: "idx_audit_champ_at")
+  @@index([organization_id, at(sort: Desc)], map: "idx_audit_org_at")
+  @@index([target_type, target_id, at(sort: Desc)], map: "idx_audit_target")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model auth_tokens {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email       String?   @db.VarChar
+  user_id     String?   @db.Uuid
+  kind        String    @db.VarChar
+  token_hash  String    @db.VarChar
+  expires_at  DateTime  @db.Timestamptz(6)
+  consumed_at DateTime? @db.Timestamptz(6)
+  attempts    Int       @default(0)
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  phone       String?   @db.VarChar(20)
+  resends     Int       @default(0) @db.SmallInt
+  users       users?    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([expires_at], map: "idx_auth_tokens_expires")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model award_types {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code           String           @unique
+  label          String
+  sport_id       String?          @db.Uuid
+  is_active      Boolean          @default(true)
+  sort_order     Int              @default(100)
+  created_at     DateTime         @default(now()) @db.Timestamptz(6)
+  sports         sports?          @relation(fields: [sport_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  fixture_awards fixture_awards[]
+
+  @@index([sport_id, sort_order], map: "idx_award_types_sport")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model career_stats {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id         String        @db.Uuid
+  organization_id String        @db.Uuid
+  sport_id        String        @db.Uuid
+  discipline_id   String?       @db.Uuid
+  format          String?       @db.VarChar(40)
+  grain           String        @db.VarChar(12)
+  played          Int           @default(0)
+  won             Int           @default(0)
+  lost            Int           @default(0)
+  drawn           Int           @default(0)
+  gold            Int           @default(0)
+  silver          Int           @default(0)
+  bronze          Int           @default(0)
+  awards          Int           @default(0)
+  first_on        DateTime?     @db.Date
+  last_on         DateTime?     @db.Date
+  computed_at     DateTime      @default(now()) @db.Timestamptz(6)
+  disciplines     disciplines?  @relation(fields: [discipline_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sports          sports        @relation(fields: [sport_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([organization_id, sport_id, grain], map: "idx_career_stats_org_sport")
+  @@index([user_id, grain, last_on(sort: Desc)], map: "idx_career_stats_user")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model certificate_counters {
+  organization_id String        @db.Uuid
+  year            Int           @db.SmallInt
+  code            String        @db.VarChar(8)
+  next_number     Int           @default(1)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([organization_id, year, code])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model certificate_templates {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String         @db.Uuid
+  name            String         @db.VarChar(160)
+  design          Json           @default("{}")
+  code            String?        @db.VarChar(8)
+  is_default      Boolean        @default(false)
+  archived_at     DateTime?      @db.Timestamptz(6)
+  created_by      String?        @db.Uuid
+  created_at      DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime       @default(now()) @db.Timestamptz(6)
+  users           users?         @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  organizations   organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  certificates    certificates[]
+
+  @@index([organization_id, archived_at], map: "idx_certificate_templates_org")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model certificate_verifications {
+  id             BigInt       @id @default(autoincrement())
+  certificate_id String       @db.Uuid
+  verified_at    DateTime     @default(now()) @db.Timestamptz(6)
+  outcome        String       @db.VarChar(24)
+  ip             String?      @db.Inet
+  user_agent     String?
+  certificates   certificates @relation(fields: [certificate_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([certificate_id, verified_at(sort: Desc)], map: "idx_certificate_verifications_cert")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model certificates {
+  id                                   String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                      String                      @db.Uuid
+  template_id                          String?                     @db.Uuid
+  championship_id                      String?                     @db.Uuid
+  fixture_id                           String?                     @db.Uuid
+  user_id                              String?                     @db.Uuid
+  recipient_name                       String                      @db.VarChar(200)
+  serial                               String                      @db.VarChar(40)
+  seq                                  Int
+  year                                 Int                         @db.SmallInt
+  code                                 String                      @db.VarChar(8)
+  payload                              Json                        @default("{}")
+  signature                            String                      @db.VarChar(64)
+  token                                String                      @unique(map: "uq_certificates_token") @db.VarChar(64)
+  issued_by                            String?                     @db.Uuid
+  issued_at                            DateTime                    @default(now()) @db.Timestamptz(6)
+  revoked_at                           DateTime?                   @db.Timestamptz(6)
+  revoked_by                           String?                     @db.Uuid
+  revoked_reason                       String?
+  lock_version                         Int?
+  superseded_at                        DateTime?                   @db.Timestamptz(6)
+  certificate_verifications            certificate_verifications[]
+  championships                        championships?              @relation(fields: [championship_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  fixtures                             fixtures?                   @relation(fields: [fixture_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_certificates_issued_byTousers  users?                      @relation("certificates_issued_byTousers", fields: [issued_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  organizations                        organizations               @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_certificates_revoked_byTousers users?                      @relation("certificates_revoked_byTousers", fields: [revoked_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  certificate_templates                certificate_templates?      @relation(fields: [template_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_certificates_user_idTousers    users?                      @relation("certificates_user_idTousers", fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([organization_id, serial], map: "uq_certificates_serial")
+  @@index([championship_id], map: "idx_certificates_championship")
+  @@index([organization_id, issued_at(sort: Desc)], map: "idx_certificates_org")
+  @@index([user_id, issued_at(sort: Desc)], map: "idx_certificates_user")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model championship_templates {
+  id                     String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                   String         @db.VarChar
+  description            String?
+  organization_id        String?        @db.Uuid
+  created_by             String?        @db.Uuid
+  source_championship_id String?        @db.Uuid
+  shape                  Json           @default("{}")
+  created_at             DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime       @default(now()) @db.Timestamptz(6)
+  is_system              Boolean        @default(false)
+  users                  users?         @relation(fields: [created_by], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations          organizations? @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  championships          championships? @relation(fields: [source_championship_id], references: [id], onUpdate: NoAction)
+
+  @@index([created_by, created_at(sort: Desc)], map: "idx_championship_templates_creator")
+  @@index([organization_id, name], map: "idx_championship_templates_org")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model claim_evidence {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  claim_id           String             @db.Uuid
+  filename           String             @db.VarChar(255)
+  mime               String             @db.VarChar(100)
+  size_bytes         Int
+  bytes              Bytes
+  uploaded_by        String             @db.Uuid
+  uploaded_at        DateTime           @default(now()) @db.Timestamptz(6)
+  achievement_claims achievement_claims @relation(fields: [claim_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users              users              @relation(fields: [uploaded_by], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([claim_id, uploaded_at], map: "idx_claim_evidence_claim")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model lifetime_entries {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id         String    @db.Uuid
+  organization_id String?   @db.Uuid
+  championship_id String?   @db.Uuid
+  fixture_id      String?   @db.Uuid
+  sport_id        String?   @db.Uuid
+  occurred_on     DateTime  @db.Date
+  kind            String
+  title           String
+  detail          Json      @default("{}")
+  source          String    @default("locked_result")
+  lock_version    Int?
+  superseded_at   DateTime? @db.Timestamptz(6)
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  users           users     @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@index([user_id, occurred_on(sort: Desc)], map: "idx_lifetime_user_date")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model org_domains {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  domain          String        @db.VarChar
+  verified        Boolean       @default(true)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([organization_id], map: "idx_org_domains_org")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model org_units {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id      String                 @db.Uuid
+  parent_id            String?                @db.Uuid
+  type                 String                 @db.VarChar
+  name                 String                 @db.VarChar
+  code                 String?                @db.VarChar
+  display_order        Int                    @default(0)
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  org_units            org_units?             @relation("org_unitsToorg_units", fields: [parent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  other_org_units      org_units[]            @relation("org_unitsToorg_units")
+  organization_members organization_members[]
+
+  @@index([organization_id, display_order], map: "idx_org_units_org")
+  @@index([parent_id, display_order], map: "idx_org_units_parent")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model rate_limits {
+  key          String
+  window_start DateTime @db.Timestamptz(6)
+  count        Int      @default(0)
+
+  @@id([key, window_start])
+  @@index([window_start], map: "idx_rate_limits_window")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model report_jobs {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  kind            String        @db.VarChar(32)
+  season          Int?          @db.SmallInt
+  status          String        @default("queued") @db.VarChar(16)
+  progress        Int           @default(0) @db.SmallInt
+  result          Json?
+  error           String?
+  requested_by    String?       @db.Uuid
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  started_at      DateTime?     @db.Timestamptz(6)
+  finished_at     DateTime?     @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users?        @relation(fields: [requested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([organization_id, created_at(sort: Desc)], map: "idx_report_jobs_org")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model user_org_roles {
+  id                                      String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                                 String        @db.Uuid
+  organization_id                         String        @db.Uuid
+  role_id                                 String        @db.Uuid
+  assigned_by                             String?       @db.Uuid
+  assigned_at                             DateTime      @default(now()) @db.Timestamptz(6)
+  scope_ref                               String?       @db.VarChar(64)
+  status                                  String        @default("ACTIVE") @db.VarChar(16)
+  users_user_org_roles_assigned_byTousers users?        @relation("user_org_roles_assigned_byTousers", fields: [assigned_by], references: [id], onUpdate: NoAction)
+  organizations                           organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  roles                                   roles         @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_user_org_roles_user_idTousers     users         @relation("user_org_roles_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([organization_id], map: "idx_user_org_roles_org")
+  @@index([user_id], map: "idx_user_org_roles_user")
+  @@index([organization_id, status], map: "idx_user_org_roles_status")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model fixture_events {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   fixture_id     String   @db.Uuid
@@ -694,4 +1149,21 @@ model fixture_events {
   @@index([fixture_id], map: "idx_fixture_events_fixture")
   @@index([event_key], map: "idx_fixture_events_key")
   @@index([player_user_id], map: "idx_fixture_events_player")
+}
+
+enum tier {
+  free
+  pro
+  max
+}
+
+enum role_kind {
+  org
+  event
+}
+
+enum role_scope {
+  whole_org
+  campus_unit
+  single_event
 }

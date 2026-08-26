@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import {
+  AUTH_METHOD, PUBLIC_EMAIL_DOMAINS,
   DEMO_REQUEST_STATUS, FEEDBACK_STATUS, ENTRY_TYPE, ENROLLMENT_STATUS, CHAMPIONSHIP_STATUS, CHAMPIONSHIP_VISIBILITY, FIXTURE_STATUS, GROUND_TYPE,
-  NOTIFICATION_AUDIENCE, NOTIFICATION_REACTIONS, ORGANIZATION_MEMBER_ROLE,
-  SPONSOR_TIER, STANDINGS_RULE_SCOPE, STANDINGS_TIEBREAKER, TEAM_MEMBER_ROLE,
+  CHAMPIONSHIP_TYPE, NOTIFICATION_AUDIENCE, NOTIFICATION_REACTIONS, ORGANIZATION_MEMBER_ROLE,
+  STANDINGS_RULE_SCOPE, STANDINGS_TIEBREAKER, TEAM_MEMBER_ROLE,
   TEAM_STATUS, TOURNAMENT_DISCIPLINE_STATUS, TOURNAMENT_STATUS,
 } from './enums.js';
 import { disciplineFormatConfigSchema } from './scoring.js';
@@ -57,6 +58,197 @@ export const signupSchema = z.object({
   password: z.string().min(6),
   phone: requiredPhone,
 });
+
+// ---------- Email-first sign-in (FR-AUTH-1/2/4) ----------
+// Step 1: which organisation does this address belong to? Answered from the domain
+// alone - the handler never reads `users`, so the reply cannot be used to probe
+// whether an account exists.
+export const identifySchema = z.object({
+  email: z.string().email(),
+});
+
+// A one-time code proves you own an address. It is never a way to sign in - it
+// gates the two things that need that proof: creating an account, and setting a new
+// password when the old one is forgotten.
+export const VERIFICATION_PURPOSE = ['signup', 'password_reset'] as const;
+export type VerificationPurpose = (typeof VERIFICATION_PURPOSE)[number];
+
+// Step 2: send a one-time code to that address.
+export const otpRequestSchema = z.object({
+  email: z.string().email(),
+  purpose: z.enum(VERIFICATION_PURPOSE).default('signup'),
+});
+
+// Step 3: check the code. Returns a short-lived verification ticket - NOT a session.
+export const otpVerifySchema = z.object({
+  email: z.string().email(),
+  code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
+  purpose: z.enum(VERIFICATION_PURPOSE).default('signup'),
+});
+
+// Step 4a: finish signing up. The ticket carries the proof of ownership, so the
+// email is taken from it and not from the body - a caller cannot verify one address
+// and register another.
+export const verifiedSignupSchema = z.object({
+  verification_token: z.string().min(1),
+  name: z.string().min(1),
+  phone: requiredPhone,
+  password: z.string().min(6),
+});
+
+// Step 4b: finish a password reset.
+export const resetPasswordSchema = z.object({
+  verification_token: z.string().min(1),
+  password: z.string().min(6),
+});
+
+
+// ---------- Phone-first sign-in (Option B) ----------
+//
+// A phone number can belong to more than one account, so every phone-keyed step
+// answers about the NUMBER and the account is chosen afterwards. An email is still
+// unique and identifies exactly one account.
+
+/** Who a request is about: a phone number or an email address, never both. */
+export const subjectSchema = z.union([
+  z.object({ phone: requiredPhone, email: z.undefined().optional() }),
+  z.object({ email: z.string().email(), phone: z.undefined().optional() }),
+]);
+export type Subject = z.infer<typeof subjectSchema>;
+
+/** What a one-time code is being asked for. */
+export const OTP_PURPOSE = ['sign_in', 'signup', 'password_reset', 'verify_email', 'verify_phone'] as const;
+export type OtpPurpose = (typeof OTP_PURPOSE)[number];
+
+/** Step 1: which doors are open for this subject - password, code, or sign up. */
+export const identifySubjectSchema = subjectSchema;
+
+/** Step 2: send a code to this subject. */
+export const otpSendSchema = z.intersection(
+  subjectSchema,
+  z.object({ purpose: z.enum(OTP_PURPOSE).default('sign_in') }),
+);
+
+/** Step 3: check it. Returns a short-lived ticket, never a session. */
+export const otpCheckSchema = z.intersection(
+  subjectSchema,
+  z.object({
+    code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
+    purpose: z.enum(OTP_PURPOSE).default('sign_in'),
+  }),
+);
+
+/**
+ * Sign in with a password. A phone resolves to a SET of accounts, so the password
+ * disambiguates only when they differ - the chooser has to stay reachable from
+ * this path, not just the code path.
+ */
+export const passwordSignInSchema = z.intersection(
+  subjectSchema,
+  z.object({ password: z.string().min(1) }),
+);
+
+/**
+ * Turn a proof into a session. `account_id` is required only when the subject
+ * resolved to more than one account and the person has picked.
+ */
+export const sessionSchema = z.object({
+  verification_token: z.string().min(1),
+  account_id: uuid.optional(),
+});
+
+/**
+ * Sign up: all four are required, and both addresses are verified independently.
+ * The verified one comes from its ticket, never from the body, so a caller cannot
+ * prove one address and register another.
+ */
+export const phoneSignupSchema = z.object({
+  phone_token: z.string().min(1),
+  email_token: z.string().min(1),
+  name: z.string().min(1),
+  password: z.string().min(6),
+});
+
+// ---------- Organisation email domains (super-admin managed) ----------
+// Normalised on the way in so "@IIMB.ac.in", "www.iimb.ac.in" and "iimb.ac.in " all
+// store as one value - the DB's unique index is on lower(domain), and sign-in looks
+// up the bare host of the address.
+const DOMAIN_SHAPE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+export const normalizeDomain = (raw: string): string =>
+  raw.trim().toLowerCase().replace(/^@/, '').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+
+const domainField = z
+  .string()
+  .min(1, 'Domain is required')
+  .transform(normalizeDomain)
+  .refine((d) => DOMAIN_SHAPE.test(d), 'Enter a domain like iimb.ac.in')
+  .refine(
+    (d) => !(PUBLIC_EMAIL_DOMAINS as readonly string[]).includes(d),
+    'Public mailbox providers cannot be claimed by an organisation',
+  );
+
+export const createOrgDomainSchema = z.object({
+  organization_id: uuid,
+  domain: domainField,
+  // Super-admin-entered domains are verified by definition; the flag exists so a
+  // future org-admin self-claim can land unverified and be approved here.
+  verified: z.boolean().default(true),
+});
+export const updateOrgDomainSchema = z.object({
+  organization_id: uuid.optional(),
+  domain: domainField.optional(),
+  verified: z.boolean().optional(),
+});
+
+// ---------- Organisation invitations (J1-E3) ----------
+// Invite someone to an organisation by email, with the role they will hold. The role
+// is part of the invitation because that is what distinguishes inviting from letting
+// someone request to join.
+export const inviteOrgMemberSchema = z.object({
+  email: z.string().email(),
+  role: z.enum(ORGANIZATION_MEMBER_ROLE).default('member'),
+});
+
+// The same thing for a pasted list or an uploaded sheet. A per-row role is optional
+// because most batches are one role for everybody; rows without one take the
+// top-level `role`. Partial success is the point: one bad or duplicate address must
+// not cost the other 199 their invitation, so the route reports per address rather
+// than failing the batch.
+export const bulkInviteOrgMembersSchema = z.object({
+  invites: z.array(z.object({
+    // Deliberately NOT .email() here, unlike the single-invite schema: a rejected
+    // body is all-or-nothing, so one typo in a pasted list of 200 would 400 the
+    // other 199. The address is checked per row in the service instead, where a bad
+    // one lands in `skipped` with the rest of the batch still sent.
+    email: z.string().min(1).max(320),
+    role: z.enum(ORGANIZATION_MEMBER_ROLE).optional(),
+  })).min(1).max(200),
+  role: z.enum(ORGANIZATION_MEMBER_ROLE).default('member'),
+});
+
+// Accepting. Name/phone/password are required only when the address has no account
+// yet - the server decides, since only it knows.
+export const acceptInvitationSchema = z.object({
+  token: z.string().min(1),
+  name: z.string().min(1).optional(),
+  phone: optionalPhone,
+  password: z.string().min(6).optional(),
+});
+
+// ---------- Organisation settings (jsonb, validated on write) ----------
+// The `settings` bag carries what would otherwise be a dozen sparse columns. Only
+// the auth block is read today; the rest are declared so the shape is agreed before
+// modules 03/08 start writing to it.
+export const orgSettingsSchema = z.object({
+  auth: z.object({
+    methods: z.array(z.enum(AUTH_METHOD)).min(1).default(['otp', 'password']),
+    sso: z.array(z.string()).default([]),
+  }).default({ methods: ['otp', 'password'], sso: [] }),
+  nav: z.record(z.boolean()).default({}),
+  modules: z.record(z.array(z.string())).default({}),
+  flags: z.record(z.boolean()).default({}),
+  brand: z.record(z.any()).default({}),
+}).partial();
 
 // ---------- Users (admin / organiser / org-owner managed) ----------
 // Creating a login for someone else (a teammate, an official, a member). The
@@ -190,6 +382,33 @@ export const createChampionshipSchema = z.object({
   status: z.enum(CHAMPIONSHIP_STATUS).optional(),
   // 'private' hides the championship from Discover/Browse; orgs join by invite only.
   visibility: z.enum(CHAMPIONSHIP_VISIBILITY).optional(),
+  // What kind of event this is - nullable, because it is a question older
+  // championships were never asked (J2-E1-S2).
+  type: z.enum(CHAMPIONSHIP_TYPE).nullable().optional(),
+  // Where it is. `region` is never accepted from a client - the server derives it
+  // from the country so the filter can't disagree with the data (J3-E4-S2).
+  country: z.string().min(1).nullable().optional(),
+  // Whether people with no institution may enter (J3-E1-S5). Omitted on create means
+  // "decide from the visibility", which is what an organiser almost always means.
+  allow_individual_entry: z.boolean().optional(),
+});
+
+// Applying a template to a fresh draft: sports, disciplines, formats and the
+// standings scheme in one call, rather than an organiser configuring six sports from
+// an empty form.
+export const applyTemplateSchema = z.object({
+  // A championship_templates row id - either a built-in or one somebody saved.
+  template: z.string().uuid(),
+});
+
+// Saving the setup of a championship you just built as a template you can start from
+// next time. The name is the user's, which is the whole point: the product derives the
+// shape, the organiser says what it is called.
+export const saveTemplateSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  description: z.string().trim().max(280).optional().nullable(),
+  // Present = the organisation owns it and it outlives the person who saved it.
+  organization_id: z.string().uuid().optional().nullable(),
 });
 export const updateChampionshipSchema = createChampionshipSchema.partial();
 export const updateChampionshipStatusSchema = z.object({ status: z.enum(CHAMPIONSHIP_STATUS) });
@@ -227,15 +446,6 @@ export const bulkCreateGroundsSchema = z.object({
   message: 'All grounds must belong to the same venue',
 });
 
-export const createSponsorSchema = z.object({
-  championship_id: uuid,
-  name: z.string().min(1),
-  logo_url: z.string().optional(),
-  tier: z.enum(SPONSOR_TIER).default('community'),
-  website_url: z.string().optional(),
-  display_order: z.number().int().default(0),
-});
-export const updateSponsorSchema = createSponsorSchema.partial();
 
 export const createTournamentSchema = z.object({
   championship_id: uuid,
@@ -275,7 +485,26 @@ export const reviewEnrollmentSchema = z.object({
   status: z.enum(['approved', 'rejected'] as const),
   rejection_note: z.string().optional(),
 });
-export const assignRoleSchema = z.object({ user_id: uuid, role_id: uuid });
+/**
+ * Assigning an organisation role.
+ *
+ * `scope_ref` is the concrete instance a scoped role applies to - a campus id for a
+ * campus_unit role, an event id for single_event. Null means the whole organisation.
+ * Role plus scope is the permission unit: "Sports Admin" alone does not say where.
+ */
+export const ROLE_GRANT_STATUS = ['ACTIVE', 'INVITED', 'SUSPENDED'] as const;
+export type RoleGrantStatus = (typeof ROLE_GRANT_STATUS)[number];
+
+export const assignRoleSchema = z.object({
+  user_id: uuid,
+  role_id: uuid,
+  scope_ref: z.string().max(64).nullable().optional(),
+  status: z.enum(ROLE_GRANT_STATUS).default('ACTIVE'),
+});
+
+export const updateRoleGrantSchema = z.object({
+  status: z.enum(ROLE_GRANT_STATUS),
+});
 // Bulk-assign one championship role to several users at once (multi-select picker).
 export const bulkAssignRoleSchema = z.object({ user_ids: z.array(uuid).min(1).max(200), role_id: uuid });
 // Bulk-assign several users as championship officials at once (multi-select picker).
@@ -332,6 +561,9 @@ export const updateTeamEntrySchema = z.object({
 export const updateTeamSchema = z.object({
   name: z.string().min(1).optional(),
   status: z.enum(TEAM_STATUS).optional(),
+  // A coach is a property of the team, not a squad member, so they never count
+  // against squad size (J3-E2-S3). null clears it - a team may have no coach.
+  coach_user_id: uuid.nullable().optional(),
 });
 export const addTeamMemberSchema = z.object({
   user_id: uuid,
@@ -456,10 +688,17 @@ export const fixturePointsSchema = z.object({
   away_points: z.number().int().min(0).nullable().optional(),
 });
 
-// Per-match awards entered by the scorer: free-text award name + a recipient who is
-// a player on one of the two competing teams. Saved with replace-all semantics.
+// Per-match awards entered by the scorer: an award name + a recipient who is a
+// player on one of the two competing teams. Saved with replace-all semantics.
+//
+// `award_type_id` points at the catalogue, and is what makes "MVP awards" a
+// countable number rather than three spellings of one thing (J4-E4-S2).
+// `award_name` stays required and free: an official who needs an award the
+// catalogue does not have must not be blocked mid-match, and the free text they
+// type is preserved untyped rather than guessed at.
 export const fixtureAwardSchema = z.object({
   award_name: z.string().min(1).max(120),
+  award_type_id: uuid.nullable().optional(),
   recipient_user_id: uuid,
 });
 export const fixtureAwardsSchema = z.object({
@@ -638,3 +877,32 @@ export const createDemoSandboxSchema = z.object({
 export type CreateDemoSandboxInput = z.infer<typeof createDemoSandboxSchema>;
 
 export { ENROLLMENT_STATUS };
+
+// ---------- Bulk registration review (J2-E2-S2) ----------
+// One decision applied to a whole selection. The cap is a Lambda budget, not a
+// technical limit: each enrolment is its own transaction plus an audit line and a
+// notification, and the batch must still answer inside the 15s function timeout.
+export const bulkReviewEnrollmentsSchema = z.object({
+  ids: z.array(uuid).min(1).max(50),
+  status: z.enum(['approved', 'rejected'] as const),
+  rejection_note: z.string().optional(),
+});
+
+// ---------------------------------------------------------------------------
+// J2-E4 · Schedule fixtures & assign officials
+// ---------------------------------------------------------------------------
+
+// Draw generation as the organiser actually asks for it. `replace` is what stops an
+// existing draw being silently overwritten: rebuilding a knockout throws away every
+// fixture in it, so the caller has to say it means to.
+export const generateDrawSchema = generateFixturesSchema.extend({
+  replace: z.boolean().optional(),
+});
+export type GenerateDrawInput = z.infer<typeof generateDrawSchema>;
+
+// Assigning (or clearing) the official responsible for scoring one match. Its own
+// route rather than a field on the fixture update, because the assignment has to
+// notify the person it names.
+export const assignFixtureOfficialSchema = z.object({
+  official_id: uuid.nullable(),
+});

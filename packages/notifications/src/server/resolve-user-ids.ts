@@ -1,4 +1,5 @@
 import type { AudienceRule } from '../core/rules.js';
+import { ROLE_CODES, roleWhereByCode, type RoleWhere } from '@semp/shared';
 
 export interface NotificationPrisma {
     user_championship_roles: {
@@ -66,11 +67,13 @@ export interface NotificationPrisma {
         }): Promise<Array<{ user_id: string }>>;
     };
 
+    // Resolved by stable code, not display name - and therefore findFirst, not
+    // findUnique: roles are org-scoped now, so `name` is no longer a unique key
+    // and the platform row has to be selected explicitly. See @semp/shared
+    // role-codes for why.
     roles: {
-        findUnique(args: {
-            where: {
-                name: string;
-            };
+        findFirst(args: {
+            where: RoleWhere;
             select: {
                 id: true;
             };
@@ -223,14 +226,8 @@ export async function resolveUserIds(
             }
 
             // Organisers continue to use the championship role system.
-            const roleName = {
-                organiser: 'Organiser',
-            }[rule.role];
-
-            const role = await prisma.roles.findUnique({
-                where: {
-                    name: roleName,
-                },
+            const role = await prisma.roles.findFirst({
+                where: roleWhereByCode(ROLE_CODES[rule.role]),
                 select: {
                     id: true,
                 },
@@ -264,10 +261,8 @@ export async function resolveUserIds(
 
             // Organisers
             const organiserRole =
-                await prisma.roles.findUnique({
-                    where: {
-                        name: 'Organiser',
-                    },
+                await prisma.roles.findFirst({
+                    where: roleWhereByCode(ROLE_CODES.organiser),
                     select: {
                         id: true,
                     },
