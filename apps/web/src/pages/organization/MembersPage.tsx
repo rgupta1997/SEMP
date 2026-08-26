@@ -204,7 +204,7 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 text-left font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 dark:border-slate-700">
+                  <tr className="border-b border-slate-200 text-left font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 dark:border-slate-800">
                     <th className="px-3 py-2.5">Member</th>
                     <th className="px-3 py-2.5">Membership</th>
                     <th className="px-3 py-2.5">Roles &amp; scope</th>

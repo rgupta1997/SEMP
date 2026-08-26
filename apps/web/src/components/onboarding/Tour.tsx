@@ -95,7 +95,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
           <div className="absolute inset-0" onClick={stop} />
 
           <div
-            className="absolute w-[320px] rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+            className="absolute w-[320px] rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-800 dark:bg-slate-900"
             style={{ top: tipTop, left: tipLeft }}
             onClick={(e) => e.stopPropagation()}
           >

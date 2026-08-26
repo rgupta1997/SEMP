@@ -6,8 +6,7 @@ import { useWorkspace } from '../../lib/useWorkspace';
 import { CapabilityLock } from '../../components/CapabilityLock';
 import { downloadCsvTemplate, matrixToRows, readFileToMatrix, type ImportColumn } from '../../lib/import';
 import {
-  Badge, BackButton, Button, Card, CardBody, CardHeader, PageHeader, Spinner, toast,
-} from '../../components/ui';
+  Badge, BackButton, Button, Card, CardBody, CardHeader, PageHeader, Spinner, toast, INSET,} from '../../components/ui';
 
 // Bulk-import the student roll (J1-E5).
 //
@@ -196,7 +195,7 @@ export function RollImportPage() {
                 <Badge tone="rose">{report.summary.reject} rejected</Badge>
               </div>
 
-              <div className="max-h-96 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
+              <div className={`max-h-96 overflow-auto ${INSET}`}>
                 <table className="w-full text-left text-sm">
                   <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
                     <tr>
@@ -279,7 +278,7 @@ export function RollImportPage() {
                 one — so hand them out directly rather than posting the list somewhere shared.
               </span>
             </p>
-            <div className="max-h-80 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
+            <div className={`max-h-80 overflow-auto ${INSET}`}>
               <table className="w-full text-left text-sm">
                 <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
                   <tr>

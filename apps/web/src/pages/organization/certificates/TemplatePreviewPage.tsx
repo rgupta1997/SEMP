@@ -121,7 +121,7 @@ export function TemplatePreviewPage() {
                       className={`rounded-lg border px-2 py-1.5 text-left text-xs font-medium transition-colors ${
                         form.design.layout === l.id
                           ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-950/50 dark:text-brand-300'
-                          : 'border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-400'}`}
+                          : 'border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-800 dark:text-slate-400'}`}
                     >{l.name}</button>
                   ))}
                 </div>
@@ -132,7 +132,7 @@ export function TemplatePreviewPage() {
                 <div className="flex items-center gap-2">
                   <input
                     type="color" value={form.design.accent ?? '#0C5A63'} onChange={(e) => set('accent', e.target.value)}
-                    className="h-9 w-12 shrink-0 cursor-pointer rounded border border-slate-300 bg-white dark:border-slate-700"
+                    className="h-9 w-12 shrink-0 cursor-pointer rounded border border-slate-300 bg-white dark:border-slate-800"
                     aria-label="Accent colour"
                   />
                   <Input value={form.design.accent ?? '#0C5A63'} onChange={(e) => set('accent', e.target.value)} className="font-mono text-xs" />

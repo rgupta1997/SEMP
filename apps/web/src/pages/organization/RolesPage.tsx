@@ -190,7 +190,7 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
 
                 {!selected.editable && (
                   // The important sentence on this screen: the copy starts identical.
-                  <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/40">
+                  <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/40">
                     <p className="flex-1 text-[13.5px] text-slate-600 dark:text-slate-300">
                       This is the platform's definition, shared by every organisation. Take a copy to change it
                       here — the copy starts identical, so nothing is lost by customising.
@@ -201,7 +201,7 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
                   </div>
                 )}
 
-                <div className="mb-5 rounded-lg border border-slate-200 px-4 py-3 dark:border-slate-700">
+                <div className="mb-5 rounded-lg border border-slate-200 px-4 py-3 dark:border-slate-800">
                   <h4 className="mb-2 font-mono text-[9.5px] uppercase tracking-[0.14em] text-slate-500">Scope</h4>
                   <div className="flex flex-wrap gap-2">
                     {(Object.keys(SCOPE_LABEL) as RoleScope[]).map((sc) => (
@@ -212,7 +212,7 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
                         onClick={() => setScope(sc)}
                         className={`rounded-lg border px-3 py-1.5 text-[13px] font-semibold transition
                           ${scope === sc ? 'border-brand-600 bg-brand-600 text-white'
-                                         : 'border-slate-200 hover:border-brand-300 dark:border-slate-700'}
+                                         : 'border-slate-200 hover:border-brand-300 dark:border-slate-800'}
                           ${selected.editable ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
                       >
                         {SCOPE_LABEL[sc]}
@@ -234,7 +234,7 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
                               key={perm.code}
                               className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-[13.5px] transition
                                 ${on ? 'border-brand-300 bg-brand-50 dark:border-brand-700 dark:bg-brand-900/25'
-                                     : 'border-slate-200 dark:border-slate-700'}
+                                     : 'border-slate-200 dark:border-slate-800'}
                                 ${selected.editable ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
                             >
                               <input
@@ -257,7 +257,7 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
                 </div>
 
                 {selected.editable && (
-                  <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
+                  <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
                     <Button variant="ghost" onClick={revert} disabled={busy}>
                       <RotateCcw size={14} /> Revert to platform
                     </Button>

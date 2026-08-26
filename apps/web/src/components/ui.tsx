@@ -75,11 +75,36 @@ export const Field = ({ label, hint, children }: { label: string; hint?: string;
 );
 
 /* ----------------------------- Card ----------------------------- */
+/**
+ * ONE bordered surface, and one edge inside it.
+ *
+ * Every panel that sits on the page background is `SURFACE`; every block that
+ * sits on a panel is `INSET`. They had drifted into four radii and two dark
+ * palettes - a table at rounded-md beside a card at rounded-2xl, a slate-700
+ * edge on a slate-800 ground beside a slate-800 edge on a slate-900 one - which
+ * is legible on any single screen and obvious the moment you move between two.
+ *
+ * The edge is `eos-line` (#E1E7F0) and the radius is `--radius-card` (14px),
+ * which is what the EOS prototype draws and what the profile screens already
+ * hard-code inline. The Tailwind half of the app now says the same thing rather
+ * than something a shade off it.
+ *
+ * FORM CONTROLS ARE NOT SURFACES. An input keeps its lighter dark edge
+ * (slate-700 on a slate-800 ground) because it sits ON a panel and has to read
+ * as inset - see `fieldBase`. Only panels use these two.
+ *
+ * Reach for these rather than retyping the classes: a fifth radius enters the
+ * product the first time somebody guesses.
+ */
+export const SURFACE = 'rounded-card border border-eos-line bg-white dark:border-slate-800 dark:bg-slate-900';
+export const INSET = 'rounded-xl border border-eos-line dark:border-slate-800';
+
 export function Card({ className = '', children, interactive, ...p }: HTMLAttributes<HTMLDivElement> & { interactive?: boolean }) {
   return (
     <div
       className={cn(
-        'rounded-2xl border border-slate-200 bg-white shadow-[var(--card-shadow)] transition-[box-shadow,transform,border-color] duration-200 dark:border-slate-800 dark:bg-slate-900 dark:shadow-none',
+        SURFACE,
+        'shadow-[var(--card-shadow)] transition-[box-shadow,transform,border-color] duration-200 dark:shadow-none',
         interactive && 'cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md dark:hover:border-brand-500/40',
         className,
       )}
@@ -92,7 +117,12 @@ export function Card({ className = '', children, interactive, ...p }: HTMLAttrib
 
 export function CardHeader({ title, subtitle, action }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="flex flex-col gap-3 px-5 pt-5 pb-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+    // `[&+div]:pt-0` takes the top padding off the body that follows, so the header
+    // owns the gap between them. It is here rather than on the body because only
+    // the header knows it is there: a CardBody used on its own - the identity
+    // panel on the profile, and a dozen like it - had no top padding at all, and
+    // its content sat on the card's own border.
+    <div className="flex flex-col gap-3 px-5 pt-5 pb-3 [&+div]:pt-0 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
       <div className="min-w-0">
         <h3 className="font-semibold text-slate-900 dark:text-slate-100">{title}</h3>
         {subtitle && <p className="text-sm text-slate-500 mt-0.5 dark:text-slate-400">{subtitle}</p>}
@@ -103,7 +133,9 @@ export function CardHeader({ title, subtitle, action }: { title: ReactNode; subt
 }
 
 export const CardBody = ({ className = '', children }: { className?: string; children: ReactNode }) =>
-  <div className={cn('px-5 pb-5', className)}>{children}</div>;
+  // Longhand, not `p-5`: several callers pass `p-0`/`p-2` for a flush table, and
+  // the shorthand would fight them on which utility Tailwind happens to emit last.
+  <div className={cn('px-5 pt-5 pb-5', className)}>{children}</div>;
 
 /* ----------------------------- Badge ----------------------------- */
 type BadgeTone = 'brand' | 'green' | 'teal' | 'amber' | 'rose' | 'slate' | 'violet' | 'info' | 'live';
@@ -223,15 +255,58 @@ export function Modal({ title, onClose, children, footer, wide, size, dismissibl
   return createPortal(
     <div className="animate-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4 sm:p-6 backdrop-blur-sm" onClick={dismissible ? onClose : undefined}>
       <div className={cn('flex max-h-full w-full flex-col animate-fade-up rounded-[20px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900', maxW)} onClick={(e) => e.stopPropagation()}>
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800">
           <h3 className="text-lg font-semibold dark:text-slate-100">{title}</h3>
           <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">×</button>
         </div>
         <div className="flex-1 overflow-y-auto p-5">{children}</div>
-        {footer && <div className="shrink-0 border-t border-slate-200 px-5 py-4 dark:border-slate-700">{footer}</div>}
+        {footer && <div className="shrink-0 border-t border-slate-200 px-5 py-4 dark:border-slate-800">{footer}</div>}
       </div>
     </div>,
     document.body,
+  );
+}
+
+/* ----------------------------- FilterChips ----------------------------- */
+/**
+ * The filter row above a list - "Everyone / Awaiting verification / Verified",
+ * each with its count.
+ *
+ * Five screens had grown their own copy of this: the same control with three
+ * radii and two ways of drawing an edge (`ring-1` here, `border` there), which
+ * is why the same row of filters looked like a different control on each page.
+ */
+export function FilterChips<T extends string>({ value, onChange, options, className = '' }: {
+  value: T;
+  onChange: (v: T) => void;
+  options: Array<{ key: T; label: ReactNode; count?: number }>;
+  className?: string;
+}) {
+  return (
+    <div className={cn('mb-4 flex flex-wrap gap-2', className)}>
+      {options.map((o, i) => {
+        const active = o.key === value;
+        return (
+          <button
+            key={o.key || `#${i}`}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(o.key)}
+            className={cn(
+              'flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-semibold transition-colors',
+              active
+                ? 'border-brand-600 bg-brand-600 text-white'
+                : 'border-eos-line bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800',
+            )}
+          >
+            {o.label}
+            {o.count !== undefined && (
+              <span className={cn('font-mono text-[11px]', active ? 'text-white/75' : 'text-slate-400')}>{o.count}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -348,7 +423,7 @@ export function Stepper({ steps, current }: { steps: string[]; current: number }
               'grid h-7 w-7 flex-none place-items-center rounded-full border text-xs font-bold',
               done ? 'border-brand-500 bg-brand-500 text-white'
                 : active ? 'border-brand-500 bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300'
-                  : 'border-slate-300 text-slate-400 dark:border-slate-700 dark:text-slate-500',
+                  : 'border-slate-300 text-slate-400 dark:border-slate-800 dark:text-slate-500',
             )}>{done ? <Check size={13} /> : i + 1}</span>
             <span className={cn('text-sm font-semibold', active ? 'text-slate-900 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400')}>{s}</span>
           </li>
@@ -374,7 +449,7 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: 
 /* ----------------------------- EmptyState ----------------------------- */
 export function EmptyState({ icon = <CircleDashed size={32} />, title, description, action }: { icon?: ReactNode; title: string; description?: string; action?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-md border border-dashed border-slate-200 bg-white px-6 py-14 text-center dark:border-slate-700 dark:bg-slate-900">
+    <div className="flex flex-col items-center justify-center rounded-card border border-dashed border-eos-line bg-white px-6 py-14 text-center dark:border-slate-800 dark:bg-slate-900">
       <div className="mb-4 text-slate-300 dark:text-slate-600">{icon}</div>
       <h3 className="font-semibold text-slate-800 dark:text-slate-200">{title}</h3>
       {description && <p className="mt-1 max-w-sm text-sm text-slate-500 dark:text-slate-400">{description}</p>}
@@ -403,7 +478,7 @@ export function ListToolbar({ children, className = '', inline = false }: { chil
       'flex flex-wrap items-center gap-2',
       inline
         ? className
-        : cn('mb-4 rounded-md border border-slate-200/80 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-900', className),
+        : cn('mb-4 p-2 shadow-sm', SURFACE, className),
     )}>
       {children}
     </div>
@@ -552,7 +627,7 @@ export function Checkbox({ checked, indeterminate, onChange }: { checked: boolea
 export function BulkBar({ count, children, onClear }: { count: number; children: ReactNode; onClear: () => void }) {
   if (count === 0) return null;
   return (
-    <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-brand-200 bg-brand-50 px-4 py-2.5 dark:border-brand-500/30 dark:bg-brand-500/10">
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-200 bg-brand-50 px-4 py-2.5 dark:border-brand-500/30 dark:bg-brand-500/10">
       <span className="text-sm font-semibold text-brand-700 dark:text-brand-300">{count} selected</span>
       <div className="flex items-center gap-2">
         {children}
@@ -565,7 +640,7 @@ export function BulkBar({ count, children, onClear }: { count: number; children:
 /* ----------------------------- Table ----------------------------- */
 export function Table({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-auto rounded-md border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+    <div className={cn('overflow-auto', SURFACE)}>
       <table className="w-full text-sm">{children}</table>
     </div>
   );
@@ -645,7 +720,7 @@ const TOAST_META: Record<ToastType, { icon: ReactNode; chip: string }> = {
 export function Toast({ type, title, message, onClose }: { type: ToastType; title: string; message?: string; onClose?: () => void }) {
   const m = TOAST_META[type];
   return (
-    <div className="flex items-start gap-3 rounded-md border border-slate-200 bg-white px-3.5 py-3 shadow-md dark:border-slate-800 dark:bg-slate-900" role="status">
+    <div className={cn('flex items-start gap-3 px-3.5 py-3 shadow-md', SURFACE)} role="status">
       <span className={cn('mt-0.5 flex-none rounded-sm p-1', m.chip)} aria-hidden>{m.icon}</span>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-bold text-slate-900 dark:text-slate-100">{title}</div>

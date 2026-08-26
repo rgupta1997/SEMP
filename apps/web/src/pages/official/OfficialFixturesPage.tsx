@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useTableControls, fmtDateTime } from '../../lib/hooks';
-import { Button, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Spinner, StatusBadge } from '../../components/ui';
+import { Button, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Spinner, StatusBadge, FilterChips } from '../../components/ui';
 import { awayTeam, disciplineLabel, eventInfo, eventLabel, homeTeam, isRankingEvent, orgLabel, sportName, teamLabel, venueLabel } from './fixtureHelpers';
 
 export function OfficialFixturesPage() {
@@ -63,21 +63,17 @@ export function OfficialFixturesPage() {
   return (
     <div>
       <PageHeader title="Officiating" subtitle="Matches assigned to you, and the console for the one you are on." />
-      <div className="mb-4 flex flex-wrap gap-2">
-        {TABS.map((t2) => (
-          <button
-            key={t2.key}
-            onClick={() => setStatus(t2.key)}
-            className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold ${status === t2.key ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700'}`}
-          >
-            {t2.key === 'live' && t2.count > 0 && (
-              <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${status === t2.key ? 'bg-white' : 'bg-rose-500'}`} />
-            )}
-            {t2.label}
-            <span className={`font-mono text-[11px] ${status === t2.key ? 'text-white/75' : 'text-slate-400'}`}>{t2.count}</span>
-          </button>
-        ))}
-      </div>
+      <FilterChips
+        value={status}
+        onChange={setStatus}
+        options={TABS.map((t2) => ({
+          key: t2.key,
+          label: t2.key === 'live' && t2.count > 0
+            ? <span className="flex items-center gap-1.5"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-rose-500" />{t2.label}</span>
+            : t2.label,
+          count: t2.count,
+        }))}
+      />
 
       {isLoading ? <Spinner /> : fixtures.length === 0 ? (
         <EmptyState icon="⚑" title="No matches assigned" description="When an organiser assigns you to a fixture, it shows up here." />

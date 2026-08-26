@@ -122,7 +122,7 @@ function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect }:
 
   const base = cn(
     'absolute overflow-hidden rounded-lg border bg-white shadow-sm dark:bg-slate-900',
-    isBye ? 'border-dashed border-slate-200 dark:border-slate-800' : 'border-slate-200 dark:border-slate-700',
+    isBye ? 'border-dashed border-slate-200 dark:border-slate-800' : 'border-slate-200 dark:border-slate-800',
   );
   const style = { width: MATCH_W, height: MATCH_H, left: x, top };
 

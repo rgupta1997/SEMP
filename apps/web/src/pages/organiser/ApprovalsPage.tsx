@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls, fmtDateTime } from '../../lib/hooks';
-import { Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, Modal, Pagination, SearchInput, SortDirButton, StatusBadge, Table, toast } from '../../components/ui';
+import { Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, Modal, Pagination, SearchInput, SortDirButton, StatusBadge, Table, toast , FilterChips} from '../../components/ui';
 
 export function ApprovalsPage() {
   const { eventId } = useEvent();
@@ -59,12 +59,13 @@ export function ApprovalsPage() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        {(['pending', 'approved', 'rejected', 'all'] as const).map((f) => (
-          <button key={f} onClick={() => { setFilter(f); setSelected(new Set()); }}
-            className={`rounded-full px-3 py-1.5 text-sm font-semibold capitalize ${filter === f ? 'bg-brand-500 text-white' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 ring-1 ring-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60'}`}>
-            {f}{f !== 'all' && counts[f] ? ` · ${counts[f]}` : ''}
-          </button>
-        ))}
+        <FilterChips
+          className="mb-0"
+          value={filter}
+          onChange={(f) => { setFilter(f); setSelected(new Set()); }}
+          options={(['pending', 'approved', 'rejected', 'all'] as const)
+            .map((f) => ({ key: f, label: <span className="capitalize">{f}</span>, count: f === 'all' ? undefined : counts[f] }))}
+        />
         <ListToolbar inline className="ml-auto flex-1 justify-end">
           <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search organization…" className="w-full sm:w-56" />
           <Button size="sm" variant="outline" onClick={() => t.setSortKey(t.sortKey === 'name' ? 'applied' : 'name')}>

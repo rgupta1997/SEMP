@@ -4,7 +4,7 @@ import { Award, Lock, ShieldOff } from 'lucide-react';
 import { useApi } from '../../lib/hooks';
 import { GenerateModal } from '../organization/certificates/GenerateModal';
 import type { Template } from '../organization/certificates/shared';
-import { Badge, Button, EmptyState, PageHeader, Spinner } from '../../components/ui';
+import { Badge, Button, EmptyState, PageHeader, Spinner, SURFACE} from '../../components/ui';
 import { useEvent } from './EventLayout';
 
 // Certificates for one event.
@@ -97,10 +97,10 @@ export function EventCertificatesPage() {
           action={canManage ? <Button onClick={() => setGenerating(true)}>Generate certificates</Button> : undefined}
         />
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+        <div className={`overflow-x-auto ${SURFACE}`}>
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 dark:border-slate-700">
+              <tr className="border-b border-slate-200 text-left font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 dark:border-slate-800">
                 <th className="px-4 py-3">Recipient</th>
                 <th className="px-4 py-3">Serial</th>
                 <th className="px-4 py-3">Issued</th>
@@ -109,7 +109,7 @@ export function EventCertificatesPage() {
             </thead>
             <tbody>
               {rows.map((c) => (
-                <tr key={c.id} className="border-b border-slate-100 last:border-0 dark:border-slate-700/60">
+                <tr key={c.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
                   <td className="px-4 py-3">
                     <Link
                       to={`/organizations/${host.id}/certificates/${c.id}`}

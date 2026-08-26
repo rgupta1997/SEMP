@@ -102,7 +102,7 @@ export function GenerateModal({ orgId, templates, onClose, invalidate }: {
           <div className={cn('rounded-lg border p-3 text-sm',
             outcome.issued > 0
               ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/40'
-              : 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60')}>
+              : 'border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/60')}>
             <div className="font-medium text-slate-800 dark:text-slate-200">
               {outcome.issued} issued{outcome.skipped ? `, ${outcome.skipped} skipped` : ''}
             </div>

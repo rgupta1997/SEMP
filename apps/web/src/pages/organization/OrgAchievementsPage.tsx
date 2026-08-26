@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Trophy } from 'lucide-react';
 import { useApi } from '../../lib/hooks';
-import { Card, PageHeader, Skeleton, cn } from '../../components/ui';
+import { Card, PageHeader, Skeleton, cn , FilterChips} from '../../components/ui';
 
 // The institution's Hall of Fame (J4-E9).
 //
@@ -32,16 +32,10 @@ export function OrgAchievementsPage() {
   const qs = new URLSearchParams({ scope, ...(sportId ? { sport_id: sportId } : {}) });
   const { data, isLoading } = useApi<Board>(orgId ? `/organizations/${orgId}/achievements?${qs}` : null);
 
-  const chip = (active: boolean) => cn(
-    'rounded-full px-3 py-1.5 text-sm font-medium transition',
-    active ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
-      : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700',
-  );
-
   return (
     <div className="grid gap-5">
       <PageHeader title="Achievements" subtitle="Track and celebrate milestones across teams and individuals.">
-        <div className="flex rounded-lg border border-slate-200 p-0.5 dark:border-slate-700">
+        <div className="flex rounded-lg border border-slate-200 p-0.5 dark:border-slate-800">
           {(['teams', 'individuals'] as const).map((s) => (
             <button
               key={s} type="button" onClick={() => setScope(s)} aria-current={scope === s}
@@ -54,12 +48,12 @@ export function OrgAchievementsPage() {
 
       {/* Only sports this institution has actually won something in. */}
       {(data?.sports.length ?? 0) > 0 && (
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className={chip(!sportId)} onClick={() => setSportId('')}>All sports</button>
-          {data!.sports.map((s) => (
-            <button key={s.id} type="button" className={chip(sportId === s.id)} onClick={() => setSportId(s.id)}>{s.name}</button>
-          ))}
-        </div>
+        <FilterChips
+          className="mb-0"
+          value={sportId}
+          onChange={setSportId}
+          options={[{ key: '', label: 'All sports' }, ...data!.sports.map((s) => ({ key: s.id, label: s.name }))]}
+        />
       )}
 
       {isLoading || !data ? <Skeleton className="h-56" /> : (

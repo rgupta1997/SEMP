@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { useApi } from '../../lib/hooks';
 import { useWorkspace } from '../../lib/useWorkspace';
-import { Card, PageHeader, Select, Skeleton, cn } from '../../components/ui';
+import { Card, PageHeader, Select, Skeleton, cn, SURFACE} from '../../components/ui';
 import { CapabilityLock } from '../../components/CapabilityLock';
 import { OrgBenchmarkPage, OrgImpactReportPage } from './ParkedSurfaces';
 
@@ -48,7 +48,7 @@ function Delta({ d }: { d: number | null }) {
 
 function KpiTile({ label, kpi, suffix }: { label: string; kpi?: Kpi; suffix?: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+    <div className={`p-4 ${SURFACE}`}>
       <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
       <div className="mt-1 text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-100">
         {kpi?.value === null || kpi?.value === undefined

@@ -311,7 +311,7 @@ export function NotificationComposeModal({
                       'relative flex min-h-[72px] items-center gap-3 rounded-xl border px-3 py-2.5 text-left',
                       selected
                         ? 'border-brand-500 bg-brand-500/10 text-slate-900 ring-1 ring-brand-500 dark:bg-brand-500/15 dark:text-slate-100'
-                        : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300',
+                        : 'border-slate-200 bg-white text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300',
                     ].join(' ')}
                   >
                     <span

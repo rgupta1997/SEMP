@@ -188,8 +188,10 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
 
   return (
     <Card>
-      <CardBody>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start' }}>
+      {/* The hero panel carries a 64px tile and a 24px name, so it gets the wider
+          inset - 20px reads as cramped against something that large. */}
+      <CardBody className="sm:px-6 sm:pt-6 sm:pb-6">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start' }}>
           <span aria-hidden style={{
             width: 64, height: 64, borderRadius: 16, background: '#004AAD', color: '#fff',
             display: 'grid', placeItems: 'center', fontFamily: POP, fontWeight: 900, fontSize: 22,

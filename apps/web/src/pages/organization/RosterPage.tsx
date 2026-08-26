@@ -6,7 +6,7 @@ import { api } from '../../lib/api';
 import { useApi, useApiMutation } from '../../lib/hooks';
 import { titleCase } from '../../lib/format';
 import { usePermissions } from '../../lib/permissions';
-import { Avatar, BackButton, Badge, Button, Card, CardBody, CardHeader, Checkbox, confirmDialog, Field, Input, Modal, Pills, Progress, SearchInput, Select, Spinner, StatusBadge, Tabs, Textarea, toast } from '../../components/ui';
+import { Avatar, BackButton, Badge, Button, Card, CardBody, CardHeader, Checkbox, confirmDialog, Field, Input, Modal, Pills, Progress, SearchInput, Select, Spinner, StatusBadge, Tabs, Textarea, toast, INSET} from '../../components/ui';
 import { EnterChampionshipsPanel } from '../../components/EnterChampionshipsModal';
 
 interface BulkResult { added: number; skipped: { label: string; reason: string }[]; total: number }
@@ -161,7 +161,7 @@ function AddPlayersPanel({ teamId, institutionId, existingUserIds, remaining, ta
                 {shown.length === 0 ? (
                   <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">No members match your search.</p>
                 ) : (
-                  <div className="max-h-72 overflow-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                  <div className={`max-h-72 overflow-auto ${INSET}`}>
                     <table className="min-w-full text-sm">
                       <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800/60">
                         <tr>
@@ -424,7 +424,7 @@ export function RosterPage() {
                     const hasDiscipline = !!e.tournament_discipline_id;
                     const choosing = choosingDiscipline?.id === e.id;
                     return (
-                      <div key={e.id} className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
+                      <div key={e.id} className={`overflow-hidden ${INSET}`}>
                         <div className="flex items-center justify-between gap-3 px-4 py-2.5">
                           <div className="min-w-0">
                             <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{e.championships?.name ?? 'Championship'}</div>
