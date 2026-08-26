@@ -27,6 +27,7 @@ import { makeMeRouter } from '../modules/iam/me.routes.js';
 import { makeUsersRouter } from '../modules/iam/users.routes.js';
 import { makeOrganizationsRouter } from '../modules/iam/organizations.routes.js';
 import { makeEventsRouter } from '../modules/championships/championships.routes.js';
+import { makeChampionshipTemplatesRouter } from '../modules/championships/templates.routes.js';
 import { makeStandingsRouter } from '../modules/standings/standings.routes.js';
 import { makeEnrollmentRouter } from '../modules/enrollment/enrollment.routes.js';
 import { makeInvitationsRouter } from '../modules/enrollment/invitations.routes.js';
@@ -137,6 +138,7 @@ export function buildApp(prisma: Prisma) {
 
   // ----- Phase 2: championship creation - setup-resource writes require the championship's organiser -----
   api.use('/championships', makeEventsRouter(prisma));
+  api.use('/championship-templates', makeChampionshipTemplatesRouter(prisma));
   // Standings (materialized tables + scoring rules) - also under /championships/:id.
   api.use('/championships', makeStandingsRouter(prisma));
   // Matrix import (sections × sport/discipline) - builds the whole setup from a sheet.

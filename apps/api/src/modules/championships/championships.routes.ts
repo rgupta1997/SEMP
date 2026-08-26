@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { bulkAssignOfficialsSchema, createChampionshipSchema, updateChampionshipSchema, updateChampionshipStatusSchema, type ChampionshipStatus } from '@semp/shared';
+import { applyTemplateSchema, bulkAssignOfficialsSchema, type ChampionshipStatus, createChampionshipSchema, saveTemplateSchema, updateChampionshipSchema, updateChampionshipStatusSchema } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
@@ -11,6 +11,8 @@ import { recomputeStandingsAtomic } from '../standings/standings.service.js';
 import { signShareToken } from '../public/share-token.js';
 import { listChampionshipFixtures } from './fixtures-list.js';
 import { managedChampionshipIds } from './manage-access.js';
+import { applyChampionshipTemplate } from './apply-template.js';
+import { captureShape, saveTemplate } from './templates.service.js';
 import { findUserByPhone } from '../iam/users.helpers.js';
 import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
 
@@ -279,6 +281,29 @@ export function makeEventsRouter(prisma: Prisma): Router {
       });
     }
     res.status(201).json(championship);
+  }));
+
+  // Apply a template to a fresh draft (J2-E1-S1): sports, disciplines, formats and
+  // the standings scheme in one call.
+  router.post('/:id/apply-template', ownChampionship, validateBody(applyTemplateSchema), asyncHandler(async (req, res) => {
+    const { template } = req.body as { template: string };
+    res.json(await applyChampionshipTemplate(prisma, req, req.params.id, template));
+  }));
+
+  // The other direction: keep the shape of this championship as a template. This is
+  // where every non-built-in template comes from - the product derives the shape, the
+  // organiser supplies the name.
+  router.post('/:id/save-template', ownChampionship, validateBody(saveTemplateSchema), asyncHandler(async (req, res) => {
+    const { name, description, organization_id } = req.body as { name: string; description?: string | null; organization_id?: string | null };
+    res.status(201).json(await saveTemplate(prisma, req, {
+      championshipId: req.params.id, name, description, organizationId: organization_id ?? null,
+    }));
+  }));
+
+  // What saving would capture, so the "save as template" prompt can show the organiser
+  // what they are about to keep before they name it.
+  router.get('/:id/template-shape', ownChampionship, asyncHandler(async (req, res) => {
+    res.json(await captureShape(prisma, req.params.id));
   }));
 
   // UPDATE championship
