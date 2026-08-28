@@ -65,19 +65,44 @@ const verifyPeopleSchema = z.object({
 export function makePeopleRouter(prisma: Prisma): Router {
   const router = Router();
 
-  const requireManage = asyncHandler(async (req, _res, next) => {
-    const organizationId = req.params.id;
-    const allowed = await can(prisma, 'org.member.manage', {
-      user: { id: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin },
-      scope: { organizationId },
-      fallback: async () => !!(await prisma.organization_members.findFirst({
-        where: { user_id: req.user!.id, organization_id: organizationId, status: 'active', role: { in: ['owner', 'admin'] } },
-        select: { id: true },
-      })),
+  /**
+   * The three write routes here asked for `org.member.manage`, and that is the wrong
+   * permission - it is the one on the MEMBERS routes, which decide who belongs to the
+   * institution at all. The catalogue already separates the three acts this router
+   * performs, and separates them for stated reasons:
+   *
+   *   people.edit    "Add & edit people"      - one row at a time.
+   *   people.import  "Bulk upload rosters"    - "Separate from people.edit because it
+   *                                             is a different risk: one row at a time
+   *                                             versus a file that can create hundreds,
+   *                                             against a duplicate-matching rule."
+   *   people.verify  "Verify players"         - deciding who is really a member.
+   *
+   * Asking for `org.member.manage` collapsed all three into one and pointed it at a
+   * permission Sports Admin does not hold - so the role whose description is "runs
+   * sport day to day ... people, teams, events" could not add, import or verify a
+   * single person, and the whole Players screen was read-only for it.
+   *
+   * Each keeps the owner/admin membership check as its fallback, so this widens only.
+   */
+  const requirePeople = (permission: 'people.edit' | 'people.import' | 'people.verify', refusal: string) =>
+    asyncHandler(async (req, _res, next) => {
+      const organizationId = req.params.id;
+      const allowed = await can(prisma, permission, {
+        user: { id: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin },
+        scope: { organizationId },
+        fallback: async () => !!(await prisma.organization_members.findFirst({
+          where: { user_id: req.user!.id, organization_id: organizationId, status: 'active', role: { in: ['owner', 'admin'] } },
+          select: { id: true },
+        })),
+      });
+      if (!allowed) throw new ForbiddenError(refusal);
+      next();
     });
-    if (!allowed) throw new ForbiddenError('You do not manage the people in this institution.');
-    next();
-  });
+
+  const canEditPeople = requirePeople('people.edit', 'You cannot add or edit people in this institution.');
+  const canImportPeople = requirePeople('people.import', 'You cannot bulk-upload rosters for this institution.');
+  const canVerifyPeople = requirePeople('people.verify', 'You cannot verify people in this institution.');
 
   /**
    * The ONLY shape a person leaves this router in.
@@ -155,13 +180,13 @@ export function makePeopleRouter(prisma: Prisma): Router {
   }
 
   // ---- J1-E5-S1 · dry run -------------------------------------------------
-  router.post('/:id/people/import/validate', requireManage, validateBody(rosterImportSchema), asyncHandler(async (req, res) => {
+  router.post('/:id/people/import/validate', canImportPeople, validateBody(rosterImportSchema), asyncHandler(async (req, res) => {
     const rows = req.body.rows as RosterRow[];
     res.json(validateRoster(rows, await loadContext(req.params.id, rows)));
   }));
 
   // ---- J1-E5-S2 · apply ---------------------------------------------------
-  router.post('/:id/people/import', requireManage, validateBody(rosterImportSchema), asyncHandler(async (req, res) => {
+  router.post('/:id/people/import', canImportPeople, validateBody(rosterImportSchema), asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
     const rows = req.body.rows as RosterRow[];
     const consentVersion = (req.body.consent_version as string | null) ?? null;
@@ -336,7 +361,7 @@ export function makePeopleRouter(prisma: Prisma): Router {
   }));
 
   // ---- J1-E5-S3 · one person ---------------------------------------------
-  router.post('/:id/people', requireManage, validateBody(addPersonSchema), asyncHandler(async (req, res) => {
+  router.post('/:id/people', canEditPeople, validateBody(addPersonSchema), asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
     // The roll ceiling. Checked before any user is provisioned, so a refusal does
     // not leave an orphaned account behind it.
@@ -492,7 +517,7 @@ export function makePeopleRouter(prisma: Prisma): Router {
   //
   // Every transition is audited individually. A single "verified 1,847 people" line
   // would be useless the day somebody asks who vouched for one of them.
-  router.post('/:id/people/verify', requireManage, validateBody(verifyPeopleSchema), asyncHandler(async (req, res) => {
+  router.post('/:id/people/verify', canVerifyPeople, validateBody(verifyPeopleSchema), asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
     const { member_ids, verification, note } = req.body as
       { member_ids: string[]; verification: 'verified' | 'rejected'; note?: string | null };

@@ -3,8 +3,9 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from './error.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { isCampusAdmin } from '../../modules/iam/campus-admin.js';
-import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
+import { ROLE_CODES, roleWhereByCode, type PermissionCode } from '@semp/shared';
 import { hostOrgManages } from '../../modules/championships/manage-access.js';
+import { can } from './can.js';
 
 // Server-side authorization. The client mirrors these rules for UX, but this is
 // the real boundary: every mutation must pass through here. Authority is
@@ -30,11 +31,23 @@ export function makeGuards(prisma: Prisma) {
     return !!row;
   }
 
-  // The real question every management guard is asking. An event is run by its
-  // organising team OR by the institution hosting it - see manage-access.ts for
-  // why the second is not a shortcut but the normal case.
+  // The real question every management guard is asking. Three answers, in the order
+  // they are cheapest to establish:
+  //
+  //   1. an Organiser row on the event itself,
+  //   2. any event role on the event whose definition grants `event.manage`, and
+  //   3. the senior staff of the institution HOSTING it.
+  //
+  // (2) is new and is what makes the event vocabulary configurable at all. Until the
+  // event roles were given permission arrays they granted nothing, so authority over
+  // an event could only ever come from the hard-coded Organiser lookup in (1) - a
+  // role an institution defined itself could not run an event however it was
+  // configured. See manage-access.ts for why (3) is not a shortcut but the normal
+  // case for an institution's own event.
   async function managesChampionship(userId: string, championshipId: string): Promise<boolean> {
-    return (await organisesChampionship(userId, championshipId)) || hostOrgManages(prisma, userId, championshipId);
+    if (await organisesChampionship(userId, championshipId)) return true;
+    if (await can(prisma, 'event.manage', { user: { id: userId }, scope: { championshipId } })) return true;
+    return hostOrgManages(prisma, userId, championshipId);
   }
 
   // Does the user hold one of `roles` in this organization? Replaces the old
@@ -49,6 +62,56 @@ export function makeGuards(prisma: Prisma) {
     return !!row;
   }
   const ORG_ADMIN = ['owner', 'admin'];
+
+  /**
+   * The guard every organisation-scoped route should be using.
+   *
+   * The routers wrote their own `orgAdmin` middleware - `orgRole(u.id, orgId,
+   * ['owner','admin'])` - which reads organization_members and nothing else. That is
+   * why "the Owner decides who is a Sports Admin" did not work: granting somebody the
+   * Org Admin role through the Roles screen wrote a user_org_roles row that the
+   * permission engine honoured and these guards could not see. The engine widened
+   * billing, two people routes and the module settings; everything else - members,
+   * roles, the organisation's own profile - stayed membership-only, so a granted role
+   * was a role in name.
+   *
+   * The membership check survives as the FALLBACK, so nothing that works today
+   * stops working: this can only ever widen. Which permission each route asks for is
+   * the interesting part, and it is stated at the route.
+   */
+  function orgPermission(
+    permission: PermissionCode,
+    opts: {
+      orgId?: (req: Request) => string | null | undefined;
+      /**
+       * The campus or batch this request is ABOUT, when it is about one.
+       *
+       * Naming it makes a campus-scoped grant answer only for its own campus - see
+       * `orgUnitId` on PermissionScope. Leaving it out asks the organisation-wide
+       * question, which is what navigation and the dashboards want.
+       */
+      unitId?: (req: Request) => string | null | undefined;
+      fallbackRoles?: string[];
+    } = {},
+  ): RequestHandler {
+    const roles = opts.fallbackRoles ?? ORG_ADMIN;
+    return asyncHandler(async (req, _res, next) => {
+      const u = req.user!;
+      if (u.isSuperAdmin) return next();
+      const orgId = (opts.orgId ?? ((r: Request) => r.params.id))(req);
+      if (!orgId) throw new ForbiddenError('No organization specified');
+      const allowed = await can(prisma, permission, {
+        user: { id: u.id, isSuperAdmin: u.isSuperAdmin },
+        scope: { organizationId: orgId, orgUnitId: opts.unitId?.(req) ?? null },
+        // The membership fallback is org-wide by nature, so it is NOT narrowed by the
+        // unit: an owner/admin member has always reached every campus, and taking
+        // that away here would be a silent behaviour change dressed up as a scope fix.
+        fallback: () => orgRole(u.id, orgId, roles),
+      });
+      if (!allowed) throw new ForbiddenError('You do not have permission to do this in this organization');
+      next();
+    });
+  }
 
   // ---- championship resolvers (walk a resource back to its owning championship) ----
   const championshipOfTournament = async (id?: string | null) =>
@@ -108,6 +171,15 @@ export function makeGuards(prisma: Prisma) {
     if (!team) throw new NotFoundError('Team');
     // Owner/admin of the owning organization.
     if (await orgRole(u.id, team.organization_id, ORG_ADMIN)) return next();
+    // ...or anybody the institution has GRANTED `team.manage`, narrowed to the unit
+    // this squad plays for. Sports Admin holds it by definition - "runs sport day to
+    // day ... people, teams, events" - and this guard could not see the grant at all,
+    // so the role reached squads only by also happening to be the campus's named
+    // administrator.
+    if (await can(prisma, 'team.manage', {
+      user: { id: u.id, isSuperAdmin: u.isSuperAdmin },
+      scope: { organizationId: team.organization_id, orgUnitId: team.org_unit_id },
+    })) return next();
     // The administrator of the campus or batch this squad plays FOR.
     //
     // Their whole job is their own unit's squads, so this is the narrowest possible
@@ -137,6 +209,12 @@ export function makeGuards(prisma: Prisma) {
     for (const r of rows) {
       if (!r?.organization_id) throw new ForbiddenError('No organization specified');
       if (await orgRole(u.id, r.organization_id, ORG_ADMIN)) continue;
+      // A granted `team.create`, judged against the unit named ON THIS ROW - so a
+      // campus-scoped Sports Admin creates squads for their campus and no other.
+      if (await can(prisma, 'team.create', {
+        user: { id: u.id, isSuperAdmin: u.isSuperAdmin },
+        scope: { organizationId: r.organization_id, orgUnitId: r.org_unit_id ?? null },
+      })) continue;
       if (await isCampusAdmin(prisma, u.id, r.org_unit_id)) {
         // ...and the campus must belong to the organisation named on the row, or
         // this is a route for building squads inside somebody else's institution.
@@ -169,8 +247,17 @@ export function makeGuards(prisma: Prisma) {
   const enrollSelf: RequestHandler = asyncHandler(async (req, _res, next) => {
     const u = req.user!;
     if (u.isSuperAdmin) return next();
-    if (await orgRole(u.id, req.body?.organization_id, ORG_ADMIN)) return next();
-    throw new ForbiddenError('Only an organization owner/admin can enroll that organization');
+    const orgId = req.body?.organization_id;
+    if (await orgRole(u.id, orgId, ORG_ADMIN)) return next();
+    // `event.enroll` exists in the catalogue precisely for this - "Entering YOUR
+    // organisation into somebody else's championship" - and this guard was reading
+    // membership instead, so the permission was unreachable and Sports Admin, which
+    // holds it, could not enter its own institution into anything.
+    if (orgId && await can(prisma, 'event.enroll', {
+      user: { id: u.id, isSuperAdmin: u.isSuperAdmin },
+      scope: { organizationId: orgId },
+    })) return next();
+    throw new ForbiddenError('You do not have permission to enter that organization into a championship');
   });
 
   // ---- guard: recording a fixture result - assigned official, organiser, or super ----
@@ -186,6 +273,7 @@ export function makeGuards(prisma: Prisma) {
   });
 
   return {
+    orgPermission,
     championshipManager,
     championshipCrudGuard,
     teamManager,

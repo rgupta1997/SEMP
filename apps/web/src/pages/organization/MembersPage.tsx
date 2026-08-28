@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useTableControls } from '../../lib/hooks';
 import { useOrgUnits, unitPath } from '../../lib/units';
+import { usePermissions } from '../../lib/permissions';
 import {
   Avatar, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field,
   ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Spinner, toast,
@@ -136,9 +137,25 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
   const orgId = orgIdProp ?? params.orgId ?? '';
   const [granting, setGranting] = useState<Member | null>(null);
 
+  // Two permissions, two different jobs, and this screen shows both.
+  //
+  // It had NO gating at all: every control - approve a join request, give a role,
+  // suspend one, revoke one - was rendered for anybody who could reach the page, and
+  // Administration hands the Members tab to more roles than can act on it. The result
+  // was a screen of buttons that each returned a 403.
+  //
+  //   org.member.manage  who belongs to the institution: approving, declining.
+  //   role.manage        what they may do once they are in: granting, suspending,
+  //                      revoking. Also gates GET /organizations/:id/roles, so asking
+  //                      for the grants at all is conditional on it - otherwise the
+  //                      page opens with a failed request in the console.
+  const perms = usePermissions();
+  const canManageMembers = perms.hasOrgPermission('org.member.manage', orgId);
+  const canManageRoles = perms.hasOrgPermission('role.manage', orgId);
+
   const members = useApi<Member[]>(`/organizations/${orgId}/members`);
-  const grants = useApi<Grant[]>(`/organizations/${orgId}/roles`);
-  const roleDefs = useApi<RoleDef[] | { roles: RoleDef[] }>(`/organizations/${orgId}/role-definitions`);
+  const grants = useApi<Grant[]>(canManageRoles ? `/organizations/${orgId}/roles` : null);
+  const roleDefs = useApi<RoleDef[] | { roles: RoleDef[] }>(canManageRoles ? `/organizations/${orgId}/role-definitions` : null);
   const unitsView = useOrgUnits(orgId);
 
   const roles = useMemo(() => {
@@ -237,7 +254,7 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
       {/* Above the roster, because it is the only thing on this screen that is
           WAITING on somebody. A request buried in a list of two hundred members is
           a request nobody answers. */}
-      {pending.length > 0 && (
+      {canManageMembers && pending.length > 0 && (
         <Card className="mb-4 border-amber-300 dark:border-amber-500/40">
           <CardBody>
             <h3 className="font-display text-[15px] font-extrabold text-slate-900 dark:text-slate-100">
@@ -290,7 +307,7 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
                     <th className="px-3 py-2.5">Member</th>
                     <th className="px-3 py-2.5">Membership</th>
                     <th className="px-3 py-2.5">Roles &amp; scope</th>
-                    <th className="px-3 py-2.5 text-right">Actions</th>
+                    {canManageRoles && <th className="px-3 py-2.5 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -329,25 +346,31 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
                                     {scopeLabel(g, units)}
                                   </span>
                                   <Badge tone={STATUS_TONE[g.status]}>{g.status}</Badge>
-                                  <button
-                                    className="text-[12px] font-semibold text-brand-600 hover:underline"
-                                    onClick={() => setStatus(g, g.status === 'SUSPENDED' ? 'ACTIVE' : 'SUSPENDED')}>
-                                    {g.status === 'SUSPENDED' ? 'Restore' : 'Suspend'}
-                                  </button>
-                                  <button className="text-[12px] font-semibold text-rose-600 hover:underline" onClick={() => revoke(g)}>
-                                    Remove
-                                  </button>
+                                  {canManageRoles && (
+                                    <>
+                                      <button
+                                        className="text-[12px] font-semibold text-brand-600 hover:underline"
+                                        onClick={() => setStatus(g, g.status === 'SUSPENDED' ? 'ACTIVE' : 'SUSPENDED')}>
+                                        {g.status === 'SUSPENDED' ? 'Restore' : 'Suspend'}
+                                      </button>
+                                      <button className="text-[12px] font-semibold text-rose-600 hover:underline" onClick={() => revoke(g)}>
+                                        Remove
+                                      </button>
+                                    </>
+                                  )}
                                 </div>
                               ))}
                             </div>
                           )}
                         </td>
 
-                        <td className="px-3 py-3 text-right">
-                          <Button size="sm" variant="ghost" onClick={() => setGranting(m)}>
-                            <ShieldCheck size={14} /> Give role
-                          </Button>
-                        </td>
+                        {canManageRoles && (
+                          <td className="px-3 py-3 text-right">
+                            <Button size="sm" variant="ghost" onClick={() => setGranting(m)}>
+                              <ShieldCheck size={14} /> Give role
+                            </Button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}

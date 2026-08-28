@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request, type RequestHandler } from 'express';
 import { z } from 'zod';
 import { UNIT_TYPES, unitLabels } from '@semp/shared';
 import { assertCapability } from '@semp/entitlements/server';
@@ -6,6 +6,8 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
+import { can } from '../../http/middleware/can.js';
+import { isCampusAdmin } from './campus-admin.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { audit, AUDIT_ACTIONS } from './audit.service.js';
 
@@ -71,12 +73,95 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
   const guards = makeGuards(prisma);
 
   // Reading the structure is open to any member - people need to see the programme
-  // they are in. Editing it is the sports office's job.
-  const orgAdmin = asyncHandler(async (req, _res, next) => {
+  // they are in.
+  //
+  // WRITING IT WAS ONE GUARD FOR THREE DIFFERENT ACTS, and that is what a Sports
+  // Admin ran into: "Only an organization owner/admin can change the structure",
+  // refused by a rule that read `organization_members` and nothing else. It was wrong
+  // in both directions at once - a granted Org Admin could not shape the institution,
+  // and a Sports Admin could not do the one job the role exists for.
+  //
+  // The three acts, now separated:
+  //
+  //   SHAPING     create, rename, re-parent, archive or delete a campus or batch, and
+  //               rename the levels themselves. This changes what the institution IS,
+  //               so it is `org.structure.manage` - Org Admin and Owner.
+  //
+  //   APPOINTING  naming the administrator of a unit (`admin_user_id`). This is
+  //               DELEGATING AUTHORITY: authorisation reads that column
+  //               (campus-admin.ts), so the person named can manage that unit's
+  //               squads. It therefore needs `org.structure.manage` too, and is
+  //               checked separately below so that widening SHAPING later cannot
+  //               accidentally widen this.
+  //
+  //   PLACING     who belongs to which unit. This is the day-to-day work, and it is
+  //               what "a player can only be picked for the unit they belong to"
+  //               depends on, so it is `people.edit` - which Sports Admin holds.
+  //               Scoped: a "Sports Admin, Bangalore only" grant places people into
+  //               Bangalore and nowhere else (see `orgUnitId` in can.ts).
+  //
+  // All three go through the permission ENGINE with the old membership check as their
+  // fallback, so nothing that worked before stops working.
+
+  /** Shaping the institution. */
+  const structure = guards.orgPermission('org.structure.manage');
+
+  /** Placing people. The narrower, everyday half. */
+  const placement = guards.orgPermission('people.edit');
+
+  /**
+   * Placing people INTO ONE NAMED UNIT.
+   *
+   * The first call site that narrows by unit, and the reason `scope_ref` was made
+   * real: without it a campus-scoped Sports Admin could file anybody into any campus,
+   * which surfaces later as a squad nobody can explain.
+   */
+  const placementInUnit = guards.orgPermission('people.edit', {
+    unitId: (req) => req.params.unitId,
+  });
+
+  /**
+   * May this caller name somebody as a unit's administrator?
+   *
+   * Checked at the point of use rather than on the route, because the same route also
+   * carries the harmless fields - a name, a code, a display order.
+   */
+  async function assertMayAppoint(req: Request, organizationId: string): Promise<void> {
+    if (req.user!.isSuperAdmin) return;
+    const allowed = await can(prisma, 'org.structure.manage', {
+      user: { id: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin },
+      scope: { organizationId },
+      fallback: () => guards.orgRole(req.user!.id, organizationId, ['owner', 'admin']),
+    });
+    if (!allowed) {
+      throw new ForbiddenError(
+        'Naming who runs a campus or batch is an owner/administrator decision - you can edit its details but not its administrator.',
+      );
+    }
+  }
+
+  /**
+   * Editing ONE unit's row: whoever may shape the institution, or the person named as
+   * running that exact unit.
+   *
+   * The second half closes a gap campus-admin.ts complained about in prose - "the
+   * person named as running a campus could not even edit its own row" - and it is the
+   * narrowest possible widening: exactly the unit they are named on, nothing above it,
+   * nothing beside it, and NOT the administrator field, which `assertMayAppoint`
+   * still holds. So a campus administrator can correct their campus's name or code
+   * and cannot hand their campus to somebody else.
+   */
+  const unitEditor: RequestHandler = asyncHandler(async (req, _res, next) => {
     const u = req.user!;
     if (u.isSuperAdmin) return next();
-    if (await guards.orgRole(u.id, req.params.id, ['owner', 'admin'])) return next();
-    throw new ForbiddenError('Only an organization owner/admin can change the structure');
+    const allowed = await can(prisma, 'org.structure.manage', {
+      user: { id: u.id, isSuperAdmin: u.isSuperAdmin },
+      scope: { organizationId: req.params.id },
+      fallback: () => guards.orgRole(u.id, req.params.id, ['owner', 'admin']),
+    });
+    if (allowed) return next();
+    if (await isCampusAdmin(prisma, u.id, req.params.unitId)) return next();
+    throw new ForbiddenError('Only an owner, an administrator, or the person who runs this unit can change it');
   });
 
   // One query for the units, one for the counts, assembled in memory: a tree this
@@ -161,7 +246,7 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
   // What this organisation calls its two levels. Stored in the settings blob beside
   // module access rather than as columns: it is presentation, and the STRUCTURE it
   // describes is what everything else keys on.
-  router.patch('/:id/unit-labels', orgAdmin, validateBody(z.object({
+  router.patch('/:id/unit-labels', structure, validateBody(z.object({
     campus: z.string().trim().min(1).max(24),
     department: z.string().trim().min(1).max(24),
   })), asyncHandler(async (req, res) => {
@@ -202,7 +287,7 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
     if (!member) throw new BusinessRuleError('The person you named is not an active member of this organisation');
   }
 
-  router.post('/:id/units', orgAdmin, validateBody(createUnitSchema), asyncHandler(async (req, res) => {
+  router.post('/:id/units', structure, validateBody(createUnitSchema), asyncHandler(async (req, res) => {
     const { type, name, code, parent_id, display_order, status, admin_user_id } = req.body as z.infer<typeof createUnitSchema>;
     const labels = unitLabels((await prisma.organizations.findUnique({
       where: { id: req.params.id }, select: { settings: true },
@@ -230,6 +315,8 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
     }
 
     await assertAdminIsMember(req.params.id, admin_user_id);
+    // Appointing is a separate act from shaping - see the guard block at the top.
+    if (admin_user_id) await assertMayAppoint(req, req.params.id);
 
     // `multi_campus` is asserted here rather than on the route, because only here is
     // it known whether this is the FIRST campus or an additional one. Every
@@ -263,11 +350,16 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
     res.status(201).json(row);
   }));
 
-  router.patch('/:id/units/:unitId', orgAdmin, validateBody(updateUnitSchema), asyncHandler(async (req, res) => {
+  router.patch('/:id/units/:unitId', unitEditor, validateBody(updateUnitSchema), asyncHandler(async (req, res) => {
     const before = await prisma.org_units.findFirst({ where: { id: req.params.unitId, organization_id: req.params.id } });
     if (!before) throw new NotFoundError('Unit');
 
     await assertAdminIsMember(req.params.id, req.body.admin_user_id);
+    // `admin_user_id: null` is a removal, which is the same delegation decision seen
+    // from the other side - so the presence of the KEY is what is checked, not its
+    // truthiness. A campus administrator must not be able to unseat themselves and
+    // leave the unit with nobody running it either.
+    if ('admin_user_id' in req.body) await assertMayAppoint(req, req.params.id);
 
     // Re-parenting is only meaningful for a department, and the new parent must be a
     // campus of the SAME organisation. Without the organisation check this is a way
@@ -336,7 +428,7 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
   }));
 
   /** Add people to one unit. Idempotent - re-adding somebody is not an error. */
-  router.post('/:id/units/:unitId/members', orgAdmin, validateBody(z.object({
+  router.post('/:id/units/:unitId/members', placementInUnit, validateBody(z.object({
     user_ids: z.array(z.string().uuid()).min(1).max(2000),
   })), asyncHandler(async (req, res) => {
     const unit = await prisma.org_units.findFirst({
@@ -369,7 +461,7 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
     res.json({ added: created.count, skipped: skipped.length });
   }));
 
-  router.delete('/:id/units/:unitId/members/:userId', orgAdmin, asyncHandler(async (req, res) => {
+  router.delete('/:id/units/:unitId/members/:userId', placementInUnit, asyncHandler(async (req, res) => {
     const { count } = await prisma.org_unit_members.deleteMany({
       where: { organization_id: req.params.id, org_unit_id: req.params.unitId, user_id: req.params.userId },
     });
@@ -383,7 +475,7 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
    * unit with a tick, so it knows the complete intended set, and sending deltas
    * from a complete picture is how the two drift apart.
    */
-  router.put('/:id/people/:userId/units', orgAdmin, validateBody(z.object({
+  router.put('/:id/people/:userId/units', placement, validateBody(z.object({
     unit_ids: z.array(z.string().uuid()).max(50),
   })), asyncHandler(async (req, res) => {
     const member = await prisma.organization_members.findFirst({
@@ -417,7 +509,7 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
 
   // What deleting would actually cost, so the UI can say it before asking. A count is
   // the difference between "are you sure?" and "this affects 118 people".
-  router.get('/:id/units/:unitId/impact', orgAdmin, asyncHandler(async (req, res) => {
+  router.get('/:id/units/:unitId/impact', structure, asyncHandler(async (req, res) => {
     const unit = await prisma.org_units.findFirst({
       where: { id: req.params.unitId, organization_id: req.params.id },
       select: { id: true, name: true, type: true },
@@ -435,7 +527,7 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
     res.json({ unit, departments: children, batches: children, members, entries });
   }));
 
-  router.delete('/:id/units/:unitId', orgAdmin, asyncHandler(async (req, res) => {
+  router.delete('/:id/units/:unitId', structure, asyncHandler(async (req, res) => {
     const unit = await prisma.org_units.findFirst({
       where: { id: req.params.unitId, organization_id: req.params.id },
       select: { id: true, name: true, type: true },

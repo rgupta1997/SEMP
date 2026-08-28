@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import type { CapabilityKey } from '@semp/entitlements';
 import { useAuth } from './auth';
 import { useApi } from './hooks';
+import { membershipRoleCode } from '@semp/shared';
 import { EVENT_ROLE_CODES, landingFor, type ContextKind, type NavFacts, type WorkspaceContext } from './workspace';
 
 // Turning one account into the list of workspaces it can enter.
@@ -99,10 +100,15 @@ export function useWorkspace() {
         // granted. Union rather than override, because losing a grant must not
         // also strip the baseline access being a member already carries - and
         // because this is exactly what can() does on the server.
+        // Resolved by the SAME function the server's engine uses. This was an
+        // inline ternary here and a three-key object literal there, and the two
+        // disagreed: ORGANIZATION_MEMBER_ROLE allows five values, the server mapped
+        // three, so a 'captain' or 'alumni' membership was shown this nav and
+        // refused by every page in it.
         roleCodes: [
-          m.role === 'owner' ? 'owner' : m.role === 'admin' ? 'org_admin' : 'viewer',
+          membershipRoleCode(m.role),
           ...(grantsByOrg.get(m.organization_id) ?? []),
-        ],
+        ].filter(Boolean) as string[],
         sub: m.organization?.city ?? undefined,
         verified: m.organization?.verified ?? false,
       }));

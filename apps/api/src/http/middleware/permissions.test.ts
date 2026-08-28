@@ -24,6 +24,8 @@ function fakePrisma(over: {
   hostOrg?: string | null;
   /** "<userId>|<orgId>" pairs who are Owner of that institution. */
   hostOrgManagers?: string[];
+  /** An event role (not the Organiser row) this person holds on these championships. */
+  eventRoleChampionshipIds?: string[]; eventRoleUserId?: string; eventRolePermissions?: string[];
   team?: any; fixture?: any;
 } = {}): any {
   const isAdmin = (userId: string, orgId: string) => (over.orgAdmins ?? []).includes(`${userId}|${orgId}`);
@@ -37,16 +39,31 @@ function fakePrisma(over: {
       // What being an Owner grants. `event.manage` sits in permission_ids rather
       // than in a role list in code, which is the whole point: an institution
       // moves it on its own Roles & Permissions screen.
-      findMany: async (args: any) =>
-        JSON.stringify(args?.where ?? {}).includes('"owner"')
+      findMany: async (args: any) => {
+        const where = JSON.stringify(args?.where ?? {});
+        // A role an institution defined itself, granted on the event. It has no code,
+        // so it is resolved by id and its stored permissions are what it grants.
+        if (where.includes('role-custom-event')) {
+          return [{ code: null, organization_id: null, permission_ids: over.eventRolePermissions ?? [] }];
+        }
+        return where.includes('"owner"')
           ? [{ code: 'owner', organization_id: null, permission_ids: ['event.manage'] }]
-          : [],
+          : [];
+      },
     },
     user_org_roles: { findMany: async () => [] },
     user_championship_roles: {
       findFirst: async (args: any) =>
         (over.organiserChampionshipIds ?? []).includes(args.where.championship_id) && args.where.user_id === over.organiserUserId
           ? { id: 'uer' } : null,
+      // `managesChampionship` now also asks the ENGINE whether any event role this
+      // person holds on the event grants `event.manage` - which is what lets an
+      // institution's own event role run an event. The engine reads the grants
+      // through findMany, so the fake has to answer it.
+      findMany: async (args: any) =>
+        (over.eventRoleChampionshipIds ?? []).includes(args.where.championship_id)
+          && args.where.user_id === over.eventRoleUserId
+          ? [{ role_id: 'role-custom-event' }] : [],
     },
     organization_members: {
       findFirst: async (args: any) =>
@@ -163,6 +180,29 @@ describe('teamManager', () => {
   it('denies an admin of another org', async () => {
     const g = makeGuards(fakePrisma({ team: { organization_id: 'org-b', team_members: [] }, orgAdmins: ['s1|org-a'] }));
     expect((await run(g.teamManager, OWNER, { params: { id: 't1' } })).ok).toBe(false);
+  });
+});
+
+describe('championshipManager - a role the institution defined itself', () => {
+  // The third route into managing an event, and the reason the event roles were
+  // given permission arrays at all: authority used to come only from a hard-coded
+  // Organiser role-id lookup, so a role an institution created and granted on its
+  // own event could not run it however it was configured.
+  it('allows an event role whose definition grants event.manage', async () => {
+    const g = makeGuards(fakePrisma({
+      eventRoleChampionshipIds: ['c1'], eventRoleUserId: 'org1', eventRolePermissions: ['event.manage'],
+    }));
+    const r = await run(g.championshipManager(async () => 'c1'), ORGANISER, {});
+    expect(r.ok).toBe(true);
+  });
+
+  it('denies an event role that grants something else', async () => {
+    const g = makeGuards(fakePrisma({
+      eventRoleChampionshipIds: ['c1'], eventRoleUserId: 'org1', eventRolePermissions: ['fixture.score'],
+    }));
+    const r = await run(g.championshipManager(async () => 'c1'), ORGANISER, {});
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe(403);
   });
 });
 

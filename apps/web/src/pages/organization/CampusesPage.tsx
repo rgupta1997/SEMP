@@ -5,7 +5,9 @@ import { api } from '../../lib/api';
 import { useParams } from 'react-router-dom';
 import { useApi } from '../../lib/hooks';
 import { useOrgUnits, type UnitNode } from '../../lib/units';
+import { useAuth } from '../../lib/auth';
 import { useWorkspace } from '../../lib/useWorkspace';
+import { usePermissions } from '../../lib/permissions';
 import { CapabilityLock } from '../../components/CapabilityLock';
 import {
   Badge, Button, Card, CardBody, EmptyState, Field, Input, Modal, PageHeader, Select,
@@ -54,7 +56,7 @@ const STATUS_TONE = { ACTIVE: 'green', SETUP: 'amber', ARCHIVED: 'slate' } as co
 // ---------------------------------------------------------------------------
 
 function UnitModal({
-  orgId, labels, unit, parentId, type, campuses, people, onClose, onSaved,
+  orgId, labels, unit, parentId, type, campuses, people, canAppoint, onClose, onSaved,
 }: {
   orgId: string;
   labels: UnitLabels;
@@ -64,6 +66,17 @@ function UnitModal({
   type: 'campus' | 'department';
   campuses: UnitNode[];
   people: Array<{ id: string; name: string }>;
+  /**
+   * May this person name who RUNS the unit?
+   *
+   * Separate from being able to edit the unit at all, because it is a different act:
+   * authorisation reads `org_units.admin_user_id` (campus-admin.ts), so this field
+   * delegates authority over the unit's squads. The person named as running a campus
+   * may correct its name and may not hand it to somebody else - or take it off
+   * themselves and leave it with nobody. The server enforces the same split
+   * (`assertMayAppoint`).
+   */
+  canAppoint: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -86,7 +99,10 @@ function UnitModal({
         name: name.trim(),
         code: code.trim() || null,
         status,
-        admin_user_id: adminId || null,
+        // Omitted entirely, not sent as the unchanged value: the server checks for
+        // the PRESENCE of the key, because `admin_user_id: null` is a removal and is
+        // the same delegation decision seen from the other side.
+        ...(canAppoint ? { admin_user_id: adminId || null } : {}),
         ...(type === 'department' ? { parent_id: parent } : {}),
       };
       if (editing) await api('PATCH', `/organizations/${orgId}/units/${unit!.id}`, body);
@@ -141,12 +157,21 @@ function UnitModal({
           </Select>
         </Field>
 
-        <Field label="Administrator" hint="Optional. The person who runs it — they must already be a member here.">
-          <Select value={adminId} onChange={(e) => setAdminId(e.target.value)}>
-            <option value="">Nobody assigned</option>
-            {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </Select>
-        </Field>
+        {canAppoint ? (
+          <Field label="Administrator" hint="Optional. The person who runs it — they must already be a member here.">
+            <Select value={adminId} onChange={(e) => setAdminId(e.target.value)}>
+              <option value="">Nobody assigned</option>
+              {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </Select>
+          </Field>
+        ) : (
+          <Field label="Administrator">
+            <p className="text-[13px] text-slate-500 dark:text-slate-400">
+              {unit?.admin ? `Run by ${unit.admin.name}.` : 'Nobody assigned.'}{' '}
+              Changing who runs a {noun.toLowerCase()} is an owner or administrator decision.
+            </p>
+          </Field>
+        )}
       </div>
     </Modal>
   );
@@ -358,6 +383,27 @@ function PeoplePanel({ orgId, unit, people, labels, loading }: {
 export function CampusesPage() {
   const { orgId = '' } = useParams();
   const ws = useWorkspace();
+  // Shaping the institution is `org.structure.manage`; the server splits the routes
+  // the same way (org-units.routes.ts). Before this the page offered Rename levels,
+  // Add, Edit and Delete to everybody who could reach the screen - which includes a
+  // Sports Admin, because the nav gives them Campuses & Units as a WORKING screen -
+  // and every one of those buttons returned "Only an organization owner/admin can
+  // change the structure".
+  //
+  // Hidden, not disabled. A disabled control says "you could do this if something
+  // changed", which is true of a plan capability and false of a permission you were
+  // never given; the honest form of the second is a line saying who can.
+  const perms = usePermissions();
+  const canShape = perms.hasOrgPermission('org.structure.manage', orgId);
+  // The person NAMED as running a unit may correct that unit's own row - its name,
+  // code and status - and nothing else: not its administrator, not its siblings, not
+  // the levels. campus-admin.ts had complained about this in prose for a while ("the
+  // person named as running a campus could not even edit its own row"), and the
+  // server now allows it (`unitEditor`), so the button has to exist or the permission
+  // is unreachable.
+  const myId = useAuth().ctx?.user?.id ?? null;
+  const runsUnit = (n: UnitNode) => !!myId && n.admin?.id === myId;
+  const canEditUnit = (n: UnitNode) => canShape || runsUnit(n);
   const { units, labels, campuses, isLoading, refetch } = useOrgUnits(orgId);
   const members = useApi<Member[]>(`/organizations/${orgId}/members`);
   const peopleQ = useApi<Person[]>(orgId ? `/organizations/${orgId}/people` : null);
@@ -474,20 +520,31 @@ export function CampusesPage() {
                 championship contested inside this organisation.
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" variant="ghost" onClick={() => setRenaming(true)}>Rename levels</Button>
-              <Button
-                size="sm"
-                disabled={!canAddCampus}
-                title={canAddCampus ? undefined : 'Running more than one campus is a plan capability'}
-                onClick={() => setEditing({ type: 'campus' })}
-              >
-                <Plus size={14} /> Add {labels.campus.toLowerCase()}
-              </Button>
-            </div>
+            {canShape ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setRenaming(true)}>Rename levels</Button>
+                <Button
+                  size="sm"
+                  disabled={!canAddCampus}
+                  title={canAddCampus ? undefined : 'Running more than one campus is a plan capability'}
+                  onClick={() => setEditing({ type: 'campus' })}
+                >
+                  <Plus size={14} /> Add {labels.campus.toLowerCase()}
+                </Button>
+              </div>
+            ) : (
+              // Says who can, so this reads as a boundary rather than as a page that
+              // is missing something.
+              <p className="max-w-[22rem] text-[12.5px] leading-relaxed text-slate-500 dark:text-slate-400">
+                You can see the structure and who is in it{units.some(runsUnit) || units.some((c) => (c.children ?? []).some(runsUnit))
+                  ? ', and edit the details of what you run'
+                  : ''}. Adding, renaming or removing a{' '}
+                {labels.campus.toLowerCase()} is an owner or administrator decision.
+              </p>
+            )}
           </div>
 
-          {!canAddCampus && (
+          {canShape && !canAddCampus && (
             <div className="mb-4">
               <CapabilityLock capability="multi_campus" title={`More than one ${labels.campus.toLowerCase()}`} />
             </div>
@@ -498,7 +555,9 @@ export function CampusesPage() {
               icon={<Building2 size={24} />}
               title={`No ${labels.campus.toLowerCase()} yet`}
               description={`Add one and it becomes available as a role scope, a placement for your people, and an entrant in championships run inside this organisation.`}
-              action={<Button onClick={() => setEditing({ type: 'campus' })}><Plus size={14} /> Add {labels.campus.toLowerCase()}</Button>}
+              action={canShape
+                ? <Button onClick={() => setEditing({ type: 'campus' })}><Plus size={14} /> Add {labels.campus.toLowerCase()}</Button>
+                : undefined}
             />
           ) : (
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -544,14 +603,20 @@ export function CampusesPage() {
                         </div>
                       </div>
 
-                      <div className="flex flex-none items-center gap-1">
-                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setEditing({ unit: c, type: 'campus' }); }} aria-label={`Edit ${c.name}`}>
-                          <Pencil size={14} />
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); remove(c, null); }} aria-label={`Delete ${c.name}`}>
-                          <Trash2 size={14} />
-                        </Button>
-                      </div>
+                      {canEditUnit(c) && (
+                        <div className="flex flex-none items-center gap-1">
+                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setEditing({ unit: c, type: 'campus' }); }} aria-label={`Edit ${c.name}`}>
+                            <Pencil size={14} />
+                          </Button>
+                          {/* Deleting is never the unit administrator's - removing the
+                              thing you run is not the same as correcting its name. */}
+                          {canShape && (
+                            <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); remove(c, null); }} aria-label={`Delete ${c.name}`}>
+                              <Trash2 size={14} />
+                            </Button>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {open && (
@@ -579,22 +644,28 @@ export function CampusesPage() {
                                 {d.admin && <span className="text-[12.5px] text-slate-500 dark:text-slate-400">Run by {d.admin.name}</span>}
                               </div>
                             </div>
-                            <div className="flex flex-none items-center gap-1">
-                              <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setEditing({ unit: { ...d, parent: c }, type: 'department' }); }} aria-label={`Edit ${d.name}`}>
-                                <Pencil size={14} />
-                              </Button>
-                              <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); remove(d, c); }} aria-label={`Delete ${d.name}`}>
-                                <Trash2 size={14} />
-                              </Button>
-                            </div>
+                            {canEditUnit(d) && (
+                              <div className="flex flex-none items-center gap-1">
+                                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setEditing({ unit: { ...d, parent: c }, type: 'department' }); }} aria-label={`Edit ${d.name}`}>
+                                  <Pencil size={14} />
+                                </Button>
+                                {canShape && (
+                                  <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); remove(d, c); }} aria-label={`Delete ${d.name}`}>
+                                    <Trash2 size={14} />
+                                  </Button>
+                                )}
+                              </div>
+                            )}
                           </div>
                         ))}
 
-                        <div className="border-t border-slate-100 pt-2.5 dark:border-slate-800">
-                          <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setEditing({ type: 'department', parentId: c.id }); }}>
-                            <Plus size={13} /> Add {labels.department.toLowerCase()} to {c.name}
-                          </Button>
-                        </div>
+                        {canShape && (
+                          <div className="border-t border-slate-100 pt-2.5 dark:border-slate-800">
+                            <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setEditing({ type: 'department', parentId: c.id }); }}>
+                              <Plus size={13} /> Add {labels.department.toLowerCase()} to {c.name}
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -650,6 +721,7 @@ export function CampusesPage() {
           type={editing.type}
           campuses={campuses}
           people={people}
+          canAppoint={canShape}
           onClose={() => setEditing(null)}
           onSaved={refetch}
         />

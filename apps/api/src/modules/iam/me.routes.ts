@@ -3,6 +3,7 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { readStandings } from '../standings/standings.service.js';
+import { permissionsFor } from '../../http/middleware/can.js';
 
 // "Me"-scoped read endpoints - everything is resolved from the authenticated
 // user, never from a path/query id, so a participant can only ever see their own.
@@ -192,6 +193,38 @@ export function makeMeRouter(prisma: Prisma): Router {
 
   // Teams the current user belongs to, with sport + roster + the championships the
   // roster is entered into (team_entries).
+  /**
+   * What this person may do in one scope, straight from the engine.
+   *
+   * `permissionsFor` existed, was exported, and was called by nothing - so there was
+   * no way for a client to ask the engine anything. The web app therefore decided
+   * authority from `organization_members.role` alone (permissions.tsx,
+   * `canManageOrg`), which is why a role the Owner granted through the Roles screen
+   * widened the sidebar and not a single control on the page behind it.
+   *
+   * It is a MIRROR, never the boundary: every mutation is still checked server-side.
+   * A super admin gets `['*']`.
+   *
+   * `orgUnitId` narrows the question to one campus or batch, which is what makes a
+   * campus-scoped grant answer honestly rather than as if it reached the whole
+   * institution.
+   */
+  router.get('/me/permissions', asyncHandler(async (req, res) => {
+    const organizationId = typeof req.query.organizationId === 'string' ? req.query.organizationId : undefined;
+    const championshipId = typeof req.query.championshipId === 'string' ? req.query.championshipId : undefined;
+    const orgUnitId = typeof req.query.orgUnitId === 'string' ? req.query.orgUnitId : undefined;
+    if (!organizationId && !championshipId) {
+      // Permissions only mean anything inside a scope. Answering the unscoped
+      // question with an empty list would read as "you may do nothing".
+      throw new NotFoundError('Scope');
+    }
+    const permissions = await permissionsFor(prisma, {
+      user: { id: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin },
+      scope: { organizationId, championshipId, orgUnitId },
+    });
+    res.json({ scope: { organizationId: organizationId ?? null, championshipId: championshipId ?? null, orgUnitId: orgUnitId ?? null }, permissions });
+  }));
+
   router.get('/me/teams', asyncHandler(async (req, res) => {
     const memberships = await prisma.team_members.findMany({
       where: { user_id: req.user!.id, is_active: true },

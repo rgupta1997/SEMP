@@ -165,7 +165,23 @@ export function PlayersPage() {
   const navigate = useNavigate();
   const { orgId: routeOrgId } = useParams();
   const orgId = routeOrgId ?? ctx?.organization?.id ?? ctx?.user.organization_id ?? '';
-  const canManage = usePermissions().canManageOrg(orgId);
+  // PER ACTION, not one `canManage`.
+  //
+  // This screen used to gate everything on `canManageOrg` - `org.manage` - which a
+  // Sports Admin does not hold, so the whole of Players was read-only for the role
+  // whose description is "runs sport day to day ... people, teams, events". The nav
+  // offered it and every control on it was hidden. The catalogue already splits these
+  // three, and they are genuinely different risks: `people.import` is a file that can
+  // create hundreds against a duplicate-matching rule, `people.verify` decides who is
+  // a real member of the institution, and `people.edit` is one row at a time.
+  const perms = usePermissions();
+  const canEditPeople = perms.hasOrgPermission('people.edit', orgId);
+  const canImport = perms.hasOrgPermission('people.import', orgId);
+  const canVerify = perms.hasOrgPermission('people.verify', orgId);
+  // Selection exists to drive the bulk bar, so the checkbox column and the Actions
+  // column appear when there is at least one bulk action behind them. Without this a
+  // reader gets two empty columns and a table that reflows for nothing.
+  const canSelect = canVerify || canEditPeople;
   const ws = useWorkspace();
 
   const { data: people = [], isLoading, refetch } = useApi<Person[]>(orgId ? `/organizations/${orgId}/people` : null);
@@ -321,15 +337,15 @@ export function PlayersPage() {
   return (
     <div className="pb-20">
       <PageHeader title="Players" subtitle="Everyone who belongs to this organisation, and what they have played.">
-        {canManage && (
-          <>
-            <Button variant="outline" onClick={() => navigate(`/organizations/${orgId}/students/import`)}>
-              <Upload size={15} /> Bulk upload
-            </Button>
-            <Button onClick={() => setAdding(true)}>
-              <UserPlus size={15} /> Add player
-            </Button>
-          </>
+        {canImport && (
+          <Button variant="outline" onClick={() => navigate(`/organizations/${orgId}/students/import`)}>
+            <Upload size={15} /> Bulk upload
+          </Button>
+        )}
+        {canEditPeople && (
+          <Button onClick={() => setAdding(true)}>
+            <UserPlus size={15} /> Add player
+          </Button>
         )}
       </PageHeader>
 
@@ -344,10 +360,12 @@ export function PlayersPage() {
           icon={<Users size={24} />}
           title="Nobody here yet"
           description="Import a roll, or add people one at a time. Anyone signing up on your email domain lands here too."
-          action={canManage ? (
+          action={canEditPeople || canImport ? (
             <div className="flex flex-wrap justify-center gap-2">
-              <Button onClick={() => setAdding(true)}>Add a player</Button>
-              <Button variant="outline" onClick={() => navigate(`/organizations/${orgId}/students/import`)}>Import a roll</Button>
+              {canEditPeople && <Button onClick={() => setAdding(true)}>Add a player</Button>}
+              {canImport && (
+                <Button variant="outline" onClick={() => navigate(`/organizations/${orgId}/students/import`)}>Import a roll</Button>
+              )}
             </div>
           ) : undefined}
         />
@@ -400,7 +418,7 @@ export function PlayersPage() {
             )}
           </ListToolbar>
 
-          {canManage && (
+          {canSelect && (
             <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
               {/* Both narrowings are offered as ACTIONS, and neither is a bare
                   number that could be mistaken for what is already selected. */}
@@ -414,12 +432,16 @@ export function PlayersPage() {
                   Just this page
                 </Button>
               )}
-              <Button size="sm" disabled={busy} onClick={() => review([...selected], 'verified', selectedLabel)}>
-                Verify {selected.size}
-              </Button>
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => review([...selected], 'rejected', selectedLabel)}>
-                Reject {selected.size}
-              </Button>
+              {canVerify && (
+                <>
+                  <Button size="sm" disabled={busy} onClick={() => review([...selected], 'verified', selectedLabel)}>
+                    Verify {selected.size}
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => review([...selected], 'rejected', selectedLabel)}>
+                    Reject {selected.size}
+                  </Button>
+                </>
+              )}
               {/* Placing a whole intake at once. The commonest shape of this job is
                   "these 120 people are all Bangalore", and doing it a row at a time
                   is how it does not get done.
@@ -428,7 +450,7 @@ export function PlayersPage() {
                   gains the campus too. Removing is a per-person act, done from the
                   row, because "take 120 people out of something" is rarely what
                   anybody means and is expensive to undo. */}
-              {unitOptions.length > 0 && (
+              {canEditPeople && unitOptions.length > 0 && (
                 <Select
                   aria-label={`Add ${selected.size} to a ${unitLabels.campus.toLowerCase()}`}
                   className="min-w-[11rem] text-[13px]"
@@ -462,7 +484,7 @@ export function PlayersPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 dark:border-slate-800">
-                  {canManage && (
+                  {canSelect && (
                     <th className="w-px px-4 py-3">
                       <Checkbox checked={allSelected} indeterminate={selected.size > 0} onChange={toggleAll} />
                     </th>
@@ -473,7 +495,7 @@ export function PlayersPage() {
                   <th className="px-4 py-3 text-right">Sports</th>
                   <th className="px-4 py-3 text-right">Events</th>
                   <th className="px-4 py-3">Status</th>
-                  {canManage && <th className="w-px whitespace-nowrap px-4 py-3 text-right">Actions</th>}
+                  {canVerify && <th className="w-px whitespace-nowrap px-4 py-3 text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -482,7 +504,7 @@ export function PlayersPage() {
                     key={p.id}
                     className={`border-b border-slate-100 last:border-0 dark:border-slate-800 ${selected.has(p.id) ? 'bg-brand-50/60 dark:bg-brand-500/10' : ''}`}
                   >
-                    {canManage && (
+                    {canSelect && (
                       <td className="px-4 py-3">
                         <Checkbox checked={selected.has(p.id)} onChange={() => toggle(p.id)} />
                       </td>
@@ -519,7 +541,7 @@ export function PlayersPage() {
                               className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[12px] text-slate-700 dark:bg-slate-800 dark:text-slate-300"
                             >{u.name}</span>
                           ))}
-                        {canManage && (
+                        {canEditPeople && (
                           <button
                             type="button"
                             disabled={busy}
@@ -538,7 +560,7 @@ export function PlayersPage() {
                         on one line, and leave the width to the name column. Rows with
                         nothing to do still hold the column open rather than letting it
                         collapse and reflow the table mid-page. */}
-                    {canManage && (
+                    {canVerify && (
                       <td className="w-px whitespace-nowrap px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
                           {p.verification === 'pending' ? (

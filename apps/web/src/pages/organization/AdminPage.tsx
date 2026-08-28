@@ -49,7 +49,12 @@ const ROLE_ADMIN: Record<string, string[] | null> = {
   // allowlist, session length), so an administrator who can be appointed - and
   // removed - by the Owner should not be able to relax the rules that bind them.
   org_admin: ['profile', 'members', 'roles', 'audit'],
-  sports_admin: ['profile', 'members', 'audit'],
+  // NOT 'members'. A Sports Admin holds neither `org.member.manage` nor
+  // `role.manage`, so that tab opened a screen whose every control - approve a join
+  // request, give a role, suspend one - returned a 403. Deciding who belongs to the
+  // institution and who administers it are the two things this role is deliberately
+  // outside of; the people it DOES work with are on Players, which it reaches.
+  sports_admin: ['profile', 'audit'],
   billing_admin: ['profile', 'billing'],
   reporting_admin: ['profile'],
   viewer: [],
