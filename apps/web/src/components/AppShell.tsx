@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Compass, Flag, FlaskConical, Landmark, Layers, LayoutGrid, LayoutList, Lock,
+  BadgeCheck, Compass, Flag, FlaskConical, Landmark, Layers, LayoutGrid, LayoutList, Lock,
   Mail, Medal, Menu, MessageSquare, Moon, Plus, Sun, Trophy, Upload, User, Users, X,
   Zap,
 } from 'lucide-react';
@@ -41,6 +41,9 @@ function navFor(role: AppRole): NavGroup[] {
         { to: '/platform/disciplines', label: 'Disciplines', icon: <Layers size={16} /> },
         { to: '/platform/tournament-formats', label: 'Formats', icon: <LayoutList size={16} /> },
         { to: '/platform/organizations', label: 'Organizations', icon: <Landmark size={16} /> },
+        // Beside Organizations rather than under Platform: the queue is about an
+        // organisation's identity, and the reviewer moves between the two.
+        { to: '/platform/verification-requests', label: 'Verification', icon: <BadgeCheck size={16} /> },
         { to: '/platform/roles', label: 'Roles & Permissions', icon: <Lock size={16} /> },
       ],
     }, {

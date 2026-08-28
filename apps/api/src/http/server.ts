@@ -21,6 +21,7 @@ import { makeAuditRouter } from '../modules/iam/audit.routes.js';
 import { makeOrgEventsRouter } from '../modules/enrollment/org-events.routes.js';
 import { makeOrgDashboardRouter } from '../modules/enrollment/org-dashboard.routes.js';
 import { makeOrgRolesRouter } from '../modules/iam/org-roles.routes.js';
+import { makeVerificationRequestsRouter } from '../modules/iam/verification-requests.routes.js';
 import { makeSignInRouter } from '../modules/iam/signin.routes.js';
 import { makeAuthRouter } from '../modules/iam/auth.routes.js';
 import { makeMeRouter } from '../modules/iam/me.routes.js';
@@ -250,6 +251,11 @@ export function buildApp(prisma: Prisma) {
   // Role grants inside an organisation, and the catalogue the matrix is generated
   // from. Mounted at the root because its paths are already fully qualified.
   api.use('/', makeOrgRolesRouter(prisma));
+
+  // ----- Organisation verification: the org asks, the platform answers -----
+  // Mounted at the root because it serves both sides - /organizations/:id/... for the
+  // institution and /verification-requests for the platform queue.
+  api.use('/', makeVerificationRequestsRouter(prisma));
 
   // The audit trail. 864 entries were already being written with nothing to read them.
   api.use('/organizations/:id/audit', ents.requireCapability('audit_logs', orgParam));

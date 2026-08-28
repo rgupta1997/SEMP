@@ -857,6 +857,46 @@ export const upsertStandingsRuleSchema = z
     message: 'scope_id is required for format/discipline rules and must be empty for the championship default',
   });
 
+// ---------- Organisation verification requests ----------
+//
+// Asking Sportagon to vouch for an institution. What is required is exactly the two
+// things a reviewer cannot proceed without - somebody to reach, and a name to check
+// the registration against - and nothing else, because a form that demands a UDISE
+// number from a sports club is a form that does not get submitted.
+//
+// The organisation is never taken from the body: it comes from the URL, and the
+// route checks that the caller manages it. `submitted_by` is the authenticated user.
+export const createVerificationRequestSchema = z.object({
+  contact_name: z.string().min(1).max(120),
+  contact_role: z.string().max(120).optional(),
+  contact_email: z.string().email(),
+  contact_phone: optionalPhone,
+  // Separate from organizations.name on purpose: a workspace is called "IIMB
+  // Sports" and the entity on the certificate of registration is "Indian Institute
+  // of Management Bangalore". The reviewer is checking the second.
+  registered_name: z.string().max(200).optional(),
+  registration_id: z.string().max(120).optional(),
+  website: z.string().max(200).optional(),
+  address: z.string().max(600).optional(),
+  // A link to something the reviewer can look at. A URL rather than an upload
+  // because there is no file store in this product yet, and inventing one inside a
+  // verification form is how a feature ends up owning infrastructure.
+  document_url: z.string().max(600).optional(),
+  note: z.string().max(2000).optional(),
+});
+
+// The platform's answer. A rejection must say why: the note is shown to the
+// organisation, and "rejected" with no reason is a support ticket by construction.
+export const reviewVerificationRequestSchema = z
+  .object({
+    status: z.enum(['approved', 'rejected'] as const),
+    review_note: z.string().max(2000).optional(),
+  })
+  .refine((r) => r.status !== 'rejected' || !!r.review_note?.trim(), {
+    message: 'Say why it was rejected - the organisation is shown this note',
+    path: ['review_note'],
+  });
+
 // ---------- Demo requests ("Book a demo" leads) ----------
 // Submitted from the public, unauthenticated landing page. Only name + email are
 // required; the rest help the team tailor the demo. `message` is trimmed/capped to

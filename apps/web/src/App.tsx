@@ -70,6 +70,7 @@ import { PlatformUsersPage } from './pages/platform/PlatformUsersPage';
 import { PlatformInstitutionsPage } from './pages/platform/PlatformInstitutionsPage';
 import { PlatformDemoRequestsPage } from './pages/platform/PlatformDemoRequestsPage';
 import { PlatformFeedbackPage } from './pages/platform/PlatformFeedbackPage';
+import { PlatformVerificationRequestsPage } from './pages/platform/PlatformVerificationRequestsPage';
 import { PlatformDemosPage } from './pages/platform/PlatformDemosPage';
 import { ChampionshipMatrixImportPage } from './pages/platform/ChampionshipMatrixImportPage';
 import { PublicChampionshipPage } from './pages/public/PublicChampionshipPage';
@@ -149,6 +150,7 @@ function AuthenticatedRoutes() {
         <Route path="/platform/users" element={<RequireRole roles={SYSTEM}><PlatformUsersPage /></RequireRole>} />
         <Route path="/platform/demo-requests" element={<RequireRole roles={SYSTEM}><PlatformDemoRequestsPage /></RequireRole>} />
         <Route path="/platform/feedback" element={<RequireRole roles={SYSTEM}><PlatformFeedbackPage /></RequireRole>} />
+        <Route path="/platform/verification-requests" element={<RequireRole roles={SYSTEM}><PlatformVerificationRequestsPage /></RequireRole>} />
         <Route path="/platform/demos" element={<RequireRole roles={SYSTEM}><PlatformDemosPage /></RequireRole>} />
         <Route path="/platform/organizations" element={<RequireRole roles={SYSTEM}><PlatformInstitutionsPage /></RequireRole>} />
         <Route path="/platform/import-setup" element={<RequireRole roles={SYSTEM}><ChampionshipMatrixImportPage /></RequireRole>} />

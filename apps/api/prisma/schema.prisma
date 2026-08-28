@@ -182,6 +182,7 @@ model organizations {
   org_domains                           org_domains[]
   org_unit_members                      org_unit_members[]
   org_units                             org_units[]
+  org_verification_requests             org_verification_requests[]
   organization_members                  organization_members[]
   users_organizations_created_byTousers users?                       @relation("organizations_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction)
   report_jobs                           report_jobs[]
@@ -485,6 +486,8 @@ model users {
   org_units                                                                org_units[]
   organization_members                                                     organization_members[]
   organization_members_organization_members_verified_byTousers             organization_members[]       @relation("organization_members_verified_byTousers")
+  org_verification_requests_submitted_by                                   org_verification_requests[]  @relation("org_verification_requests_submitted_byTousers")
+  org_verification_requests_reviewed_by                                    org_verification_requests[]  @relation("org_verification_requests_reviewed_byTousers")
   organizations_organizations_created_byTousers                            organizations[]              @relation("organizations_created_byTousers")
   profile_privacy                                                          profile_privacy?
   report_jobs                                                              report_jobs[]
@@ -753,6 +756,38 @@ model demo_requests {
 
 /// User feedback from the public pages + in-app shell. championship_id / user_id are kept
 /// as scalar columns (DB FKs exist) - only handled_by navigates, mirroring demo_requests.
+/// Written by hand to match supabase/migrations/20260828000040_org_verification_requests.sql.
+/// `prisma db pull` is the source of truth for this file; this block is what that pull
+/// will produce, added here so the client is usable before the next introspection.
+model org_verification_requests {
+  id                                                  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                     String        @db.Uuid
+  contact_name                                        String        @db.VarChar
+  contact_role                                        String?       @db.VarChar
+  contact_email                                       String        @db.VarChar
+  contact_phone                                       String?       @db.VarChar
+  registered_name                                     String?       @db.VarChar
+  registration_id                                     String?       @db.VarChar
+  website                                             String?       @db.VarChar
+  address                                             String?
+  document_url                                        String?
+  note                                                String?
+  status                                              String        @default("pending") @db.VarChar
+  submitted_by                                        String?       @db.Uuid
+  reviewed_by                                         String?       @db.Uuid
+  reviewed_at                                         DateTime?     @db.Timestamptz(6)
+  review_note                                         String?
+  created_at                                          DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at                                          DateTime      @default(now()) @db.Timestamptz(6)
+  organizations                                       organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_org_verification_requests_submitted_byTousers users?        @relation("org_verification_requests_submitted_byTousers", fields: [submitted_by], references: [id], onUpdate: NoAction)
+  users_org_verification_requests_reviewed_byTousers  users?        @relation("org_verification_requests_reviewed_byTousers", fields: [reviewed_by], references: [id], onUpdate: NoAction)
+
+  @@index([created_at(sort: Desc)], map: "idx_org_verification_created")
+  @@index([status], map: "idx_org_verification_status")
+  @@index([organization_id, created_at(sort: Desc)], map: "idx_org_verification_org")
+}
+
 model feedback {
   id                            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   message                       String

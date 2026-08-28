@@ -1,12 +1,15 @@
 import { useState } from 'react';
-import { Check, ShieldCheck } from 'lucide-react';
+import { Check, Clock, ShieldCheck, XCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useApi } from '../../../lib/hooks';
+import type { OrgVerificationStatus } from '@semp/shared';
+import { fmtDate, useApi } from '../../../lib/hooks';
 import { useAuth } from '../../../lib/auth';
 import { usePermissions } from '../../../lib/permissions';
 import { api } from '../../../lib/api';
 import { InstitutionFormModal, type InstitutionFormBody } from '../../../components/InstitutionFormModal';
-import { Badge, Button, Card, CardBody, Spinner, confirmDialog, toast } from '../../../components/ui';
+import {
+  Badge, Button, Card, CardBody, Field, Input, Modal, Spinner, Textarea, confirmDialog, toast,
+} from '../../../components/ui';
 
 // Admin > Organization Profile (PG-28a).
 //
@@ -53,6 +56,141 @@ const BENEFITS = [
   'Certificates that carry the verified issuer mark',
 ];
 
+interface VerificationRequest {
+  id: string;
+  status: OrgVerificationStatus;
+  created_at: string;
+  reviewed_at: string | null;
+  review_note: string | null;
+  contact_name: string;
+  contact_role: string | null;
+  contact_email: string;
+  contact_phone: string | null;
+  registered_name: string | null;
+  registration_id: string | null;
+  website: string | null;
+  address: string | null;
+  document_url: string | null;
+  note: string | null;
+}
+
+interface VerificationState {
+  verified: boolean;
+  request: VerificationRequest | null;
+}
+
+/**
+ * The request form.
+ *
+ * Two required fields and seven optional ones, and that split is the whole design.
+ * A reviewer cannot proceed without somebody to reach and a name to check the
+ * registration against; everything else helps and nothing else blocks. A form that
+ * demands a UDISE number from a sports club is a form that does not get submitted,
+ * and an unsubmitted request is indistinguishable from the dead end this replaces.
+ */
+function VerificationRequestModal({ orgId, orgName, onClose, onDone }: {
+  orgId: string; orgName: string; onClose: () => void; onDone: () => void;
+}) {
+  const { ctx } = useAuth();
+  // Prefilled from the person asking, because in practice they are the contact. Every
+  // field stays editable - the authorised contact is often not whoever has the laptop.
+  const [form, setForm] = useState({
+    contact_name: ctx?.user?.name ?? '',
+    contact_role: '',
+    contact_email: ctx?.user?.email ?? '',
+    contact_phone: '',
+    registered_name: orgName,
+    registration_id: '',
+    website: '',
+    address: '',
+    document_url: '',
+    note: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k: keyof typeof form) => (e: { target: { value: string } }) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const ready = form.contact_name.trim() && /.+@.+\..+/.test(form.contact_email.trim());
+
+  async function submit() {
+    setSaving(true);
+    try {
+      // Blanks are stripped rather than sent as empty strings: the columns are
+      // nullable and "" would render as a filled-in field showing nothing on the
+      // reviewer's screen.
+      const body = Object.fromEntries(
+        Object.entries(form).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v !== ''),
+      );
+      await api('POST', `/organizations/${orgId}/verification-request`, body);
+      toast.success('Verification request sent');
+      onDone();
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Request verification"
+      onClose={onClose}
+      wide
+      footer={(
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            Sportagon reviews this by hand. Nothing about your workspace changes while you wait.
+          </span>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>Cancel</Button>
+            <Button onClick={submit} disabled={!ready || saving}>{saving ? 'Sending…' : 'Send request'}</Button>
+          </div>
+        </div>
+      )}
+    >
+      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+        We are checking one thing: that {orgName} is the institution it says it is. The
+        two contact fields are required; the rest just make that quicker to confirm.
+      </p>
+
+      <div className="grid gap-x-4 sm:grid-cols-2">
+        <Field label="Authorised contact *">
+          <Input value={form.contact_name} onChange={set('contact_name')} placeholder="Full name" />
+        </Field>
+        <Field label="Their designation">
+          <Input value={form.contact_role} onChange={set('contact_role')} placeholder="Sports Director, Registrar…" />
+        </Field>
+        <Field label="Contact email *" hint="Ideally on the institution's own domain.">
+          <Input type="email" value={form.contact_email} onChange={set('contact_email')} />
+        </Field>
+        <Field label="Contact phone">
+          <Input value={form.contact_phone} onChange={set('contact_phone')} />
+        </Field>
+        <Field label="Registered name" hint="As it appears on the registration, if different from the workspace name.">
+          <Input value={form.registered_name} onChange={set('registered_name')} />
+        </Field>
+        <Field label="Registration / affiliation number">
+          <Input value={form.registration_id} onChange={set('registration_id')} placeholder="UDISE, AICTE, society reg. no.…" />
+        </Field>
+        <Field label="Website">
+          <Input value={form.website} onChange={set('website')} placeholder="https://" />
+        </Field>
+        <Field label="Link to a document" hint="Anything public we can look at. We do not store uploads.">
+          <Input value={form.document_url} onChange={set('document_url')} placeholder="https://" />
+        </Field>
+      </div>
+
+      <Field label="Address">
+        <Textarea rows={2} value={form.address} onChange={set('address')} />
+      </Field>
+      <Field label="Anything else we should know">
+        <Textarea rows={3} value={form.note} onChange={set('note')} />
+      </Field>
+    </Modal>
+  );
+}
+
 export function OrgProfilePanel({ orgId }: { orgId: string }) {
   const navigate = useNavigate();
   const { refresh } = useAuth();
@@ -60,8 +198,13 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
   const canManage = perms.canManageOrg(orgId);
   const canDelete = perms.isOrgOwner(orgId);
   const { data: org, isLoading, refetch } = useApi<Org>(`/organizations/${orgId}`);
+  // Only asked for by somebody who could act on it - the endpoint is `org.manage`,
+  // and a Viewer opening this tab would otherwise get a 403 in the console for a
+  // panel they are not shown.
+  const verification = useApi<VerificationState>(`/organizations/${orgId}/verification-request`, canManage);
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [requesting, setRequesting] = useState(false);
 
   // The API protects completed and scored matches and cascades the rest;
   // ?cascade=true is the explicit confirmation it requires.
@@ -86,10 +229,32 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
     }
   }
 
+  async function withdrawRequest() {
+    const ok = await confirmDialog({
+      title: 'Withdraw the request?',
+      message: 'Sportagon will stop reviewing it. You can send a new one whenever you like.',
+      confirmLabel: 'Withdraw request',
+    });
+    if (!ok) return;
+    try {
+      await api('DELETE', `/organizations/${orgId}/verification-request`);
+      toast.success('Request withdrawn');
+      await verification.refetch();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  }
+
   if (isLoading) return <Spinner />;
   if (!org) return null;
 
-  const verified = !!org.verified;
+  // The organisation row is the authority on whether the tick is held; the request
+  // row says what is happening about it. Read from the request endpoint where it has
+  // answered, so approving in another tab is reflected without a full context refresh.
+  const verified = !!(verification.data?.verified ?? org.verified);
+  const request = verification.data?.request ?? null;
+  const pending = request?.status === 'pending';
+  const refused = request?.status === 'rejected';
 
   return (
     <>
@@ -102,15 +267,17 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
           <span aria-hidden style={{
             width: 38, height: 38, borderRadius: 10, display: 'grid', placeItems: 'center',
             background: verified ? '#1E9E5A' : '#004AAD', color: '#fff',
-          }}>{verified ? <Check size={18} /> : <ShieldCheck size={18} />}</span>
+          }}>{verified ? <Check size={18} /> : pending ? <Clock size={18} /> : <ShieldCheck size={18} />}</span>
           <div>
             <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 18 }}>
-              {verified ? 'Verified organisation' : 'Not yet verified'}
+              {verified ? 'Verified organisation' : pending ? 'Verification under review' : 'Not yet verified'}
             </div>
             <div style={{ fontSize: 13.5, color: '#4F5F77', marginTop: 2 }}>
               {verified
                 ? 'Your organisation carries the tick wherever it appears.'
-                : 'Everything still works. Verification adds trust signals, it does not unlock features.'}
+                : pending
+                  ? 'Your request is with Sportagon. Everything keeps working while it is reviewed.'
+                  : 'Everything still works. Verification adds trust signals, it does not unlock features.'}
             </div>
           </div>
         </div>
@@ -149,12 +316,53 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
                 </div>
               </div>
             ))}
-            {/* Deliberately not a "Request verification" button yet: nothing routes
-                such a request to anyone, and a button that silently does nothing is
-                worse than a sentence telling you who to talk to. */}
-            <p style={{ margin: '14px 0 0', fontSize: 13, color: '#6E7E96' }}>
-              Verification is carried out by Sportagon. Contact play@sportagon.in to start it.
-            </p>
+            {/* There is now something behind the button: the request goes to a
+                platform queue (org_verification_requests) that a super admin
+                approves, and approving is what sets the tick. The sentence this
+                replaces - "contact play@sportagon.in" - was the honest thing to say
+                while nothing routed such a request to anyone. */}
+            {refused && request?.review_note && (
+              <div className="mt-3 flex gap-2.5 rounded-xl border border-rose-200 bg-rose-50 p-3 dark:border-rose-900/50 dark:bg-rose-950/30">
+                <XCircle size={16} className="mt-0.5 shrink-0 text-rose-500" />
+                <div>
+                  <div className="text-[13px] font-semibold text-rose-700 dark:text-rose-300">
+                    Your last request was not approved
+                  </div>
+                  {/* The reason is shown rather than summarised. A refusal with no
+                      reason on the screen is a support ticket by construction. */}
+                  <p className="mt-0.5 text-[12.5px] leading-relaxed text-rose-700/90 dark:text-rose-300/90">
+                    {request.review_note}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-3.5 flex flex-wrap items-center gap-3">
+              {pending ? (
+                <>
+                  <Badge tone="amber">Submitted {fmtDate(request!.created_at)}</Badge>
+                  <span className="text-[13px] text-slate-500 dark:text-slate-400">
+                    We will let your administrators know either way.
+                  </span>
+                  {canManage && (
+                    <Button size="sm" variant="ghost" onClick={withdrawRequest}>Withdraw</Button>
+                  )}
+                </>
+              ) : canManage ? (
+                <>
+                  <Button size="sm" onClick={() => setRequesting(true)}>
+                    {refused ? 'Send a new request' : 'Request verification'}
+                  </Button>
+                  <span className="text-[13px] text-slate-500 dark:text-slate-400">
+                    Reviewed by hand. Nothing changes about your workspace while you wait.
+                  </span>
+                </>
+              ) : (
+                <span className="text-[13px] text-slate-500 dark:text-slate-400">
+                  An owner or administrator of this organisation can request verification.
+                </span>
+              )}
+            </div>
           </CardBody>
         </Card>
       )}
@@ -192,6 +400,15 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
             </div>
           </CardBody>
         </Card>
+      )}
+
+      {requesting && (
+        <VerificationRequestModal
+          orgId={orgId}
+          orgName={org.name}
+          onClose={() => setRequesting(false)}
+          onDone={() => verification.refetch()}
+        />
       )}
 
       {editing && (

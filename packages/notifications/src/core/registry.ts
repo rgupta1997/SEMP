@@ -306,6 +306,55 @@ ${where}` : where;
       return `You’ve been approved to join ${organizationName}`;
     },
   },
+  // ---- organisation verification ------------------------------------------
+  //
+  // Addressed to the institution's owners and admins rather than to whoever
+  // submitted the request. Verification is a fact about the ORGANISATION, the
+  // person who filled the form in may have left, and the tick appearing (or not)
+  // is something its administrators need to know either way.
+  org_verification_approved: {
+    key: 'org_verification_approved',
+
+    defaultAudience: (ctx) => {
+      if (!ctx.organizationId) {
+        throw new Error('organizationId is required for org_verification_approved');
+      }
+
+      return Rules.orgAdmins(ctx.organizationId);
+    },
+
+    titleTemplate: () => 'Your organisation is now verified',
+
+    bodyTemplate: (data) => {
+      const organizationName = String(data.organizationName ?? 'Your organisation');
+
+      return `${organizationName} carries the verification tick wherever it appears.`;
+    },
+  },
+  org_verification_rejected: {
+    key: 'org_verification_rejected',
+
+    defaultAudience: (ctx) => {
+      if (!ctx.organizationId) {
+        throw new Error('organizationId is required for org_verification_rejected');
+      }
+
+      return Rules.orgAdmins(ctx.organizationId);
+    },
+
+    titleTemplate: () => 'Verification was not approved',
+
+    // The reason is the whole point of the notification. Without it this is a dead
+    // end: nothing on the screen would say what to fix, and the only next step
+    // would be a support email.
+    bodyTemplate: (data) => {
+      const reason = data.reason ? String(data.reason) : null;
+
+      return reason
+        ? `${reason} You can submit a new request once that is sorted.`
+        : 'You can submit a new request from Administration → Organization Profile.';
+    },
+  },
   org_join_declined: {
     key: 'org_join_declined',
 
