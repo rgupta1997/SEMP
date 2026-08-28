@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Check, Copy, Lock, ShieldCheck } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Eye, Lock, ShieldCheck } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
 import { useWorkspace } from '../../lib/useWorkspace';
-import { Badge, Card, CardBody, PageHeader, Spinner, toast } from '../../components/ui';
+import { Badge, Button, Card, CardBody, PageHeader, Spinner, toast } from '../../components/ui';
+import { SheetPreview, openDoc } from '../organization/certificates/shared';
 import { ParticipantDashboard } from './ParticipantDashboard';
 import { LifetimeRecordPage } from './LifetimeRecordPage';
 
@@ -59,7 +60,9 @@ interface TeamRow {
 }
 
 interface CertRow {
-  id: string; serial: string; issued_at: string; revoked_at: string | null;
+  id: string; serial: string; issued_at: string; revoked_at: string | null; superseded_at: string | null;
+  token: string;
+  payload?: { title?: string | null; sport?: string | null; recipient_name?: string | null } | null;
   organizations?: { name: string } | null; championships?: { name: string } | null;
 }
 
@@ -133,6 +136,112 @@ function TeamsTab() {
   );
 }
 
+const DetailLine = ({ label, mono, children }: { label: string; mono?: boolean; children: React.ReactNode }) => (
+  <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', padding: '3px 0' }}>
+    <dt style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4, color: '#9BA9BE', flexShrink: 0 }}>{label}</dt>
+    <dd style={{
+      margin: 0, textAlign: 'right', minWidth: 0, color: '#14233B',
+      fontFamily: mono ? MONO : undefined, fontSize: mono ? 12 : 13,
+    }}>{children}</dd>
+  </div>
+);
+
+/**
+ * The holder's own copy.
+ *
+ * A certificate you can see the status of but not open is a receipt, not a document -
+ * so every row carries the two things a holder actually needs (the artefact itself,
+ * and a link a stranger can check) and the facts behind them. All of it goes through
+ * /me/certificates/:id/render, which authorises by ownership rather than by
+ * institution: nobody has to ask an administrator for their own certificate.
+ */
+function CertificateRow({ c }: { c: CertRow }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const dead = !!(c.revoked_at || c.superseded_at);
+  const verifyUrl = `${window.location.origin}/verify/${c.token}`;
+
+  const copyVerify = async () => {
+    try {
+      await navigator.clipboard.writeText(verifyUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch { toast.error('Could not copy the link', verifyUrl); }
+  };
+
+  return (
+    <div style={{ borderTop: '1px solid #EFF2F7' }}>
+      <div style={{ ...rowStyle, borderTop: 'none', flexWrap: 'wrap' }}>
+        <span style={{ flex: '1 1 200px', minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#14233B' }}>
+            {c.payload?.title || c.championships?.name || 'Certificate'}
+          </span>
+          <span style={{ display: 'block', fontFamily: MONO, fontSize: 11, color: '#6E7E96', marginTop: 2 }}>
+            {c.serial} · {c.organizations?.name ?? ''}
+          </span>
+        </span>
+
+        {/* A revoked certificate is shown, not removed. Somebody may be holding
+            a copy, and silence about it is worse than saying it was withdrawn. */}
+        <Badge tone={c.revoked_at ? 'rose' : c.superseded_at ? 'amber' : 'green'}>
+          {c.revoked_at ? 'Revoked' : c.superseded_at ? 'Superseded' : 'Issued'}
+        </Badge>
+
+        <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <Button size="sm" variant="outline" onClick={() => openDoc(`/me/certificates/${c.id}/render`)}>
+            <Eye size={13} aria-hidden />View
+          </Button>
+          <Button
+            size="sm" variant="outline"
+            onClick={() => openDoc(`/me/certificates/${c.id}/render?download=1`, { download: `${c.serial}.html` })}
+          >
+            <Download size={13} aria-hidden />Download
+          </Button>
+          <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+            Details{open ? <ChevronUp size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
+          </Button>
+        </span>
+      </div>
+
+      {open && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start', padding: '4px 0 16px' }}>
+          {/* The real render, at print geometry - so what is checked here is what
+              prints, not a description of it. */}
+          <SheetPreview path={`/me/certificates/${c.id}/render`} width={320} />
+
+          <dl style={{ flex: '1 1 240px', minWidth: 0, margin: 0, fontSize: 13 }}>
+            <DetailLine label="Serial" mono>{c.serial}</DetailLine>
+            <DetailLine label="Issued to">{c.payload?.recipient_name ?? '—'}</DetailLine>
+            <DetailLine label="Event">{c.championships?.name ?? '—'}</DetailLine>
+            <DetailLine label="Sport">{c.payload?.sport ?? '—'}</DetailLine>
+            <DetailLine label="Award">{c.payload?.title ?? '—'}</DetailLine>
+            <DetailLine label="Issued by">{c.organizations?.name ?? '—'}</DetailLine>
+            <DetailLine label="Issued on">{new Date(c.issued_at).toLocaleDateString()}</DetailLine>
+            {c.revoked_at && <DetailLine label="Withdrawn">{new Date(c.revoked_at).toLocaleDateString()}</DetailLine>}
+
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+              {/* The public verify link, not a link into the app: sharing a certificate
+                  means letting somebody else check it, and they have no account. */}
+              <Button size="sm" variant="subtle" onClick={copyVerify}>
+                {copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
+                {copied ? 'Copied' : 'Copy verification link'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => window.open(`/verify/${c.token}`, '_blank', 'noopener')}>
+                <ExternalLink size={13} aria-hidden />Verification page
+              </Button>
+            </div>
+            {dead && (
+              <p style={{ margin: '8px 0 0', fontSize: 12, color: '#B4405F' }}>
+                This certificate no longer verifies. It still opens, stamped, so you can see what happened to it.
+              </p>
+            )}
+          </dl>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CertificatesTab() {
   const { data, isLoading } = useApi<{ rows: CertRow[] }>('/me/certificates');
   if (isLoading) return <Spinner />;
@@ -141,21 +250,7 @@ function CertificatesTab() {
     <div style={cardStyle}>
       <h3 style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, margin: '0 0 6px' }}>Certificates</h3>
       {rows.length === 0 ? <p style={emptyStyle}>Certificates issued to you will appear here.</p>
-        : rows.map((c) => (
-          <div key={c.id} style={rowStyle}>
-            <span style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#14233B' }}>
-                {c.championships?.name ?? 'Certificate'}
-              </span>
-              <span style={{ display: 'block', fontFamily: MONO, fontSize: 11, color: '#6E7E96', marginTop: 2 }}>
-                {c.serial} · {c.organizations?.name ?? ''}
-              </span>
-            </span>
-            {/* A revoked certificate is shown, not removed. Somebody may be holding
-                a copy, and silence about it is worse than saying it was withdrawn. */}
-            <Badge tone={c.revoked_at ? 'rose' : 'green'}>{c.revoked_at ? 'Revoked' : 'Issued'}</Badge>
-          </div>
-        ))}
+        : rows.map((c) => <CertificateRow key={c.id} c={c} />)}
     </div>
   );
 }
