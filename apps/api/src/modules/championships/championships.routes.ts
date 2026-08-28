@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import { applyTemplateSchema, bulkAssignOfficialsSchema, type ChampionshipStatus, createChampionshipSchema, saveTemplateSchema, updateChampionshipSchema, updateChampionshipStatusSchema } from '@semp/shared';
+import { applyTemplateSchema, bulkAssignOfficialsSchema, type ChampionshipStatus, createChampionshipSchema, entrantLabel, entrantLabelPlural, type EntryLevel, isIntraLevel, saveTemplateSchema, unitLabels, updateChampionshipSchema, updateChampionshipStatusSchema } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
-import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { can } from '../../http/middleware/can.js';
+import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { assertChampionshipTransition } from './domain/championship-lifecycle.js';
 import { notify } from '@semp/notifications/server/notify.js';
 import { recomputeStandingsAtomic } from '../standings/standings.service.js';
@@ -118,8 +119,37 @@ export function makeEventsRouter(prisma: Prisma): Router {
     return ids;
   };
 
-  const canSeeChampionship = async (user: { id: string; isSuperAdmin?: boolean }, championship: { id: string; visibility: string }): Promise<boolean> => {
-    if (championship.visibility !== 'private' || user.isSuperAdmin) return true;
+  /**
+   * Members of one organisation, cached per request like the involvement set.
+   *
+   * Needed because an INTERNAL championship is not merely private - it is not other
+   * organisations' business that it exists. Private means "invite only"; internal
+   * means "belongs to one institution", and the audience is that institution.
+   */
+  const memberOf = async (userId: string, organizationId: string): Promise<boolean> => !!(
+    await prisma.organization_members.findFirst({
+      where: { user_id: userId, organization_id: organizationId, status: 'active' },
+      select: { id: true },
+    })
+  );
+
+  const canSeeChampionship = async (
+    user: { id: string; isSuperAdmin?: boolean },
+    championship: { id: string; visibility: string; entry_level?: string | null; host_organization_id?: string | null },
+  ): Promise<boolean> => {
+    if (user.isSuperAdmin) return true;
+
+    // An internal championship is visible ONLY inside the organisation running it.
+    // No external organisation may see it or take part - so this is checked before
+    // visibility, and being "involved" is not enough on its own: involvement can be
+    // inherited from an older relationship, membership cannot.
+    if (championship.entry_level && championship.entry_level !== 'organization') {
+      if (!championship.host_organization_id) return false;
+      if (await memberOf(user.id, championship.host_organization_id)) return true;
+      return (await involvedChampionshipIds(user.id)).has(championship.id);
+    }
+
+    if (championship.visibility !== 'private') return true;
     return (await involvedChampionshipIds(user.id)).has(championship.id);
   };
 
@@ -129,9 +159,28 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // "Host" and "Championships" views are derived from /mine.
   // -------------------------------------------------------------------------
   router.get('/', asyncHandler(async (req, res) => {
+    // Internal championships are excluded from Discover unless the viewer belongs to
+    // the organisation running one. Discover is the "who can I play?" feed, and an
+    // event whose entrants are somebody else's campuses is not an answer to that -
+    // listing it would advertise a fixture nobody outside can join.
+    const myOrgIds = req.user!.isSuperAdmin ? [] : (await prisma.organization_members.findMany({
+      where: { user_id: req.user!.id, status: 'active' },
+      select: { organization_id: true },
+    })).map((m) => m.organization_id);
+
     const where = req.user!.isSuperAdmin
       ? {}
-      : { OR: [{ visibility: 'public' }, { id: { in: [...(await involvedChampionshipIds(req.user!.id))] } }] };
+      : {
+        AND: [
+          { OR: [{ visibility: 'public' }, { id: { in: [...(await involvedChampionshipIds(req.user!.id))] } }] },
+          {
+            OR: [
+              { entry_level: 'organization' },
+              ...(myOrgIds.length ? [{ host_organization_id: { in: myOrgIds } }] : []),
+            ],
+          },
+        ],
+      };
     const championships = await prisma.championships.findMany({
       where,
       orderBy: { created_at: 'desc' },
@@ -211,7 +260,34 @@ export function makeEventsRouter(prisma: Prisma): Router {
     if (!championship) throw new NotFoundError('Championship');
     if (!(await canSeeChampionship(req.user!, championship))) throw new NotFoundError('Championship');
     const { organizations, ...rest } = championship;
-    res.json({ ...rest, host_organization: organizations });
+
+    // What competes here, in the host's own words. Resolved server-side because the
+    // noun is a per-organisation setting ("Campus" / "Office"), and a client that
+    // guessed would print the wrong one on the entry form, the approvals queue and
+    // the standings header at once.
+    const scopeUnit = rest.entry_scope_unit_id
+      ? await prisma.org_units.findUnique({ where: { id: rest.entry_scope_unit_id }, select: { id: true, name: true } })
+      : null;
+    const hostOrg = rest.host_organization_id
+      ? await prisma.organizations.findUnique({ where: { id: rest.host_organization_id }, select: { settings: true } })
+      : null;
+    const level = (rest.entry_level ?? 'organization') as EntryLevel;
+    const labels = unitLabels(hostOrg?.settings);
+
+    res.json({
+      ...rest,
+      host_organization: organizations,
+      entry: {
+        level,
+        intra: isIntraLevel(level),
+        // Singular AND plural, resolved once here. Screens need both - "Enter a
+        // campus" and "2 of 2 campuses entered" - and deriving one from the other
+        // at each call site is how "the campu they belong to" reached production.
+        entrant_label: entrantLabel(level, labels),
+        entrant_label_plural: entrantLabelPlural(level, labels),
+        scope_unit: scopeUnit,
+      },
+    });
   }));
 
   // The view-only public share token for this championship (organiser/super only).
@@ -236,14 +312,22 @@ export function makeEventsRouter(prisma: Prisma): Router {
    */
   async function assertMayHost(userId: string, isSuper: boolean, organizationId: string) {
     if (isSuper) return;
-    const may = await prisma.organization_members.findFirst({
-      where: {
-        user_id: userId, organization_id: organizationId,
-        status: 'active', role: { in: ['owner', 'admin'] },
-      },
-      select: { id: true },
+    // ONE rule, and it is the permission engine's.
+    //
+    // This used to test membership role directly - owner or admin - which meant the
+    // `event.create` permission existed in the catalogue, was held by Owner, Org
+    // Admin and Sports Admin, and decided nothing. A Sports Admin, whose entire job
+    // is running competitions, could not host one; and configuring the permission
+    // through the Roles screen changed nothing at all, which is the failure the
+    // whole engine exists to prevent.
+    //
+    // `can()` resolves explicit grants (user_org_roles) AND the role implied by
+    // membership, so owner/admin still pass without a fallback.
+    const allowed = await can(prisma, 'event.create', {
+      user: { id: userId, isSuperAdmin: isSuper },
+      scope: { organizationId },
     });
-    if (!may) throw new ForbiddenError('You cannot host an event on behalf of that organisation');
+    if (!allowed) throw new ForbiddenError('You do not have permission to host a championship for that organisation.');
   }
 
   router.post('/', validateBody(createChampionshipSchema), asyncHandler(async (req, res) => {
@@ -255,12 +339,25 @@ export function makeEventsRouter(prisma: Prisma): Router {
     if (hostOrgId) {
       await assertMayHost(req.user!.id, !!req.user!.isSuperAdmin, hostOrgId);
     } else {
-      const admin = await prisma.organization_members.findMany({
-        where: { user_id: req.user!.id, status: 'active', role: { in: ['owner', 'admin'] } },
+      // Inferring a host still has to obey the same permission. Candidates are the
+      // organisations where this person holds event.create - not merely the ones
+      // they belong to - so an inferred host can never grant what an explicit one
+      // would have refused.
+      const memberships = await prisma.organization_members.findMany({
+        where: { user_id: req.user!.id, status: 'active' },
         select: { organization_id: true },
-        take: 2,
       });
-      if (admin.length === 1) hostOrgId = admin[0].organization_id;
+      const candidates: string[] = [];
+      for (const m of memberships) {
+        if (await can(prisma, 'event.create', {
+          user: { id: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin },
+          scope: { organizationId: m.organization_id },
+        })) candidates.push(m.organization_id);
+        if (candidates.length > 1) break;   // ambiguous; stop looking
+      }
+      // Exactly one is an answer. Two is a question, and a question that guesses is
+      // how an event ends up filed under the wrong institution.
+      if (candidates.length === 1) hostOrgId = candidates[0];
     }
 
     // How many events an institution may run AT ONCE is a plan limit, and this is
@@ -273,9 +370,84 @@ export function makeEventsRouter(prisma: Prisma): Router {
       await assertWithinOrgLimit(prisma, 'active_events', hostOrgId, await countActiveEvents(prisma, hostOrgId));
     }
 
+    // An intra event is contested inside ONE organisation, so it is meaningless
+    // without a host: there would be no campuses to enter. Checked here rather than
+    // in the schema because the host may be INFERRED above, so the request can
+    // legitimately omit it and still end up with one.
+    const entryLevel = (req.body.entry_level as EntryLevel | undefined) ?? 'organization';
+    if (isIntraLevel(entryLevel) && !hostOrgId) {
+      throw new BusinessRuleError('A championship contested between campuses or departments must name the organisation it runs inside.');
+    }
+    // The scope must be a campus of the host, and only a department-level event has
+    // one at all. A scope on a campus-level event would silently narrow nothing.
+    const scopeUnitId = (req.body.entry_scope_unit_id as string | null | undefined) ?? null;
+    if (scopeUnitId) {
+      if (entryLevel !== 'department') {
+        throw new BusinessRuleError('Only a championship contested between departments can be limited to one campus.');
+      }
+      const scope = await prisma.org_units.findFirst({
+        where: { id: scopeUnitId, organization_id: hostOrgId!, type: 'campus' },
+        select: { id: true },
+      });
+      if (!scope) throw new BusinessRuleError('That campus does not belong to the hosting organisation.');
+    }
+
+    const { host_participates: hostParticipates, ...body } = req.body as Record<string, unknown>;
+
     const championship = await prisma.championships.create({
-      data: { ...req.body, host_organization_id: hostOrgId },
+      data: {
+        ...body,
+        host_organization_id: hostOrgId,
+        entry_level: entryLevel,
+        entry_scope_unit_id: scopeUnitId,
+      } as never,
     });
+
+    // "Are you taking part yourself?"
+    //
+    // Asked at creation because it is the commonest thing an organiser forgets: a
+    // college hosting an inter-college meet is usually IN it, and discovering three
+    // days later that their own teams cannot be entered is a bad way to find out.
+    // Approved immediately - the host approving its own application is a formality
+    // nobody should have to perform.
+    //
+    // Only meaningful for an inter-organisation event. An internal one has no
+    // organisation-level entrants at all: its competitors are the host's campuses,
+    // and their squads join through Teams.
+    // An INTERNAL championship gets exactly one entry row, for the host itself,
+    // created with the event and never shown to anybody.
+    //
+    // It exists because `team_entries` hangs off an entry, and the competitors here
+    // are squads rather than organisations - there is nothing for an organiser to
+    // enrol. Rather than making the foreign key nullable and teaching every reader
+    // to cope, the host's own entry stands in for "this organisation's event", and
+    // every campus squad's entry points at it. What competes is still the squad's
+    // unit; this row is plumbing.
+    if (hostOrgId && entryLevel !== 'organization') {
+      await prisma.championship_organizations.create({
+        data: {
+          championship_id: championship.id,
+          organization_id: hostOrgId,
+          applied_by: req.user!.id,
+          reviewed_by: req.user!.id,
+          reviewed_at: new Date(),
+          status: 'approved',
+        },
+      });
+    }
+
+    if (hostParticipates && hostOrgId && entryLevel === 'organization') {
+      await prisma.championship_organizations.create({
+        data: {
+          championship_id: championship.id,
+          organization_id: hostOrgId,
+          applied_by: req.user!.id,
+          reviewed_by: req.user!.id,
+          reviewed_at: new Date(),
+          status: 'approved',
+        },
+      });
+    }
     const organiserRole = await prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser) });
     if (organiserRole) {
       await prisma.user_championship_roles.create({

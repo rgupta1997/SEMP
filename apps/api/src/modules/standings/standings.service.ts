@@ -1,12 +1,13 @@
 import { DEFAULT_STANDINGS_RULE, standingsRuleSchema, type StandingsRule, type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
-import { accumulate, rankBy, runScheme, type OrgTally, type SchemeFixture } from './domain/schemes.js';
+import { contingentKey, type ContingentRef } from '@semp/shared';
+import { accumulate, rankBy, runScheme, type EntityTally, type SchemeFixture } from './domain/schemes.js';
 
 // One accumulator bucket = one standings table (a scope + scope_id pair).
 interface Bucket {
   scope_type: StandingsAggScope;
   scope_id: string | null;
-  rows: Map<string, OrgTally>;
+  rows: Map<string, EntityTally>;
 }
 
 const bucketKey = (scope: StandingsAggScope, id: string | null) => `${scope}|${id ?? ''}`;
@@ -74,9 +75,14 @@ export async function countCompletedMatches(
 }
 
 // Rebuild every standings table for a championship from its completed fixtures.
-// Aggregates by organization at three scopes (championship / tournament / sport),
-// each draw scored by its resolved rule. Idempotent: wipes and re-inserts in one
+// Aggregates by CONTINGENT at three scopes (championship / tournament / sport), each
+// draw scored by its resolved rule. Idempotent: wipes and re-inserts in one
 // transaction.
+//
+// The contingent is the team's unit when it has one and its organisation otherwise.
+// In an inter-organisation championship every team's unit is null, so the key IS the
+// organisation id and this behaves exactly as it did before intra events existed -
+// which is why the whole feature needed no change to the ranking maths.
 export async function recomputeStandings(prisma: Db, championshipId: string): Promise<void> {
   // Editable rules for this championship, indexed for most-specific-wins resolution.
   const ruleRows = await prisma.standings_rules.findMany({ where: { championship_id: championshipId } });
@@ -118,14 +124,29 @@ export async function recomputeStandings(prisma: Db, championshipId: string): Pr
           status: true,
           round: true, home_team_id: true, away_team_id: true,
           home_score: true, away_score: true, winner_team_id: true, live_state: true,
-          teams_fixtures_home_team_idToteams: { select: { organization_id: true } },
-          teams_fixtures_away_team_idToteams: { select: { organization_id: true } },
+          teams_fixtures_home_team_idToteams: { select: { organization_id: true, org_unit_id: true } },
+          teams_fixtures_away_team_idToteams: { select: { organization_id: true, org_unit_id: true } },
         },
       },
     },
   });
 
   const buckets = new Map<string, Bucket>();
+
+  // Contingent key -> the pair it stands for. The scheme layer works in opaque keys,
+  // but the standings ROW has to carry both columns: organization_id keeps every
+  // existing foreign key and cascade intact, org_unit_id is what makes two campuses
+  // of one institution two rows instead of one. Collected as the fixtures are read
+  // so persistence never has to look a key back up.
+  const refs = new Map<string, ContingentRef>();
+  const keyOf = (side: { organization_id: string; org_unit_id: string | null } | null | undefined): string | null => {
+    if (!side?.organization_id) return null;
+    const ref: ContingentRef = { orgId: side.organization_id, unitId: side.org_unit_id ?? null };
+    const key = contingentKey(ref);
+    refs.set(key, ref);
+    return key;
+  };
+
   const ensureBucket = (scope: StandingsAggScope, id: string | null): Bucket => {
     const key = bucketKey(scope, id);
     let b = buckets.get(key);
@@ -149,8 +170,8 @@ export async function recomputeStandings(prisma: Db, championshipId: string): Pr
         round: f.round,
         home_team_id: f.home_team_id,
         away_team_id: f.away_team_id,
-        home_org_id: f.teams_fixtures_home_team_idToteams?.organization_id ?? null,
-        away_org_id: f.teams_fixtures_away_team_idToteams?.organization_id ?? null,
+        home_entity_id: keyOf(f.teams_fixtures_home_team_idToteams),
+        away_entity_id: keyOf(f.teams_fixtures_away_team_idToteams),
         home_score: f.home_score,
         away_score: f.away_score,
         winner_team_id: f.winner_team_id,
@@ -193,15 +214,21 @@ export async function recomputeStandings(prisma: Db, championshipId: string): Pr
     if (!Array.isArray(contributions) || contributions.length === 0) continue;
     const ts = f.tournament_disciplines?.tournament_sports;
     if (!ts) continue;
-    const tallies: OrgTally[] = [];
+    const tallies: EntityTally[] = [];
     for (const c of contributions) {
       if (!c?.orgId) continue;
       const detail: Record<string, number> = {};
       if (c.gold) detail.gold = c.gold;
       if (c.silver) detail.silver = c.silver;
       if (c.bronze) detail.bronze = c.bronze;
+      // A ranking event's console writes one contribution per competing side. In an
+      // intra championship that side is a campus or a department, so the row carries
+      // `unitId` beside `orgId`; an inter-organisation console omits it and the key
+      // falls back to the organisation exactly as before.
+      const key = keyOf({ organization_id: c.orgId, org_unit_id: c.unitId ?? null });
+      if (!key) continue;
       tallies.push({
-        organization_id: c.orgId, played: 0, won: 0, drawn: 0, lost: 0,
+        entity_id: key, played: 0, won: 0, drawn: 0, lost: 0,
         points: typeof c.points === 'number' ? c.points : 0, gf: 0, ga: 0, detail,
       });
     }
@@ -217,17 +244,24 @@ export async function recomputeStandings(prisma: Db, championshipId: string): Pr
     defaultRule.scheme === 'league_points' ? defaultRule.tiebreakers : ['points', 'wins', 'lost', 'score_diff'];
 
   const data = [] as Array<{
-    championship_id: string; scope_type: string; scope_id: string | null; organization_id: string;
+    championship_id: string; scope_type: string; scope_id: string | null;
+    organization_id: string; org_unit_id: string | null;
     played: number; won: number; drawn: number; lost: number; points: number; detail: object; rank: number;
   }>;
   for (const b of buckets.values()) {
     const rows = rankBy([...b.rows.values()], tiebreakers);
     for (const r of rows) {
+      const ref = refs.get(r.entity_id);
+      // A tally whose key was never registered cannot be written: organization_id is
+      // NOT NULL and there is nothing honest to put in it. Skipping is right - the
+      // only way to get here is a contribution referencing a side no fixture named.
+      if (!ref) continue;
       data.push({
         championship_id: championshipId,
         scope_type: b.scope_type,
         scope_id: b.scope_id,
-        organization_id: r.organization_id,
+        organization_id: ref.orgId,
+        org_unit_id: ref.unitId,
         played: r.played, won: r.won, drawn: r.drawn, lost: r.lost, points: r.points,
         detail: r.detail,
         rank: r.rank ?? 0,
@@ -306,7 +340,14 @@ export async function readStandingsBreakdown(
   championshipId: string,
   scope: StandingsAggScope,
   scopeId: string | null,
-  orgId: string,
+  /**
+   * The CONTINGENT key whose contribution is being explained - a unit id in an
+   * intra championship, an organisation id in an inter one. Named `entityId`
+   * rather than `orgId` because passing an organisation id for an intra event
+   * would silently match nothing and render an empty breakdown, which reads as
+   * "this campus scored nothing" rather than as the bug it is.
+   */
+  entityId: string,
 ): Promise<BreakdownEvent[]> {
   // Rule resolution (most-specific wins) - mirrors recomputeStandings.
   const ruleRows = await prisma.standings_rules.findMany({ where: { championship_id: championshipId } });
@@ -351,12 +392,30 @@ export async function readStandingsBreakdown(
           status: true, round: true,
           home_team_id: true, away_team_id: true,
           home_score: true, away_score: true, winner_team_id: true, live_state: true,
-          teams_fixtures_home_team_idToteams: { select: { organization_id: true, organizations: { select: { name: true, short_name: true } } } },
-          teams_fixtures_away_team_idToteams: { select: { organization_id: true, organizations: { select: { name: true, short_name: true } } } },
+          teams_fixtures_home_team_idToteams: {
+            select: {
+              organization_id: true, org_unit_id: true,
+              organizations: { select: { name: true, short_name: true } },
+              org_units: { select: { name: true, code: true } },
+            },
+          },
+          teams_fixtures_away_team_idToteams: {
+            select: {
+              organization_id: true, org_unit_id: true,
+              organizations: { select: { name: true, short_name: true } },
+              org_units: { select: { name: true, code: true } },
+            },
+          },
         },
       },
     },
   });
+
+  // The same rule the recompute uses, restated locally: the unit wins when there is
+  // one. It has to agree exactly with recomputeStandings or a breakdown would fail to
+  // find the tally its own table displays.
+  const sideKey = (side: { organization_id: string; org_unit_id: string | null } | null | undefined): string | null =>
+    side?.organization_id ? contingentKey({ orgId: side.organization_id, unitId: side.org_unit_id ?? null }) : null;
 
   const events: BreakdownEvent[] = [];
   for (const d of draws) {
@@ -373,8 +432,8 @@ export async function readStandingsBreakdown(
       return {
         status: f.status, round: f.round,
         home_team_id: f.home_team_id, away_team_id: f.away_team_id,
-        home_org_id: f.teams_fixtures_home_team_idToteams?.organization_id ?? null,
-        away_org_id: f.teams_fixtures_away_team_idToteams?.organization_id ?? null,
+        home_entity_id: sideKey(f.teams_fixtures_home_team_idToteams),
+        away_entity_id: sideKey(f.teams_fixtures_away_team_idToteams),
         home_score: f.home_score, away_score: f.away_score,
         winner_team_id: f.winner_team_id,
         home_points: typeof cp?.home === 'number' ? cp.home : null,
@@ -384,17 +443,21 @@ export async function readStandingsBreakdown(
 
     const hasCompletedFinal = schemeFixtures.some((f) => f.round === 'Final' && f.winner_team_id);
     const decided = hasCompletedFinal || !drawsWithPending.has(d.id);
-    const tally = runScheme(schemeFixtures, rule, decided).find((t) => t.organization_id === orgId);
-    if (!tally) continue; // org didn't take part in / score from this draw
+    const tally = runScheme(schemeFixtures, rule, decided).find((t) => t.entity_id === entityId);
+    if (!tally) continue; // this contingent didn't take part in / score from this draw
 
-    // The org's own matches in this draw, oriented to it (its score first).
+    // This contingent's own matches in the draw, oriented to it (its score first).
     const matches: BreakdownMatch[] = [];
     for (const f of d.fixtures) {
-      const isHome = f.teams_fixtures_home_team_idToteams?.organization_id === orgId;
-      const isAway = f.teams_fixtures_away_team_idToteams?.organization_id === orgId;
+      const isHome = sideKey(f.teams_fixtures_home_team_idToteams) === entityId;
+      const isAway = sideKey(f.teams_fixtures_away_team_idToteams) === entityId;
       if (!isHome && !isAway) continue;
-      const oppOrg = isHome ? f.teams_fixtures_away_team_idToteams?.organizations : f.teams_fixtures_home_team_idToteams?.organizations;
-      const opponent = f.status === 'bye' ? 'Bye' : (oppOrg?.name ?? oppOrg?.short_name ?? 'TBD');
+      const opp = isHome ? f.teams_fixtures_away_team_idToteams : f.teams_fixtures_home_team_idToteams;
+      // The opponent is named by its contingent for the same reason the table is: in
+      // an intra event every opponent's ORGANISATION is your own, so an org-named
+      // breakdown would list "IIM Bangalore" as every opponent you ever played.
+      const oppName = opp?.org_units?.name ?? opp?.organizations?.name ?? opp?.organizations?.short_name ?? null;
+      const opponent = f.status === 'bye' ? 'Bye' : (oppName ?? 'TBD');
       const myScore = isHome ? f.home_score : f.away_score;
       const oppScore = isHome ? f.away_score : f.home_score;
       const score = myScore != null && oppScore != null ? `${myScore}–${oppScore}` : null;
@@ -429,7 +492,7 @@ export async function readStandingsBreakdown(
   }
 
   // Ranking events (no head-to-head) contribute via live_state.eventStandings, not the
-  // per-draw scheme - append the org's per-sport contribution so the breakdown shows what
+  // per-draw scheme - append this contingent's per-sport contribution so the breakdown shows what
   // a powerlifting/swimming/athletics draw earned too (medals + points, no match list).
   const eventFx = await prisma.fixtures.findMany({
     where: {
@@ -450,7 +513,7 @@ export async function readStandingsBreakdown(
   for (const f of eventFx) {
     const contribs = (f.live_state as any)?.eventStandings;
     if (!Array.isArray(contribs)) continue;
-    const mine = contribs.find((c: any) => c?.orgId === orgId);
+    const mine = contribs.find((c: any) => (c?.unitId ?? c?.orgId) === entityId);
     if (!mine) continue;
     const detail: Record<string, number> = {};
     if (mine.gold) detail.gold = mine.gold;
@@ -474,16 +537,54 @@ export async function readStandingsBreakdown(
   return events;
 }
 
-// Read a materialized standings table (org rows joined for display), ordered by rank.
+// Read a materialized standings table, ordered by rank.
+//
+// Each row is labelled by its CONTINGENT. In an inter-organisation championship that
+// is the institution and this returns what it always did. In an intra one it is the
+// campus or department - and labelling those rows with the organisation instead
+// would print the same name twelve times down the table, which is the bug the whole
+// contingent model exists to remove.
+//
+// `organization` is still returned beside it. A campus row belongs to an
+// institution, and the certificate, the logo and the drill-down all still need to
+// know which.
 export async function readStandings(prisma: Db, championshipId: string, scope: StandingsAggScope, scopeId: string | null) {
   const rows = await prisma.standings.findMany({
     where: { championship_id: championshipId, scope_type: scope, scope_id: scopeId },
-    include: { organizations: { select: { id: true, name: true, short_name: true, logo_url: true } } },
+    include: {
+      organizations: { select: { id: true, name: true, short_name: true, logo_url: true } },
+      org_units: { select: { id: true, name: true, code: true, type: true, parent_id: true } },
+    },
     orderBy: [{ rank: 'asc' }, { points: 'desc' }],
   });
+
+  // One extra hop for the campus a department sits under, so a department table can
+  // read "Sales · Bangalore" rather than three identically-named Sales rows.
+  const parentIds = [...new Set(rows.map((r) => r.org_units?.parent_id).filter((id): id is string => !!id))];
+  const parents = parentIds.length
+    ? await prisma.org_units.findMany({ where: { id: { in: parentIds } }, select: { id: true, name: true } })
+    : [];
+  const parentName = new Map(parents.map((p) => [p.id, p.name]));
+
   return rows.map((r) => ({
+    // The key the whole table is grouped by - what a client should use as its row id.
+    entity_id: r.org_unit_id ?? r.organization_id,
     organization_id: r.organization_id,
     organization: r.organizations,
+    org_unit_id: r.org_unit_id,
+    org_unit: r.org_units
+      ? {
+        id: r.org_units.id,
+        name: r.org_units.name,
+        code: r.org_units.code,
+        type: r.org_units.type,
+        parent: r.org_units.parent_id ? parentName.get(r.org_units.parent_id) ?? null : null,
+      }
+      : null,
+    // What to print. Resolved server-side so every surface - the table, the medal
+    // tally, the public page, the export - cannot each pick a different answer.
+    name: r.org_units?.name ?? r.organizations?.name ?? 'Unknown',
+    short_name: r.org_units?.code ?? r.organizations?.short_name ?? null,
     played: r.played, won: r.won, drawn: r.drawn, lost: r.lost,
     points: r.points,
     detail: (r.detail ?? {}) as Record<string, number>,

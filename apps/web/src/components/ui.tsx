@@ -169,7 +169,9 @@ export function StatusBadge({ status, label }: { status?: string | null; label?:
   if (s === 'live') return <Badge tone="live">{label ?? 'LIVE'}</Badge>;
   const tone: BadgeTone =
     s === 'completed' ? 'teal'
-      : ['approved', 'active', 'ongoing', 'roster_locked'].includes(s) ? 'green'
+      // A locked scorecard is the verified, official result - it reads as a
+      // confirmation, not as a neutral state, and sits beside roster_locked.
+      : ['approved', 'active', 'ongoing', 'roster_locked', 'locked'].includes(s) ? 'green'
       : ['pending', 'forming', 'upcoming', 'submitted', 'scheduled', 'draft'].includes(s) ? 'amber'
         : ['rejected', 'cancelled'].includes(s) ? 'rose'
           : ['registration_open'].includes(s) ? 'brand'

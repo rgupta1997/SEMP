@@ -4,6 +4,7 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
+import { assertEntrantAllowed, eligibleEntrants, findEntrant, loadEventShape } from '../championships/contingent.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { notify } from '@semp/notifications/server/notify.js';
 const ORG_ADMIN = ['owner', 'admin'];
@@ -25,15 +26,105 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
 
   // ----- Host side -----
 
-  // Invite an organization picked from the master list. The request goes straight
-  // to that org's owners/admins - no POC mobile number.
+  // Who may be invited, for the picker.
+  //
+  // An OPEN championship invites organisations, and any of them may be asked - so
+  // there is no list to enumerate and this returns none. An INTERNAL one invites the
+  // host's own campuses or batches, which is a known, finite set, and offering the
+  // wrong one is the commonest mistake there is.
+  router.get('/championships/:eventId/invitable', eventOrganiser, asyncHandler(async (req, res) => {
+    const shape = await loadEventShape(prisma, req.params.eventId);
+    const [candidates, invited] = await Promise.all([
+      eligibleEntrants(prisma, shape),
+      prisma.championship_invitations.findMany({
+        where: { championship_id: req.params.eventId, org_unit_id: { not: null } },
+        select: { id: true, org_unit_id: true, status: true },
+      }),
+    ]);
+    const byUnit = new Map(invited.map((i) => [i.org_unit_id as string, i]));
+    res.json({
+      level: shape.entry_level,
+      intra: shape.entry_level !== 'organization',
+      units: candidates.map((c) => {
+        const row = byUnit.get(c.unitId!);
+        return { ...c, invited: !!row, invitation_id: row?.id ?? null, status: row?.status ?? null };
+      }),
+    });
+  }));
+
+  // Invite an organisation (open championship) or one of the host's own campuses
+  // (internal championship). The request goes straight to that org's owners/admins,
+  // or to the campus's administrator - no POC mobile number.
   router.post('/championships/:eventId/invitations', eventOrganiser, validateBody(createInvitationSchema), asyncHandler(async (req, res) => {
-    const championship = await prisma.championships.findUnique({ where: { id: req.params.eventId }, select: { id: true } });
-    if (!championship) throw new NotFoundError('Championship');
+    const shape = await loadEventShape(prisma, req.params.eventId);
+    const intra = shape.entry_level !== 'organization';
+
+    // ---- internal: a campus or batch of the HOST ---------------------------
+    if (intra) {
+      const unitId = req.body.org_unit_id as string | undefined;
+      if (!unitId) {
+        throw new BusinessRuleError('This championship is contested inside its host organisation. Invite one of its campuses or batches, not an organisation.');
+      }
+      // Reuses the entrant validator: it checks the unit belongs to the host, is of
+      // the right type for this level, is ACTIVE, and sits inside the campus the
+      // event is limited to. Every one of those is a way to invite the wrong thing.
+      await assertEntrantAllowed(prisma, shape, { orgId: shape.host_organization_id!, unitId });
+
+      const unit = await prisma.org_units.findUnique({
+        where: { id: unitId },
+        select: { id: true, name: true, org_units: { select: { name: true } } },
+      });
+      const parentName = unit?.org_units?.name ?? null;
+      const champName = (await prisma.championships.findUnique({
+        where: { id: req.params.eventId }, select: { name: true },
+      }))?.name ?? null;
+      const already = await prisma.championship_invitations.findFirst({
+        where: { championship_id: req.params.eventId, org_unit_id: unitId, status: { in: ['pending', 'accepted'] } },
+        select: { id: true },
+      });
+      if (already) throw new BusinessRuleError(`${unit?.name ?? 'That campus'} has already been invited`);
+
+      const row = await prisma.championship_invitations.create({
+        data: {
+          championship_id: req.params.eventId,
+          organization_id: shape.host_organization_id,
+          org_unit_id: unitId,
+          // The human label every existing reader already prints.
+          org_name: unit?.name ?? 'Campus',
+          invited_by: req.user!.id,
+          // ACCEPTED on arrival. There is nobody outside the organisation to
+          // negotiate with, so an accept step would be the host asking its own
+          // campus for permission - a rubber stamp that only delays the squad being
+          // built, and a "pending" badge that never resolves for anyone who never
+          // logs in. Adding a campus IS entering it.
+          status: 'accepted',
+          accepted_by: req.user!.id,
+          responded_at: new Date(),
+        },
+      });
+      // Names the CAMPUS, not the institution. `enrollment_approved` would have
+      // announced "Northfield has joined the championship" on an event contested
+      // between Northfield's own campuses - true, useless, and hiding the one fact
+      // the reader wants.
+      await notify(prisma, {
+        type: 'contingent_added',
+        championshipId: req.params.eventId,
+        senderId: req.user!.id,
+        data: {
+          unitName: unit?.name ?? 'A campus',
+          parentName: parentName ?? undefined,
+          championshipName: champName ?? undefined,
+        },
+      });
+
+      return void res.status(201).json(row);
+    }
+
+    // ---- open: another organisation ---------------------------------------
     const org = await prisma.organizations.findUnique({ where: { id: req.body.organization_id }, select: { id: true, name: true } });
     if (!org) throw new NotFoundError('Organization');
     const existing = await prisma.championship_invitations.findFirst({
-      where: { championship_id: req.params.eventId, organization_id: org.id, status: 'pending' },
+      where: { championship_id: req.params.eventId, organization_id: org.id, org_unit_id: null, status: 'pending' },
       select: { id: true },
     });
     if (existing) throw new BusinessRuleError('That organization has already been invited');
@@ -49,14 +140,47 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
     res.status(201).json(row);
   }));
 
+  // Withdraw an invitation. For an internal championship this is how a campus is
+  // taken out again - refused once it has squads, because withdrawing would leave
+  // people picked for a fixture their campus is no longer in.
+  router.delete('/championships/:eventId/invitations/:id', eventOrganiser, asyncHandler(async (req, res) => {
+    const inv = await prisma.championship_invitations.findFirst({
+      where: { id: req.params.id, championship_id: req.params.eventId },
+      select: { id: true, org_unit_id: true, org_name: true },
+    });
+    if (!inv) throw new NotFoundError('Invitation');
+
+    if (inv.org_unit_id) {
+      const squads = await prisma.team_entries.count({
+        where: { championship_id: req.params.eventId, teams: { org_unit_id: inv.org_unit_id } },
+      });
+      if (squads > 0) {
+        throw new BusinessRuleError(`${inv.org_name} has ${squads} squad${squads === 1 ? '' : 's'} in this championship. Remove them first — withdrawing now would leave people picked for a campus that is no longer taking part.`);
+      }
+    }
+
+    await prisma.championship_invitations.delete({ where: { id: inv.id } });
+    res.json({ ok: true, withdrawn: inv.org_name });
+  }));
+
   // The host's invitation list for a championship.
   router.get('/championships/:eventId/invitations', eventOrganiser, asyncHandler(async (req, res) => {
     const rows = await prisma.championship_invitations.findMany({
       where: { championship_id: req.params.eventId },
-      include: { organizations: { select: { id: true, name: true, short_name: true, city: true } } },
+      include: {
+        organizations: { select: { id: true, name: true, short_name: true, city: true } },
+        org_units: { select: { id: true, name: true, code: true, type: true } },
+      },
       orderBy: { created_at: 'desc' },
     });
-    res.json(rows);
+    // `target` is resolved here so the invitation list, like every other list in
+    // this product, never has to decide for itself whether to print the unit or the
+    // organisation.
+    res.json(rows.map((r) => ({
+      ...r,
+      target: r.org_units?.name ?? r.organizations?.name ?? r.org_name,
+      is_unit: !!r.org_unit_id,
+    })));
   }));
 
   // Cancel a pending invitation.
@@ -113,18 +237,27 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
       throw new ForbiddenError('This invitation was not addressed to an organization you administer');
     }
 
-    const enrollment = await prisma.championship_organizations.upsert({
-      where: { championship_id_organization_id: { championship_id: inv.championship_id, organization_id: inv.organization_id } },
-      update: { status: 'approved', reviewed_by: inv.invited_by, reviewed_at: new Date() },
-      create: {
-        championship_id: inv.championship_id,
-        organization_id: inv.organization_id,
-        applied_by: req.user!.id,
-        status: 'approved',
-        reviewed_by: inv.invited_by,
-        reviewed_at: new Date(),
-      },
-    });
+    // An invitation is always addressed to an ORGANISATION, so the contingent it
+    // creates never names a unit - an intra event's entrants are the host's own
+    // campuses and there is nobody to invite. Written as an explicit null rather
+    // than omitted so that intent is visible at the call site.
+    const existing = await findEntrant(prisma, inv.championship_id, { orgId: inv.organization_id, unitId: null });
+    const enrollment = existing
+      ? await prisma.championship_organizations.update({
+        where: { id: existing.id },
+        data: { status: 'approved', reviewed_by: inv.invited_by, reviewed_at: new Date() },
+      })
+      : await prisma.championship_organizations.create({
+        data: {
+          championship_id: inv.championship_id,
+          organization_id: inv.organization_id,
+          org_unit_id: null,
+          applied_by: req.user!.id,
+          status: 'approved',
+          reviewed_by: inv.invited_by,
+          reviewed_at: new Date(),
+        },
+      });
     await prisma.championship_invitations.update({
       where: { id: inv.id },
       data: { status: 'accepted', accepted_by: req.user!.id, responded_at: new Date() },

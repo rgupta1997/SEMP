@@ -2,6 +2,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from './error.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { isCampusAdmin } from '../../modules/iam/campus-admin.js';
 import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
 import { hostOrgManages } from '../../modules/championships/manage-access.js';
 
@@ -100,29 +101,54 @@ export function makeGuards(prisma: Prisma) {
       where: { id: req.params.id },
       select: {
         organization_id: true,
+        org_unit_id: true,
         team_members: { where: { user_id: u.id, is_active: true }, select: { role: true } },
       },
     });
     if (!team) throw new NotFoundError('Team');
     // Owner/admin of the owning organization.
     if (await orgRole(u.id, team.organization_id, ORG_ADMIN)) return next();
+    // The administrator of the campus or batch this squad plays FOR.
+    //
+    // Their whole job is their own unit's squads, so this is the narrowest possible
+    // widening: it grants nothing on an organisation-level team (org_unit_id null),
+    // and nothing on another unit's team.
+    if (await isCampusAdmin(prisma, u.id, team.org_unit_id)) return next();
     // The team's own captain / vice-captain.
     if (team.team_members.some((m) => m.role === 'captain' || m.role === 'vice_captain')) return next();
-    throw new ForbiddenError('Only the team captain or an organization owner/admin can manage this team');
+    throw new ForbiddenError('Only the team captain, the campus administrator or an organization owner/admin can manage this team');
   });
 
   // ---- guard: creating teams - an owner/admin of the org(s) named in the body ----
   const teamCreate: RequestHandler = asyncHandler(async (req, _res, next) => {
     const u = req.user!;
     if (u.isSuperAdmin) return next();
-    const ids: string[] = Array.isArray(req.body?.teams)
-      ? req.body.teams.map((t: any) => t?.organization_id)
-      : [req.body?.organization_id];
-    const unique = [...new Set(ids.filter(Boolean))] as string[];
-    if (unique.length === 0) throw new ForbiddenError('No organization specified');
-    const ok = await Promise.all(unique.map((id) => orgRole(u.id, id, ORG_ADMIN)));
-    if (ok.every(Boolean)) return next();
-    throw new ForbiddenError('You can only create teams for an organization you own or administer');
+
+    // Each row is judged on its OWN pair. A campus administrator may create squads
+    // for their campus and no other, so checking the organisation alone - as this
+    // did - both refused them wrongly and, for an org admin, said nothing about
+    // which unit a squad was being created for.
+    const rows: Array<{ organization_id?: string; org_unit_id?: string | null }> =
+      Array.isArray(req.body?.teams) ? req.body.teams : [req.body ?? {}];
+    if (rows.length === 0 || !rows.some((r) => r?.organization_id)) {
+      throw new ForbiddenError('No organization specified');
+    }
+
+    for (const r of rows) {
+      if (!r?.organization_id) throw new ForbiddenError('No organization specified');
+      if (await orgRole(u.id, r.organization_id, ORG_ADMIN)) continue;
+      if (await isCampusAdmin(prisma, u.id, r.org_unit_id)) {
+        // ...and the campus must belong to the organisation named on the row, or
+        // this is a route for building squads inside somebody else's institution.
+        const owned = await prisma.org_units.findFirst({
+          where: { id: r.org_unit_id!, organization_id: r.organization_id },
+          select: { id: true },
+        });
+        if (owned) continue;
+      }
+      throw new ForbiddenError('You can only create teams for an organization you administer, or for a campus you run');
+    }
+    return next();
   });
 
   // ---- guard: managing a specific user (PATCH/DELETE /users/:id) - super admin,

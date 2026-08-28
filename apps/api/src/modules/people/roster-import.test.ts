@@ -10,8 +10,8 @@ const ctx = (over: Partial<RosterContext> = {}): RosterContext => ({
   usersByPhone: new Map(),
   usersByEmail: new Map(),
   unitsByName: new Map([
-    ['computer science', { id: 'unit-cs', type: 'programme' }],
-    ['2024', { id: 'unit-2024', type: 'batch' }],
+    ['computer science', { id: 'unit-cs', type: 'campus' }],
+    ['2024', { id: 'unit-2024', type: 'department' }],
   ]),
   memberUserIds: new Set(),
   memberCodeOwner: new Map(),
@@ -84,18 +84,39 @@ describe('validateRoster · rejections', () => {
     expect(dupCode.rows.every((r) => r.message.match(/member code appears on more than one row/i))).toBe(true);
   });
 
-  // No org unit is ever created implicitly - a typo would found a department.
-  it('rejects a programme or batch that does not exist', () => {
-    const r = validateRoster([row({ programme: 'Compter Science' })], ctx()).rows[0];
+  // No org unit is ever created implicitly - a typo would found a department. This
+  // matters more than it did: units are now what compete in an intra-organisation
+  // championship, so an implicitly-created one would become a phantom entrant.
+  it('rejects a campus that does not exist', () => {
+    const r = validateRoster([row({ campus: 'Compter Science' })], ctx()).rows[0];
     expect(r.verdict).toBe('reject');
-    expect(r.message).toMatch(/no programme called "Compter Science" exists/i);
+    expect(r.message).toMatch(/no campus called "Compter Science" exists/i);
   });
 
-  it('resolves a known programme, and lets batch win when both are given', () => {
+  it('resolves a known campus, and lets the department win when both are given', () => {
+    const campus = validateRoster([row({ campus: 'Computer Science' })], ctx()).rows[0];
+    expect(campus.org_unit_id).toBe('unit-cs');
+    // The department places somebody more precisely, so it is the one that sticks.
+    const both = validateRoster([row({ campus: 'Computer Science', department: '2024' })], ctx()).rows[0];
+    expect(both.org_unit_id).toBe('unit-2024');
+  });
+
+  // Institutions have saved spreadsheets with the old headers. Breaking those is a
+  // worse outcome than carrying two names for one field, so both are accepted.
+  it('still accepts the old programme/batch column headers', () => {
     const prog = validateRoster([row({ programme: 'Computer Science' })], ctx()).rows[0];
     expect(prog.org_unit_id).toBe('unit-cs');
-    const both = validateRoster([row({ programme: 'Computer Science', batch: '2024' })], ctx()).rows[0];
-    expect(both.org_unit_id).toBe('unit-2024');
+    const batch = validateRoster([row({ batch: '2024' })], ctx()).rows[0];
+    expect(batch.org_unit_id).toBe('unit-2024');
+    // Mixed headers in one file resolve the same way as matched ones.
+    const mixed = validateRoster([row({ programme: 'Computer Science', department: '2024' })], ctx()).rows[0];
+    expect(mixed.org_unit_id).toBe('unit-2024');
+  });
+
+  it('prefers the current column name when a row carries both it and its alias', () => {
+    const r = validateRoster([row({ campus: 'Computer Science', programme: 'Nonsense' })], ctx()).rows[0];
+    expect(r.verdict).not.toBe('reject');
+    expect(r.org_unit_id).toBe('unit-cs');
   });
 
   it('refuses a member code already held by somebody else here', () => {

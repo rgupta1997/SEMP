@@ -3,13 +3,12 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import type { CapabilityKey } from '@semp/entitlements';
 import { useAuth } from '../../lib/auth';
 import { useWorkspace } from '../../lib/useWorkspace';
-import { PageHeader, Spinner } from '../../components/ui';
+import { PageHeader, Spinner, SURFACE, cn } from '../../components/ui';
 import { CapabilityLock } from '../../components/CapabilityLock';
 import { MembersPanel } from './admin/MembersPanel';
 import { RolesPanel } from './admin/RolesPanel';
 import { OrgProfilePanel } from './admin/OrgProfilePanel';
 import { AuditLogPanel } from './admin/AuditLogPanel';
-import { CampusesPanel } from './admin/CampusesPanel';
 import { PolicyPanel } from './admin/PolicyPanel';
 import { BillingPanel } from './admin/BillingPanel';
 
@@ -35,7 +34,6 @@ interface Tab {
 
 const TABS: Tab[] = [
   { key: 'profile', label: 'Organization Profile' },
-  { key: 'campuses', label: 'Campuses & Units', needs: 'multi_campus' },
   { key: 'members', label: 'Members' },
   { key: 'roles', label: 'Roles & Permissions' },
   { key: 'billing', label: 'Billing & Subscription' },
@@ -47,16 +45,22 @@ const TABS: Tab[] = [
 const ROLE_ADMIN: Record<string, string[] | null> = {
   owner: null,
   super_admin: null,
-  org_admin: ['profile', 'campuses', 'members', 'roles', 'security', 'audit'],
-  sports_admin: ['profile', 'members', 'campuses', 'audit'],
+  // Security is the Owner's alone: it is org-wide policy (2FA enforcement, IP
+  // allowlist, session length), so an administrator who can be appointed - and
+  // removed - by the Owner should not be able to relax the rules that bind them.
+  org_admin: ['profile', 'members', 'roles', 'audit'],
+  sports_admin: ['profile', 'members', 'audit'],
   billing_admin: ['profile', 'billing'],
   reporting_admin: ['profile'],
   viewer: [],
 };
 
-const C = { line: '#E1E7F0', line2: '#C8D2E0', warn: '#E9920B', warnSoft: '#FCF0DB', fg4: '#6E7E96' };
-const MONO = "'JetBrains Mono',ui-monospace,monospace";
-const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
+// Written with theme tokens rather than the inline hex this file used to carry.
+// The rail was `background: '#fff'` and `color: '#374459'`, which meant that in dark
+// mode the whole of Administration - profile, campuses, members, roles, billing,
+// security, audit - rendered as a white card on a near-black canvas. Every screen in
+// this section sits behind this rail, so it was the single highest-leverage place to
+// fix the theme.
 
 export function AdminPage() {
   const { orgId = '' } = useParams();
@@ -82,7 +86,7 @@ export function AdminPage() {
     return (
       <>
         <PageHeader title="Administration" />
-        <p style={{ fontSize: 14, color: C.fg4 }}>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
           Your role in this organisation does not include any administration areas.
         </p>
       </>
@@ -99,12 +103,12 @@ export function AdminPage() {
     <>
       <PageHeader title="Administration" subtitle={orgName ?? undefined} />
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start' }}>
+      <div className="flex flex-wrap items-start gap-[18px]">
         {/* ---- the rail ---- */}
-        <div style={{
-          flex: '0 0 214px', minWidth: 170, background: '#fff',
-          border: `1px solid ${C.line}`, borderRadius: 14, padding: 10,
-        }}>
+        <nav
+          aria-label="Administration sections"
+          className={cn('w-full flex-none p-2.5 sm:w-[214px]', SURFACE)}
+        >
           {visible.map((t) => {
             const isActive = t.key === active.key;
             const isLocked = !!t.needs && !ws.granted.has(t.needs);
@@ -113,32 +117,29 @@ export function AdminPage() {
                 key={t.key}
                 onClick={() => setParams({ tab: t.key })}
                 aria-current={isActive ? 'page' : undefined}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8, width: '100%', cursor: 'pointer',
-                  padding: '10px 12px', borderRadius: 10, border: 'none', textAlign: 'left',
-                  fontSize: 13.5, fontWeight: 600,
-                  background: isActive ? '#004AAD' : 'transparent',
-                  color: isActive ? '#fff' : '#374459',
-                }}
+                className={cn(
+                  'flex w-full cursor-pointer items-center gap-2 rounded-[10px] border-none px-3 py-2.5 text-left text-[13.5px] font-semibold transition-colors duration-150',
+                  isActive
+                    ? 'bg-brand-600 text-white'
+                    : 'bg-transparent text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
+                )}
               >
-                <span style={{ flex: 1 }}>{t.label}</span>
+                <span className="flex-1">{t.label}</span>
                 {isLocked && (
-                  <span style={{
-                    fontFamily: MONO, fontSize: 8.5, padding: '2px 5px', borderRadius: 4,
-                    background: C.warnSoft, color: C.warn,
-                  }}>PLAN</span>
+                  <span className="rounded font-mono text-[8.5px] bg-eos-warn-soft px-[5px] py-[2px] text-eos-warn dark:bg-amber-900/40 dark:text-amber-300">
+                    PLAN
+                  </span>
                 )}
               </button>
             );
           })}
-        </div>
+        </nav>
 
         {/* ---- the body ---- */}
-        <div style={{ flex: '1 1 420px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="flex min-w-0 flex-1 basis-[420px] flex-col gap-4">
           {locked ? <CapabilityLock capability={active.needs!} title={active.label} /> : (
             <>
               {active.key === 'profile' && <OrgProfilePanel orgId={orgId} />}
-              {active.key === 'campuses' && <CampusesPanel orgId={orgId} />}
               {active.key === 'members' && <MembersPanel orgId={orgId} />}
               {active.key === 'roles' && <RolesPanel orgId={orgId} />}
               {active.key === 'billing' && <BillingPanel orgId={orgId} />}

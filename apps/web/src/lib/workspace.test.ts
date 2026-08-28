@@ -223,17 +223,50 @@ describe('mayOpenSegment · the URL guard agrees with the sidebar', () => {
     (_key, segment) => expect(mayOpenSegment(['organiser'], segment)).toBe(true),
   );
 
-  it('opens exactly what the sidebar offers, for every role', () => {
-    // The two answers come from the same lists and must not be able to drift: a
-    // section the sidebar hides but the URL opens is an access bug, and one the
-    // sidebar offers but the URL refuses is a dead link.
-    for (const roleCodes of [[], ['player', 'member'], ['owner'], ['organiser'], ['official'], ['poc'], ['captain'], ['participant']]) {
-      const offered = new Set(keys(resolveNav(ctx({ id: 'e1', kind: 'event', roleCodes }), NONE)));
-      for (const item of NAV.event) {
-        expect(mayOpenSegment(roleCodes, seg(item.to)), `${roleCodes.join(',') || 'no role'} → ${item.key}`)
-          .toBe(offered.has(item.key));
+  // Run over BOTH event kinds. It used to cover only `event`, and that is exactly
+  // how the draft nav shipped broken: `eventDraft` offered two items to everybody,
+  // so an organiser's sidebar hid nine sections their own URL guard opened. The
+  // sidebar and the URL disagreeing IS the bug, and parametrising the kind is what
+  // makes the test able to see it.
+  it.each([['event'], ['eventDraft']] as const)(
+    'opens exactly what the sidebar offers, for every role (%s)',
+    (kind) => {
+      // The two answers come from the same lists and must not be able to drift: a
+      // section the sidebar hides but the URL opens is an access bug, and one the
+      // sidebar offers but the URL refuses is a dead link.
+      for (const roleCodes of [[], ['player', 'member'], ['owner'], ['organiser'], ['official'], ['poc'], ['captain'], ['participant']]) {
+        const offered = new Set(keys(resolveNav(ctx({ id: 'e1', kind, roleCodes }), NONE)));
+        // Iterated over the FULL event nav, not over this kind's own list.
+        //
+        // That distinction is the whole point. Walking `NAV[kind]` only ever asks
+        // about the sections the kind already offers, so a draft nav trimmed to two
+        // items would check those two, find them both openable, and pass - which is
+        // precisely how the broken draft nav shipped under a green suite. The URL
+        // guard is kind-agnostic, so the full list is the right question to ask of
+        // both kinds.
+        for (const item of NAV.event) {
+          expect(mayOpenSegment(roleCodes, seg(item.to)), `${kind} · ${roleCodes.join(',') || 'no role'} → ${item.key}`)
+            .toBe(offered.has(item.key));
+        }
       }
+    },
+  );
+
+  it('gives an organiser the whole event on a DRAFT', () => {
+    // The specific regression: a draft is not published, but "you are running it"
+    // is a fact about the person, not about the event. An organiser building an
+    // event needs Setup, the organising team, the schedule and the settings -
+    // those are what building it means.
+    const offered = keys(resolveNav(ctx({ id: 'e1', kind: 'eventDraft', roleCodes: ['organiser'] }), NONE));
+    for (const key of ['setup', 'organisers', 'schedule', 'settings', 'results', 'standings']) {
+      expect(offered, `organiser should reach ${key} on a draft`).toContain(key);
     }
+  });
+
+  it('still holds a draft back from somebody with no role in it', () => {
+    const offered = keys(resolveNav(ctx({ id: 'e1', kind: 'eventDraft', roleCodes: [] }), NONE));
+    expect(offered).not.toContain('settings');
+    expect(offered).not.toContain('setup');
   });
 
   it('refuses somebody holding no role in this event', () => {

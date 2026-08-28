@@ -25,7 +25,8 @@ const C = {
 interface Dash {
   can_approve: boolean;
   kpis: {
-    players: number; teams: number; upcoming_events: number;
+    players: number; teams: number;
+    ongoing_events: number; upcoming_events: number;
     awaiting_approval: number; certificates_pending: number; live_now: number;
   };
   queue: Array<{ key: string; text: string; sub: string; cta: string; to: string; tone: 'amber' | 'brand' }>;
@@ -62,11 +63,17 @@ export function OrgDashboardPage() {
   const KPIS: Array<[string, number, React.ReactNode, boolean]> = data ? [
     ['Players', data.kpis.players, <Users size={19} />, false],
     ['Teams', data.kpis.teams, <Shield size={19} />, false],
+    // Running and not-yet-started are separate cards. They used to share one, so an
+    // institution with three championships in progress was told it had three
+    // "upcoming" - the opposite of the thing it most needed to see.
+    ['Championships running', data.kpis.ongoing_events ?? 0, <Radio size={19} />, false],
     ['Upcoming events', data.kpis.upcoming_events, <CalendarDays size={19} />, false],
     ['Awaiting approval', data.kpis.awaiting_approval, <ClipboardList size={19} />, false],
     ['Certificates pending', data.kpis.certificates_pending, <Award size={19} />, false],
     // The one card that means "look now" rather than "look sometime".
-    ['Live now', data.kpis.live_now, <Radio size={19} />, true],
+    // Matches in progress, not championships - a different question, and the only
+    // card on this row that means "look at this right now".
+    ['Matches live now', data.kpis.live_now, <Radio size={19} />, true],
   ] : [];
 
   const peak = Math.max(1, ...(data?.trend ?? []).map((t) => t.participants));

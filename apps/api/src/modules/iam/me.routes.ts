@@ -260,10 +260,28 @@ export function makeMeRouter(prisma: Prisma): Router {
     }
     const rows = await prisma.championship_organizations.findMany({
       where: { organization_id: { in: orgIds } },
-      include: { championships: { select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true } } },
+      include: {
+        championships: { select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true, entry_level: true } },
+        org_units: { select: { id: true, name: true, code: true, type: true } },
+      },
       orderBy: { applied_at: 'desc' },
     });
-    res.json(rows);
+
+    // An organisation has ONE entry per inter-org championship and one per CAMPUS in
+    // an intra one. So this list can legitimately carry the same championship name
+    // several times, and a client that printed only `championships.name` would show
+    // three identical rows with no way to tell which campus each was for.
+    //
+    // `entity_name` is what to print, resolved here rather than in each of the three
+    // screens that render this list.
+    res.json(rows.map((r) => ({
+      ...r,
+      entity_id: r.org_unit_id ?? r.organization_id,
+      entity_name: r.org_units?.name ?? null,
+      label: r.org_units
+        ? `${r.championships?.name ?? 'Championship'} · ${r.org_units.name}`
+        : r.championships?.name ?? 'Championship',
+    })));
   }));
 
   // Fixtures the current user is assigned to officiate (only for championships they're assigned to).

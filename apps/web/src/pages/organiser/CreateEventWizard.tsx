@@ -4,7 +4,9 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useApi, useApiMutation } from '../../lib/hooks';
 import type { ChampionshipTemplate } from '@semp/shared';
-import { BackButton, Button, Card, Field, Input, Pills, Select, Spinner, Stepper, Textarea, confirmDialog, toast } from '../../components/ui';
+import { ENTRY_LEVEL_META, ENTRY_LEVELS, isIntraLevel, type EntryLevel } from '@semp/shared';
+import { useOrgUnits } from '../../lib/units';
+import { BackButton, Button, Card, Field, Input, Pills, Select, Spinner, Stepper, Textarea, cn, confirmDialog, toast } from '../../components/ui';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { SportsTab } from './setup/SportsTab';
 import { TemplateGallery } from './TemplateGallery';
@@ -59,13 +61,47 @@ export function CreateEventWizard() {
     (c) => c.kind === 'org' && c.roleCodes.some((r) => r === 'owner' || r === 'org_admin'),
   );
   const [hostOrgId, setHostOrgId] = useState<string>('');
+
+  // WHAT COMPETES. Asked here rather than inferred, because it cannot be inferred:
+  // the same organisation runs open inter-college meets AND its own inter-campus
+  // league, and only the organiser knows which this one is. It is also the single
+  // hardest thing to change afterwards - every entry, team and standings row is
+  // keyed on it - so it belongs on the create form, not in settings.
+  const [entryLevel, setEntryLevel] = useState<EntryLevel>('organization');
+  const [scopeUnitId, setScopeUnitId] = useState<string>('');
+  // Defaulted ON: a host running an open championship is usually in it. The cost of
+  // the wrong default is one unticked box either way, and this is the direction that
+  // saves the commoner mistake.
+  const [hostParticipates, setHostParticipates] = useState(true);
+
+  // The host is the sole administered organisation when there is only one, and the
+  // explicit choice when there are several. Either way it is what the structure is
+  // read from - an intra event competes among the HOST's campuses.
+  const resolvedHostId = hostable.length > 1 ? hostOrgId : hostable[0]?.id ?? '';
+  // Fetched for the host REGARDLESS of the level currently selected.
+  //
+  // Conditioning this on `isIntraLevel(entryLevel)` deadlocked the form: the level
+  // starts at 'organization', so nothing was fetched, so `campuses` was empty, so
+  // both intra options rendered disabled with "no campus exists yet" - and there was
+  // no way to select one to trigger the fetch. The options that describe the
+  // structure cannot depend on having already chosen one of them.
+  const { units, labels, campuses, isLoading: unitsLoading } = useOrgUnits(resolvedHostId || null);
+
+  // Only ACTIVE units can be entered - the server's entrant list excludes SETUP and
+  // ARCHIVED ones. Counting them here would offer a level whose entrant screen then
+  // came back empty, which reads as a broken event rather than as an unbuilt one.
+  const activeCampuses = campuses.filter((c) => c.status === 'ACTIVE');
+  const activeDepartments = units.flatMap((c) => (c.children ?? []).filter((d) => d.status === 'ACTIVE'));
+
   const effectiveSlug = slugTouched ? slug : slugify(name);
 
   const create = useApiMutation((body: any) => api('POST', '/championships', body), ['/championships']);
   const update = useApiMutation((body: any) => api('PATCH', `/championships/${eventId}`, body), ['/championships']);
   const openReg = useApiMutation(
     () => api('PATCH', `/championships/${eventId}/status`, { status: 'registration_open' }),
-    ['/championships'],
+    // See the note in EventLayout - the sidebar's nav is derived from `mine`, so a
+    // status change that does not refresh it leaves the event stuck on its draft nav.
+    ['/championships', '/championships/mine'],
   );
 
   // Step 0 doubles as create + edit: the first save creates the draft (and grants
@@ -82,6 +118,11 @@ export function CreateEventWizard() {
       // Sent only when there was a choice to make. Omitted, the server infers it
       // from a sole administered organisation, or leaves it null for an individual.
       ...(hostable.length > 1 ? { host_organization_id: hostOrgId || null } : {}),
+      entry_level: entryLevel,
+      // Only a department-level event can be confined to one campus; the server
+      // refuses a scope on any other level rather than ignoring it.
+      entry_scope_unit_id: entryLevel === 'department' && scopeUnitId ? scopeUnitId : null,
+      host_participates: entryLevel === 'organization' ? hostParticipates : false,
     };
     if (eventId) {
       update.mutate(body, {
@@ -202,15 +243,121 @@ export function CreateEventWizard() {
                   </Select>
                 </Field>
               )}
-              <Field label="Description"><Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="A short summary of the championship…" /></Field>
-              <Field label="Visibility" hint={visibility === 'private'
-                ? 'Hidden from Discover - organizations can only join through your invitations.'
-                : 'Listed in Discover so any organization can find it and apply.'}>
-                <Pills value={visibility} onChange={(v) => setVisibility(v as 'public' | 'private')} options={[
-                  { value: 'public', label: 'Public' },
-                  { value: 'private', label: 'Private (invite-only)' },
-                ]} ariaLabel="Championship visibility" />
+              <Field
+                label="Who competes"
+                hint={ENTRY_LEVEL_META[entryLevel].description}
+              >
+                <div className="grid gap-2">
+                  {ENTRY_LEVELS.map((lvl) => {
+                    const meta = ENTRY_LEVEL_META[lvl];
+                    const needsHost = meta.intra && !resolvedHostId;
+                    // While the structure is still loading nothing is known yet, so
+                    // the option is disabled WITHOUT the "none exists" explanation -
+                    // saying that before the answer has arrived is simply wrong.
+                    const loading = meta.intra && !!resolvedHostId && unitsLoading;
+                    const noUnits = meta.intra && !!resolvedHostId && !unitsLoading
+                      && (lvl === 'campus' ? activeCampuses.length === 0 : activeDepartments.length === 0);
+                    const disabled = needsHost || loading || noUnits;
+                    return (
+                      <label
+                        key={lvl}
+                        className={cn(
+                          'flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-[13.5px] transition',
+                          entryLevel === lvl
+                            ? 'border-brand-300 bg-brand-50 dark:border-brand-700 dark:bg-brand-900/25'
+                            : 'border-slate-200 dark:border-slate-800',
+                          disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="entry_level"
+                          className="mt-0.5 accent-brand-600"
+                          checked={entryLevel === lvl}
+                          disabled={disabled}
+                          onChange={() => { setEntryLevel(lvl); setScopeUnitId(''); }}
+                        />
+                        <span className="min-w-0">
+                          <span className="block font-medium text-slate-800 dark:text-slate-100">
+                            {meta.intra && resolvedHostId
+                              ? `Between ${(lvl === 'campus' ? labels.campus : labels.department).toLowerCase()}s`
+                              : meta.label}
+                          </span>
+                          <span className="block text-[12.5px] text-slate-500 dark:text-slate-400">
+                            {/* A disabled option says WHY, or it reads as broken. */}
+                            {needsHost
+                              ? 'Pick a hosting organisation first — an internal championship runs inside one.'
+                              : loading
+                                ? 'Checking your structure…'
+                                : noUnits
+                                  ? `No active ${(lvl === 'campus' ? labels.campus : labels.department).toLowerCase()} yet. Add one — or set an existing one to Active — under the organisation's Campuses & Units screen.`
+                                  : meta.description}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
               </Field>
+
+              {/* Only for an open event. An internal one has no organisation-level
+                  entrants - its competitors are this organisation's own campuses. */}
+              {entryLevel === 'organization' && !!resolvedHostId && (
+                <Field
+                  label="Your own participation"
+                  hint="Whether the hosting organisation is competing as well as running it."
+                >
+                  <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-slate-200 px-3 py-2.5 text-[13.5px] dark:border-slate-800">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 accent-brand-600"
+                      checked={hostParticipates}
+                      onChange={(e) => setHostParticipates(e.target.checked)}
+                    />
+                    <span className="min-w-0">
+                      <span className="block font-medium text-slate-800 dark:text-slate-100">
+                        Take part in this championship too
+                      </span>
+                      <span className="block text-[12.5px] text-slate-500 dark:text-slate-400">
+                        Enters your organisation automatically, already approved, so your teams can be
+                        added straight away. Leave it unticked if you are only running the event.
+                      </span>
+                    </span>
+                  </label>
+                </Field>
+              )}
+
+              {entryLevel === 'department' && activeCampuses.length > 0 && (
+                <Field
+                  label={`Limit to one ${labels.campus.toLowerCase()}`}
+                  hint={`Leave this open and every ${labels.department.toLowerCase()} in the organisation may enter.`}
+                >
+                  <Select value={scopeUnitId} onChange={(e) => setScopeUnitId(e.target.value)}>
+                    <option value="">
+                      Every {labels.department.toLowerCase()} in the organisation
+                    </option>
+                    {activeCampuses.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
+
+              <Field label="Description"><Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="A short summary of the championship…" /></Field>
+              {/* An internal championship has no outside audience to advertise to -
+                  its entrants are the host's own campuses, and they are entered
+                  rather than applying. Offering Public would list it in a Discover
+                  feed where nobody who saw it could take part. */}
+              {!isIntraLevel(entryLevel) && (
+                <Field label="Visibility" hint={visibility === 'private'
+                  ? 'Hidden from Discover - organizations can only join through your invitations.'
+                  : 'Listed in Discover so any organization can find it and apply.'}>
+                  <Pills value={visibility} onChange={(v) => setVisibility(v as 'public' | 'private')} options={[
+                    { value: 'public', label: 'Public' },
+                    { value: 'private', label: 'Private (invite-only)' },
+                  ]} ariaLabel="Championship visibility" />
+                </Field>
+              )}
               {error && <p className="mb-3 rounded-lg bg-rose-50 dark:bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">{error}</p>}
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="ghost" onClick={() => navigate('/championships')}>Cancel</Button>

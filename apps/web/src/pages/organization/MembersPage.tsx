@@ -3,9 +3,10 @@ import { Lock, ShieldCheck, Users } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useTableControls } from '../../lib/hooks';
+import { useOrgUnits, unitPath } from '../../lib/units';
 import {
   Avatar, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field,
-  ListToolbar, Modal, PageHeader, SearchInput, Select, Spinner, toast,
+  ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Spinner, toast,
 } from '../../components/ui';
 
 // Screen 6: Members.
@@ -46,10 +47,16 @@ const STATUS_TONE = { ACTIVE: 'green', INVITED: 'amber', SUSPENDED: 'slate' } as
 /** Membership alone implies a role. Naming it stops the table looking empty. */
 const IMPLIED: Record<string, string> = { owner: 'Owner', admin: 'Org Admin', member: 'Viewer' };
 
-function scopeLabel(g: Grant, units: Array<{ id: string; name: string }>) {
+// Two departments in different campuses can share a name, so a scope is shown as
+// "Sales · Bangalore" rather than "Sales". A grant whose scope reads ambiguously is
+// one somebody will eventually assign to the wrong half of the organisation.
+function scopeLabel(g: Grant, units: ScopeUnit[]) {
   if (!g.scope_ref) return 'Whole organisation';
-  return units.find((u) => u.id === g.scope_ref)?.name ?? g.scope_ref;
+  const u = units.find((x) => x.id === g.scope_ref);
+  return u ? unitPath(u, u.parent) : g.scope_ref;
 }
+
+type ScopeUnit = { id: string; name: string; parent: { name: string } | null };
 
 function GrantModal({
   orgId, member, roles, units, onClose,
@@ -57,7 +64,7 @@ function GrantModal({
   orgId: string;
   member: Member;
   roles: RoleDef[];
-  units: Array<{ id: string; name: string }>;
+  units: ScopeUnit[];
   onClose: () => void;
 }) {
   const [roleId, setRoleId] = useState(roles[0]?.id ?? '');
@@ -97,7 +104,7 @@ function GrantModal({
           <Field label="Campus or unit" hint="This role only reaches the campus you choose.">
             <Select value={scopeRef} onChange={(e) => setScopeRef(e.target.value)}>
               <option value="">Whole organisation</option>
-              {units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              {units.map((u) => <option key={u.id} value={u.id}>{unitPath(u, u.parent)}</option>)}
             </Select>
           </Field>
         )}
@@ -132,7 +139,7 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
   const members = useApi<Member[]>(`/organizations/${orgId}/members`);
   const grants = useApi<Grant[]>(`/organizations/${orgId}/roles`);
   const roleDefs = useApi<RoleDef[] | { roles: RoleDef[] }>(`/organizations/${orgId}/role-definitions`);
-  const unitsQ = useApi<Array<{ id: string; name: string }>>(`/organizations/${orgId}/units`, true);
+  const unitsView = useOrgUnits(orgId);
 
   const roles = useMemo(() => {
     const raw = Array.isArray(roleDefs.data) ? roleDefs.data : roleDefs.data?.roles ?? [];
@@ -141,7 +148,9 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
     return raw.filter((r) => r.kind !== 'event');
   }, [roleDefs.data]);
 
-  const units = unitsQ.data ?? [];
+  // Flattened: a role can be scoped to a campus OR to a department beneath it, and
+  // a picker that offered only campuses would make the finer scope unreachable.
+  const units = unitsView.flat;
 
   const byUser = useMemo(() => {
     const m = new Map<string, Grant[]>();
@@ -152,10 +161,44 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
     return m;
   }, [grants.data]);
 
-  const rows = members.data ?? [];
-  const { view, query, setQuery } = useTableControls(rows, {
-    search: (m) => `${m.users?.name ?? ''} ${m.users?.email ?? ''}`,
+  // Join requests are held OUT of the roster and shown above it.
+  //
+  // They were previously visible only on an orphaned page with no route, so a
+  // person who had asked to join could not be approved anywhere in the product -
+  // and the dashboard counted them while pointing at Players, a screen that acts on
+  // a different field entirely. Somebody following that link and pressing "Reject"
+  // changed the person's VERIFICATION and left the request exactly where it was.
+  const all = members.data ?? [];
+  const pending = all.filter((m) => m.status === 'pending');
+  const rows = all.filter((m) => m.status !== 'pending');
+  // Paged, like every other roster in the product.
+  //
+  // It was not, and `useTableControls` pages by default, so this table rendered
+  // the first ten members of two hundred and offered no way to reach the rest -
+  // looking exactly like an organisation with ten people in it. Search still
+  // found the other 190, which is why it read as data missing rather than as a
+  // list truncated.
+  const tc = useTableControls(rows, {
+    search: (m) => `${m.users?.name ?? ''} ${m.users?.email ?? ''} ${m.users?.phone ?? ''}`,
+    sorts: { name: (a, b) => (a.users?.name ?? '').localeCompare(b.users?.name ?? '') },
+    initialSort: 'name',
+    pageSize: 20,
   });
+  const { view, query, setQuery } = tc;
+
+  const [deciding, setDeciding] = useState<string | null>(null);
+  const decide = async (m: Member, action: 'approve' | 'decline') => {
+    setDeciding(m.id);
+    try {
+      await api('POST', `/organizations/${orgId}/members/${m.id}/${action}`);
+      toast.success(action === 'approve'
+        ? `${m.users?.name ?? 'They'} can now use this organisation`
+        : `${m.users?.name ?? 'That request'} was declined`);
+      await members.refetch();
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Could not do that');
+    } finally { setDeciding(null); }
+  };
 
   const setStatus = async (g: Grant, status: Grant['status']) => {
     try {
@@ -191,6 +234,40 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
         </>
       )}
 
+      {/* Above the roster, because it is the only thing on this screen that is
+          WAITING on somebody. A request buried in a list of two hundred members is
+          a request nobody answers. */}
+      {pending.length > 0 && (
+        <Card className="mb-4 border-amber-300 dark:border-amber-500/40">
+          <CardBody>
+            <h3 className="font-display text-[15px] font-extrabold text-slate-900 dark:text-slate-100">
+              {pending.length} {pending.length === 1 ? 'person has' : 'people have'} asked to join
+            </h3>
+            <p className="mb-3 mt-0.5 text-[12.5px] text-slate-500 dark:text-slate-400">
+              They found this organisation in Discover and asked to join - the only route that
+              needs your say-so. Approving makes them a member; declining leaves them out, and you
+              can still add them yourself later.
+            </p>
+            <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+              {pending.map((m) => (
+                <li key={m.id} className="flex flex-wrap items-center gap-3 py-2.5">
+                  <Avatar name={m.users?.name} size={32} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium text-slate-800 dark:text-slate-100">{m.users?.name ?? 'Unnamed'}</span>
+                    <span className="block truncate text-[12px] text-slate-500 dark:text-slate-400">{m.users?.email ?? m.users?.phone ?? 'No contact'}</span>
+                  </span>
+                  <Button size="sm" disabled={deciding !== null} onClick={() => decide(m, 'approve')}>
+                    {deciding === m.id ? 'Saving…' : 'Approve'}
+                  </Button>
+                  <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
+                    disabled={deciding !== null} onClick={() => decide(m, 'decline')}>Decline</Button>
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
+      )}
+
       <Card>
         <CardBody>
           <ListToolbar>
@@ -198,8 +275,13 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
           </ListToolbar>
 
           {view.length === 0 ? (
-            <EmptyState icon={<Users />} title="No members yet"
-              description="People appear here once they join or are added to the organisation." />
+            query ? (
+              <EmptyState icon={<Users />} title="Nobody matches that"
+                description="No member has that name, email or phone number. Clear the search to see everyone." />
+            ) : (
+              <EmptyState icon={<Users />} title="No members yet"
+                description="People appear here once they join or are added to the organisation." />
+            )
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -272,6 +354,11 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
                 </tbody>
               </table>
             </div>
+          )}
+
+          {view.length > 0 && (
+            <Pagination page={tc.page} pageCount={tc.pageCount} total={tc.total}
+              pageSize={tc.pageSize} onPage={tc.setPage} />
           )}
         </CardBody>
       </Card>

@@ -32,6 +32,12 @@ const rosterRowSchema = z.object({
   name: z.string().max(200).nullish(),
   email: z.string().max(200).nullish(),
   phone: z.string().max(40).nullish(),
+  // Where this person sits in the organisation. `campus`/`department` are the
+  // current column names; `programme`/`batch` are kept as ACCEPTED ALIASES because
+  // institutions have spreadsheets with those headers and breaking a saved import
+  // template is a worse outcome than carrying two names for one field.
+  campus: z.string().max(200).nullish(),
+  department: z.string().max(200).nullish(),
   programme: z.string().max(200).nullish(),
   batch: z.string().max(200).nullish(),
   member_code: z.string().max(64).nullish(),
@@ -93,14 +99,25 @@ export function makePeopleRouter(prisma: Prisma): Router {
     member_code: m.member_code,
     verification: m.verification,
     verified_at: m.verified_at,
-    org_unit_id: m.org_unit_id,
-    org_unit_name: m.org_units?.name ?? null,
+    // A LIST, because placement is a set. `org_unit_names` is the joined form the
+    // table cell prints, so the client never has to decide how to render several.
+    units: (m.users?.org_unit_members ?? []).map((x: any) => ({
+      id: x.org_units?.id ?? x.org_unit_id,
+      name: x.org_units?.name ?? null,
+      type: x.org_units?.type ?? null,
+    })),
+    org_unit_names: (m.users?.org_unit_members ?? [])
+      .map((x: any) => x.org_units?.name)
+      .filter(Boolean)
+      .join(', ') || null,
     joined_at: m.joined_at,
     // The Sportagon ID is the whole point of the directory: it is what makes this
     // person the same person at the next institution, so it travels with the row.
     sportagon_id: m.users?.sportagon_id ?? null,
     sports: m.sports ?? 0,
     events: m.events ?? 0,
+    // Which sports, not just how many - the directory's sport filter reads this.
+    sport_names: m.sport_names ?? [],
   });
 
   /** Everything the pure validator needs, in four queries regardless of file size. */
@@ -268,22 +285,37 @@ export function makePeopleRouter(prisma: Prisma): Router {
       // the sense J1-E5-S2 actually means.
       await tx.$executeRawUnsafe(
         `insert into organization_members
-           (user_id, organization_id, role, status, org_unit_id, member_code, scholarship, verification)
+           (user_id, organization_id, role, status, member_code, scholarship, verification)
          select v.user_id::uuid, $1::uuid, 'member', 'active',
-                v.org_unit_id::uuid, v.member_code, v.scholarship::boolean, 'pending'
-         from unnest($2::text[], $3::text[], $4::text[], $5::text[])
-           as v(user_id, org_unit_id, member_code, scholarship)
+                v.member_code, v.scholarship::boolean, 'pending'
+         from unnest($2::text[], $3::text[], $4::text[])
+           as v(user_id, member_code, scholarship)
          on conflict (user_id, organization_id) do update set
-           org_unit_id = coalesce(excluded.org_unit_id, organization_members.org_unit_id),
            member_code = coalesce(excluded.member_code, organization_members.member_code),
            scholarship = coalesce(excluded.scholarship, organization_members.scholarship)`,
         organizationId,
         resolved.map((x) => x.userId),
-        resolved.map((x) => x.r.org_unit_id),
         resolved.map((x) => x.r.member_code),
         // Stringified for the same reason as above; `::boolean` restores it.
         resolved.map((x) => (x.r.scholarship == null ? null : String(x.r.scholarship))),
       );
+
+      // Placement lives on its own table now, and is ADDITIVE: a sheet naming a
+      // campus adds that campus, and re-importing never strips units somebody was
+      // given on the Campuses screen. `do nothing` on conflict is what keeps
+      // re-running the same file a no-op rather than an error.
+      const placements = resolved.filter((x) => x.r.org_unit_id);
+      if (placements.length) {
+        await tx.$executeRawUnsafe(
+          `insert into org_unit_members (organization_id, org_unit_id, user_id)
+           select $1::uuid, v.org_unit_id::uuid, v.user_id::uuid
+           from unnest($2::text[], $3::text[]) as v(org_unit_id, user_id)
+           on conflict (org_unit_id, user_id) do nothing`,
+          organizationId,
+          placements.map((x) => x.r.org_unit_id),
+          placements.map((x) => x.userId),
+        );
+      }
 
       return resolved.length;
     }, { timeout: 20_000 });
@@ -343,17 +375,27 @@ export function makePeopleRouter(prisma: Prisma): Router {
     const member = await prisma.organization_members.upsert({
       where: { user_id_organization_id: { user_id: userId, organization_id: organizationId } },
       update: {
-        ...(row.org_unit_id ? { org_unit_id: row.org_unit_id } : {}),
         ...(row.member_code ? { member_code: row.member_code } : {}),
         ...(row.scholarship != null ? { scholarship: row.scholarship } : {}),
       },
       create: {
         user_id: userId, organization_id: organizationId, role: 'member', status: 'active',
-        org_unit_id: row.org_unit_id, member_code: row.member_code, scholarship: row.scholarship,
+        member_code: row.member_code, scholarship: row.scholarship,
         verification: 'pending',
       },
-      include: { users: { select: { name: true, email: true, phone: true } }, org_units: { select: { name: true } } },
+      include: { users: { select: { name: true, email: true, phone: true } } },
     });
+
+    // Placement is ADDITIVE on import. A sheet naming a campus and a batch places
+    // the person in both, and re-importing a corrected sheet adds rather than
+    // replaces - an import that silently dropped somebody's other units would undo
+    // work done on the Campuses screen.
+    if (row.org_unit_id) {
+      await prisma.org_unit_members.createMany({
+        data: [{ organization_id: organizationId, org_unit_id: row.org_unit_id, user_id: userId }],
+        skipDuplicates: true,
+      });
+    }
 
     await audit(prisma, req, {
       action: AUDIT_ACTIONS.memberAdded,
@@ -384,14 +426,25 @@ export function makePeopleRouter(prisma: Prisma): Router {
       where: {
         organization_id: organizationId,
         ...(verification ? { verification } : {}),
-        ...(org_unit_id ? { org_unit_id } : {}),
+        // Filtering the directory by unit now goes through the join table.
+        ...(org_unit_id ? { users: { org_unit_members: { some: { org_unit_id } } } } : {}),
         ...(q ? { users: { OR: [{ name: { contains: q, mode: 'insensitive' } }, { email: { contains: q, mode: 'insensitive' } }] } } : {}),
       },
       select: {
         id: true, user_id: true, role: true, status: true, member_code: true,
-        verification: true, verified_at: true, org_unit_id: true, joined_at: true,
-        users: { select: { name: true, email: true, phone: true, sportagon_id: true } },
-        org_units: { select: { name: true } },
+        verification: true, verified_at: true, joined_at: true,
+        users: {
+          select: {
+            name: true, email: true, phone: true, sportagon_id: true,
+            // Every unit this person belongs to, scoped to THIS organisation - the
+            // same person may be placed inside another institution too, and that is
+            // none of this directory's business.
+            org_unit_members: {
+              where: { organization_id: organizationId },
+              select: { org_unit_id: true, org_units: { select: { id: true, name: true, type: true } } },
+            },
+          },
+        },
         // Deliberately NOT selected: gender, date_of_birth, scholarship.
       },
       orderBy: [{ joined_at: 'desc' }],
@@ -403,15 +456,20 @@ export function makePeopleRouter(prisma: Prisma): Router {
     // two thousand people, and a per-row lookup at that size is a page that
     // never finishes loading.
     const userIds = rows.map((r) => r.user_id);
+    // The NAMES come back beside the counts, not as a second query: the directory
+    // filters by sport, and a filter whose options need one round trip per person
+    // is a filter nobody can afford to offer.
     const activity = userIds.length
-      ? await prisma.$queryRaw<Array<{ user_id: string; sports: bigint; events: bigint }>>(PrismaNS.sql`
+      ? await prisma.$queryRaw<Array<{ user_id: string; sports: bigint; events: bigint; sport_names: Array<string | null> }>>(PrismaNS.sql`
           select tm.user_id,
                  count(distinct ts.sport_id) as sports,
-                 count(distinct te.championship_id) as events
+                 count(distinct te.championship_id) as events,
+                 array_agg(distinct s.name) as sport_names
             from team_members tm
             join team_entries te on te.team_id = tm.team_id
             join tournament_disciplines td on td.id = te.tournament_discipline_id
             join tournament_sports ts on ts.id = td.tournament_sport_id
+            left join sports s on s.id = ts.sport_id
            where te.organization_id = ${organizationId}::uuid
              and tm.user_id in (${PrismaNS.join(userIds.map((id) => PrismaNS.sql`${id}::uuid`))})
            group by tm.user_id`)
@@ -422,6 +480,8 @@ export function makePeopleRouter(prisma: Prisma): Router {
       ...r,
       sports: Number(byUser.get(r.user_id)?.sports ?? 0),
       events: Number(byUser.get(r.user_id)?.events ?? 0),
+      // left join, so a discipline whose sport row is gone aggregates a null.
+      sport_names: (byUser.get(r.user_id)?.sport_names ?? []).filter((n): n is string => !!n).sort(),
     })));
   }));
 

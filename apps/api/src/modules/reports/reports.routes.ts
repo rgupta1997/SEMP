@@ -258,7 +258,9 @@ export function makeReportsRouter(prisma: Prisma): Router {
     const memberCounts = await prisma.$queryRaw<Array<{ programme_id: string | null; members: bigint }>>(PrismaNS.sql`
       select coalesce(root.id, null) as programme_id, count(distinct om.user_id) as members
         from organization_members om
-        left join org_units u on u.id = om.org_unit_id
+        left join org_unit_members oum
+               on oum.user_id = om.user_id and oum.organization_id = om.organization_id
+        left join org_units u on u.id = oum.org_unit_id
         left join org_units root on root.id = coalesce(u.parent_id, u.id)
        where om.organization_id = ${organizationId}::uuid and om.status = 'active'
        group by 1`);

@@ -120,20 +120,45 @@ export function useWorkspace() {
     // rather than replacing the list - an organiser should not watch their own
     // events pop in a moment late.
     //
+    // MERGED, not skipped. The auth context carries a SNAPSHOT of each event taken
+    // when the session was last refreshed, so its `status` goes stale the moment
+    // anybody changes it. `/championships/mine` is refetched on every status
+    // transition and is therefore the fresher source - but this loop used to
+    // `continue` past any event the auth context had already produced, so the stale
+    // copy won and the fresh one was thrown away.
+    //
+    // The symptom was specific and awful: an organiser opened registration, the
+    // header badge flipped to "Registration Open", and the sidebar kept rendering
+    // the two-item DRAFT nav until they reloaded the page by hand. Invalidating
+    // `mine` on the transition - which the callers do - could never have fixed it,
+    // because the value was being discarded here.
+    //
     // Only EVENT roles are carried. An event role overrides an organisation one:
     // administering an institution says nothing about an event you were entered
     // into, and 'player' / 'member' say how you got here rather than what you hold,
     // so both resolve to the view set instead of to an org role's nav.
-    const seen = new Set(events.map((e) => e.id));
+    const byId = new Map(events.map((e) => [e.id, e]));
     for (const c of mine.data ?? []) {
-      if (seen.has(c.id)) continue;
-      events.push({
+      const roleCodes = (c.my_roles ?? []).filter((r) => EVENT_ROLE_CODES.includes(r));
+      const existing = byId.get(c.id);
+      if (existing) {
+        // Fresher facts about the EVENT replace the snapshot; the role codes are
+        // unioned, because the auth row may carry a grant `mine` does not list.
+        existing.kind = (c.status === 'draft' ? 'eventDraft' : 'event') as ContextKind;
+        existing.name = c.name;
+        existing.sub = c.status;
+        existing.roleCodes = [...new Set([...existing.roleCodes, ...roleCodes])];
+        continue;
+      }
+      const built: WorkspaceContext = {
         id: c.id,
         kind: (c.status === 'draft' ? 'eventDraft' : 'event') as ContextKind,
         name: c.name,
-        roleCodes: (c.my_roles ?? []).filter((r) => EVENT_ROLE_CODES.includes(r)),
+        roleCodes,
         sub: c.status,
-      });
+      };
+      byId.set(c.id, built);
+      events.push(built);
     }
 
     // An assignment is the tightest scope in the product: one match, nothing else.

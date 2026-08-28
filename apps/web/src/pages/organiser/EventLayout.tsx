@@ -10,6 +10,24 @@ export interface EventDetail {
   id: string; name: string; slug: string; status: string;
   venue?: string; description?: string; start_date: string; end_date: string;
   visibility?: string; // 'public' (default) | 'private'
+  host_organization_id?: string | null;
+  /**
+   * What competes here, resolved by the server.
+   *
+   * `entrant_label` is the host organisation's OWN noun - "Campuses", "Offices",
+   * "Departments" - so a screen never has to work out whether to say organisation
+   * or campus. It exists precisely because getting that wrong is invisible: a
+   * summary card reading "Organizations: 12" above twelve campuses of one
+   * institution is wrong in a way nobody reports as a bug.
+   */
+  entry?: {
+    level: 'organization' | 'campus' | 'department';
+    intra: boolean;
+    entrant_label: string;
+    /** Plural of the same noun. Both are resolved server-side - see IntraEntrantsPanel. */
+    entrant_label_plural: string;
+    scope_unit: { id: string; name: string } | null;
+  };
 }
 interface EventCtx { championship: EventDetail; eventId: string; canManage: boolean }
 export const useEvent = () => useOutletContext<EventCtx>();
@@ -32,7 +50,12 @@ export function EventLayout() {
   const { data: championship, isLoading } = useApi<EventDetail>(`/championships/${eventId}`);
   const statusMut = useApiMutation(
     (status: string) => api('PATCH', `/championships/${eventId}/status`, { status }),
-    [`/championships/${eventId}`, '/championships'],
+    // `/championships/mine` matters as much as the other two: it is what the SIDEBAR
+    // builds its nav from, and the nav for a draft is two items where a live event's
+    // is eleven. Leaving it stale meant an organiser who pressed "Start championship"
+    // watched the badge flip to Ongoing while Schedule, Results, Standings and the
+    // rest stayed missing until they reloaded the page by hand.
+    [`/championships/${eventId}`, '/championships', '/championships/mine'],
   );
 
   if (isLoading || !championship) return <Spinner />;

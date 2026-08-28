@@ -116,7 +116,7 @@ export function PlayerDetailPage() {
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 21 }}>{p.name}</div>
           <div style={{ fontSize: 13, color: C.fg4 }}>
-            {[member?.member_code, member?.org_unit_name, p.email].filter(Boolean).join(' · ') || 'No details on file'}
+            {[member?.member_code, member?.org_unit_names, p.email].filter(Boolean).join(' · ') || 'No details on file'}
           </div>
           {p.sportagon_id && (
             <div style={{ fontFamily: MONO, fontSize: 11.5, color: C.brand, marginTop: 4 }}>{p.sportagon_id}</div>

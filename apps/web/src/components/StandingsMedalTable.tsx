@@ -5,6 +5,17 @@ import { StandingsBreakdown } from './StandingsBreakdown';
 
 // Minimal shape shared by the organiser + participant standings rows.
 export interface MedalStandingRow {
+  /**
+   * The CONTINGENT this row is for - a campus or department id in a championship
+   * contested inside one organisation, an organisation id in an open one. This is
+   * the row's identity: in an intra event every row shares one organization_id, so
+   * keying a list or an expand-state on that collapses twelve campuses into one.
+   */
+  entity_id: string;
+  /** What to print. Resolved server-side so no two surfaces can label it differently. */
+  name: string;
+  short_name: string | null;
+  org_unit: { id: string; name: string; code: string | null; type: string; parent: string | null } | null;
   organization_id: string;
   organization: { id: string; name: string; short_name?: string | null; logo_url?: string | null } | null;
   detail: Record<string, number>;
@@ -65,11 +76,11 @@ export function StandingsMedalTable({ rows, base, scope, scopeId }:
       </thead>
       <tbody>
         {ranked.map((r, i) => {
-          const isOpen = expanded === r.row.organization_id;
+          const isOpen = expanded === r.row.entity_id;
           return (
-            <Fragment key={r.row.organization_id}>
+            <Fragment key={r.row.entity_id}>
               <tr
-                onClick={() => setExpanded(isOpen ? null : r.row.organization_id)}
+                onClick={() => setExpanded(isOpen ? null : r.row.entity_id)}
                 className={cn('cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40',
                   isOpen ? 'bg-slate-50 dark:bg-slate-800/40' : i === 0 && r.total > 0 && 'bg-amber-50/40 dark:bg-amber-500/5')}
                 title="Show which sports & disciplines earned these medals"
@@ -78,8 +89,13 @@ export function StandingsMedalTable({ rows, base, scope, scopeId }:
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
                     <ChevronDown size={16} className={cn('shrink-0 text-slate-400 transition-transform dark:text-slate-500', isOpen && 'rotate-180')} />
-                    <Avatar name={r.row.organization?.name} size={30} />
-                    <span className="font-medium text-slate-800 dark:text-slate-200">{r.row.organization?.name}</span>
+                    <Avatar name={r.row.name} size={30} />
+                    <span className="min-w-0">
+                      <span className="block font-medium text-slate-800 dark:text-slate-200">{r.row.name}</span>
+                      {r.row.org_unit?.parent && (
+                        <span className="block text-[11.5px] text-slate-500 dark:text-slate-400">{r.row.org_unit.parent}</span>
+                      )}
+                    </span>
                   </div>
                 </td>
                 <td className="px-3 py-3 text-center font-semibold tabular-nums text-slate-700 dark:text-slate-200">{r.gold || <span className="text-slate-300 dark:text-slate-600">-</span>}</td>
@@ -91,7 +107,7 @@ export function StandingsMedalTable({ rows, base, scope, scopeId }:
               {isOpen && (
                 <tr className="bg-slate-50/60 dark:bg-slate-800/20">
                   <td colSpan={7} className="px-4 pb-4 pt-0">
-                    <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} orgId={r.row.organization_id} />
+                    <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} entityId={r.row.entity_id} />
                   </td>
                 </tr>
               )}

@@ -73,6 +73,12 @@ export const NAV: Record<ContextKind, NavItem[]> = {
   org: [
     { key: 'dashboard', label: 'Dashboard', to: '/organizations/:id/overview' },
     { key: 'players', label: 'Players', to: '/organizations/:id/students' },
+    // Campuses & units is a WORKING screen, not a setting: it answers "who belongs
+    // where", and a player can only be picked for the unit they belong to. It sat
+    // inside Administration, which is where things go to be configured once and
+    // never reopened - the wrong home for the screen an organiser has to get right
+    // before an internal championship can run at all.
+    { key: 'structure', label: 'Campuses & Units', to: '/organizations/:id/campuses' },
     { key: 'teams', label: 'Teams', to: '/organizations/:id/teams' },
     { key: 'events', label: 'Events', to: '/organizations/:id/events' },
     { key: 'discover', label: 'Discover', to: '/discover' },
@@ -96,7 +102,6 @@ export const NAV: Record<ContextKind, NavItem[]> = {
     { key: 'overview', label: 'Overview', to: '/championships/:id', end: true },
     { key: 'setup', label: 'Setup', to: '/championships/:id/setup' },
     { key: 'organisers', label: 'Organising team', to: '/championships/:id/organisers' },
-    { key: 'approvals', label: 'Approvals', to: '/championships/:id/approvals' },
     { key: 'participants', label: 'Participants', to: '/championships/:id/participants' },
     { key: 'schedule', label: 'Schedule', to: '/championships/:id/schedule' },
     { key: 'results', label: 'Results', to: '/championships/:id/results' },
@@ -105,9 +110,32 @@ export const NAV: Record<ContextKind, NavItem[]> = {
     { key: 'certificates', label: 'Certificates', to: '/championships/:id/certificates' },
     { key: 'settings', label: 'Settings', to: '/championships/:id/settings' },
   ],
+  /**
+   * A DRAFT event offers the same sections as a live one.
+   *
+   * It used to offer two - Overview and Event setup - and that was wrong for the
+   * only person who is ever in a draft: the organiser who just created it. They
+   * need the organising team, the officials, the schedule and the settings while
+   * the event is still being built; those are exactly the things "being built"
+   * means. Cutting the list here also cut it for them, because `resolveNav`
+   * filters the CONTEXT's list by role, so a role that opens everything still
+   * cannot open what the context never offered.
+   *
+   * Restricting the draft is ROLE_NAV's job, and it already does it: anybody
+   * without an event role gets EVENT_VIEW, which on a draft is five honestly
+   * empty pages rather than a nav that pretends the event has no settings.
+   */
   eventDraft: [
     { key: 'overview', label: 'Overview', to: '/championships/:id', end: true },
     { key: 'setup', label: 'Event setup', to: '/championships/:id/setup' },
+    { key: 'organisers', label: 'Organising team', to: '/championships/:id/organisers' },
+    { key: 'participants', label: 'Participants', to: '/championships/:id/participants' },
+    { key: 'schedule', label: 'Schedule', to: '/championships/:id/schedule' },
+    { key: 'results', label: 'Results', to: '/championships/:id/results' },
+    { key: 'standings', label: 'Standings', to: '/championships/:id/standings' },
+    { key: 'communications', label: 'Communications', to: '/championships/:id/communications' },
+    { key: 'certificates', label: 'Certificates', to: '/championships/:id/certificates' },
+    { key: 'settings', label: 'Settings', to: '/championships/:id/settings' },
   ],
   assignment: [
     { key: 'matchops', label: 'Match Operations', to: '/score/:id' },
@@ -171,9 +199,9 @@ export const ROLE_NAV: Record<string, string[] | null> = {
   super_admin: null,
 
   org_admin: null,
-  sports_admin: ['dashboard', 'players', 'teams', 'events', 'discover', 'achievements', 'certificates', 'admin'],
+  sports_admin: ['dashboard', 'players', 'structure', 'teams', 'events', 'discover', 'achievements', 'certificates', 'admin'],
   billing_admin: ['dashboard', 'admin'],
-  reporting_admin: ['dashboard', 'players', 'achievements', 'reports', 'admin'],
+  reporting_admin: ['dashboard', 'players', 'structure', 'achievements', 'reports', 'admin'],
   viewer: ['dashboard', 'events', 'achievements'],
 
   organiser: null,
@@ -186,9 +214,10 @@ export const ROLE_NAV: Record<string, string[] | null> = {
   // Everyone else involved in an event sees the event, and operates none of it.
   captain: EVENT_VIEW,
   participant: EVENT_VIEW,
-  // The one exception: a POC approves their own institution's entries, which is
-  // the job the role exists to do.
-  poc: [...EVENT_VIEW, 'approvals'],
+  // Deciding the field - invitations AND the applications queue - now lives on
+  // Setup → Invite rather than on a section of its own, so there is no longer an
+  // 'approvals' key to grant. A POC sees the event as published.
+  poc: EVENT_VIEW,
 };
 
 export interface WorkspaceContext {

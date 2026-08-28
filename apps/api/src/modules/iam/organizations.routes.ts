@@ -320,6 +320,11 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
         member.status === 'active' && audienceOfRole(member.role) === 'staff',
       );
     }
+    // Placement is NOT edited here any more. A person belongs to several campuses
+    // and departments at once, so it is a set on its own table and has its own
+    // routes (PUT /organizations/:id/people/:userId/units). Leaving a single
+    // `org_unit_id` on this endpoint would have been a second way to express
+    // placement that could only ever hold one of the several answers.
     const updated = await prisma.organization_members.update({
       where: { id: member.id },
       data: req.body,

@@ -2,13 +2,31 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
-import { Avatar, Button, Card, Input, Spinner, StatusBadge, toast } from './ui';
+import { Avatar, Badge, Button, Card, Input, Spinner, StatusBadge, toast } from './ui';
+import { ApplicationsQueue } from '../pages/organiser/ApplicationsQueue';
 
 interface Invitation {
   id: string;
   org_name: string;
   status: string;
   organizations?: { id: string; name: string; short_name?: string | null; city?: string | null } | null;
+  org_unit_id?: string | null;
+  org_units?: { id: string; name: string; code: string | null; type: string } | null;
+  /** Server-resolved label: the campus for an internal event, the org otherwise. */
+  target?: string;
+  is_unit?: boolean;
+}
+
+/** One of the host's own campuses or batches, as the invite picker offers it. */
+interface InvitableUnit {
+  key: string;
+  unitId: string | null;
+  name: string;
+  short?: string | null;
+  parentName?: string | null;
+  invited: boolean;
+  invitation_id: string | null;
+  status: string | null;
 }
 
 interface Org { id: string; name: string; short_name?: string | null; city?: string | null }
@@ -117,11 +135,148 @@ function OrgPicker({ value, onChange, excludeIds }: { value: Org[]; onChange: (o
   );
 }
 
-// Host-side invite manager: search the master institution list and send the
-// request straight to the org. Reused in the create wizard's Invite step and the
-// Invite tab.
+/**
+ * The invite list for an INTERNAL championship.
+ *
+ * A different control, not a different filter, because the question is different.
+ * Inviting an organisation is a search over every institution in the country;
+ * inviting a campus is a tick-list of the host's own, which is short, known, and
+ * wrong to make somebody search for. There is nobody outside to negotiate with, so
+ * being invited IS taking part - the campus administrator then builds the squads.
+ */
+function CampusInvites({ eventId, path }: { eventId: string; path: string }) {
+  const qc = useQueryClient();
+  const { data, isLoading } = useApi<{ intra: boolean; units: InvitableUnit[] }>(
+    `/championships/${eventId}/invitable`,
+  );
+  const [busy, setBusy] = useState<string | null>(null);
+  const units = data?.units ?? [];
+  const invited = units.filter((u) => u.invited);
+
+  const refresh = () => qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0] ?? '').includes(`/championships/${eventId}/`) });
+
+  const invite = async (u: InvitableUnit) => {
+    setBusy(u.key);
+    try {
+      await api('POST', path, { org_unit_id: u.unitId });
+      toast.success(`${u.name} is in`);
+      refresh();
+    } catch (e: any) { toast.error(e?.message ?? `Could not add ${u.name}`); }
+    finally { setBusy(null); }
+  };
+
+  const withdraw = async (u: InvitableUnit) => {
+    if (!u.invitation_id) return;
+    setBusy(u.key);
+    try {
+      await api('DELETE', `${path}/${u.invitation_id}`);
+      toast.success(`${u.name} withdrawn`);
+      refresh();
+    } catch (e: any) {
+      // The server refuses once squads exist, and says how many - worth showing.
+      toast.error(e?.message ?? `Could not withdraw ${u.name}`);
+    } finally { setBusy(null); }
+  };
+
+  const inviteAll = async () => {
+    const todo = units.filter((u) => !u.invited);
+    if (!todo.length) return;
+    setBusy('all');
+    let sent = 0;
+    const failed: string[] = [];
+    for (const u of todo) {
+      try { await api('POST', path, { org_unit_id: u.unitId }); sent++; } catch { failed.push(u.name); }
+    }
+    setBusy(null);
+    refresh();
+    if (failed.length) toast.error(`${sent} added, ${failed.length} could not be`, failed.join(', '));
+    else toast.success(`${sent} added`);
+  };
+
+  if (isLoading) return <Spinner />;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="max-w-prose text-sm text-slate-500 dark:text-slate-400">
+          Choose which of your own campuses and batches take part. They are in straight
+          away — there is nobody outside the organisation to accept. Each one's
+          administrator then builds its squads and enters them; you do not enter rosters.
+        </p>
+        {units.length > invited.length && (
+          <Button onClick={inviteAll} disabled={busy !== null}>
+            {busy === 'all' ? 'Adding…' : `+ Add all ${units.length - invited.length}`}
+          </Button>
+        )}
+      </div>
+
+      {units.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400 dark:border-slate-800 dark:text-slate-500">
+          Nothing to add yet. Create a campus — and set it Active — on the organisation's
+          Campuses &amp; Units screen.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {units.map((u) => (
+            <Card key={u.key} className="flex items-center justify-between gap-3 p-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <Avatar name={u.name} size={30} />
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-slate-800 dark:text-slate-200">{u.name}</div>
+                  {u.parentName && <div className="truncate text-xs text-slate-500 dark:text-slate-400">{u.parentName}</div>}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* "In", not "Invited". There is no pending state to report - an
+                    added campus is taking part - and a badge implying a handshake
+                    nobody is waiting on is worse than no badge. */}
+                {u.invited && <Badge tone="green">In</Badge>}
+                {u.invited ? (
+                  <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
+                    disabled={busy !== null} onClick={() => withdraw(u)}>Remove</Button>
+                ) : (
+                  <Button size="sm" disabled={busy !== null} onClick={() => invite(u)}>
+                    {busy === u.key ? 'Adding…' : '+ Add'}
+                  </Button>
+                )}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Which invite control this championship takes.
+ *
+ * A wrapper rather than a branch inside one component, because the two panels hold
+ * DIFFERENT hooks - the organisation one has picker state and a cancel mutation the
+ * campus one has no use for. Branching mid-component meant the early return skipped
+ * every hook below it the moment `invitable` resolved, and React counted fewer hooks
+ * on that render than the one before: "Rendered fewer hooks than expected".
+ *
+ * Splitting is the fix rather than hoisting the return, because it is also the
+ * honest shape: these are two controls that happen to answer the same question.
+ * The one hook here runs unconditionally, so the early return below is safe.
+ */
 export function InvitePanel({ eventId }: { eventId: string }) {
   const path = `/championships/${eventId}/invitations`;
+  // Asked of the server rather than inferred - the shape is a property of the
+  // championship, not something the client can work out.
+  const { data: invitable, isLoading } = useApi<{ intra: boolean }>(`/championships/${eventId}/invitable`);
+
+  if (isLoading) return <Spinner />;
+  return invitable?.intra
+    ? <CampusInvites eventId={eventId} path={path} />
+    : <OrganisationInvites eventId={eventId} path={path} />;
+}
+
+// Host-side invite manager for an OPEN championship: search the master institution
+// list and send the request straight to the org. Reused in the create wizard's
+// Invite step and the Invite tab.
+function OrganisationInvites({ eventId, path }: { eventId: string; path: string }) {
   const qc = useQueryClient();
   const { data: invites = [], isLoading } = useApi<Invitation[]>(path);
   const [orgs, setOrgs] = useState<Org[]>([]);
@@ -168,6 +323,12 @@ export function InvitePanel({ eventId }: { eventId: string }) {
         </Button>
       </div>
 
+      {/* Applications live beside invitations, because they are the same question
+          asked from the other side: who is in. They used to sit on a separate
+          Entrants tab, which meant an organiser deciding the field had to work in
+          two places and could see only half of it in each. */}
+      <ApplicationsQueue eventId={eventId} />
+
       {isLoading ? <Spinner /> : invites.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400 dark:border-slate-800 dark:text-slate-500">
           No organizations yet. Add at least two to auto-generate fixtures - or invite them later.
@@ -177,7 +338,7 @@ export function InvitePanel({ eventId }: { eventId: string }) {
           {invites.map((inv) => (
             <Card key={inv.id} className="flex items-center justify-between gap-3 p-3">
               <div className="min-w-0">
-                <div className="truncate font-medium text-slate-800 dark:text-slate-200">{inv.organizations?.name ?? inv.org_name}</div>
+                <div className="truncate font-medium text-slate-800 dark:text-slate-200">{inv.target ?? inv.organizations?.name ?? inv.org_name}</div>
                 {inv.organizations?.city && <div className="text-xs text-slate-500 dark:text-slate-400">{inv.organizations.city}</div>}
               </div>
               <div className="flex items-center gap-2">

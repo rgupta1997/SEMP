@@ -1,12 +1,15 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Building2 } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import { titleCase } from '../../lib/format';
 import { usePermissions } from '../../lib/permissions';
 import { api } from '../../lib/api';
 import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
-import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge, INSET} from '../../components/ui';
+import { pluralise } from '@semp/shared';
+import { useOrgUnits, unitPath } from '../../lib/units';
+import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge, Tabs, INSET} from '../../components/ui';
 
 // A roster can be entered into several championships; these read its team_entries.
 function teamEntries(team: any): any[] { return team.team_entries ?? []; }
@@ -41,8 +44,15 @@ function drawFormatName(d: any, formats: any[]): string | null {
 }
 
 // Enter one team for every selected discipline in a single action.
-function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onClose }:
-  { approved: any[]; organization: any; defaultEnrollmentId?: string; onClose: () => void }) {
+function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentId, onClose }:
+  {
+    approved: any[];
+    organization: any;
+    /** Decided by the tab this was opened from, never asked. */
+    kind: 'organization' | 'campus' | 'department';
+    defaultEnrollmentId?: string;
+    onClose: () => void;
+  }) {
   const navigate = useNavigate();
   const [enrollmentId, setEnrollmentId] = useState(defaultEnrollmentId ?? approved[0]?.id ?? '');
   const enrollment = approved.find((e) => e.id === enrollmentId);
@@ -51,16 +61,38 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
   const { data: formats = [] } = useApi<any[]>('/tournament-formats');
   const { data: existing = [] } = useApi<any[]>(organization?.id ? `/teams?organization_id=${organization.id}` : null);
 
-  // Don't offer draws this organization has already entered for this championship.
+  // Don't offer draws this CONTINGENT has already entered for this championship.
+  //
+  // Keyed on the entry's campus as well as the championship. Keyed on the
+  // championship alone - as it read before intra events - the moment Bangalore
+  // entered Cricket, Cricket disappeared from Mumbai's picker too, because both
+  // entries belong to the same organisation.
+  // Which unit these squads play for. On the Organisation tab there is none; on a
+  // campus or batch tab the tab has fixed the KIND, so all that remains is WHICH -
+  // and when the organisation has only one, not even that.
+  const { units: campusTree, labels: unitLabels, flat: allUnits } = useOrgUnits(organization?.id);
+  const pickable = useMemo(
+    () => (kind === 'campus' ? allUnits.filter((u) => u.type === 'campus')
+      : kind === 'department' ? allUnits.filter((u) => u.type === 'department')
+        : []),
+    [allUnits, kind],
+  );
+  const [bulkUnitId, setBulkUnitId] = useState('');
+  useEffect(() => {
+    if (kind !== 'organization' && pickable.length === 1) setBulkUnitId(pickable[0].id);
+  }, [kind, pickable.length]);
+
+  const unitNoun = kind === 'campus' ? unitLabels.campus : unitLabels.department;
+  const entryUnitId = kind === 'organization' ? null : (bulkUnitId || null);
   const takenDrawIds = useMemo(
     () => new Set(
       existing
         .flatMap((t: any) => (t.team_entries ?? []) as any[])
-        .filter((e) => e.championship_id === eventId)
+        .filter((e) => e.championship_id === eventId && (e.org_unit_id ?? null) === entryUnitId)
         .map((e) => e.tournament_discipline_id)
         .filter(Boolean),
     ),
-    [existing, eventId],
+    [existing, eventId, entryUnitId],
   );
   const available = useMemo(() => draws.filter((d) => !takenDrawIds.has(d.id)), [draws, takenDrawIds]);
   const tournamentNames = useMemo(
@@ -69,7 +101,14 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
-  const short = organization?.short_name || organization?.name || 'Team';
+  // A campus team is named after the CAMPUS, not the institution. Every campus in an
+  // intra championship shares one organisation, so "NIT Cricket" twice tells nobody
+  // which side is which - on the team list, the fixture card or the scoreboard.
+  // A campus squad is named after the CAMPUS. Every squad in an internal
+  // championship shares one organisation, so the institution's name distinguishes
+  // nothing on a team list, a fixture card or a scoreboard.
+  const short = (entryUnitId ? pickable.find((u) => u.id === entryUnitId)?.name : null)
+    || organization?.short_name || organization?.name || 'Team';
   // Default team name keeps the championship name (not the sport - the discipline row
   // already shows that); a sub-discipline like "Men's"/"Women's" is appended so two
   // teams in the same sport stay distinct.
@@ -87,10 +126,12 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
   const submit = () => {
     setError(null);
     if (!enrollment || selected.size === 0) { setError('Select at least one discipline'); return; }
+    if (kind !== 'organization' && !bulkUnitId) { setError(`Pick which ${unitNoun.toLowerCase()} these squads play for`); return; }
     const teams = available.filter((d) => selected.has(d.id)).map((d) => ({
       championship_id: enrollment.championship_id,
       organization_id: organization.id,
       championship_organization_id: enrollment.id,
+      org_unit_id: entryUnitId,
       sport_id: d.tournament_sports.sport_id,
       tournament_discipline_id: d.id,
       name: defaultName(d),
@@ -105,9 +146,30 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
     <Modal title="Enter multiple teams" onClose={onClose} wide>
       <Field label="Championship">
         <Select value={enrollmentId} onChange={(e) => { setEnrollmentId(e.target.value); setSelected(new Set()); }}>
-          {approved.map((e) => <option key={e.id} value={e.id}>{e.championships?.name}</option>)}
+          {/* `label` is the server's own "Championship · Campus", so an
+              organisation holding one entry per campus does not render the same
+              championship name three times with nothing to choose between them. */}
+          {approved.map((e) => <option key={e.id} value={e.id}>{e.championships?.name ?? 'Championship'}</option>)}
         </Select>
       </Field>
+
+      {/* WHICH one - never which kind. Hidden entirely when there is one possible
+          answer, which is preselected above. */}
+      {kind !== 'organization' && pickable.length > 1 && (
+        <Field label={unitNoun} hint={`These squads all play for the ${unitNoun.toLowerCase()} you choose.`}>
+          <Select value={bulkUnitId} onChange={(e) => setBulkUnitId(e.target.value)}>
+            <option value="">- select a {unitNoun.toLowerCase()} -</option>
+            {kind === 'campus'
+              ? pickable.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)
+              : campusTree.map((c) => (
+                <optgroup key={c.id} label={c.name}>
+                  {(c.children ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </optgroup>
+              ))}
+          </Select>
+        </Field>
+      )}
+
       {eventId && tournamentNames.length > 0 && (
         <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
           Season{tournamentNames.length > 1 ? 's' : ''}:{' '}
@@ -152,12 +214,40 @@ function BulkCreateTeamsModal({ approved, organization, defaultEnrollmentId, onC
 // Create a team as a standalone organization asset - just a name and sport. Rendered
 // inline (not a popup) so it sits right in the Teams list. It's entered into a
 // championship & discipline later from the team page.
-function InlineCreateTeam({ institutionId, onClose }: { institutionId: string; onClose: () => void }) {
+// A team created here has no championship entry yet, so nothing else can tell us
+// which campus it plays for - it has to be asked. Skipping the question was worse
+// than it looked: the team silently became an ORGANISATION team, and an organisation
+// team can never be entered into an internal championship. The mistake only surfaced
+// later, on a screen that said "no championships left to enter" with no reason given.
+function InlineCreateTeam({ institutionId, kind, onClose }: {
+  institutionId: string;
+  /** Decided by the tab this was opened from, never asked. */
+  kind: 'organization' | 'campus' | 'department';
+  onClose: () => void;
+}) {
   const navigate = useNavigate();
   const { data: sports = [] } = useApi<any[]>('/sports');
   const [name, setName] = useState('');
   const [sportId, setSportId] = useState('');
+  const [playsFor, setPlaysFor] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const { flat: allUnits, units: campusTree, labels } = useOrgUnits(institutionId);
+
+  // Only the units of THIS kind. The tab has already decided whether this is a
+  // campus squad or a batch squad, so offering the other kind - or "the whole
+  // organisation" - would be offering a way to contradict the tab you are standing in.
+  const units = useMemo(
+    () => (kind === 'campus' ? allUnits.filter((u) => u.type === 'campus')
+      : kind === 'department' ? allUnits.filter((u) => u.type === 'department')
+        : []),
+    [allUnits, kind],
+  );
+  const noun = kind === 'campus' ? labels.campus : labels.department;
+
+  // One possible answer is not a question: a lone campus is chosen for you.
+  useEffect(() => {
+    if (kind !== 'organization' && units.length === 1) setPlaysFor(units[0].id);
+  }, [kind, units.length]);
 
   const create = useApiMutation(
     (body: any) => api('POST', '/teams', body),
@@ -169,16 +259,29 @@ function InlineCreateTeam({ institutionId, onClose }: { institutionId: string; o
     setError(null);
     if (!name.trim()) { setError('Team name is required'); return; }
     if (!sportId) { setError('Pick a sport'); return; }
-    create.mutate({ name: name.trim(), sport_id: sportId, organization_id: institutionId }, { onError: (e: any) => setError(e.message) });
+    if (kind !== 'organization' && !playsFor) { setError(`Pick which ${noun.toLowerCase()} this squad plays for`); return; }
+    create.mutate({
+      name: name.trim(),
+      sport_id: sportId,
+      organization_id: institutionId,
+      // Null for an organisation squad, and the tab guarantees it.
+      org_unit_id: kind === 'organization' ? null : playsFor,
+    }, { onError: (e: any) => setError(e.message) });
   };
 
   return (
     <Card className="mb-4 p-5 ring-1 ring-brand-200 dark:ring-brand-500/30">
       <div className="mb-1 flex items-center justify-between">
-        <h3 className="font-semibold text-slate-900 dark:text-slate-100">Create a team</h3>
+        <h3 className="font-semibold text-slate-900 dark:text-slate-100">
+          {kind === 'organization' ? 'Create a team' : `Create a ${noun.toLowerCase()} squad`}
+        </h3>
         <button onClick={onClose} className="text-sm text-slate-500 hover:underline dark:text-slate-400">Cancel</button>
       </div>
-      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">Add a team for your organization, then enter it into a championship &amp; pick a discipline when you’re ready.</p>
+      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+        {kind === 'organization'
+          ? 'Add a team for your organization, then enter it into a championship & pick a discipline when you’re ready.'
+          : `Add a ${noun.toLowerCase()} squad, then enter it into one of this organisation's internal championships when you’re ready.`}
+      </p>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <label className="block flex-1">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Team name</span>
@@ -192,8 +295,32 @@ function InlineCreateTeam({ institutionId, onClose }: { institutionId: string; o
             {sports.map((s) => <option key={s.id} value={s.id}>{s.icon ? `${s.icon} ` : ''}{s.name}</option>)}
           </Select>
         </label>
+        {/* Which one - never which KIND. The tab answered that, and a picker with a
+            single option is a question not worth putting on the screen, so it is
+            preselected above. Batches are grouped by campus because two campuses can
+            each have a "2026". */}
+        {kind !== 'organization' && units.length > 1 && (
+          <label className="block sm:w-60">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">{noun}</span>
+            <Select value={playsFor} onChange={(e) => setPlaysFor(e.target.value)}>
+              <option value="">- select a {noun.toLowerCase()} -</option>
+              {kind === 'campus'
+                ? units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)
+                : campusTree.map((c) => (
+                  <optgroup key={c.id} label={c.name}>
+                    {(c.children ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </optgroup>
+                ))}
+            </Select>
+          </label>
+        )}
         <Button disabled={!name.trim() || !sportId || create.isPending} onClick={submit}>{create.isPending ? 'Creating…' : 'Create team'}</Button>
       </div>
+      <p className="mt-2.5 text-xs text-slate-500 dark:text-slate-400">
+        {kind === 'organization'
+          ? `This squad represents the whole institution and plays other institutions. It cannot enter a championship contested between your own ${pluralise(labels.campus).toLowerCase()}.`
+          : `This squad represents one ${noun.toLowerCase()}${playsFor ? ` — ${units.find((u) => u.id === playsFor)?.name ?? ''}` : ''}. It plays championships contested between ${pluralise(noun).toLowerCase()}, and only people who belong to it can be picked.`}
+      </p>
       {error && <p className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
     </Card>
   );
@@ -221,8 +348,31 @@ export function TeamsPage() {
   const isLoading = institutionId ? instLoading : myLoading;
   // Enrollments scoped to THIS org (a user may run several) so "Enter" uses the right
   // approved enrollment - otherwise entering a team can pick another org's enrollment.
+  // WHICH TAB. Declared here, above everything derived from it.
+  //
+  // It used to sit two hundred lines lower, and `approved` below reads it inside a
+  // `.filter()` callback - which is why the type checker stayed silent: TypeScript
+  // assumes a callback might run later, so it does not flag the temporal dead zone.
+  // `.filter()` runs immediately, so the page threw "Cannot access 'playsFor'
+  // before initialization" on first render.
+  //
+  // Organisation first: it is the kind that existed before internal championships,
+  // and the one an institution that runs none will only ever have.
+  const [playsFor, setPlaysFor] = useState<string>('organization');
+
   const { data: enrollments = [] } = useApi<any[]>(institutionId ? `/me/enrollments?organization_id=${institutionId}` : '/me/enrollments');
-  const approved = enrollments.filter((e) => e.status === 'approved');
+  // Approved entries this organisation holds. Internal championships are excluded:
+  // their competitors are CAMPUS squads, built for one campus and entered from that
+  // squad's own page. Offering them in an organisation-level bulk create would ask
+  // this modal to decide which campus a batch of squads belongs to, which is not a
+  // question it should be asking.
+  // Championships this tab's squads can actually enter. An organisation squad plays
+  // open championships; a campus squad plays campus-level ones; a batch squad plays
+  // batch-level ones. Filtering by the tab means the picker never offers a
+  // championship the server would then refuse the squad from.
+  const approved = enrollments.filter((e) => e.status === 'approved'
+    && (e.championships?.entry_level ?? 'organization') === playsFor);
+
   const { eventId, setEventId } = useFilterBar();
   const [tournamentFilter, setTournamentFilter] = useState('all');
   const [creating, setCreating] = useState(false);
@@ -231,7 +381,18 @@ export function TeamsPage() {
 
   // Approved championships populate the shared header championship filter.
   const eventOptions = useMemo(
-    () => approved.map((e) => ({ id: e.championship_id, name: e.championships?.name ?? 'Championship' })),
+    // Deduped by championship. An organisation holds one entry PER CAMPUS in an
+    // internal event, so mapping entries straight to options produced the same
+    // championship two or three times over with identical names - and React keyed
+    // them identically too.
+    () => {
+      const byId = new Map<string, { id: string; name: string }>();
+      for (const e of approved) {
+        if (!e.championship_id || byId.has(e.championship_id)) continue;
+        byId.set(e.championship_id, { id: e.championship_id, name: e.championships?.name ?? 'Championship' });
+      }
+      return [...byId.values()];
+    },
     [approved],
   );
 
@@ -284,15 +445,58 @@ export function TeamsPage() {
     sports: sportOptions.length ? sportOptions : undefined,
   });
 
+  const { labels, units: campusTree } = useOrgUnits(institutionId);
   const statusOptions = useMemo(() => ['all', ...new Set(teams.map((t) => t.status).filter(Boolean))], [teams]);
+
+  // WHO A TEAM PLAYS FOR is a different question from who owns it, and on this
+  // screen it is the more useful one. Every team here belongs to the same
+  // organisation, so once campuses and departments are in play the owner's name
+  // distinguishes nothing - "NIT Cricket" three times over is unreadable.
+  //
+  // Three kinds are genuinely different things and must not be mixed up:
+  //
+  //   organisation - represents the whole institution against OTHER institutions
+  //   campus       - represents one campus against the institution's other campuses
+  //   department   - represents one department, inside a campus or across the org
+  //
+  // A campus squad can never play in an inter-organisation event and an
+  // organisation squad can never play in an internal one, so a list that showed
+  // them together with no distinction invited exactly the wrong team to be picked.
+  /** Which of the three a team is. The tabs, and the card chip, both read this. */
+  const kindOf = (t: any): 'organization' | 'campus' | 'department' =>
+    (t?.org_units?.type === 'campus' ? 'campus' : t?.org_units?.type === 'department' ? 'department' : 'organization');
+
+  const kindCounts = useMemo(() => ({
+    organization: teams.filter((t) => kindOf(t) === 'organization').length,
+    campus: teams.filter((t) => kindOf(t) === 'campus').length,
+    department: teams.filter((t) => kindOf(t) === 'department').length,
+  }), [teams]);
+
+  // THREE tabs, one per kind of squad. They are not variations of one another:
+  //
+  //   Organisation - represents the whole institution against OTHER institutions
+  //   Campuses     - represents one campus against this institution's other campuses
+  //   Batches      - represents one batch against the other batches
+  //
+  // Each plays in a different kind of championship and draws from different people.
+  // The tab is also what makes the create buttons below contextual: standing in the
+  // Campuses tab, "Create team" already knows the squad is a campus squad, so it
+  // never has to ask whether you meant a campus, a batch or the whole organisation.
+  const kindTabs = useMemo(() => ([
+    { id: 'organization', label: 'Organisation', n: kindCounts.organization },
+    { id: 'campus', label: pluralise(labels.campus), n: kindCounts.campus },
+    { id: 'department', label: pluralise(labels.department), n: kindCounts.department },
+  ]), [kindCounts, labels]);
+
   const filtered = useMemo(() => {
     let rows = teams;
     if (eventId) rows = rows.filter((t) => teamChampIds(t).includes(eventId));
     if (tournamentFilter !== 'all') rows = rows.filter((t) => teamTournaments(t).some((x) => x.id === tournamentFilter));
     if (sportId) rows = rows.filter((t) => t.sport_id === sportId);
     if (status !== 'all') rows = rows.filter((t) => t.status === status);
+    rows = rows.filter((t) => kindOf(t) === playsFor);
     return rows;
-  }, [teams, eventId, tournamentFilter, sportId, status]);
+  }, [teams, eventId, tournamentFilter, sportId, status, playsFor]);
   const tc = useTableControls(filtered, {
     search: (t) => `${t.name} ${t.sports?.name ?? ''} ${teamChampNames(t)}`,
     sorts: {
@@ -309,12 +513,91 @@ export function TeamsPage() {
         title={activeEvent ? `${activeEvent.championships?.name ?? 'Championship'} teams` : 'Teams'}
         subtitle={activeEvent ? 'Teams entered for this championship.' : 'Enter and manage teams across your approved championships.'}
       >
-        {canManage && <Button variant="outline" onClick={() => setBulkCreating(true)} disabled={!canEnterTeams}>+ Enter multiple</Button>}
-        {canManage && <Button onClick={() => setCreating(true)}>+ Create team</Button>}
       </PageHeader>
 
+      {/* Hidden entirely until the organisation has a structure. Without campuses
+          there is only one kind of squad, and a two-tab strip where one tab can
+          never fill is a question with one answer. */}
+      {campusTree.length > 0 && (
+        <div className="mb-4">
+          <Tabs
+            active={playsFor}
+            onChange={setPlaysFor}
+            tabs={kindTabs.map((t) => ({
+              id: t.id,
+              label: t.label,
+              badge: (
+                <span className="rounded-full bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  {t.n}
+                </span>
+              ),
+            }))}
+          />
+          <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
+            <p className="max-w-prose text-[12.5px] text-slate-500 dark:text-slate-400">
+              {playsFor === 'organization'
+                ? 'These squads represent the whole institution against other institutions. They play in open championships.'
+                : `Each of these represents one ${(playsFor === 'campus' ? labels.campus : labels.department).toLowerCase()}, and plays in championships run inside this organisation. Only people who belong to it can be picked.`}
+            </p>
+
+            {/* The actions live HERE, inside the tab, rather than in the page
+                header. Standing in a tab already answers "what kind of squad", so
+                the create form below never asks - which is the whole reason they
+                moved. A header button would have to ask, because a header belongs
+                to no tab. */}
+            {canManage && (
+              <div className="flex flex-none flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setBulkCreating(true)}
+                  disabled={!canEnterTeams}
+                  title={canEnterTeams ? undefined
+                    : approved.length === 0
+                      ? 'You have no approved championship entry yet.'
+                      : 'This championship has no discipline draws yet — set up its sports first.'}
+                >+ Enter multiple</Button>
+                <Button onClick={() => setCreating(true)}>
+                  + Create {playsFor === 'organization' ? 'team' : (playsFor === 'campus' ? labels.campus : labels.department).toLowerCase() + ' squad'}
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* With no structure there is only one kind of squad, so no tab strip is
+          drawn - but the actions still have to be somewhere. */}
+      {campusTree.length === 0 && canManage && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setBulkCreating(true)} disabled={!canEnterTeams}>+ Enter multiple</Button>
+          <Button onClick={() => setCreating(true)}>+ Create team</Button>
+        </div>
+      )}
+
+      {/* The commonest reason teams cannot be created, stated where it is hit.
+          Entrants can be in and squads still impossible, because a team is entered
+          into a DRAW and the draws come from Setup → Sports. */}
+      {approved.length > 0 && !canEnterTeams && (
+        <p className="mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+          This championship has no discipline draws yet, so there is nothing to enter a team into.
+          Add its sports and disciplines under <strong>Setup → Sports</strong> first.
+        </p>
+      )}
+
+      {/* Says where a CAMPUS squad is entered, which is not here. Without this the
+          Teams page silently omits the internal championship an organiser has just
+          set up, and the only clue is an absence. */}
+      {/* Scoped to the tab, because `approved` now is. Standing in Campuses with no
+          campus-level championship is a different sentence from standing in
+          Organisation with no open one - and pointing somebody at "Browse
+          championships" when what they need is an internal event nobody has created
+          would send them out of the product for something that is not there. */}
       {approved.length === 0 && (
-        <p className="mb-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">You need an approved championship registration before entering teams. Apply via “Browse championships”.</p>
+        <p className="mb-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+          {playsFor === 'organization'
+            ? 'You need an approved championship registration before entering teams. Apply via “Browse championships”.'
+            : `No championship is being contested between your ${pluralise(playsFor === 'campus' ? labels.campus : labels.department).toLowerCase()} yet. You can still build squads here — they can be entered once one exists and this ${(playsFor === 'campus' ? labels.campus : labels.department).toLowerCase()} is added to it.`}
+        </p>
       )}
       {approved.length > 0 && eventId && eventDraws.length === 0 && (
         <p className="mb-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
@@ -322,7 +605,13 @@ export function TeamsPage() {
         </p>
       )}
 
-      {creating && institutionId && <InlineCreateTeam institutionId={institutionId} onClose={() => setCreating(false)} />}
+      {creating && institutionId && (
+        <InlineCreateTeam
+          institutionId={institutionId}
+          kind={playsFor as 'organization' | 'campus' | 'department'}
+          onClose={() => setCreating(false)}
+        />
+      )}
 
       {isLoading ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -381,6 +670,19 @@ export function TeamsPage() {
                     </div>
                     <h3 className="mt-3 font-semibold text-slate-900 dark:text-slate-100">{t.name}</h3>
                     <p className="text-sm text-slate-500 dark:text-slate-400">{t.sports?.name}</p>
+                    {/* The line that stops two identically-named squads being
+                        mistaken for each other. Absent for an organisation team,
+                        because "the organisation" is the default and saying it on
+                        every card is noise. */}
+                    {(t as any).org_units && (
+                      <p className="mt-0.5 flex items-center gap-1.5 text-[12px] font-medium text-brand-700 dark:text-brand-300">
+                        <Building2 size={11} className="flex-none" aria-hidden />
+                        {(t as any).org_units.name}
+                        <span className="font-mono text-[8.5px] uppercase tracking-[0.12em] opacity-70">
+                          {(t as any).org_units.type === 'campus' ? labels.campus : labels.department}
+                        </span>
+                      </p>
+                    )}
                     <div className="mt-1.5">
                       {teamEntries(t).length === 0
                         ? <span className="text-xs text-amber-600 dark:text-amber-400">Not entered yet</span>
@@ -398,7 +700,15 @@ export function TeamsPage() {
         </>
       )}
 
-      {bulkCreating && institutionId && <BulkCreateTeamsModal approved={approved} organization={viewedOrg ?? (ctx?.organization?.id === institutionId ? ctx.organization : { id: institutionId })} defaultEnrollmentId={defaultEnrollmentId} onClose={() => setBulkCreating(false)} />}
+      {bulkCreating && institutionId && (
+        <BulkCreateTeamsModal
+          approved={approved}
+          organization={viewedOrg ?? (ctx?.organization?.id === institutionId ? ctx.organization : { id: institutionId })}
+          kind={playsFor as 'organization' | 'campus' | 'department'}
+          defaultEnrollmentId={defaultEnrollmentId}
+          onClose={() => setBulkCreating(false)}
+        />
+      )}
     </div>
   );
 }

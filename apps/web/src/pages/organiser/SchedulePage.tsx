@@ -68,10 +68,13 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, venues, officials, tea
   const title = isEdit ? `Edit · ${teamName(fixture.home_team_id)} vs ${teamName(fixture.away_team_id)}` : 'Add fixture';
   const teamHint = teams.length === 0 ? 'No teams registered to this draw yet.' : undefined;
   // Disambiguate same-named teams (e.g. several "Badminton (Mixed)" draws) by
-  // appending each team's organization to its option label.
+  // appending who each squad plays FOR - its campus or batch when it has one, its
+  // organisation otherwise. Appending the organisation unconditionally
+  // disambiguated nothing inside an internal championship, where every squad
+  // belongs to the same one.
   const optLabel = (t: any) => {
-    const org = t.organizations?.short_name || t.organizations?.name;
-    return org ? `${t.name} — ${org}` : t.name;
+    const who = t.org_units?.name || t.organizations?.short_name || t.organizations?.name;
+    return who ? `${t.name} — ${who}` : t.name;
   };
   // The grounds belonging to the chosen venue (venues come straight from the venues
   // list, so a venue with no courts still shows and is selectable).

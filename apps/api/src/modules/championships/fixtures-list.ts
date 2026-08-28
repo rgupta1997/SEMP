@@ -7,8 +7,24 @@ export async function listChampionshipFixtures(prisma: Prisma, championshipId: s
   const fixtures = await prisma.fixtures.findMany({
     where: { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: championshipId } } } },
     include: {
-      teams_fixtures_home_team_idToteams: { select: { id: true, name: true, organizations: { select: { short_name: true, name: true } } } },
-      teams_fixtures_away_team_idToteams: { select: { id: true, name: true, organizations: { select: { short_name: true, name: true } } } },
+      // The unit comes with each side, because who a squad plays FOR is what every
+      // screen labels it by. Without it, an internal championship's results read
+      // "Northfield vs Northfield" on every row - the organisation is the same for
+      // both sides and says nothing.
+      teams_fixtures_home_team_idToteams: {
+        select: {
+          id: true, name: true,
+          organizations: { select: { short_name: true, name: true } },
+          org_units: { select: { id: true, name: true, code: true, type: true } },
+        },
+      },
+      teams_fixtures_away_team_idToteams: {
+        select: {
+          id: true, name: true,
+          organizations: { select: { short_name: true, name: true } },
+          org_units: { select: { id: true, name: true, code: true, type: true } },
+        },
+      },
       venue_grounds: { select: { id: true, name: true, venues: { select: { name: true } } } },
       tournament_disciplines: {
         select: {
@@ -36,6 +52,13 @@ export async function listChampionshipFixtures(prisma: Prisma, championshipId: s
     home_score: f.home_score,
     away_score: f.away_score,
     winner_team_id: f.winner_team_id,
+    // The scorecard state machine, so a results list can show what is official and
+    // offer the lock. Public viewers see it too, and should: "locked" is the whole
+    // basis of the verified claim, and hiding it would leave a spectator unable to
+    // tell a provisional score from a final one.
+    scorecard_status: f.scorecard_status,
+    submitted_at: f.submitted_at,
+    locked_at: f.locked_at,
     home_team_id: f.home_team_id,
     away_team_id: f.away_team_id,
     venue_ground_id: f.venue_ground_id,

@@ -9,6 +9,17 @@ import { StandingsBreakdown } from '../../components/StandingsBreakdown';
 import { StandingsMedalTable, rankMedals } from '../../components/StandingsMedalTable';
 
 interface StandingRow {
+  /**
+   * The CONTINGENT this row is for - a campus or department id in a championship
+   * contested inside one organisation, an organisation id in an open one. This is
+   * the row's identity: in an intra event every row shares one organization_id, so
+   * keying a list or an expand-state on that collapses twelve campuses into one.
+   */
+  entity_id: string;
+  /** What to print. Resolved server-side so no two surfaces can label it differently. */
+  name: string;
+  short_name: string | null;
+  org_unit: { id: string; name: string; code: string | null; type: string; parent: string | null } | null;
   organization_id: string;
   organization: { id: string; name: string; short_name?: string | null; logo_url?: string | null } | null;
   played: number; won: number; drawn: number; lost: number; points: number;
@@ -44,7 +55,11 @@ function RankBadge({ pos }: { pos: number }) {
 }
 
 export function StandingsPage() {
-  const { eventId } = useEvent();
+  const { eventId, championship } = useEvent();
+  // "Organizations" is only the right word for an inter-organisation event. The
+  // server resolves the host's own noun so this cannot disagree with the entry form
+  // or the approvals queue.
+  const entrants = championship.entry?.entrant_label ?? 'Organizations';
   const { data: draws = [] } = useApi<DrawRow[]>(`/championships/${eventId}/draws`);
   // Which org's row is expanded to show its per-event points breakdown.
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -89,8 +104,8 @@ export function StandingsPage() {
   const showMedals = rows.some((r) => r.detail && (r.detail.gold || r.detail.silver || r.detail.bronze));
 
   // Medal leader = top of the medal tally (gold, then silver/bronze); points leader = rank 1.
-  const medalLeader = rankMedals(rows)[0]?.row.organization;
-  const pointsLeader = rows[0]?.organization;
+  const medalLeader = rankMedals(rows)[0]?.row;
+  const pointsLeader = rows[0];
 
   return (
     <div className="space-y-4">
@@ -98,13 +113,13 @@ export function StandingsPage() {
         {view === 'medals' ? (
           <>
             <StatCard label="Sports & disciplines" value={draws.length} />
-            <StatCard label="Organizations" value={rows.length} />
+            <StatCard label={entrants} value={rows.length} />
             <StatCard label="Medal leader" value={medalLeader?.short_name ?? medalLeader?.name ?? '-'} accent />
           </>
         ) : (
           <>
             <StatCard label="Completed matches" value={data?.completed_matches ?? 0} />
-            <StatCard label="Organizations scoring" value={rows.length} />
+            <StatCard label={`${entrants} scoring`} value={rows.length} />
             <StatCard label="Leader" value={pointsLeader?.short_name ?? pointsLeader?.name ?? '-'} accent />
           </>
         )}
@@ -146,12 +161,12 @@ export function StandingsPage() {
               </thead>
               <tbody>
                 {rows.map((r, i) => {
-                  const isOpen = expanded === r.organization_id;
+                  const isOpen = expanded === r.entity_id;
                   const colSpan = 7 + (showMedals ? 1 : 0);
                   return (
-                  <Fragment key={r.organization_id}>
+                  <Fragment key={r.entity_id}>
                   <tr
-                    onClick={() => setExpanded(isOpen ? null : r.organization_id)}
+                    onClick={() => setExpanded(isOpen ? null : r.entity_id)}
                     className={cn('cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40', isOpen && 'bg-slate-50 dark:bg-slate-800/40')}
                     title="Show how these points were earned"
                   >
@@ -159,8 +174,13 @@ export function StandingsPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <ChevronDown size={16} className={cn('shrink-0 text-slate-400 transition-transform dark:text-slate-500', isOpen && 'rotate-180')} />
-                        <Avatar name={r.organization?.name} size={30} />
-                        <span className="font-medium text-slate-800 dark:text-slate-200">{r.organization?.name}</span>
+                        <Avatar name={r.name} size={30} />
+                        <span className="min-w-0">
+                          <span className="block font-medium text-slate-800 dark:text-slate-200">{r.name}</span>
+                          {r.org_unit?.parent && (
+                            <span className="block text-[11.5px] text-slate-500 dark:text-slate-400">{r.org_unit.parent}</span>
+                          )}
+                        </span>
                       </div>
                     </td>
                     <td className="px-3 py-3 text-center text-slate-600 dark:text-slate-300">{r.played}</td>
@@ -185,7 +205,7 @@ export function StandingsPage() {
                   {isOpen && (
                     <tr className="bg-slate-50/60 dark:bg-slate-800/20">
                       <td colSpan={colSpan} className="px-4 pb-4 pt-0">
-                        <StandingsBreakdown base={`/championships/${eventId}`} scope={scope} scopeId={scopeId} orgId={r.organization_id} />
+                        <StandingsBreakdown base={`/championships/${eventId}`} scope={scope} scopeId={scopeId} entityId={r.entity_id} />
                       </td>
                     </tr>
                   )}

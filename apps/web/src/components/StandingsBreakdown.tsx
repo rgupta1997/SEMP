@@ -38,8 +38,8 @@ const RESULT_STYLE: Record<BreakdownMatch['result'], { label: string; cls: strin
 
 // Expanded standings-row content: how an org's points were earned, grouped by event
 // (sport · discipline). `base` is the championship API path (authed or public token).
-export function StandingsBreakdown({ base, scope, scopeId, orgId }: { base: string; scope: string; scopeId: string | null; orgId: string }) {
-  const q = `?scope=${scope}${scopeId ? `&scopeId=${scopeId}` : ''}&orgId=${orgId}`;
+export function StandingsBreakdown({ base, scope, scopeId, entityId }: { base: string; scope: string; scopeId: string | null; entityId: string }) {
+  const q = `?scope=${scope}${scopeId ? `&scopeId=${scopeId}` : ''}&entityId=${entityId}`;
   const { data, isLoading } = useApi<{ events: BreakdownEvent[] }>(`${base}/standings/breakdown${q}`);
   const events = data?.events ?? [];
 

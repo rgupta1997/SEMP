@@ -14,6 +14,8 @@ import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { resolveEntryRules, type EntryRules } from '../tournaments/domain/entry-rules.js';
 import { assertCanAddMember, assertCanLockRoster } from './domain/roster-policy.js';
+import { assertPlayerEligible, screenSquad, squadEntryRefusal } from '../championships/contingent.js';
+import { unitLabels } from '@semp/shared';
 
 // Default password for auto-provisioned players from a bulk import. They can be
 // invited / reset later; precomputed once to keep the bulk loop cheap.
@@ -88,6 +90,11 @@ const teamFullInclude = {
   organizations: organizationWithOwnersInclude,
   sports: true,
   team_entries: entryInclude,
+  // The campus or department this team plays FOR, when it plays for one. Distinct
+  // from `organizations`, which is who OWNS it - in an intra championship every
+  // team on the list belongs to the same organisation, so the owner's name
+  // distinguishes nothing and the unit's name is the only useful label.
+  org_units: { select: { id: true, name: true, code: true, type: true } },
 } as const;
 
 // Per-entry rules from its discipline draw (defaults when no draw linked yet).
@@ -188,15 +195,27 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       name: string; sport_id: string; organization_id: string;
       championship_id?: string; championship_organization_id?: string; tournament_discipline_id?: string;
     };
+    // Which campus or department this team plays for. Not taken from the request:
+    // it is read off the ENTRY the team is being created against, because the entry
+    // is the row that was already validated as a legal contingent for this event.
+    // Trusting a client-supplied unit here would let a team be created for a campus
+    // that never entered, and it would only surface as a standings row nobody
+    // recognised.
+    // Absent an entry, the client says who this team plays for; with an entry, the
+    // entry decides (below) and this is ignored.
+    let orgUnitId: string | null = (req.body.org_unit_id as string | null | undefined) ?? null;
+    if (orgUnitId) {
+      const unit = await prisma.org_units.findFirst({
+        where: { id: orgUnitId, organization_id },
+        select: { id: true },
+      });
+      // A unit from another institution would produce a team whose contingent belongs
+      // to somebody else - every eligibility and standings read downstream would then
+      // treat it as real.
+      if (!unit) throw new NotFoundError('Campus or department');
+    }
     const creatorId = req.user!.id;
     const seedCaptain = !(await isOrgAdmin(creatorId, organization_id));
-
-    // No two teams of the same org may share a name within a sport.
-    const nameClash = await prisma.teams.findFirst({
-      where: { organization_id, sport_id, name: { equals: name.trim(), mode: 'insensitive' } },
-      select: { id: true },
-    });
-    if (nameClash) throw new BusinessRuleError('Your organization already has a team with this name in this sport');
 
     // Validate the optional "enter at create" inputs before opening a transaction.
     let entryData: { championship_id: string; championship_organization_id: string; tournament_discipline_id: string } | null = null;
@@ -207,22 +226,68 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       const ei = await prisma.championship_organizations.findUnique({ where: { id: championship_organization_id } });
       if (!ei) throw new NotFoundError('Enrollment');
       if (ei.status !== 'approved') throw new BusinessRuleError('Organization enrollment is not approved for this championship');
+      if (ei.organization_id !== organization_id) throw new BusinessRuleError('That entry belongs to another organisation');
+
+      // For an OPEN event the squad represents the organisation, so it carries no
+      // unit whatever the request said. For an INTERNAL one the entry is the host's
+      // standing row and says nothing about which campus this squad is - that comes
+      // from the request, and must name a unit of the host.
+      const champ = await prisma.championships.findUnique({
+        where: { id: championship_id },
+        select: { id: true, name: true, entry_level: true, entry_scope_unit_id: true, host_organization_id: true, organizations: { select: { settings: true } } },
+      });
+      if (champ && champ.entry_level !== 'organization') {
+        if (!orgUnitId) {
+          throw new BusinessRuleError('This championship is contested between campuses or departments. Say which one this squad plays for.');
+        }
+        // The same single check as the enter-existing-squad path. Both must hold it
+        // or the create-and-enter shortcut is a way around both the level rule and
+        // the invitation list.
+        const refusal = await squadEntryRefusal(
+          prisma, champ as never, champ.name, orgUnitId, unitLabels(champ.organizations?.settings),
+        );
+        if (refusal) throw new BusinessRuleError(refusal);
+      } else {
+        orgUnitId = null;
+      }
       await assertDisciplineForTeam(prisma, tournament_discipline_id, championship_id, sport_id);
+      // Scoped to the CONTINGENT, not the organisation: in an intra event Bangalore
+      // and Mumbai are both this organisation, and a duplicate check keyed on the
+      // organisation alone would tell the second campus its own institution had
+      // already entered the draw.
       const dupe = await prisma.team_entries.findFirst({
-        where: { organization_id, championship_id, tournament_discipline_id },
+        where: { organization_id, org_unit_id: orgUnitId, championship_id, tournament_discipline_id },
         select: { id: true },
       });
-      if (dupe) throw new BusinessRuleError('Your organization already has a team in this discipline draw');
+      if (dupe) throw new BusinessRuleError(orgUnitId
+        ? 'That campus or department already has a team in this discipline draw'
+        : 'Your organization already has a team in this discipline draw');
       entryData = { championship_id, championship_organization_id, tournament_discipline_id };
+    }
+
+    // No two teams of the same CONTINGENT may share a name within a sport.
+    //
+    // Checked after the entry is resolved because the entry is what says which
+    // contingent this team belongs to. Keyed on the organisation alone - which is
+    // how it read before intra events - "Bangalore / Cricket XI" would have blocked
+    // "Mumbai / Cricket XI", and the obvious name for a campus team is the sport.
+    const nameClash = await prisma.teams.findFirst({
+      where: { organization_id, org_unit_id: orgUnitId, sport_id, name: { equals: name.trim(), mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (nameClash) {
+      throw new BusinessRuleError(orgUnitId
+        ? 'That campus or department already has a team with this name in this sport'
+        : 'Your organization already has a team with this name in this sport');
     }
 
     const created = await prisma.$transaction(async (tx) => {
       const team = await tx.teams.create({
-        data: { sport_id, organization_id, name, status: 'forming', invite_token: randomBytes(16).toString('hex') },
+        data: { sport_id, organization_id, org_unit_id: orgUnitId, name, status: 'forming', invite_token: randomBytes(16).toString('hex') },
       });
       if (seedCaptain) await tx.team_members.create({ data: { team_id: team.id, user_id: creatorId, role: 'captain' } });
       if (entryData) {
-        await tx.team_entries.create({ data: { team_id: team.id, organization_id, ...entryData, status: 'forming' } });
+        await tx.team_entries.create({ data: { team_id: team.id, organization_id, org_unit_id: orgUnitId, ...entryData, status: 'forming' } });
       }
       return team;
     });
@@ -236,7 +301,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   // roster joins each championship once, and no two teams of the same org may occupy
   // the same draw.
   router.post('/teams/:id/entries', guards.teamManager, validateBody(enterChampionshipsSchema), asyncHandler(async (req, res) => {
-    const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true, organization_id: true, sport_id: true } });
+    const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true, organization_id: true, org_unit_id: true, sport_id: true } });
     if (!team) throw new NotFoundError('Team');
     const input = req.body.entries as Array<{ championship_organization_id: string; tournament_discipline_id?: string | null }>;
 
@@ -250,6 +315,35 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       if (!ei) throw new NotFoundError('Enrollment');
       if (ei.organization_id !== team.organization_id) throw new BusinessRuleError('That enrollment belongs to a different organization');
       if (ei.status !== 'approved') throw new BusinessRuleError('Organization enrollment is not approved for this championship');
+      // Which squads may enter WHICH events. The two rules are opposites, and
+      // getting either wrong produces a standings table nobody can read:
+      //
+      //   open event     - organisation squads only. A campus squad entered here
+      //                    would appear in a table of institutions as though it
+      //                    were one.
+      //   internal event - unit squads only, and the unit must belong to the host.
+      //                    A whole-organisation squad entered here would be the
+      //                    institution playing its own campuses.
+      const champ = await prisma.championships.findUnique({
+        where: { id: ei.championship_id },
+        select: { id: true, name: true, entry_level: true, entry_scope_unit_id: true, host_organization_id: true, organizations: { select: { settings: true } } },
+      });
+      const intra = !!champ && champ.entry_level !== 'organization';
+      if (intra) {
+        // One check, which reports the LEVEL mismatch before the invitation - see
+        // squadEntryRefusal. Getting that order wrong is what told somebody their
+        // batch "has not been invited" when no invitation would have helped.
+        const refusal = await squadEntryRefusal(
+          prisma,
+          champ as never,
+          champ!.name,
+          team.org_unit_id,
+          unitLabels(champ!.organizations?.settings),
+        );
+        if (refusal) throw new BusinessRuleError(refusal);
+      } else if (team.org_unit_id) {
+        throw new BusinessRuleError('This championship is contested between organisations. Enter a whole-organisation squad, not a campus or department one.');
+      }
       const drawId = e.tournament_discipline_id ?? null;
       if (drawId) await assertDisciplineForTeam(prisma, drawId, ei.championship_id, team.sport_id);
       prepared.push({ championship_id: ei.championship_id, championship_organization_id: ei.id, tournament_discipline_id: drawId });
@@ -261,7 +355,12 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     const wantedDraws = prepared.map((p) => p.tournament_discipline_id).filter((d): d is string => !!d);
     const drawTaken = new Set(
       (wantedDraws.length === 0 ? [] : await prisma.team_entries.findMany({
-        where: { organization_id: team.organization_id, tournament_discipline_id: { in: wantedDraws }, team_id: { not: team.id } },
+        where: {
+          organization_id: team.organization_id,
+          org_unit_id: team.org_unit_id ?? null,
+          tournament_discipline_id: { in: wantedDraws },
+          team_id: { not: team.id },
+        },
         select: { tournament_discipline_id: true },
       })).map((e) => e.tournament_discipline_id),
     );
@@ -269,13 +368,17 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       if (champSeen.has(p.championship_id)) throw new BusinessRuleError('This team is already entered in one of the selected championships');
       champSeen.add(p.championship_id);
       if (p.tournament_discipline_id) {
-        if (drawTaken.has(p.tournament_discipline_id)) throw new BusinessRuleError('Your organization already has a team in one of the selected discipline draws');
+        if (drawTaken.has(p.tournament_discipline_id)) {
+          throw new BusinessRuleError(team.org_unit_id
+            ? 'That campus or department already has a team in one of the selected discipline draws'
+            : 'Your organization already has a team in one of the selected discipline draws');
+        }
         drawTaken.add(p.tournament_discipline_id);
       }
     }
 
     await prisma.$transaction(prepared.map((p) => prisma.team_entries.create({
-      data: { team_id: team.id, organization_id: team.organization_id, status: 'forming', ...p },
+      data: { team_id: team.id, organization_id: team.organization_id, org_unit_id: team.org_unit_id ?? null, status: 'forming', ...p },
     })));
     res.status(201).json(await hydrateTeam(prisma, team.id));
   }));
@@ -431,8 +534,70 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   }));
 
   router.patch('/teams/:id', guards.teamManager, validateBody(updateTeamSchema), asyncHandler(async (req, res) => {
-    const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    const team = await prisma.teams.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, name: true, organization_id: true, org_unit_id: true },
+    });
     if (!team) throw new NotFoundError('Team');
+
+    // ---- moving a squad between campuses / batches -------------------------
+    //
+    // Guarded rather than freely allowed, because `teams.org_unit_id` is what the
+    // standings engine reads to decide whose result a match was. Changing it after
+    // the squad has competed would silently re-attribute finished results to another
+    // campus, with no error and nothing in the table to suggest it had happened.
+    const moving = 'org_unit_id' in req.body && (req.body.org_unit_id ?? null) !== (team.org_unit_id ?? null);
+    if (moving) {
+      const nextUnitId = (req.body.org_unit_id as string | null) ?? null;
+
+      // 1 · the unit must be this organisation's, or this is a route for filing a
+      //     squad into another institution's structure.
+      if (nextUnitId) {
+        const unit = await prisma.org_units.findFirst({
+          where: { id: nextUnitId, organization_id: team.organization_id },
+          select: { id: true },
+        });
+        if (!unit) throw new NotFoundError('Campus or department');
+      }
+
+      // 2 · not once it has entered anything. Withdrawing first is the honest path:
+      //     it makes the organiser's entrant list change visibly rather than a
+      //     finished table changing underneath them.
+      const entries = await prisma.team_entries.findMany({
+        where: { team_id: team.id },
+        select: { championships: { select: { name: true } } },
+      });
+      if (entries.length > 0) {
+        const names = [...new Set(entries.map((e) => e.championships?.name).filter(Boolean))];
+        throw new BusinessRuleError(
+          `“${team.name}” is entered in ${names.length === 1 ? `“${names[0]}”` : `${names.length} championships`}. `
+          + 'Withdraw it first — moving a squad after it has entered would change which campus its results belong to.',
+        );
+      }
+
+      // 3 · everybody already picked must still be eligible where it is going.
+      //     Reported by name: "some players are not eligible" is not something
+      //     anybody can act on.
+      const squad = await prisma.team_members.findMany({
+        where: { team_id: team.id, is_active: true },
+        select: { user_id: true },
+      });
+      if (squad.length) {
+        const { refused } = await screenSquad(
+          prisma,
+          { organization_id: team.organization_id, org_unit_id: nextUnitId },
+          squad.map((m) => m.user_id),
+        );
+        if (refused.length) {
+          throw new BusinessRuleError(
+            `${refused.length} ${refused.length === 1 ? 'player is' : 'players are'} not eligible there: `
+            + `${refused.slice(0, 5).map((r) => r.reason).join(' ')}`
+            + (refused.length > 5 ? ` …and ${refused.length - 5} more.` : ''),
+          );
+        }
+      }
+    }
+
     await prisma.teams.update({ where: { id: team.id }, data: { ...req.body } });
     res.json(await hydrateTeam(prisma, team.id));
   }));
@@ -476,6 +641,59 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   }));
 
   // ---- members ----
+  /**
+   * Who may be picked for this squad.
+   *
+   * The picker asks the SERVER rather than filtering the member list itself,
+   * because eligibility is a real rule with a shape a client would get wrong: a
+   * campus includes its batches, a batch does not include its campus, and one
+   * person can belong to several units at once. Reimplementing that in the browser
+   * would leave two answers that drift, and the one people see would be the one
+   * that is not enforced - so somebody picks a name, waits, and is refused.
+   *
+   * Runs the same `screenSquad` the guard runs, so the list offered and the list
+   * accepted are the same list by construction.
+   */
+  router.get('/teams/:id/eligible-players', asyncHandler(async (req, res) => {
+    const team = await prisma.teams.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, organization_id: true, org_unit_id: true },
+    });
+    if (!team) throw new NotFoundError('Team');
+
+    const members = await prisma.organization_members.findMany({
+      where: { organization_id: team.organization_id, status: { notIn: ['pending', 'past'] } },
+      select: {
+        user_id: true,
+        users: {
+          select: {
+            id: true, name: true, email: true, phone: true, sportagon_id: true,
+            org_unit_members: {
+              where: { organization_id: team.organization_id },
+              select: { org_units: { select: { id: true, name: true, type: true } } },
+            },
+          },
+        },
+      },
+    });
+    const withUser = members.filter((m) => m.users);
+
+    // An organisation squad draws from the whole organisation, so there is nothing
+    // to screen - screenSquad short-circuits on a null unit, but saying so here
+    // keeps the empty-unit case obvious to the next reader.
+    if (!team.org_unit_id) {
+      return void res.json(withUser.map((m) => ({ ...m.users, units: (m.users!.org_unit_members ?? []).map((x) => x.org_units) })));
+    }
+
+    const { ok } = await screenSquad(prisma, team, withUser.map((m) => m.user_id));
+    const eligible = new Set(ok);
+    res.json(
+      withUser
+        .filter((m) => eligible.has(m.user_id))
+        .map((m) => ({ ...m.users, units: (m.users!.org_unit_members ?? []).map((x) => x.org_units) })),
+    );
+  }));
+
   router.get('/teams/:id/members', asyncHandler(async (req, res) => {
     const rows = await prisma.team_members.findMany({
       where: { team_id: req.params.id },
@@ -497,6 +715,11 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     if (entries.length > 0 && entries.every((e) => e.status === 'roster_locked')) {
       throw new BusinessRuleError('Every championship entry for this team is locked');
     }
+    // Strict unit eligibility. A team that plays for a campus may only field people
+    // who belong to it - this is what makes "Bangalore beat Mumbai" a fact about
+    // those two campuses rather than about which of them recruited harder from the
+    // other. A no-op for inter-organisation teams, whose unit is null.
+    await assertPlayerEligible(prisma, team, data.user_id);
     if (data.role === 'captain' || data.role === 'vice_captain') {
       const existing = await prisma.team_members.findFirst({ where: { team_id: teamId, role: data.role }, select: { id: true } });
       if (existing) throw new BusinessRuleError(`This team already has a ${data.role === 'vice_captain' ? 'vice-captain' : 'captain'}`);
@@ -529,6 +752,9 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     const rules = looseAddRules(entries);
 
     const result = await prisma.$transaction(async (tx) => {
+      // Ineligible players are SKIPPED with a reason, not thrown on. A captain
+      // pasting thirty names wants the list of who cannot play and the other
+      // twenty-seven added, not a wall on the first out-of-campus name.
       const rows = req.body.members as Array<{ user_id?: string; name?: string; email?: string; role: string; jersey_number?: number | null }>;
 
       // Resolve every email in one query instead of a findUnique per row, then
@@ -560,6 +786,13 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       const onRoster = new Set(
         (await tx.team_members.findMany({ where: { team_id: team.id }, select: { user_id: true } })).map((m) => m.user_id),
       );
+
+      // Screened AFTER the auto-create step above, so a person the import just
+      // created is judged on the membership it gave them rather than on not having
+      // existed a moment ago.
+      const candidateIds = [...new Set(rows.map((r) => r.user_id ?? (r.email ? byEmail.get(r.email)?.id : null)).filter((id): id is string => !!id))];
+      const screened = await screenSquad(tx, team, candidateIds);
+      const ineligible = new Map(screened.refused.map((r) => [r.user_id, r.reason]));
       let count = await tx.team_members.count({ where: { team_id: team.id, is_active: true } });
 
       const added: { name: string; email?: string }[] = [];
@@ -576,6 +809,8 @@ export function makeTeamsRouter(prisma: Prisma): Router {
         if (!userId) { skipped.push({ label, reason: 'no user/email' }); continue; }
         // onRoster also absorbs duplicates within the same batch (we add as we go).
         if (onRoster.has(userId)) { skipped.push({ label, reason: 'already on roster' }); continue; }
+        const refusal = ineligible.get(userId);
+        if (refusal) { skipped.push({ label, reason: refusal }); continue; }
         if (count + 1 > rules.squad_max) {
           throw new BusinessRuleError(`Squad limit reached: at most ${rules.squad_max} members`);
         }

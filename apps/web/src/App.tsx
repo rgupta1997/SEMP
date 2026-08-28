@@ -14,7 +14,6 @@ import { CreateEventWizard } from './pages/organiser/CreateEventWizard';
 import { EventLayout } from './pages/organiser/EventLayout';
 import { EventDashboard } from './pages/organiser/EventDashboard';
 import { EventSetupPage } from './pages/organiser/EventSetupPage';
-import { ApprovalsPage } from './pages/organiser/ApprovalsPage';
 import { SchedulePage } from './pages/organiser/SchedulePage';
 import { ResultsPage } from './pages/organiser/ResultsPage';
 import { StandingsPage } from './pages/organiser/StandingsPage';
@@ -33,6 +32,7 @@ import { SportsProfilePage } from './pages/participant/SportsProfilePage';
 import { MyGamePage } from './pages/MyGamePage';
 import { OrgDashboardPage } from './pages/organization/OrgDashboardPage';
 import { PlayersPage } from './pages/organization/PlayersPage';
+import { CampusesPage } from './pages/organization/CampusesPage';
 import { PlayerDetailPage } from './pages/organization/PlayerDetailPage';
 import { OrgEventsPage } from './pages/organization/OrgEventsPage';
 import { OrgAchievementsPage } from './pages/organization/OrgAchievementsPage';
@@ -46,7 +46,6 @@ import { TemplatePreviewPage } from './pages/organization/certificates/TemplateP
 import { VerifyCertificatePage } from './pages/public/VerifyCertificatePage';
 import { AdminPage } from './pages/organization/AdminPage';
 import { MembersPage } from './pages/organization/MembersPage';
-import { PocsPage } from './pages/organization/PocsPage';
 import { InvitationsPage } from './pages/organization/InvitationsPage';
 
 // Officiating
@@ -107,6 +106,7 @@ function AuthenticatedRoutes() {
         <Route path="/organizations/:orgId/teams" element={<TeamsPage />} />
         <Route path="/organizations/:orgId/teams/:teamId" element={<RosterPage />} />
         <Route path="/organizations/:orgId/students" element={<PlayersPage />} />
+        <Route path="/organizations/:orgId/campuses" element={<CampusesPage />} />
         <Route path="/organizations/:orgId/people/:userId" element={<PlayerDetailPage />} />
         <Route path="/organizations/:orgId/members" element={<MembersPage />} />
         <Route path="/organizations/:orgId/roles" element={<RolesPage />} />
@@ -131,7 +131,6 @@ function AuthenticatedRoutes() {
           <Route index element={<EventDashboard />} />
           <Route path="setup" element={<EventSetupPage />} />
           <Route path="organisers" element={<EventOrganisersPage />} />
-          <Route path="approvals" element={<ApprovalsPage />} />
           <Route path="participants" element={<EventParticipantsPage />} />
           <Route path="schedule" element={<SchedulePage />} />
           <Route path="results" element={<ResultsPage />} />

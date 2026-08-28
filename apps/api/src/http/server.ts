@@ -255,8 +255,16 @@ export function buildApp(prisma: Prisma) {
   api.use('/organizations/:id/audit', ents.requireCapability('audit_logs', orgParam));
   api.use('/', makeAuditRouter(prisma));
 
-  // Campuses and units - the concrete scopes a campus_unit role is granted against.
-  api.use('/organizations/:id/units', ents.requireCapability('multi_campus', orgParam));
+  // Campuses and units - the concrete scopes a campus_unit role is granted against,
+  // and the entrants of an intra-organisation championship.
+  //
+  // NOT gated as a whole path any more. `multi_campus` means "more than one campus",
+  // and blanket-gating the route made reading the structure a paid feature: placing
+  // a player in a department, naming a team's campus and listing an intra event's
+  // entrants all read this tree, so a free organisation could not see the shape of
+  // itself. The capability is now asserted where it actually applies - creating a
+  // SECOND campus - inside the handler, which is also the only place that can tell
+  // whether this is the second one.
   api.use('/organizations', makeOrgUnitsRouter(prisma));
   api.use('/organizations', makeOrgEventsRouter(prisma));
   api.use('/organizations', makeOrgDashboardRouter(prisma));
