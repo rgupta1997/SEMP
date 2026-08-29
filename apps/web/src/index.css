@@ -358,15 +358,30 @@ body {
 
 /* Momentum scrolling for the horizontal chip rows that replace wrapping toolbars
    on a phone, with the scrollbar hidden and snap points so a row never rests
-   half-way through a chip. */
-.snap-row {
-  display: flex; gap: .5rem;
-  overflow-x: auto; scroll-snap-type: x proximity;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
+   half-way through a chip.
+   
+   PHONE ONLY, AND THE MEDIA QUERY IS LOAD-BEARING. This file is imported AFTER
+   Tailwind's utilities, so a bare `.snap-row { display: flex }` has the same
+   specificity as `sm:block` / `sm:flex-wrap` / `sm:overflow-visible` and wins on
+   source order - silently overriding every responsive override a caller writes.
+   
+   It broke the Administration rail exactly that way: the rail is `sm:block
+   sm:w-[214px]`, but `.snap-row` forced `display:flex` at every width, so on a
+   desktop the seven tabs laid out as a ROW inside a 214px column and six of them
+   were scrolled off. An owner saw one tab and concluded they had lost their
+   permissions. Scoping the class below `sm` means it contributes nothing at the
+   widths where the `sm:` utilities are meant to take over, so there is no contest
+   to lose. */
+@media (max-width: 639.98px) {
+  .snap-row {
+    display: flex; gap: .5rem;
+    overflow-x: auto; scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .snap-row::-webkit-scrollbar { display: none; }
+  .snap-row > * { scroll-snap-align: start; flex: 0 0 auto; }
 }
-.snap-row::-webkit-scrollbar { display: none; }
-.snap-row > * { scroll-snap-align: start; flex: 0 0 auto; }
 
 /* Edge-to-edge on a phone, inset on a desktop: a card that keeps 16px of gutter
    on each side of a 390px screen has thrown away 8% of its width. */

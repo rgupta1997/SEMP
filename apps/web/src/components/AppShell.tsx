@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   BadgeCheck, Compass, Flag, FlaskConical, Landmark, Layers, LayoutGrid, LayoutList, Lock,
@@ -9,6 +9,7 @@ import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
 import { BRAND } from '../lib/brand';
 import { ContextSwitcher } from './ContextSwitcher';
 import { useWorkspace } from '../lib/useWorkspace';
+import { applyTenantTheme } from '../lib/tenant-theme';
 import { hrefFor, resolveNav } from '../lib/workspace';
 import { BottomNav } from './BottomNav';
 import { Lock as LockIcon, SlidersHorizontal } from 'lucide-react';
@@ -171,6 +172,31 @@ export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const signOut = () => { logout(); navigate('/', { replace: true }); };
+
+  /**
+   * PAINT THE INSTITUTION'S COLOUR ONTO THE DOCUMENT.
+   *
+   * HERE, AND ONLY HERE. This lived inside `useWorkspace()`, which is called by the
+   * shell AND by a dozen pages - so every one of them mounted its own copy of the
+   * effect against the same three global CSS variables. Navigating from
+   * Administration to Teams unmounted that page's copy, its cleanup cleared the
+   * variables, and the shell's copy never re-ran because its own dependencies had
+   * not changed. The colour survived a full page reload and vanished on a click,
+   * which is exactly the shape of "the colour I chose was there but the theme didn't
+   * change".
+   *
+   * The shell is mounted for the whole authenticated app, so one owner, one effect,
+   * one cleanup - which now only fires on sign-out, where clearing is right.
+   *
+   * Keyed to the active WORKSPACE rather than the route: the sidebar, tab bar and
+   * switcher all follow the workspace too, so a colour keyed to the URL would flip
+   * to Sportagon blue on /home while the navigation beside it named the institution.
+   */
+  useEffect(() => {
+    applyTenantTheme(ws.active?.kind === 'org' ? ws.active.theme : null);
+  }, [ws.active?.id, ws.active?.kind, ws.active?.theme?.brand]);
+
+  useEffect(() => () => applyTenantTheme(null), []);
 
   const eventId = ctx ? parseEventId(pathname) : null;
   const { data: championship } = useApi<EventSummary>(eventId ? `/championships/${eventId}` : null);

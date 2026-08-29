@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, Info, Palette, RotateCcw } from 'lucide-react';
 import { api } from '../../../lib/api';
+import { useAuth } from '../../../lib/auth';
 import { useApi } from '../../../lib/hooks';
 import { usePermissions } from '../../../lib/permissions';
 import {
@@ -33,6 +34,13 @@ import { QueryState } from '../../../components/primitives';
  */
 export function AppearancePanel({ orgId }: { orgId: string }) {
   const canManage = usePermissions().hasOrgPermission('org.manage', orgId);
+  // The workspace paints the theme from the AUTH CONTEXT, which is a snapshot taken
+  // at sign-in. Saving here writes the database and refreshes this panel's own
+  // query - but leaves that snapshot holding the old colour, and the workspace
+  // effect then re-applies it over the choice that was just made. The swatch showed
+  // the new colour, the interface stayed blue, and nothing looked broken enough to
+  // explain why. Refreshing the context is what makes the save actually take.
+  const { refresh } = useAuth();
   const q = useApi<{ theme: TenantTheme }>(`/organizations/${orgId}/settings/appearance`);
 
   const saved = q.data?.theme?.brand ?? null;
@@ -44,14 +52,23 @@ export function AppearancePanel({ orgId }: { orgId: string }) {
   const current = draft ?? saved ?? DEFAULT_BRAND;
   const dirty = draft !== null && draft !== (saved ?? DEFAULT_BRAND);
 
-  // Live preview, and put it back on the way out. The cleanup is what makes it
-  // safe to try six colours and walk away: an unsaved choice must not follow you
-  // to the next screen.
+  // Live preview, and put it back on the way out. The cleanup is what makes it safe
+  // to try six colours and walk away: an unsaved choice must not follow you to the
+  // next screen.
+  //
+  // It reads `saved` through a ref rather than closing over it, and depends on
+  // `draft` alone. Otherwise saving re-runs the effect with BOTH values changed, and
+  // the cleanup - carrying the previous render's `saved` - repaints the OLD colour
+  // over the one just committed. That race is why a saved colour appeared to take
+  // and then quietly did not.
+  const savedRef = useRef(saved);
+  savedRef.current = saved;
+
   useEffect(() => {
     if (draft === null) return;
     applyTenantTheme({ brand: draft });
-    return () => applyTenantTheme({ brand: saved });
-  }, [draft, saved]);
+    return () => applyTenantTheme({ brand: savedRef.current });
+  }, [draft]);
 
   const legible = contrastsWithWhite(current);
   const hsl = hexToHsl(current);
@@ -60,7 +77,9 @@ export function AppearancePanel({ orgId }: { orgId: string }) {
     setBusy(true);
     try {
       await api('PATCH', `/organizations/${orgId}/settings/appearance`, { brand: value });
-      await q.refetch();
+      // Both, and in this order: the panel's own query so the controls settle, and
+      // the auth context so the workspace stops re-applying the previous colour.
+      await Promise.all([q.refetch(), refresh()]);
       setDraft(null);
       applyTenantTheme({ brand: value });
       toast.success(value ? 'Workspace colour saved' : 'Back to the Sportagon colour');

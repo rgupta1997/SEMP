@@ -4,7 +4,7 @@ import type { CapabilityKey } from '@semp/entitlements';
 import { useAuth } from './auth';
 import { useApi } from './hooks';
 import { membershipRoleCode } from '@semp/shared';
-import { applyTenantTheme, themeOf, type TenantTheme } from './tenant-theme';
+import { themeOf } from './tenant-theme';
 import { EVENT_ROLE_CODES, landingFor, type ContextKind, type NavFacts, type WorkspaceContext } from './workspace';
 
 // Turning one account into the list of workspaces it can enter.
@@ -227,30 +227,6 @@ export function useWorkspace() {
   }, [storeKey, contexts.length, routeContextId]);
 
   const active = contexts.find((c) => c.id === activeId) ?? contexts[0] ?? null;
-
-  /**
-   * PAINT THE INSTITUTION'S COLOUR ONTO THE DOCUMENT.
-   *
-   * Keyed to the ACTIVE WORKSPACE - not the account, and not the URL. One person
-   * belongs to several institutions, and the one they are standing in is the one
-   * whose brand should be on screen.
-   *
-   * Following the workspace rather than the route is deliberate: the sidebar, the
-   * tab bar and the switcher all follow the workspace too, so a colour keyed to the
-   * URL would flip to Sportagon blue on /home while the navigation beside it still
-   * said the institution's name. Switching context repaints; an event does not
-   * carry a third brand into the same screen, and the theme clears when the last
-   * organisation context goes away.
-   *
-   * One effect writing three CSS variables - every `--color-brand-*` step, the
-   * sidebar, focus rings, chips and links are derived from them in index.css, so
-   * nothing here has to know which components use the ramp.
-   */
-  useEffect(() => {
-    applyTenantTheme(active?.kind === 'org' ? active.theme : null);
-    return () => applyTenantTheme(null);
-  }, [active?.id, active?.kind, active?.theme?.brand]);
-
   // What is true of this PERSON, for the nav items that depend on it rather than
   // on the context. Read from the auth context, so somebody added to an event's
   // officials list mid-session sees Officiating appear on the next /me rather than

@@ -350,7 +350,7 @@ export function FilterChips<T extends string>({ value, onChange, options, classN
     // jumps between renders. One row that scrolls keeps the geometry stable and
     // costs nothing: the chips are ordered, so the ones past the edge are the ones
     // least often wanted.
-    <div className={cn('snap-row bleed-x mb-4 px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0', className)}>
+    <div className={cn('snap-row bleed-x mb-4 px-4 pb-1 sm:mx-0 sm:flex sm:flex-wrap sm:gap-2 sm:overflow-visible sm:px-0 sm:pb-0', className)}>
       {options.map((o, i) => {
         const active = o.key === value;
         return (
