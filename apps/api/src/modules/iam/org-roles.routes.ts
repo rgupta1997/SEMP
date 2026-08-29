@@ -33,6 +33,14 @@ const moduleSettingsSchema = z.object({
 // shape (user + organization + role) rather than in a check somebody could forget.
 
 
+// A hex colour, or null to go back to the product's own blue. Validated here so a
+// value that cannot be parsed never reaches the browser, where it would silently
+// resolve to "no theme" and read as the setting not having saved.
+const appearanceSchema = z.object({
+  brand: z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Enter a colour like #004AAD').nullable().optional(),
+  logo_url: z.string().max(600).nullable().optional(),
+}).refine((v) => v.brand !== undefined || v.logo_url !== undefined, { message: 'Nothing to change' });
+
 const setRolePermissionsSchema = z.object({
   // Only catalogue codes. A permission the product cannot enforce is not a
   // permission, so an unknown code is rejected rather than stored and ignored.
@@ -102,6 +110,59 @@ export function makeOrgRolesRouter(prisma: Prisma): Router {
     res.json({ settings: parsed.modules });
   }));
   const guards = makeGuards(prisma);
+
+  // ---- appearance: the institution's own colour -------------------------
+  //
+  // Stored beside the module map in `organizations.settings`, for the same reason:
+  // it is a setting about the organisation, not a new table. ONE colour is stored -
+  // the ten-step ramp the interface actually uses is derived from it in the browser
+  // (index.css expresses every --color-brand-* step as an hsl() of three seed
+  // variables), so a tenant picks a colour rather than authoring a palette, and the
+  // lightness relationships the product was designed against survive whatever hue
+  // they choose.
+  //
+  // `org.manage` to write, and readable by any active member: the client needs it
+  // to paint the workspace, and it is not a secret - it is on every screen.
+
+  router.get('/organizations/:id/settings/appearance', asyncHandler(async (req, res) => {
+    const org = await prisma.organizations.findUnique({
+      where: { id: req.params.id },
+      select: { settings: true, name: true },
+    });
+    if (!org) throw new NotFoundError('Organization');
+    const theme = (org.settings as { theme?: unknown } | null)?.theme;
+    res.json({ theme: theme && typeof theme === 'object' ? theme : {} });
+  }));
+
+  router.patch('/organizations/:id/settings/appearance', guards.orgPermission('org.manage'),
+    validateBody(appearanceSchema), asyncHandler(async (req, res) => {
+      const organizationId = req.params.id;
+      const org = await prisma.organizations.findUnique({
+        where: { id: organizationId },
+        select: { settings: true, name: true },
+      });
+      if (!org) throw new NotFoundError('Organization');
+
+      const before = (org.settings as { theme?: unknown } | null)?.theme ?? {};
+      // Merged into the blob rather than replacing it: `settings` also carries the
+      // module map, retention and other keys that have nothing to do with colour.
+      const theme = { ...(before as object), ...req.body };
+      await prisma.organizations.update({
+        where: { id: organizationId },
+        data: { settings: { ...(org.settings as object ?? {}), theme } },
+      });
+
+      await audit(prisma, req, {
+        action: AUDIT_ACTIONS.orgSettingsChanged,
+        target: { type: 'organizations', id: organizationId, label: 'Appearance' },
+        organizationId,
+        summary: `Changed the workspace colour for ${org.name}`,
+        diff: { theme: { from: before, to: theme } },
+      });
+
+      res.json({ theme });
+    }));
+
 
   // `role.manage` rather than membership. The screen that decides who is a Sports
   // Admin was itself reachable only by an owner/admin MEMBER, which meant the one

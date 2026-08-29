@@ -8,8 +8,9 @@ import { api } from '../../lib/api';
 import { usePageFilters } from '../../lib/filters';
 import { useApi } from '../../lib/hooks';
 import {
-  Badge, Button, Card, EmptyState, Modal, Spinner, StatusBadge, Textarea, cn, confirmDialog, toast,
+  Badge, Button, Card, EmptyState, FilterChips, Modal, Spinner, StatusBadge, Textarea, cn, confirmDialog, toast,
 } from '../../components/ui';
+import { useUrlState, usePreserveScroll } from '../../components/primitives';
 
 // A flattened fixture row from GET /championships/:id/fixtures.
 interface ResultRow {
@@ -179,17 +180,6 @@ export function ResultsPage() {
   // Group matches by their draw (sport + discipline) so the list reads as sections
   // instead of one long flat run. Groups keep first-appearance order; rows keep the
   // scheduled order from the API.
-  const groups = useMemo(() => {
-    const map = new Map<string, { key: string; sport: string | null; discipline: string | null; icon: string | null; rows: ResultRow[] }>();
-    for (const f of rows) {
-      const key = `${f.sport ?? ''}__${f.discipline ?? ''}`;
-      let g = map.get(key);
-      if (!g) { g = { key, sport: f.sport, discipline: f.discipline, icon: f.sport_icon, rows: [] }; map.set(key, g); }
-      g.rows.push(f);
-    }
-    return [...map.values()];
-  }, [rows]);
-
   // Who may open the console for THIS match: the organiser, or the official the
   // match was assigned to. Per match, not per championship, because that is the
   // rule the server enforces (permissions.ts, fixtureScorer) - an official offered
@@ -216,12 +206,34 @@ export function ResultsPage() {
   // control anywhere in the product, so a championship could be played to the end
   // and still have nothing to certify.
   const qc = useQueryClient();
+  const preserveScroll = usePreserveScroll();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [unlocking, setUnlocking] = useState<ResultRow | null>(null);
 
-  const refreshAfterLock = () => qc.invalidateQueries({
-    predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0] as string).includes(`/championships/${eventId}`),
-  });
+  /**
+   * WHAT ACTUALLY CHANGED, AND NOTHING ELSE.
+   *
+   * This used to invalidate EVERY query whose key contained this championship -
+   * the fixtures list, the standings, the lock status, the event summary - which
+   * refetched the list you are looking at and re-laid it out underneath you.
+   *
+   * Locking a scorecard changes one fixture. So the fixture is patched in place in
+   * the cache: no request, no refetch, no reflow, and the row updates under your
+   * finger. Standings genuinely do change, so those are invalidated - they are a
+   * different query on a different tab and moving them costs this page nothing.
+   */
+  const patchFixture = (ids: string[], patch: Partial<ResultRow>) => {
+    qc.setQueryData<ResultRow[]>([`/championships/${eventId}/fixtures`], (prev) =>
+      (prev ?? []).map((f) => (ids.includes(f.id) ? { ...f, ...patch } : f)));
+    qc.invalidateQueries({
+      predicate: (q) => {
+        const k = q.queryKey[0];
+        return typeof k === 'string'
+          && k.includes(`/championships/${eventId}`)
+          && !k.endsWith('/fixtures');
+      },
+    });
+  };
 
   const locked = (f: ResultRow) => f.scorecard_status === 'locked';
   // What the server will accept, mirrored here so a button is not offered on a
@@ -235,6 +247,42 @@ export function ResultsPage() {
   const readyRows = useMemo(() => rows.filter(lockable), [rows]);
   const lockedCount = useMemo(() => rows.filter(locked).length, [rows]);
 
+  /**
+   * THE QUEUE, AS A FILTER.
+   *
+   * Mid-event an organiser is not browsing results, they are working through the
+   * ones that need them - and this page offered no way to see only those. "Awaiting
+   * review" is the whole job: everything finished, scored, and not yet official.
+   * Kept in the URL so coming back from a scorecard returns to the same queue.
+   */
+  const [queue, setQueue] = useUrlState<string>('show', 'all');
+  const visibleRows = useMemo(() => rows.filter((f) => {
+    if (queue === 'ready') return lockable(f);
+    if (queue === 'locked') return locked(f);
+    if (queue === 'pending') return !locked(f) && !lockable(f);
+    return true;
+  }), [rows, queue]);
+
+  const queueCounts = useMemo(() => ({
+    all: rows.length,
+    ready: readyRows.length,
+    locked: lockedCount,
+    pending: rows.length - readyRows.length - lockedCount,
+  }), [rows.length, readyRows.length, lockedCount]);
+
+  // Grouped from the FILTERED rows, so choosing "Awaiting review" narrows the
+  // sport headings too rather than leaving empty ones behind.
+  const groups = useMemo(() => {
+    const map = new Map<string, { key: string; sport: string | null; discipline: string | null; icon: string | null; rows: ResultRow[] }>();
+    for (const f of visibleRows) {
+      const key = `${f.sport ?? ''}__${f.discipline ?? ''}`;
+      let g = map.get(key);
+      if (!g) { g = { key, sport: f.sport, discipline: f.discipline, icon: f.sport_icon, rows: [] }; map.set(key, g); }
+      g.rows.push(f);
+    }
+    return [...map.values()];
+  }, [visibleRows]);
+
   const matchLabel = (f: ResultRow) =>
     (f.home || f.away) ? `${teamLabel(f.home) || 'TBD'} vs ${teamLabel(f.away) || 'TBD'}` : (f.discipline ?? f.sport ?? 'This event');
 
@@ -247,9 +295,14 @@ export function ResultsPage() {
     });
     if (!ok) return;
     setBusyId(f.id);
+    // Everything above the list can change height when a lock lands - the queue
+    // banner counts down, and disappears entirely on the last one. Hold the
+    // reader's position across it.
+    const restore = preserveScroll();
     try {
       await api('POST', `/fixtures/${f.id}/lock`, {});
-      await refreshAfterLock();
+      patchFixture([f.id], { scorecard_status: 'locked' });
+      restore();
       toast.success('Result locked', `${matchLabel(f)} is now official.`);
     } catch (e: any) {
       toast.error('Could not lock this result', e.message);
@@ -260,7 +313,7 @@ export function ResultsPage() {
     setBusyId(f.id);
     try {
       await api('POST', `/fixtures/${f.id}/unlock`, { reason });
-      await refreshAfterLock();
+      patchFixture([f.id], { scorecard_status: 'submitted' });
       setUnlocking(null);
       toast.success('Result unlocked', 'It is back to submitted and can be corrected.');
     } catch (e: any) {
@@ -281,11 +334,17 @@ export function ResultsPage() {
     });
     if (!ok) return;
     setBusyId('bulk');
+    const restore = preserveScroll();
     try {
-      const r = await api<{ locked: number; failed: number; results: Array<{ error?: string }> }>(
+      const r = await api<{ locked: number; failed: number; results: Array<{ id?: string; error?: string }> }>(
         'POST', `/championships/${eventId}/fixtures/lock-bulk`, { fixture_ids: batch.map((f) => f.id) },
       );
-      await refreshAfterLock();
+      // Only the ones that actually locked. The server reports per-card failures
+      // rather than refusing the batch, so marking all 50 locked would show a
+      // scorecard as official that the server had refused.
+      const failedIds = new Set(r.results.filter((x) => x.error).map((x) => x.id));
+      patchFixture(batch.map((f) => f.id).filter((id) => !failedIds.has(id)), { scorecard_status: 'locked' });
+      restore();
       const firstError = r.results.find((x) => x.error)?.error;
       if (r.failed > 0) {
         toast.warning(`${r.locked} locked, ${r.failed} could not be`, firstError);
@@ -307,9 +366,13 @@ export function ResultsPage() {
               ? 'Tap a match you are officiating to record its result.'
               : 'Live scores and final results across the championship.'}
         </p>
-        {/* Background refresh (e.g. returning here right after a sign-off) keeps the
-            list visible but signals that the latest scores are being pulled. */}
-        {isFetching && !isLoading && <Spinner label="Refreshing…" />}
+        {/* Background refresh keeps the list visible while the latest scores are
+            pulled. The slot holds its width whether or not it is showing anything:
+            an indicator that appears and disappears in a flex row was one of the
+            things nudging the list under the reader between renders. */}
+        <div className="min-w-[7.5rem] shrink-0 text-right" aria-live="polite">
+          {isFetching && !isLoading && <Spinner label="Refreshing…" />}
+        </div>
       </div>
 
       {customActive && canManage && (
@@ -335,12 +398,32 @@ export function ResultsPage() {
         </div>
       )}
 
-      {isLoading ? <Spinner /> : rows.length === 0 ? (
+      {/* The queue. An organiser mid-event wants the ones that need them, not a
+          browse of everything played so far. */}
+      {rows.length > 0 && (
+        <FilterChips
+          value={queue}
+          onChange={setQueue}
+          options={[
+            { key: 'all', label: 'All matches', count: queueCounts.all },
+            { key: 'ready', label: 'Awaiting review', count: queueCounts.ready },
+            { key: 'pending', label: 'Not played', count: queueCounts.pending },
+            { key: 'locked', label: 'Official', count: queueCounts.locked },
+          ]}
+        />
+      )}
+
+      {isLoading ? <Spinner /> : visibleRows.length === 0 ? (
         <EmptyState
           icon={<Flag size={24} />}
-          title={fixtures.length === 0 ? 'No fixtures yet' : 'No matches for this sport'}
+          title={fixtures.length === 0 ? 'No fixtures yet'
+            : queue === 'ready' ? 'Nothing waiting to be made official'
+            : queue === 'locked' ? 'No results are official yet'
+            : queue === 'pending' ? 'Everything here has been played'
+            : 'No matches for this sport'}
           description={fixtures.length === 0
             ? (canManage ? 'Generate draws on the Schedule tab - matches appear here for scoring.' : 'Results will appear here once matches are scheduled and played.')
+            : queue !== 'all' ? 'Nothing in this view. Choose "All matches" to see the rest.'
             : 'Clear the sport filter or pick another sport.'}
         />
       ) : (

@@ -234,6 +234,12 @@ export interface WorkspaceContext {
   sub?: string;
   /** Organisations carry a verification state; it is a trust signal, not a gate. */
   verified?: boolean;
+  /**
+   * The institution's own colour, applied to the whole workspace while it is the
+   * active context. Only organisations have one - an event borrows its host's
+   * chrome rather than carrying a third brand into the same screen.
+   */
+  theme?: { brand?: string | null; logo_url?: string | null };
 }
 
 /**

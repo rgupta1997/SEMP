@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, CircleDashed, Info, Search, X } from 'lucide-react';
 import { titleCase } from '../lib/format';
+import { useDialog } from '../lib/useDialog';
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
@@ -26,10 +27,14 @@ export function Button({
     danger: 'bg-rose-600 text-white hover:bg-rose-700 shadow-sm',
     subtle: 'bg-brand-50 text-brand-700 hover:bg-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:hover:bg-brand-500/25',
   };
+  // MINIMUM HEIGHTS, not just padding. `py-1.5 text-xs` is a 28px button, which is
+  // 16px short of the 44px a thumb needs, and the audit found these used for real
+  // actions - Verify, Lock, Remove - on rows people tap on a phone. The height
+  // floors relax at sm+ where a pointer is precise and 28px is the right density.
   const sizes: Record<ButtonSize, string> = {
-    sm: 'px-2.5 py-1.5 text-xs rounded gap-1.5',
-    md: 'px-3.5 py-2 text-sm rounded gap-2',
-    lg: 'px-5 py-2.5 text-base rounded-md gap-2',
+    sm: 'min-h-[36px] sm:min-h-0 px-2.5 py-1.5 text-xs rounded gap-1.5',
+    md: 'min-h-[44px] sm:min-h-0 px-3.5 py-2 text-sm rounded gap-2',
+    lg: 'min-h-[48px] px-5 py-2.5 text-base rounded-md gap-2',
   };
   return (
     <button
@@ -247,22 +252,71 @@ export function StatusLegend({ statuses = MATCH_LEGEND_STATUSES, value, onSelect
 // The modal is capped to the viewport height: the header (and optional `footer`)
 // stay pinned while only the body scrolls. Put action buttons in `footer` so they
 // never scroll out of view. `size` overrides the default/`wide` width.
-const MODAL_WIDTHS = { lg: 'max-w-lg', xl: 'max-w-xl', '2xl': 'max-w-2xl', '3xl': 'max-w-3xl', '4xl': 'max-w-4xl' } as const;
+// Widths apply from sm up. Below that a modal is a full-width sheet, so a
+// `max-w-lg` here would leave a 78px gutter on a 390px phone for no reason.
+const MODAL_WIDTHS = { lg: 'sm:max-w-lg', xl: 'sm:max-w-xl', '2xl': 'sm:max-w-2xl', '3xl': 'sm:max-w-3xl', '4xl': 'sm:max-w-4xl' } as const;
 export function Modal({ title, onClose, children, footer, wide, size, dismissible = true }:
   { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; size?: keyof typeof MODAL_WIDTHS; dismissible?: boolean }) {
-  const maxW = size ? MODAL_WIDTHS[size] : wide ? 'max-w-2xl' : 'max-w-lg';
+  const maxW = size ? MODAL_WIDTHS[size] : wide ? 'sm:max-w-2xl' : 'sm:max-w-lg';
+
+  // A BOTTOM SHEET ON A PHONE, A DIALOG ON A DESKTOP.
+  //
+  // This used to centre a `max-w-lg` card at every width with `p-4` around it, so on
+  // a 390px screen every dialog in the product was a floating box with ~24px of
+  // wasted gutter and its confirm button wherever the body happened to end. Roughly
+  // twenty modals inherit from here, so they all changed shape at once rather than
+  // twenty times by hand.
+  //
+  // Three things make it a sheet rather than a narrow dialog: it is anchored to the
+  // bottom edge where a thumb is, it is rounded only at the top because the bottom
+  // edge IS the screen edge, and `max-h-[92dvh]` uses the dynamic viewport so the
+  // browser chrome cannot cover its footer.
+  //
+  // `useDialog` adds what every overlay here was missing: a focus trap, Escape,
+  // focus restoration on close, and a body that cannot scroll behind it.
+  //
   // `dismissible={false}` keeps a backdrop click from closing the modal - used for
   // long/batched flows (imports) so a stray outside-click can't discard an in-flight
   // run or its result. The × button still closes it explicitly.
+  const ref = useDialog(true, onClose);
+
   return createPortal(
-    <div className="animate-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4 sm:p-6 backdrop-blur-sm" onClick={dismissible ? onClose : undefined}>
-      <div className={cn('flex max-h-full w-full flex-col animate-fade-up rounded-[20px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900', maxW)} onClick={(e) => e.stopPropagation()}>
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800">
-          <h3 className="text-lg font-semibold dark:text-slate-100">{title}</h3>
-          <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">×</button>
+    <div
+      className="animate-backdrop fixed inset-0 z-modal flex items-end justify-center bg-slate-900/50 backdrop-blur-sm sm:items-center sm:p-6"
+      onClick={dismissible ? onClose : undefined}
+    >
+      <div
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        className={cn(
+          'animate-sheet flex max-h-[92dvh] w-full flex-col overflow-hidden bg-white shadow-2xl outline-none dark:bg-slate-900',
+          'rounded-t-[22px] sm:rounded-[20px] sm:border sm:border-slate-200 dark:sm:border-slate-800',
+          maxW,
+        )}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-center pt-2.5 sm:hidden" aria-hidden>
+          <span className="h-1 w-9 rounded-full bg-slate-300 dark:bg-slate-700" />
         </div>
-        <div className="flex-1 overflow-y-auto p-5">{children}</div>
-        {footer && <div className="shrink-0 border-t border-slate-200 px-5 py-4 dark:border-slate-800">{footer}</div>}
+        <div className="flex shrink-0 items-center justify-between gap-3 px-5 py-3 sm:border-b sm:border-slate-200 sm:py-4 dark:sm:border-slate-800">
+          <h3 className="t-section min-w-0 dark:text-slate-100">{title}</h3>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="tap -m-1 shrink-0 rounded-lg p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+          >
+            <X size={20} />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        {/* Pinned, and clear of the home indicator. A footer that scrolls with the
+            body is the reason people could not find Save on a phone. */}
+        {footer && (
+          <div className="shrink-0 border-t border-slate-200 px-5 py-3.5 pb-safe dark:border-slate-800">{footer}</div>
+        )}
       </div>
     </div>,
     document.body,
@@ -285,7 +339,13 @@ export function FilterChips<T extends string>({ value, onChange, options, classN
   className?: string;
 }) {
   return (
-    <div className={cn('mb-4 flex flex-wrap gap-2', className)}>
+    // A SCROLLING ROW BELOW sm, NOT A WRAPPING GRID.
+    // Four chips with counts wrap to two or three rows on a 390px screen, and the
+    // wrap moves as the counts change - so the control the reader is aiming at
+    // jumps between renders. One row that scrolls keeps the geometry stable and
+    // costs nothing: the chips are ordered, so the ones past the edge are the ones
+    // least often wanted.
+    <div className={cn('snap-row bleed-x mb-4 px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0', className)}>
       {options.map((o, i) => {
         const active = o.key === value;
         return (
@@ -295,7 +355,7 @@ export function FilterChips<T extends string>({ value, onChange, options, classN
             aria-pressed={active}
             onClick={() => onChange(o.key)}
             className={cn(
-              'flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-semibold transition-colors',
+              'flex min-h-[38px] items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-semibold transition-colors',
               active
                 ? 'border-brand-600 bg-brand-600 text-white'
                 : 'border-eos-line bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800',
@@ -350,12 +410,19 @@ export function Pills({ value, onChange, options, ariaLabel }: {
 /* ----------------------------- PageHeader ----------------------------- */
 export function PageHeader({ title, subtitle, children }: { title: ReactNode; subtitle?: ReactNode; children?: ReactNode }) {
   return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}
+    // A 24px title plus a wrapped subtitle plus a row of full-size buttons was
+    // ~150px of a 390px screen spent before the page began. Below sm the title
+    // drops to 21px (`t-page-title`), the subtitle is held to two lines, and the
+    // actions sit on the title's own row where there is almost always space for
+    // them - so the content starts above the fold instead of below it.
+    <div className="mb-4 flex flex-wrap items-start justify-between gap-x-3 gap-y-2 sm:mb-6 sm:items-end sm:gap-4">
+      <div className="min-w-0 flex-1">
+        <h1 className="t-page-title text-slate-900 dark:text-slate-100">{title}</h1>
+        {subtitle && (
+          <p className="t-meta mt-1 line-clamp-2 max-w-prose sm:line-clamp-none">{subtitle}</p>
+        )}
       </div>
-      {children && <div className="flex items-center gap-2">{children}</div>}
+      {children && <div className="flex shrink-0 items-center gap-2">{children}</div>}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { CapabilityLock } from '../../components/CapabilityLock';
 import { MembersPanel } from './admin/MembersPanel';
 import { RolesPanel } from './admin/RolesPanel';
 import { OrgProfilePanel } from './admin/OrgProfilePanel';
+import { AppearancePanel } from './admin/AppearancePanel';
 import { AuditLogPanel } from './admin/AuditLogPanel';
 import { PolicyPanel } from './admin/PolicyPanel';
 import { BillingPanel } from './admin/BillingPanel';
@@ -34,6 +35,7 @@ interface Tab {
 
 const TABS: Tab[] = [
   { key: 'profile', label: 'Organization Profile' },
+  { key: 'appearance', label: 'Appearance' },
   { key: 'members', label: 'Members' },
   { key: 'roles', label: 'Roles & Permissions' },
   { key: 'billing', label: 'Billing & Subscription' },
@@ -48,7 +50,7 @@ const ROLE_ADMIN: Record<string, string[] | null> = {
   // Security is the Owner's alone: it is org-wide policy (2FA enforcement, IP
   // allowlist, session length), so an administrator who can be appointed - and
   // removed - by the Owner should not be able to relax the rules that bind them.
-  org_admin: ['profile', 'members', 'roles', 'audit'],
+  org_admin: ['profile', 'appearance', 'members', 'roles', 'audit'],
   // NOT 'members'. A Sports Admin holds neither `org.member.manage` nor
   // `role.manage`, so that tab opened a screen whose every control - approve a join
   // request, give a role, suspend one - returned a 403. Deciding who belongs to the
@@ -109,10 +111,19 @@ export function AdminPage() {
       <PageHeader title="Administration" subtitle={orgName ?? undefined} />
 
       <div className="flex flex-wrap items-start gap-[18px]">
-        {/* ---- the rail ---- */}
+        {/* ---- the rail ----
+            A VERTICAL RAIL AT sm+, A SCROLLING ROW BELOW IT.
+            Seven stacked full-width buttons is the right shape for a 214px column
+            beside the content; on a 390px screen it is ~420px of navigation the
+            reader has to scroll past to reach the panel they already chose. Same
+            markup, same state, laid out along the other axis - and the active chip
+            is scrolled into view so the row always says where you are. */}
         <nav
           aria-label="Administration sections"
-          className={cn('w-full flex-none p-2.5 sm:w-[214px]', SURFACE)}
+          className={cn(
+            'snap-row bleed-x w-full flex-none px-4 pb-1 sm:mx-0 sm:block sm:w-[214px] sm:overflow-visible sm:px-2.5 sm:py-2.5',
+            'sm:rounded-card sm:border sm:border-eos-line sm:bg-white sm:dark:border-slate-800 sm:dark:bg-slate-900',
+          )}
         >
           {visible.map((t) => {
             const isActive = t.key === active.key;
@@ -120,18 +131,20 @@ export function AdminPage() {
             return (
               <button
                 key={t.key}
+                ref={(el) => { if (isActive) el?.scrollIntoView({ block: 'nearest', inline: 'center' }); }}
                 onClick={() => setParams({ tab: t.key })}
                 aria-current={isActive ? 'page' : undefined}
                 className={cn(
-                  'flex w-full cursor-pointer items-center gap-2 rounded-[10px] border-none px-3 py-2.5 text-left text-[13.5px] font-semibold transition-colors duration-150',
+                  'flex cursor-pointer items-center gap-2 whitespace-nowrap rounded-full border px-3.5 text-left text-[13.5px] font-semibold transition-colors duration-150',
+                  'min-h-[38px] sm:min-h-0 sm:w-full sm:rounded-[10px] sm:border-none sm:px-3 sm:py-2.5',
                   isActive
-                    ? 'bg-brand-600 text-white'
-                    : 'bg-transparent text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
+                    ? 'border-brand-600 bg-brand-600 text-white'
+                    : 'border-eos-line bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 sm:border-transparent sm:bg-transparent dark:sm:bg-transparent',
                 )}
               >
-                <span className="flex-1">{t.label}</span>
+                <span className="sm:flex-1">{t.label}</span>
                 {isLocked && (
-                  <span className="rounded font-mono text-[8.5px] bg-eos-warn-soft px-[5px] py-[2px] text-eos-warn dark:bg-amber-900/40 dark:text-amber-300">
+                  <span className="rounded bg-eos-warn-soft px-[5px] py-[2px] font-mono text-[9px] text-eos-warn dark:bg-amber-900/40 dark:text-amber-300">
                     PLAN
                   </span>
                 )}
@@ -145,6 +158,7 @@ export function AdminPage() {
           {locked ? <CapabilityLock capability={active.needs!} title={active.label} /> : (
             <>
               {active.key === 'profile' && <OrgProfilePanel orgId={orgId} />}
+              {active.key === 'appearance' && <AppearancePanel orgId={orgId} />}
               {active.key === 'members' && <MembersPanel orgId={orgId} />}
               {active.key === 'roles' && <RolesPanel orgId={orgId} />}
               {active.key === 'billing' && <BillingPanel orgId={orgId} />}

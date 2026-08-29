@@ -10,9 +10,10 @@ import { AddPlayersModal } from '../../components/AddPlayersModal';
 import { pluralise } from '@semp/shared';
 import { useOrgUnits, unitPath } from '../../lib/units';
 import {
-  Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, PageHeader, Pagination,
-  Modal, SearchInput, Select, Spinner, cn, confirmDialog, toast, SURFACE, FilterChips,
+  Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, PageHeader, Pagination,
+  Modal, SearchInput, Select, cn, confirmDialog, toast, SURFACE, FilterChips,
 } from '../../components/ui';
+import { DataList, FilterBar, QueryState, SkeletonList, useUrlState } from '../../components/primitives';
 
 // Where somebody is PLACED is now a competitive fact, not filing.
 //
@@ -184,16 +185,25 @@ export function PlayersPage() {
   const canSelect = canVerify || canEditPeople;
   const ws = useWorkspace();
 
-  const { data: people = [], isLoading, refetch } = useApi<Person[]>(orgId ? `/organizations/${orgId}/people` : null);
+  const { data: people = [], isLoading, isError, error, refetch } = useApi<Person[]>(orgId ? `/organizations/${orgId}/people` : null);
   const { flat: unitOptions, labels: unitLabels } = useOrgUnits(orgId);
   const [placing, setPlacing] = useState<Person | null>(null);
-  const [filter, setFilter] = useState<string>('all');
-  // Three narrowings that stack, and stack with the verification chips above them:
-  // "unverified people in this batch who play football" is one question, and it is
-  // the question an administrator chasing an intake actually has.
-  const [campusId, setCampusId] = useState('');
-  const [deptId, setDeptId] = useState('');
-  const [sport, setSport] = useState('');
+  // FILTERS THAT MATCH THE QUESTION THIS SCREEN ANSWERS.
+  //
+  // There was a third dropdown here, "All sports", and it was the wrong axis. This
+  // is the people directory - it answers "who belongs to this institution, and
+  // where do they sit in it", which is the question asked when somebody has to be
+  // found, verified, chased or picked. Sport is a fact about PARTICIPATION, it
+  // belongs to the records surfaces, and as a filter here it competed for width
+  // with the two axes that do matter. Sport names are still searchable, so nothing
+  // became unreachable - it stopped being a dropdown.
+  //
+  // Campus and batch are the two, and they are in the URL rather than in useState:
+  // opening a player and pressing Back returned you to an unfiltered list at page
+  // one, which on a 200-person roll means finding your place again by hand.
+  const [filter, setFilter] = useUrlState<string>('status', 'all');
+  const [campusId, setCampusId] = useUrlState<string>('campus', '');
+  const [deptId, setDeptId] = useUrlState<string>('batch', '');
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -215,20 +225,18 @@ export function PlayersPage() {
     return m;
   }, [unitOptions]);
 
-  const sportOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const p of people) for (const s of p.sport_names ?? []) set.add(s);
-    return [...set].sort();
-  }, [people]);
-
   // Everything except the verification chips, so the chip counts describe the list
   // the chips are sitting on rather than the whole roll.
   const scoped = useMemo(() => people.filter((p) => {
     if (campusId && !p.units.some((u) => campusOf.get(u.id) === campusId)) return false;
     if (deptId && !p.units.some((u) => u.id === deptId)) return false;
-    if (sport && !(p.sport_names ?? []).includes(sport)) return false;
     return true;
-  }), [people, campusId, deptId, sport, campusOf]);
+  }), [people, campusId, deptId, campusOf]);
+
+  // Shown on the Filters button so the count is never a mystery, and cleared in
+  // one place rather than by resetting each dropdown to its own "All".
+  const activeFilters = (campusId ? 1 : 0) + (deptId ? 1 : 0);
+  const clearFilters = () => { setCampusId(''); setDeptId(''); setSelected(new Set()); };
 
   const counts = useMemo(() => ({
     all: scoped.length,
@@ -332,19 +340,35 @@ export function PlayersPage() {
     ? `all ${tc.total} ${tc.total === 1 ? 'person' : 'people'} matching this view`
     : `${selected.size} ${selected.size === 1 ? 'person' : 'people'}`;
 
-  if (isLoading) return <Spinner />;
+  // A page-wide `<Spinner/>` for a screen whose shape is entirely known, and no
+  // branch at all for a failed request - `people` fell through to [] and the
+  // honest-looking "Nobody here yet" was rendered over a roll of two hundred.
+  if (isLoading || isError) {
+    return (
+      <div>
+        <PageHeader title="Players" subtitle="Everyone who belongs to this organisation." />
+        <QueryState query={{ isLoading, isError, error, refetch }} errorTitle="Could not load the directory"
+          skeleton={<SkeletonList rows={8} />}>
+          <span />
+        </QueryState>
+      </div>
+    );
+  }
 
   return (
-    <div className="pb-20">
+    <div>
       <PageHeader title="Players" subtitle="Everyone who belongs to this organisation, and what they have played.">
         {canImport && (
-          <Button variant="outline" onClick={() => navigate(`/organizations/${orgId}/students/import`)}>
-            <Upload size={15} /> Bulk upload
+          // Icon-only below sm: two full-width buttons under the title cost a whole
+          // row of a 390px screen, and "Bulk upload" is not a word anybody needs
+          // read to them next to an upload arrow.
+          <Button variant="outline" aria-label="Bulk upload" onClick={() => navigate(`/organizations/${orgId}/students/import`)}>
+            <Upload size={15} /> <span className="hidden sm:inline">Bulk upload</span>
           </Button>
         )}
         {canEditPeople && (
           <Button onClick={() => setAdding(true)}>
-            <UserPlus size={15} /> Add player
+            <UserPlus size={15} /> <span className="hidden sm:inline">Add player</span><span className="sm:hidden">Add</span>
           </Button>
         )}
       </PageHeader>
@@ -373,13 +397,18 @@ export function PlayersPage() {
         <EmptyState icon={<Users size={24} />} title="Nobody matches" description="Try another filter, or a different search." />
       ) : (
         <>
-          <ListToolbar>
-            <SearchInput
-              value={tc.query}
-              onChange={tc.setQuery}
-              placeholder="Search by name, ID, email or roll number…"
-              className="w-full sm:w-96"
-            />
+          <FilterBar
+            activeCount={activeFilters}
+            onClear={clearFilters}
+            search={
+              <SearchInput
+                value={tc.query}
+                onChange={tc.setQuery}
+                placeholder="Search name, ID, email, sport…"
+                className="w-full"
+              />
+            }
+          >
             {/* The org's own nouns, not ours: a college reads "Batch" here and a
                 company reads "Department", from the same two dropdowns. Each is
                 offered only when the structure actually has that level. */}
@@ -405,18 +434,7 @@ export function PlayersPage() {
                 {departments.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
               </Select>
             )}
-            {sportOptions.length > 0 && (
-              <Select
-                value={sport}
-                onChange={(e) => { setSport(e.target.value); setSelected(new Set()); }}
-                className="w-auto"
-                aria-label="Filter by sport"
-              >
-                <option value="">All sports</option>
-                {sportOptions.map((sp) => <option key={sp} value={sp}>{sp}</option>)}
-              </Select>
-            )}
-          </ListToolbar>
+          </FilterBar>
 
           {canSelect && (
             <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
@@ -480,107 +498,122 @@ export function PlayersPage() {
             </BulkBar>
           )}
 
-          <div className={`overflow-x-auto ${SURFACE}`}>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 dark:border-slate-800">
-                  {canSelect && (
-                    <th className="w-px px-4 py-3">
-                      <Checkbox checked={allSelected} indeterminate={selected.size > 0} onChange={toggleAll} />
-                    </th>
-                  )}
-                  <th className="px-4 py-3">Player</th>
-                  <th className="px-4 py-3">Sportagon ID</th>
-                  <th className="px-4 py-3">{unitLabels.campus} &amp; {unitLabels.department}</th>
-                  <th className="px-4 py-3 text-right">Sports</th>
-                  <th className="px-4 py-3 text-right">Events</th>
-                  <th className="px-4 py-3">Status</th>
-                  {canVerify && <th className="w-px whitespace-nowrap px-4 py-3 text-right">Actions</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {tc.view.map((p) => (
-                  <tr
-                    key={p.id}
-                    className={`border-b border-slate-100 last:border-0 dark:border-slate-800 ${selected.has(p.id) ? 'bg-brand-50/60 dark:bg-brand-500/10' : ''}`}
-                  >
-                    {canSelect && (
-                      <td className="px-4 py-3">
-                        <Checkbox checked={selected.has(p.id)} onChange={() => toggle(p.id)} />
-                      </td>
-                    )}
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <Avatar name={p.name ?? '?'} size={32} />
-                        <div className="min-w-0">
-                          <Link
-                            to={`/organizations/${orgId}/people/${p.user_id}`}
-                            className="truncate font-semibold text-slate-900 hover:text-brand-600 dark:text-slate-100"
-                          >
-                            {p.name ?? 'Unnamed'}
-                          </Link>
-                          <div className="truncate text-xs text-slate-500">
-                            {p.member_code ? `${p.member_code} · ` : ''}{p.email ?? p.phone ?? 'No contact'}
-                          </div>
-                        </div>
+          {/* ONE COLUMN SPEC, TWO SHAPES.
+              This was a seven-column <table> in an `overflow-x-auto` div, which is
+              not a mobile treatment - it is a desktop table you have to drag
+              sideways, and the two columns that matter on a phone (status, and the
+              Verify/Reject buttons) were the two furthest off-screen. `DataList`
+              renders the same records as stacked cards below sm and as this table
+              at sm+, from one spec, so the two cannot disagree about what a row
+              contains. */}
+          <DataList
+            rows={tc.view}
+            rowKey={(row) => row.id}
+            caption="People in this organisation"
+            columns={[
+              ...(canSelect ? [{
+                key: 'select',
+                header: <Checkbox checked={allSelected} indeterminate={selected.size > 0} onChange={toggleAll} />,
+                className: 'w-px',
+                // Selection is a bulk-action affordance and belongs to the table;
+                // on a phone the card itself is the target, so it is desktop-only.
+                desktopOnly: true,
+                render: (row: Person) => <Checkbox checked={selected.has(row.id)} onChange={() => toggle(row.id)} />,
+              }] : []),
+              {
+                key: 'player',
+                header: 'Player',
+                primary: true,
+                render: (row: Person) => (
+                  <div className="flex items-center gap-3">
+                    <Avatar name={row.name ?? '?'} size={32} />
+                    <div className="min-w-0">
+                      <Link
+                        to={`/organizations/${orgId}/people/${row.user_id}`}
+                        className="truncate font-semibold text-slate-900 hover:text-brand-600 dark:text-slate-100"
+                      >
+                        {row.name ?? 'Unnamed'}
+                      </Link>
+                      <div className="t-meta truncate">
+                        {row.member_code ? `${row.member_code} · ` : ''}{row.email ?? row.phone ?? 'No contact'}
                       </div>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-[12px] text-slate-600 dark:text-slate-300">
-                      {p.sportagon_id ?? <span className="text-slate-400">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                      {/* Chips rather than a dropdown: a person is in SEVERAL units,
-                          and a single-value control cannot show that, let alone
-                          edit it. Editing opens a checklist. */}
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {p.units.length === 0
-                          ? <span className="text-slate-400">Not placed</span>
-                          : p.units.map((u) => (
-                            <span
-                              key={u.id}
-                              className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[12px] text-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                            >{u.name}</span>
-                          ))}
-                        {canEditPeople && (
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => setPlacing(p)}
-                            className="text-[12px] font-medium text-brand-600 hover:underline disabled:opacity-50 dark:text-brand-400"
-                          >Edit</button>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-[13px] text-slate-700 dark:text-slate-300">{p.sports}</td>
-                    <td className="px-4 py-3 text-right font-mono text-[13px] text-slate-700 dark:text-slate-300">{p.events}</td>
-                    <td className="px-4 py-3">
-                      <Badge tone={VERIFY_TONE[p.verification] ?? 'slate'}>{p.verification}</Badge>
-                    </td>
-                    {/* Shrink-to-fit and nowrap, so the two buttons keep a gap, sit
-                        on one line, and leave the width to the name column. Rows with
-                        nothing to do still hold the column open rather than letting it
-                        collapse and reflow the table mid-page. */}
-                    {canVerify && (
-                      <td className="w-px whitespace-nowrap px-4 py-3">
-                        <div className="flex items-center justify-end gap-2">
-                          {p.verification === 'pending' ? (
-                            <>
-                              <Button size="sm" variant="outline" disabled={busy}
-                                onClick={() => review([p.id], 'verified', `“${p.name ?? 'this person'}”`)}>Verify</Button>
-                              <Button size="sm" variant="ghost" disabled={busy}
-                                onClick={() => review([p.id], 'rejected', `“${p.name ?? 'this person'}”`)}>Reject</Button>
-                            </>
-                          ) : (
-                            <span className="text-slate-300 dark:text-slate-700">—</span>
-                          )}
-                        </div>
-                      </td>
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                key: 'status',
+                header: 'Status',
+                render: (row: Person) => <Badge tone={VERIFY_TONE[row.verification] ?? 'slate'}>{row.verification}</Badge>,
+              },
+              {
+                key: 'units',
+                header: `${unitLabels.campus} & ${unitLabels.department}`,
+                render: (row: Person) => (
+                  /* Chips rather than a dropdown: a person is in SEVERAL units, and
+                     a single-value control cannot show that, let alone edit it. */
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {row.units.length === 0
+                      ? <span className="text-slate-400">Not placed</span>
+                      : row.units.map((u) => (
+                        <span key={u.id} className="rounded-md bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                          {u.name}
+                        </span>
+                      ))}
+                    {canEditPeople && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={(e) => { e.stopPropagation(); setPlacing(row); }}
+                        className="tap text-xs font-semibold text-brand-600 hover:underline disabled:opacity-50 dark:text-brand-400"
+                      >Edit</button>
                     )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  </div>
+                ),
+              },
+              {
+                key: 'sportagon',
+                header: 'Sportagon ID',
+                render: (row: Person) => (
+                  <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
+                    {row.sportagon_id ?? <span className="text-slate-400">—</span>}
+                  </span>
+                ),
+              },
+              {
+                key: 'sports',
+                header: 'Sports',
+                align: 'right' as const,
+                // A count with no context is a desktop column, not a phone field:
+                // "Sports 0" spends a whole card row saying nothing the reader can
+                // act on. Both live on the player's own page.
+                desktopOnly: true,
+                render: (row: Person) => <span className="t-num font-mono text-[13px] text-slate-700 dark:text-slate-300">{row.sports}</span>,
+              },
+              {
+                key: 'events',
+                header: 'Events',
+                align: 'right' as const,
+                desktopOnly: true,
+                render: (row: Person) => <span className="t-num font-mono text-[13px] text-slate-700 dark:text-slate-300">{row.events}</span>,
+              },
+              ...(canVerify ? [{
+                key: 'actions',
+                header: '',
+                align: 'right' as const,
+                className: 'w-px',
+                actions: true,
+                render: (row: Person) => (row.verification === 'pending' ? (
+                  <div className="flex flex-1 items-center gap-2 sm:justify-end">
+                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" disabled={busy}
+                      onClick={() => review([row.id], 'verified', `“${row.name ?? 'this person'}”`)}>Verify</Button>
+                    <Button size="sm" variant="ghost" className="flex-1 sm:flex-none" disabled={busy}
+                      onClick={() => review([row.id], 'rejected', `“${row.name ?? 'this person'}”`)}>Reject</Button>
+                  </div>
+                ) : null),
+              }] : []),
+            ]}
+          />
           <Pagination page={tc.page} pageCount={tc.pageCount} total={tc.total} pageSize={tc.pageSize} onPage={tc.setPage} />
         </>
       )}

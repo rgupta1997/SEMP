@@ -4,6 +4,7 @@ import type { CapabilityKey } from '@semp/entitlements';
 import { useAuth } from './auth';
 import { useApi } from './hooks';
 import { membershipRoleCode } from '@semp/shared';
+import { applyTenantTheme, themeOf, type TenantTheme } from './tenant-theme';
 import { EVENT_ROLE_CODES, landingFor, type ContextKind, type NavFacts, type WorkspaceContext } from './workspace';
 
 // Turning one account into the list of workspaces it can enter.
@@ -111,6 +112,7 @@ export function useWorkspace() {
         ].filter(Boolean) as string[],
         sub: m.organization?.city ?? undefined,
         verified: m.organization?.verified ?? false,
+        theme: themeOf(m.organization?.settings),
       }));
 
     const events: WorkspaceContext[] = (ctx.championship_roles ?? []).map((r: any) => ({
@@ -225,6 +227,24 @@ export function useWorkspace() {
   }, [storeKey, contexts.length, routeContextId]);
 
   const active = contexts.find((c) => c.id === activeId) ?? contexts[0] ?? null;
+
+  /**
+   * PAINT THE INSTITUTION'S COLOUR ONTO THE DOCUMENT.
+   *
+   * Keyed to the ACTIVE context, not to the account, because one person belongs to
+   * several institutions and the workspace they are standing in is the one whose
+   * brand should be on screen. Switching context repaints; leaving for personal
+   * space or an event clears back to Sportagon's own blue, so a tenant's colour
+   * never leaks onto a surface that is not theirs.
+   *
+   * One effect writing three CSS variables - every `--color-brand-*` step, the
+   * sidebar, focus rings, chips and links are derived from them in index.css, so
+   * nothing here has to know which components use the ramp.
+   */
+  useEffect(() => {
+    applyTenantTheme(active?.kind === 'org' ? active.theme : null);
+    return () => applyTenantTheme(null);
+  }, [active?.id, active?.kind, active?.theme?.brand]);
 
   // What is true of this PERSON, for the nav items that depend on it rather than
   // on the context. Read from the auth context, so somebody added to an event's
