@@ -13,14 +13,14 @@ export async function listChampionshipFixtures(prisma: Prisma, championshipId: s
       // both sides and says nothing.
       teams_fixtures_home_team_idToteams: {
         select: {
-          id: true, name: true,
+          id: true, name: true, short_name: true,
           organizations: { select: { short_name: true, name: true } },
           org_units: { select: { id: true, name: true, code: true, type: true } },
         },
       },
       teams_fixtures_away_team_idToteams: {
         select: {
-          id: true, name: true,
+          id: true, name: true, short_name: true,
           organizations: { select: { short_name: true, name: true } },
           org_units: { select: { id: true, name: true, code: true, type: true } },
         },
@@ -39,10 +39,16 @@ export async function listChampionshipFixtures(prisma: Prisma, championshipId: s
         },
       },
     },
-    orderBy: [{ scheduled_at: 'asc' }, { created_at: 'asc' }],
+    // Match number first: it was allocated in scheduled order, so this is the same
+    // ordering as before for anything numbered, and it keeps the list stable when a
+    // fixture is later rescheduled - the numbers on people's sheets do not move.
+    // Unnumbered fixtures fall back to the old ordering, at the end.
+    orderBy: [{ match_no: { sort: 'asc', nulls: 'last' } }, { scheduled_at: 'asc' }, { created_at: 'asc' }],
   });
   return fixtures.map((f) => ({
     id: f.id,
+    /** Sequential within the championship. How a person refers to this match. */
+    match_no: f.match_no,
     status: f.status,
     round: f.round,
     scheduled_at: f.scheduled_at,

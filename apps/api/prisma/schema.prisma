@@ -95,6 +95,8 @@ model championships {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model fixtures {
   id                                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Sequential within the championship, in scheduled order. Assigned at creation.
+  match_no                             Int?
   tournament_discipline_id             String                 @db.Uuid
   home_team_id                         String?                @db.Uuid
   away_team_id                         String?                @db.Uuid
@@ -284,6 +286,9 @@ model teams {
   sport_id                                String         @db.Uuid
   organization_id                         String         @db.Uuid
   name                                    String         @db.VarChar
+  /// Scoreboard abbreviation, entered by whoever creates the squad. Required by the
+  /// API on create; nullable here only because 136 rows predate the column.
+  short_name                              String?        @db.VarChar(12)
   status                                  String         @default("forming") @db.VarChar
   invite_token                            String?        @unique @db.VarChar
   created_at                              DateTime       @default(now()) @db.Timestamptz(6)

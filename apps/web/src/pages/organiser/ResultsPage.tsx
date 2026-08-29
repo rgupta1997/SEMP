@@ -1,19 +1,25 @@
-import { useMemo, useState } from 'react';
-import { Flag, Lock, LockOpen } from 'lucide-react';
+import { useMemo, useState, type ReactNode } from 'react';
+import {
+  CheckCircle2, ChevronRight, Clock, Eye, Flag, Lock, LockOpen, Pencil, Radio, ShieldCheck, Users,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEvent } from './EventLayout';
 import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
-import { usePageFilters } from '../../lib/filters';
 import { useApi } from '../../lib/hooks';
+import { titleCase, whenLabel } from '../../lib/format';
 import {
-  Badge, Button, Card, EmptyState, FilterChips, Modal, Spinner, StatusBadge, Textarea, cn, confirmDialog, toast,
+  Badge, Button, Card, EmptyState, FilterChips, Modal, Select, Spinner, StatusBadge, Textarea, cn, confirmDialog, toast,
 } from '../../components/ui';
 import { useUrlState, usePreserveScroll } from '../../components/primitives';
 
 // A flattened fixture row from GET /championships/:id/fixtures.
 interface ResultRow {
+  /** Sequential within the championship - how a person refers to this match. */
+  match_no?: number | null;
+  /** When it is played. Rendered as Today / Tomorrow / 28th Aug, 2026 · 7:30 PM. */
+  scheduled_at?: string | null;
   id: string;
   status: string;
   /** Whoever was assigned to score this match, if anyone. */
@@ -37,6 +43,8 @@ interface ResultRow {
 interface Side {
   id: string;
   name: string;
+  /** The squad's own scoreboard abbreviation, entered when it was created. */
+  short_name?: string | null;
   organizations?: { short_name?: string | null; name?: string | null } | null;
   /** The campus or batch this squad plays FOR, when it plays for one. */
   org_units?: { id: string; name: string; code?: string | null; type?: string | null } | null;
@@ -62,6 +70,124 @@ const teamCode = (t: Side | null) => {
 
 const teamLabel = (t: Side | null) =>
   t?.org_units?.name || t?.organizations?.name || t?.organizations?.short_name || t?.name || '';
+
+/**
+ * The name that fits on a phone.
+ *
+ * A results row has room for roughly twelve characters a side. The squad's own
+ * `short_name` is entered by whoever created it and is the right answer; the
+ * organisation's short name is the fallback for a squad that predates the column,
+ * and the full label is the last resort.
+ *
+ * This is what stopped the phone view being a horizontal scroll container: the row
+ * was laying out "Northfield Institute of Technology B.Tech 2024" twice and a score,
+ * which cannot be done in 390px, so it was made draggable instead of made to fit.
+ */
+/**
+ * A square, thumb-sized action carrying a glyph instead of a word.
+ *
+ * The phone row had three text buttons - Lock, Unlock, "Record →" - spending most of
+ * a 390px line on labels for actions whose glyphs are unambiguous, on a row that did
+ * not fit anyway. 40px is above the touch floor, and `label` becomes both the
+ * accessible name and the tooltip, so the meaning is available to anybody reading
+ * with a screen reader or hovering on a tablet.
+ */
+function IconAction({
+  label, short, children, onClick, disabled, busy, tone, expressive,
+}: {
+  /** The accessible name and the tooltip. Always present. */
+  label: string;
+  /** The word shown beside the glyph where there is room. */
+  short?: string;
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  busy?: boolean;
+  tone?: 'primary' | 'warn';
+  /**
+   * Show the word from sm up.
+   *
+   * A phone has room for a glyph and nothing else, so there it stays square. A
+   * tablet and a desktop have the width, and a glyph plus its word is simply
+   * clearer than a glyph alone - there is no reason to make a mouse user hover to
+   * find out what a button does when the label fits.
+   */
+  expressive?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className={cn(
+        // 36px square by default: these sit in a row of three at the top of a card
+        // that is itself a tap target for the common action, so the surrounding
+        // surface carries the reach.
+        'inline-grid h-9 shrink-0 place-items-center rounded-lg transition-colors active:scale-95 disabled:opacity-40',
+        expressive && short
+          ? 'w-9 sm:flex sm:w-auto sm:items-center sm:gap-1.5 sm:px-3 sm:text-[13px] sm:font-semibold'
+          : 'w-9',
+        tone === 'primary'
+          ? 'bg-brand-600 text-white hover:bg-brand-700'
+          : tone === 'warn'
+            ? 'border border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-500/40 dark:text-amber-300 dark:hover:bg-amber-500/10'
+            : 'border border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800',
+        busy && 'animate-pulse',
+      )}
+    >
+      {children}
+      {expressive && short && <span className="hidden sm:inline">{short}</span>}
+    </button>
+  );
+}
+
+/**
+ * Status as a glyph plus one word, rather than a full badge.
+ *
+ * A StatusBadge is the right density beside a match on a desktop table. On a phone
+ * it competed with the score for the same line, so this is the same information at a
+ * third of the width - and colour is never the only signal, because the glyph
+ * differs too.
+ */
+function StatusGlyph({ locked, individual, status }: { locked: boolean; individual: boolean; status: string }) {
+  const done = status === 'completed' || status === 'confirmed';
+  const [Icon, text, cls] = locked
+    ? [ShieldCheck, 'Official', 'text-emerald-600 dark:text-emerald-400']
+    : individual
+      ? [Users, 'Individual', 'text-slate-500 dark:text-slate-400']
+      : done
+        ? [CheckCircle2, 'Played', 'text-emerald-600 dark:text-emerald-400']
+        // 'live' is the value the database actually stores - FIXTURE_STATUS is
+        // scheduled | live | completed | postponed | cancelled | bye | walkover.
+        // This read 'in_progress', which is not one of them, so every match in play
+        // fell through to the grey "Scheduled" clock.
+        : status === 'live'
+          ? [Radio, 'Live', 'text-[var(--live)]']
+          : status === 'walkover' || status === 'bye'
+            ? [CheckCircle2, titleCase(status), 'text-slate-500 dark:text-slate-400']
+            : [Clock, titleCase(status || 'Scheduled'), 'text-slate-400 dark:text-slate-500'];
+  return (
+    <span className={cn('inline-flex shrink-0 items-center gap-1 text-[11px] font-bold uppercase tracking-wide', cls)}
+      title={text}
+    >
+      <Icon size={14} />
+      <span className="hidden sm:inline">{text}</span>
+    </span>
+  );
+}
+
+/**
+ * The statuses this page is about: being played, or played.
+ *
+ * `scheduled` is Schedule's business, and `postponed` / `cancelled` will never
+ * produce a result.
+ */
+const RESULTABLE = new Set(['live', 'completed', 'walkover', 'bye']);
+
+const teamShort = (t: Side | null) =>
+  t?.short_name || t?.org_units?.code || t?.organizations?.short_name || teamLabel(t);
 
 // The dark square chip used for each side of a match (e.g. "INF", "WIP"). When the
 // side isn't decided yet (knockout placeholder / bye), show a clear "TBD" chip so
@@ -165,10 +291,20 @@ export function ResultsPage() {
     fixtures.forEach((f) => { if (f.sport) set.add(f.sport); });
     return [...set].sort().map((name) => ({ id: name, name }));
   }, [fixtures]);
-  const { tournamentId, sportId } = usePageFilters({
-    tournaments: tournamentOptions.length ? tournamentOptions : undefined,
-    sports: sportOptions.length ? sportOptions : undefined,
-  });
+  /**
+   * TOURNAMENT AND SPORT LIVE ON THIS PAGE, NOT IN THE APP HEADER.
+   *
+   * They used to be published to the shared header bar via `usePageFilters`, which
+   * split this screen's filtering across two places: two axes at the top of the
+   * window and three (queue, sort, search) in the page. Nobody could see everything
+   * that was applied at once, there was no way to clear them together, and on a
+   * phone the header pair had to be found behind a separate button from the page's
+   * own. One row, one place, one "clear".
+   *
+   * In the URL like the rest, so a filtered view is a link somebody can send.
+   */
+  const [tournamentId, setTournamentId] = useUrlState<string>('tournament', '');
+  const [sportId, setSportId] = useUrlState<string>('sport', '');
 
   const rows = useMemo(
     () => fixtures.filter((f) =>
@@ -244,8 +380,27 @@ export function ResultsPage() {
     || (f.round === 'Event' && !f.home && !f.away)
     || ((f.status === 'completed' || f.status === 'confirmed') && f.home_score != null && f.away_score != null)
   );
-  const readyRows = useMemo(() => rows.filter(lockable), [rows]);
-  const lockedCount = useMemo(() => rows.filter(locked).length, [rows]);
+  /**
+   * A SCHEDULED MATCH IS NOT A RESULT.
+   *
+   * This page is the results queue: what is being played, and what has been played
+   * and needs a decision. Everything still marked `scheduled` belongs on Schedule,
+   * whatever its kick-off time says - a fixture becomes this page's business when
+   * somebody starts it, not when the clock passes it.
+   *
+   * (An earlier pass hid them by TIME instead, on the reasoning that this morning's
+   * unscored match still needs scoring. It does - but it needs its status moving
+   * first, and a list that quietly mixes "nobody has started this" into "these need
+   * a result" is the thing that made the queue unreadable. The scoring entry point
+   * is Schedule, which is where an organiser goes to start a match anyway.)
+   *
+   * `postponed` and `cancelled` go too: neither will produce a result.
+   */
+  const started = (f: ResultRow) => RESULTABLE.has(f.status);
+  const hiddenCount = useMemo(() => rows.length - rows.filter(started).length, [rows]);
+
+  const readyRows = useMemo(() => rows.filter(started).filter(lockable), [rows]);
+  const lockedCount = useMemo(() => rows.filter(started).filter(locked).length, [rows]);
 
   /**
    * THE QUEUE, AS A FILTER.
@@ -255,33 +410,65 @@ export function ResultsPage() {
    * review" is the whole job: everything finished, scored, and not yet official.
    * Kept in the URL so coming back from a scorecard returns to the same queue.
    */
+
   const [queue, setQueue] = useUrlState<string>('show', 'all');
-  const visibleRows = useMemo(() => rows.filter((f) => {
+
+  /**
+   * SORTING, WHICH THE MATCH NUMBER IS WHAT MAKES POSSIBLE.
+   *
+   * The list was fixed in the API's order and offered no control. Mid-event the
+   * useful orders are: the running order (match number), what is next (soonest
+   * first), and what has been waiting longest for a decision (oldest first). Kept
+   * in the URL beside the queue filter so a view can be returned to.
+   */
+  const [sort, setSort] = useUrlState<string>('sort', 'match');
+  const sortRows = useMemo(() => {
+    const byDate = (a: ResultRow, b: ResultRow, dir: number) => {
+      // An unscheduled fixture has no place in a date ordering, so it goes last
+      // whichever way the sort runs rather than pretending to be 1 Jan 1970.
+      const av = a.scheduled_at ? +new Date(a.scheduled_at) : null;
+      const bv = b.scheduled_at ? +new Date(b.scheduled_at) : null;
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return (av - bv) * dir;
+    };
+    return (list: ResultRow[]) => [...list].sort((a, b) => {
+      if (sort === 'soonest') return byDate(a, b, 1);
+      if (sort === 'latest') return byDate(a, b, -1);
+      // Default: the running order. Unnumbered last, for the same reason.
+      const an = a.match_no ?? Number.MAX_SAFE_INTEGER;
+      const bn = b.match_no ?? Number.MAX_SAFE_INTEGER;
+      return an - bn;
+    });
+  }, [sort]);
+  const playable = useMemo(() => rows.filter(started), [rows]);
+  const visibleRows = useMemo(() => playable.filter((f) => {
     if (queue === 'ready') return lockable(f);
     if (queue === 'locked') return locked(f);
     if (queue === 'pending') return !locked(f) && !lockable(f);
     return true;
-  }), [rows, queue]);
+  }), [playable, queue]);
 
   const queueCounts = useMemo(() => ({
-    all: rows.length,
+    all: playable.length,
     ready: readyRows.length,
     locked: lockedCount,
-    pending: rows.length - readyRows.length - lockedCount,
-  }), [rows.length, readyRows.length, lockedCount]);
+    pending: playable.length - readyRows.length - lockedCount,
+  }), [playable.length, readyRows.length, lockedCount]);
 
   // Grouped from the FILTERED rows, so choosing "Awaiting review" narrows the
   // sport headings too rather than leaving empty ones behind.
   const groups = useMemo(() => {
     const map = new Map<string, { key: string; sport: string | null; discipline: string | null; icon: string | null; rows: ResultRow[] }>();
-    for (const f of visibleRows) {
+    for (const f of sortRows(visibleRows)) {
       const key = `${f.sport ?? ''}__${f.discipline ?? ''}`;
       let g = map.get(key);
       if (!g) { g = { key, sport: f.sport, discipline: f.discipline, icon: f.sport_icon, rows: [] }; map.set(key, g); }
       g.rows.push(f);
     }
     return [...map.values()];
-  }, [visibleRows]);
+  }, [visibleRows, sortRows]);
 
   const matchLabel = (f: ResultRow) =>
     (f.home || f.away) ? `${teamLabel(f.home) || 'TBD'} vs ${teamLabel(f.away) || 'TBD'}` : (f.discipline ?? f.sport ?? 'This event');
@@ -359,7 +546,7 @@ export function ResultsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-slate-500 dark:text-slate-400">
+        <p className="hidden text-sm text-slate-500 sm:block dark:text-slate-400">
           {canManage
             ? 'Tap a match to enter its result. Standings recalculate instantly.'
             : scoresAny
@@ -384,12 +571,16 @@ export function ResultsPage() {
       {/* The lock queue. Shown only while there is something to do with it - an
           organiser with nothing finished does not need to be told a number. */}
       {canManage && readyRows.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50/70 px-4 py-3 text-sm text-brand-800 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-200">
-          <div>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50/70 px-3 py-2.5 text-sm text-brand-800 sm:px-4 sm:py-3 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-200">
+          <div className="min-w-0 flex-1">
             <span className="font-semibold">
               {readyRows.length} finished {readyRows.length === 1 ? 'result is' : 'results are'} waiting to be made official.
-            </span>{' '}
-            Locking publishes the standings and is what certificates are issued from.
+            </span>
+            {/* The explanation is for the first time somebody sees this, not the
+                fiftieth, and on a phone it was three of the banner's four lines. */}
+            <span className="hidden sm:inline">
+              {' '}Locking publishes the standings and is what certificates are issued from.
+            </span>
             {lockedCount > 0 && <span className="text-brand-600/80 dark:text-brand-300/70"> {lockedCount} already locked.</span>}
           </div>
           <Button size="sm" disabled={busyId !== null} onClick={lockAllReady}>
@@ -398,19 +589,63 @@ export function ResultsPage() {
         </div>
       )}
 
-      {/* The queue. An organiser mid-event wants the ones that need them, not a
-          browse of everything played so far. */}
-      {rows.length > 0 && (
+      {/* The queue. An organiser mid-event wants the ones that need them. */}
+      {playable.length > 0 && (
         <FilterChips
+          label="Show"
           value={queue}
           onChange={setQueue}
           options={[
             { key: 'all', label: 'All matches', count: queueCounts.all },
             { key: 'ready', label: 'Awaiting review', count: queueCounts.ready },
-            { key: 'pending', label: 'Not played', count: queueCounts.pending },
+            { key: 'pending', label: 'Being played', count: queueCounts.pending },
             { key: 'locked', label: 'Official', count: queueCounts.locked },
           ]}
         />
+      )}
+
+      {/* Tournament, sport and sort - the axes that used to be split between the app
+          header and here. One row, wrapping, on the page's own margin. */}
+      {(tournamentOptions.length > 0 || sportOptions.length > 0 || playable.length > 1) && (
+        <div className="-mt-1 flex flex-wrap items-center gap-2">
+          {tournamentOptions.length > 0 && (
+            <Select value={tournamentId} onChange={(e) => setTournamentId(e.target.value)}
+              aria-label="Filter by tournament" className="!py-1.5 text-[13px]">
+              <option value="">All tournaments</option>
+              {tournamentOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </Select>
+          )}
+          {sportOptions.length > 0 && (
+            <Select value={sportId} onChange={(e) => setSportId(e.target.value)}
+              aria-label="Filter by sport" className="!py-1.5 text-[13px]">
+              <option value="">All sports</option>
+              {sportOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </Select>
+          )}
+          {(tournamentId || sportId) && (
+            <Button size="sm" variant="ghost" onClick={() => { setTournamentId(''); setSportId(''); }}>
+              Clear
+            </Button>
+          )}
+          {playable.length > 1 && (
+            <div className="ml-auto flex items-center gap-2">
+              <label className="t-eyebrow" htmlFor="results-sort">Sort</label>
+              <Select id="results-sort" value={sort} onChange={(e) => setSort(e.target.value)} className="!py-1.5 text-[13px]">
+                <option value="match">Match number</option>
+                <option value="soonest">Soonest first</option>
+                <option value="latest">Latest first</option>
+              </Select>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Said once, quietly, so the missing cards are not a mystery. */}
+      {hiddenCount > 0 && (
+        <p className="t-meta">
+          {hiddenCount} scheduled {hiddenCount === 1 ? 'match is' : 'matches are'} not shown here —
+          start them from Schedule and they appear.
+        </p>
       )}
 
       {isLoading ? <Spinner /> : visibleRows.length === 0 ? (
@@ -449,19 +684,143 @@ export function ResultsPage() {
                 const completed = f.status === 'completed' || f.status === 'confirmed';
                 const isLocked = locked(f);
                 const scored = !individual && !rankingEvent && f.home_score != null && f.away_score != null;
+                const homeWon = f.winner_team_id != null && f.winner_team_id === f.home?.id;
+                const awayWon = f.winner_team_id != null && f.winner_team_id === f.away?.id;
                 return (
-                  // On phone the row content is wider than the viewport, so the card
-                  // becomes a horizontal scroll container and the status/action column
-                  // is pinned (sticky) so it stays reachable. The inner wrapper uses
-                  // `sm:contents` so on larger screens the three cells fall back into
-                  // the original 1fr / auto / 1fr grid unchanged.
-                  <Card key={f.id} interactive={canScore(f)} onClick={() => open(f)} className="block overflow-x-auto sm:grid sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center sm:gap-x-4 sm:overflow-visible sm:p-4">
-                    <div className="flex w-max items-center gap-x-2 py-3 pl-3 sm:contents">
+                  // TWO LAYOUTS, NOT ONE THAT SCROLLS.
+                  //
+                  // This used to be a single row that was wider than a phone, made
+                  // into a horizontal scroll container with the actions pinned to the
+                  // right edge. That is not a layout - it is a desktop row you have
+                  // to drag, and the two things an organiser needs mid-event (the
+                  // score and the lock) were the two furthest off-screen.
+                  //
+                  // Below sm it is a scoreboard: meta line, then one line per side
+                  // with the squad's short name and its score, then the actions. The
+                  // shape everybody already reads on a sports app, and it fits 390px
+                  // with room left over. At sm+ the original three-column grid is
+                  // untouched.
+                  <Card key={f.id} interactive={canScore(f)} onClick={() => open(f)} className="block p-0 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-center lg:gap-x-4 lg:p-4">
+
+                    {/* ---------------- phone ---------------- */}
+                    <div className="flex flex-col gap-1 px-3 py-2 lg:hidden">
+                      {/* Round, status and actions on ONE line. They were a header
+                          row and a footer row with a divider between them, which
+                          cost ~70px per card - and there are 224 cards. Nothing is
+                          dropped: the actions are icons, so all three fit beside a
+                          status that is itself a glyph and one word. */}
+                      <div className="flex items-center gap-2">
+                        {/* The number first: it is the handle somebody uses out loud
+                            ("score match 14"), and two team names are not unique in
+                            a round robin where the same pair meets twice. */}
+                        {f.match_no != null && (
+                          <span className="t-num shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                            #{f.match_no}
+                          </span>
+                        )}
+                        <span className="t-meta min-w-0 flex-1 truncate text-[12px]">
+                          {[f.round || (rankingEvent ? 'Event' : ''), whenLabel(f.scheduled_at)].filter(Boolean).join(' · ')}
+                        </span>
+                        <StatusGlyph locked={isLocked} individual={individual} status={f.status} />
+                        {canManage && (
+                          <span className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            {/* `expressive` reveals the word from sm up. This card
+                                layout now serves phones AND tablets, and a tablet
+                                has the width for "Reopen" beside the glyph - only a
+                                390px row genuinely cannot spare it. */}
+                            {isLocked && (
+                              <IconAction expressive short="Reopen" tone="warn"
+                                label="Reopen this result" onClick={() => setUnlocking(f)} disabled={busyId !== null}>
+                                <LockOpen size={16} />
+                              </IconAction>
+                            )}
+                            {lockable(f) && (
+                              <IconAction expressive short={busyId === f.id ? 'Locking…' : 'Lock'} tone="primary"
+                                label="Make this result official"
+                                onClick={() => void lockOne(f)} disabled={busyId !== null} busy={busyId === f.id}>
+                                <Lock size={16} />
+                              </IconAction>
+                            )}
+                            <IconAction
+                              expressive
+                              short={isLocked ? 'View' : completed ? 'Edit' : 'Record'}
+                              label={isLocked ? 'View scorecard' : completed ? 'Edit result' : 'Record result'}
+                              tone={!isLocked && !completed ? 'primary' : undefined}
+                              onClick={() => open(f)}>
+                              {isLocked ? <Eye size={16} /> : completed ? <Pencil size={16} /> : <ChevronRight size={17} />}
+                            </IconAction>
+                          </span>
+                        )}
+                      </div>
+
+                      {individual || rankingEvent ? (
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-[15px] font-semibold text-slate-800 dark:text-slate-100">
+                            {f.discipline ?? f.sport ?? 'Event'}
+                          </span>
+                          <Badge tone="violet">Ranking</Badge>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-0.5">
+                          {([[f.home, f.home_score, homeWon], [f.away, f.away_score, awayWon]] as const).map(([side, score, won], i) => (
+                            <div key={i} className="flex items-baseline gap-2.5">
+                              {/* No chip here. It carried a 3-letter slice of the
+                                  same name the text now shows in full-short form -
+                                  "BT23" beside "BT2023" - so it was 44px spent
+                                  saying the thing twice. The winner is carried by
+                                  weight instead, which needs no width at all. */}
+                              <span
+                                className={cn(
+                                  'min-w-0 flex-1 truncate text-[15px] leading-6 tracking-tight',
+                                  won ? 'font-extrabold text-slate-900 dark:text-slate-50' : 'font-semibold text-slate-600 dark:text-slate-300',
+                                )}
+                                title={teamLabel(side)}
+                              >
+                                {/* THE FULL NAME, TRUNCATED - not the abbreviation.
+                                    The row is `min-w-0 flex-1 truncate`, so a long
+                                    name ellipsises and can never push the score off
+                                    the card; that is what made the horizontal scroll
+                                    unnecessary, not shortening the text. With the
+                                    abbreviation in this slot a 390px row read "DB"
+                                    against "PB" with 200px of nothing between them -
+                                    less information than the full name AND worse
+                                    looking. The short name stays the fallback for a
+                                    squad that has no full name to show. */}
+                                {side ? (teamLabel(side) || teamShort(side)) : 'TBD'}
+                              </span>
+                              <span
+                                className={cn(
+                                  't-num shrink-0 text-[17px] leading-6 tabular-nums',
+                                  won ? 'font-extrabold text-slate-900 dark:text-slate-50' : 'font-bold text-slate-700 dark:text-slate-300',
+                                )}
+                              >
+                                {scored ? score : <span className="text-slate-300 dark:text-slate-600">·</span>}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                    </div>
+
+                    {/* ---------------- lg+ : the three-column row ---------------- */}
+                    <div className="hidden items-center gap-x-2 lg:contents">
                     {/* Left cell (1fr): match type — always shown in full.
                         Both outer cells are equal 1fr so the auto center column is
                         always physically centered regardless of their content widths. */}
-                    <div className="shrink-0 whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400" title={f.round ?? undefined}>
-                      {f.round || '-'}
+                    <div className="min-w-0 text-xs text-slate-500 dark:text-slate-400" title={f.round ?? undefined}>
+                      <div className="flex items-center gap-1.5">
+                        {f.match_no != null && (
+                          <span className="t-num rounded bg-slate-100 px-1.5 py-0.5 font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                            #{f.match_no}
+                          </span>
+                        )}
+                        <span className="truncate font-semibold uppercase tracking-wide">{f.round || '-'}</span>
+                      </div>
+                      {/* When it is played. It was on the Schedule tab and nowhere
+                          near the result being recorded, which is where somebody
+                          checking "is this the right match?" is standing. */}
+                      <div className="mt-0.5 truncate">{whenLabel(f.scheduled_at)}</div>
                     </div>
 
                     {/* Center cell (auto): home · score · away. Ranking/event fixtures
@@ -492,10 +851,17 @@ export function ResultsPage() {
                       )}
                     </div>
 
-                    {/* Right cell (1fr): status + actions. Pinned to the right edge on
-                        phone (sticky) so it stays visible while the match info scrolls
-                        underneath; reverts to a plain grid cell from sm up. */}
-                    <div className="sticky right-0 z-10 flex items-center justify-end gap-2 self-stretch bg-white pl-3 pr-3 shadow-[-8px_0_8px_-6px_rgba(15,23,42,0.08)] dark:bg-slate-900 sm:static sm:z-auto sm:self-auto sm:gap-3 sm:bg-transparent sm:pl-0 sm:pr-0 sm:shadow-none dark:sm:bg-transparent">
+                    {/* Right cell (1fr): status + actions.
+                        THE SAME VOCABULARY AS THE PHONE, SPOKEN MORE FULLY. The
+                        phone gives each action a glyph because that is all that
+                        fits; here the glyph keeps its word beside it. Same
+                        components, same icons, same colours - so somebody who
+                        learns "🔓 reopens this" on a laptop recognises the bare
+                        glyph on their phone at the pitch.
+                        "Record" was a bare text link and the only affordance that
+                        did not look like a button, which on the most-used action of
+                        the page was the wrong way round. */}
+                    <div className="flex items-center justify-end gap-2">
                       {isLocked ? (
                         // The lock outranks the match status here: "completed" and
                         // "official" are different claims, and this cell can only
@@ -506,29 +872,33 @@ export function ResultsPage() {
                       ) : (
                         <StatusBadge status={f.status} />
                       )}
-                      {/* The buttons live inside a clickable card, so every one of
-                          them has to stop the click reaching it - otherwise locking
-                          a result also navigates away from the list. */}
+                      {/* Every one of these stops the click reaching the card -
+                          otherwise locking a result also navigates away from the
+                          list. */}
                       {canManage && isLocked && (
-                        <Button
-                          size="sm" variant="ghost" disabled={busyId !== null}
-                          onClick={(e) => { e.stopPropagation(); setUnlocking(f); }}
-                        >
-                          <LockOpen size={14} /> Unlock
-                        </Button>
+                        <IconAction expressive short="Reopen" tone="warn"
+                          label="Reopen this result" disabled={busyId !== null}
+                          onClick={() => setUnlocking(f)}>
+                          <LockOpen size={15} />
+                        </IconAction>
                       )}
                       {canManage && lockable(f) && (
-                        <Button
-                          size="sm" disabled={busyId !== null}
-                          onClick={(e) => { e.stopPropagation(); void lockOne(f); }}
-                        >
-                          <Lock size={14} /> {busyId === f.id ? 'Locking…' : 'Lock'}
-                        </Button>
+                        <IconAction expressive short={busyId === f.id ? 'Locking…' : 'Lock'} tone="primary"
+                          label="Make this result official" disabled={busyId !== null} busy={busyId === f.id}
+                          onClick={() => void lockOne(f)}>
+                          <Lock size={15} />
+                        </IconAction>
                       )}
                       {canManage && (
-                        <span className="shrink-0 text-right text-sm font-semibold text-brand-600 dark:text-brand-300">
-                          {isLocked ? 'View' : completed ? 'Edit' : 'Record →'}
-                        </span>
+                        <IconAction
+                          expressive
+                          short={isLocked ? 'View' : completed ? 'Edit' : 'Record'}
+                          tone={!isLocked && !completed ? 'primary' : undefined}
+                          label={isLocked ? 'View scorecard' : completed ? 'Edit result' : 'Record result'}
+                          onClick={() => open(f)}
+                        >
+                          {isLocked ? <Eye size={15} /> : completed ? <Pencil size={15} /> : <ChevronRight size={16} />}
+                        </IconAction>
                       )}
                     </div>
                     </div>

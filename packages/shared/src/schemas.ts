@@ -11,6 +11,26 @@ import { stageConfigSchema } from './stage-config.js';
 import { ENTRY_LEVELS } from './org-structure.js';
 
 const uuid = z.string().uuid();
+
+/**
+ * A scoreboard abbreviation.
+ *
+ * Required wherever a name will have to fit in a results row on a phone, which is
+ * about twelve characters per side. It is ENTERED, never derived: the render-time
+ * abbreviation this replaces sliced the first three letters, so "B.Tech 2023" and
+ * "B.Tech 2024" both became "BTE" - two sides of a scoreboard reading the same.
+ * Whoever creates the squad knows theirs are BT23 and BT24.
+ *
+ * Upper-cased and stripped on the way in so the stored value is what a scoreboard
+ * shows, whatever was typed.
+ */
+const shortName = z
+  .string({ required_error: 'A short name is required' })
+  .trim()
+  .min(2, 'At least 2 characters')
+  .max(12, 'At most 12 characters')
+  .transform((v) => v.toUpperCase())
+  .refine((v) => /[A-Z0-9]/.test(v), 'Use letters or numbers');
 const json = z.record(z.any());
 
 // A valid mobile is 10–15 digits (10-digit number, optionally a country code),
@@ -326,7 +346,15 @@ export const updateFormatSchema = createFormatSchema.partial();
 
 export const createOrganizationSchema = z.object({
   name: z.string().min(1),
-  short_name: z.string().optional(),
+  // REQUIRED on create. An institution's full name is on every standings table,
+  // every certificate and every match row, and none of those have room for
+  // "Northfield Institute of Technology" on a phone. Asking once at creation is
+  // cheaper than a directory of names that cannot be displayed.
+  //
+  // `updateOrganizationSchema` is `.partial()`, so editing an existing organisation
+  // still leaves it optional - the requirement is on the way in, not a retrospective
+  // demand on the rows that predate it.
+  short_name: shortName,
   code: z.string().optional(),
   logo_url: z.string().optional(),
   city: z.string().optional(),
@@ -577,6 +605,9 @@ export const createTeamSchema = z.object({
   sport_id: uuid,
   organization_id: uuid,
   name: z.string().min(1),
+  // REQUIRED, and taken from whoever creates the squad. See `shortName` above for
+  // why it is not derived from the name.
+  short_name: shortName,
   championship_id: uuid.optional(),
   championship_organization_id: uuid.optional(),
   tournament_discipline_id: uuid.optional(),
@@ -607,6 +638,9 @@ export const updateTeamEntrySchema = z.object({
 });
 export const updateTeamSchema = z.object({
   name: z.string().min(1).optional(),
+  // Correctable after the fact: the 136 squads that predate the column were
+  // backfilled with a guess, and this is where that guess gets fixed.
+  short_name: shortName.optional(),
   status: z.enum(TEAM_STATUS).optional(),
   // A coach is a property of the team, not a squad member, so they never count
   // against squad size (J3-E2-S3). null clears it - a team may have no coach.

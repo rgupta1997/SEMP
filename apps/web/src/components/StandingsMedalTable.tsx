@@ -62,6 +62,60 @@ export function StandingsMedalTable({ rows, base, scope, scopeId }:
   }
 
   return (
+    <>
+    {/* ---------------- phone ----------------
+        Seven columns - #, name, gold, silver, bronze, total, points - is a drag on a
+        390px screen, and the medal counts (the entire point of a medal tally) are the
+        part that ends up off it. One row instead: position, short name, the three
+        counts as coloured pips, and the total. Tapping still opens the breakdown. */}
+    <div className="sm:hidden">
+      {ranked.map((r, i) => {
+        const isOpen = expanded === r.row.entity_id;
+        return (
+          <div
+            key={r.row.entity_id}
+            className={cn('border-t border-slate-100 first:border-t-0 dark:border-slate-800',
+              !isOpen && i === 0 && r.total > 0 && 'bg-amber-50/40 dark:bg-amber-500/5')}
+          >
+            <button
+              type="button"
+              aria-expanded={isOpen}
+              onClick={() => setExpanded(isOpen ? null : r.row.entity_id)}
+              className={cn('flex w-full items-center gap-2.5 px-1 py-2.5 text-left', isOpen && 'bg-slate-50 dark:bg-slate-800/40')}
+            >
+              <span className="w-5 shrink-0 text-center text-[13px] font-bold tabular-nums text-slate-400 dark:text-slate-500">{i + 1}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[15px] font-semibold text-slate-800 dark:text-slate-100">
+                  {r.row.name || r.row.short_name}
+                </span>
+                {/* Pips rather than three numbered columns: the medal's colour and
+                    its count in ~22px each, which is what the columns were spending
+                    64px on. The count is always shown, so colour is never the only
+                    signal. */}
+                <span className="t-meta mt-0.5 flex items-center gap-2.5 tabular-nums">
+                  {(['gold', 'silver', 'bronze'] as const).map((m) => (
+                    <span key={m} className="inline-flex items-center gap-1">
+                      <span className={`medal-pip medal-pip--${m}`} />
+                      {r[m] || 0}
+                    </span>
+                  ))}
+                  <span className="font-semibold text-slate-600 dark:text-slate-300">{r.total} total</span>
+                </span>
+              </span>
+              <Badge tone="brand">{r.row.points}</Badge>
+              <ChevronDown size={15} className={cn('shrink-0 text-slate-400 transition-transform', isOpen && 'rotate-180')} />
+            </button>
+            {isOpen && (
+              <div className="pb-3">
+                <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} entityId={r.row.entity_id} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+
+    <div className="hidden sm:block">
     <Table>
       <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
         <tr>
@@ -116,5 +170,7 @@ export function StandingsMedalTable({ rows, base, scope, scopeId }:
         })}
       </tbody>
     </Table>
+    </div>
+    </>
   );
 }

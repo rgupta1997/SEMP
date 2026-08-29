@@ -109,12 +109,17 @@ export function StandingsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 sm:grid-cols-3">
+      {/* Two up on a phone, three across at sm+. Stacked full-width they were a
+          column of three near-square tiles introducing a table nobody had reached
+          yet; side by side they read as a summary, which is what they are. */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-4">
         {view === 'medals' ? (
           <>
             <StatCard label="Sports & disciplines" value={draws.length} />
             <StatCard label={entrants} value={rows.length} />
-            <StatCard label="Medal leader" value={medalLeader?.short_name ?? medalLeader?.name ?? '-'} accent />
+            <div className="col-span-2 sm:col-span-1">
+              <StatCard label="Medal leader" value={medalLeader?.short_name ?? medalLeader?.name ?? '-'} accent />
+            </div>
           </>
         ) : (
           <>
@@ -146,6 +151,64 @@ export function StandingsPage() {
           ) : view === 'medals' ? (
             <StandingsMedalTable rows={rows} base={`/championships/${eventId}`} scope={scope} scopeId={scopeId} />
           ) : (
+            <>
+            {/* ---------------- phone: a league table that fits ----------------
+                Eight columns - #, name, P, W, D, L, Medals, Pts - is a horizontal
+                scroll on a 390px screen, and the two that matter (who, and how many
+                points) sit at opposite ends of the drag. Two lines instead: the
+                position, the squad's short name and its points on the first, the
+                record and any medals on the second. Same rows, same expansion, no
+                sideways movement. */}
+            <div className="sm:hidden">
+              {rows.map((r, i) => {
+                const isOpen = expanded === r.entity_id;
+                return (
+                  <div key={r.entity_id} className="border-t border-slate-100 first:border-t-0 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setExpanded(isOpen ? null : r.entity_id)}
+                      aria-expanded={isOpen}
+                      className={cn(
+                        'flex w-full items-center gap-2.5 px-1 py-2.5 text-left transition-colors',
+                        isOpen && 'bg-slate-50 dark:bg-slate-800/40',
+                      )}
+                    >
+                      <RankBadge pos={r.rank ?? i + 1} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[15px] font-semibold text-slate-800 dark:text-slate-100">
+                          {r.name || r.short_name}
+                        </span>
+                        {/* The record, as one muted run. Colour still carries won
+                            and lost, and the letters carry them for anybody who
+                            cannot see the colour. */}
+                        <span className="t-meta mt-0.5 flex items-center gap-2 tabular-nums">
+                          <span>P{r.played}</span>
+                          <span className="text-emerald-600 dark:text-emerald-400">W{r.won}</span>
+                          <span>D{r.drawn}</span>
+                          <span className="text-rose-500 dark:text-rose-400">L{r.lost}</span>
+                          {showMedals && (['gold', 'silver', 'bronze'] as const).map((m) => (
+                            r.detail?.[m] ? (
+                              <span key={m} className="inline-flex items-center gap-0.5">
+                                <span className={`medal-pip medal-pip--${m}`} />{r.detail[m]}
+                              </span>
+                            ) : null
+                          ))}
+                        </span>
+                      </span>
+                      <Badge tone="brand">{r.points}</Badge>
+                      <ChevronDown size={15} className={cn('shrink-0 text-slate-400 transition-transform', isOpen && 'rotate-180')} />
+                    </button>
+                    {isOpen && (
+                      <div className="pb-3">
+                        <StandingsBreakdown base={`/championships/${eventId}`} scope={scope} scopeId={scopeId} entityId={r.entity_id} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="hidden sm:block">
             <Table>
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 <tr>
@@ -214,6 +277,8 @@ export function StandingsPage() {
                 })}
               </tbody>
             </Table>
+            </div>
+            </>
           )}
         </CardBody>
       </Card>

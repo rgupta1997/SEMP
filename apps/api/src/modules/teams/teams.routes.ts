@@ -191,8 +191,8 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   // entered into championships later via /teams/:id/entries. The creating user is
   // seeded as captain (unless they administer the org - admins manage, not play).
   router.post('/teams', guards.teamCreate, validateBody(createTeamSchema), asyncHandler(async (req, res) => {
-    const { name, sport_id, organization_id, championship_id, championship_organization_id, tournament_discipline_id } = req.body as {
-      name: string; sport_id: string; organization_id: string;
+    const { name, short_name, sport_id, organization_id, championship_id, championship_organization_id, tournament_discipline_id } = req.body as {
+      name: string; short_name: string; sport_id: string; organization_id: string;
       championship_id?: string; championship_organization_id?: string; tournament_discipline_id?: string;
     };
     // Which campus or department this team plays for. Not taken from the request:
@@ -283,7 +283,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
 
     const created = await prisma.$transaction(async (tx) => {
       const team = await tx.teams.create({
-        data: { sport_id, organization_id, org_unit_id: orgUnitId, name, status: 'forming', invite_token: randomBytes(16).toString('hex') },
+        data: { sport_id, organization_id, org_unit_id: orgUnitId, name, short_name, status: 'forming', invite_token: randomBytes(16).toString('hex') },
       });
       if (seedCaptain) await tx.team_members.create({ data: { team_id: team.id, user_id: creatorId, role: 'captain' } });
       if (entryData) {
@@ -469,7 +469,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   router.post('/teams/bulk', guards.teamCreate, validateBody(bulkCreateTeamsSchema), asyncHandler(async (req, res) => {
     const teams = req.body.teams as Array<{
       championship_id: string; sport_id: string; organization_id: string;
-      championship_organization_id: string; tournament_discipline_id: string; name: string;
+      championship_organization_id: string; tournament_discipline_id: string; name: string; short_name: string;
     }>;
     for (const t of teams) {
       await assertDisciplineForTeam(prisma, t.tournament_discipline_id, t.championship_id, t.sport_id);
@@ -514,7 +514,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       const out: any[] = [];
       for (const t of teams) {
         const team = await tx.teams.create({
-          data: { sport_id: t.sport_id, organization_id: t.organization_id, name: t.name, status: 'forming', invite_token: randomBytes(16).toString('hex') },
+          data: { sport_id: t.sport_id, organization_id: t.organization_id, name: t.name, short_name: t.short_name, status: 'forming', invite_token: randomBytes(16).toString('hex') },
         });
         await tx.team_entries.create({
           data: {

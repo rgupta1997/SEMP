@@ -5,7 +5,7 @@ import type {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, CircleDashed, Info, Search, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, CircleDashed, Info, Search, SlidersHorizontal, X } from 'lucide-react';
 import { titleCase } from '../lib/format';
 import { useDialog } from '../lib/useDialog';
 
@@ -132,10 +132,13 @@ export function CardHeader({ title, subtitle, action }: { title: ReactNode; subt
     // the header knows it is there: a CardBody used on its own - the identity
     // panel on the profile, and a dozen like it - had no top padding at all, and
     // its content sat on the card's own border.
-    <div className="flex flex-col gap-3 px-5 pt-5 pb-3 [&+div]:pt-0 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+    // Tighter on a phone, and the subtitle is held to two lines. A card header of
+    // title + a full sentence of explanation + a wrapped row of actions was ~180px
+    // above tables that people open the page to read.
+    <div className="flex flex-col gap-2 px-4 pt-4 pb-2.5 [&+div]:pt-0 sm:gap-3 sm:px-5 sm:pt-5 sm:pb-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
       <div className="min-w-0">
-        <h3 className="font-semibold text-slate-900 dark:text-slate-100">{title}</h3>
-        {subtitle && <p className="text-sm text-slate-500 mt-0.5 dark:text-slate-400">{subtitle}</p>}
+        <h3 className="t-card-title text-slate-900 sm:text-base dark:text-slate-100">{title}</h3>
+        {subtitle && <p className="t-meta mt-0.5 line-clamp-2 sm:line-clamp-none">{subtitle}</p>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </div>
@@ -145,7 +148,7 @@ export function CardHeader({ title, subtitle, action }: { title: ReactNode; subt
 export const CardBody = ({ className = '', children }: { className?: string; children: ReactNode }) =>
   // Longhand, not `p-5`: several callers pass `p-0`/`p-2` for a flush table, and
   // the shorthand would fight them on which utility Tailwind happens to emit last.
-  <div className={cn('px-5 pt-5 pb-5', className)}>{children}</div>;
+  <div className={cn('px-4 pt-4 pb-4 sm:px-5 sm:pt-5 sm:pb-5', className)}>{children}</div>;
 
 /* ----------------------------- Badge ----------------------------- */
 type BadgeTone = 'brand' | 'green' | 'teal' | 'amber' | 'rose' | 'slate' | 'violet' | 'info' | 'live';
@@ -337,20 +340,97 @@ export function Modal({ title, onClose, children, footer, wide, size, dismissibl
  * radii and two ways of drawing an edge (`ring-1` here, `border` there), which
  * is why the same row of filters looked like a different control on each page.
  */
-export function FilterChips<T extends string>({ value, onChange, options, className = '' }: {
+export function FilterChips<T extends string>({ value, onChange, options, className = '', label = 'Filter' }: {
   value: T;
   onChange: (v: T) => void;
   options: Array<{ key: T; label: ReactNode; count?: number }>;
   className?: string;
+  /** What the sheet is called on a phone. "Filter" unless the axis has a better name. */
+  label?: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const current = options.find((o) => o.key === value) ?? options[0];
+
   return (
-    // A SCROLLING ROW BELOW sm, NOT A WRAPPING GRID.
-    // Four chips with counts wrap to two or three rows on a 390px screen, and the
-    // wrap moves as the counts change - so the control the reader is aiming at
-    // jumps between renders. One row that scrolls keeps the geometry stable and
-    // costs nothing: the chips are ordered, so the ones past the edge are the ones
-    // least often wanted.
-    <div className={cn('snap-row bleed-x mb-4 px-4 pb-1 sm:mx-0 sm:flex sm:flex-wrap sm:gap-2 sm:overflow-visible sm:px-0 sm:pb-0', className)}>
+    <>
+      {/* ---------------- phone: one control, on the page's own margin ----------
+          This was a full-bleed scrolling row - `bleed-x` pulled it out to the screen
+          edge with its own `px-4`, so the chips started flush left while every card
+          under them sat on the page padding. Two different left edges on one screen
+          reads as a bug even when nobody can say why.
+
+          A single button instead: it obeys the page margin like everything else, it
+          says which filter is on without the reader scrolling to find the
+          highlighted chip, and the full set opens as a sheet. */}
+      <div className={cn('mb-3 flex items-center gap-2 sm:hidden', className)}>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-haspopup="dialog"
+          aria-label={`${label}: ${typeof current?.label === 'string' ? current.label : 'change'}`}
+          className={cn(
+            'flex min-h-[38px] flex-1 items-center gap-2 rounded-full border px-3.5 text-sm font-semibold transition-colors',
+            value !== options[0]?.key
+              ? 'border-brand-600 bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
+              : 'border-eos-line bg-white text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300',
+          )}
+        >
+          <SlidersHorizontal size={15} className="shrink-0" />
+          <span className="min-w-0 flex-1 truncate text-left">{current?.label}</span>
+          {current?.count !== undefined && (
+            <span className="tnum shrink-0 text-xs opacity-60">{current.count}</span>
+          )}
+          <ChevronDown size={15} className="shrink-0 opacity-60" />
+        </button>
+      </div>
+
+      {open && createPortal(
+        <div
+          className="animate-backdrop fixed inset-0 z-modal flex items-end bg-slate-900/50 backdrop-blur-sm sm:hidden"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={label}
+            onClick={(e) => e.stopPropagation()}
+            className="animate-sheet max-h-[80dvh] w-full overflow-y-auto rounded-t-[22px] bg-white pb-safe dark:bg-slate-900"
+          >
+            <div className="flex justify-center pt-2.5" aria-hidden>
+              <span className="h-1 w-9 rounded-full bg-slate-300 dark:bg-slate-700" />
+            </div>
+            <div className="px-5 pb-2 pt-3">
+              <h2 className="t-section dark:text-slate-100">{label}</h2>
+            </div>
+            <div className="pb-3">
+              {options.map((o, i) => {
+                const active = o.key === value;
+                return (
+                  <button
+                    key={o.key || `#${i}`}
+                    type="button"
+                    onClick={() => { onChange(o.key); setOpen(false); }}
+                    className={cn(
+                      'flex w-full items-center gap-3 px-5 py-3 text-left text-[15px] transition-colors',
+                      active ? 'font-bold text-brand-700 dark:text-brand-300' : 'text-slate-700 dark:text-slate-300',
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                    {o.count !== undefined && (
+                      <span className="tnum text-sm text-slate-400 dark:text-slate-500">{o.count}</span>
+                    )}
+                    {active && <Check size={17} className="shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
+    {/* ---------------- sm+: the chips, on the page margin ---------------- */}
+    <div className={cn('mb-4 hidden flex-wrap gap-2 sm:flex', className)}>
       {options.map((o, i) => {
         const active = o.key === value;
         return (
@@ -374,6 +454,7 @@ export function FilterChips<T extends string>({ value, onChange, options, classN
         );
       })}
     </div>
+    </>
   );
 }
 
@@ -443,15 +524,22 @@ export function PageHeader({ title, subtitle, children }: { title: ReactNode; su
 // faint watermark in the corner, mirroring the mockup's `data-bg-number`.
 export function StatCard({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode; accent?: boolean }) {
   return (
+    // A DASHBOARD TILE, NOT A POSTER.
+    //
+    // `p-6` + a 36px value + a 120px watermark makes a ~290px tile. Three of them
+    // stacked full-width on a phone is 900px of chrome before the table they are
+    // introducing - which on Standings meant the championship table itself started
+    // two screens down. Halved below sm: smaller padding, a 26px value, and the
+    // watermark scaled to match rather than dominating a box a third the size.
     <div
-      className="relative overflow-hidden rounded-2xl p-6 text-white shadow-[var(--card-shadow)]"
+      className="relative overflow-hidden rounded-2xl p-4 text-white shadow-[var(--card-shadow)] sm:p-6"
       style={{ backgroundImage: 'linear-gradient(135deg, var(--stat-grad-from), var(--stat-grad-to))' }}
     >
-      <div aria-hidden className="pointer-events-none absolute -bottom-5 -right-2 select-none text-[120px] font-extrabold leading-none tnum opacity-10">{value}</div>
+      <div aria-hidden className="pointer-events-none absolute -bottom-3 -right-1 select-none text-[64px] font-extrabold leading-none tnum opacity-10 sm:-bottom-5 sm:-right-2 sm:text-[120px]">{value}</div>
       <div className="relative">
-        <div className="text-sm font-medium opacity-90">{label}</div>
-        <div className="mt-3 text-4xl font-bold tracking-tight tnum">{value}</div>
-        {hint && <div className="mt-1 text-[13px] opacity-80">{hint}</div>}
+        <div className="text-[13px] font-medium opacity-90 sm:text-sm">{label}</div>
+        <div className="mt-1 text-[26px] font-bold leading-none tracking-tight tnum sm:mt-3 sm:text-4xl">{value}</div>
+        {hint && <div className="mt-1 text-[12.5px] opacity-80 sm:text-[13px]">{hint}</div>}
       </div>
     </div>
   );

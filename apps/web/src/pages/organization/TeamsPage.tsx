@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Building2 } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
-import { titleCase } from '../../lib/format';
+import { suggestShort, titleCase } from '../../lib/format';
 import { usePermissions } from '../../lib/permissions';
 import { api } from '../../lib/api';
 import { useFilterBar, usePageFilters } from '../../lib/filters';
@@ -228,6 +228,15 @@ function InlineCreateTeam({ institutionId, kind, onClose }: {
   const navigate = useNavigate();
   const { data: sports = [] } = useApi<any[]>('/sports');
   const [name, setName] = useState('');
+  // Entered, never derived. A slice of the name gives "B.Tech 2023" and "B.Tech
+  // 2024" the same three letters, and on a scoreboard the abbreviation IS the side -
+  // two rows reading BTE is a result nobody can tell apart. Whoever creates the
+  // squad knows theirs are BT23 and BT24.
+  //
+  // `touched` is what makes the suggestion a suggestion: it follows the name until
+  // the moment somebody types here, and then it is theirs and stops moving.
+  const [shortName, setShortName] = useState('');
+  const [shortTouched, setShortTouched] = useState(false);
   const [sportId, setSportId] = useState('');
   const [playsFor, setPlaysFor] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -258,10 +267,12 @@ function InlineCreateTeam({ institutionId, kind, onClose }: {
   const submit = () => {
     setError(null);
     if (!name.trim()) { setError('Team name is required'); return; }
+    if (shortName.trim().length < 2) { setError('A short name of at least 2 characters is required'); return; }
     if (!sportId) { setError('Pick a sport'); return; }
     if (kind !== 'organization' && !playsFor) { setError(`Pick which ${noun.toLowerCase()} this squad plays for`); return; }
     create.mutate({
       name: name.trim(),
+      short_name: shortName.trim().toUpperCase(),
       sport_id: sportId,
       organization_id: institutionId,
       // Null for an organisation squad, and the tab guarantees it.
@@ -285,8 +296,35 @@ function InlineCreateTeam({ institutionId, kind, onClose }: {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <label className="block flex-1">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Team name</span>
-          <Input value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder="e.g. VJTI Titans"
-            onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
+          <Input
+            value={name}
+            autoFocus
+            onChange={(e) => {
+              setName(e.target.value);
+              // A head start, not an answer: it tracks the name until somebody
+              // types their own, then stops.
+              if (!shortTouched) setShortName(suggestShort(e.target.value));
+            }}
+            placeholder="e.g. VJTI Titans"
+            onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+          />
+        </label>
+        <label className="block sm:w-40">
+          <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+            Short name <span className="text-rose-500">*</span>
+          </span>
+          <Input
+            value={shortName}
+            onChange={(e) => { setShortTouched(true); setShortName(e.target.value.toUpperCase().slice(0, 12)); }}
+            placeholder="VJTI"
+            maxLength={12}
+            className="font-mono uppercase tracking-wide"
+            aria-describedby="short-name-hint"
+            onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+          />
+          <span id="short-name-hint" className="mt-1 block text-xs text-slate-400 dark:text-slate-500">
+            Shown on scoreboards and phones
+          </span>
         </label>
         <label className="block sm:w-56">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Sport</span>
