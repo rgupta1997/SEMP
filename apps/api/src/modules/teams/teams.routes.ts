@@ -14,6 +14,18 @@ import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { resolveEntryRules, type EntryRules } from '../tournaments/domain/entry-rules.js';
 import { assertCanAddMember, assertCanLockRoster } from './domain/roster-policy.js';
+import { notify } from '@semp/notifications/server/notify.js';
+
+// Best-effort: the roster/team write is already committed, so a notification
+// hiccup must never surface as a failed request. Matches the pattern already
+// used for fixtures/org-roles notifications.
+async function tellUser(prisma: Prisma, actorId: string, userId: string, type: string, data: Record<string, unknown>) {
+  try {
+    await notify(prisma, { type, userId, senderId: actorId, data });
+  } catch (err) {
+    console.error(`[teams] ${type} notification failed for user ${userId}:`, err);
+  }
+}
 
 // Default password for auto-provisioned players from a bulk import. They can be
 // invited / reset later; precomputed once to keep the bulk loop cheap.
@@ -226,6 +238,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       }
       return team;
     });
+    await tellUser(prisma, creatorId, creatorId, 'team_created', { teamName: name });
     res.status(201).json(await hydrateTeam(prisma, created.id));
   }));
 
@@ -335,6 +348,19 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     const count = await prisma.team_members.count({ where: { team_id: req.params.id, is_active: true } });
     assertCanLockRoster(entryRules(entry), count);
     await prisma.team_entries.update({ where: { id: entry.id }, data: { status: 'roster_locked' } });
+
+    try {
+      const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { name: true } });
+      await notify(prisma, {
+        type: 'team_roster_locked',
+        teamId: req.params.id,
+        senderId: req.user!.id,
+        data: { teamName: team?.name },
+      });
+    } catch (err) {
+      console.error(`[teams] team_roster_locked notification failed for team ${req.params.id}:`, err);
+    }
+
     res.json(await hydrateTeam(prisma, req.params.id));
   }));
 
@@ -431,9 +457,21 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   }));
 
   router.patch('/teams/:id', guards.teamManager, validateBody(updateTeamSchema), asyncHandler(async (req, res) => {
-    const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true, name: true, coach_user_id: true } });
     if (!team) throw new NotFoundError('Team');
     await prisma.teams.update({ where: { id: team.id }, data: { ...req.body } });
+
+    // This route is generic (any team field), but a coach change specifically
+    // gets the coach a heads-up - only fires when coach_user_id is actually
+    // set and different from before, not on unrelated field edits.
+    if (
+      Object.prototype.hasOwnProperty.call(req.body, 'coach_user_id') &&
+      req.body.coach_user_id &&
+      req.body.coach_user_id !== team.coach_user_id
+    ) {
+      await tellUser(prisma, req.user!.id, req.body.coach_user_id, 'team_coach_assigned', { teamName: team.name });
+    }
+
     res.json(await hydrateTeam(prisma, team.id));
   }));
 
@@ -485,7 +523,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     res.json(rows);
   }));
 
-  async function addMember(prisma: Prisma, teamId: string, data: { user_id: string; role: string; jersey_number?: number }) {
+  async function addMember(prisma: Prisma, teamId: string, data: { user_id: string; role: string; jersey_number?: number }, actorId: string) {
     const team = await prisma.teams.findUnique({
       where: { id: teamId },
       include: { team_entries: { include: { tournament_disciplines: { include: { disciplines: true } } } } },
@@ -503,13 +541,15 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     }
     const count = await prisma.team_members.count({ where: { team_id: teamId, is_active: true } });
     assertCanAddMember(looseAddRules(entries), count);
-    return prisma.team_members.create({
+    const created = await prisma.team_members.create({
       data: { team_id: teamId, user_id: data.user_id, role: data.role, jersey_number: data.jersey_number ?? null },
     });
+    await tellUser(prisma, actorId, data.user_id, 'team_player_added', { teamName: team.name });
+    return created;
   }
 
   router.post('/teams/:id/members', guards.teamManager, validateBody(addTeamMemberSchema), asyncHandler(async (req, res) => {
-    const member = await addMember(prisma, req.params.id, req.body);
+    const member = await addMember(prisma, req.params.id, req.body, req.user!.id);
     res.status(201).json(member);
   }));
 
@@ -593,17 +633,22 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       }
 
       if (newMembers.length) await tx.team_members.createMany({ data: newMembers });
-      return { added: added.length, skipped, total: count };
+      return { added: added.length, skipped, total: count, newMembers };
     });
 
-    res.status(201).json(result);
+    const { newMembers: addedMembers, ...summary } = result;
+    for (const m of addedMembers) {
+      await tellUser(prisma, req.user!.id, m.user_id, 'team_player_added', { teamName: team.name });
+    }
+
+    res.status(201).json(summary);
   }));
 
   // Join via invite token as the current authenticated user.
   router.post('/teams/by-token/:token/join', validateBody(joinTeamSchema), asyncHandler(async (req, res) => {
     const team = await prisma.teams.findUnique({ where: { invite_token: req.params.token } });
     if (!team) throw new NotFoundError('Team');
-    const member = await addMember(prisma, team.id, { user_id: req.user!.id, role: req.body.role, jersey_number: req.body.jersey_number });
+    const member = await addMember(prisma, team.id, { user_id: req.user!.id, role: req.body.role, jersey_number: req.body.jersey_number }, req.user!.id);
     res.status(201).json(member);
   }));
 
@@ -626,14 +671,22 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       data: req.body,
       include: { users: { select: publicUserSelect } },
     });
+
+    if (req.body.role === 'captain' && member.role !== 'captain') {
+      const teamName = (await prisma.teams.findUnique({ where: { id: team.id }, select: { name: true } }))?.name;
+      await tellUser(prisma, req.user!.id, member.user_id, 'team_captain_assigned', { teamName });
+    }
+
     res.json(updated);
   }));
 
   router.delete('/teams/:id/members/:memberId', guards.teamManager, asyncHandler(async (req, res) => {
-    const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true, name: true } });
     if (!team) throw new NotFoundError('Team');
     await assertRosterEditable(prisma, team.id);
+    const member = await prisma.team_members.findUnique({ where: { id: req.params.memberId }, select: { user_id: true } });
     await prisma.team_members.delete({ where: { id: req.params.memberId } });
+    if (member) await tellUser(prisma, req.user!.id, member.user_id, 'team_player_removed', { teamName: team.name });
     res.status(204).send();
   }));
 

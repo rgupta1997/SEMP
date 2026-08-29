@@ -1,3 +1,9 @@
+import { setDefaultResultOrder } from 'node:dns';
+// The Supabase pooler host resolves to real IPv4 addresses plus NAT64-synthesized
+// IPv6 ones; Node's default DNS ordering races IPv6 first, which on networks with
+// flaky NAT64 causes intermittent P1001s and connection-pool-fill timeouts (P2024).
+setDefaultResultOrder('ipv4first');
+
 import './http/middleware/types.js'; // load Request augmentation
 import { env } from './config/env.js';
 import { prisma } from './infra/prisma.js';

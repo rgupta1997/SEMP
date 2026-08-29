@@ -20,6 +20,7 @@ import { accountsForSubject, accountsMatchingPassword, phoneHasCapacity, type Ac
 import { readVerificationTicket, signVerificationTicket } from './verification-ticket.js';
 import { sendEmail, otpEmail } from '../comms/email.js';
 import { sendSms, otpSms } from '../comms/sms.js';
+import { notify } from '@semp/notifications/server/notify.js';
 
 // Phone-first sign-in (Option B).
 //
@@ -297,6 +298,12 @@ export function makeSignInRouter(prisma: Prisma): Router {
       select: { id: true, name: true, email: true, is_super_admin: true, organization_id: true },
     });
 
+    try {
+      await notify(prisma, { type: 'account_created', userId: created.id, senderId: created.id, data: {} });
+    } catch (err) {
+      console.error(`[signup] account_created notification failed for ${created.id}:`, err);
+    }
+
     res.status(201).json({ token: sessionFor(created), user: { id: created.id, name: created.name, email: created.email } });
   }));
 
@@ -333,6 +340,12 @@ export function makeSignInRouter(prisma: Prisma): Router {
       // so demanding they choose another on first sign-in is nonsense.
       data: { password_hash: await bcrypt.hash(password, 10), must_change_password: false },
     });
+
+    try {
+      await notify(prisma, { type: 'account_security_changed', userId: chosen.id, senderId: chosen.id, data: {} });
+    } catch (err) {
+      console.error(`[signin] account_security_changed notification failed for ${chosen.id}:`, err);
+    }
 
     res.json({ reset: true });
   }));

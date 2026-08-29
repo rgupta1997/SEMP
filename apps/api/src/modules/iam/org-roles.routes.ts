@@ -10,6 +10,7 @@ import { can } from '../../http/middleware/can.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { audit, AUDIT_ACTIONS } from './audit.service.js';
 import { moduleSettingsOf, visibleModulesFor } from './module-access.js';
+import { notify } from '@semp/notifications/server/notify.js';
 
 // The module map an institution may store. Only known module keys and known
 // audiences survive - an unrecognised key would sit in the settings blob forever
@@ -304,13 +305,14 @@ export function makeOrgRolesRouter(prisma: Prisma): Router {
       user_id: string; role_id: string; scope_ref?: string | null; status?: 'ACTIVE' | 'INVITED' | 'SUSPENDED';
     };
 
-    const [user, role, member] = await Promise.all([
+    const [user, role, member, organization] = await Promise.all([
       prisma.users.findUnique({ where: { id: user_id }, select: { id: true, name: true, email: true } }),
       prisma.roles.findUnique({ where: { id: role_id }, select: { id: true, name: true } }),
       prisma.organization_members.findFirst({
         where: { user_id, organization_id: req.params.id },
         select: { id: true },
       }),
+      prisma.organizations.findUnique({ where: { id: req.params.id }, select: { name: true } }),
     ]);
     if (!user) throw new NotFoundError('User');
     if (!role) throw new NotFoundError('Role');
@@ -338,6 +340,20 @@ export function makeOrgRolesRouter(prisma: Prisma): Router {
       diff: { role: { from: null, to: role.name }, scope: { from: null, to: scope_ref } },
     });
 
+    // Best-effort: the grant is already committed, so a notification hiccup
+    // must not surface as a failed assignment.
+    try {
+      await notify(prisma, {
+        type: 'role_assigned',
+        organizationId: req.params.id,
+        userId: user_id,
+        senderId: req.user!.id,
+        data: { roleName: role.name, organizationName: organization?.name },
+      });
+    } catch (err) {
+      console.error(`[org-roles] role_assigned notification failed for ${row.id}:`, err);
+    }
+
     res.status(201).json(row);
   }));
 
@@ -346,13 +362,16 @@ export function makeOrgRolesRouter(prisma: Prisma): Router {
   router.patch('/organizations/:id/roles/:assignmentId', orgAdmin, validateBody(updateRoleGrantSchema),
     asyncHandler(async (req, res) => {
       const { status } = req.body as { status: 'ACTIVE' | 'INVITED' | 'SUSPENDED' };
-      const row = await prisma.user_org_roles.findFirst({
-        where: { id: req.params.assignmentId, organization_id: req.params.id },
-        include: {
-          users_user_org_roles_user_idTousers: { select: { name: true, email: true } },
-          roles: { select: { name: true } },
-        },
-      });
+      const [row, organization] = await Promise.all([
+        prisma.user_org_roles.findFirst({
+          where: { id: req.params.assignmentId, organization_id: req.params.id },
+          include: {
+            users_user_org_roles_user_idTousers: { select: { name: true, email: true } },
+            roles: { select: { name: true } },
+          },
+        }),
+        prisma.organizations.findUnique({ where: { id: req.params.id }, select: { name: true } }),
+      ]);
       if (!row) throw new NotFoundError('Assignment');
 
       const updated = await prisma.user_org_roles.update({ where: { id: row.id }, data: { status } });
@@ -365,17 +384,33 @@ export function makeOrgRolesRouter(prisma: Prisma): Router {
         diff: { status: { from: row.status, to: status } },
       });
 
+      // Best-effort - see the note on the assign route above.
+      try {
+        await notify(prisma, {
+          type: 'role_changed',
+          organizationId: req.params.id,
+          userId: row.user_id,
+          senderId: req.user!.id,
+          data: { roleName: row.roles?.name, organizationName: organization?.name, status },
+        });
+      } catch (err) {
+        console.error(`[org-roles] role_changed notification failed for ${row.id}:`, err);
+      }
+
       res.json(updated);
     }));
 
   router.delete('/organizations/:id/roles/:assignmentId', orgAdmin, asyncHandler(async (req, res) => {
-    const row = await prisma.user_org_roles.findFirst({
-      where: { id: req.params.assignmentId, organization_id: req.params.id },
-      include: {
-        users_user_org_roles_user_idTousers: { select: { name: true, email: true } },
-        roles: { select: { name: true } },
-      },
-    });
+    const [row, organization] = await Promise.all([
+      prisma.user_org_roles.findFirst({
+        where: { id: req.params.assignmentId, organization_id: req.params.id },
+        include: {
+          users_user_org_roles_user_idTousers: { select: { name: true, email: true } },
+          roles: { select: { name: true } },
+        },
+      }),
+      prisma.organizations.findUnique({ where: { id: req.params.id }, select: { name: true } }),
+    ]);
     if (!row) throw new NotFoundError('Assignment');
 
     await prisma.user_org_roles.delete({ where: { id: row.id } });
@@ -387,6 +422,19 @@ export function makeOrgRolesRouter(prisma: Prisma): Router {
       summary: `Removed the ${row.roles?.name} role from ${row.users_user_org_roles_user_idTousers?.name}`,
       diff: { role: { from: row.roles?.name ?? null, to: null } },
     });
+
+    // Best-effort - see the note on the assign route above.
+    try {
+      await notify(prisma, {
+        type: 'admin_access_revoked',
+        organizationId: req.params.id,
+        userId: row.user_id,
+        senderId: req.user!.id,
+        data: { roleName: row.roles?.name, organizationName: organization?.name },
+      });
+    } catch (err) {
+      console.error(`[org-roles] admin_access_revoked notification failed for ${row.id}:`, err);
+    }
 
     res.json({ ok: true });
   }));

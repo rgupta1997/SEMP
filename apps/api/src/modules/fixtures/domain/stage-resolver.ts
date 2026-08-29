@@ -2,8 +2,14 @@ import { stageConfigSchema, type StandingsTiebreaker } from '@semp/shared';
 import type { Prisma } from '../../../infra/prisma.js';
 import { resolveRuleForDraw } from '../../standings/standings.service.js';
 import { advanceInBracket } from '../bracket.js';
+import { matchAudience, notifyMatch } from '../match-audience.js';
 import { computePoolStandings, isPoolComplete, tiedRanks, type PoolFixture, type PoolStanding } from './generators/pool-standings.js';
 import { assignStageSequence, type AssignedStageTree } from './stage-tree.js';
+
+async function notifyTeamQualifies(prisma: Prisma, teamId: string): Promise<void> {
+  const audience = await matchAudience(prisma, teamId, null);
+  await notifyMatch(prisma, 'team_qualifies', audience, null, { body: 'Your team has qualified for the next stage.' });
+}
 
 const poolLetter = (poolNumber: number) => String.fromCharCode(64 + poolNumber);
 
@@ -146,6 +152,7 @@ async function resolveGroupQualifierLabels(
       if (Object.keys(data).length === 0) continue; // both sides already resolved/manually set - nothing to do
       await prisma.fixtures.update({ where: { id: t.id }, data });
       await clearTieBlocked(prisma, t.id);
+      await notifyTeamQualifies(prisma, standing.teamId);
 
       // If that update fully resolved a structural bye row (the other side was
       // never labeled - see stage-orchestrator.ts), the lone team is the winner:

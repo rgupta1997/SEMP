@@ -117,6 +117,19 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       return org;
     });
 
+    // Best-effort - the organization is already committed, and a notification
+    // hiccup must never be reported back as a failed creation.
+    try {
+      await notify(prisma, {
+        type: 'organization_created',
+        userId: req.user!.id,
+        senderId: req.user!.id,
+        data: { organizationName: created.name },
+      });
+    } catch (err) {
+      console.error(`[organizations] organization_created notification failed for ${created.id}:`, err);
+    }
+
     // Surface the new login's credentials once so the actor can share them.
     const credentials = owner && provision && owner.name && owner.email
       ? { name: owner.name, email: owner.email, phone: owner.phone ?? null, password: provision.tempPassword }

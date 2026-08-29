@@ -81,6 +81,10 @@ export function MatchConsolePage() {
       </div>
       <div className="mb-4 text-sm text-slate-500 dark:text-slate-400">{eventLabel(fixture)} · {venueLabel(fixture)} · {fmtDateTime(fixture.scheduled_at)}</div>
 
+      {['completed', 'walkover', 'bye'].includes(fixture.status) && (
+        <LockScorecardPanel fixtureId={fixtureId!} scorecardStatus={fixture.scorecard_status} invalidate={invalidate} />
+      )}
+
       {notStarted ? (
         <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-500/10">
           <CardBody className="space-y-3 py-8 text-center">
@@ -1542,6 +1546,41 @@ function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeT
         </div>
       )}
     </>
+  );
+}
+
+/* ----------------------------- Lock scorecard (organiser sign-off) ----------------------------- */
+// A locked scorecard is the permanent, official moment - it's what creates
+// achievements/certificates and freezes the result forever (see lock.service.ts).
+// Entering a score only gets a match to "completed"; nothing before this panel
+// ever called /fixtures/:id/lock, so a played match could sit unlocked forever
+// with no way to make it official. Lock is organiser-only server-side - an
+// official without that role gets the API's own clear error via the toast below
+// rather than a silently missing button.
+function LockScorecardPanel({ fixtureId, scorecardStatus, invalidate }:
+  { fixtureId: string; scorecardStatus: string; invalidate: (string | null)[] }) {
+  const mut = useApiMutation(() => api('POST', `/fixtures/${fixtureId}/lock`, {}), invalidate);
+  if (scorecardStatus === 'locked') {
+    return (
+      <div className="mb-4 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-800/60">
+        <span className="font-semibold text-slate-600 dark:text-slate-300">🔒 Scorecard locked</span>
+        <span className="text-slate-400 dark:text-slate-500">— this result is now official and permanent.</span>
+      </div>
+    );
+  }
+  return (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+      <div className="text-sm text-amber-800 dark:text-amber-300">
+        <span className="font-semibold">Not locked yet.</span> Locking makes this result official and permanent (organiser only).
+      </div>
+      <Button disabled={mut.isPending}
+        onClick={() => mut.mutate(undefined, {
+          onSuccess: () => toast.success('Scorecard locked', 'This result is now official.'),
+          onError: (e: any) => toast.error(e.message),
+        })}>
+        {mut.isPending ? 'Locking…' : 'Lock scorecard'}
+      </Button>
+    </div>
   );
 }
 

@@ -250,8 +250,12 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
   );
 }
 
-/** The rule F-026 calls the trust anchor, rendered as a fact rather than a switch. */
-function VerifiedRecordsNotice() {
+/** The rule F-026 calls the trust anchor, rendered as a fact rather than a switch.
+ *  `visible` comes from the server's own VERIFIED_RECORDS_VISIBLE constant
+ *  (id.privacy.verified_records_visible) rather than being assumed here, so this
+ *  banner can never say something the backend doesn't actually back up. */
+function VerifiedRecordsNotice({ visible }: { visible: boolean }) {
+  if (!visible) return null;
   return (
     <div style={{
       display: 'flex', gap: 11, alignItems: 'flex-start', padding: '13px 15px',
@@ -328,7 +332,7 @@ export function SportsProfilePage() {
         <>
           {active.key === 'overview' && (
             <>
-              <VerifiedRecordsNotice />
+              <VerifiedRecordsNotice visible={id.privacy.verified_records_visible} />
               <ParticipantDashboard />
             </>
           )}

@@ -4,6 +4,8 @@ import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import { recomputeStandingsForFixture } from '../standings/standings.service.js';
 import { createNotification } from '../notifications/audience.js';
+import { notify } from '@semp/notifications/server/notify.js';
+import { Rules } from '@semp/notifications/core/rules.js';
 import { advanceWinnerStrict } from './bracket.js';
 import { deriveAchievements, queueCertificates, writeLifetimeEntries } from './downstream.js';
 import { resolveFixtureParticipants, type FixtureParticipants } from './participants.js';
@@ -261,6 +263,21 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
   // back, so one sent inside the transaction would survive a failure that undid the
   // very thing it announces.
   await notifyParticipants(prisma, req, { fixture: fx, label, championshipId, participants });
+
+  // Separate from notifyParticipants above (players) - this tells the organiser and
+  // the assigned official the card is now official, matching the trigger doc's
+  // "Match score locked -> Organizer/Official" row.
+  if (championshipId) {
+    try {
+      const audience = Rules.compose([
+        Rules.role('organiser', championshipId),
+        ...(fx.official_id ? [Rules.directUser(fx.official_id)] : []),
+      ]);
+      await notify(prisma, { type: 'match_score_locked', audience, senderId: req.user!.id, data: { body: `The scorecard for ${label} is now locked.` } });
+    } catch (err) {
+      console.error(`[lock] match_score_locked notification failed for fixture ${fx.id}:`, err);
+    }
+  }
 
   // Career statistics, refreshed for exactly the people this result touched (J4-E3).
   // Outside the transaction and deliberately not awaited into the lock's success: the

@@ -20,7 +20,7 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
 
   // Organization applies to a championship (status: pending, stamps applied_by).
   router.post('/championships/:eventId/enroll', guards.enrollSelf, validateBody(enrollOrganizationSchema), asyncHandler(async (req, res) => {
-    const championship = await prisma.championships.findUnique({ where: { id: req.params.eventId }, select: { status: true, visibility: true } });
+    const championship = await prisma.championships.findUnique({ where: { id: req.params.eventId }, select: { name: true, status: true, visibility: true } });
     if (!championship) throw new NotFoundError('Championship');
     if (championship.status !== 'registration_open') {
       throw new BusinessRuleError('This championship is not open for registration');
@@ -48,6 +48,28 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
         status: 'pending',
       },
     });
+
+    // Best-effort - the application is already committed, and a notification
+    // hiccup must never be reported back as a failed application.
+    try {
+      await notify(prisma, {
+        type: 'registration_submitted',
+        championshipId: req.params.eventId,
+        userId: req.user!.id,
+        senderId: req.user!.id,
+        data: { championshipName: championship.name },
+      });
+      const org = await prisma.organizations.findUnique({ where: { id: req.body.organization_id }, select: { name: true, short_name: true } });
+      await notify(prisma, {
+        type: 'participant_approval_pending',
+        championshipId: req.params.eventId,
+        senderId: req.user!.id,
+        data: { orgName: org?.short_name || org?.name, championshipName: championship.name },
+      });
+    } catch (err) {
+      console.error(`[enrollment] registration notifications failed for ${row.id}:`, err);
+    }
+
     res.status(201).json(row);
   }));
 
@@ -92,6 +114,19 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
           championshipName: existing.championships?.name,
         },
       });
+    }
+
+    if (req.body.status === 'rejected' && existing.status !== 'rejected') {
+      try {
+        await notify(prisma, {
+          type: 'registration_rejected',
+          organizationId: existing.organization_id,
+          senderId: req.user!.id,
+          data: { reason: req.body.rejection_note ?? null, championshipName: existing.championships?.name },
+        });
+      } catch (err) {
+        console.error(`[enrollment] registration_rejected notification failed for ${existing.id}:`, err);
+      }
     }
 
     res.json(row);
