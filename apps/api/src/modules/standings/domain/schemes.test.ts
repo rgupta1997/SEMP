@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_STANDINGS_RULE, type StandingsRule } from '@semp/shared';
-import { runScheme, rankBy, accumulate, type SchemeFixture, type OrgTally } from './schemes.js';
+import { runScheme, rankBy, accumulate, type SchemeFixture, type EntityTally } from './schemes.js';
 
 // One team per org for brevity: team_id === org_id.
 function fx(home: string, away: string, hs: number, as: number, round: string | null = null): SchemeFixture {
@@ -8,12 +8,12 @@ function fx(home: string, away: string, hs: number, as: number, round: string | 
   return {
     status: 'completed', round,
     home_team_id: home, away_team_id: away,
-    home_org_id: home, away_org_id: away,
+    home_entity_id: home, away_entity_id: away,
     home_score: hs, away_score: as, winner_team_id: winner,
   };
 }
 
-const byId = (rows: OrgTally[]) => Object.fromEntries(rows.map((r) => [r.organization_id, r]));
+const byId = (rows: EntityTally[]) => Object.fromEntries(rows.map((r) => [r.entity_id, r]));
 
 describe('league_points scheme', () => {
   const rule = DEFAULT_STANDINGS_RULE; // 3 / 1 / 0
@@ -35,7 +35,7 @@ describe('league_points scheme', () => {
   it('ranks by tiebreakers (points then score_diff)', () => {
     const rows = runScheme([fx('A', 'B', 2, 0), fx('A', 'C', 1, 1), fx('B', 'C', 3, 1)], rule);
     const ranked = rankBy(rows, ['points', 'wins', 'lost', 'score_diff']);
-    expect(ranked.map((r) => r.organization_id)).toEqual(['A', 'B', 'C']);
+    expect(ranked.map((r) => r.entity_id)).toEqual(['A', 'B', 'C']);
     expect(ranked.map((r) => r.rank)).toEqual([1, 2, 3]);
   });
 });
@@ -166,7 +166,7 @@ describe('placement byes earn the reached-stage floor', () => {
   const bye = (team: string, round: string): SchemeFixture => ({
     status: 'bye', round,
     home_team_id: team, away_team_id: null,
-    home_org_id: team, away_org_id: null,
+    home_entity_id: team, away_entity_id: null,
     home_score: null, away_score: null, winner_team_id: null,
   });
 
@@ -210,7 +210,7 @@ describe('medal position points are withheld until the discipline is decided', (
 
 describe('accumulate across draws', () => {
   it('sums points and merges medal/placement detail by org', () => {
-    const acc = new Map<string, OrgTally>();
+    const acc = new Map<string, EntityTally>();
     accumulate(acc, runScheme([fx('A', 'B', 2, 0)], DEFAULT_STANDINGS_RULE)); // A +3
     accumulate(acc, runScheme([fx('A', 'B', 1, 0)], { scheme: 'medal', gold: 5, silver: 3, bronze: 1, participation: 0 })); // A gold +5
     const a = acc.get('A')!;

@@ -5,7 +5,7 @@ import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/useWorkspace';
 import { api } from '../lib/api';
 import { useApi, useTableControls, fmtDateRange } from '../lib/hooks';
-import { Button, Card, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge, toast } from '../components/ui';
+import { Button, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge, SURFACE, toast } from '../components/ui';
 
 interface Championship {
   id: string; name: string; slug: string; status: string;
@@ -251,59 +251,88 @@ export function DiscoverPage() {
         />
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {tc.view.map((c) => (
-              <Card key={c.id} className="flex flex-col p-5">
-                <div className="flex items-start justify-between">
-                  <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-50 text-lg font-black text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">{c.name.slice(0, 1)}</span>
-                  <div className="flex items-center gap-1.5">
-                    {c.visibility === 'private' && <StatusBadge status="private" label="Private" />}
-                    <StatusBadge status={c.status} />
-                  </div>
-                </div>
-                <h3 className="mt-3 font-semibold text-slate-900 dark:text-slate-100">{c.name}</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400">{c.venue || 'Venue TBD'} · {fmtDateRange(c.start_date, c.end_date)}</p>
-                {(c.sports ?? []).length > 0 && (
-                  <p className="mt-2 truncate text-xs text-slate-400 dark:text-slate-500" title={(c.sports ?? []).join(', ')}>
-                    {(c.sports ?? []).slice(0, 4).join(' · ')}{(c.sports ?? []).length > 4 ? ` +${(c.sports ?? []).length - 4}` : ''}
-                  </p>
-                )}
-                <div className="mt-4 flex-1" />
-                {(() => {
+          <div className={`overflow-x-auto ${SURFACE}`}>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-left font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 dark:border-slate-800">
+                  <th className="px-4 py-3">Championship</th>
+                  <th className="px-4 py-3">Sports</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="w-px whitespace-nowrap px-4 py-3 text-right">Entry</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tc.view.map((c) => {
+                  const sports = c.sports ?? [];
                   const applied = enrollmentStatusFor(c.id);
-                  if (applied) {
-                    return (
-                      <div className="mb-2 flex items-center gap-2">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                          {activeOrg ? `Application from ${orgLabel(activeOrg)}` : 'Your application'}
-                        </span>
-                        <StatusBadge status={applied} />
-                      </div>
-                    );
-                  }
-                  if (c.status !== 'registration_open') return null;
-                  if (activeOrg) {
-                    // Discover reaches Sports Admin, who holds the org by grant rather
-                    // than by membership - the server would refuse the application, so
-                    // name who can make it instead of offering a button that fails.
-                    if (!mayEnter) {
-                      return (
-                        <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
-                          An owner or admin of {orgLabel(activeOrg)} can enter it into this championship.
-                        </p>
-                      );
-                    }
-                    return (
-                      <Button className="mb-2 w-full" disabled={busyId === c.id} onClick={() => registerActiveOrg(c)}>
-                        {busyId === c.id ? 'Registering…' : `Register ${orgLabel(activeOrg)}`}
-                      </Button>
-                    );
-                  }
-                  return <Button className="mb-2 w-full" onClick={() => setApplying(c)}>Register</Button>;
-                })()}
-                <Link to={`/championships/${c.id}`} className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300">View details →</Link>
-              </Card>
-            ))}
+                  return (
+                    <tr key={c.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
+                      <td className="px-4 py-3">
+                        <Link to={`/championships/${c.id}`} className="font-semibold text-slate-900 hover:text-brand-600 dark:text-slate-100">
+                          {c.name}
+                        </Link>
+                        <div className="text-xs text-slate-500">
+                          {c.venue || 'Venue TBD'} · {fmtDateRange(c.start_date, c.end_date)}
+                        </div>
+                      </td>
+                      {/* Sports were the card's third line; as a column they stay
+                          scannable down the list instead of per-tile. */}
+                      <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
+                        {sports.length === 0 ? (
+                          <span className="text-slate-400 dark:text-slate-600">—</span>
+                        ) : (
+                          <span title={sports.join(', ')}>
+                            {sports.slice(0, 3).join(' · ')}{sports.length > 3 ? ` +${sports.length - 3}` : ''}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          {c.visibility === 'private' && <StatusBadge status="private" label="Private" />}
+                          <StatusBadge status={c.status} />
+                        </div>
+                      </td>
+                      {/* Every state in this cell is one right-aligned, nowrap row of
+                          the same height - a button, a badge, or a link. The column
+                          shrinks to its content (w-px) so the name column keeps the
+                          slack, and nothing here reflows as the page filters. */}
+                      <td className="w-px whitespace-nowrap px-4 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          {applied ? (
+                            <>
+                              <span className="text-xs text-slate-500 dark:text-slate-400">
+                                {activeOrg ? orgLabel(activeOrg) : 'You'}
+                              </span>
+                              <StatusBadge status={applied} />
+                            </>
+                          ) : c.status !== 'registration_open' ? (
+                            <Link to={`/championships/${c.id}`} className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300">
+                              View →
+                            </Link>
+                          ) : activeOrg ? (
+                            // Discover reaches Sports Admin, who holds the org by grant
+                            // rather than by membership - the server would refuse the
+                            // application, so name who can make it instead of offering a
+                            // button that fails.
+                            !mayEnter ? (
+                              <span className="text-xs text-slate-400 dark:text-slate-500" title={`An owner or admin of ${orgLabel(activeOrg)} can enter it into this championship.`}>
+                                Owner or admin only
+                              </span>
+                            ) : (
+                              <Button size="sm" disabled={busyId === c.id} title={`Register ${orgLabel(activeOrg)}`} onClick={() => registerActiveOrg(c)}>
+                                {busyId === c.id ? 'Registering…' : 'Register'}
+                              </Button>
+                            )
+                          ) : (
+                            <Button size="sm" onClick={() => setApplying(c)}>Register</Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
           <Pagination page={tc.page} pageCount={tc.pageCount} total={tc.total} pageSize={tc.pageSize} onPage={tc.setPage} />
         </>

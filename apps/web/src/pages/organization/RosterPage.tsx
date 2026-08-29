@@ -8,28 +8,63 @@ import { titleCase } from '../../lib/format';
 import { usePermissions } from '../../lib/permissions';
 import { Avatar, BackButton, Badge, Button, Card, CardBody, CardHeader, Checkbox, confirmDialog, Field, Input, Modal, Pills, Progress, SearchInput, Select, Spinner, StatusBadge, Tabs, Textarea, toast, INSET} from '../../components/ui';
 import { EnterChampionshipsPanel } from '../../components/EnterChampionshipsModal';
+import { useOrgUnits } from '../../lib/units';
 
 interface BulkResult { added: number; skipped: { label: string; reason: string }[]; total: number }
 
-// Rename a team. Discipline + championship are managed per entry now, not here.
+// Rename a squad, and move it between campuses and batches.
+//
+// The move matters more than the rename: a squad created at the wrong level - a
+// batch squad for a campus championship - cannot enter anything, and until this
+// existed the only remedy was to delete it and start again, losing the roster.
+//
+// The server refuses a move once the squad has entered a championship, and refuses
+// one that would strand players who do not belong where it is going. Both refusals
+// arrive as sentences worth showing verbatim, so this does not second-guess them.
 function EditTeamModal({ team, onClose }: { team: any; onClose: () => void }) {
   const path = `/teams/${team.id}`;
   const [name, setName] = useState(team.name ?? '');
+  const [unitId, setUnitId] = useState<string>(team.org_unit_id ?? '');
   const [error, setError] = useState<string | null>(null);
+  const { flat: units, labels } = useOrgUnits(team.organization_id);
+  const entered = (team.team_entries ?? []).length > 0;
+
   const update = useApiMutation(
-    (body: { name: string }) => api('PATCH', path, body),
-    [path, `/teams?organization_id=${team.organization_id}`],
+    (body: Record<string, unknown>) => api('PATCH', path, body),
+    [path, `/teams?organization_id=${team.organization_id}`, '/me/teams'],
   );
 
   const submit = () => {
     setError(null);
     if (!name.trim()) { setError('Team name is required'); return; }
-    update.mutate({ name: name.trim() }, { onSuccess: () => onClose(), onError: (e: any) => setError(e.message) });
+    update.mutate(
+      { name: name.trim(), org_unit_id: unitId || null },
+      { onSuccess: () => onClose(), onError: (e: any) => setError(e.message) },
+    );
   };
 
   return (
     <Modal title="Edit team" onClose={onClose}>
       <Field label="Team name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+
+      {units.length > 0 && (
+        <Field
+          label="Plays for"
+          hint={entered
+            ? 'This squad has already entered a championship, so who it plays for is fixed. Withdraw it first to move it.'
+            : 'A campus squad plays championships between your campuses; a batch squad plays between batches.'}
+        >
+          <Select value={unitId} disabled={entered} onChange={(e) => setUnitId(e.target.value)}>
+            <option value="">The whole organisation</option>
+            {units.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.parent ? `${u.name} · ${u.parent.name}` : `${u.name} — whole ${labels.campus.toLowerCase()}`}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
+
       {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -57,17 +92,23 @@ function parsePasted(text: string): { name?: string; email?: string; jersey_numb
 
 // Inline "Add players" block (not a popup). Lists the organization's members in a
 // table you tick to add, or paste a list. Shows the import result inline when done.
-function AddPlayersPanel({ teamId, institutionId, existingUserIds, remaining, takenRoles, onClose }:
-  { teamId: string; institutionId?: string; existingUserIds: Set<string>; remaining: number; takenRoles: Set<string>; onClose: () => void }) {
+function AddPlayersPanel({ teamId, team, institutionId, existingUserIds, remaining, takenRoles, onClose }:
+  { teamId: string; team: any; institutionId?: string; existingUserIds: Set<string>; remaining: number; takenRoles: Set<string>; onClose: () => void }) {
   const [tab, setTab] = useState('roster');
-  // Source from the org's members (organization_members), not the legacy
-  // users.organization_id column - a user can belong to several orgs, and members
-  // added via the Members page only get an organization_members row.
-  const { data: orgMembers = [], isLoading } = useApi<any[]>(institutionId ? `/organizations/${institutionId}/members` : null);
-  const users = useMemo(
-    () => orgMembers.filter((m) => m.users && m.status !== 'pending' && m.status !== 'past').map((m) => m.users),
-    [orgMembers],
-  );
+  // Only the people who may actually play for this squad.
+  //
+  // Asked of the SERVER, not filtered here. A campus squad may pick anyone in that
+  // campus INCLUDING its batches; a batch squad may pick only that batch; and one
+  // person can be in several units at once, so they appear in every picker they
+  // qualify for. Rebuilding that rule in the browser would leave two answers free to
+  // drift, and the one people see would be the one that is not enforced - so a name
+  // would be offered, ticked, and then refused on save.
+  //
+  // For a whole-organisation squad this returns every member, which is what the old
+  // members list returned, so nothing changes there.
+  const { data: eligible = [], isLoading } = useApi<any[]>(teamId ? `/teams/${teamId}/eligible-players` : null);
+  const users = eligible;
+  const unitName = team?.org_units?.name ?? null;
   const candidates = useMemo(() => users.filter((u) => !existingUserIds.has(u.id)), [users, existingUserIds]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
@@ -88,6 +129,13 @@ function AddPlayersPanel({ teamId, institutionId, existingUserIds, remaining, ta
   }, [candidates, search]);
 
   const parsed = useMemo(() => parsePasted(paste), [paste]);
+
+  // An empty or short list is the commonest confusion on this screen, and the cause
+  // is almost always placement rather than the squad. Naming the unit turns "where
+  // is everybody" into a job somebody can go and do.
+  const scopeNote = unitName
+    ? `Only people in ${unitName} can play for this squad. Somebody missing is not in it yet — add them on the Campuses & Units screen.`
+    : null;
   const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const allChecked = shown.length > 0 && shown.every((u) => selected.has(u.id));
 
@@ -154,10 +202,22 @@ function AddPlayersPanel({ teamId, institutionId, existingUserIds, remaining, ta
 
           {tab === 'roster' ? (
             isLoading ? <Spinner /> : candidates.length === 0 ? (
-              <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">Everyone from this organization is already on the roster. Use “Paste list” to add new people.</p>
+              <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">
+                {scopeNote
+                  // An empty picker on a campus squad almost never means "everyone is
+                  // already on the roster" - it means nobody has been placed in that
+                  // campus yet, which is a different job on a different screen.
+                  ? `Nobody left to add from ${unitName}. ${scopeNote}`
+                  : 'Everyone from this organization is already on the roster. Use “Paste list” to add new people.'}
+              </p>
             ) : (
               <>
-                <SearchInput value={search} onChange={setSearch} placeholder="Search members by name or mobile…" className="mb-3 w-full" />
+                {scopeNote && (
+                  <p className="mb-3 rounded-xl bg-brand-50 px-3 py-2 text-[12.5px] text-brand-800 dark:bg-brand-500/10 dark:text-brand-200">
+                    {scopeNote}
+                  </p>
+                )}
+                <SearchInput value={search} onChange={setSearch} placeholder={unitName ? `Search ${unitName} by name or mobile…` : 'Search members by name or mobile…'} className="mb-3 w-full" />
                 {shown.length === 0 ? (
                   <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">No members match your search.</p>
                 ) : (
@@ -367,9 +427,26 @@ export function RosterPage() {
         <div className="flex items-center gap-3">
           <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-50 dark:bg-brand-500/10 text-2xl">{team.sports?.icon ?? '◇'}</span>
           <div>
-            <div className="flex items-center gap-2"><h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{team.name}</h1>{allLocked && <Badge tone="slate">locked</Badge>}</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{team.name}</h1>
+              {/* Which kind of squad this is, stated plainly. A campus squad and a
+                  whole-organisation squad play in different championships and draw
+                  from different people, and mistaking one for the other is only
+                  discovered when the entry is refused. */}
+              {team.org_units && (
+                <Badge tone="brand">
+                  {team.org_units.type === 'campus' ? 'Campus squad' : 'Department squad'}
+                </Badge>
+              )}
+              {allLocked && <Badge tone="slate">locked</Badge>}
+            </div>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              {[team.sports?.name, team.organizations?.name].filter(Boolean).join(' · ')}
+              {/* The unit REPLACES the organisation here rather than joining it.
+                  Every campus squad in an internal championship belongs to the same
+                  institution, so printing both gives "Cricket · Northfield Institute
+                  of Technology" on all of them and the campus - the only part that
+                  differs - goes missing. */}
+              {[team.sports?.name, team.org_units?.name ?? team.organizations?.name].filter(Boolean).join(' · ')}
             </p>
             <p className="text-xs text-slate-400 dark:text-slate-500">
               {entries.length === 0 ? 'Not entered into any championship yet' : `Entered in ${entries.length} championship${entries.length === 1 ? '' : 's'}`} · {activeCount} player{activeCount === 1 ? '' : 's'}
@@ -490,7 +567,7 @@ export function RosterPage() {
             subtitle={allLocked ? 'Roster is locked. To edit, unlock an entry under the Championships tab.' : entries.length === 0 ? 'Add players now - squad limits apply per championship once entered' : belowMin ? `Add at least ${rules.squad_min - activeCount} more to lock` : 'Add players to complete your squad'}
             action={!allLocked && canManage && <Button size="sm" variant="subtle" disabled={atMax} title={atMax ? 'Squad is full' : undefined} onClick={() => setAdding(true)}>+ Add players</Button>} />
           <CardBody>
-            {adding && canManage && <AddPlayersPanel teamId={teamId!} institutionId={team.organizations?.id ?? team.organization_id} existingUserIds={existingUserIds} remaining={remaining} takenRoles={takenRoles} onClose={() => setAdding(false)} />}
+            {adding && canManage && <AddPlayersPanel teamId={teamId!} team={team} institutionId={team.organizations?.id ?? team.organization_id} existingUserIds={existingUserIds} remaining={remaining} takenRoles={takenRoles} onClose={() => setAdding(false)} />}
             <Progress
               value={activeCount}
               max={rules.squad_max}

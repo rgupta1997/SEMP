@@ -20,7 +20,7 @@ export function EventDashboard() {
   const sportsCount = new Set(draws.map((d) => d.tournament_sports?.sport_id).filter(Boolean)).size;
 
   // Live "getting started" progress for this championship (organisers only).
-  const onboarding = useOrganiserOnboarding(eventId, championship.status, canManage);
+  const onboarding = useOrganiserOnboarding(eventId, championship.status, canManage, championship.entry);
 
   const tasks: { label: string; to: string; tone: 'amber' | 'brand' }[] = [];
   if (pending.length) tasks.push({ label: `${pending.length} organization${pending.length > 1 ? 's' : ''} awaiting approval`, to: `/championships/${eventId}/approvals`, tone: 'amber' });

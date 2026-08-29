@@ -19,16 +19,22 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
 
-  // super OR owner/admin of the :id org
-  const orgAdmin = asyncHandler(async (req, _res, next) => {
-    const u = req.user!;
-    if (u.isSuperAdmin) return next();
-    if (await guards.orgRole(u.id, req.params.id, ['owner', 'admin'])) return next();
-    throw new ForbiddenError('Only an organization owner/admin can do this');
-  });
+  // The routes below ask the permission ENGINE - `guards.orgPermission(...)` - rather
+  // than the membership-only `orgAdmin` guard this router used to define for itself.
+  // That guard read organization_members and nothing else, so a role the Owner
+  // granted through the Roles screen meant nothing here. It keeps the membership
+  // check as its fallback, so this could only ever widen; see permissions.ts for why
+  // every router had grown its own copy and what that cost.
+  //
+  // Which permission each route asks for is the interesting part. `org.manage` is the
+  // organisation's own settings and profile; `org.member.manage` is who belongs to
+  // it. A different job, separately grantable, and the reason Sports Admin - which
+  // holds neither - cannot quietly add people to the institution while it runs the
+  // sport inside it.
 
-  // super OR owner of the :id org. Deleting an organization is owner-only - admins
-  // manage day-to-day, but tearing down the whole org is the owner's call.
+  // Deleting is the exception and stays OWNERSHIP rather than a permission: admins
+  // manage day to day, but tearing down the whole tenant is the owner's call, and it
+  // is not something a role should be grantable into.
   const orgOwner = asyncHandler(async (req, _res, next) => {
     const u = req.user!;
     if (u.isSuperAdmin) return next();
@@ -137,7 +143,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     res.status(201).json({ ...created, poc_credentials: credentials });
   }));
 
-  router.patch('/:id', orgAdmin, validateBody(updateOrganizationSchema), asyncHandler(async (req, res) => {
+  router.patch('/:id', guards.orgPermission('org.manage'), validateBody(updateOrganizationSchema), asyncHandler(async (req, res) => {
     const row = await prisma.organizations.update({ where: { id: req.params.id }, data: req.body });
     res.json(row);
   }));
@@ -245,7 +251,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   // email; provision a new login only if none match. A newly provisioned login is
   // forced to change its password on first sign-in and its temporary password is
   // returned once so it can be shared.
-  router.post('/:id/members', orgAdmin, validateBody(addOrganizationMemberSchema), asyncHandler(async (req, res) => {
+  router.post('/:id/members', guards.orgPermission('org.member.manage'), validateBody(addOrganizationMemberSchema), asyncHandler(async (req, res) => {
     const { user_id, name, email, phone, role } = req.body as { user_id?: string; name?: string; email?: string; phone?: string; role: string };
 
     let resolvedUserId = user_id ?? null;
@@ -290,7 +296,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   // Bulk-add several already-registered users in one request (multi-select picker).
   // Each id is upserted to an active membership with the given role; re-adding an
   // existing member just refreshes their role. One round-trip instead of N.
-  router.post('/:id/members/bulk', orgAdmin, validateBody(bulkAddOrganizationMembersSchema), asyncHandler(async (req, res) => {
+  router.post('/:id/members/bulk', guards.orgPermission('org.member.manage'), validateBody(bulkAddOrganizationMembersSchema), asyncHandler(async (req, res) => {
     const { user_ids, role } = req.body as { user_ids: string[]; role: string };
     const orgId = req.params.id;
     const members = await prisma.$transaction(
@@ -314,7 +320,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     if (others === 0) throw new BusinessRuleError('This is the organization’s only owner/admin - promote another member to owner first.');
   }
 
-  router.patch('/:id/members/:memberId', orgAdmin, validateBody(updateOrganizationMemberSchema), asyncHandler(async (req, res) => {
+  router.patch('/:id/members/:memberId', guards.orgPermission('org.member.manage'), validateBody(updateOrganizationMemberSchema), asyncHandler(async (req, res) => {
     const member = await prisma.organization_members.findFirst({
       where: { id: req.params.memberId, organization_id: req.params.id },
     });
@@ -333,6 +339,11 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
         member.status === 'active' && audienceOfRole(member.role) === 'staff',
       );
     }
+    // Placement is NOT edited here any more. A person belongs to several campuses
+    // and departments at once, so it is a set on its own table and has its own
+    // routes (PUT /organizations/:id/people/:userId/units). Leaving a single
+    // `org_unit_id` on this endpoint would have been a second way to express
+    // placement that could only ever hold one of the several answers.
     const updated = await prisma.organization_members.update({
       where: { id: member.id },
       data: req.body,
@@ -341,7 +352,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     res.json(updated);
   }));
 
-  router.delete('/:id/members/:memberId', orgAdmin, asyncHandler(async (req, res) => {
+  router.delete('/:id/members/:memberId', guards.orgPermission('org.member.manage'), asyncHandler(async (req, res) => {
     const member = await prisma.organization_members.findFirst({
       where: { id: req.params.memberId, organization_id: req.params.id },
       select: { id: true, role: true },
@@ -357,7 +368,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     return (await prisma.organizations.findUnique({ where: { id }, select: { name: true } }))?.name ?? 'the organization';
   }
 
-  router.post('/:id/members/:memberId/approve', orgAdmin, asyncHandler(async (req, res) => {
+  router.post('/:id/members/:memberId/approve', guards.orgPermission('org.member.manage'), asyncHandler(async (req, res) => {
     const member = await prisma.organization_members.findFirst({
       where: { id: req.params.memberId, organization_id: req.params.id },
     });
@@ -378,7 +389,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     res.json(updated);
   }));
 
-  router.post('/:id/members/:memberId/decline', orgAdmin, asyncHandler(async (req, res) => {
+  router.post('/:id/members/:memberId/decline', guards.orgPermission('org.member.manage'), asyncHandler(async (req, res) => {
     const member = await prisma.organization_members.findFirst({
       where: { id: req.params.memberId, organization_id: req.params.id },
     });

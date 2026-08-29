@@ -4,7 +4,15 @@ import { api } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { Button, Card, Checkbox, Pills, Spinner, toast } from './ui';
 
-interface Enrollment { id: string; status: string; championship_id: string; championships?: { id: string; name: string } | null }
+interface Enrollment {
+  id: string; status: string; championship_id: string;
+  championships?: { id: string; name: string; entry_level?: string | null } | null;
+  /** Set when the entry is a campus or department rather than the organisation. */
+  org_unit_id?: string | null;
+  org_units?: { id: string; name: string; code: string | null; type: string } | null;
+  /** Server-resolved "Championship · Campus", so no two screens label it differently. */
+  label?: string;
+}
 
 const CHOOSE_LATER = '';
 
@@ -37,7 +45,14 @@ function EnrollmentRow({ enrollment, team, orgTeams, checked, drawId, onToggle, 
     <div className="rounded-xl border border-slate-200 px-3 py-2.5 dark:border-slate-800">
       <label className="flex cursor-pointer items-center gap-3">
         <Checkbox checked={checked} onChange={onToggle} />
-        <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{enrollment.championships?.name ?? 'Championship'}</span>
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-slate-800 dark:text-slate-200">{enrollment.championships?.name ?? 'Championship'}</span>
+          {/* Named only when the entry is a campus or department - an inter-org
+              entry has no second line to draw, and an empty one reads as missing. */}
+          {enrollment.org_units && (
+            <span className="block text-[11.5px] text-slate-500 dark:text-slate-400">{enrollment.org_units.name}</span>
+          )}
+        </span>
       </label>
       {checked && (
         <div className="mt-2 pl-7">
@@ -93,8 +108,16 @@ export function EnterChampionshipsPanel({ team, onClose }: { team: any; onClose:
     [team.team_entries],
   );
   const approved = useMemo(
-    () => enrollments.filter((e) => e.status === 'approved' && !alreadyIn.has(e.championship_id)),
-    [enrollments, alreadyIn],
+    () => enrollments.filter((e) => e.status === 'approved'
+      && !alreadyIn.has(e.championship_id)
+      // Which squads may enter which events. A whole-organisation squad plays open
+      // championships; a campus or department squad plays internal ones. Offering
+      // either the other's events would produce a standings table mixing an
+      // institution with its own campuses - the server refuses it, and filtering
+      // here means the option is never offered rather than offered and rejected.
+      && (team.org_unit_id ? e.championships?.entry_level !== 'organization'
+        : (e.championships?.entry_level ?? 'organization') === 'organization')),
+    [enrollments, alreadyIn, team.org_unit_id],
   );
 
   const toggle = (enrollmentId: string) =>
@@ -129,7 +152,9 @@ export function EnterChampionshipsPanel({ team, onClose }: { team: any; onClose:
       <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Pick the approved championships to enter this team into. Choosing a discipline is optional - you can set it later. The same roster competes in every one.</p>
       {approved.length === 0 ? (
         <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
-          No approved championships left to enter - either this team’s organization has none approved yet (apply via “Browse championships”) or this team is already in all of them.
+          {team.org_unit_id
+            ? 'No internal championships left for this squad to enter. A campus or department squad only plays championships contested inside this organisation.'
+            : 'No approved championships left to enter - either this team’s organization has none approved yet (apply via “Browse championships”) or this team is already in all of them.'}
         </p>
       ) : (
         <div className="max-h-80 space-y-2 overflow-auto">

@@ -35,9 +35,13 @@ export function FeedbackWidget({ championshipId, context }: { championshipId?: s
   return (
     <>
       <button
+        /* Above the mobile tab bar, not on top of it. `bottom-3` put this pill
+           directly over the last two tab cells, so "More" was unreachable on every
+           screen the widget appears on. Cleared by the bar's height plus the home
+           indicator; back to the corner at md+ where there is no bar. */
         type="button"
         onClick={() => setOpen(true)}
-        className="fixed bottom-3 right-3 z-40 inline-flex items-center gap-1.5 rounded-full bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-md shadow-brand-600/20 transition hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:ring-offset-2 dark:focus:ring-offset-slate-900"
+        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+4.75rem)] right-3 z-sticky inline-flex items-center gap-1.5 rounded-full bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-md shadow-brand-600/20 transition hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:ring-offset-2 md:bottom-3 md:z-40 dark:focus:ring-offset-slate-900"
         aria-label="Send feedback"
       >
         <MessageSquarePlus size={14} /> Feedback

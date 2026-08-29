@@ -61,7 +61,7 @@ export function PlatformDemoRequestsPage() {
       {requests.length === 0 ? (
         <EmptyState icon="✉" title="No demo requests yet" description="Leads submitted from the landing page’s “Book a demo” form will appear here." />
       ) : (
-        <Card className="overflow-hidden">
+        <Card className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-100 dark:divide-slate-800 text-sm">
             <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
               <tr>

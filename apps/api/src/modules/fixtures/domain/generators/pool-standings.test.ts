@@ -9,7 +9,7 @@ const rule: StandingsRule = { scheme: 'league_points', win: 3, draw: 1, loss: 0,
 const fx = (home: string, away: string, homeScore: number, awayScore: number, winner: string | null): PoolFixture => ({
   status: 'completed', round: 'Pool A - Match 1',
   home_team_id: `team-${home}`, away_team_id: `team-${away}`,
-  home_org_id: `org-${home}`, away_org_id: `org-${away}`,
+  home_entity_id: `org-${home}`, away_entity_id: `org-${away}`,
   home_score: homeScore, away_score: awayScore, winner_team_id: winner ? `team-${winner}` : null,
 });
 
@@ -23,7 +23,7 @@ describe('computePoolStandings', () => {
     const standings = computePoolStandings(fixtures, rule, ['points', 'wins', 'lost']);
     expect(standings.map((s) => s.teamId)).toEqual(['team-a', 'team-b', 'team-c']);
     expect(standings[0].rank).toBe(1);
-    expect(standings.map((s) => s.organizationId)).toEqual(['org-a', 'org-b', 'org-c']);
+    expect(standings.map((s) => s.entityId)).toEqual(['org-a', 'org-b', 'org-c']);
   });
 });
 

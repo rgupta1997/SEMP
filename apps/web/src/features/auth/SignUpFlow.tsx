@@ -17,7 +17,7 @@ import { checkCode, completeSignup, identify, sendCode } from '../../lib/signin'
 
 type Step = 'details' | 'phone' | 'email';
 
-const C = { blue: '#004AAD', blue50: '#F1F6FE', line: '#E1E7F0', ok: '#1E9E5A', okSoft: '#E4F6EC' };
+const C = { blue: 'var(--brand)', blue50: 'var(--brand-tint)', line: 'var(--line)', ok: '#1E9E5A', okSoft: '#E4F6EC' };
 const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
 const MONO = "'JetBrains Mono',ui-monospace,monospace";
 
@@ -117,7 +117,7 @@ export function SignUpFlow({ dark, inputStyle, labelStyle, t, onHeading }: SignU
   const cta: CSSProperties = {
     height: 50, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center',
     gap: 9, background: C.blue, color: '#fff', fontFamily: POP, fontWeight: 700, fontSize: 15.5,
-    borderRadius: 6, border: 'none', boxShadow: '0 14px 30px -12px rgba(0,74,173,.55)',
+    borderRadius: 6, border: 'none', boxShadow: '0 14px 30px -12px color-mix(in srgb, var(--brand) 55%, transparent)',
   };
   const ghost: CSSProperties = {
     background: 'none', border: 'none', padding: 0, cursor: 'pointer',
@@ -127,7 +127,7 @@ export function SignUpFlow({ dark, inputStyle, labelStyle, t, onHeading }: SignU
   const DevCode = () => devCode ? (
     <p style={{
       margin: 0, borderRadius: 6, border: `1px dashed ${C.line}`,
-      background: dark ? 'rgba(0,74,173,.10)' : C.blue50, padding: '9px 12px', fontSize: 13, color: t.body,
+      background: dark ? 'color-mix(in srgb, var(--brand) 10%, transparent)' : C.blue50, padding: '9px 12px', fontSize: 13, color: t.body,
     }}>
       Delivery isn't wired yet, so here is the code: <b style={{ fontFamily: MONO, color: C.blue }}>{devCode}</b>
     </p>
@@ -141,7 +141,7 @@ export function SignUpFlow({ dark, inputStyle, labelStyle, t, onHeading }: SignU
           fontFamily: MONO, fontSize: 9.5, letterSpacing: '.12em', textTransform: 'uppercase',
           padding: '4px 9px', borderRadius: 999, fontWeight: 700,
           background: done ? C.okSoft : (dark ? '#16233A' : '#EFF2F7'),
-          color: done ? C.ok : '#6E7E96',
+          color: done ? C.ok : 'var(--muted)',
         }}>
           {done ? '✓ ' : ''}{label}
         </span>

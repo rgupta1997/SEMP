@@ -7,7 +7,7 @@ import { Avatar, Button, EmptyState, Modal, SearchInput, Spinner, toast } from '
 interface Org { id: string; name: string; short_name?: string | null; city?: string | null; code?: string | null }
 
 // Browse every organization on the platform and request to join one. A request is
-// a pending membership the org's owners/admins approve (see PocsPage). Orgs the
+// a pending membership the org's owners/admins approve on the Members screen. Orgs the
 // user already belongs to or has a pending request for are excluded from the list.
 export function JoinOrgModal({ onClose }: { onClose: () => void }) {
   const { ctx, refresh } = useAuth();

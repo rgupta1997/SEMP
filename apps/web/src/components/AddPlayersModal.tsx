@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { KeyRound, Plus, X } from 'lucide-react';
 import { CAPABILITIES } from '@semp/entitlements';
 import { api } from '../lib/api';
-import { useApi } from '../lib/hooks';
+import { useOrgUnits, type UnitNode } from '../lib/units';
 import { downloadCsvTemplate } from '../lib/import';
 import { PhoneLookupNotice } from './userProvisioning';
 import { Badge, Button, Modal, Input, Select, toast, INSET} from './ui';
@@ -15,12 +15,11 @@ import { Badge, Button, Modal, Input, Select, toast, INSET} from './ui';
 // through the bulk importer, which is - so the row limit IS the capability, and
 // the button says so rather than letting the submit fail with a 403.
 //
-// The programme is a picker rather than a text field on purpose. The server
-// rejects a programme or batch it does not already know, because a typo would
-// otherwise quietly found a new department; offering a free-text box that can
-// only ever be wrong is not a kindness.
-
-interface UnitNode { id: string; type: string; name: string; children?: UnitNode[] }
+// The placement is a picker rather than a text field on purpose. The server rejects
+// a campus or department it does not already know, because a typo would otherwise
+// quietly found a new one; offering a free-text box that can only ever be wrong is
+// not a kindness. Since units became what compete in an intra-organisation
+// championship, a typo would also invent an ENTRANT, which is worse.
 
 interface Row { name: string; email: string; phone: string; member_code: string; unit: string }
 
@@ -60,9 +59,9 @@ function rowError(r: Row): string | null {
   return null;
 }
 
-/** The unit tree flattened to what a select can hold, keeping programme over batch. */
-function flatten(units: UnitNode[]): Array<{ programme: UnitNode; batches: UnitNode[] }> {
-  return units.map((u) => ({ programme: u, batches: u.children ?? [] }));
+/** The unit tree flattened to what a select can hold: a campus and its departments. */
+function flatten(units: UnitNode[]): Array<{ campus: UnitNode; departments: UnitNode[] }> {
+  return units.map((u) => ({ campus: u, departments: u.children ?? [] }));
 }
 
 export function AddPlayersModal({
@@ -74,10 +73,10 @@ export function AddPlayersModal({
   onClose: () => void;
   onAdded: () => void;
 }) {
-  // The unit tree is itself behind multi_campus, so on a plan without it this
-  // 403s rather than coming back empty. An empty picker is the right outcome
-  // either way - what differs is what may honestly be said underneath it.
-  const { data: units = [], error: unitsError } = useApi<UnitNode[]>(`/organizations/${orgId}/units`);
+  // Reading the structure is open to every member: `multi_campus` gates running a
+  // SECOND campus, not looking at the one you have. So an empty picker here means
+  // the organisation has not built its structure yet, not that it has not paid.
+  const { units, labels, error: unitsError } = useOrgUnits(orgId);
   const [rows, setRows] = useState<Row[]>([blankRow()]);
   const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -93,7 +92,7 @@ export function AddPlayersModal({
 
   // The unit is carried as `type:name` because the server takes NAMES, not ids -
   // the same shape the spreadsheet importer takes, so both paths meet the same
-  // validator. Batch is the more specific placement and is sent as such.
+  // validator. The department is the more specific placement and is sent as such.
   const payload = (r: Row) => {
     const sep = r.unit.indexOf(':');
     const type = sep < 0 ? '' : r.unit.slice(0, sep);
@@ -103,7 +102,7 @@ export function AddPlayersModal({
       email: r.email.trim() || null,
       phone: r.phone.trim() || null,
       member_code: r.member_code.trim() || null,
-      ...(unitName ? (type === 'batch' ? { batch: unitName } : { programme: unitName }) : {}),
+      ...(unitName ? (type === 'department' ? { department: unitName } : { campus: unitName }) : {}),
     };
   };
 
@@ -254,7 +253,7 @@ export function AddPlayersModal({
           <span>Email</span>
           <span>Phone</span>
           <span>Roll no.</span>
-          <span>Programme</span>
+          <span>{labels.campus}</span>
           <span className="w-7" />
         </div>
 
@@ -269,10 +268,10 @@ export function AddPlayersModal({
                 <Select value={r.unit} onChange={(e) => set(i, { unit: e.target.value })}>
                   <option value="">Unassigned</option>
                   {groups.map((g) => (
-                    <optgroup key={g.programme.id} label={g.programme.name}>
-                      <option value={`programme:${g.programme.name}`}>{g.programme.name}</option>
-                      {g.batches.map((b) => (
-                        <option key={b.id} value={`batch:${b.name}`}>{b.name}</option>
+                    <optgroup key={g.campus.id} label={g.campus.name}>
+                      <option value={`campus:${g.campus.name}`}>{g.campus.name}</option>
+                      {g.departments.map((d) => (
+                        <option key={d.id} value={`department:${d.name}`}>{d.name}</option>
                       ))}
                     </optgroup>
                   ))}
@@ -311,7 +310,8 @@ export function AddPlayersModal({
 
         {units.length === 0 && !unitsError && (
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            No programmes or batches exist yet — add them under Structure and people can be placed as they are added.
+            No {labels.campus.toLowerCase()} or {labels.department.toLowerCase()} exists yet — add them under
+            the organisation's Campuses &amp; Units screen and people can be placed as they are added.
           </p>
         )}
       </div>

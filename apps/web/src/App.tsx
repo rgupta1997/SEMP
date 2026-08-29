@@ -14,7 +14,6 @@ import { CreateEventWizard } from './pages/organiser/CreateEventWizard';
 import { EventLayout } from './pages/organiser/EventLayout';
 import { EventDashboard } from './pages/organiser/EventDashboard';
 import { EventSetupPage } from './pages/organiser/EventSetupPage';
-import { ApprovalsPage } from './pages/organiser/ApprovalsPage';
 import { SchedulePage } from './pages/organiser/SchedulePage';
 import { ResultsPage } from './pages/organiser/ResultsPage';
 import { StandingsPage } from './pages/organiser/StandingsPage';
@@ -33,6 +32,7 @@ import { SportsProfilePage } from './pages/participant/SportsProfilePage';
 import { MyGamePage } from './pages/MyGamePage';
 import { OrgDashboardPage } from './pages/organization/OrgDashboardPage';
 import { PlayersPage } from './pages/organization/PlayersPage';
+import { CampusesPage } from './pages/organization/CampusesPage';
 import { PlayerDetailPage } from './pages/organization/PlayerDetailPage';
 import { OrgEventsPage } from './pages/organization/OrgEventsPage';
 import { OrgAchievementsPage } from './pages/organization/OrgAchievementsPage';
@@ -46,7 +46,6 @@ import { TemplatePreviewPage } from './pages/organization/certificates/TemplateP
 import { VerifyCertificatePage } from './pages/public/VerifyCertificatePage';
 import { AdminPage } from './pages/organization/AdminPage';
 import { MembersPage } from './pages/organization/MembersPage';
-import { PocsPage } from './pages/organization/PocsPage';
 import { InvitationsPage } from './pages/organization/InvitationsPage';
 
 // Officiating
@@ -71,6 +70,7 @@ import { PlatformUsersPage } from './pages/platform/PlatformUsersPage';
 import { PlatformInstitutionsPage } from './pages/platform/PlatformInstitutionsPage';
 import { PlatformDemoRequestsPage } from './pages/platform/PlatformDemoRequestsPage';
 import { PlatformFeedbackPage } from './pages/platform/PlatformFeedbackPage';
+import { PlatformVerificationRequestsPage } from './pages/platform/PlatformVerificationRequestsPage';
 import { PlatformDemosPage } from './pages/platform/PlatformDemosPage';
 import { ChampionshipMatrixImportPage } from './pages/platform/ChampionshipMatrixImportPage';
 import { PublicChampionshipPage } from './pages/public/PublicChampionshipPage';
@@ -107,6 +107,7 @@ function AuthenticatedRoutes() {
         <Route path="/organizations/:orgId/teams" element={<TeamsPage />} />
         <Route path="/organizations/:orgId/teams/:teamId" element={<RosterPage />} />
         <Route path="/organizations/:orgId/students" element={<PlayersPage />} />
+        <Route path="/organizations/:orgId/campuses" element={<CampusesPage />} />
         <Route path="/organizations/:orgId/people/:userId" element={<PlayerDetailPage />} />
         <Route path="/organizations/:orgId/members" element={<MembersPage />} />
         <Route path="/organizations/:orgId/roles" element={<RolesPage />} />
@@ -131,7 +132,6 @@ function AuthenticatedRoutes() {
           <Route index element={<EventDashboard />} />
           <Route path="setup" element={<EventSetupPage />} />
           <Route path="organisers" element={<EventOrganisersPage />} />
-          <Route path="approvals" element={<ApprovalsPage />} />
           <Route path="participants" element={<EventParticipantsPage />} />
           <Route path="schedule" element={<SchedulePage />} />
           <Route path="results" element={<ResultsPage />} />
@@ -150,6 +150,7 @@ function AuthenticatedRoutes() {
         <Route path="/platform/users" element={<RequireRole roles={SYSTEM}><PlatformUsersPage /></RequireRole>} />
         <Route path="/platform/demo-requests" element={<RequireRole roles={SYSTEM}><PlatformDemoRequestsPage /></RequireRole>} />
         <Route path="/platform/feedback" element={<RequireRole roles={SYSTEM}><PlatformFeedbackPage /></RequireRole>} />
+        <Route path="/platform/verification-requests" element={<RequireRole roles={SYSTEM}><PlatformVerificationRequestsPage /></RequireRole>} />
         <Route path="/platform/demos" element={<RequireRole roles={SYSTEM}><PlatformDemosPage /></RequireRole>} />
         <Route path="/platform/organizations" element={<RequireRole roles={SYSTEM}><PlatformInstitutionsPage /></RequireRole>} />
         <Route path="/platform/import-setup" element={<RequireRole roles={SYSTEM}><ChampionshipMatrixImportPage /></RequireRole>} />

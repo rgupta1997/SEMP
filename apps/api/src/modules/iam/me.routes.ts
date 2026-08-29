@@ -3,6 +3,7 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { readStandings } from '../standings/standings.service.js';
+import { permissionsFor } from '../../http/middleware/can.js';
 
 // "Me"-scoped read endpoints - everything is resolved from the authenticated
 // user, never from a path/query id, so a participant can only ever see their own.
@@ -192,6 +193,38 @@ export function makeMeRouter(prisma: Prisma): Router {
 
   // Teams the current user belongs to, with sport + roster + the championships the
   // roster is entered into (team_entries).
+  /**
+   * What this person may do in one scope, straight from the engine.
+   *
+   * `permissionsFor` existed, was exported, and was called by nothing - so there was
+   * no way for a client to ask the engine anything. The web app therefore decided
+   * authority from `organization_members.role` alone (permissions.tsx,
+   * `canManageOrg`), which is why a role the Owner granted through the Roles screen
+   * widened the sidebar and not a single control on the page behind it.
+   *
+   * It is a MIRROR, never the boundary: every mutation is still checked server-side.
+   * A super admin gets `['*']`.
+   *
+   * `orgUnitId` narrows the question to one campus or batch, which is what makes a
+   * campus-scoped grant answer honestly rather than as if it reached the whole
+   * institution.
+   */
+  router.get('/me/permissions', asyncHandler(async (req, res) => {
+    const organizationId = typeof req.query.organizationId === 'string' ? req.query.organizationId : undefined;
+    const championshipId = typeof req.query.championshipId === 'string' ? req.query.championshipId : undefined;
+    const orgUnitId = typeof req.query.orgUnitId === 'string' ? req.query.orgUnitId : undefined;
+    if (!organizationId && !championshipId) {
+      // Permissions only mean anything inside a scope. Answering the unscoped
+      // question with an empty list would read as "you may do nothing".
+      throw new NotFoundError('Scope');
+    }
+    const permissions = await permissionsFor(prisma, {
+      user: { id: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin },
+      scope: { organizationId, championshipId, orgUnitId },
+    });
+    res.json({ scope: { organizationId: organizationId ?? null, championshipId: championshipId ?? null, orgUnitId: orgUnitId ?? null }, permissions });
+  }));
+
   router.get('/me/teams', asyncHandler(async (req, res) => {
     const memberships = await prisma.team_members.findMany({
       where: { user_id: req.user!.id, is_active: true },
@@ -260,10 +293,28 @@ export function makeMeRouter(prisma: Prisma): Router {
     }
     const rows = await prisma.championship_organizations.findMany({
       where: { organization_id: { in: orgIds } },
-      include: { championships: { select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true } } },
+      include: {
+        championships: { select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true, entry_level: true } },
+        org_units: { select: { id: true, name: true, code: true, type: true } },
+      },
       orderBy: { applied_at: 'desc' },
     });
-    res.json(rows);
+
+    // An organisation has ONE entry per inter-org championship and one per CAMPUS in
+    // an intra one. So this list can legitimately carry the same championship name
+    // several times, and a client that printed only `championships.name` would show
+    // three identical rows with no way to tell which campus each was for.
+    //
+    // `entity_name` is what to print, resolved here rather than in each of the three
+    // screens that render this list.
+    res.json(rows.map((r) => ({
+      ...r,
+      entity_id: r.org_unit_id ?? r.organization_id,
+      entity_name: r.org_units?.name ?? null,
+      label: r.org_units
+        ? `${r.championships?.name ?? 'Championship'} · ${r.org_units.name}`
+        : r.championships?.name ?? 'Championship',
+    })));
   }));
 
   // Fixtures the current user is assigned to officiate (only for championships they're assigned to).

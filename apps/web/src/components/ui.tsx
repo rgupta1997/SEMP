@@ -5,8 +5,9 @@ import type {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, CircleDashed, Info, Search, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, CircleDashed, Info, Search, SlidersHorizontal, X } from 'lucide-react';
 import { titleCase } from '../lib/format';
+import { useDialog } from '../lib/useDialog';
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
@@ -20,16 +21,25 @@ export function Button({
   className = '', variant = 'primary', size = 'md', ...p
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant; size?: ButtonSize }) {
   const variants: Record<ButtonVariant, string> = {
-    primary: 'bg-brand-500 text-white hover:bg-brand-600 shadow-sm',
+    // brand-600, not brand-500. index.css calls 600 "the 234-use primary" and it is
+    // the step the seed colour IS; 500 is a lighter tint two stops up the ladder.
+    // With a fixed blue ramp the difference was cosmetic. With a derived one it is a
+    // contrast bug: a maroon seed makes 500 a pale pink, and every primary button in
+    // the product puts white text on it.
+    primary: 'bg-brand-600 text-white hover:bg-brand-700 shadow-sm',
     ghost: 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
     outline: 'border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700',
     danger: 'bg-rose-600 text-white hover:bg-rose-700 shadow-sm',
     subtle: 'bg-brand-50 text-brand-700 hover:bg-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:hover:bg-brand-500/25',
   };
+  // MINIMUM HEIGHTS, not just padding. `py-1.5 text-xs` is a 28px button, which is
+  // 16px short of the 44px a thumb needs, and the audit found these used for real
+  // actions - Verify, Lock, Remove - on rows people tap on a phone. The height
+  // floors relax at sm+ where a pointer is precise and 28px is the right density.
   const sizes: Record<ButtonSize, string> = {
-    sm: 'px-2.5 py-1.5 text-xs rounded gap-1.5',
-    md: 'px-3.5 py-2 text-sm rounded gap-2',
-    lg: 'px-5 py-2.5 text-base rounded-md gap-2',
+    sm: 'min-h-[36px] sm:min-h-0 px-2.5 py-1.5 text-xs rounded gap-1.5',
+    md: 'min-h-[44px] sm:min-h-0 px-3.5 py-2 text-sm rounded gap-2',
+    lg: 'min-h-[48px] px-5 py-2.5 text-base rounded-md gap-2',
   };
   return (
     <button
@@ -84,7 +94,7 @@ export const Field = ({ label, hint, children }: { label: string; hint?: string;
  * edge on a slate-800 ground beside a slate-800 edge on a slate-900 one - which
  * is legible on any single screen and obvious the moment you move between two.
  *
- * The edge is `eos-line` (#E1E7F0) and the radius is `--radius-card` (14px),
+ * The edge is `eos-line` (var(--line)) and the radius is `--radius-card` (14px),
  * which is what the EOS prototype draws and what the profile screens already
  * hard-code inline. The Tailwind half of the app now says the same thing rather
  * than something a shade off it.
@@ -122,10 +132,13 @@ export function CardHeader({ title, subtitle, action }: { title: ReactNode; subt
     // the header knows it is there: a CardBody used on its own - the identity
     // panel on the profile, and a dozen like it - had no top padding at all, and
     // its content sat on the card's own border.
-    <div className="flex flex-col gap-3 px-5 pt-5 pb-3 [&+div]:pt-0 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+    // Tighter on a phone, and the subtitle is held to two lines. A card header of
+    // title + a full sentence of explanation + a wrapped row of actions was ~180px
+    // above tables that people open the page to read.
+    <div className="flex flex-col gap-2 px-4 pt-4 pb-2.5 [&+div]:pt-0 sm:gap-3 sm:px-5 sm:pt-5 sm:pb-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
       <div className="min-w-0">
-        <h3 className="font-semibold text-slate-900 dark:text-slate-100">{title}</h3>
-        {subtitle && <p className="text-sm text-slate-500 mt-0.5 dark:text-slate-400">{subtitle}</p>}
+        <h3 className="t-card-title text-slate-900 sm:text-base dark:text-slate-100">{title}</h3>
+        {subtitle && <p className="t-meta mt-0.5 line-clamp-2 sm:line-clamp-none">{subtitle}</p>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </div>
@@ -135,7 +148,7 @@ export function CardHeader({ title, subtitle, action }: { title: ReactNode; subt
 export const CardBody = ({ className = '', children }: { className?: string; children: ReactNode }) =>
   // Longhand, not `p-5`: several callers pass `p-0`/`p-2` for a flush table, and
   // the shorthand would fight them on which utility Tailwind happens to emit last.
-  <div className={cn('px-5 pt-5 pb-5', className)}>{children}</div>;
+  <div className={cn('px-4 pt-4 pb-4 sm:px-5 sm:pt-5 sm:pb-5', className)}>{children}</div>;
 
 /* ----------------------------- Badge ----------------------------- */
 type BadgeTone = 'brand' | 'green' | 'teal' | 'amber' | 'rose' | 'slate' | 'violet' | 'info' | 'live';
@@ -169,7 +182,9 @@ export function StatusBadge({ status, label }: { status?: string | null; label?:
   if (s === 'live') return <Badge tone="live">{label ?? 'LIVE'}</Badge>;
   const tone: BadgeTone =
     s === 'completed' ? 'teal'
-      : ['approved', 'active', 'ongoing', 'roster_locked'].includes(s) ? 'green'
+      // A locked scorecard is the verified, official result - it reads as a
+      // confirmation, not as a neutral state, and sits beside roster_locked.
+      : ['approved', 'active', 'ongoing', 'roster_locked', 'locked'].includes(s) ? 'green'
       : ['pending', 'forming', 'upcoming', 'submitted', 'scheduled', 'draft'].includes(s) ? 'amber'
         : ['rejected', 'cancelled'].includes(s) ? 'rose'
           : ['registration_open'].includes(s) ? 'brand'
@@ -245,22 +260,71 @@ export function StatusLegend({ statuses = MATCH_LEGEND_STATUSES, value, onSelect
 // The modal is capped to the viewport height: the header (and optional `footer`)
 // stay pinned while only the body scrolls. Put action buttons in `footer` so they
 // never scroll out of view. `size` overrides the default/`wide` width.
-const MODAL_WIDTHS = { lg: 'max-w-lg', xl: 'max-w-xl', '2xl': 'max-w-2xl', '3xl': 'max-w-3xl', '4xl': 'max-w-4xl' } as const;
+// Widths apply from sm up. Below that a modal is a full-width sheet, so a
+// `max-w-lg` here would leave a 78px gutter on a 390px phone for no reason.
+const MODAL_WIDTHS = { lg: 'sm:max-w-lg', xl: 'sm:max-w-xl', '2xl': 'sm:max-w-2xl', '3xl': 'sm:max-w-3xl', '4xl': 'sm:max-w-4xl' } as const;
 export function Modal({ title, onClose, children, footer, wide, size, dismissible = true }:
   { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; size?: keyof typeof MODAL_WIDTHS; dismissible?: boolean }) {
-  const maxW = size ? MODAL_WIDTHS[size] : wide ? 'max-w-2xl' : 'max-w-lg';
+  const maxW = size ? MODAL_WIDTHS[size] : wide ? 'sm:max-w-2xl' : 'sm:max-w-lg';
+
+  // A BOTTOM SHEET ON A PHONE, A DIALOG ON A DESKTOP.
+  //
+  // This used to centre a `max-w-lg` card at every width with `p-4` around it, so on
+  // a 390px screen every dialog in the product was a floating box with ~24px of
+  // wasted gutter and its confirm button wherever the body happened to end. Roughly
+  // twenty modals inherit from here, so they all changed shape at once rather than
+  // twenty times by hand.
+  //
+  // Three things make it a sheet rather than a narrow dialog: it is anchored to the
+  // bottom edge where a thumb is, it is rounded only at the top because the bottom
+  // edge IS the screen edge, and `max-h-[92dvh]` uses the dynamic viewport so the
+  // browser chrome cannot cover its footer.
+  //
+  // `useDialog` adds what every overlay here was missing: a focus trap, Escape,
+  // focus restoration on close, and a body that cannot scroll behind it.
+  //
   // `dismissible={false}` keeps a backdrop click from closing the modal - used for
   // long/batched flows (imports) so a stray outside-click can't discard an in-flight
   // run or its result. The × button still closes it explicitly.
+  const ref = useDialog(true, onClose);
+
   return createPortal(
-    <div className="animate-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4 sm:p-6 backdrop-blur-sm" onClick={dismissible ? onClose : undefined}>
-      <div className={cn('flex max-h-full w-full flex-col animate-fade-up rounded-[20px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900', maxW)} onClick={(e) => e.stopPropagation()}>
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800">
-          <h3 className="text-lg font-semibold dark:text-slate-100">{title}</h3>
-          <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">×</button>
+    <div
+      className="animate-backdrop fixed inset-0 z-modal flex items-end justify-center bg-slate-900/50 backdrop-blur-sm sm:items-center sm:p-6"
+      onClick={dismissible ? onClose : undefined}
+    >
+      <div
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        className={cn(
+          'animate-sheet flex max-h-[92dvh] w-full flex-col overflow-hidden bg-white shadow-2xl outline-none dark:bg-slate-900',
+          'rounded-t-[22px] sm:rounded-[20px] sm:border sm:border-slate-200 dark:sm:border-slate-800',
+          maxW,
+        )}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-center pt-2.5 sm:hidden" aria-hidden>
+          <span className="h-1 w-9 rounded-full bg-slate-300 dark:bg-slate-700" />
         </div>
-        <div className="flex-1 overflow-y-auto p-5">{children}</div>
-        {footer && <div className="shrink-0 border-t border-slate-200 px-5 py-4 dark:border-slate-800">{footer}</div>}
+        <div className="flex shrink-0 items-center justify-between gap-3 px-5 py-3 sm:border-b sm:border-slate-200 sm:py-4 dark:sm:border-slate-800">
+          <h3 className="t-section min-w-0 dark:text-slate-100">{title}</h3>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="tap -m-1 shrink-0 rounded-lg p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+          >
+            <X size={20} />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        {/* Pinned, and clear of the home indicator. A footer that scrolls with the
+            body is the reason people could not find Save on a phone. */}
+        {footer && (
+          <div className="shrink-0 border-t border-slate-200 px-5 py-3.5 pb-safe dark:border-slate-800">{footer}</div>
+        )}
       </div>
     </div>,
     document.body,
@@ -276,14 +340,97 @@ export function Modal({ title, onClose, children, footer, wide, size, dismissibl
  * radii and two ways of drawing an edge (`ring-1` here, `border` there), which
  * is why the same row of filters looked like a different control on each page.
  */
-export function FilterChips<T extends string>({ value, onChange, options, className = '' }: {
+export function FilterChips<T extends string>({ value, onChange, options, className = '', label = 'Filter' }: {
   value: T;
   onChange: (v: T) => void;
   options: Array<{ key: T; label: ReactNode; count?: number }>;
   className?: string;
+  /** What the sheet is called on a phone. "Filter" unless the axis has a better name. */
+  label?: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const current = options.find((o) => o.key === value) ?? options[0];
+
   return (
-    <div className={cn('mb-4 flex flex-wrap gap-2', className)}>
+    <>
+      {/* ---------------- phone: one control, on the page's own margin ----------
+          This was a full-bleed scrolling row - `bleed-x` pulled it out to the screen
+          edge with its own `px-4`, so the chips started flush left while every card
+          under them sat on the page padding. Two different left edges on one screen
+          reads as a bug even when nobody can say why.
+
+          A single button instead: it obeys the page margin like everything else, it
+          says which filter is on without the reader scrolling to find the
+          highlighted chip, and the full set opens as a sheet. */}
+      <div className={cn('mb-3 flex items-center gap-2 sm:hidden', className)}>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-haspopup="dialog"
+          aria-label={`${label}: ${typeof current?.label === 'string' ? current.label : 'change'}`}
+          className={cn(
+            'flex min-h-[38px] flex-1 items-center gap-2 rounded-full border px-3.5 text-sm font-semibold transition-colors',
+            value !== options[0]?.key
+              ? 'border-brand-600 bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
+              : 'border-eos-line bg-white text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300',
+          )}
+        >
+          <SlidersHorizontal size={15} className="shrink-0" />
+          <span className="min-w-0 flex-1 truncate text-left">{current?.label}</span>
+          {current?.count !== undefined && (
+            <span className="tnum shrink-0 text-xs opacity-60">{current.count}</span>
+          )}
+          <ChevronDown size={15} className="shrink-0 opacity-60" />
+        </button>
+      </div>
+
+      {open && createPortal(
+        <div
+          className="animate-backdrop fixed inset-0 z-modal flex items-end bg-slate-900/50 backdrop-blur-sm sm:hidden"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={label}
+            onClick={(e) => e.stopPropagation()}
+            className="animate-sheet max-h-[80dvh] w-full overflow-y-auto rounded-t-[22px] bg-white pb-safe dark:bg-slate-900"
+          >
+            <div className="flex justify-center pt-2.5" aria-hidden>
+              <span className="h-1 w-9 rounded-full bg-slate-300 dark:bg-slate-700" />
+            </div>
+            <div className="px-5 pb-2 pt-3">
+              <h2 className="t-section dark:text-slate-100">{label}</h2>
+            </div>
+            <div className="pb-3">
+              {options.map((o, i) => {
+                const active = o.key === value;
+                return (
+                  <button
+                    key={o.key || `#${i}`}
+                    type="button"
+                    onClick={() => { onChange(o.key); setOpen(false); }}
+                    className={cn(
+                      'flex w-full items-center gap-3 px-5 py-3 text-left text-[15px] transition-colors',
+                      active ? 'font-bold text-brand-700 dark:text-brand-300' : 'text-slate-700 dark:text-slate-300',
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                    {o.count !== undefined && (
+                      <span className="tnum text-sm text-slate-400 dark:text-slate-500">{o.count}</span>
+                    )}
+                    {active && <Check size={17} className="shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
+    {/* ---------------- sm+: the chips, on the page margin ---------------- */}
+    <div className={cn('mb-4 hidden flex-wrap gap-2 sm:flex', className)}>
       {options.map((o, i) => {
         const active = o.key === value;
         return (
@@ -293,7 +440,7 @@ export function FilterChips<T extends string>({ value, onChange, options, classN
             aria-pressed={active}
             onClick={() => onChange(o.key)}
             className={cn(
-              'flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-semibold transition-colors',
+              'flex min-h-[38px] items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-semibold transition-colors',
               active
                 ? 'border-brand-600 bg-brand-600 text-white'
                 : 'border-eos-line bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800',
@@ -307,6 +454,7 @@ export function FilterChips<T extends string>({ value, onChange, options, classN
         );
       })}
     </div>
+    </>
   );
 }
 
@@ -333,7 +481,7 @@ export function Pills({ value, onChange, options, ariaLabel }: {
             className={cn(
               'rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors',
               active
-                ? 'border-brand-500 bg-brand-500 text-white shadow-sm'
+                ? 'border-brand-600 bg-brand-600 text-white shadow-sm'
                 : 'border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:bg-brand-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10',
             )}
           >
@@ -348,12 +496,25 @@ export function Pills({ value, onChange, options, ariaLabel }: {
 /* ----------------------------- PageHeader ----------------------------- */
 export function PageHeader({ title, subtitle, children }: { title: ReactNode; subtitle?: ReactNode; children?: ReactNode }) {
   return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}
+    // A 24px title plus a wrapped subtitle plus a row of full-size buttons was
+    // ~150px of a 390px screen spent before the page began. Below sm the title
+    // drops to 21px (`t-page-title`), the subtitle is held to two lines, and the
+    // actions sit on the title's own row where there is almost always space for
+    // them - so the content starts above the fold instead of below it.
+    <div className="mb-4 flex flex-wrap items-start justify-between gap-x-3 gap-y-2 sm:mb-6 sm:items-end sm:gap-4">
+      <div className="min-w-0 flex-1">
+        <h1 className="t-page-title text-slate-900 dark:text-slate-100">{title}</h1>
+        {subtitle && (
+          <p className="t-meta mt-1 line-clamp-2 max-w-prose sm:line-clamp-none">{subtitle}</p>
+        )}
       </div>
-      {children && <div className="flex items-center gap-2">{children}</div>}
+      {/* `shrink-0` alone let a wide control (the Teams/Individuals segmented switch
+          on Achievements) push itself past the right edge of a 390px screen, where
+          it was clipped by the viewport with no way to reach the second option.
+          `max-w-full` keeps it inside the page and lets it scroll within itself. */}
+      {children && (
+        <div className="snap-row max-w-full shrink-0 items-center gap-2 sm:flex sm:overflow-visible">{children}</div>
+      )}
     </div>
   );
 }
@@ -363,15 +524,22 @@ export function PageHeader({ title, subtitle, children }: { title: ReactNode; su
 // faint watermark in the corner, mirroring the mockup's `data-bg-number`.
 export function StatCard({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode; accent?: boolean }) {
   return (
+    // A DASHBOARD TILE, NOT A POSTER.
+    //
+    // `p-6` + a 36px value + a 120px watermark makes a ~290px tile. Three of them
+    // stacked full-width on a phone is 900px of chrome before the table they are
+    // introducing - which on Standings meant the championship table itself started
+    // two screens down. Halved below sm: smaller padding, a 26px value, and the
+    // watermark scaled to match rather than dominating a box a third the size.
     <div
-      className="relative overflow-hidden rounded-2xl p-6 text-white shadow-[var(--card-shadow)]"
+      className="relative overflow-hidden rounded-2xl p-4 text-white shadow-[var(--card-shadow)] sm:p-6"
       style={{ backgroundImage: 'linear-gradient(135deg, var(--stat-grad-from), var(--stat-grad-to))' }}
     >
-      <div aria-hidden className="pointer-events-none absolute -bottom-5 -right-2 select-none text-[120px] font-extrabold leading-none tnum opacity-10">{value}</div>
+      <div aria-hidden className="pointer-events-none absolute -bottom-3 -right-1 select-none text-[64px] font-extrabold leading-none tnum opacity-10 sm:-bottom-5 sm:-right-2 sm:text-[120px]">{value}</div>
       <div className="relative">
-        <div className="text-sm font-medium opacity-90">{label}</div>
-        <div className="mt-3 text-4xl font-bold tracking-tight tnum">{value}</div>
-        {hint && <div className="mt-1 text-[13px] opacity-80">{hint}</div>}
+        <div className="text-[13px] font-medium opacity-90 sm:text-sm">{label}</div>
+        <div className="mt-1 text-[26px] font-bold leading-none tracking-tight tnum sm:mt-3 sm:text-4xl">{value}</div>
+        {hint && <div className="mt-1 text-[12.5px] opacity-80 sm:text-[13px]">{hint}</div>}
       </div>
     </div>
   );

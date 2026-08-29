@@ -9,20 +9,44 @@
    Neutrals stay on Tailwind slate. Light theme; dark-ready vars
    declared for future use.
    ============================================================ */
+/* ============================================================
+   THE BRAND RAMP IS RUNTIME-THEMEABLE.
+
+   It used to be ten literal hex values compiled into the stylesheet, which meant
+   an institution's colour could never be anything but Sportagon blue. Every step
+   is now derived from ONE seed - `--brand-h/s/l` - so setting three numbers on
+   <html> rebrands the entire product: buttons, focus rings, links, the sidebar,
+   the active nav item, chips, charts, the wordmark.
+
+   Derived rather than ten separate overrides on purpose. A tenant picks one
+   colour, not a ten-stop ramp, and a ramp interpolated at runtime keeps the
+   lightness relationships the design was drawn against - so contrast holds for a
+   dark green or a bright orange, not just for a blue of the same value.
+
+   The defaults reproduce the EOS prototype's ramp exactly (brand-600 = #004AAD,
+   the 234-use primary), so an institution that sets nothing looks identical to
+   before. lib/tenant-theme.ts writes the three seed variables.
+   ============================================================ */
+:root {
+  --brand-h: 214;
+  --brand-s: 100%;
+  --brand-l: 34%;
+}
+
 @theme {
-  /* Brand ramp taken from the EOS prototype, in hex rather than oklch so the
-     screens match the mockups exactly. brand-600 IS #004AAD - the 234-use
-     primary - and 100/200/300 are the prototype's own tints, not interpolations. */
-  --color-brand-50:  #F7FAFF;
-  --color-brand-100: #F1F6FE;
-  --color-brand-200: #DFEAFB;
-  --color-brand-300: #BCD2F6;
-  --color-brand-400: #7FA5E8;
-  --color-brand-500: #3D74CE;
-  --color-brand-600: #004AAD;
-  --color-brand-700: #00337A;
-  --color-brand-800: #14233B;
-  --color-brand-900: #0A1A33;
+  /* Lightness ladder held constant; hue and saturation come from the seed. The
+     top and bottom steps deliberately desaturate - a 100%-saturated tint at 97%
+     lightness reads as a stain rather than a wash. */
+  --color-brand-50:  hsl(var(--brand-h) calc(var(--brand-s) * 0.42) 97.5%);
+  --color-brand-100: hsl(var(--brand-h) calc(var(--brand-s) * 0.60) 95.5%);
+  --color-brand-200: hsl(var(--brand-h) calc(var(--brand-s) * 0.68) 90%);
+  --color-brand-300: hsl(var(--brand-h) calc(var(--brand-s) * 0.72) 82%);
+  --color-brand-400: hsl(var(--brand-h) calc(var(--brand-s) * 0.74) 70%);
+  --color-brand-500: hsl(var(--brand-h) calc(var(--brand-s) * 0.80) 52%);
+  --color-brand-600: hsl(var(--brand-h) var(--brand-s) var(--brand-l));
+  --color-brand-700: hsl(var(--brand-h) var(--brand-s) calc(var(--brand-l) * 0.72));
+  --color-brand-800: hsl(var(--brand-h) calc(var(--brand-s) * 0.55) calc(var(--brand-l) * 0.48));
+  --color-brand-900: hsl(var(--brand-h) calc(var(--brand-s) * 0.50) calc(var(--brand-l) * 0.36));
 
   /* Three faces, as the prototype uses them: Poppins for headings and anything
      that carries weight, Hanken Grotesk for running text, JetBrains Mono for
@@ -58,12 +82,60 @@
   --radius-card: 14px;
 }
 
+/* ============================================================
+   SEMANTIC ALIASES FOR INLINE STYLES
+
+   Tailwind tree-shakes an `@theme` variable that no emitted class references, so
+   `var(--color-eos-cyan)` resolves to nothing in a style={{}} object even though it
+   is declared above. These are plain `:root` custom properties - always present,
+   always resolvable from TS - and they are what a hard-coded brand hex should become.
+
+   They exist because roughly 150 literal `#004AAD` / `#0A1A33` / `#5CE1E6` values
+   were spread across the inline-styled screens (My Game, the org dashboard, the
+   sports profile, the auth flows, Help, the context switcher). Every one of them was
+   a page that would NOT follow an institution's colour - so the chrome rebranded and
+   the content stayed Sportagon blue, which is worse than not theming at all.
+   ============================================================ */
 :root {
-  /* -- Dashboard design system surfaces -- */
+  --brand:        var(--color-brand-600);   /* the primary. White text sits on this. */
+  --brand-strong: var(--color-brand-700);   /* hover / pressed */
+  --brand-tint:   var(--color-brand-100);   /* wash behind brand text */
+  --brand-line:   var(--color-brand-200);   /* borders on a tinted ground */
+  --brand-ink:    var(--color-brand-800);   /* headings in brand-adjacent blocks */
+  --brand-deep:   var(--color-brand-900);   /* the darkest step - sidebar and hero ground */
+  /* What reads ON a brand ground - the eyebrow, the accent rule, the CTA on a dark
+     hero band. A light step of the SAME ramp, so those accents are the tenant's
+     colour rather than Sportagon's teal, and the contrast holds by construction:
+     300 is light, 600 and 900 are dark, whatever hue was picked. */
+  --on-brand: var(--color-brand-300);
+
+  /* The teal accent is Sportagon's, NOT the tenant's: it marks the product ("EOS"),
+     and a tenant recolouring it would erase the one mark that says whose software
+     this is. Fixed on purpose. */
+  --accent:       #5CE1E6;
+  --accent-deep:  #159FA6;
+
+  /* The neutral ink ramp, as aliases for the same reason. Kept NEUTRAL rather than
+     tinted toward the brand: tinting body text with the tenant hue is a nice touch
+     for a deep blue and unreadable for a bright yellow, and text legibility is not
+     something a colour picker should be able to break. */
+  --ink:    #0A1A33;
+  --ink-2:  #14233B;
+  --ink-3:  #374459;
+  --ink-4:  #4F5F77;
+  --muted:  #6E7E96;
+  --faint:  #9BA9BE;
+  --line:   #E1E7F0;
+}
+
+:root {
+  /* -- Dashboard design system surfaces --
+     The sidebar follows the tenant ramp rather than a literal navy, so a school
+     with maroon colours gets a maroon-black chrome instead of Sportagon's. */
   --canvas: #F7F9FC;                 /* app page background (prototype body) */
-  --sidebar-bg: #0A1A33;             /* prototype sidebar */
-  --sidebar-active: #004AAD;         /* prototype: active item is brand, not a grey */
-  --sidebar-border: #14233B;         /* sidebar dividers */
+  --sidebar-bg: var(--color-brand-900);
+  --sidebar-active: var(--color-brand-600);
+  --sidebar-border: var(--color-brand-800);
   --card-shadow: 0 2px 4px rgba(0, 0, 0, 0.02), 0 1px 2px rgba(0, 0, 0, 0.04);
 
   /* Stat card gradient (blue, white text) */
@@ -173,3 +245,152 @@ body {
 *::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
+
+/* ============================================================
+   MOBILE FOUNDATION
+   ------------------------------------------------------------
+   These four things were the difference between "the desktop layout, narrower"
+   and a layout built for a phone. They are here rather than per-component
+   because every screen needs all four and none of them is a component's choice.
+   ============================================================ */
+
+/* 1. DYNAMIC VIEWPORT. `100vh` on iOS Safari and Android Chrome is the viewport
+      WITHOUT the collapsible browser chrome, so a `h-screen` shell renders
+      60-110px taller than the window and its bottom row is unreachable until you
+      scroll the chrome away. `dvh` tracks the real box. Written as a utility so
+      `h-screen h-dvh` degrades cleanly on a browser without dvh. */
+@supports (height: 100dvh) {
+  .h-dvh { height: 100dvh; }
+  .min-h-dvh { min-height: 100dvh; }
+  .max-h-dvh { max-height: 100dvh; }
+}
+
+/* 2. SAFE AREA. Anything pinned to the bottom of a phone sits under the home
+      indicator without this. */
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.mb-safe { margin-bottom: env(safe-area-inset-bottom, 0px); }
+.bottom-safe { bottom: env(safe-area-inset-bottom, 0px); }
+.h-safe-bottom { height: env(safe-area-inset-bottom, 0px); }
+
+/* 3. A MANAGED STACK. Six magic z-index values were in use across the shell, the
+      bell, the feedback pill, the switcher and the modal - with two genuine
+      collisions. One ordering, named after what sits at each level. */
+:root {
+  --z-sticky:  20;   /* sticky table headers, sticky toolbars */
+  --z-bottomnav: 30; /* the mobile tab bar */
+  --z-scrim:   40;   /* the dimmer behind a drawer or sheet */
+  --z-drawer:  50;   /* the sidebar drawer, the notification drawer */
+  --z-modal:   60;   /* dialogs and sheets */
+  --z-popover: 70;   /* menus opened from inside a dialog */
+  --z-toast:   80;   /* always on top; it reports what just happened */
+}
+.z-sticky { z-index: var(--z-sticky); }
+.z-bottomnav { z-index: var(--z-bottomnav); }
+.z-scrim { z-index: var(--z-scrim); }
+.z-drawer { z-index: var(--z-drawer); }
+.z-modal { z-index: var(--z-modal); }
+.z-popover { z-index: var(--z-popover); }
+.z-toast { z-index: var(--z-toast); }
+
+/* 4. A TYPE SCALE WITH NAMES.
+      The audit found 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14,
+      14.5, 15, 15.5px in use for about five semantic roles, two of them below any
+      legible floor. These five names ARE the scale; a size that is not one of them
+      is a bug. Each carries its own weight, tracking and colour role so that the
+      same idea cannot be typeset two ways on two screens.
+
+      Sizes hold at every breakpoint except `page-title`. Shrinking body text on a
+      phone is the single most common way "mobile friendly" is got wrong - the
+      screen is further from the eye and held one-handed, so 15px is a floor, not
+      a desktop luxury. */
+.t-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase;
+  color: var(--color-eos-muted);
+}
+.dark .t-eyebrow { color: #94a3b8; }
+
+.t-meta { font-size: 12.5px; line-height: 1.45; color: var(--color-eos-muted); }
+.dark .t-meta { color: #94a3b8; }
+
+.t-body { font-size: 15px; line-height: 1.55; }
+.t-body-sm { font-size: 13.5px; line-height: 1.5; }
+
+.t-card-title {
+  font-family: var(--font-display);
+  font-size: 15px; font-weight: 700; letter-spacing: -.01em; line-height: 1.3;
+}
+.t-section {
+  font-family: var(--font-display);
+  font-size: 17px; font-weight: 800; letter-spacing: -.015em; line-height: 1.25;
+}
+/* The one step that scales: a 30px page title on a 390px screen eats two lines
+   and a third of the fold. */
+.t-page-title {
+  font-family: var(--font-display);
+  font-size: 21px; font-weight: 800; letter-spacing: -.02em; line-height: 1.15;
+  text-wrap: balance;
+}
+@media (min-width: 640px) { .t-page-title { font-size: 26px; } }
+
+/* Numbers that sit in columns must not jitter as they change. */
+.t-num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
+/* ============================================================
+   TOUCH
+   ============================================================ */
+
+/* A 44px minimum hit box WITHOUT a 44px visual box - the padding is pushed back
+   out with a negative margin, so a 17px text link keeps its typographic rhythm
+   and still catches a thumb. This is what every bare `<button style={{padding:0}}>`
+   in the auth flows and the roster rows needed. */
+.tap {
+  position: relative;
+}
+.tap::after {
+  content: '';
+  position: absolute;
+  inset: 50% 0 auto 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+
+/* Momentum scrolling for the horizontal chip rows that replace wrapping toolbars
+   on a phone, with the scrollbar hidden and snap points so a row never rests
+   half-way through a chip.
+   
+   PHONE ONLY, AND THE MEDIA QUERY IS LOAD-BEARING. This file is imported AFTER
+   Tailwind's utilities, so a bare `.snap-row { display: flex }` has the same
+   specificity as `sm:block` / `sm:flex-wrap` / `sm:overflow-visible` and wins on
+   source order - silently overriding every responsive override a caller writes.
+   
+   It broke the Administration rail exactly that way: the rail is `sm:block
+   sm:w-[214px]`, but `.snap-row` forced `display:flex` at every width, so on a
+   desktop the seven tabs laid out as a ROW inside a 214px column and six of them
+   were scrolled off. An owner saw one tab and concluded they had lost their
+   permissions. Scoping the class below `sm` means it contributes nothing at the
+   widths where the `sm:` utilities are meant to take over, so there is no contest
+   to lose. */
+@media (max-width: 639.98px) {
+  .snap-row {
+    display: flex; gap: .5rem;
+    overflow-x: auto; scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .snap-row::-webkit-scrollbar { display: none; }
+  .snap-row > * { scroll-snap-align: start; flex: 0 0 auto; }
+}
+
+/* Edge-to-edge on a phone, inset on a desktop: a card that keeps 16px of gutter
+   on each side of a 390px screen has thrown away 8% of its width. */
+.bleed-x { margin-left: -1rem; margin-right: -1rem; }
+@media (min-width: 640px) { .bleed-x { margin-left: 0; margin-right: 0; } }
+
+/* A sheet rises from the bottom on a phone and becomes a centred dialog at sm+.
+   Keyframed here so `prefers-reduced-motion` can switch it off in one place. */
+@keyframes sheet-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.animate-sheet { animation: sheet-up 200ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@media (prefers-reduced-motion: reduce) { .animate-sheet { animation: none; } }

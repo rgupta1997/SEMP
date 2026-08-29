@@ -33,11 +33,16 @@ interface Home {
 }
 
 const C = {
-  blue: '#004AAD', blue50: '#F1F6FE', teal: '#5CE1E6', navy: '#0A1A33',
-  line: '#E1E7F0', line2: '#C8D2E0', fg2: '#14233B', fg3: '#4F5F77', fg4: '#6E7E96',
-  faint: '#9BA9BE', ground: '#F7F9FC', surface: '#EFF2F7',
+  blue: 'var(--brand)', blue50: 'var(--brand-tint)', navy: 'var(--ink)',
+  // The accent ON the brand-coloured hero. It was Sportagon's teal, which left a
+  // maroon institution with a teal eyebrow and a teal hexagon on their own band -
+  // the theme applied to the panel and not to what sits on it. A light step of the
+  // same ramp instead, so it is their colour and the contrast is guaranteed.
+  teal: 'var(--on-brand)',
+  line: 'var(--line)', line2: '#C8D2E0', fg2: 'var(--ink-2)', fg3: 'var(--ink-4)', fg4: 'var(--muted)',
+  faint: 'var(--faint)', ground: '#F7F9FC', surface: '#EFF2F7',
   ok: '#1E9E5A', okSoft: '#E4F6EC', bad: '#DE3A3A', badSoft: '#FBE6E6',
-  warn: '#E9920B', warnSoft: '#FCF0DB', brandSoft: '#DFEAFB',
+  warn: '#E9920B', warnSoft: '#FCF0DB', brandSoft: 'var(--brand-line)',
 };
 const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
 const MONO = "'JetBrains Mono',ui-monospace,monospace";
@@ -90,7 +95,7 @@ function NextGameHero({ m }: { m: Match }) {
   return (
     <div style={{
       background: C.blue, borderRadius: 14, padding: '24px 26px', color: '#fff',
-      position: 'relative', overflow: 'hidden', boxShadow: '0 12px 28px rgba(0,74,173,.28)',
+      position: 'relative', overflow: 'hidden', boxShadow: '0 12px 28px color-mix(in srgb, var(--brand) 28%, transparent)',
     }}>
       {/* The hexagon bleed from the prototype - decoration, so hidden from readers. */}
       <div aria-hidden style={{

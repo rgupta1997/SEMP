@@ -25,6 +25,7 @@ import {
   assertNotLocked, lockScorecard, lockScorecardsBulk, lockStatusForChampionship,
   retractScorecard, submitScorecard, unlockScorecard,
 } from './lock.service.js';
+import { assignMatchNos, championshipOfDiscipline } from './match-no.js';
 // A match can only be recorded once its championship is under way. Resolves the
 // owning championship from the fixture's draw and blocks scoring while it's still
 // in draft or registration - nothing should be played before the event starts.
@@ -221,7 +222,14 @@ export function makeFixturesRouter(prisma: Prisma): Router {
             if (doubleRound) toCreate.push({ tournament_discipline_id: td.id, home_team_id: other, away_team_id: p, round: 'Added', status: 'scheduled' });
           }
         }
-        if (toCreate.length) await prisma.fixtures.createMany({ data: toCreate });
+        if (toCreate.length) {
+          await prisma.fixtures.createMany({ data: toCreate });
+          // Numbered after the insert, across everything unnumbered in the event.
+          // See match-no.ts for why numbering is a second pass rather than a value
+          // threaded through each generator.
+          const cid = await championshipOfDiscipline(prisma, td.id);
+          if (cid) await assignMatchNos(prisma, cid);
+        }
         const rows = await prisma.fixtures.findMany({
           where: { tournament_discipline_id: td.id },
           orderBy: [{ pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
@@ -273,10 +281,14 @@ export function makeFixturesRouter(prisma: Prisma): Router {
 
       // Auto-advance round-0 byes so the next round isn't left with a permanent TBD.
       await propagateByes(prisma, td.id);
+      {
+        const cid = await championshipOfDiscipline(prisma, td.id);
+        if (cid) await assignMatchNos(prisma, cid);
+      }
 
       const rows = await prisma.fixtures.findMany({
         where: { tournament_discipline_id: td.id },
-        orderBy: [{ pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
+        orderBy: [{ match_no: { sort: 'asc', nulls: 'last' } }, { pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
       });
       await notifyFixturesGenerated(rows);
       res.status(201).json(rows);
@@ -337,6 +349,12 @@ export function makeFixturesRouter(prisma: Prisma): Router {
 
       await propagateByes(prisma, td.id); // stage-1 byes only, unchanged signature (default stageSequence = 1)
       await resolveStageAdvancement(prisma, td.id); // resolves anything stage 1 already decided (e.g. a fully-bye pool)
+      {
+        // After byes AND advancement: both rewrite fixtures, and a placeholder that
+        // gets resolved away should not have taken a number with it.
+        const cid = await championshipOfDiscipline(prisma, td.id);
+        if (cid) await assignMatchNos(prisma, cid);
+      }
 
       const rows = await prisma.fixtures.findMany({
         where: { tournament_discipline_id: td.id },

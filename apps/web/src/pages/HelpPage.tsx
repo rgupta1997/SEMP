@@ -85,7 +85,7 @@ const SERVICES = [
 ] as const;
 
 const card: React.CSSProperties = {
-  background: '#fff', border: '1px solid #E1E7F0', borderRadius: 14, padding: 20,
+  background: '#fff', border: '1px solid var(--line)', borderRadius: 14, padding: 20,
 };
 
 export function HelpPage() {
@@ -118,14 +118,14 @@ export function HelpPage() {
       <PageHeader title="Help & guides" subtitle={headline} />
 
       {/* ---- the four rules ---- */}
-      <div style={{ ...card, background: '#0A1A33', border: 'none', color: '#fff' }}>
-        <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase', color: '#5CE1E6' }}>
+      <div style={{ ...card, background: 'var(--ink)', border: 'none', color: '#fff' }}>
+        <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--accent)' }}>
           How this product thinks
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(230px,1fr))', gap: 18, marginTop: 16 }}>
           {RULES.map(([k, v]) => (
             <div key={k}>
-              <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 15, color: '#5CE1E6' }}>{k}</div>
+              <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 15, color: 'var(--accent)' }}>{k}</div>
               <p style={{ margin: '5px 0 0', fontSize: 13.5, color: '#C2CEDF', lineHeight: 1.6 }}>{v}</p>
             </div>
           ))}
@@ -137,13 +137,13 @@ export function HelpPage() {
         {relevant.map((t) => (
           <div key={t.key} style={card}>
             <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 16 }}>{t.title}</div>
-            <p style={{ margin: '3px 0 10px', fontSize: 13, color: '#6E7E96' }}>{t.blurb}</p>
+            <p style={{ margin: '3px 0 10px', fontSize: 13, color: 'var(--muted)' }}>{t.blurb}</p>
             {t.guides.map(([title, mins]) => (
               <div key={title} style={{
                 display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: '1px solid #EFF2F7',
               }}>
-                <span style={{ flex: 1, fontSize: 13.5, color: '#14233B' }}>{title}</span>
-                <span style={{ fontFamily: MONO, fontSize: 10.5, color: '#9BA9BE' }}>{mins}</span>
+                <span style={{ flex: 1, fontSize: 13.5, color: 'var(--ink-2)' }}>{title}</span>
+                <span style={{ fontFamily: MONO, fontSize: 10.5, color: 'var(--faint)' }}>{mins}</span>
               </div>
             ))}
           </div>
@@ -153,7 +153,7 @@ export function HelpPage() {
       {/* ---- status ---- */}
       <div style={card}>
         <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Service status</div>
-        <p style={{ margin: '0 0 8px', fontSize: 13, color: '#6E7E96' }}>
+        <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--muted)' }}>
           What is working, and what is not wired yet.
         </p>
         {SERVICES.map(([name, state]) => (
@@ -162,7 +162,7 @@ export function HelpPage() {
               width: 9, height: 9, borderRadius: '50%',
               background: state === 'operational' ? '#1E9E5A' : '#E9920B',
             }} />
-            <span style={{ flex: 1, fontSize: 13.5, color: '#14233B' }}>{name}</span>
+            <span style={{ flex: 1, fontSize: 13.5, color: 'var(--ink-2)' }}>{name}</span>
             <span style={{
               fontFamily: MONO, fontSize: 9.5, letterSpacing: '.1em', textTransform: 'uppercase',
               color: state === 'operational' ? '#1E9E5A' : '#E9920B',
@@ -171,7 +171,7 @@ export function HelpPage() {
         ))}
         {/* Honest rather than green: both delivery services are bypassed, and a fake
             green light is worse than no light at all. */}
-        <p style={{ margin: '12px 0 0', fontSize: 12.5, color: '#6E7E96', lineHeight: 1.55 }}>
+        <p style={{ margin: '12px 0 0', fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.55 }}>
           Email and SMS are in bypass: codes are shown on screen instead of being sent. Everything else
           runs normally.
         </p>
@@ -180,11 +180,11 @@ export function HelpPage() {
       <div style={{ ...card, display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 15 }}>Still stuck?</div>
-          <p style={{ margin: '2px 0 0', fontSize: 13.5, color: '#6E7E96' }}>
+          <p style={{ margin: '2px 0 0', fontSize: 13.5, color: 'var(--muted)' }}>
             play@sportagon.in · +91 72760 88888 — WhatsApp on the same number.
           </p>
         </div>
-        <Link to="/profile" style={{ fontFamily: POP, fontWeight: 700, fontSize: 13.5, color: '#004AAD', textDecoration: 'none' }}>
+        <Link to="/profile" style={{ fontFamily: POP, fontWeight: 700, fontSize: 13.5, color: 'var(--brand)', textDecoration: 'none' }}>
           Your profile settings →
         </Link>
       </div>

@@ -64,10 +64,14 @@ export function makePublicRouter(prisma: Prisma): Router {
     const scope = (req.query.scope as StandingsAggScope) || 'championship';
     if (!STANDINGS_AGG_SCOPE.includes(scope)) throw new NotFoundError('Scope');
     const scopeId = scope === 'championship' ? null : (req.query.scopeId as string | undefined) ?? null;
-    const orgId = req.query.orgId as string | undefined;
-    if (!orgId) throw new NotFoundError('Organization');
+    // `entityId` is the contingent key - a unit id in an intra championship, an
+    // organisation id in an inter one. `orgId` stays accepted as the old name so a
+    // client mid-deploy keeps working; the two mean the same thing for every
+    // inter-organisation event, which is all the old clients ever asked about.
+    const entityId = (req.query.entityId ?? req.query.orgId) as string | undefined;
+    if (!entityId) throw new NotFoundError('Competitor');
     if (scope !== 'championship' && !scopeId) { res.json({ events: [] }); return; }
-    const events = await readStandingsBreakdown(prisma, id, scope, scopeId, orgId);
+    const events = await readStandingsBreakdown(prisma, id, scope, scopeId, entityId);
     res.json({ events });
   }));
 

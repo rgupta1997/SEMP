@@ -47,9 +47,17 @@ export const NOTIFICATION_TYPES: Record<string, NotificationTypeDef> = {
     },
 
     bodyTemplate: (data) => {
+      // `entrants` is the host's own noun for what competes - "campuses",
+      // "batches", or absent for an open championship. It matters most here:
+      // "open for organization registration" is simply false on an internal
+      // event, where no organisation registers and the competitors are the
+      // host's own units, added by the organiser.
+      const entrants = data.entrants ? String(data.entrants) : null;
       switch (data.status) {
         case 'registration_open':
-          return 'This championship is now open for organization registration.';
+          return entrants
+            ? `This championship is now open. Its ${entrants} can enter their squads.`
+            : 'This championship is now open for organization registration.';
         case 'ongoing':
           return 'Matches are underway - good luck to all teams.';
         case 'completed':
@@ -57,6 +65,43 @@ export const NOTIFICATION_TYPES: Record<string, NotificationTypeDef> = {
         default:
           return null;
       }
+    },
+  },
+
+  /**
+   * A campus or batch has been added to an internal championship.
+   *
+   * Distinct from `enrollment_approved`, which announces that an ORGANISATION
+   * joined. Reusing that type here produced "Northfield has joined the
+   * championship" on an event contested between Northfield's own campuses - which
+   * is both useless and slightly absurd, since the organisation is the host. What
+   * the reader needs is WHICH campus.
+   *
+   * There is nothing to approve, so the wording is an announcement rather than a
+   * decision: being added is taking part.
+   */
+  contingent_added: {
+    key: 'contingent_added',
+
+    defaultAudience: (ctx) => {
+      if (!ctx.championshipId) {
+        throw new Error('championshipId is required for contingent_added');
+      }
+      return Rules.everyone(ctx.championshipId);
+    },
+
+    titleTemplate: (data) => {
+      const name = String(data.unitName ?? 'A campus');
+      return `${name} is taking part`;
+    },
+
+    bodyTemplate: (data) => {
+      const name = String(data.unitName ?? 'A campus');
+      const where = data.championshipName ? ` in ${String(data.championshipName)}` : '';
+      // Named with its parent when it has one: two campuses can each have a
+      // "2026", and a notification naming only the batch tells nobody whose it is.
+      const under = data.parentName ? ` (${String(data.parentName)})` : '';
+      return `${name}${under} has been added${where} and can now enter squads.`;
     },
   },
   enrollment_approved: {
@@ -259,6 +304,55 @@ ${where}` : where;
       );
 
       return `You’ve been approved to join ${organizationName}`;
+    },
+  },
+  // ---- organisation verification ------------------------------------------
+  //
+  // Addressed to the institution's owners and admins rather than to whoever
+  // submitted the request. Verification is a fact about the ORGANISATION, the
+  // person who filled the form in may have left, and the tick appearing (or not)
+  // is something its administrators need to know either way.
+  org_verification_approved: {
+    key: 'org_verification_approved',
+
+    defaultAudience: (ctx) => {
+      if (!ctx.organizationId) {
+        throw new Error('organizationId is required for org_verification_approved');
+      }
+
+      return Rules.orgAdmins(ctx.organizationId);
+    },
+
+    titleTemplate: () => 'Your organisation is now verified',
+
+    bodyTemplate: (data) => {
+      const organizationName = String(data.organizationName ?? 'Your organisation');
+
+      return `${organizationName} carries the verification tick wherever it appears.`;
+    },
+  },
+  org_verification_rejected: {
+    key: 'org_verification_rejected',
+
+    defaultAudience: (ctx) => {
+      if (!ctx.organizationId) {
+        throw new Error('organizationId is required for org_verification_rejected');
+      }
+
+      return Rules.orgAdmins(ctx.organizationId);
+    },
+
+    titleTemplate: () => 'Verification was not approved',
+
+    // The reason is the whole point of the notification. Without it this is a dead
+    // end: nothing on the screen would say what to fix, and the only next step
+    // would be a support email.
+    bodyTemplate: (data) => {
+      const reason = data.reason ? String(data.reason) : null;
+
+      return reason
+        ? `${reason} You can submit a new request once that is sorted.`
+        : 'You can submit a new request from Administration → Organization Profile.';
     },
   },
   org_join_declined: {

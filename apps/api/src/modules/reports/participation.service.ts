@@ -67,15 +67,25 @@ export async function participantsIn(
   db: Db, organizationId: string, champIds: string[],
 ): Promise<Array<{ user_id: string; sport: string; org_unit_id: string | null }>> {
   if (!champIds.length) return [];
+  // One row per (person, sport, UNIT they belong to).
+  //
+  // Somebody in a campus and a department appears twice, which is deliberate: units
+  // are counted independently, so a person shows up in every unit they belong to.
+  // Callers counting unique PEOPLE already dedupe through a Set, so the extra rows
+  // cost them nothing; callers grouping by unit get the intended behaviour without
+  // a second query.
+  //
+  // The left join keeps people with no placement at all - they are real
+  // participants and dropping them would quietly shrink the headline number.
   return db.$queryRaw(PrismaNS.sql`
-    select distinct tm.user_id, s.name as sport, om.org_unit_id
+    select distinct tm.user_id, s.name as sport, oum.org_unit_id
       from team_entries te
       join tournament_disciplines td on td.id = te.tournament_discipline_id
       join tournament_sports ts on ts.id = td.tournament_sport_id
       join sports s on s.id = ts.sport_id
       join team_members tm on tm.team_id = te.team_id
-      left join organization_members om
-             on om.user_id = tm.user_id and om.organization_id = ${organizationId}::uuid
+      left join org_unit_members oum
+             on oum.user_id = tm.user_id and oum.organization_id = ${organizationId}::uuid
      where te.organization_id = ${organizationId}::uuid
        and te.championship_id in (${PrismaNS.join(champIds.map((id) => PrismaNS.sql`${id}::uuid`))})`);
 }
