@@ -10,6 +10,24 @@ export interface EventDetail {
   id: string; name: string; slug: string; status: string;
   venue?: string; description?: string; start_date: string; end_date: string;
   visibility?: string; // 'public' (default) | 'private'
+  host_organization_id?: string | null;
+  /**
+   * What competes here, resolved by the server.
+   *
+   * `entrant_label` is the host organisation's OWN noun - "Campuses", "Offices",
+   * "Departments" - so a screen never has to work out whether to say organisation
+   * or campus. It exists precisely because getting that wrong is invisible: a
+   * summary card reading "Organizations: 12" above twelve campuses of one
+   * institution is wrong in a way nobody reports as a bug.
+   */
+  entry?: {
+    level: 'organization' | 'campus' | 'department';
+    intra: boolean;
+    entrant_label: string;
+    /** Plural of the same noun. Both are resolved server-side - see IntraEntrantsPanel. */
+    entrant_label_plural: string;
+    scope_unit: { id: string; name: string } | null;
+  };
 }
 interface EventCtx { championship: EventDetail; eventId: string; canManage: boolean }
 export const useEvent = () => useOutletContext<EventCtx>();
@@ -32,7 +50,12 @@ export function EventLayout() {
   const { data: championship, isLoading } = useApi<EventDetail>(`/championships/${eventId}`);
   const statusMut = useApiMutation(
     (status: string) => api('PATCH', `/championships/${eventId}/status`, { status }),
-    [`/championships/${eventId}`, '/championships'],
+    // `/championships/mine` matters as much as the other two: it is what the SIDEBAR
+    // builds its nav from, and the nav for a draft is two items where a live event's
+    // is eleven. Leaving it stale meant an organiser who pressed "Start championship"
+    // watched the badge flip to Ongoing while Schedule, Results, Standings and the
+    // rest stayed missing until they reloaded the page by hand.
+    [`/championships/${eventId}`, '/championships', '/championships/mine'],
   );
 
   if (isLoading || !championship) return <Spinner />;
@@ -66,21 +89,35 @@ export function EventLayout() {
 
   return (
     <div>
-      <BackButton onClick={() => ws.leaveTo(from)}>{backLabel}</BackButton>
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">{championship.name}</h1>
+      {/* COMPACT ON A PHONE.
+          This spent about 500px before any content: a full-width Back button, a
+          24px two-line title, a venue-and-dates line, and a full-size lifecycle
+          button on its own row. On a 390px screen that is most of the fold, on
+          every page of the event, before you see a single fixture.
+
+          The pieces are the same; the arrangement is not. Back becomes an inline
+          link on the title's own row, the title scales, and the lifecycle action
+          moves beside it - it is the one thing here somebody might act on, and it
+          keeps its label because "Mark completed" is not a glyph anybody would
+          guess. Venue and dates stay: they are what tells you which event this is
+          when two have similar names. */}
+      <div className="mb-4 flex items-start justify-between gap-3 sm:mb-5">
+        <div className="min-w-0 flex-1">
+          <BackButton onClick={() => ws.leaveTo(from)}>{backLabel}</BackButton>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <h1 className="t-page-title min-w-0 text-slate-900 dark:text-slate-100">{championship.name}</h1>
             <StatusBadge status={championship.status} />
           </div>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{championship.venue || 'Venue TBD'} · {fmtDateRange(championship.start_date, championship.end_date)}</p>
+          <p className="t-meta mt-1">{championship.venue || 'Venue TBD'} · {fmtDateRange(championship.start_date, championship.end_date)}</p>
         </div>
         {canManage && next && (
           <Button
+            size="sm"
+            className="mt-6 shrink-0 sm:mt-0 sm:size-auto"
             onClick={() => statusMut.mutate(next.to, { onSuccess: () => toast.success('Championship status updated'), onError: (e: any) => toast.error(e.message) })}
             disabled={statusMut.isPending}
           >
-            {statusMut.isPending ? 'Updating…' : next.label} →
+            {statusMut.isPending ? 'Updating…' : next.label}
           </Button>
         )}
       </div>

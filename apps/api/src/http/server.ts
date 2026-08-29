@@ -21,6 +21,7 @@ import { makeAuditRouter } from '../modules/iam/audit.routes.js';
 import { makeOrgEventsRouter } from '../modules/enrollment/org-events.routes.js';
 import { makeOrgDashboardRouter } from '../modules/enrollment/org-dashboard.routes.js';
 import { makeOrgRolesRouter } from '../modules/iam/org-roles.routes.js';
+import { makeVerificationRequestsRouter } from '../modules/iam/verification-requests.routes.js';
 import { makeSignInRouter } from '../modules/iam/signin.routes.js';
 import { makeAuthRouter } from '../modules/iam/auth.routes.js';
 import { makeMeRouter } from '../modules/iam/me.routes.js';
@@ -251,12 +252,25 @@ export function buildApp(prisma: Prisma) {
   // from. Mounted at the root because its paths are already fully qualified.
   api.use('/', makeOrgRolesRouter(prisma));
 
+  // ----- Organisation verification: the org asks, the platform answers -----
+  // Mounted at the root because it serves both sides - /organizations/:id/... for the
+  // institution and /verification-requests for the platform queue.
+  api.use('/', makeVerificationRequestsRouter(prisma));
+
   // The audit trail. 864 entries were already being written with nothing to read them.
   api.use('/organizations/:id/audit', ents.requireCapability('audit_logs', orgParam));
   api.use('/', makeAuditRouter(prisma));
 
-  // Campuses and units - the concrete scopes a campus_unit role is granted against.
-  api.use('/organizations/:id/units', ents.requireCapability('multi_campus', orgParam));
+  // Campuses and units - the concrete scopes a campus_unit role is granted against,
+  // and the entrants of an intra-organisation championship.
+  //
+  // NOT gated as a whole path any more. `multi_campus` means "more than one campus",
+  // and blanket-gating the route made reading the structure a paid feature: placing
+  // a player in a department, naming a team's campus and listing an intra event's
+  // entrants all read this tree, so a free organisation could not see the shape of
+  // itself. The capability is now asserted where it actually applies - creating a
+  // SECOND campus - inside the handler, which is also the only place that can tell
+  // whether this is the second one.
   api.use('/organizations', makeOrgUnitsRouter(prisma));
   api.use('/organizations', makeOrgEventsRouter(prisma));
   api.use('/organizations', makeOrgDashboardRouter(prisma));

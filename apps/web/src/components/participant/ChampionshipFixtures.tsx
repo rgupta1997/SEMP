@@ -4,7 +4,13 @@ import { useApi, fmtDateTime } from '../../lib/hooks';
 import { Badge, Card, EmptyState, ListToolbar, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
 
 // A flattened fixture from GET /championships/:id/fixtures.
-interface TeamRef { id: string; name: string; organizations?: { short_name: string | null; name: string } | null }
+interface TeamRef {
+  id: string;
+  name: string;
+  organizations?: { short_name: string | null; name: string } | null;
+  /** The campus or batch this squad plays for, when it plays for one. */
+  org_units?: { id: string; name: string; code?: string | null; type?: string | null } | null;
+}
 interface FixtureRow {
   id: string; status: string; round: string | null; scheduled_at: string | null;
   entry_type: string | null; home_score: number | null; away_score: number | null; winner_team_id: string | null;
@@ -21,7 +27,12 @@ interface FixtureRow {
 const RESULT_STATUSES = new Set(['live', 'completed', 'walkover', 'bye', 'cancelled']);
 
 function teamLabel(t: TeamRef | null) { return t?.name ?? 'TBD'; }
-function orgLabel(t: TeamRef | null) { return t?.organizations?.short_name || t?.organizations?.name || ''; }
+// Who a squad plays for: its campus or batch first, its organisation otherwise.
+// Reading the organisation alone put the same name under both sides of every match
+// in an internal championship.
+function orgLabel(t: TeamRef | null) {
+  return t?.org_units?.name || t?.organizations?.short_name || t?.organizations?.name || '';
+}
 
 // Ranking events (powerlifting/swimming/athletics) have no head-to-head matchup -
 // everyone competes for a single ranking - so the generator emits one team-less

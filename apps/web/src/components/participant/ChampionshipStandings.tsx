@@ -15,6 +15,17 @@ interface DrawRow {
 }
 
 interface StandingRow {
+  /**
+   * The CONTINGENT this row is for - a campus or department id in a championship
+   * contested inside one organisation, an organisation id in an open one. This is
+   * the row's identity: in an intra event every row shares one organization_id, so
+   * keying a list or an expand-state on that collapses twelve campuses into one.
+   */
+  entity_id: string;
+  /** What to print. Resolved server-side so no two surfaces can label it differently. */
+  name: string;
+  short_name: string | null;
+  org_unit: { id: string; name: string; code: string | null; type: string; parent: string | null } | null;
   organization_id: string;
   organization: { id: string; name: string; short_name?: string | null; logo_url?: string | null } | null;
   played: number; won: number; drawn: number; lost: number; points: number;
@@ -118,12 +129,12 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
           </thead>
           <tbody>
             {rows.map((r, i) => {
-              const isOpen = expanded === r.organization_id;
+              const isOpen = expanded === r.entity_id;
               const colSpan = 7 + (showMedals ? 1 : 0);
               return (
-              <Fragment key={r.organization_id}>
+              <Fragment key={r.entity_id}>
               <tr
-                onClick={() => setExpanded(isOpen ? null : r.organization_id)}
+                onClick={() => setExpanded(isOpen ? null : r.entity_id)}
                 className={cn('cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40', isOpen && 'bg-slate-50 dark:bg-slate-800/40')}
                 title="Show how these points were earned"
               >
@@ -131,8 +142,13 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
                     <ChevronDown size={16} className={cn('shrink-0 text-slate-400 transition-transform dark:text-slate-500', isOpen && 'rotate-180')} />
-                    <Avatar name={r.organization?.name} size={30} />
-                    <span className="font-medium text-slate-800 dark:text-slate-200">{r.organization?.name}</span>
+                    <Avatar name={r.name} size={30} />
+                    <span className="min-w-0">
+                      <span className="block font-medium text-slate-800 dark:text-slate-200">{r.name}</span>
+                      {r.org_unit?.parent && (
+                        <span className="block text-[11.5px] text-slate-500 dark:text-slate-400">{r.org_unit.parent}</span>
+                      )}
+                    </span>
                   </div>
                 </td>
                 <td className="px-3 py-3 text-center text-slate-600 dark:text-slate-300">{r.played}</td>
@@ -152,7 +168,7 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
               {isOpen && (
                 <tr className="bg-slate-50/60 dark:bg-slate-800/20">
                   <td colSpan={colSpan} className="px-4 pb-4 pt-0">
-                    <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} orgId={r.organization_id} />
+                    <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} entityId={r.entity_id} />
                   </td>
                 </tr>
               )}

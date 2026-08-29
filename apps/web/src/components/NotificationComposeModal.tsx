@@ -339,7 +339,7 @@ export function NotificationComposeModal({
                     </span>
 
                     {selected && (
-                      <span className="absolute right-2 top-2 grid h-4 w-4 place-items-center rounded-full bg-brand-500 text-white">
+                      <span className="absolute right-2 top-2 grid h-4 w-4 place-items-center rounded-full bg-brand-600 text-white">
                         <Check size={10} strokeWidth={3} />
                       </span>
                     )}

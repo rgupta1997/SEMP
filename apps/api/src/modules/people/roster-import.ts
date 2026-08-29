@@ -28,6 +28,9 @@ export interface RosterRow {
   email?: string | null;
   phone?: string | null;
   /** Names of existing org units - NOT created if absent. */
+  campus?: string | null;
+  department?: string | null;
+  /** Accepted aliases for campus/department - see the note on the request schema. */
   programme?: string | null;
   batch?: string | null;
   member_code?: string | null;
@@ -170,16 +173,25 @@ export function validateRoster(rows: RosterRow[], ctx: RosterContext): RosterRep
     const scholarship = parseScholarship(r.scholarship);
     if (scholarship === 'invalid') return reject(`"${r.scholarship}" is not a yes/no value.`);
 
-    // Programme and batch must already exist. Creating them implicitly is how a
-    // typo becomes a department nobody meant to found.
+    // The campus and department must already exist. Creating them implicitly is how
+    // a typo becomes a department nobody meant to found - and, now that units are
+    // what compete in an intra-organisation championship, how a typo becomes an
+    // entrant in one.
+    //
+    // Most specific wins: the department places a person more precisely than the
+    // campus, so it is read last and overwrites. The alias columns fold in beside
+    // their current names, so a sheet with either header lands in the same place.
     let unitId: string | null = null;
-    for (const [label, raw] of [['batch', r.batch], ['programme', r.programme]] as const) {
+    const placements = [
+      ['campus', r.campus ?? r.programme],
+      ['department', r.department ?? r.batch],
+    ] as const;
+    for (const [label, raw] of placements) {
       const key = lower(raw);
       if (!key) continue;
       const unit = ctx.unitsByName.get(key);
       if (!unit) return reject(`No ${label} called "${norm(raw)}" exists - create it under Structure first.`);
-      // Batch is the more specific placement, so it wins when both are given.
-      if (!unitId || label === 'batch') unitId = unit.id;
+      unitId = unit.id;
     }
 
     // Resolution order, per J1-E5-S2: phone, then email, then create.

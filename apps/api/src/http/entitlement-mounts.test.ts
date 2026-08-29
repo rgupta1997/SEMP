@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { buildApp } from './server.js';
 
@@ -39,7 +40,6 @@ describe('subscription gates are mounted, not merely written', () => {
     ['reports', 'advanced_reports', 'reports'],
     ['report jobs', 'advanced_reports', 'report-jobs'],
     ['peer benchmark', 'benchmarking', 'benchmark'],
-    ['campuses and units', 'multi_campus', 'units'],
     ['audit log', 'audit_logs', 'audit'],
     ['bulk roster import', 'bulk_player_upload', 'import'],
   ])('%s is gated on %s', (_label, capability, segment) => {
@@ -53,7 +53,36 @@ describe('subscription gates are mounted, not merely written', () => {
     // If Express changed how it stores mounts, or the naming were dropped, every
     // assertion above would fail rather than pass vacuously - but this states the
     // expectation directly so the reason is legible when it does.
-    expect(gates.length).toBeGreaterThanOrEqual(6);
+    expect(gates.length).toBeGreaterThanOrEqual(5);
     expect(all.length).toBeGreaterThan(20);
+  });
+
+  // `multi_campus` is deliberately NOT in the table above any more.
+  //
+  // It used to gate the whole `/organizations/:id/units` path, which made READING
+  // the structure a paid feature. Placing a player in a department, naming the
+  // campus a team plays for, and listing an intra-organisation championship's
+  // entrants all read that tree - so a free organisation could not see the shape of
+  // itself, and an intra event had no entrants to offer.
+  //
+  // The capability now guards the act it is named for: running MORE THAN ONE
+  // campus. That check can only live in the handler, because only the handler knows
+  // whether the campus being created is the first or the second.
+  //
+  // Asserted here as an absence plus a presence, so that re-adding the blanket
+  // mount fails loudly rather than quietly re-breaking free organisations.
+  it('multi_campus gates creating a second campus, not reading the structure', () => {
+    const blanket = gates.filter((g) => g.name === 'capability:multi_campus' && g.path.includes('units'));
+    expect(blanket).toEqual([]);
+
+    const source = readFileSync(
+      new URL('../modules/iam/org-units.routes.ts', import.meta.url),
+      'utf8',
+    );
+    // The guard is inside the create handler, and it is conditional on a campus
+    // already existing. Both halves matter: the assert alone would also match a
+    // version that gated the first campus too.
+    expect(source).toContain("assertCapability(prisma, 'multi_campus'");
+    expect(source).toContain("where: { organization_id: req.params.id, type: 'campus' }");
   });
 });

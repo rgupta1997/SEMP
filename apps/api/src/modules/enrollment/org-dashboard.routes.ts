@@ -37,11 +37,12 @@ export function makeOrgDashboardRouter(prisma: Prisma): Router {
     today.setHours(0, 0, 0, 0);
 
     const [
-      players, pendingPeople, teams, upcoming, live,
+      players, pendingPeople, pendingVerification, teams, upcoming, live,
       pendingEntries, certsPending, achievements, scope,
     ] = await Promise.all([
       prisma.organization_members.count({ where: { organization_id: orgId, status: 'active' } }),
       prisma.organization_members.count({ where: { organization_id: orgId, status: 'pending' } }),
+      prisma.organization_members.count({ where: { organization_id: orgId, status: 'active', verification: 'pending' } }),
       prisma.teams.count({ where: { organization_id: orgId } }),
 
       prisma.championships.findMany({
@@ -73,7 +74,11 @@ export function makeOrgDashboardRouter(prisma: Prisma): Router {
       // an organiser glancing at this wants to know whether anything needs watching.
       prisma.fixtures.count({
         where: {
-          status: 'in_progress',
+          // 'live', not 'in_progress'. The latter is not one of the seven values in
+          // FIXTURE_STATUS, so this count matched nothing and the "Live now" card
+          // read 0 through an entire championship - a KPI that is always zero is
+          // indistinguishable from a quiet day, which is why it went unnoticed.
+          status: 'live',
           tournament_disciplines: {
             tournament_sports: {
               tournaments: {
@@ -134,10 +139,28 @@ export function makeOrgDashboardRouter(prisma: Prisma): Router {
       : null;
 
     const queue = [
+      // A JOIN REQUEST - `organization_members.status = 'pending'`.
+      //
+      // It used to say "waiting to be verified" and link to Players, which is a
+      // different field on a different screen: somebody following it pressed
+      // "Reject", changed that person's VERIFICATION, and left the request
+      // untouched and still counted. Membership is approved on Members.
       pendingPeople > 0 && {
         key: 'people',
-        text: `${pendingPeople} ${pendingPeople === 1 ? 'person is' : 'people are'} waiting to be verified`,
-        sub: 'Joined by invitation or domain sign-up',
+        text: `${pendingPeople} ${pendingPeople === 1 ? 'person has' : 'people have'} asked to join`,
+        sub: 'Signed up with a verified domain, or followed an invitation',
+        // The Administration TAB, not the bare /members route. Members has no item
+        // of its own in the organisation nav - Administration → Members is the only
+        // navigable way in - so sending somebody to the standalone URL drops them on
+        // a page whose sidebar cannot show them where they are.
+        cta: 'Review', to: `/organizations/${orgId}/admin?tab=members`, tone: 'amber' as const,
+      },
+      // Genuinely awaiting VERIFICATION - a different queue, on Players, and it was
+      // not surfaced here at all while its wording was being used by the one above.
+      pendingVerification > 0 && {
+        key: 'verify',
+        text: `${pendingVerification} ${pendingVerification === 1 ? 'player is' : 'players are'} waiting to be verified`,
+        sub: 'On the roll, not yet confirmed as who they say they are',
         cta: 'Review', to: `/organizations/${orgId}/students`, tone: 'amber' as const,
       },
       pendingEntries > 0 && {
@@ -158,9 +181,19 @@ export function makeOrgDashboardRouter(prisma: Prisma): Router {
       can_approve: canApprove,
       kpis: {
         players, teams,
-        upcoming_events: upcoming.length,
-        awaiting_approval: pendingPeople + pendingEntries,
+        // Split, because they are different states and were being reported as one.
+        // `upcoming` deliberately includes events that are already RUNNING - an
+        // organiser needs to see those most of all - but counting them under a card
+        // headed "Upcoming events" told an institution with three championships in
+        // progress that it had three coming up.
+        ongoing_events: upcoming.filter((c) => c.status === 'ongoing').length,
+        upcoming_events: upcoming.filter((c) => c.status !== 'ongoing').length,
+        // Everything that needs a decision from somebody here: join requests, people
+        // awaiting verification, and entries this organisation is waiting on.
+        awaiting_approval: pendingPeople + pendingVerification + pendingEntries,
         certificates_pending: certsPending,
+        // Matches in progress right now, which is a different question from how many
+        // championships are running.
         live_now: live,
       },
       queue,

@@ -1,19 +1,29 @@
 import type { StandingsRule, StandingsPlacement, StandingsTiebreaker } from '@semp/shared';
 
 // Pure standings computation. A scheme turns a single draw's (tournament_discipline)
-// completed fixtures into per-organization tallies. The service aggregates these
+// completed fixtures into per-CONTINGENT tallies. The service aggregates these
 // tallies across draws into the championship / tournament / sport scopes and ranks
 // them. No DB access here so the logic is unit-testable in isolation.
+//
+// `entity_id` is deliberately opaque here. It used to be an organisation id, and
+// naming it that was what made intra-organisation events impossible to express:
+// every campus of one institution carries the same organisation id, so the table
+// collapsed to one row. The service now resolves each side to a contingent key -
+// the unit when there is one, the organisation otherwise (@semp/shared
+// `contingentKey`) - and this layer never learns which of the two it was handed.
+// That is the point: the ranking maths is identical either way, and a scheme that
+// could tell them apart would eventually treat them differently.
 
-// The minimal fixture shape a scheme needs. The service maps each side's team to its
-// organization (standings are org-level) before handing rows over.
+// The minimal fixture shape a scheme needs. The service maps each side's team to the
+// CONTINGENT it plays for - a campus, a department, or the organisation itself -
+// before handing rows over.
 export interface SchemeFixture {
   status: string;
   round: string | null;
   home_team_id: string | null;
   away_team_id: string | null;
-  home_org_id: string | null;
-  away_org_id: string | null;
+  home_entity_id: string | null;
+  away_entity_id: string | null;
   home_score: number | null;
   away_score: number | null;
   winner_team_id: string | null;
@@ -22,8 +32,8 @@ export interface SchemeFixture {
   away_points?: number | null;
 }
 
-export interface OrgTally {
-  organization_id: string;
+export interface EntityTally {
+  entity_id: string;
   played: number;
   won: number;
   drawn: number;
@@ -38,25 +48,25 @@ export interface OrgTally {
   rank?: number;
 }
 
-function emptyTally(organization_id: string): OrgTally {
-  return { organization_id, played: 0, won: 0, drawn: 0, lost: 0, points: 0, gf: 0, ga: 0, detail: {} };
+function emptyTally(entity_id: string): EntityTally {
+  return { entity_id, played: 0, won: 0, drawn: 0, lost: 0, points: 0, gf: 0, ga: 0, detail: {} };
 }
 
 // Core W/D/L counter shared by every scheme - counts played/won/drawn/lost and
 // goals for/against, and awards `win`/`draw`/`loss` points. Returns a keyed map so
 // callers can layer scheme-specific points on top.
-function leagueTally(fixtures: SchemeFixture[], win: number, draw: number, loss: number): Map<string, OrgTally> {
-  const table = new Map<string, OrgTally>();
-  const ensure = (orgId: string) => {
-    let row = table.get(orgId);
-    if (!row) { row = emptyTally(orgId); table.set(orgId, row); }
+function leagueTally(fixtures: SchemeFixture[], win: number, draw: number, loss: number): Map<string, EntityTally> {
+  const table = new Map<string, EntityTally>();
+  const ensure = (entityId: string) => {
+    let row = table.get(entityId);
+    if (!row) { row = emptyTally(entityId); table.set(entityId, row); }
     return row;
   };
 
   for (const f of fixtures) {
     if (f.status !== 'completed') continue;
-    const home = f.home_org_id ? ensure(f.home_org_id) : null;
-    const away = f.away_org_id ? ensure(f.away_org_id) : null;
+    const home = f.home_entity_id ? ensure(f.home_entity_id) : null;
+    const away = f.away_entity_id ? ensure(f.away_entity_id) : null;
     if (!home && !away) continue;
     if (home) home.played++;
     if (away) away.played++;
@@ -76,12 +86,13 @@ function leagueTally(fixtures: SchemeFixture[], win: number, draw: number, loss:
   return table;
 }
 
-// Map each team to its organization across all fixtures in the draw (either side).
-function teamOrgMap(fixtures: SchemeFixture[]): Map<string, string> {
+// Map each team to the contingent it plays for, across all fixtures in the draw
+// (either side).
+function teamEntityMap(fixtures: SchemeFixture[]): Map<string, string> {
   const m = new Map<string, string>();
   for (const f of fixtures) {
-    if (f.home_team_id && f.home_org_id) m.set(f.home_team_id, f.home_org_id);
-    if (f.away_team_id && f.away_org_id) m.set(f.away_team_id, f.away_org_id);
+    if (f.home_team_id && f.home_entity_id) m.set(f.home_team_id, f.home_entity_id);
+    if (f.away_team_id && f.away_entity_id) m.set(f.away_team_id, f.away_entity_id);
   }
   return m;
 }
@@ -137,7 +148,7 @@ function placementCandidates(f: SchemeFixture): Array<[string, StandingsPlacemen
 
 // --- the three schemes ---
 
-function leaguePointsScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'league_points' }>): OrgTally[] {
+function leaguePointsScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'league_points' }>): EntityTally[] {
   return [...leagueTally(fixtures, rule.win, rule.draw, rule.loss).values()];
 }
 
@@ -149,13 +160,13 @@ const PLACEMENT_SPECIFICITY: StandingsPlacement[] = [
   'winner', 'runner_up', 'third_place', 'fourth_place', 'semi_finalist', 'quarter_finalist',
 ];
 
-function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'placement' }>): OrgTally[] {
+function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'placement' }>): EntityTally[] {
   // Base P/W/L from the knockout results (no league points), then layer placement
   // points. Unlike the medal scheme these accrue progressively round by round - each
   // team holds the floor of the highest stage it has reached (see placementCandidates),
   // so the table is live throughout the bracket rather than blank until the final.
   const table = leagueTally(fixtures, 0, 0, 0);
-  const teamOrg = teamOrgMap(fixtures);
+  const teamEntity = teamEntityMap(fixtures);
 
   // All placements each team earned across the bracket. Byes count here (they grant
   // a reached-the-next-stage floor) even though leagueTally ignores them as unplayed.
@@ -169,27 +180,27 @@ function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule,
     }
   }
 
-  // Orgs that banked a scored placement - they do NOT also get participation.
+  // Contingents that banked a scored placement - they do NOT also get participation.
   const placed = new Set<string>();
   for (const [teamId, earned] of candidates) {
     const chosen = PLACEMENT_SPECIFICITY.find((p) => earned.has(p) && rule.points[p] !== undefined);
     if (!chosen) continue;
-    const orgId = teamOrg.get(teamId);
-    if (!orgId) continue;
-    let row = table.get(orgId);
-    if (!row) { row = emptyTally(orgId); table.set(orgId, row); }
+    const entityId = teamEntity.get(teamId);
+    if (!entityId) continue;
+    let row = table.get(entityId);
+    if (!row) { row = emptyTally(entityId); table.set(entityId, row); }
     row.points += rule.points[chosen]!;
     row.detail[chosen] = (row.detail[chosen] ?? 0) + 1;
-    placed.add(orgId);
+    placed.add(entityId);
   }
 
   // Participation is a consolation floor, not a universal top-up: it goes only to
-  // orgs knocked out below the semis with no placement point to show for it (so if
+  // contingents knocked out below the semis with no placement point to show for it (so if
   // quarter-finalist points are configured, QF losers take those instead). Anyone
   // who reached the semis already carries a higher placement floor.
   if (rule.participation > 0) {
     for (const row of table.values()) {
-      if (placed.has(row.organization_id)) continue;
+      if (placed.has(row.entity_id)) continue;
       row.points += rule.participation;
       row.detail.participation = (row.detail.participation ?? 0) + 1;
     }
@@ -200,18 +211,18 @@ function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule,
 // Custom: no auto formula. Base P/W/L is tallied for the display columns (with zero
 // auto-points), then the organiser's hand-entered championship points per side are
 // added on. A side with no points entered simply contributes nothing.
-function customScheme(fixtures: SchemeFixture[]): OrgTally[] {
+function customScheme(fixtures: SchemeFixture[]): EntityTally[] {
   const table = leagueTally(fixtures, 0, 0, 0);
   for (const f of fixtures) {
     if (f.status !== 'completed') continue;
-    if (f.home_org_id && f.home_points != null) { const row = table.get(f.home_org_id); if (row) row.points += f.home_points; }
-    if (f.away_org_id && f.away_points != null) { const row = table.get(f.away_org_id); if (row) row.points += f.away_points; }
+    if (f.home_entity_id && f.home_points != null) { const row = table.get(f.home_entity_id); if (row) row.points += f.home_points; }
+    if (f.away_entity_id && f.away_points != null) { const row = table.get(f.away_entity_id); if (row) row.points += f.away_points; }
   }
   return [...table.values()];
 }
 
-function medalScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'medal' }>, decided: boolean): OrgTally[] {
-  // Rank organizations within the discipline by a standard 3/1/0 win record, then
+function medalScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'medal' }>, decided: boolean): EntityTally[] {
+  // Rank contingents within the discipline by a standard 3/1/0 win record, then
   // award gold/silver/bronze points to the top three - but only once the discipline
   // is decided (the final has been played / every match is in).
   const rows = [...leagueTally(fixtures, 3, 1, 0).values()];
@@ -231,12 +242,12 @@ function medalScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { s
 }
 
 // Run the scheme matching `rule`. For league_points/medal/custom, participation is a
-// flat top-up added to every org that took part; placement handles participation
+// flat top-up added to every contingent that took part; placement handles participation
 // itself (a sub-semis consolation floor). `decided` gates only the medal scheme's
 // position points until the discipline is concluded - placement now accrues live,
 // round by round, and league points always have.
-export function runScheme(fixtures: SchemeFixture[], rule: StandingsRule, decided = true): OrgTally[] {
-  let tallies: OrgTally[];
+export function runScheme(fixtures: SchemeFixture[], rule: StandingsRule, decided = true): EntityTally[] {
+  let tallies: EntityTally[];
   switch (rule.scheme) {
     case 'league_points': tallies = leaguePointsScheme(fixtures, rule); break;
     // Placement folds participation in itself (consolation floor for sub-semis exits),
@@ -258,11 +269,11 @@ export function runScheme(fixtures: SchemeFixture[], rule: StandingsRule, decide
   return tallies;
 }
 
-// Merge a draw's tallies into a running per-scope accumulator (by organization).
-export function accumulate(acc: Map<string, OrgTally>, tallies: OrgTally[]): void {
+// Merge a draw's tallies into a running per-scope accumulator (by contingent).
+export function accumulate(acc: Map<string, EntityTally>, tallies: EntityTally[]): void {
   for (const t of tallies) {
-    let row = acc.get(t.organization_id);
-    if (!row) { row = emptyTally(t.organization_id); acc.set(t.organization_id, row); }
+    let row = acc.get(t.entity_id);
+    if (!row) { row = emptyTally(t.entity_id); acc.set(t.entity_id, row); }
     row.played += t.played;
     row.won += t.won;
     row.drawn += t.drawn;
@@ -276,8 +287,8 @@ export function accumulate(acc: Map<string, OrgTally>, tallies: OrgTally[]): voi
 
 // Sort rows in place by the ordered tiebreakers (descending "better first") and
 // assign sequential ranks. `head_to_head` is not yet implemented and is skipped.
-export function rankBy(rows: OrgTally[], tiebreakers: StandingsTiebreaker[]): OrgTally[] {
-  const metric = (r: OrgTally, t: StandingsTiebreaker): number => {
+export function rankBy(rows: EntityTally[], tiebreakers: StandingsTiebreaker[]): EntityTally[] {
+  const metric = (r: EntityTally, t: StandingsTiebreaker): number => {
     switch (t) {
       case 'points': return r.points;
       case 'wins': return r.won;

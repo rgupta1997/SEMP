@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Check, Copy, Lock, ShieldCheck } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Eye, Lock, ShieldCheck } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
 import { useWorkspace } from '../../lib/useWorkspace';
-import { Badge, Card, CardBody, PageHeader, Spinner, toast } from '../../components/ui';
+import { Badge, Button, Card, CardBody, PageHeader, Spinner, toast } from '../../components/ui';
+import { SheetPreview, openDoc } from '../organization/certificates/shared';
 import { ParticipantDashboard } from './ParticipantDashboard';
 import { LifetimeRecordPage } from './LifetimeRecordPage';
 
@@ -59,17 +60,19 @@ interface TeamRow {
 }
 
 interface CertRow {
-  id: string; serial: string; issued_at: string; revoked_at: string | null;
+  id: string; serial: string; issued_at: string; revoked_at: string | null; superseded_at: string | null;
+  token: string;
+  payload?: { title?: string | null; sport?: string | null; recipient_name?: string | null } | null;
   organizations?: { name: string } | null; championships?: { name: string } | null;
 }
 
 const cardStyle: React.CSSProperties = {
-  background: '#fff', border: '1px solid #E1E7F0', borderRadius: 14, padding: 20,
+  background: '#fff', border: '1px solid var(--line)', borderRadius: 14, padding: 20,
 };
 const rowStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 12, padding: '11px 0', borderTop: '1px solid #EFF2F7',
 };
-const emptyStyle: React.CSSProperties = { margin: 0, fontSize: 13.5, color: '#9BA9BE' };
+const emptyStyle: React.CSSProperties = { margin: 0, fontSize: 13.5, color: 'var(--faint)' };
 
 /** Sports, derived from the squads this person is actually in. */
 function SportsTab() {
@@ -90,15 +93,15 @@ function SportsTab() {
   return (
     <div style={cardStyle}>
       <h3 style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, margin: '0 0 4px' }}>Sports you play</h3>
-      <p style={{ margin: '0 0 6px', fontSize: 13, color: '#6E7E96' }}>Taken from the squads you belong to.</p>
+      <p style={{ margin: '0 0 6px', fontSize: 13, color: 'var(--muted)' }}>Taken from the squads you belong to.</p>
       {bySport.size === 0 ? <p style={emptyStyle}>No sports yet — join a squad and they appear here.</p>
         : [...bySport.entries()].map(([sport, v]) => (
           <div key={sport} style={rowStyle}>
             <span style={{ flex: 1, fontFamily: POP, fontWeight: 700, fontSize: 14 }}>{sport}</span>
-            <span style={{ fontFamily: MONO, fontSize: 11.5, color: '#6E7E96' }}>
+            <span style={{ fontFamily: MONO, fontSize: 11.5, color: 'var(--muted)' }}>
               {v.teams} {v.teams === 1 ? 'team' : 'teams'} · {v.events} {v.events === 1 ? 'entry' : 'entries'}
             </span>
-            <span style={{ fontSize: 12, color: '#9BA9BE', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: 12, color: 'var(--faint)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {[...v.orgs].join(', ')}
             </span>
           </div>
@@ -118,17 +121,123 @@ function TeamsTab() {
         : rows.map((t) => (
           <div key={t.id} style={rowStyle}>
             <span style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#14233B' }}>{t.name}</span>
-              <span style={{ display: 'block', fontSize: 12, color: '#6E7E96', marginTop: 2 }}>
+              <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: 'var(--ink-2)' }}>{t.name}</span>
+              <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
                 {[t.organizations?.short_name ?? t.organizations?.name, t.sports?.name].filter(Boolean).join(' · ')}
               </span>
             </span>
             {t.jersey_number != null && (
-              <span style={{ fontFamily: MONO, fontSize: 13, color: '#004AAD' }}>#{t.jersey_number}</span>
+              <span style={{ fontFamily: MONO, fontSize: 13, color: 'var(--brand)' }}>#{t.jersey_number}</span>
             )}
             <Badge tone={t.membership_role === 'captain' ? 'amber' : 'slate'}>{t.membership_role}</Badge>
           </div>
         ))}
+    </div>
+  );
+}
+
+const DetailLine = ({ label, mono, children }: { label: string; mono?: boolean; children: React.ReactNode }) => (
+  <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', padding: '3px 0' }}>
+    <dt style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--faint)', flexShrink: 0 }}>{label}</dt>
+    <dd style={{
+      margin: 0, textAlign: 'right', minWidth: 0, color: 'var(--ink-2)',
+      fontFamily: mono ? MONO : undefined, fontSize: mono ? 12 : 13,
+    }}>{children}</dd>
+  </div>
+);
+
+/**
+ * The holder's own copy.
+ *
+ * A certificate you can see the status of but not open is a receipt, not a document -
+ * so every row carries the two things a holder actually needs (the artefact itself,
+ * and a link a stranger can check) and the facts behind them. All of it goes through
+ * /me/certificates/:id/render, which authorises by ownership rather than by
+ * institution: nobody has to ask an administrator for their own certificate.
+ */
+function CertificateRow({ c }: { c: CertRow }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const dead = !!(c.revoked_at || c.superseded_at);
+  const verifyUrl = `${window.location.origin}/verify/${c.token}`;
+
+  const copyVerify = async () => {
+    try {
+      await navigator.clipboard.writeText(verifyUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch { toast.error('Could not copy the link', verifyUrl); }
+  };
+
+  return (
+    <div style={{ borderTop: '1px solid #EFF2F7' }}>
+      <div style={{ ...rowStyle, borderTop: 'none', flexWrap: 'wrap' }}>
+        <span style={{ flex: '1 1 200px', minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: 'var(--ink-2)' }}>
+            {c.payload?.title || c.championships?.name || 'Certificate'}
+          </span>
+          <span style={{ display: 'block', fontFamily: MONO, fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+            {c.serial} · {c.organizations?.name ?? ''}
+          </span>
+        </span>
+
+        {/* A revoked certificate is shown, not removed. Somebody may be holding
+            a copy, and silence about it is worse than saying it was withdrawn. */}
+        <Badge tone={c.revoked_at ? 'rose' : c.superseded_at ? 'amber' : 'green'}>
+          {c.revoked_at ? 'Revoked' : c.superseded_at ? 'Superseded' : 'Issued'}
+        </Badge>
+
+        <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <Button size="sm" variant="outline" onClick={() => openDoc(`/me/certificates/${c.id}/render`)}>
+            <Eye size={13} aria-hidden />View
+          </Button>
+          <Button
+            size="sm" variant="outline"
+            onClick={() => openDoc(`/me/certificates/${c.id}/render?download=1`, { download: `${c.serial}.html` })}
+          >
+            <Download size={13} aria-hidden />Download
+          </Button>
+          <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+            Details{open ? <ChevronUp size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
+          </Button>
+        </span>
+      </div>
+
+      {open && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start', padding: '4px 0 16px' }}>
+          {/* The real render, at print geometry - so what is checked here is what
+              prints, not a description of it. */}
+          <SheetPreview path={`/me/certificates/${c.id}/render`} width={320} />
+
+          <dl style={{ flex: '1 1 240px', minWidth: 0, margin: 0, fontSize: 13 }}>
+            <DetailLine label="Serial" mono>{c.serial}</DetailLine>
+            <DetailLine label="Issued to">{c.payload?.recipient_name ?? '—'}</DetailLine>
+            <DetailLine label="Event">{c.championships?.name ?? '—'}</DetailLine>
+            <DetailLine label="Sport">{c.payload?.sport ?? '—'}</DetailLine>
+            <DetailLine label="Award">{c.payload?.title ?? '—'}</DetailLine>
+            <DetailLine label="Issued by">{c.organizations?.name ?? '—'}</DetailLine>
+            <DetailLine label="Issued on">{new Date(c.issued_at).toLocaleDateString()}</DetailLine>
+            {c.revoked_at && <DetailLine label="Withdrawn">{new Date(c.revoked_at).toLocaleDateString()}</DetailLine>}
+
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+              {/* The public verify link, not a link into the app: sharing a certificate
+                  means letting somebody else check it, and they have no account. */}
+              <Button size="sm" variant="subtle" onClick={copyVerify}>
+                {copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
+                {copied ? 'Copied' : 'Copy verification link'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => window.open(`/verify/${c.token}`, '_blank', 'noopener')}>
+                <ExternalLink size={13} aria-hidden />Verification page
+              </Button>
+            </div>
+            {dead && (
+              <p style={{ margin: '8px 0 0', fontSize: 12, color: '#B4405F' }}>
+                This certificate no longer verifies. It still opens, stamped, so you can see what happened to it.
+              </p>
+            )}
+          </dl>
+        </div>
+      )}
     </div>
   );
 }
@@ -141,21 +250,7 @@ function CertificatesTab() {
     <div style={cardStyle}>
       <h3 style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, margin: '0 0 6px' }}>Certificates</h3>
       {rows.length === 0 ? <p style={emptyStyle}>Certificates issued to you will appear here.</p>
-        : rows.map((c) => (
-          <div key={c.id} style={rowStyle}>
-            <span style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#14233B' }}>
-                {c.championships?.name ?? 'Certificate'}
-              </span>
-              <span style={{ display: 'block', fontFamily: MONO, fontSize: 11, color: '#6E7E96', marginTop: 2 }}>
-                {c.serial} · {c.organizations?.name ?? ''}
-              </span>
-            </span>
-            {/* A revoked certificate is shown, not removed. Somebody may be holding
-                a copy, and silence about it is worse than saying it was withdrawn. */}
-            <Badge tone={c.revoked_at ? 'rose' : 'green'}>{c.revoked_at ? 'Revoked' : 'Issued'}</Badge>
-          </div>
-        ))}
+        : rows.map((c) => <CertificateRow key={c.id} c={c} />)}
     </div>
   );
 }
@@ -193,21 +288,21 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
       <CardBody className="sm:px-6 sm:pt-6 sm:pb-6">
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start' }}>
           <span aria-hidden style={{
-            width: 64, height: 64, borderRadius: 16, background: '#004AAD', color: '#fff',
+            width: 64, height: 64, borderRadius: 16, background: 'var(--brand)', color: '#fff',
             display: 'grid', placeItems: 'center', fontFamily: POP, fontWeight: 900, fontSize: 22,
           }}>{initials(id.name)}</span>
 
           <div style={{ flex: '1 1 260px', minWidth: 0 }}>
             <h2 style={{ fontFamily: POP, fontWeight: 900, fontSize: 24, margin: 0, letterSpacing: '-.02em' }}>{id.name}</h2>
             {id.controlled.tagline && (
-              <p style={{ margin: '4px 0 0', fontSize: 14, color: '#4F5F77' }}>{id.controlled.tagline}</p>
+              <p style={{ margin: '4px 0 0', fontSize: 14, color: 'var(--ink-4)' }}>{id.controlled.tagline}</p>
             )}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10, alignItems: 'center' }}>
               {/* The portable identity. Issued once and quoted everywhere - it is
                   what makes a record follow a person between institutions. */}
               <span style={{
                 fontFamily: MONO, fontWeight: 700, fontSize: 12, letterSpacing: '.06em',
-                padding: '4px 9px', borderRadius: 6, background: '#DFEAFB', color: '#004AAD',
+                padding: '4px 9px', borderRadius: 6, background: 'var(--brand-line)', color: 'var(--brand)',
               }}>{id.sportagon_id ?? 'ID pending'}</span>
               {id.officiates && <Badge tone="amber">Official</Badge>}
               {id.email_verified && id.phone_verified && <Badge tone="green">Verified contact</Badge>}
@@ -220,7 +315,7 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
               padding: '8px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600,
               border: `1px solid ${id.privacy.public_profile ? '#1E9E5A' : '#C8D2E0'}`,
               background: id.privacy.public_profile ? '#E4F6EC' : '#fff',
-              color: id.privacy.public_profile ? '#1E6E45' : '#4F5F77',
+              color: id.privacy.public_profile ? '#1E6E45' : 'var(--ink-4)',
             }}>
               <span aria-hidden style={{
                 width: 30, height: 16, borderRadius: 999, position: 'relative',
@@ -237,7 +332,7 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
             {id.public_url && (
               <button onClick={copy} style={{
                 display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', border: 'none',
-                background: 'none', fontFamily: MONO, fontSize: 11.5, color: '#004AAD', padding: 0,
+                background: 'none', fontFamily: MONO, fontSize: 11.5, color: 'var(--brand)', padding: 0,
               }}>
                 {copied ? <Check size={13} /> : <Copy size={13} />}
                 {copied ? 'Copied' : id.public_url}
@@ -277,10 +372,10 @@ function LockedTab({ label }: { label: string }) {
     }}>
       <div aria-hidden style={{
         width: 42, height: 42, margin: '0 auto 14px', borderRadius: 11,
-        background: '#EFF2F7', color: '#6E7E96', display: 'grid', placeItems: 'center',
+        background: '#EFF2F7', color: 'var(--muted)', display: 'grid', placeItems: 'center',
       }}><Lock size={19} /></div>
       <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 18 }}>{label} needs advanced stats</div>
-      <p style={{ fontSize: 13.5, color: '#6E7E96', marginTop: 8, maxWidth: 400, marginInline: 'auto', lineHeight: 1.6 }}>
+      <p style={{ fontSize: 13.5, color: 'var(--muted)', marginTop: 8, maxWidth: 400, marginInline: 'auto', lineHeight: 1.6 }}>
         Your participation, results and certificates are all included. Detailed career statistics and a
         sports CV need <span style={{ fontFamily: MONO, fontSize: 12 }}>advanced_stats</span>.
       </p>
@@ -313,9 +408,9 @@ export function SportsProfilePage() {
               style={{
                 display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
                 padding: '7px 13px', borderRadius: 999, fontSize: 13.5, fontWeight: 600,
-                border: `1px solid ${isActive ? '#004AAD' : '#E1E7F0'}`,
-                background: isActive ? '#004AAD' : '#fff',
-                color: isActive ? '#fff' : '#4F5F77',
+                border: `1px solid ${isActive ? 'var(--brand)' : 'var(--line)'}`,
+                background: isActive ? 'var(--brand)' : '#fff',
+                color: isActive ? '#fff' : 'var(--ink-4)',
               }}>
               {t.label}
               {isLocked && <Lock size={11} style={{ opacity: 0.75 }} />}

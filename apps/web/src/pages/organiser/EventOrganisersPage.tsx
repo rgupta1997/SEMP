@@ -59,7 +59,7 @@ export function EventOrganisersPage() {
       {organisers.length === 0 ? (
         <EmptyState icon="⚿" title="No co-organisers yet" description="Add teammates so more than one person can run this championship." />
       ) : (
-        <Card className="overflow-hidden">
+        <Card className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-100 dark:divide-slate-800 text-sm">
             <thead className="bg-slate-50 dark:bg-slate-800/60 text-left">
               <tr>

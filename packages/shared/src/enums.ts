@@ -187,6 +187,18 @@ export const MEDAL_LABEL: Record<Medal, string> = { gold: 'Gold', silver: 'Silve
 export const RECORD_SOURCE = ['locked_result', 'validated_claim', 'migrated'] as const;
 export type RecordSource = (typeof RECORD_SOURCE)[number];
 
+// ---------- Organisation verification ----------
+// The lifecycle of an organisation's request to be verified.
+//
+// 'withdrawn' and 'rejected' are kept apart deliberately: the first is the
+// organisation's own cancel and the second is the platform's answer, and somebody
+// asking "why is this closed" needs to be able to tell which happened. Only one
+// 'pending' request per organisation exists at a time (a partial unique index), so
+// the reviewer never sees two identical submissions and has to guess which one the
+// organisation meant.
+export const ORG_VERIFICATION_STATUS = ['pending', 'approved', 'rejected', 'withdrawn'] as const;
+export type OrgVerificationStatus = (typeof ORG_VERIFICATION_STATUS)[number];
+
 // ---------- Demo requests ----------
 // Triage state for a "Book a demo" lead captured from the public landing page.
 // 'new' on capture; an admin moves it through contacted → scheduled → closed.

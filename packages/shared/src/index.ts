@@ -12,3 +12,5 @@ export * from './permissions.js';
 export * from './seasons.js';
 export * from './schemas.js';
 export * from './role-codes.js';
+export * from './role-model.js';
+export * from './org-structure.js';

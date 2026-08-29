@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Lock, RotateCcw, ShieldCheck } from 'lucide-react';
 import { useParams } from 'react-router-dom';
+import type { PermissionCode } from '@semp/shared';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
+import { usePermissions } from '../../lib/permissions';
 import {
   Badge, Button, Card, CardBody, confirmDialog, PageHeader, Spinner, toast,
 } from '../../components/ui';
@@ -56,6 +58,15 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
   const defs = useApi<RoleDef[]>(`/organizations/${orgId}/role-definitions`);
   const catalogue = useApi<Area[]>('/permission-catalogue');
 
+  // THE DELEGATION RULE, mirrored. You cannot write a permission into a role that
+  // you do not hold yourself - the API refuses it (org-roles.routes.ts), and without
+  // this the only way to find that out would be a 403 on Save after ticking twelve
+  // boxes. Shown as a padlock on the box rather than hidden, because "you cannot
+  // grant this" is information and an absent row is not.
+  const perms = usePermissions();
+  const mine = perms.orgPermissions(orgId);
+  const canGrant = (code: string) => perms.isSuper || mine.has(code as PermissionCode);
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Set<string>>(new Set());
   const [scope, setScope] = useState<RoleScope>('whole_org');
@@ -81,6 +92,9 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
 
   const toggle = (code: string) => {
     if (!selected?.editable) return;
+    // Already-granted permissions stay removable: taking access away is not
+    // escalation, so only ADDING one you lack is refused.
+    if (!draft.has(code) && !canGrant(code)) return;
     setDraft((d) => { const n = new Set(d); n.has(code) ? n.delete(code) : n.add(code); return n; });
   };
 
@@ -201,6 +215,15 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
                   </div>
                 )}
 
+                {selected.editable && !perms.isSuper && (
+                  <p className="mb-4 flex items-start gap-2 text-[13px] text-slate-500 dark:text-slate-400">
+                    <Lock size={13} className="mt-0.5 shrink-0" />
+                    A padlocked permission is one you do not hold yourself. You can take it
+                    off a role but not add it — otherwise anyone who can edit roles could
+                    edit their way past the person who appointed them.
+                  </p>
+                )}
+
                 <div className="mb-5 rounded-lg border border-slate-200 px-4 py-3 dark:border-slate-800">
                   <h4 className="mb-2 font-mono text-[9.5px] uppercase tracking-[0.14em] text-slate-500">Scope</h4>
                   <div className="flex flex-wrap gap-2">
@@ -229,23 +252,30 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
                       <div className="grid gap-1.5 sm:grid-cols-2">
                         {area.permissions.map((perm) => {
                           const on = draft.has(perm.code);
+                          // Locked = you do not hold it, so you cannot hand it out.
+                          const locked = !on && !canGrant(perm.code);
+                          const usable = selected.editable && !locked;
                           return (
                             <label
                               key={perm.code}
+                              title={locked ? 'You do not hold this permission, so you cannot grant it.' : undefined}
                               className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-[13.5px] transition
                                 ${on ? 'border-brand-300 bg-brand-50 dark:border-brand-700 dark:bg-brand-900/25'
                                      : 'border-slate-200 dark:border-slate-800'}
-                                ${selected.editable ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
+                                ${usable ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
                             >
                               <input
                                 type="checkbox"
                                 className="mt-0.5 accent-brand-600"
                                 checked={on}
-                                disabled={!selected.editable}
+                                disabled={!usable}
                                 onChange={() => toggle(perm.code)}
                               />
                               <span className="min-w-0">
-                                <span className="block font-medium text-slate-800 dark:text-slate-100">{perm.label}</span>
+                                <span className="flex items-center gap-1.5 font-medium text-slate-800 dark:text-slate-100">
+                                  {perm.label}
+                                  {locked && <Lock size={11} className="shrink-0 text-slate-400" />}
+                                </span>
                                 <span className="block font-mono text-[10px] text-slate-400">{perm.code}</span>
                               </span>
                             </label>

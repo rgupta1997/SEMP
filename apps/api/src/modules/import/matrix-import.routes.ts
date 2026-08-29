@@ -6,6 +6,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError } from '../../shared/errors.js';
+import { findEntrant } from '../championships/contingent.js';
 import { deriveProvisionedPassword, findUsersByPhones, maskPhone, phoneLast10 } from '../iam/users.helpers.js';
 
 // Champion­ship setup matrix import: turn one 2D spreadsheet (sections × sport/
@@ -235,12 +236,20 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
         const found = await tx.organizations.findFirst({ where: { name: { equals: section, mode: 'insensitive' } }, select: { id: true } });
         const orgId = found?.id ?? (summary.orgs.created++, (await tx.organizations.create({ data: { name: section, status: true }, select: { id: true } })).id);
         if (found) summary.orgs.existing++;
-        const champOrg = await tx.championship_organizations.upsert({
-          where: { championship_id_organization_id: { championship_id: championshipId, organization_id: orgId } },
-          update: { status: 'approved', reviewed_by: actorId, reviewed_at: new Date() },
-          create: { championship_id: championshipId, organization_id: orgId, applied_by: actorId, reviewed_by: actorId, reviewed_at: new Date(), status: 'approved' },
-          select: { id: true },
-        });
+        // The matrix sheet's sections ARE organisations, so this builds inter-org
+        // entrants with no unit. findEntrant + create replaces an upsert whose
+        // compound key stopped existing when entries became per-contingent.
+        const existingEntrant = await findEntrant(tx, championshipId, { orgId, unitId: null });
+        const champOrg = existingEntrant
+          ? await tx.championship_organizations.update({
+            where: { id: existingEntrant.id },
+            data: { status: 'approved', reviewed_by: actorId, reviewed_at: new Date() },
+            select: { id: true },
+          })
+          : await tx.championship_organizations.create({
+            data: { championship_id: championshipId, organization_id: orgId, applied_by: actorId, reviewed_by: actorId, reviewed_at: new Date(), status: 'approved' },
+            select: { id: true },
+          });
         orgIdBySection.set(key, orgId);
         champOrgBySection.set(key, champOrg.id);
         return { orgId, champOrgId: champOrg.id };

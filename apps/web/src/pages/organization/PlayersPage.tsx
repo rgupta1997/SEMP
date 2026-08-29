@@ -7,10 +7,113 @@ import { usePermissions } from '../../lib/permissions';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { api } from '../../lib/api';
 import { AddPlayersModal } from '../../components/AddPlayersModal';
+import { pluralise } from '@semp/shared';
+import { useOrgUnits, unitPath } from '../../lib/units';
 import {
-  Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, PageHeader, Pagination,
-  SearchInput, Spinner, confirmDialog, toast, SURFACE, FilterChips,
+  Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, PageHeader, Pagination,
+  Modal, SearchInput, Select, cn, confirmDialog, toast, SURFACE, FilterChips,
 } from '../../components/ui';
+import { DataList, FilterBar, QueryState, SkeletonList, useUrlState } from '../../components/primitives';
+
+// Where somebody is PLACED is now a competitive fact, not filing.
+//
+// A player can only be picked for the campus or department they belong to, so an
+// unplaced person cannot be selected for any intra-organisation squad. That makes
+// this column the thing an organiser has to fix before an internal championship can
+// be run at all - which is why it is editable in place here, and in bulk, rather
+// than only at import time.
+/** Add many people to one unit. Additive - it never removes anything they have. */
+function addToUnit(orgId: string, unitId: string, userIds: string[]) {
+  return api('POST', `/organizations/${orgId}/units/${unitId}/members`, { user_ids: userIds });
+}
+
+/** Replace one person's whole set of units. */
+function setUnits(orgId: string, userId: string, unitIds: string[]) {
+  return api('PUT', `/organizations/${orgId}/people/${userId}/units`, { unit_ids: unitIds });
+}
+
+/**
+ * Which campuses and departments one person belongs to.
+ *
+ * A checklist rather than a picker, because the answer is a set: a student is in a
+ * campus AND a programme AND an intake year, and each of those makes them eligible
+ * for a different squad. Saved as a replace - the dialog shows the complete
+ * intended state, so sending deltas from it is how the two drift apart.
+ */
+function PlacementModal({ orgId, person, units, labels, onClose, onSaved }: {
+  orgId: string;
+  person: Person;
+  units: Array<{ id: string; name: string; type: string; parent: { name: string } | null }>;
+  labels: { campus: string; department: string };
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [chosen, setChosen] = useState<Set<string>>(new Set(person.units.map((u) => u.id)));
+  const [busy, setBusy] = useState(false);
+
+  const toggle = (id: string) => setChosen((s) => {
+    const n = new Set(s);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await setUnits(orgId, person.user_id, [...chosen]);
+      toast.success(`${person.name ?? 'Placement'} updated`);
+      onSaved();
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Could not save that placement');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Modal
+      title={`Where does ${person.name ?? 'this person'} belong?`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</Button>
+        </>
+      }
+    >
+      <p className="mb-3 text-[13px] leading-relaxed text-slate-600 dark:text-slate-300">
+        Tick every {labels.campus.toLowerCase()} and {labels.department.toLowerCase()} they are part of.
+        They can be picked for a squad of any of them, and only those.
+      </p>
+      {units.length === 0 ? (
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          No {labels.campus.toLowerCase()} exists yet — add one on the Campuses &amp; Units screen.
+        </p>
+      ) : (
+        <div className="grid max-h-[24rem] gap-1 overflow-y-auto">
+          {units.map((u) => (
+            <label
+              key={u.id}
+              className={cn(
+                'flex cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2 text-[13.5px] transition',
+                chosen.has(u.id)
+                  ? 'border-brand-300 bg-brand-50 dark:border-brand-700 dark:bg-brand-900/25'
+                  : 'border-slate-200 dark:border-slate-800',
+                u.parent && 'ml-5',
+              )}
+            >
+              <input type="checkbox" className="accent-brand-600" checked={chosen.has(u.id)} onChange={() => toggle(u.id)} />
+              <span className="min-w-0">
+                <span className="block font-medium text-slate-800 dark:text-slate-100">{u.name}</span>
+                <span className="block font-mono text-[9px] uppercase tracking-[0.12em] text-slate-400">
+                  {u.type === 'campus' ? labels.campus : `${labels.department} · ${u.parent?.name ?? ''}`}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
 
 // The player directory (PG-21).
 //
@@ -37,9 +140,13 @@ interface Person {
   status: string;
   member_code: string | null;
   verification: string;
-  org_unit_name: string | null;
+  /** Every campus and department this person belongs to - placement is a set. */
+  units: Array<{ id: string; name: string | null; type: string | null }>;
+  org_unit_names: string | null;
   sportagon_id: string | null;
   sports: number;
+  /** Which sports they have played for this institution - the sport filter reads this. */
+  sport_names: string[];
   events: number;
 }
 
@@ -59,34 +166,104 @@ export function PlayersPage() {
   const navigate = useNavigate();
   const { orgId: routeOrgId } = useParams();
   const orgId = routeOrgId ?? ctx?.organization?.id ?? ctx?.user.organization_id ?? '';
-  const canManage = usePermissions().canManageOrg(orgId);
+  // PER ACTION, not one `canManage`.
+  //
+  // This screen used to gate everything on `canManageOrg` - `org.manage` - which a
+  // Sports Admin does not hold, so the whole of Players was read-only for the role
+  // whose description is "runs sport day to day ... people, teams, events". The nav
+  // offered it and every control on it was hidden. The catalogue already splits these
+  // three, and they are genuinely different risks: `people.import` is a file that can
+  // create hundreds against a duplicate-matching rule, `people.verify` decides who is
+  // a real member of the institution, and `people.edit` is one row at a time.
+  const perms = usePermissions();
+  const canEditPeople = perms.hasOrgPermission('people.edit', orgId);
+  const canImport = perms.hasOrgPermission('people.import', orgId);
+  const canVerify = perms.hasOrgPermission('people.verify', orgId);
+  // Selection exists to drive the bulk bar, so the checkbox column and the Actions
+  // column appear when there is at least one bulk action behind them. Without this a
+  // reader gets two empty columns and a table that reflows for nothing.
+  const canSelect = canVerify || canEditPeople;
   const ws = useWorkspace();
 
-  const { data: people = [], isLoading, refetch } = useApi<Person[]>(orgId ? `/organizations/${orgId}/people` : null);
-  const [filter, setFilter] = useState<string>('all');
+  const { data: people = [], isLoading, isError, error, refetch } = useApi<Person[]>(orgId ? `/organizations/${orgId}/people` : null);
+  const { flat: unitOptions, labels: unitLabels } = useOrgUnits(orgId);
+  const [placing, setPlacing] = useState<Person | null>(null);
+  // FILTERS THAT MATCH THE QUESTION THIS SCREEN ANSWERS.
+  //
+  // There was a third dropdown here, "All sports", and it was the wrong axis. This
+  // is the people directory - it answers "who belongs to this institution, and
+  // where do they sit in it", which is the question asked when somebody has to be
+  // found, verified, chased or picked. Sport is a fact about PARTICIPATION, it
+  // belongs to the records surfaces, and as a filter here it competed for width
+  // with the two axes that do matter. Sport names are still searchable, so nothing
+  // became unreachable - it stopped being a dropdown.
+  //
+  // Campus and batch are the two, and they are in the URL rather than in useState:
+  // opening a player and pressing Back returned you to an unfiltered list at page
+  // one, which on a 200-person roll means finding your place again by hand.
+  const [filter, setFilter] = useUrlState<string>('status', 'all');
+  const [campusId, setCampusId] = useUrlState<string>('campus', '');
+  const [deptId, setDeptId] = useUrlState<string>('batch', '');
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  const campuses = useMemo(() => unitOptions.filter((u) => u.type === 'campus'), [unitOptions]);
+  // Departments narrow to the chosen campus, so the second dropdown never offers a
+  // batch that would return nobody once the first one is set.
+  const departments = useMemo(
+    () => unitOptions.filter((u) => u.type === 'department' && (!campusId || u.parent?.id === campusId)),
+    [unitOptions, campusId],
+  );
+
+  // A person placed in a batch is in its campus whether or not somebody also ticked
+  // the campus itself - placement is entered per unit, and a campus filter that
+  // missed the batches under it would report an empty campus that is full.
+  const campusOf = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const u of unitOptions) m.set(u.id, u.type === 'campus' ? u.id : (u.parent?.id ?? u.id));
+    return m;
+  }, [unitOptions]);
+
+  // Everything except the verification chips, so the chip counts describe the list
+  // the chips are sitting on rather than the whole roll.
+  const scoped = useMemo(() => people.filter((p) => {
+    if (campusId && !p.units.some((u) => campusOf.get(u.id) === campusId)) return false;
+    if (deptId && !p.units.some((u) => u.id === deptId)) return false;
+    return true;
+  }), [people, campusId, deptId, campusOf]);
+
+  // Shown on the Filters button so the count is never a mystery, and cleared in
+  // one place rather than by resetting each dropdown to its own "All".
+  const activeFilters = (campusId ? 1 : 0) + (deptId ? 1 : 0);
+  const clearFilters = () => { setCampusId(''); setDeptId(''); setSelected(new Set()); };
+
   const counts = useMemo(() => ({
-    all: people.length,
-    pending: people.filter((p) => p.verification === 'pending').length,
-    verified: people.filter((p) => p.verification === 'verified').length,
-    rejected: people.filter((p) => p.verification === 'rejected').length,
-  }), [people]);
+    all: scoped.length,
+    pending: scoped.filter((p) => p.verification === 'pending').length,
+    verified: scoped.filter((p) => p.verification === 'verified').length,
+    rejected: scoped.filter((p) => p.verification === 'rejected').length,
+  }), [scoped]);
 
   const rows = useMemo(
-    () => people.filter((p) => filter === 'all' || p.verification === filter),
-    [people, filter],
+    () => scoped.filter((p) => filter === 'all' || p.verification === filter),
+    [scoped, filter],
   );
 
   const tc = useTableControls(rows, {
-    search: (p) => [p.name, p.email, p.phone, p.member_code, p.sportagon_id, p.org_unit_name]
+    search: (p) => [p.name, p.email, p.phone, p.member_code, p.sportagon_id, p.org_unit_names, (p.sport_names ?? []).join(' ')]
       .filter(Boolean).join(' '),
     sorts: { name: (a, b) => (a.name ?? '').localeCompare(b.name ?? '') },
     initialSort: 'name',
     pageSize: 20,
   });
+
+  // A batch belongs to one campus, so a campus change can leave the second dropdown
+  // holding a batch that is no longer on offer - and a filter pair that cannot match
+  // anything reads as "nobody here" rather than as a stale control.
+  useEffect(() => {
+    if (deptId && !departments.some((d) => d.id === deptId)) setDeptId('');
+  }, [departments, deptId]);
 
   // A selection has to mean the rows it was made on. After a refetch - or after
   // somebody is verified out of the filter they were selected under - an id that
@@ -163,20 +340,36 @@ export function PlayersPage() {
     ? `all ${tc.total} ${tc.total === 1 ? 'person' : 'people'} matching this view`
     : `${selected.size} ${selected.size === 1 ? 'person' : 'people'}`;
 
-  if (isLoading) return <Spinner />;
+  // A page-wide `<Spinner/>` for a screen whose shape is entirely known, and no
+  // branch at all for a failed request - `people` fell through to [] and the
+  // honest-looking "Nobody here yet" was rendered over a roll of two hundred.
+  if (isLoading || isError) {
+    return (
+      <div>
+        <PageHeader title="Players" subtitle="Everyone who belongs to this organisation." />
+        <QueryState query={{ isLoading, isError, error, refetch }} errorTitle="Could not load the directory"
+          skeleton={<SkeletonList rows={8} />}>
+          <span />
+        </QueryState>
+      </div>
+    );
+  }
 
   return (
-    <div className="pb-20">
+    <div>
       <PageHeader title="Players" subtitle="Everyone who belongs to this organisation, and what they have played.">
-        {canManage && (
-          <>
-            <Button variant="outline" onClick={() => navigate(`/organizations/${orgId}/students/import`)}>
-              <Upload size={15} /> Bulk upload
-            </Button>
-            <Button onClick={() => setAdding(true)}>
-              <UserPlus size={15} /> Add player
-            </Button>
-          </>
+        {canImport && (
+          // Icon-only below sm: two full-width buttons under the title cost a whole
+          // row of a 390px screen, and "Bulk upload" is not a word anybody needs
+          // read to them next to an upload arrow.
+          <Button variant="outline" aria-label="Bulk upload" onClick={() => navigate(`/organizations/${orgId}/students/import`)}>
+            <Upload size={15} /> <span className="hidden sm:inline">Bulk upload</span>
+          </Button>
+        )}
+        {canEditPeople && (
+          <Button onClick={() => setAdding(true)}>
+            <UserPlus size={15} /> <span className="hidden sm:inline">Add player</span><span className="sm:hidden">Add</span>
+          </Button>
         )}
       </PageHeader>
 
@@ -191,10 +384,12 @@ export function PlayersPage() {
           icon={<Users size={24} />}
           title="Nobody here yet"
           description="Import a roll, or add people one at a time. Anyone signing up on your email domain lands here too."
-          action={canManage ? (
+          action={canEditPeople || canImport ? (
             <div className="flex flex-wrap justify-center gap-2">
-              <Button onClick={() => setAdding(true)}>Add a player</Button>
-              <Button variant="outline" onClick={() => navigate(`/organizations/${orgId}/students/import`)}>Import a roll</Button>
+              {canEditPeople && <Button onClick={() => setAdding(true)}>Add a player</Button>}
+              {canImport && (
+                <Button variant="outline" onClick={() => navigate(`/organizations/${orgId}/students/import`)}>Import a roll</Button>
+              )}
             </div>
           ) : undefined}
         />
@@ -202,16 +397,46 @@ export function PlayersPage() {
         <EmptyState icon={<Users size={24} />} title="Nobody matches" description="Try another filter, or a different search." />
       ) : (
         <>
-          <ListToolbar>
-            <SearchInput
-              value={tc.query}
-              onChange={tc.setQuery}
-              placeholder="Search by name, ID, email or roll number…"
-              className="w-full sm:w-96"
-            />
-          </ListToolbar>
+          <FilterBar
+            activeCount={activeFilters}
+            onClear={clearFilters}
+            search={
+              <SearchInput
+                value={tc.query}
+                onChange={tc.setQuery}
+                placeholder="Search name, ID, email, sport…"
+                className="w-full"
+              />
+            }
+          >
+            {/* The org's own nouns, not ours: a college reads "Batch" here and a
+                company reads "Department", from the same two dropdowns. Each is
+                offered only when the structure actually has that level. */}
+            {campuses.length > 0 && (
+              <Select
+                value={campusId}
+                onChange={(e) => { setCampusId(e.target.value); setSelected(new Set()); }}
+                className="w-auto"
+                aria-label={`Filter by ${unitLabels.campus.toLowerCase()}`}
+              >
+                <option value="">All {pluralise(unitLabels.campus).toLowerCase()}</option>
+                {campuses.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </Select>
+            )}
+            {departments.length > 0 && (
+              <Select
+                value={deptId}
+                onChange={(e) => { setDeptId(e.target.value); setSelected(new Set()); }}
+                className="w-auto"
+                aria-label={`Filter by ${unitLabels.department.toLowerCase()}`}
+              >
+                <option value="">All {pluralise(unitLabels.department).toLowerCase()}</option>
+                {departments.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </Select>
+            )}
+          </FilterBar>
 
-          {canManage && (
+          {canSelect && (
             <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
               {/* Both narrowings are offered as ACTIONS, and neither is a bare
                   number that could be mistaken for what is already selected. */}
@@ -225,90 +450,183 @@ export function PlayersPage() {
                   Just this page
                 </Button>
               )}
-              <Button size="sm" disabled={busy} onClick={() => review([...selected], 'verified', selectedLabel)}>
-                Verify {selected.size}
-              </Button>
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => review([...selected], 'rejected', selectedLabel)}>
-                Reject {selected.size}
-              </Button>
+              {canVerify && (
+                <>
+                  <Button size="sm" disabled={busy} onClick={() => review([...selected], 'verified', selectedLabel)}>
+                    Verify {selected.size}
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => review([...selected], 'rejected', selectedLabel)}>
+                    Reject {selected.size}
+                  </Button>
+                </>
+              )}
+              {/* Placing a whole intake at once. The commonest shape of this job is
+                  "these 120 people are all Bangalore", and doing it a row at a time
+                  is how it does not get done.
+
+                  ADD, not move: somebody already in a department stays in it and
+                  gains the campus too. Removing is a per-person act, done from the
+                  row, because "take 120 people out of something" is rarely what
+                  anybody means and is expensive to undo. */}
+              {canEditPeople && unitOptions.length > 0 && (
+                <Select
+                  aria-label={`Add ${selected.size} to a ${unitLabels.campus.toLowerCase()}`}
+                  className="min-w-[11rem] text-[13px]"
+                  value=""
+                  disabled={busy}
+                  onChange={async (e) => {
+                    const unitId = e.target.value;
+                    if (!unitId) return;                    // the placeholder
+                    const ids = [...selected];
+                    setBusy(true);
+                    try {
+                      const r: any = await addToUnit(orgId, unitId, ids);
+                      toast.success(`Added ${r?.added ?? ids.length} ${(r?.added ?? ids.length) === 1 ? 'person' : 'people'}`);
+                      setSelected(new Set());
+                      await refetch();
+                    } catch (err: any) {
+                      toast.error(err?.message ?? 'Could not add those people');
+                    } finally { setBusy(false); }
+                  }}
+                >
+                  <option value="">Add {selected.size} to…</option>
+                  {unitOptions.map((u) => (
+                    <option key={u.id} value={u.id}>{unitPath(u, u.parent)}</option>
+                  ))}
+                </Select>
+              )}
             </BulkBar>
           )}
 
-          <div className={`overflow-x-auto ${SURFACE}`}>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 dark:border-slate-800">
-                  {canManage && (
-                    <th className="w-px px-4 py-3">
-                      <Checkbox checked={allSelected} indeterminate={selected.size > 0} onChange={toggleAll} />
-                    </th>
-                  )}
-                  <th className="px-4 py-3">Player</th>
-                  <th className="px-4 py-3">Sportagon ID</th>
-                  <th className="px-4 py-3">Programme</th>
-                  <th className="px-4 py-3 text-right">Sports</th>
-                  <th className="px-4 py-3 text-right">Events</th>
-                  <th className="px-4 py-3">Status</th>
-                  {canManage && <th className="px-4 py-3" />}
-                </tr>
-              </thead>
-              <tbody>
-                {tc.view.map((p) => (
-                  <tr
-                    key={p.id}
-                    className={`border-b border-slate-100 last:border-0 dark:border-slate-800 ${selected.has(p.id) ? 'bg-brand-50/60 dark:bg-brand-500/10' : ''}`}
-                  >
-                    {canManage && (
-                      <td className="px-4 py-3">
-                        <Checkbox checked={selected.has(p.id)} onChange={() => toggle(p.id)} />
-                      </td>
-                    )}
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <Avatar name={p.name ?? '?'} size={32} />
-                        <div className="min-w-0">
-                          <Link
-                            to={`/organizations/${orgId}/people/${p.user_id}`}
-                            className="truncate font-semibold text-slate-900 hover:text-brand-600 dark:text-slate-100"
-                          >
-                            {p.name ?? 'Unnamed'}
-                          </Link>
-                          <div className="truncate text-xs text-slate-500">
-                            {p.member_code ? `${p.member_code} · ` : ''}{p.email ?? p.phone ?? 'No contact'}
-                          </div>
-                        </div>
+          {/* ONE COLUMN SPEC, TWO SHAPES.
+              This was a seven-column <table> in an `overflow-x-auto` div, which is
+              not a mobile treatment - it is a desktop table you have to drag
+              sideways, and the two columns that matter on a phone (status, and the
+              Verify/Reject buttons) were the two furthest off-screen. `DataList`
+              renders the same records as stacked cards below sm and as this table
+              at sm+, from one spec, so the two cannot disagree about what a row
+              contains. */}
+          <DataList
+            rows={tc.view}
+            rowKey={(row) => row.id}
+            caption="People in this organisation"
+            columns={[
+              ...(canSelect ? [{
+                key: 'select',
+                header: <Checkbox checked={allSelected} indeterminate={selected.size > 0} onChange={toggleAll} />,
+                className: 'w-px',
+                // Selection is a bulk-action affordance and belongs to the table;
+                // on a phone the card itself is the target, so it is desktop-only.
+                desktopOnly: true,
+                render: (row: Person) => <Checkbox checked={selected.has(row.id)} onChange={() => toggle(row.id)} />,
+              }] : []),
+              {
+                key: 'player',
+                header: 'Player',
+                primary: true,
+                render: (row: Person) => (
+                  <div className="flex items-center gap-3">
+                    <Avatar name={row.name ?? '?'} size={32} />
+                    <div className="min-w-0">
+                      <Link
+                        to={`/organizations/${orgId}/people/${row.user_id}`}
+                        className="truncate font-semibold text-slate-900 hover:text-brand-600 dark:text-slate-100"
+                      >
+                        {row.name ?? 'Unnamed'}
+                      </Link>
+                      <div className="t-meta truncate">
+                        {row.member_code ? `${row.member_code} · ` : ''}{row.email ?? row.phone ?? 'No contact'}
                       </div>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-[12px] text-slate-600 dark:text-slate-300">
-                      {p.sportagon_id ?? <span className="text-slate-400">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                      {p.org_unit_name ?? <span className="text-slate-400">Unassigned</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-[13px] text-slate-700 dark:text-slate-300">{p.sports}</td>
-                    <td className="px-4 py-3 text-right font-mono text-[13px] text-slate-700 dark:text-slate-300">{p.events}</td>
-                    <td className="px-4 py-3">
-                      <Badge tone={VERIFY_TONE[p.verification] ?? 'slate'}>{p.verification}</Badge>
-                    </td>
-                    {canManage && (
-                      <td className="px-4 py-3 text-right whitespace-nowrap">
-                        {p.verification === 'pending' ? (
-                          <>
-                            <Button size="sm" variant="outline" disabled={busy}
-                              onClick={() => review([p.id], 'verified', `“${p.name ?? 'this person'}”`)}>Verify</Button>
-                            <Button size="sm" variant="ghost" disabled={busy}
-                              onClick={() => review([p.id], 'rejected', `“${p.name ?? 'this person'}”`)}>Reject</Button>
-                          </>
-                        ) : null}
-                      </td>
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                key: 'status',
+                header: 'Status',
+                render: (row: Person) => <Badge tone={VERIFY_TONE[row.verification] ?? 'slate'}>{row.verification}</Badge>,
+              },
+              {
+                key: 'units',
+                header: `${unitLabels.campus} & ${unitLabels.department}`,
+                render: (row: Person) => (
+                  /* Chips rather than a dropdown: a person is in SEVERAL units, and
+                     a single-value control cannot show that, let alone edit it. */
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {row.units.length === 0
+                      ? <span className="text-slate-400">Not placed</span>
+                      : row.units.map((u) => (
+                        <span key={u.id} className="rounded-md bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                          {u.name}
+                        </span>
+                      ))}
+                    {canEditPeople && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={(e) => { e.stopPropagation(); setPlacing(row); }}
+                        className="tap text-xs font-semibold text-brand-600 hover:underline disabled:opacity-50 dark:text-brand-400"
+                      >Edit</button>
                     )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  </div>
+                ),
+              },
+              {
+                key: 'sportagon',
+                header: 'Sportagon ID',
+                render: (row: Person) => (
+                  <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
+                    {row.sportagon_id ?? <span className="text-slate-400">—</span>}
+                  </span>
+                ),
+              },
+              {
+                key: 'sports',
+                header: 'Sports',
+                align: 'right' as const,
+                // A count with no context is a desktop column, not a phone field:
+                // "Sports 0" spends a whole card row saying nothing the reader can
+                // act on. Both live on the player's own page.
+                desktopOnly: true,
+                render: (row: Person) => <span className="t-num font-mono text-[13px] text-slate-700 dark:text-slate-300">{row.sports}</span>,
+              },
+              {
+                key: 'events',
+                header: 'Events',
+                align: 'right' as const,
+                desktopOnly: true,
+                render: (row: Person) => <span className="t-num font-mono text-[13px] text-slate-700 dark:text-slate-300">{row.events}</span>,
+              },
+              ...(canVerify ? [{
+                key: 'actions',
+                header: '',
+                align: 'right' as const,
+                className: 'w-px',
+                actions: true,
+                render: (row: Person) => (row.verification === 'pending' ? (
+                  <div className="flex flex-1 items-center gap-2 sm:justify-end">
+                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" disabled={busy}
+                      onClick={() => review([row.id], 'verified', `“${row.name ?? 'this person'}”`)}>Verify</Button>
+                    <Button size="sm" variant="ghost" className="flex-1 sm:flex-none" disabled={busy}
+                      onClick={() => review([row.id], 'rejected', `“${row.name ?? 'this person'}”`)}>Reject</Button>
+                  </div>
+                ) : null),
+              }] : []),
+            ]}
+          />
           <Pagination page={tc.page} pageCount={tc.pageCount} total={tc.total} pageSize={tc.pageSize} onPage={tc.setPage} />
         </>
+      )}
+
+      {placing && (
+        <PlacementModal
+          orgId={orgId}
+          person={placing}
+          units={unitOptions}
+          labels={unitLabels}
+          onClose={() => setPlacing(null)}
+          onSaved={() => { setPlacing(null); refetch(); }}
+        />
       )}
 
       {adding && (

@@ -103,17 +103,17 @@ export function ContextSwitcher({
           <span style={{ display: 'block', fontFamily: POP, fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {active.name}
           </span>
-          <span style={{ display: 'block', fontFamily: MONO, fontSize: 9, letterSpacing: '.12em', textTransform: 'uppercase', color: '#9BA9BE', marginTop: 2 }}>
+          <span style={{ display: 'block', fontFamily: MONO, fontSize: 9, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--faint)', marginTop: 2 }}>
             {active.sub ?? KIND_META[active.kind].group}
           </span>
         </span>
-        <ChevronsUpDown size={14} style={{ color: '#9BA9BE', flex: '0 0 auto' }} />
+        <ChevronsUpDown size={14} style={{ color: 'var(--faint)', flex: '0 0 auto' }} />
       </button>
 
       {open && (
         <div role="listbox" style={{
           position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 40,
-          background: '#fff', border: '1px solid #E1E7F0', borderRadius: 12,
+          background: '#fff', border: '1px solid var(--line)', borderRadius: 12,
           boxShadow: '0 18px 40px -18px rgba(10,26,51,.45)', padding: 6, maxHeight: 380, overflowY: 'auto',
         }}>
           {groups.map((g) => {
@@ -129,7 +129,7 @@ export function ContextSwitcher({
             <div key={g.group}>
               <div style={{
                 fontFamily: MONO, fontSize: 9, letterSpacing: '.14em', textTransform: 'uppercase',
-                color: '#9BA9BE', padding: '8px 9px 4px',
+                color: 'var(--faint)', padding: '8px 9px 4px',
               }}>{g.group}</div>
               {shown.map((c) => {
                 const m = KIND_META[c.kind];
@@ -143,7 +143,7 @@ export function ContextSwitcher({
                     style={{
                       display: 'flex', alignItems: 'center', gap: 10, width: '100%', cursor: 'pointer',
                       padding: '8px 9px', borderRadius: 9, border: 'none', textAlign: 'left',
-                      background: isActive ? '#F1F6FE' : 'transparent',
+                      background: isActive ? 'var(--brand-tint)' : 'transparent',
                     }}
                   >
                     <span aria-hidden style={{
@@ -151,7 +151,7 @@ export function ContextSwitcher({
                       background: m.tile, color: m.ink, fontFamily: POP, fontWeight: 800, fontSize: 11,
                     }}>{initials(c.name)}</span>
                     <span style={{ minWidth: 0, flex: 1 }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontFamily: POP, fontWeight: 700, fontSize: 13, color: '#0A1A33' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontFamily: POP, fontWeight: 700, fontSize: 13, color: 'var(--ink)' }}>
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
                         {/* Verification is a trust signal, not an access gate - an
                             unverified org still works, it just does not carry the tick. */}
@@ -159,7 +159,7 @@ export function ContextSwitcher({
                           <Check size={12} style={{ color: '#1E9E5A', flex: '0 0 auto' }} aria-label="Verified" />
                         )}
                       </span>
-                      <span style={{ display: 'block', fontSize: 11.5, color: '#6E7E96', marginTop: 1 }}>
+                      <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', marginTop: 1 }}>
                         {c.roleCodes.length
                           ? [...new Set(c.roleCodes)].map((r) => r.replace(/_/g, ' ')).join(' · ')
                           : c.sub ?? 'My Space'}
@@ -175,7 +175,7 @@ export function ContextSwitcher({
                   style={{
                     display: 'block', width: '100%', cursor: 'pointer', textAlign: 'left',
                     padding: '5px 9px 8px', border: 'none', background: 'transparent',
-                    fontFamily: POP, fontWeight: 700, fontSize: 11.5, color: '#004AAD',
+                    fontFamily: POP, fontWeight: 700, fontSize: 11.5, color: 'var(--brand)',
                   }}
                 >
                   Show all {g.items.length} {MORE[g.group].noun}

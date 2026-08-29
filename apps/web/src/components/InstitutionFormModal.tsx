@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { suggestShort } from '../lib/format';
 import { useQueryClient } from '@tanstack/react-query';
 import { BRAND } from '../lib/brand';
 import { Button, Field, Input, Modal, Toggle } from './ui';
@@ -44,15 +45,24 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
   const [pocPassword, setPocPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The suggestion follows the name until somebody types their own - see
+  // `suggestShort`. Existing institutions open with their stored value and are
+  // therefore already "touched".
+  const [shortTouched, setShortTouched] = useState(!!initial?.short_name);
   const [creds, setCreds] = useState<Credentials | null>(null);
   const { found } = useUserLookup(pocPhone);
 
   const submit = async () => {
     setError(null);
     if (!name.trim()) { setError('Organization name is required'); return; }
+    // Required, and required HERE rather than only on the server, so the message
+    // arrives beside the field rather than as a toast after a round trip. An
+    // institution's full name appears on every standings table, certificate and
+    // match row, and none of those have room for it on a phone.
+    if (shortName.trim().length < 2) { setError('A short name of at least 2 characters is required'); return; }
     const body: InstitutionFormBody = {
       name: name.trim(),
-      short_name: shortName.trim() || undefined,
+      short_name: shortName.trim().toUpperCase(),
       code: code.trim() || undefined,
       city: city.trim() || undefined,
       country: country.trim() || 'India',
@@ -95,8 +105,25 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
   return (
     <Modal title={isEdit ? 'Edit organization' : 'Add organization'} onClose={onClose} wide>
       <div className="grid gap-x-4 sm:grid-cols-2">
-        <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. VJTI" /></Field>
-        <Field label="Short name"><Input value={shortName} onChange={(e) => setShortName(e.target.value)} placeholder="Optional" /></Field>
+        <Field label="Name">
+          <Input
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (!shortTouched) setShortName(suggestShort(e.target.value));
+            }}
+            placeholder="e.g. VJTI"
+          />
+        </Field>
+        <Field label="Short name *" hint="Shown on standings, certificates and phone screens.">
+          <Input
+            value={shortName}
+            onChange={(e) => { setShortTouched(true); setShortName(e.target.value.toUpperCase().slice(0, 12)); }}
+            placeholder="NIT"
+            maxLength={12}
+            className="font-mono uppercase tracking-wide"
+          />
+        </Field>
         <Field label="Code"><Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Optional" /></Field>
         <Field label="City"><Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Optional" /></Field>
         <Field label="Country"><Input value={country} onChange={(e) => setCountry(e.target.value)} /></Field>

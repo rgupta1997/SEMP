@@ -98,7 +98,7 @@ export const ORGANISER_GUIDE: StepContent[] = [
     id: 'invite',
     title: 'Invite organizations',
     description: 'Invite organizations to participate, or approve those who applied.',
-    help: 'From Setup → Invite, invite organizations directly, or review applications on the Approvals tab. Approved organizations can then enter teams into your draws.',
+    help: 'From Setup → Invite, invite organizations directly, or review applications on the Entrants tab. Approved organizations can then enter teams into your draws. For a championship contested inside your own organisation, the same tab lists your campuses and batches instead: invite them, and each one’s administrator builds its squads.',
   },
   {
     id: 'officials',
@@ -167,7 +167,27 @@ export function usePocOnboarding(orgId: string, enabled = true): OnboardingState
   );
 }
 
-export function useOrganiserOnboarding(eventId: string, status?: string, enabled = true): OnboardingState {
+/**
+ * What competes in this event, when the caller knows.
+ *
+ * The checklist is otherwise identical for both shapes, and only one step differs -
+ * but it differs completely. An inter-organisation event waits on OTHER institutions
+ * to apply or accept; an internal one has the organiser enter their own campuses,
+ * with nobody to invite and nothing to approve. Telling an internal championship to
+ * "Invite organizations" points at a screen that will never do anything for it.
+ */
+export interface OnboardingEntry {
+  intra: boolean;
+  /** The host's own noun - "Campuses", "Offices", "Departments". */
+  entrant_label: string;
+}
+
+export function useOrganiserOnboarding(
+  eventId: string,
+  status?: string,
+  enabled = true,
+  entry?: OnboardingEntry,
+): OnboardingState {
   const on = enabled && !!eventId;
   const tournaments = useApi<any[]>(on ? `/tournaments?championship_id=${eventId}` : null);
   const draws = useApi<any[]>(on ? `/championships/${eventId}/draws` : null);
@@ -178,14 +198,40 @@ export function useOrganiserOnboarding(eventId: string, status?: string, enabled
 
   const setupHref = `/championships/${eventId}/setup`;
 
+  // Singular of the entrant noun, for a button that acts on a list of them.
+  const entrants = entry?.entrant_label ?? 'Entrants';
+
+  // The one step that is a different job in an internal championship. Everything
+  // else - seasons, sports, venues, officials, opening - is the same work.
+  const inviteStep = entry?.intra
+    ? {
+      content: {
+        title: `Invite your ${entrants.toLowerCase()}`,
+        description: `Choose which of your own ${entrants.toLowerCase()} take part. Each one's administrator then builds its squads and enters them.`,
+      },
+      // Same Setup tab as an open event - the CONTROL there differs (a tick-list of
+      // your own campuses rather than a search over every institution), but the
+      // step is the same one: deciding who is in.
+      cta: { label: `Invite ${entrants.toLowerCase()}`, to: `${setupHref}?tab=invite` },
+    }
+    : {
+      content: null,
+      cta: { label: 'Invite organizations', to: `${setupHref}?tab=invite` },
+    };
+
   return build(
-    ORGANISER_GUIDE,
+    // Only the `invite` row is rewritten, and only when the event is internal -
+    // patching the shared guide content itself would change the Help page for
+    // everybody, including organisers running open events.
+    inviteStep.content
+      ? ORGANISER_GUIDE.map((c) => (c.id === 'invite' ? { ...c, ...inviteStep.content } : c))
+      : ORGANISER_GUIDE,
     {
       // Deep-link each step straight to the right Setup tab (?tab=…).
       season: { label: 'Add a season', to: `${setupHref}?tab=tournaments` },
       draws: { label: 'Configure sports', to: `${setupHref}?tab=sports` },
       venue: { label: 'Add a venue', to: `${setupHref}?tab=venues` },
-      invite: { label: 'Invite organizations', to: `${setupHref}?tab=invite` },
+      invite: inviteStep.cta,
       officials: { label: 'Assign officials', to: `/championships/${eventId}/organisers` },
       open: { label: 'Open registration', to: `/championships/${eventId}/settings` },
     },
@@ -193,7 +239,11 @@ export function useOrganiserOnboarding(eventId: string, status?: string, enabled
       season: (tournaments.data ?? []).length > 0,
       draws: (draws.data ?? []).length > 0,
       venue: (venues.data ?? []).length > 0,
-      // "Invited" counts both organisations you invited and those who applied/joined.
+      // "Invited" counts both organisations you invited and those who applied or
+      // joined. For an internal event only the entries count - there are no
+      // invitations, so a check that required one could never be satisfied.
+      // For an internal event the milestone is squads existing, and the entry rows
+      // behind them are plumbing the organiser never sees.
       invite: (invitations.data ?? []).length > 0 || (enrollments.data ?? []).length > 0,
       officials: (officials.data ?? []).length > 0,
       open: !!status && status !== 'draft',

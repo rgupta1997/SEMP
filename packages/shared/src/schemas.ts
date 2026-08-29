@@ -8,8 +8,29 @@ import {
 } from './enums.js';
 import { disciplineFormatConfigSchema } from './scoring.js';
 import { stageConfigSchema } from './stage-config.js';
+import { ENTRY_LEVELS } from './org-structure.js';
 
 const uuid = z.string().uuid();
+
+/**
+ * A scoreboard abbreviation.
+ *
+ * Required wherever a name will have to fit in a results row on a phone, which is
+ * about twelve characters per side. It is ENTERED, never derived: the render-time
+ * abbreviation this replaces sliced the first three letters, so "B.Tech 2023" and
+ * "B.Tech 2024" both became "BTE" - two sides of a scoreboard reading the same.
+ * Whoever creates the squad knows theirs are BT23 and BT24.
+ *
+ * Upper-cased and stripped on the way in so the stored value is what a scoreboard
+ * shows, whatever was typed.
+ */
+const shortName = z
+  .string({ required_error: 'A short name is required' })
+  .trim()
+  .min(2, 'At least 2 characters')
+  .max(12, 'At most 12 characters')
+  .transform((v) => v.toUpperCase())
+  .refine((v) => /[A-Z0-9]/.test(v), 'Use letters or numbers');
 const json = z.record(z.any());
 
 // A valid mobile is 10–15 digits (10-digit number, optionally a country code),
@@ -325,7 +346,15 @@ export const updateFormatSchema = createFormatSchema.partial();
 
 export const createOrganizationSchema = z.object({
   name: z.string().min(1),
-  short_name: z.string().optional(),
+  // REQUIRED on create. An institution's full name is on every standings table,
+  // every certificate and every match row, and none of those have room for
+  // "Northfield Institute of Technology" on a phone. Asking once at creation is
+  // cheaper than a directory of names that cannot be displayed.
+  //
+  // `updateOrganizationSchema` is `.partial()`, so editing an existing organisation
+  // still leaves it optional - the requirement is on the way in, not a retrospective
+  // demand on the rows that predate it.
+  short_name: shortName,
   code: z.string().optional(),
   logo_url: z.string().optional(),
   city: z.string().optional(),
@@ -395,6 +424,21 @@ export const createChampionshipSchema = z.object({
   // hosting a local event has no institution behind them - so it is nullable rather
   // than required. The server verifies the caller may actually host on its behalf.
   host_organization_id: uuid.nullable().optional(),
+  // WHAT COMPETES here. 'organization' is the open, inter-institution event and is
+  // the default, so every call written before intra events existed still means what
+  // it meant. 'campus' and 'department' contest the event inside the host
+  // organisation, and both require a host - checked on the server, because that is
+  // where the host is finally resolved.
+  entry_level: z.enum(ENTRY_LEVELS).optional(),
+  // Narrows a department-level event to one campus's departments. Null means every
+  // department in the organisation, which is the org-wide department league.
+  entry_scope_unit_id: uuid.nullable().optional(),
+  // "Are you taking part yourself?" - asked of the host at creation. A college
+  // hosting an inter-college meet is usually IN it, and finding out three days
+  // later that its own teams cannot be entered is a bad way to learn otherwise.
+  // Meaningless for an internal event, where the competitors are the host's own
+  // campuses; the server ignores it there rather than creating a phantom entry.
+  host_participates: z.boolean().optional(),
 });
 
 // Applying a template to a fresh draft: sports, disciplines, formats and the
@@ -484,7 +528,15 @@ export const createTournamentDisciplineSchema = z.object({
 export const updateTournamentDisciplineSchema = createTournamentDisciplineSchema.partial();
 
 // ---------- Phase 3: enrollment ----------
-export const enrollOrganizationSchema = z.object({ organization_id: uuid });
+// Entering a championship. `organization_id` is who is entering; `org_unit_id` is
+// WHICH OF THEM - the campus or department - and applies exactly when the
+// championship is contested inside one organisation. Which of the two is legal is
+// the server's call, not the client's: the level lives on the championship, so a
+// client that decided for itself would be guessing about a row it cannot see.
+export const enrollOrganizationSchema = z.object({
+  organization_id: uuid,
+  org_unit_id: uuid.nullable().optional(),
+});
 export const reviewEnrollmentSchema = z.object({
   status: z.enum(['approved', 'rejected'] as const),
   rejection_note: z.string().optional(),
@@ -517,8 +569,18 @@ export const bulkAssignOfficialsSchema = z.object({ user_ids: z.array(uuid).min(
 // ---------- Phase 3b: host → organization invitations ----------
 // Host invites an organization by picking it from the master list; the request
 // goes straight to that org's owners/admins (no POC mobile number).
+// Inviting somebody to a championship.
+//
+// An OPEN championship invites another organisation. An INTERNAL one invites one of
+// the host's own campuses or batches, and `organization_id` is then irrelevant - the
+// host is already known from the event. Both are optional here and the SERVER
+// decides which is required, because which one applies is a property of the
+// championship, not something a client should be trusted to assert.
 export const createInvitationSchema = z.object({
-  organization_id: uuid,
+  organization_id: uuid.optional(),
+  org_unit_id: uuid.optional(),
+}).refine((v) => !!v.organization_id || !!v.org_unit_id, {
+  message: 'Name an organisation or a campus to invite',
 });
 // Accepting needs no body - the invitation already names the organization, and
 // only its owners/admins can see it.
@@ -543,9 +605,21 @@ export const createTeamSchema = z.object({
   sport_id: uuid,
   organization_id: uuid,
   name: z.string().min(1),
+  // REQUIRED, and taken from whoever creates the squad. See `shortName` above for
+  // why it is not derived from the name.
+  short_name: shortName,
   championship_id: uuid.optional(),
   championship_organization_id: uuid.optional(),
   tournament_discipline_id: uuid.optional(),
+  // Which campus or department this team plays FOR. Null/absent means it represents
+  // the whole organisation, which is the only shape that existed before internal
+  // championships and stays the default.
+  //
+  // Only read when the team is created WITHOUT an entry: when an entry is given, the
+  // unit comes from that entry, because the entry is the row already validated as a
+  // legal contingent for its event. A client-supplied unit could otherwise disagree
+  // with the entry and produce a squad credited to a campus that never entered.
+  org_unit_id: uuid.nullable().optional(),
 });
 // Enter an existing roster into one or more championships at once. Each entry
 // names an approved enrollment; the discipline draw is OPTIONAL - a team can enter
@@ -564,10 +638,21 @@ export const updateTeamEntrySchema = z.object({
 });
 export const updateTeamSchema = z.object({
   name: z.string().min(1).optional(),
+  // Correctable after the fact: the 136 squads that predate the column were
+  // backfilled with a guess, and this is where that guess gets fixed.
+  short_name: shortName.optional(),
   status: z.enum(TEAM_STATUS).optional(),
   // A coach is a property of the team, not a squad member, so they never count
   // against squad size (J3-E2-S3). null clears it - a team may have no coach.
   coach_user_id: uuid.nullable().optional(),
+  // Which campus or batch this squad plays FOR. Null makes it a whole-organisation
+  // squad again.
+  //
+  // Changing this changes WHO ITS RESULTS BELONG TO, so the server refuses it once
+  // the squad has entered anything - see the handler. Correcting a squad created at
+  // the wrong level is the case this exists for, and that correction happens before
+  // it competes.
+  org_unit_id: uuid.nullable().optional(),
 });
 export const addTeamMemberSchema = z.object({
   user_id: uuid,
@@ -804,6 +889,46 @@ export const upsertStandingsRuleSchema = z
   })
   .refine((r) => (r.scope_type === 'championship' ? !r.scope_id : !!r.scope_id), {
     message: 'scope_id is required for format/discipline rules and must be empty for the championship default',
+  });
+
+// ---------- Organisation verification requests ----------
+//
+// Asking Sportagon to vouch for an institution. What is required is exactly the two
+// things a reviewer cannot proceed without - somebody to reach, and a name to check
+// the registration against - and nothing else, because a form that demands a UDISE
+// number from a sports club is a form that does not get submitted.
+//
+// The organisation is never taken from the body: it comes from the URL, and the
+// route checks that the caller manages it. `submitted_by` is the authenticated user.
+export const createVerificationRequestSchema = z.object({
+  contact_name: z.string().min(1).max(120),
+  contact_role: z.string().max(120).optional(),
+  contact_email: z.string().email(),
+  contact_phone: optionalPhone,
+  // Separate from organizations.name on purpose: a workspace is called "IIMB
+  // Sports" and the entity on the certificate of registration is "Indian Institute
+  // of Management Bangalore". The reviewer is checking the second.
+  registered_name: z.string().max(200).optional(),
+  registration_id: z.string().max(120).optional(),
+  website: z.string().max(200).optional(),
+  address: z.string().max(600).optional(),
+  // A link to something the reviewer can look at. A URL rather than an upload
+  // because there is no file store in this product yet, and inventing one inside a
+  // verification form is how a feature ends up owning infrastructure.
+  document_url: z.string().max(600).optional(),
+  note: z.string().max(2000).optional(),
+});
+
+// The platform's answer. A rejection must say why: the note is shown to the
+// organisation, and "rejected" with no reason is a support ticket by construction.
+export const reviewVerificationRequestSchema = z
+  .object({
+    status: z.enum(['approved', 'rejected'] as const),
+    review_note: z.string().max(2000).optional(),
+  })
+  .refine((r) => r.status !== 'rejected' || !!r.review_note?.trim(), {
+    message: 'Say why it was rejected - the organisation is shown this note',
+    path: ['review_note'],
   });
 
 // ---------- Demo requests ("Book a demo" leads) ----------

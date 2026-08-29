@@ -1,11 +1,21 @@
 import { useState } from 'react';
-import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls, fmtDateTime } from '../../lib/hooks';
 import { Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, Modal, Pagination, SearchInput, SortDirButton, StatusBadge, Table, toast , FilterChips} from '../../components/ui';
 
-export function ApprovalsPage() {
-  const { eventId } = useEvent();
+// Organisations that APPLIED to an open championship, and the approve/reject queue
+// for them.
+//
+// No longer a page of its own. It was the "Entrants" tab, which duplicated Setup →
+// Invite: both answer "who is in", one from the side of people asking and one from
+// the side of people being asked. Splitting them meant an organiser deciding the
+// field worked in two places and saw half of it in each. It now renders inside the
+// Invite tab, above the invitations.
+//
+// Never rendered for an internal championship: nobody applies to one, so the queue
+// could only ever be empty, and an empty table reads as "nobody yet" rather than as
+// "this does not apply here".
+export function ApplicationsQueue({ eventId }: { eventId: string }) {
   const path = `/championships/${eventId}/enrollments`;
   const { data: rows = [], isLoading } = useApi<any[]>(path);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
