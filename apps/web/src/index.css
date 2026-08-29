@@ -82,6 +82,52 @@
   --radius-card: 14px;
 }
 
+/* ============================================================
+   SEMANTIC ALIASES FOR INLINE STYLES
+
+   Tailwind tree-shakes an `@theme` variable that no emitted class references, so
+   `var(--color-eos-cyan)` resolves to nothing in a style={{}} object even though it
+   is declared above. These are plain `:root` custom properties - always present,
+   always resolvable from TS - and they are what a hard-coded brand hex should become.
+
+   They exist because roughly 150 literal `#004AAD` / `#0A1A33` / `#5CE1E6` values
+   were spread across the inline-styled screens (My Game, the org dashboard, the
+   sports profile, the auth flows, Help, the context switcher). Every one of them was
+   a page that would NOT follow an institution's colour - so the chrome rebranded and
+   the content stayed Sportagon blue, which is worse than not theming at all.
+   ============================================================ */
+:root {
+  --brand:        var(--color-brand-600);   /* the primary. White text sits on this. */
+  --brand-strong: var(--color-brand-700);   /* hover / pressed */
+  --brand-tint:   var(--color-brand-100);   /* wash behind brand text */
+  --brand-line:   var(--color-brand-200);   /* borders on a tinted ground */
+  --brand-ink:    var(--color-brand-800);   /* headings in brand-adjacent blocks */
+  --brand-deep:   var(--color-brand-900);   /* the darkest step - sidebar and hero ground */
+  /* What reads ON a brand ground - the eyebrow, the accent rule, the CTA on a dark
+     hero band. A light step of the SAME ramp, so those accents are the tenant's
+     colour rather than Sportagon's teal, and the contrast holds by construction:
+     300 is light, 600 and 900 are dark, whatever hue was picked. */
+  --on-brand: var(--color-brand-300);
+
+  /* The teal accent is Sportagon's, NOT the tenant's: it marks the product ("EOS"),
+     and a tenant recolouring it would erase the one mark that says whose software
+     this is. Fixed on purpose. */
+  --accent:       #5CE1E6;
+  --accent-deep:  #159FA6;
+
+  /* The neutral ink ramp, as aliases for the same reason. Kept NEUTRAL rather than
+     tinted toward the brand: tinting body text with the tenant hue is a nice touch
+     for a deep blue and unreadable for a bright yellow, and text legibility is not
+     something a colour picker should be able to break. */
+  --ink:    #0A1A33;
+  --ink-2:  #14233B;
+  --ink-3:  #374459;
+  --ink-4:  #4F5F77;
+  --muted:  #6E7E96;
+  --faint:  #9BA9BE;
+  --line:   #E1E7F0;
+}
+
 :root {
   /* -- Dashboard design system surfaces --
      The sidebar follows the tenant ramp rather than a literal navy, so a school

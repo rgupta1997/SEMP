@@ -260,19 +260,19 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
     <>
       <div style={{
         borderRadius: 14, padding: '22px 24px',
-        background: verified ? '#E4F6EC' : '#F1F6FE',
-        border: `1px solid ${verified ? '#C7E9D5' : '#DFEAFB'}`,
+        background: verified ? '#E4F6EC' : 'var(--brand-tint)',
+        border: `1px solid ${verified ? '#C7E9D5' : 'var(--brand-line)'}`,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span aria-hidden style={{
             width: 38, height: 38, borderRadius: 10, display: 'grid', placeItems: 'center',
-            background: verified ? '#1E9E5A' : '#004AAD', color: '#fff',
+            background: verified ? '#1E9E5A' : 'var(--brand)', color: '#fff',
           }}>{verified ? <Check size={18} /> : pending ? <Clock size={18} /> : <ShieldCheck size={18} />}</span>
           <div>
             <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 18 }}>
               {verified ? 'Verified organisation' : pending ? 'Verification under review' : 'Not yet verified'}
             </div>
-            <div style={{ fontSize: 13.5, color: '#4F5F77', marginTop: 2 }}>
+            <div style={{ fontSize: 13.5, color: 'var(--ink-4)', marginTop: 2 }}>
               {verified
                 ? 'Your organisation carries the tick wherever it appears.'
                 : pending
@@ -292,8 +292,8 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 14, marginTop: 14 }}>
             {([['Name', org.name], ['Kind', org.kind], ['City', org.city ?? '—'], ['Code', org.code ?? '—']] as const).map(([k, v]) => (
               <div key={k}>
-                <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '.12em', textTransform: 'uppercase', color: '#6E7E96' }}>{k}</div>
-                <div style={{ fontSize: 14, color: '#14233B', marginTop: 4 }}>{v}</div>
+                <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>{k}</div>
+                <div style={{ fontSize: 14, color: 'var(--ink-2)', marginTop: 4 }}>{v}</div>
               </div>
             ))}
           </div>
@@ -308,11 +308,11 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
               <div key={title} style={{ display: 'flex', gap: 12, padding: '11px 0', borderTop: i ? '1px solid #EFF2F7' : 'none' }}>
                 <span aria-hidden style={{
                   flex: '0 0 auto', width: 24, height: 24, borderRadius: 999, background: '#EFF2F7',
-                  color: '#4F5F77', display: 'grid', placeItems: 'center', fontFamily: MONO, fontSize: 11, fontWeight: 700,
+                  color: 'var(--ink-4)', display: 'grid', placeItems: 'center', fontFamily: MONO, fontSize: 11, fontWeight: 700,
                 }}>{i + 1}</span>
                 <div>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: '#14233B' }}>{title}</div>
-                  <div style={{ fontSize: 12.5, color: '#6E7E96', marginTop: 2 }}>{note}</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-2)' }}>{title}</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>{note}</div>
                 </div>
               </div>
             ))}
@@ -375,8 +375,8 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
           </div>
           <ul style={{ margin: '12px 0 0', padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {BENEFITS.map((b) => (
-              <li key={b} style={{ display: 'flex', gap: 9, fontSize: 13.5, color: '#4F5F77' }}>
-                <Check size={15} style={{ flex: '0 0 auto', marginTop: 2, color: verified ? '#1E9E5A' : '#9BA9BE' }} />
+              <li key={b} style={{ display: 'flex', gap: 9, fontSize: 13.5, color: 'var(--ink-4)' }}>
+                <Check size={15} style={{ flex: '0 0 auto', marginTop: 2, color: verified ? '#1E9E5A' : 'var(--faint)' }} />
                 {b}
               </li>
             ))}
@@ -390,7 +390,7 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ minWidth: 240 }}>
                 <h3 style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, margin: 0, color: '#B02525' }}>Delete this organisation</h3>
-                <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6E7E96', lineHeight: 1.55 }}>
+                <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--muted)', lineHeight: 1.55 }}>
                   Its teams, rosters and entries go with it. Events with completed or
                   scored matches are refused — a locked result is somebody’s record,
                   and it does not disappear because an account was closed.

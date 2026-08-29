@@ -8,8 +8,8 @@ import { ResetPasswordFlow } from '../features/auth/ResetPasswordFlow';
 
 // Landing-page palette.
 const C = {
-  blue: '#004AAD', blue8: '#013C8B', blue50: '#F1F6FE', teal: '#5CE1E6',
-  teal6: '#159FA6', navy: '#0A1A33', fg2: '#374459', fg3: '#6E7E96',
+  blue: 'var(--brand)', blue8: 'var(--brand-strong)', blue50: 'var(--brand-tint)', teal: 'var(--accent)',
+  teal6: 'var(--accent-deep)', navy: 'var(--ink)', fg2: 'var(--ink-3)', fg3: 'var(--muted)',
 };
 const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
 const HANK = "'Hanken Grotesk',ui-sans-serif,system-ui,sans-serif";
@@ -25,8 +25,8 @@ const css = (dark: boolean) => `
 .auth *{box-sizing:border-box}
 .auth a{text-decoration:none;color:inherit}
 .auth .field{transition:border-color .15s,box-shadow .15s}
-.auth .field::placeholder{color:${dark ? '#5A6B85' : '#9BA9BE'}}
-.auth .field:focus{border-color:${C.blue};box-shadow:0 0 0 3px ${dark ? 'rgba(0,74,173,.45)' : 'rgba(0,74,173,.14)'}}
+.auth .field::placeholder{color:${dark ? '#5A6B85' : 'var(--faint)'}}
+.auth .field:focus{border-color:${C.blue};box-shadow:0 0 0 3px ${dark ? 'color-mix(in srgb, var(--brand) 45%, transparent)' : 'color-mix(in srgb, var(--brand) 14%, transparent)'}}
 .auth .cta{transition:background .15s,transform .1s,box-shadow .15s}
 .auth .cta:hover{background:${C.blue8}}
 .auth .cta:active{transform:translateY(1px)}
@@ -80,7 +80,7 @@ export function AuthPage() {
     fg: dark ? '#EAF0FA' : C.navy,
     fg2: dark ? '#C2CEDF' : C.fg2,
     fg3: dark ? '#8595AC' : C.fg3,
-    body: dark ? '#AFBDD2' : '#4F5F77',
+    body: dark ? '#AFBDD2' : 'var(--ink-4)',
     line: dark ? '#1E2C42' : '#E8ECF3',
     card: dark ? '#0E1828' : '#fff',
     inputBg: dark ? '#0E1828' : '#fff',
@@ -156,8 +156,8 @@ export function AuthPage() {
               <span style={{ fontFamily: MONO, fontWeight: 700, fontSize: 20, color: C.teal }}>2</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
-              <span style={{ fontWeight: 700, fontSize: 14.5, color: '#9BA9BE' }}>Hilltop Utd</span>
-              <span style={{ fontFamily: MONO, fontWeight: 700, fontSize: 20, color: '#9BA9BE' }}>1</span>
+              <span style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--faint)' }}>Hilltop Utd</span>
+              <span style={{ fontFamily: MONO, fontWeight: 700, fontSize: 20, color: 'var(--faint)' }}>1</span>
             </div>
           </div>
         </aside>

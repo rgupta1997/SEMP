@@ -63,7 +63,7 @@ const ROLE_ADMIN: Record<string, string[] | null> = {
 };
 
 // Written with theme tokens rather than the inline hex this file used to carry.
-// The rail was `background: '#fff'` and `color: '#374459'`, which meant that in dark
+// The rail was `background: '#fff'` and `color: 'var(--ink-3)'`, which meant that in dark
 // mode the whole of Administration - profile, campuses, members, roles, billing,
 // security, audit - rendered as a white card on a near-black canvas. Every screen in
 // this section sits behind this rail, so it was the single highest-leverage place to

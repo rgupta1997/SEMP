@@ -49,7 +49,7 @@ export function AuditLogPanel({ orgId }: { orgId: string }) {
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
           <div>
             <h3 style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, margin: 0 }}>Audit trail</h3>
-            <p style={{ margin: '2px 0 0', fontSize: 13, color: '#6E7E96' }}>
+            <p style={{ margin: '2px 0 0', fontSize: 13, color: 'var(--muted)' }}>
               Append-only. {data?.total ?? 0} entries recorded.
             </p>
           </div>
@@ -63,20 +63,20 @@ export function AuditLogPanel({ orgId }: { orgId: string }) {
           <div key={g.day} style={{ marginBottom: 18 }}>
             <div style={{
               fontFamily: MONO, fontSize: 9.5, letterSpacing: '.14em', textTransform: 'uppercase',
-              color: '#9BA9BE', paddingBottom: 6,
+              color: 'var(--faint)', paddingBottom: 6,
             }}>{g.day}</div>
             {g.items.map((e) => (
               <div key={e.id} style={{ display: 'flex', gap: 12, padding: '10px 0', borderTop: '1px solid #EFF2F7' }}>
-                <span style={{ fontFamily: MONO, fontSize: 11.5, color: '#6E7E96', flex: '0 0 46px', paddingTop: 1 }}>
+                <span style={{ fontFamily: MONO, fontSize: 11.5, color: 'var(--muted)', flex: '0 0 46px', paddingTop: 1 }}>
                   {new Date(e.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
                 </span>
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 13.5, color: '#14233B' }}>
+                  <div style={{ fontSize: 13.5, color: 'var(--ink-2)' }}>
                     {e.summary ?? `${e.actor_label ?? 'Someone'} · ${e.action}`}
                   </div>
                   {/* The action code is kept alongside the sentence: the sentence is
                       for a person, the code is what you grep for in an incident. */}
-                  <div style={{ fontFamily: MONO, fontSize: 10, color: '#9BA9BE', marginTop: 3 }}>
+                  <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--faint)', marginTop: 3 }}>
                     {e.action}{e.target_label ? ` · ${e.target_label}` : ''}
                   </div>
                 </div>

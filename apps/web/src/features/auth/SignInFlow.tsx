@@ -20,8 +20,8 @@ import {
 type Step = 'subject' | 'method' | 'code' | 'choose';
 
 const C = {
-  blue: '#004AAD', blue8: '#013C8B', blue50: '#F1F6FE', teal6: '#159FA6',
-  navy: '#0A1A33', fg2: '#374459', fg3: '#6E7E96', line: '#E1E7F0',
+  blue: 'var(--brand)', blue8: 'var(--brand-strong)', blue50: 'var(--brand-tint)', teal6: 'var(--accent-deep)',
+  navy: 'var(--ink)', fg2: 'var(--ink-3)', fg3: 'var(--muted)', line: 'var(--line)',
 };
 const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
 const MONO = "'JetBrains Mono',ui-monospace,monospace";
@@ -136,7 +136,7 @@ export function SignInFlow({ dark, inputStyle, labelStyle, t, onHeading, onWantS
   const cta: CSSProperties = {
     height: 50, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center',
     gap: 9, background: C.blue, color: '#fff', fontFamily: POP, fontWeight: 700, fontSize: 15.5,
-    borderRadius: 6, border: 'none', boxShadow: '0 14px 30px -12px rgba(0,74,173,.55)',
+    borderRadius: 6, border: 'none', boxShadow: '0 14px 30px -12px color-mix(in srgb, var(--brand) 55%, transparent)',
   };
   const ghost: CSSProperties = {
     background: 'none', border: 'none', padding: 0, cursor: 'pointer',
@@ -203,7 +203,7 @@ export function SignInFlow({ dark, inputStyle, labelStyle, t, onHeading, onWantS
         // Only ever rendered while the delivery bypass is on - the API refuses to
         // start in production with it, so this cannot reach a real user.
         <p style={{
-          margin: 0, borderRadius: 6, border: `1px dashed ${C.line}`, background: dark ? 'rgba(0,74,173,.10)' : C.blue50,
+          margin: 0, borderRadius: 6, border: `1px dashed ${C.line}`, background: dark ? 'color-mix(in srgb, var(--brand) 10%, transparent)' : C.blue50,
           padding: '9px 12px', fontSize: 13, color: t.body,
         }}>
           No SMS provider is wired yet, so here is the code: <b style={{ fontFamily: MONO, color: C.blue }}>{devCode}</b>
@@ -232,7 +232,7 @@ export function SignInFlow({ dark, inputStyle, labelStyle, t, onHeading, onWantS
           }}>
           <span style={{
             flex: '0 0 auto', width: 42, height: 42, borderRadius: 10, display: 'grid', placeItems: 'center',
-            background: a.organization ? C.blue : '#0A1A33', color: '#fff',
+            background: a.organization ? C.blue : 'var(--ink)', color: '#fff',
             fontFamily: POP, fontWeight: 800, fontSize: 15,
           }}>
             {(a.organization?.name ?? a.name).slice(0, 2).toUpperCase()}

@@ -34,7 +34,7 @@ export function PolicyPanel({ kind }: { kind: 'security'; orgId: string }) {
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
           <div>
             <h3 style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, margin: 0 }}>{c.title}</h3>
-            <p style={{ margin: '2px 0 0', fontSize: 13, color: '#6E7E96' }}>{c.blurb}</p>
+            <p style={{ margin: '2px 0 0', fontSize: 13, color: 'var(--muted)' }}>{c.blurb}</p>
           </div>
         </div>
 
@@ -44,13 +44,13 @@ export function PolicyPanel({ kind }: { kind: 'security'; orgId: string }) {
               display: 'flex', justifyContent: 'space-between', gap: 12,
               padding: '12px 0', borderTop: i ? '1px solid #EFF2F7' : '1px solid #EFF2F7',
             }}>
-              <span style={{ fontSize: 13.5, color: '#14233B' }}>{k}</span>
-              <span style={{ fontSize: 13.5, color: '#6E7E96' }}>{v}</span>
+              <span style={{ fontSize: 13.5, color: 'var(--ink-2)' }}>{k}</span>
+              <span style={{ fontSize: 13.5, color: 'var(--muted)' }}>{v}</span>
             </div>
           ))}
         </div>
 
-        <p style={{ margin: '14px 0 0', fontSize: 12.5, color: '#6E7E96', lineHeight: 1.55 }}>{c.note}</p>
+        <p style={{ margin: '14px 0 0', fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.55 }}>{c.note}</p>
       </CardBody>
     </Card>
   );

@@ -51,8 +51,13 @@ await sleep(1200);
 console.log('before :', JSON.stringify(await read()));
 await page.screenshot({ path: '.shots/theme/1-panel.png', fullPage: true });
 
-// Maroon, through the actual swatch a person would tap.
-await page.locator('button[aria-label="Maroon"]').click();
+// A colour that is NOT the one already saved - picking the current value leaves
+// the form clean and Save correctly disabled, which is the panel behaving properly
+// and the check failing for the wrong reason.
+const currentHex = (await read()).brand600;
+const target = currentHex.includes('342') ? 'Forest' : 'Maroon';
+console.log('setting  :', target);
+await page.locator(`button[aria-label="${target}"]`).click();
 await sleep(400);
 console.log('preview:', JSON.stringify(await read()));
 await page.screenshot({ path: '.shots/theme/2-preview.png', fullPage: true });

@@ -18,8 +18,14 @@ import { Badge, Spinner, StatusBadge } from '../../components/ui';
 const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
 const MONO = "'JetBrains Mono',ui-monospace,monospace";
 const C = {
-  ink: '#0A1A33', line: '#E1E7F0', fg4: '#6E7E96', brand: '#004AAD',
-  cyan: '#5CE1E6', amber: '#E9920B', amberSoft: '#FCF0DB', brandSoft: '#DFEAFB',
+  ink: 'var(--ink)', line: 'var(--line)', fg4: 'var(--muted)', brand: 'var(--brand)',
+  // The dark hero band and the "live now" tile are BRAND SURFACES, not ink. They
+  // were painted with the neutral ink so they stayed navy while the rest of the
+  // workspace turned the institution's colour - which reads as the theme being
+  // half-applied. `deep` is the ramp's darkest step and `onDeep` is what reads on
+  // it, so both follow the tenant and their contrast holds by construction.
+  deep: 'var(--brand-deep)', onDeep: 'var(--on-brand)',
+  cyan: 'var(--accent)', amber: '#E9920B', amberSoft: '#FCF0DB', brandSoft: 'var(--brand-line)',
 };
 
 interface Dash {
@@ -85,11 +91,11 @@ export function OrgDashboardPage() {
 
       {/* ---- hero ---- */}
       <div style={{
-        background: C.ink, borderRadius: 14, padding: 22, color: '#fff',
+        background: C.deep, borderRadius: 14, padding: 22, color: '#fff',
         display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', justifyContent: 'space-between',
       }}>
         <div style={{ minWidth: 240 }}>
-          <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase', color: C.cyan }}>
+          <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase', color: C.onDeep }}>
             System of record · live
           </div>
           <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 19, marginTop: 7 }}>
@@ -108,8 +114,8 @@ export function OrgDashboardPage() {
             flex: 'none', padding: '11px 18px', border: 'none', borderRadius: 10,
             fontFamily: POP, fontWeight: 700, fontSize: 13.5,
             ...(canCreateEvent
-              ? { background: C.cyan, color: C.ink, cursor: 'pointer' }
-              : { background: 'rgba(255,255,255,.12)', color: '#9BA9BE', cursor: 'not-allowed' }),
+              ? { background: C.onDeep, color: C.deep, cursor: 'pointer' }
+              : { background: 'rgba(255,255,255,.12)', color: 'var(--faint)', cursor: 'not-allowed' }),
           }}
         >
           {canCreateEvent ? '+ Create event' : 'Create event · locked'}
@@ -121,11 +127,11 @@ export function OrgDashboardPage() {
         {KPIS.map(([label, value, icon, brand]) => (
           <div key={label} style={{
             ...card, padding: 16,
-            ...(brand && value > 0 ? { background: C.ink, border: 'none' } : {}),
+            ...(brand && value > 0 ? { background: C.deep, border: 'none' } : {}),
           }}>
             <span style={{
               display: 'flex', width: 19, height: 19,
-              color: brand && value > 0 ? C.cyan : C.brand,
+              color: brand && value > 0 ? C.onDeep : C.brand,
             }}>{icon}</span>
             <div style={{
               fontFamily: MONO, fontWeight: 700, fontSize: 26, marginTop: 11, letterSpacing: '-.02em',
@@ -172,7 +178,7 @@ export function OrgDashboardPage() {
                 {q.key === 'people' ? <Users size={15} /> : q.key === 'certificates' ? <Award size={15} /> : <ClipboardList size={15} />}
               </span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#14233B' }}>{q.text}</div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-2)' }}>{q.text}</div>
                 <div style={{ fontSize: 12, color: C.fg4 }}>{q.sub}</div>
               </div>
               <Link to={q.to} style={{ fontFamily: POP, fontWeight: 700, fontSize: 13, color: C.brand, textDecoration: 'none' }}>
@@ -243,7 +249,7 @@ export function OrgDashboardPage() {
                   </span>
                 </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: '#14233B' }}>{e.name}</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-2)' }}>{e.name}</div>
                   <div style={{ fontSize: 12, color: C.fg4 }}>{e.venue || 'Venue TBD'}</div>
                 </div>
                 <StatusBadge status={e.status} />
@@ -271,7 +277,7 @@ export function OrgDashboardPage() {
                 background: C.brandSoft, color: C.brand, fontFamily: POP, fontWeight: 800, fontSize: 11.5,
               }}>{initials(a.name)}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#14233B' }}>{a.name}</div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-2)' }}>{a.name}</div>
                 <div style={{ fontSize: 12, color: C.fg4 }}>{a.title}</div>
               </div>
               <Badge tone={a.tag === 'GOLD' ? 'amber' : a.tag === 'TEAM' ? 'slate' : 'brand'}>{a.tag}</Badge>

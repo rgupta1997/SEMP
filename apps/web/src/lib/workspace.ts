@@ -298,10 +298,10 @@ export function landingFor(ctx: WorkspaceContext, granted: ReadonlySet<Capabilit
 
 /** Switcher grouping and tile colour, from the prototype. */
 export const KIND_META: Record<ContextKind, { group: string; tile: string; ink: string }> = {
-  personal: { group: 'Personal', tile: '#5CE1E6', ink: '#0A1A33' },
-  org: { group: 'Organizations', tile: '#004AAD', ink: '#FFFFFF' },
-  orgGuest: { group: 'Organizations', tile: '#6E7E96', ink: '#FFFFFF' },
-  event: { group: 'Events', tile: '#159FA6', ink: '#FFFFFF' },
-  eventDraft: { group: 'Events', tile: '#159FA6', ink: '#FFFFFF' },
+  personal: { group: 'Personal', tile: 'var(--accent)', ink: 'var(--ink)' },
+  org: { group: 'Organizations', tile: 'var(--brand)', ink: '#FFFFFF' },
+  orgGuest: { group: 'Organizations', tile: 'var(--muted)', ink: '#FFFFFF' },
+  event: { group: 'Events', tile: 'var(--accent-deep)', ink: '#FFFFFF' },
+  eventDraft: { group: 'Events', tile: 'var(--accent-deep)', ink: '#FFFFFF' },
   assignment: { group: 'Assignments', tile: '#E9920B', ink: '#FFFFFF' },
 };

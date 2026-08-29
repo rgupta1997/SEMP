@@ -94,7 +94,7 @@ export const Field = ({ label, hint, children }: { label: string; hint?: string;
  * edge on a slate-800 ground beside a slate-800 edge on a slate-900 one - which
  * is legible on any single screen and obvious the moment you move between two.
  *
- * The edge is `eos-line` (#E1E7F0) and the radius is `--radius-card` (14px),
+ * The edge is `eos-line` (var(--line)) and the radius is `--radius-card` (14px),
  * which is what the EOS prototype draws and what the profile screens already
  * hard-code inline. The Tailwind half of the app now says the same thing rather
  * than something a shade off it.
@@ -427,7 +427,13 @@ export function PageHeader({ title, subtitle, children }: { title: ReactNode; su
           <p className="t-meta mt-1 line-clamp-2 max-w-prose sm:line-clamp-none">{subtitle}</p>
         )}
       </div>
-      {children && <div className="flex shrink-0 items-center gap-2">{children}</div>}
+      {/* `shrink-0` alone let a wide control (the Teams/Individuals segmented switch
+          on Achievements) push itself past the right edge of a 390px screen, where
+          it was clipped by the viewport with no way to reach the second option.
+          `max-w-full` keeps it inside the page and lets it scroll within itself. */}
+      {children && (
+        <div className="snap-row max-w-full shrink-0 items-center gap-2 sm:flex sm:overflow-visible">{children}</div>
+      )}
     </div>
   );
 }

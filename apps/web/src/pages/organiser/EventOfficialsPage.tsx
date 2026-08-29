@@ -4,6 +4,7 @@ import { useApi, useApiMutation, useTableControls, fmtDate } from '../../lib/hoo
 import { api } from '../../lib/api';
 import { Card, Spinner, Button, Avatar, SearchInput, Pagination, ListToolbar, confirmDialog } from '../../components/ui';
 import { PeoplePicker } from '../../components/PeoplePicker';
+import { DataList } from '../../components/primitives';
 
 interface Official {
   id: string;
@@ -82,61 +83,80 @@ export function EventOfficialsPage() {
       </div>
 
       {officials && officials.length > 0 ? (
-        <Card className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800 text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-800/60">
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Official</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Contact</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Assigned</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-700 dark:text-slate-300">Notes</th>
-                <th className="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {t.view.map((o) => (
-                <tr key={o.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/60">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <Avatar name={o.user.name} size={32} />
-                      <span className="font-medium text-slate-900 dark:text-slate-100">{o.user.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="text-slate-600 dark:text-slate-300">{o.user.email}</div>
-                    {o.user.phone && <div className="text-xs text-slate-400 dark:text-slate-500">{o.user.phone}</div>}
-                  </td>
-                  <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                    <div>{fmtDate(o.assigned_at)}</div>
-                    {o.assigned_by && <div className="text-xs text-slate-400 dark:text-slate-500">by {o.assigned_by.name}</div>}
-                  </td>
-                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{o.notes || '-'}</td>
-                  <td className="px-4 py-3 text-right">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-rose-600 dark:text-rose-400 hover:bg-rose-50 hover:text-rose-700"
-                      onClick={async () => {
-                        if (await confirmDialog({ title: 'Remove official', confirmLabel: 'Remove', message: `Remove ${o.user.name} from this championship?` })) {
-                          removeMut.mutate(o.id);
-                        }
-                      }}
-                      disabled={removeMut.isPending}
-                    >
-                      Remove
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-              {t.total === 0 && (
-                <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400 dark:text-slate-500">No officials match your search.</td></tr>
-              )}
-            </tbody>
-          </table>
-          <div className="px-4 pb-3">
-            <Pagination page={t.page} pageCount={t.pageCount} total={t.total} pageSize={t.pageSize} onPage={t.setPage} />
-          </div>
-        </Card>
+        <>
+        <DataList
+          rows={t.view}
+          rowKey={(o: Official) => o.id}
+          caption="Officials assigned to this championship"
+          empty={<p className="px-4 py-6 text-center text-slate-400 dark:text-slate-500">No officials match your search.</p>}
+          columns={[
+            {
+              key: 'official',
+              header: 'Official',
+              primary: true,
+              render: (o: Official) => (
+                <div className="flex items-center gap-2">
+                  <Avatar name={o.user.name} size={32} />
+                  <span className="font-semibold text-slate-900 dark:text-slate-100">{o.user.name}</span>
+                </div>
+              ),
+            },
+            {
+              key: 'contact',
+              header: 'Contact',
+              render: (o: Official) => (
+                <div className="min-w-0">
+                  <div className="truncate text-slate-600 dark:text-slate-300">{o.user.email}</div>
+                  {o.user.phone && <div className="t-meta truncate">{o.user.phone}</div>}
+                </div>
+              ),
+            },
+            {
+              key: 'assigned',
+              header: 'Assigned',
+              render: (o: Official) => (
+                <div className="text-slate-600 dark:text-slate-300">
+                  <div>{fmtDate(o.assigned_at)}</div>
+                  {o.assigned_by && <div className="t-meta">by {o.assigned_by.name}</div>}
+                </div>
+              ),
+            },
+            {
+              key: 'notes',
+              header: 'Notes',
+              // A free-text note is the one column worth dropping from a phone card:
+              // it is usually empty, and when it is not it is a sentence that would
+              // dominate the card. It stays in the table at sm+.
+              desktopOnly: true,
+              render: (o: Official) => <span className="text-slate-500 dark:text-slate-400">{o.notes || '-'}</span>,
+            },
+            {
+              key: 'actions',
+              header: '',
+              align: 'right' as const,
+              actions: true,
+              render: (o: Official) => (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="flex-1 text-rose-600 hover:bg-rose-50 hover:text-rose-700 sm:flex-none dark:text-rose-400"
+                  onClick={async () => {
+                    if (await confirmDialog({ title: 'Remove official', confirmLabel: 'Remove', message: `Remove ${o.user.name} from this championship?` })) {
+                      removeMut.mutate(o.id);
+                    }
+                  }}
+                  disabled={removeMut.isPending}
+                >
+                  Remove
+                </Button>
+              ),
+            },
+          ]}
+        />
+        <div className="mt-3">
+          <Pagination page={t.page} pageCount={t.pageCount} total={t.total} pageSize={t.pageSize} onPage={t.setPage} />
+        </div>
+        </>
       ) : (
         <Card className="p-8 text-center text-slate-500 dark:text-slate-400">
           <div className="text-4xl mb-3">⚑</div>

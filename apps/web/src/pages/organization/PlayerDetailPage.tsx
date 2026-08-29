@@ -13,7 +13,7 @@ import { Avatar, BackButton, Badge, EmptyState, Spinner } from '../../components
 
 const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
 const MONO = "'JetBrains Mono',ui-monospace,monospace";
-const C = { ink: '#0A1A33', line: '#E1E7F0', fg4: '#6E7E96', brand: '#004AAD', green: '#1E9E5A' };
+const C = { ink: 'var(--ink)', line: 'var(--line)', fg4: 'var(--muted)', brand: 'var(--brand)', green: '#1E9E5A' };
 
 interface Profile {
   person: {
@@ -46,8 +46,8 @@ function Section({ title, chip, chipTone, children, note }: {
           fontFamily: MONO, fontSize: 9, letterSpacing: '.12em', textTransform: 'uppercase',
           padding: '3px 8px', borderRadius: 6,
           ...(chipTone === 'editable'
-            ? { background: '#DFEAFB', color: C.brand }
-            : { background: '#EFF2F7', color: '#4F5F77' }),
+            ? { background: 'var(--brand-line)', color: C.brand }
+            : { background: '#EFF2F7', color: 'var(--ink-4)' }),
         }}>{chip}</span>
       </div>
       <div style={{ marginTop: 12 }}>{children}</div>
@@ -62,7 +62,7 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', gap: 12, padding: '9px 0', borderTop: '1px solid #EFF2F7' }}>
       <span style={{ flex: '0 0 40%', fontSize: 13, color: C.fg4 }}>{k}</span>
-      <span style={{ flex: 1, fontSize: 13.5, color: '#14233B', minWidth: 0 }}>{v}</span>
+      <span style={{ flex: 1, fontSize: 13.5, color: 'var(--ink-2)', minWidth: 0 }}>{v}</span>
     </div>
   );
 }
@@ -159,13 +159,13 @@ export function PlayerDetailPage() {
             ? 'Yours to change, from your sports profile.'
             : 'Theirs to change. An institution can see these, and cannot edit them.'}
         >
-          <Row k="Tagline" v={p.tagline || <span style={{ color: '#9BA9BE' }}>Not set</span>} />
+          <Row k="Tagline" v={p.tagline || <span style={{ color: 'var(--faint)' }}>Not set</span>} />
           <Row k="Preferred sports" v={p.preferred_sports?.length
             ? p.preferred_sports.join(', ')
-            : <span style={{ color: '#9BA9BE' }}>Not set</span>} />
+            : <span style={{ color: 'var(--faint)' }}>Not set</span>} />
           <Row k="Public handle" v={p.handle
             ? <span style={{ fontFamily: MONO, fontSize: 12.5 }}>/p/{p.handle}</span>
-            : <span style={{ color: '#9BA9BE' }}>Not published</span>} />
+            : <span style={{ color: 'var(--faint)' }}>Not published</span>} />
           <Row k="Contact" v={[p.email, p.phone].filter(Boolean).join(' · ') || '—'} />
         </Section>
 
@@ -196,7 +196,7 @@ export function PlayerDetailPage() {
             <span style={{ fontFamily: MONO, fontSize: 11, color: C.fg4, flex: 'none', width: 84 }}>
               {new Date(e.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}
             </span>
-            <span style={{ flex: 1, fontSize: 13.5, color: '#14233B', minWidth: 0 }}>{e.title}</span>
+            <span style={{ flex: 1, fontSize: 13.5, color: 'var(--ink-2)', minWidth: 0 }}>{e.title}</span>
             {/* Provisional rows sit on the same list, badged - hiding them would make
                 the page disagree with what the player saw on their own profile. */}
             <span style={{
