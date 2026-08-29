@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { useApi, useTableControls } from '../../lib/hooks';
 import { useOrgUnits, unitPath } from '../../lib/units';
 import { usePermissions } from '../../lib/permissions';
+import { DataList } from '../../components/primitives';
 import {
   Avatar, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field,
   ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Spinner, toast,
@@ -300,83 +301,85 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
                 description="People appear here once they join or are added to the organisation." />
             )
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-left font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 dark:border-slate-800">
-                    <th className="px-3 py-2.5">Member</th>
-                    <th className="px-3 py-2.5">Membership</th>
-                    <th className="px-3 py-2.5">Roles &amp; scope</th>
-                    {canManageRoles && <th className="px-3 py-2.5 text-right">Actions</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {view.map((m) => {
+            <DataList
+              rows={view}
+              rowKey={(m) => m.id}
+              caption="Members of this organisation"
+              columns={[
+                {
+                  key: 'member',
+                  header: 'Member',
+                  primary: true,
+                  render: (m) => (
+                    <div className="flex items-center gap-3">
+                      <Avatar name={m.users?.name ?? '?'} size={34} />
+                      <div className="min-w-0">
+                        <div className="font-display font-semibold text-slate-900 dark:text-slate-100">{m.users?.name}</div>
+                        <div className="t-meta truncate">{m.users?.email}</div>
+                      </div>
+                    </div>
+                  ),
+                },
+                {
+                  key: 'membership',
+                  header: 'Membership',
+                  render: (m) => <Badge tone={m.status === 'active' ? 'green' : 'amber'}>{m.status}</Badge>,
+                },
+                {
+                  key: 'roles',
+                  header: 'Roles & scope',
+                  render: (m) => {
                     const held = byUser.get(m.user_id) ?? [];
+                    if (held.length === 0) {
+                      // Not "none": membership already implies a role, and saying
+                      // none would misrepresent what this person can actually do.
+                      return (
+                        <span className="inline-flex items-center gap-1.5 text-[13px] text-slate-500 dark:text-slate-400">
+                          <Lock size={13} />
+                          {IMPLIED[m.role] ?? m.role} <span className="text-slate-400">(from membership)</span>
+                        </span>
+                      );
+                    }
                     return (
-                      <tr key={m.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
-                        <td className="px-3 py-3">
-                          <div className="flex items-center gap-3">
-                            <Avatar name={m.users?.name ?? '?'} size={34} />
-                            <div className="min-w-0">
-                              <div className="font-display font-semibold text-slate-900 dark:text-slate-100">{m.users?.name}</div>
-                              <div className="truncate text-[13px] text-slate-500">{m.users?.email}</div>
-                            </div>
+                      <div className="flex flex-col gap-1.5">
+                        {held.map((g) => (
+                          <div key={g.id} className="flex flex-wrap items-center gap-2">
+                            <Badge tone="brand">{g.role?.name}</Badge>
+                            <span className="t-eyebrow">{scopeLabel(g, units)}</span>
+                            <Badge tone={STATUS_TONE[g.status]}>{g.status}</Badge>
+                            {canManageRoles && (
+                              <>
+                                <button
+                                  className="tap text-[12px] font-semibold text-brand-600 hover:underline dark:text-brand-400"
+                                  onClick={() => setStatus(g, g.status === 'SUSPENDED' ? 'ACTIVE' : 'SUSPENDED')}>
+                                  {g.status === 'SUSPENDED' ? 'Restore' : 'Suspend'}
+                                </button>
+                                <button
+                                  className="tap text-[12px] font-semibold text-rose-600 hover:underline dark:text-rose-400"
+                                  onClick={() => revoke(g)}>
+                                  Remove
+                                </button>
+                              </>
+                            )}
                           </div>
-                        </td>
-
-                        <td className="px-3 py-3">
-                          <Badge tone={m.status === 'active' ? 'green' : 'amber'}>{m.status}</Badge>
-                        </td>
-
-                        <td className="px-3 py-3">
-                          {held.length === 0 ? (
-                            // Not "none": membership already implies a role, and saying
-                            // none would misrepresent what this person can actually do.
-                            <span className="inline-flex items-center gap-1.5 text-[13px] text-slate-500">
-                              <Lock size={13} />
-                              {IMPLIED[m.role] ?? m.role} <span className="text-slate-400">(from membership)</span>
-                            </span>
-                          ) : (
-                            <div className="flex flex-col gap-1.5">
-                              {held.map((g) => (
-                                <div key={g.id} className="flex flex-wrap items-center gap-2">
-                                  <Badge tone="brand">{g.role?.name}</Badge>
-                                  <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-slate-500">
-                                    {scopeLabel(g, units)}
-                                  </span>
-                                  <Badge tone={STATUS_TONE[g.status]}>{g.status}</Badge>
-                                  {canManageRoles && (
-                                    <>
-                                      <button
-                                        className="text-[12px] font-semibold text-brand-600 hover:underline"
-                                        onClick={() => setStatus(g, g.status === 'SUSPENDED' ? 'ACTIVE' : 'SUSPENDED')}>
-                                        {g.status === 'SUSPENDED' ? 'Restore' : 'Suspend'}
-                                      </button>
-                                      <button className="text-[12px] font-semibold text-rose-600 hover:underline" onClick={() => revoke(g)}>
-                                        Remove
-                                      </button>
-                                    </>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-
-                        {canManageRoles && (
-                          <td className="px-3 py-3 text-right">
-                            <Button size="sm" variant="ghost" onClick={() => setGranting(m)}>
-                              <ShieldCheck size={14} /> Give role
-                            </Button>
-                          </td>
-                        )}
-                      </tr>
+                        ))}
+                      </div>
                     );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                  },
+                },
+                ...(canManageRoles ? [{
+                  key: 'actions',
+                  header: '',
+                  align: 'right' as const,
+                  actions: true,
+                  render: (m: Member) => (
+                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => setGranting(m)}>
+                      <ShieldCheck size={14} /> Give role
+                    </Button>
+                  ),
+                }] : []),
+              ]}
+            />
           )}
 
           {view.length > 0 && (

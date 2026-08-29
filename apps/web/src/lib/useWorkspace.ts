@@ -231,11 +231,16 @@ export function useWorkspace() {
   /**
    * PAINT THE INSTITUTION'S COLOUR ONTO THE DOCUMENT.
    *
-   * Keyed to the ACTIVE context, not to the account, because one person belongs to
-   * several institutions and the workspace they are standing in is the one whose
-   * brand should be on screen. Switching context repaints; leaving for personal
-   * space or an event clears back to Sportagon's own blue, so a tenant's colour
-   * never leaks onto a surface that is not theirs.
+   * Keyed to the ACTIVE WORKSPACE - not the account, and not the URL. One person
+   * belongs to several institutions, and the one they are standing in is the one
+   * whose brand should be on screen.
+   *
+   * Following the workspace rather than the route is deliberate: the sidebar, the
+   * tab bar and the switcher all follow the workspace too, so a colour keyed to the
+   * URL would flip to Sportagon blue on /home while the navigation beside it still
+   * said the institution's name. Switching context repaints; an event does not
+   * carry a third brand into the same screen, and the theme clears when the last
+   * organisation context goes away.
    *
    * One effect writing three CSS variables - every `--color-brand-*` step, the
    * sidebar, focus rings, chips and links are derived from them in index.css, so

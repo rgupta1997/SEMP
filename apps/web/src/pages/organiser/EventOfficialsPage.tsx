@@ -82,7 +82,7 @@ export function EventOfficialsPage() {
       </div>
 
       {officials && officials.length > 0 ? (
-        <Card className="overflow-hidden">
+        <Card className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800 text-sm">
             <thead className="bg-slate-50 dark:bg-slate-800/60">
               <tr>

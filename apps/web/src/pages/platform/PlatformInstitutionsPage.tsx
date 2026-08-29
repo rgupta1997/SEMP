@@ -40,7 +40,7 @@ export function PlatformInstitutionsPage() {
       {organizations.length === 0 ? (
         <EmptyState icon={<Landmark size={24} />} title="No organizations" description="Add an organization to get started." />
       ) : (
-        <Card className="overflow-hidden">
+        <Card className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-100 dark:divide-slate-800 text-sm">
             <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
               <tr>

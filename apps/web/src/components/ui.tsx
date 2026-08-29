@@ -21,7 +21,12 @@ export function Button({
   className = '', variant = 'primary', size = 'md', ...p
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant; size?: ButtonSize }) {
   const variants: Record<ButtonVariant, string> = {
-    primary: 'bg-brand-500 text-white hover:bg-brand-600 shadow-sm',
+    // brand-600, not brand-500. index.css calls 600 "the 234-use primary" and it is
+    // the step the seed colour IS; 500 is a lighter tint two stops up the ladder.
+    // With a fixed blue ramp the difference was cosmetic. With a derived one it is a
+    // contrast bug: a maroon seed makes 500 a pale pink, and every primary button in
+    // the product puts white text on it.
+    primary: 'bg-brand-600 text-white hover:bg-brand-700 shadow-sm',
     ghost: 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
     outline: 'border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700',
     danger: 'bg-rose-600 text-white hover:bg-rose-700 shadow-sm',
@@ -395,7 +400,7 @@ export function Pills({ value, onChange, options, ariaLabel }: {
             className={cn(
               'rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors',
               active
-                ? 'border-brand-500 bg-brand-500 text-white shadow-sm'
+                ? 'border-brand-600 bg-brand-600 text-white shadow-sm'
                 : 'border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:bg-brand-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10',
             )}
           >
