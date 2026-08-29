@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Check, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Eye, Lock, ShieldCheck } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Eye, Lock, Pencil, ShieldCheck, X } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
 import { useWorkspace } from '../../lib/useWorkspace';
-import { Badge, Button, Card, CardBody, PageHeader, Spinner, toast } from '../../components/ui';
+import { Badge, Button, Card, CardBody, Field, Input, Modal, PageHeader, Select, Spinner, Textarea, toast } from '../../components/ui';
 import { SheetPreview, openDoc } from '../organization/certificates/shared';
 import { ParticipantDashboard } from './ParticipantDashboard';
 import { LifetimeRecordPage } from './LifetimeRecordPage';
@@ -25,6 +25,10 @@ import { LifetimeRecordPage } from './LifetimeRecordPage';
 
 const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
 const MONO = "'JetBrains Mono',ui-monospace,monospace";
+
+// Mirrors the server's HANDLE regex (profile.routes.ts) so a bad handle is
+// caught before the round trip - the server stays the actual authority.
+const HANDLE_RE = /^[a-z0-9][a-z0-9-]{2,38}[a-z0-9]$/;
 
 interface Identity {
   id: string;
@@ -257,9 +261,132 @@ function CertificatesTab() {
 
 const initials = (s: string) => s.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 
+/**
+ * Edits the whole CONTROLLED half in one place (tagline, preferred sports, handle) -
+ * the three fields PATCH /me/identity has always accepted, with no UI anywhere
+ * that called it before this. One modal rather than three inline editors: they are
+ * one concept ("what I say about myself") and saving them together means one
+ * request, one error state, one place to look.
+ */
+function EditProfileModal({ id, onClose, onSaved }: { id: Identity; onClose: () => void; onSaved: () => void }) {
+  const [tagline, setTagline] = useState(id.controlled.tagline ?? '');
+  const [sports, setSports] = useState<string[]>(id.controlled.preferred_sports);
+  const [handleValue, setHandleValue] = useState(id.controlled.handle ?? '');
+  const [handleError, setHandleError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const { data: sportsList } = useApi<Array<{ id: string; name: string }>>('/sports');
+
+  const availableSports = (sportsList ?? []).filter((s) => !sports.includes(s.name));
+
+  // A single action, not "pick then remember to click Add" - a picked value that
+  // never gets clicked into the list is silently dropped on save with nothing
+  // telling you it didn't count, which is exactly the shape of bug this replaces.
+  const addSport = (name: string) => {
+    if (!name || sports.length >= 12 || sports.includes(name)) return;
+    setSports((prev) => [...prev, name]);
+  };
+  const removeSport = (name: string) => setSports((prev) => prev.filter((s) => s !== name));
+
+  const save = async () => {
+    const trimmedHandle = handleValue.trim().toLowerCase();
+    // A handle already set is the profile's public address - clearing it here would
+    // break a link somebody may already be holding, so this only ever adds or
+    // corrects one, never removes it.
+    if (trimmedHandle && !HANDLE_RE.test(trimmedHandle)) {
+      setHandleError('Use 4-40 lowercase letters, numbers or hyphens');
+      return;
+    }
+    setHandleError(null);
+    setBusy(true);
+    try {
+      await api('PATCH', '/me/identity', {
+        tagline: tagline.trim() || null,
+        preferred_sports: sports,
+        ...(trimmedHandle ? { handle: trimmedHandle } : {}),
+      });
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      setHandleError(e?.message ?? 'Could not save changes');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Modal
+      title="Edit profile"
+      onClose={onClose}
+      footer={(
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</Button>
+        </>
+      )}
+    >
+      <div className="grid gap-4">
+        <Field label="Tagline" hint={`${tagline.length}/160 - a short line shown under your name.`}>
+          <Textarea
+            value={tagline}
+            onChange={(e) => setTagline(e.target.value.slice(0, 160))}
+            rows={2}
+            placeholder="e.g. Right-arm off-spinner · Badminton doubles specialist"
+          />
+        </Field>
+
+        {/* A plain div, not <Field>: Field wraps its content in a <label>, and a
+            label containing SEVERAL interactive controls (every chip's remove
+            button, plus the select below) makes the browser route a click
+            anywhere in its empty space to the first one - so touching blank
+            space near a chip was silently "clicking" that chip's remove button. */}
+        <div className="mb-4 block">
+          <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Preferred sports</span>
+          {sports.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {sports.map((s) => (
+                <Badge key={s} tone="slate">
+                  <span className="flex items-center gap-1">
+                    {s}
+                    <button onClick={() => removeSport(s)} aria-label={`Remove ${s}`} className="cursor-pointer">
+                      <X size={11} aria-hidden />
+                    </button>
+                  </span>
+                </Badge>
+              ))}
+            </div>
+          )}
+          {sports.length < 12 && (
+            // Picking a sport IS adding it - value stays reset to the placeholder
+            // so choosing one always reads as "added another", not "now selected".
+            <Select value="" onChange={(e) => addSport(e.target.value)} className="w-full">
+              <option value="">Add a sport…</option>
+              {availableSports.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+            </Select>
+          )}
+          <span className="mt-1 block text-xs text-slate-400 dark:text-slate-500">
+            {sports.length}/12 - sports you play, shown on your public profile.
+          </span>
+        </div>
+
+        <Field label="Handle" hint="Becomes your public profile address: /p/your-handle - needed before your profile can go public.">
+          <Input
+            value={handleValue}
+            onChange={(e) => { setHandleValue(e.target.value); setHandleError(null); }}
+            placeholder="your-handle"
+            maxLength={40}
+            style={{ fontFamily: MONO }}
+          />
+          {handleError && <span className="mt-1 block text-xs text-rose-600 dark:text-rose-400">{handleError}</span>}
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
 function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void }) {
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+
+  const [statsBusy, setStatsBusy] = useState(false);
 
   const togglePublic = async () => {
     setBusy(true);
@@ -272,6 +399,20 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
       // first impression. Surface that reason instead of a generic failure.
       toast.error(e?.message ?? 'Could not change that');
     } finally { setBusy(false); }
+  };
+
+  // A second, narrower gate under the profile toggle: public_profile shows the
+  // identity card to a stranger, public_stats decides whether it also shows the
+  // verified playing record (win/loss, medals, achievements). Only meaningful
+  // once the profile itself is public, so it only renders alongside that toggle.
+  const togglePublicStats = async () => {
+    setStatsBusy(true);
+    try {
+      await api('PATCH', '/me/privacy', { public_stats: !id.privacy.public_stats });
+      onChanged();
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Could not change that');
+    } finally { setStatsBusy(false); }
   };
 
   const copy = async () => {
@@ -293,7 +434,15 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
           }}>{initials(id.name)}</span>
 
           <div style={{ flex: '1 1 260px', minWidth: 0 }}>
-            <h2 style={{ fontFamily: POP, fontWeight: 900, fontSize: 24, margin: 0, letterSpacing: '-.02em' }}>{id.name}</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <h2 style={{ fontFamily: POP, fontWeight: 900, fontSize: 24, margin: 0, letterSpacing: '-.02em' }}>{id.name}</h2>
+              <button onClick={() => setEditOpen(true)} title="Edit profile" aria-label="Edit profile" style={{
+                display: 'grid', placeItems: 'center', width: 26, height: 26, flexShrink: 0, cursor: 'pointer',
+                borderRadius: 7, border: '1px solid var(--line)', background: '#fff', color: 'var(--muted)',
+              }}>
+                <Pencil size={12} aria-hidden />
+              </button>
+            </div>
             {id.controlled.tagline && (
               <p style={{ margin: '4px 0 0', fontSize: 14, color: 'var(--ink-4)' }}>{id.controlled.tagline}</p>
             )}
@@ -307,27 +456,76 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
               {id.officiates && <Badge tone="amber">Official</Badge>}
               {id.email_verified && id.phone_verified && <Badge tone="green">Verified contact</Badge>}
             </div>
+            {id.controlled.preferred_sports.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                {id.controlled.preferred_sports.map((s) => (
+                  <span key={s} style={{
+                    fontSize: 12, fontWeight: 500, padding: '3px 9px', borderRadius: 999,
+                    border: '1px solid var(--line)', color: 'var(--ink-4)',
+                  }}>{s}</span>
+                ))}
+              </div>
+            )}
           </div>
 
           <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
-            <button onClick={togglePublic} disabled={busy} style={{
-              display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
-              padding: '8px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600,
-              border: `1px solid ${id.privacy.public_profile ? '#1E9E5A' : '#C8D2E0'}`,
-              background: id.privacy.public_profile ? '#E4F6EC' : '#fff',
-              color: id.privacy.public_profile ? '#1E6E45' : 'var(--ink-4)',
-            }}>
-              <span aria-hidden style={{
-                width: 30, height: 16, borderRadius: 999, position: 'relative',
-                background: id.privacy.public_profile ? '#1E9E5A' : '#C8D2E0', transition: 'background .15s',
+            <span style={{ fontFamily: MONO, fontSize: 12, color: 'var(--muted)' }}>
+              {id.controlled.handle ? `@${id.controlled.handle}` : 'No handle set'}
+            </span>
+
+            {id.controlled.handle ? (
+              <button onClick={togglePublic} disabled={busy} style={{
+                display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+                padding: '8px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600,
+                border: `1px solid ${id.privacy.public_profile ? '#1E9E5A' : '#C8D2E0'}`,
+                background: id.privacy.public_profile ? '#E4F6EC' : '#fff',
+                color: id.privacy.public_profile ? '#1E6E45' : 'var(--ink-4)',
               }}>
-                <span style={{
-                  position: 'absolute', top: 2, left: id.privacy.public_profile ? 16 : 2,
-                  width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left .15s',
-                }} />
-              </span>
-              {id.privacy.public_profile ? 'Public profile on' : 'Profile is private'}
-            </button>
+                <span aria-hidden style={{
+                  width: 30, height: 16, borderRadius: 999, position: 'relative',
+                  background: id.privacy.public_profile ? '#1E9E5A' : '#C8D2E0', transition: 'background .15s',
+                }}>
+                  <span style={{
+                    position: 'absolute', top: 2, left: id.privacy.public_profile ? 16 : 2,
+                    width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left .15s',
+                  }} />
+                </span>
+                {id.privacy.public_profile ? 'Public profile on' : 'Profile is private'}
+              </button>
+            ) : null}
+
+            {id.controlled.handle && id.privacy.public_profile && (
+              // Only worth showing once the profile itself is public - toggling
+              // this while private would change a value nobody can see yet.
+              <button onClick={togglePublicStats} disabled={statsBusy} style={{
+                display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                border: 'none', background: 'none', padding: 0,
+                fontSize: 11.5, color: id.privacy.public_stats ? '#1E6E45' : 'var(--muted)',
+              }}>
+                <span aria-hidden style={{
+                  width: 24, height: 13, borderRadius: 999, position: 'relative', flexShrink: 0,
+                  background: id.privacy.public_stats ? '#1E9E5A' : '#C8D2E0', transition: 'background .15s',
+                }}>
+                  <span style={{
+                    position: 'absolute', top: 1.5, left: id.privacy.public_stats ? 12 : 1.5,
+                    width: 10, height: 10, borderRadius: '50%', background: '#fff', transition: 'left .15s',
+                  }} />
+                </span>
+                Show my stats publicly
+              </button>
+            )}
+
+            {!id.controlled.handle && (
+              // A handle is a URL, so it has to exist before the profile can go
+              // public - the server refuses otherwise. Pointing straight at Edit
+              // profile is what makes that fixable instead of a dead-end error.
+              <button onClick={() => setEditOpen(true)} style={{
+                fontSize: 11.5, color: 'var(--brand)', textAlign: 'right', maxWidth: 200,
+                border: 'none', background: 'none', cursor: 'pointer', padding: 0,
+              }}>
+                Set a handle to make your profile public
+              </button>
+            )}
 
             {id.public_url && (
               <button onClick={copy} style={{
@@ -341,6 +539,8 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
           </div>
         </div>
       </CardBody>
+
+      {editOpen && <EditProfileModal id={id} onClose={() => setEditOpen(false)} onSaved={onChanged} />}
     </Card>
   );
 }

@@ -181,7 +181,7 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
   // Everything that must be all-or-nothing happens in here. The audit entry and any
   // notification are deliberately OUTSIDE: an audit row describing a rolled-back lock
   // would be a lie, and an email cannot be un-sent.
-  const { fx, label, championshipId, fromStatus, participants } = await prisma.$transaction(async (tx) => {
+  const { fx, label, championshipId, fromStatus, participants, newAchievements } = await prisma.$transaction(async (tx) => {
     const current = await tx.fixtures.findUnique({ where: { id: fixtureId }, ...FIXTURE_FOR_LOCK });
     if (!current) throw new NotFoundError('Fixture');
     assertLockable(current);
@@ -233,7 +233,7 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
     //       this transaction three more times, and they receive the people already
     //       resolved rather than each working it out again.
     await writeLifetimeEntries(tx, locked.id, { participants });
-    await deriveAchievements(tx, locked.id, { participants });
+    const newAchievements = await deriveAchievements(tx, locked.id, { participants });
     await queueCertificates(tx, locked.id, { participants });
 
     return {
@@ -242,6 +242,7 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
       championshipId: championshipOf(current),
       fromStatus: current.scorecard_status,
       participants,
+      newAchievements,
     };
   });
 
@@ -263,6 +264,17 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
   // back, so one sent inside the transaction would survive a failure that undid the
   // very thing it announces.
   await notifyParticipants(prisma, req, { fixture: fx, label, championshipId, participants });
+
+  // Same reasoning as notifyParticipants: the achievement rows are already
+  // committed (written inside the transaction above), so telling people about
+  // them happens out here - never inside the 5s-capped transaction itself.
+  for (const a of newAchievements) {
+    try {
+      await notify(prisma, { type: 'achievement_created', userId: a.user_id, senderId: null, data: { title: a.title } });
+    } catch (err) {
+      console.error(`[lock] achievement_created notification failed for user ${a.user_id}:`, err);
+    }
+  }
 
   // Separate from notifyParticipants above (players) - this tells the organiser and
   // the assigned official the card is now official, matching the trigger doc's

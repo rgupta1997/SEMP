@@ -42,8 +42,16 @@ export async function writeLifetimeEntries(db: Db, fixtureId: string, opts: Supe
 }
 
 // module 07a - medals, placements and awards derived from the verified result.
-export async function deriveAchievements(db: Db, fixtureId: string, opts: SupersedeOptions = {}): Promise<void> {
-  if (opts.supersedeVersion != null) return supersedeAchievements(db, fixtureId, opts.supersedeVersion);
+// Returns who newly earned one (empty on unlock/supersede - nothing new to tell
+// anyone there) so the caller can notify them once the lock has actually
+// committed, rather than from inside this transaction.
+export async function deriveAchievements(
+  db: Db, fixtureId: string, opts: SupersedeOptions = {},
+): Promise<Array<{ user_id: string; title: string }>> {
+  if (opts.supersedeVersion != null) {
+    await supersedeAchievements(db, fixtureId, opts.supersedeVersion);
+    return [];
+  }
   return writeAchievementsFor(db, fixtureId, opts.participants ?? NO_PARTICIPANTS);
 }
 

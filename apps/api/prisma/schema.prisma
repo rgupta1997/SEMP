@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -94,8 +94,6 @@ model championships {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model fixtures {
   id                                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  /// Sequential within the championship, in scheduled order. Assigned at creation.
-  match_no                             Int?
   tournament_discipline_id             String                 @db.Uuid
   home_team_id                         String?                @db.Uuid
   away_team_id                         String?                @db.Uuid
@@ -115,6 +113,9 @@ model fixtures {
   winner_team_id                       String?                @db.Uuid
   live_state                           Json                   @default("{}")
   live_log                             Json                   @default("[]")
+  stage_sequence                       Int                    @default(1) @db.SmallInt
+  home_slot_label                      String?                @db.VarChar
+  away_slot_label                      String?                @db.VarChar
   scorecard_status                     String                 @default("draft") @db.VarChar
   submitted_at                         DateTime?              @db.Timestamptz(6)
   submitted_by                         String?                @db.Uuid
@@ -122,9 +123,8 @@ model fixtures {
   locked_by                            String?                @db.Uuid
   lock_version                         Int                    @default(0)
   live_started_at                      DateTime?              @db.Timestamptz(6)
-  stage_sequence                       Int                    @default(1) @db.SmallInt
-  home_slot_label                      String?                @db.VarChar
-  away_slot_label                      String?                @db.VarChar
+  /// Sequential within the championship, in scheduled order. Assigned at creation.
+  match_no                             Int?
   certificates                         certificates[]
   fixture_awards                       fixture_awards[]
   fixture_events                       fixture_events[]
@@ -280,20 +280,21 @@ model team_members {
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model teams {
   id                                      String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   sport_id                                String         @db.Uuid
   organization_id                         String         @db.Uuid
   name                                    String         @db.VarChar
-  /// Scoreboard abbreviation, entered by whoever creates the squad. Required by the
-  /// API on create; nullable here only because 136 rows predate the column.
-  short_name                              String?        @db.VarChar(12)
   status                                  String         @default("forming") @db.VarChar
   invite_token                            String?        @unique @db.VarChar
   created_at                              DateTime       @default(now()) @db.Timestamptz(6)
   updated_at                              DateTime       @default(now()) @db.Timestamptz(6)
   coach_user_id                           String?        @db.Uuid
   org_unit_id                             String?        @db.Uuid
+  /// Scoreboard abbreviation, entered by whoever creates the squad. Required by the
+  /// API on create; nullable here only because 136 rows predate the column.
+  short_name                              String?        @db.VarChar(12)
   fixtures_fixtures_away_team_idToteams   fixtures[]     @relation("fixtures_away_team_idToteams")
   fixtures_fixtures_home_team_idToteams   fixtures[]     @relation("fixtures_home_team_idToteams")
   fixtures_fixtures_winner_team_idToteams fixtures[]     @relation("fixtures_winner_team_idToteams")
@@ -488,10 +489,10 @@ model users {
   notifications                                                            notifications[]
   org_unit_members                                                         org_unit_members[]
   org_units                                                                org_units[]
+  org_verification_requests_reviewed_by                                    org_verification_requests[]  @relation("org_verification_requests_reviewed_byTousers")
+  org_verification_requests_submitted_by                                   org_verification_requests[]  @relation("org_verification_requests_submitted_byTousers")
   organization_members                                                     organization_members[]
   organization_members_organization_members_verified_byTousers             organization_members[]       @relation("organization_members_verified_byTousers")
-  org_verification_requests_submitted_by                                   org_verification_requests[]  @relation("org_verification_requests_submitted_byTousers")
-  org_verification_requests_reviewed_by                                    org_verification_requests[]  @relation("org_verification_requests_reviewed_byTousers")
   organizations_organizations_created_byTousers                            organizations[]              @relation("organizations_created_byTousers")
   profile_privacy                                                          profile_privacy?
   report_jobs                                                              report_jobs[]
@@ -784,8 +785,8 @@ model org_verification_requests {
   created_at                                          DateTime      @default(now()) @db.Timestamptz(6)
   updated_at                                          DateTime      @default(now()) @db.Timestamptz(6)
   organizations                                       organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users_org_verification_requests_submitted_byTousers users?        @relation("org_verification_requests_submitted_byTousers", fields: [submitted_by], references: [id], onUpdate: NoAction)
   users_org_verification_requests_reviewed_byTousers  users?        @relation("org_verification_requests_reviewed_byTousers", fields: [reviewed_by], references: [id], onUpdate: NoAction)
+  users_org_verification_requests_submitted_byTousers users?        @relation("org_verification_requests_submitted_byTousers", fields: [submitted_by], references: [id], onUpdate: NoAction)
 
   @@index([created_at(sort: Desc)], map: "idx_org_verification_created")
   @@index([status], map: "idx_org_verification_status")

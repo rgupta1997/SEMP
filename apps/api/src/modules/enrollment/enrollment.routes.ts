@@ -28,7 +28,7 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
   router.post('/championships/:eventId/enroll', guards.enrollSelf, validateBody(enrollOrganizationSchema), asyncHandler(async (req, res) => {
     const championship = await prisma.championships.findUnique({
       where: { id: req.params.eventId },
-      select: { status: true, visibility: true, entry_level: true, host_organization_id: true },
+      select: { name: true, status: true, visibility: true, entry_level: true, host_organization_id: true },
     });
     if (!championship) throw new NotFoundError('Championship');
 
