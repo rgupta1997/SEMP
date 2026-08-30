@@ -2,7 +2,7 @@ import { Clock, Medal, Trophy, ShieldCheck } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { useApi, fmtDate } from '../../lib/hooks';
 import {
-  Badge, BackButton, Card, CardBody, CardHeader, EmptyState, PageHeader, Spinner, StatCard, cn,
+  Badge, Card, CardBody, CardHeader, EmptyState, Spinner, StatCard, cn,
 } from '../../components/ui';
 
 // The lifetime record (J4-E2) - a player's permanent, verified sporting history.
@@ -96,18 +96,10 @@ export function LifetimeRecordPage() {
   }
   if (!data) return null;
 
-  const { person, stats, timeline, achievements } = data;
-  const isSelf = !userId;
+  const { stats, timeline, achievements } = data;
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title={isSelf ? 'My record' : person.name}
-        subtitle="Everything played, in one place. Results an organiser has made official are marked Verified and count towards the totals below; nothing here can be edited - correcting the result is the only thing that changes it."
-      >
-        <BackButton to="/profile" className="mb-0">Dashboard</BackButton>
-      </PageHeader>
-
       {/* The totals count VERIFIED results only. The provisional hint is what
           keeps that from reading as data loss when a player can plainly see
           more matches on the timeline than the counter admits. */}

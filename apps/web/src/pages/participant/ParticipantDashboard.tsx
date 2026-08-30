@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth } from '../../lib/auth';
 import { useApi } from '../../lib/hooks';
-import { Button, Card, CardBody, EmptyState, PageHeader, Spinner } from '../../components/ui';
+import { Button, Card, CardBody, EmptyState, Spinner } from '../../components/ui';
 import { CareerStats } from '../../components/participant/CareerStats';
 import { EventCard } from '../../components/participant/EventCard';
 import { MatchRow } from '../../components/participant/MatchRow';
@@ -26,8 +25,6 @@ function ShowMore({ hidden, onClick }: { hidden: number; onClick: () => void }) 
 }
 
 export function ParticipantDashboard() {
-  const { ctx } = useAuth();
-  const user = ctx!.user;
   const { data, isLoading } = useApi<DashboardData>('/me/dashboard');
 
   const [champShown, setChampShown] = useState(CHAMP_INITIAL);
@@ -55,8 +52,6 @@ export function ParticipantDashboard() {
 
   return (
     <div className="space-y-6 pb-20">
-      <PageHeader title={`Welcome, ${user.name.split(' ')[0]}`} subtitle="Your matches and championships across the platform." />
-
       {isLoading || !data ? (
         <Spinner />
       ) : data.stats.total_events === 0 ? (

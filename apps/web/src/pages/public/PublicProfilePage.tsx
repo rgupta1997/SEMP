@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Award, CalendarCheck, Medal, Moon, ShieldCheck, Sun, Swords, Trophy } from 'lucide-react';
+import { Medal, Moon, ShieldCheck, Sun, Swords, Trophy } from 'lucide-react';
 import { api } from '../../lib/api';
 import { BrandMark } from '../../components/BrandMark';
-import { Spinner } from '../../components/ui';
+import { Badge, Card, CardBody, CardHeader, Spinner, StatCard } from '../../components/ui';
 import { useTheme } from '../../lib/theme';
 
 // Public sports profile (F-026 extension) - outside the app shell and outside auth,
 // same reasoning as VerifyCertificatePage: a profile someone chose to make public is
 // only actually public if a stranger with no account can open it.
+//
+// Built from the SAME Card/StatCard/Badge components the authenticated Sports
+// Profile page uses, rather than a bespoke look - a public mirror of a page should
+// look like it came from the same product, not a different one.
 //
 // v1 ships one fixed set of fields, chosen by us rather than the profile owner -
 // identity plus the verified record, nothing that belongs to anyone else (no
@@ -41,24 +45,6 @@ const MEDAL_RING = {
 
 const initials = (s: string) => s.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 
-function StatTile({ icon: Icon, label, value, hint, accent }: {
-  icon: typeof Trophy; label: string; value: string | number; hint?: string; accent: string;
-}) {
-  return (
-    <div className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 transition-shadow hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
-      <div className={`mb-3 grid h-9 w-9 place-items-center rounded-xl ${accent}`}>
-        <Icon size={17} aria-hidden />
-      </div>
-      <div className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">{value}</div>
-      <div className="mt-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
-      {hint && <div className="mt-1 text-xs text-slate-400 dark:text-slate-500">{hint}</div>}
-    </div>
-  );
-}
-
-// The handle arrives as a PROP, not from useParams: this page renders outside the
-// <Route> tree (ahead of every auth check), so there is no route context to read
-// params from - useParams would silently hand back undefined.
 function ThemeToggle() {
   const { theme, toggle } = useTheme();
   const dark = theme === 'dark';
@@ -67,13 +53,16 @@ function ThemeToggle() {
       onClick={toggle}
       aria-label={dark ? 'Switch to light view' : 'Switch to dark view'}
       title={dark ? 'Light view' : 'Dark view'}
-      className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+      className="grid h-8 w-8 place-items-center rounded-lg border border-[var(--line)] text-[var(--muted)] transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
     >
       {dark ? <Sun size={15} aria-hidden /> : <Moon size={15} aria-hidden />}
     </button>
   );
 }
 
+// The handle arrives as a PROP, not from useParams: this page renders outside the
+// <Route> tree (ahead of every auth check), so there is no route context to read
+// params from - useParams would silently hand back undefined.
 export function PublicProfilePage({ handle }: { handle?: string }) {
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -89,13 +78,15 @@ export function PublicProfilePage({ handle }: { handle?: string }) {
     return () => { live = false; };
   }, [handle]);
 
-  // The chrome around it - logo, product badge, theme toggle - renders the same
-  // way whatever state the page is in, so a slow connection reads as "this app is
-  // loading a page" rather than "did this link even go anywhere real". Only the
-  // content underneath it changes.
+  // The chrome around it - logo, theme toggle - renders the same way whatever
+  // state the page is in, so a slow connection reads as "this app is loading a
+  // page" rather than "did this link even go anywhere real". Only the content
+  // underneath it changes. Backgrounds use the app's own --canvas token in light
+  // mode (that token has no dark variant of its own, so dark mode falls back to
+  // the same slate-950 every other Tailwind-styled page in this product uses).
   const Shell = ({ children }: { children: React.ReactNode }) => (
-    <div className="flex min-h-screen flex-col bg-slate-50 dark:bg-slate-950">
-      <header className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 py-3.5 dark:border-slate-800 dark:bg-slate-900">
+    <div className="flex min-h-screen flex-col bg-[var(--canvas)] dark:bg-slate-950">
+      <header className="flex shrink-0 items-center justify-between border-b border-[var(--line)] bg-white px-6 py-3.5 dark:border-slate-800 dark:bg-slate-900">
         <BrandMark height={22} />
         <ThemeToggle />
       </header>
@@ -110,8 +101,8 @@ export function PublicProfilePage({ handle }: { handle?: string }) {
           <div className="grid h-14 w-14 place-items-center rounded-2xl bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500">
             <ShieldCheck size={24} aria-hidden />
           </div>
-          <h1 className="mt-5 text-xl font-bold text-slate-900 dark:text-slate-100">Profile not found</h1>
-          <p className="mt-2 max-w-sm text-sm text-slate-600 dark:text-slate-300">
+          <h1 className="mt-5 text-xl font-bold text-[var(--ink-2)] dark:text-slate-100">Profile not found</h1>
+          <p className="mt-2 max-w-sm text-sm text-[var(--muted)] dark:text-slate-300">
             Either this handle does not exist, or its owner has not made their profile public.
           </p>
         </main>
@@ -123,7 +114,7 @@ export function PublicProfilePage({ handle }: { handle?: string }) {
     return (
       <Shell>
         <main className="mx-auto flex flex-1 items-center justify-center px-6 text-center">
-          <p className="max-w-sm text-sm text-slate-600 dark:text-slate-300">
+          <p className="max-w-sm text-sm text-[var(--muted)] dark:text-slate-300">
             We could not reach the profile service. That is a problem at our end - please try again shortly.
           </p>
         </main>
@@ -146,107 +137,110 @@ export function PublicProfilePage({ handle }: { handle?: string }) {
   return (
     <Shell>
       <main className="mx-auto w-full max-w-2xl space-y-5 px-4 py-8 sm:px-6 sm:py-12">
-        {/* Identity */}
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="h-20 bg-gradient-to-r from-[#0E7C82] via-[#4F63D2] to-[#8B5CF6] sm:h-24" />
-          <div className="px-6 pb-6">
-            <div className="-mt-10 flex flex-wrap items-end justify-between gap-4 sm:-mt-12">
+        {/* Identity - same shape as the authenticated ProfileHeader card (solid
+            brand-coloured avatar tile, bold name, badges, sport chips), just
+            without any control a stranger has no business seeing. */}
+        <Card>
+          <CardBody className="sm:px-6 sm:pt-6 sm:pb-6">
+            <div className="flex flex-wrap items-start gap-5">
               {p.avatar_url ? (
                 <img
                   src={p.avatar_url} alt=""
-                  className="h-20 w-20 shrink-0 rounded-2xl border-4 border-white object-cover shadow-md dark:border-slate-900 sm:h-24 sm:w-24"
+                  className="h-16 w-16 shrink-0 rounded-2xl object-cover sm:h-20 sm:w-20"
                 />
               ) : (
                 <div
                   aria-hidden
-                  className="grid h-20 w-20 shrink-0 place-items-center rounded-2xl border-4 border-white bg-gradient-to-br from-[#0E7C82] to-[#6D28D9] text-2xl font-black text-white shadow-md dark:border-slate-900 sm:h-24 sm:w-24 sm:text-3xl"
+                  className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-[var(--brand)] text-2xl font-black text-white sm:h-20 sm:w-20 sm:text-3xl"
                 >
                   {initials(p.name) || <ShieldCheck size={26} />}
                 </div>
               )}
-              {p.sportagon_id && (
-                <span className="mb-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-[11px] font-bold tracking-wide text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                  {p.sportagon_id}
-                </span>
-              )}
-            </div>
 
-            <div className="mt-4 min-w-0">
-              <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-slate-100">{p.name}</h1>
-              <p className="mt-0.5 font-mono text-[13px] text-slate-500 dark:text-slate-400">@{p.handle}</p>
-              {p.tagline && <p className="mt-3 max-w-md text-[14.5px] leading-relaxed text-slate-600 dark:text-slate-300">{p.tagline}</p>}
+              <div className="min-w-0 flex-1">
+                <h1 className="text-2xl font-black tracking-tight text-[var(--ink-2)] dark:text-slate-100">{p.name}</h1>
+                {p.tagline && <p className="mt-1 text-sm text-[var(--ink-4)] dark:text-slate-300">{p.tagline}</p>}
 
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                {p.officiates && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
-                    <Swords size={12} aria-hidden />Official
-                  </span>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {p.sportagon_id && (
+                    <span className="rounded-md bg-[var(--brand-line)] px-2.5 py-1 font-mono text-xs font-bold tracking-wide text-[var(--brand)] dark:bg-brand-500/15 dark:text-brand-300">
+                      {p.sportagon_id}
+                    </span>
+                  )}
+                  {p.officiates && <Badge tone="amber"><Swords size={12} aria-hidden />Official</Badge>}
+                  {p.verified_contact && <Badge tone="green"><ShieldCheck size={12} aria-hidden />Verified contact</Badge>}
+                </div>
+
+                {p.preferred_sports.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {p.preferred_sports.map((s) => (
+                      <span
+                        key={s}
+                        className="rounded-full border border-[var(--line)] px-2.5 py-1 text-xs font-medium text-[var(--ink-4)] dark:border-slate-700 dark:text-slate-300"
+                      >
+                        {s}
+                      </span>
+                    ))}
+                  </div>
                 )}
-                {p.verified_contact && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
-                    <ShieldCheck size={12} aria-hidden />Verified contact
-                  </span>
-                )}
-                {p.preferred_sports.map((s) => (
-                  <span key={s} className="rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                    {s}
-                  </span>
-                ))}
               </div>
             </div>
-          </div>
-        </section>
+          </CardBody>
+        </Card>
 
         {/* Verified record - only present when the owner has also turned on
             "Show my stats publicly"; public_profile alone gets the identity
-            card above, not this. */}
+            card above, not this. Uses the same StatCard tile as every stats
+            surface in the product (Standings, My Game, the org dashboard). */}
         {p.stats && p.achievements ? (
           <>
-            <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <StatTile icon={CalendarCheck} label="Verified events" value={p.stats.events} accent="bg-sky-100 text-sky-600 dark:bg-sky-500/15 dark:text-sky-400" />
-              <StatTile icon={Swords} label="Won / Lost / Drew" value={`${p.stats.won} / ${p.stats.lost} / ${p.stats.drew}`} accent="bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400" />
-              <StatTile
-                icon={Medal} label="Medals" value={p.stats.total_medals} accent="bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400"
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatCard label="Verified events" value={p.stats.events} />
+              <StatCard label="Won / Lost / Drew" value={`${p.stats.won}/${p.stats.lost}/${p.stats.drew}`} />
+              <StatCard
+                label="Medals" value={p.stats.total_medals}
                 hint={p.stats.total_medals > 0 ? `${p.stats.medals.gold}G · ${p.stats.medals.silver}S · ${p.stats.medals.bronze}B` : undefined}
               />
-              <StatTile icon={Award} label="Awards" value={p.stats.awards} accent="bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400" />
-            </section>
+              <StatCard label="Awards" value={p.stats.awards} />
+            </div>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">Honours</h2>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Every medal, placement and award, each tied to a verified result.</p>
-
-              {p.achievements.length === 0 ? (
-                <div className="mt-6 flex flex-col items-center gap-2 rounded-xl bg-slate-50 py-10 text-center text-sm text-slate-400 dark:bg-slate-800/50 dark:text-slate-500">
-                  <Trophy size={22} aria-hidden />
-                  Nothing verified yet.
-                </div>
-              ) : (
-                <ul className="mt-4 divide-y divide-slate-100 dark:divide-slate-800">
-                  {p.achievements.map((a, i) => (
-                    <li key={i} className="flex items-center gap-3 py-3">
-                      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${a.medal ? MEDAL_RING[a.medal] : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'}`}>
-                        <Medal size={16} aria-hidden />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{a.title}</span>
-                        <span className="block text-xs text-slate-500 dark:text-slate-400">
-                          {[a.sport, new Date(a.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })].filter(Boolean).join(' · ')}
+            <Card>
+              <CardHeader title="Honours" subtitle="Every medal, placement and award, each tied to a verified result." />
+              <CardBody className="pt-0">
+                {p.achievements.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 rounded-xl bg-slate-50 py-10 text-center text-sm text-[var(--faint)] dark:bg-slate-800/50 dark:text-slate-500">
+                    <Trophy size={22} aria-hidden />
+                    Nothing verified yet.
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {p.achievements.map((a, i) => (
+                      <li key={i} className="flex items-center gap-3 py-3">
+                        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${a.medal ? MEDAL_RING[a.medal] : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'}`}>
+                          <Medal size={16} aria-hidden />
                         </span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-semibold text-[var(--ink-2)] dark:text-slate-100">{a.title}</span>
+                          <span className="block text-xs text-[var(--muted)] dark:text-slate-400">
+                            {[a.sport, new Date(a.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })].filter(Boolean).join(' · ')}
+                          </span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardBody>
+            </Card>
           </>
         ) : (
-          <section className="rounded-2xl border border-dashed border-slate-300 bg-white/60 p-6 text-center text-sm text-slate-400 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-500">
-            This player has kept their verified stats private.
-          </section>
+          <Card>
+            <CardBody className="text-center text-sm text-[var(--faint)]">
+              This player has kept their verified stats private.
+            </CardBody>
+          </Card>
         )}
 
-        <p className="pt-1 text-center text-[11px] text-slate-400 dark:text-slate-600">
+        <p className="pt-1 text-center text-[11px] text-[var(--faint)] dark:text-slate-600">
           This record is verified by Sportagon and cannot be edited by its owner.
         </p>
       </main>
