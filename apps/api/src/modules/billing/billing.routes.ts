@@ -8,6 +8,7 @@ import {
   subscribeSchema,
 } from '@semp/shared';
 import { notify } from '@semp/notifications/server/notify.js';
+import type { NotificationTypeKey } from '@semp/notifications/core/registry.js';
 import {
   CAPABILITIES,
   capabilitiesOn,
@@ -416,7 +417,7 @@ export function makeBillingRouter(prisma: Prisma): Router {
 async function announcePlanChange(
   prisma: Prisma,
   holder: Holder,
-  input: { type: string; from: Tier; to: Tier; actorId: string | null; effectiveAt?: Date | null },
+  input: { type: NotificationTypeKey; from: Tier; to: Tier; actorId: string | null; effectiveAt?: Date | null },
 ): Promise<void> {
   if (holder.ladder !== 'org') return;
   try {

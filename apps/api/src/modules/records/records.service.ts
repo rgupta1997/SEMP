@@ -225,10 +225,24 @@ export async function writeLifetimeEntriesFor(db: Db, fixtureId: string, partici
   });
 }
 
-/** The typed, countable medals / placements / awards (J4-E4). */
-export async function writeAchievementsFor(db: Db, fixtureId: string, participants: FixtureParticipants): Promise<void> {
+/**
+ * The typed, countable medals / placements / awards (J4-E4).
+ *
+ * Returns who should be told about a new achievement, rather than notifying
+ * here directly - this runs inside the scorecard lock's transaction (which
+ * Prisma caps at 5s), and notify() is its own handful of sequential queries
+ * per recipient. Firing it here was what actually pushed a real lock over
+ * that timeout, not connection flakiness - lock.service.ts is the one place
+ * that knows when the transaction has ACTUALLY committed, and this file's own
+ * notifyParticipants already does exactly that for the same reason: "a
+ * notification sent inside the transaction would survive a failure that undid
+ * the very thing it announces."
+ */
+export async function writeAchievementsFor(
+  db: Db, fixtureId: string, participants: FixtureParticipants,
+): Promise<Array<{ user_id: string; title: string }>> {
   const derived = await derive(db, fixtureId, participants);
-  if (!derived || derived.achievements.length === 0) return;
+  if (!derived || derived.achievements.length === 0) return [];
 
   await supersedeAchievements(db, fixtureId);
 
@@ -244,4 +258,8 @@ export async function writeAchievementsFor(db: Db, fixtureId: string, participan
       detail: a.detail as object,
     })),
   });
+
+  return derived.achievements
+    .filter((a): a is typeof a & { user_id: string } => !!a.user_id)
+    .map((a) => ({ user_id: a.user_id, title: a.title }));
 }

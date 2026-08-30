@@ -14,7 +14,11 @@ export interface NotificationTypeDef {
   bodyTemplate?: (data: Record<string, unknown>) => string | null;
 }
 
-export const NOTIFICATION_TYPES: Record<string, NotificationTypeDef> = {
+// `satisfies` rather than a `: Record<string, NotificationTypeDef>` annotation
+// on purpose: an explicit annotation widens every key to `string`, which is
+// exactly what NotificationTypeKey below exists to avoid. `satisfies` still
+// checks every entry against the shape, but leaves the literal key union intact.
+export const NOTIFICATION_TYPES = {
   event_lifecycle: {
     key: 'event_lifecycle',
 
@@ -374,4 +378,330 @@ ${where}` : where;
       return `Your request to join ${organizationName} was declined`;
     },
   },
-};
+
+  // ---- Trigger Matrix build-out (2026-08-26) -----------------------------
+  //
+  // Every type below wires an existing app action to notify() for the first
+  // time - none of them add a new status, field, or workflow. Recipients and
+  // copy are taken directly from the trigger-matrix/notification-spec doc.
+  // Anything from that doc needing a scheduler or a not-yet-built concept
+  // (trials, waitlists, deadlines, lineups, reminders, reports) is
+  // deliberately left out - see the audit this build-out followed.
+
+  role_assigned: {
+    key: 'role_assigned',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for role_assigned');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => 'You have been assigned a new role',
+    bodyTemplate: (data) => {
+      const role = String(data.roleName ?? 'a role');
+      const org = String(data.organizationName ?? 'your institution');
+      return `You've been given the ${role} role at ${org}.`;
+    },
+  },
+
+  role_changed: {
+    key: 'role_changed',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for role_changed');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => 'Your organization role changed',
+    bodyTemplate: (data) => {
+      const role = String(data.roleName ?? 'your role');
+      const status = String(data.status ?? '').toLowerCase();
+      const org = String(data.organizationName ?? 'your institution');
+      return status
+        ? `Your ${role} role at ${org} is now ${status}.`
+        : `Your ${role} role at ${org} has changed.`;
+    },
+  },
+
+  admin_access_revoked: {
+    key: 'admin_access_revoked',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for admin_access_revoked');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => 'Your admin access changed',
+    bodyTemplate: (data) => {
+      const role = String(data.roleName ?? 'role');
+      const org = String(data.organizationName ?? 'your institution');
+      return `Your ${role} access at ${org} has been removed.`;
+    },
+  },
+
+  // ---- Team (2026-08-26) --------------------------------------------------
+
+  team_created: {
+    key: 'team_created',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for team_created');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => 'Team created successfully',
+    bodyTemplate: (data) => `${String(data.teamName ?? 'Your team')} is ready.`,
+  },
+
+  team_player_added: {
+    key: 'team_player_added',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for team_player_added');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => "You've been added to a team",
+    bodyTemplate: (data) => `You're now part of ${String(data.teamName ?? 'the team')}.`,
+  },
+
+  team_player_removed: {
+    key: 'team_player_removed',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for team_player_removed');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => 'You were removed from a team',
+    bodyTemplate: (data) => `You're no longer part of ${String(data.teamName ?? 'the team')}.`,
+  },
+
+  team_coach_assigned: {
+    key: 'team_coach_assigned',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for team_coach_assigned');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => "You've been assigned as coach",
+    bodyTemplate: (data) => `You're now the coach of ${String(data.teamName ?? 'the team')}.`,
+  },
+
+  team_captain_assigned: {
+    key: 'team_captain_assigned',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for team_captain_assigned');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => "You've been named team captain",
+    bodyTemplate: (data) => `You're now captain of ${String(data.teamName ?? 'the team')}.`,
+  },
+
+  team_roster_locked: {
+    key: 'team_roster_locked',
+    defaultAudience: (ctx) => {
+      if (!ctx.teamId) throw new Error('teamId is required for team_roster_locked');
+      return Rules.teamMembers(ctx.teamId);
+    },
+    titleTemplate: () => 'Team roster locked',
+    bodyTemplate: (data) => `${String(data.teamName ?? 'Your team')}'s roster is now locked in.`,
+  },
+
+  // ---- Fixture / Match / Result (2026-08-26) ------------------------------
+  //
+  // match_* types are always called with an explicit `audience` (both teams'
+  // members + coaches, composed from real ids at the call site) - there's no
+  // single teamId/championshipId in RuleContext that could express "both
+  // sides of this match", so defaultAudience intentionally refuses to guess.
+
+  fixtures_generated: {
+    key: 'fixtures_generated',
+    defaultAudience: (ctx) => {
+      if (!ctx.championshipId) throw new Error('championshipId is required for fixtures_generated');
+      return Rules.role('organiser', ctx.championshipId);
+    },
+    titleTemplate: () => 'Fixtures generated',
+    bodyTemplate: (data) => `Fixtures for ${String(data.disciplineName ?? 'the draw')} are ready to review.`,
+  },
+
+  match_scheduled: {
+    key: 'match_scheduled',
+    defaultAudience: () => { throw new Error('match_scheduled requires an explicit audience'); },
+    titleTemplate: () => 'Your match has been scheduled',
+    bodyTemplate: (data) => String(data.body ?? ''),
+  },
+
+  match_rescheduled: {
+    key: 'match_rescheduled',
+    defaultAudience: () => { throw new Error('match_rescheduled requires an explicit audience'); },
+    titleTemplate: () => 'Match time changed',
+    bodyTemplate: (data) => String(data.body ?? ''),
+  },
+
+  match_venue_changed: {
+    key: 'match_venue_changed',
+    defaultAudience: () => { throw new Error('match_venue_changed requires an explicit audience'); },
+    titleTemplate: () => 'Match venue changed',
+    bodyTemplate: (data) => String(data.body ?? ''),
+  },
+
+  match_opponent_changed: {
+    key: 'match_opponent_changed',
+    defaultAudience: () => { throw new Error('match_opponent_changed requires an explicit audience'); },
+    titleTemplate: () => 'Match opponent changed',
+    bodyTemplate: (data) => String(data.body ?? ''),
+  },
+
+  match_cancelled: {
+    key: 'match_cancelled',
+    defaultAudience: () => { throw new Error('match_cancelled requires an explicit audience'); },
+    titleTemplate: () => 'Match cancelled',
+    bodyTemplate: (data) => String(data.body ?? ''),
+  },
+
+  match_live: {
+    key: 'match_live',
+    defaultAudience: () => { throw new Error('match_live requires an explicit audience'); },
+    titleTemplate: () => 'Match is live',
+    bodyTemplate: (data) => String(data.body ?? ''),
+  },
+
+  result_submitted: {
+    key: 'result_submitted',
+    defaultAudience: (ctx) => {
+      if (!ctx.championshipId) throw new Error('championshipId is required for result_submitted');
+      return Rules.role('organiser', ctx.championshipId);
+    },
+    titleTemplate: () => 'Result submitted',
+    bodyTemplate: (data) => String(data.body ?? 'A match result is ready to review.'),
+  },
+
+  team_qualifies: {
+    key: 'team_qualifies',
+    defaultAudience: () => { throw new Error('team_qualifies requires an explicit audience'); },
+    titleTemplate: () => 'Your team has qualified',
+    bodyTemplate: (data) => String(data.body ?? ''),
+  },
+
+  // ---- Event (2026-08-26) --------------------------------------------------
+
+  registration_submitted: {
+    key: 'registration_submitted',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for registration_submitted');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => 'Registration submitted',
+    bodyTemplate: (data) => `Your application to ${String(data.championshipName ?? 'the championship')} was received.`,
+  },
+
+  participant_approval_pending: {
+    key: 'participant_approval_pending',
+    defaultAudience: (ctx) => {
+      if (!ctx.championshipId) throw new Error('championshipId is required for participant_approval_pending');
+      return Rules.role('organiser', ctx.championshipId);
+    },
+    titleTemplate: () => 'Registrations awaiting approval',
+    bodyTemplate: (data) => `${String(data.orgName ?? 'An organization')} applied to ${String(data.championshipName ?? 'your championship')}.`,
+  },
+
+  registration_rejected: {
+    key: 'registration_rejected',
+    defaultAudience: (ctx) => {
+      if (!ctx.organizationId) throw new Error('organizationId is required for registration_rejected');
+      return Rules.orgAdmins(ctx.organizationId);
+    },
+    titleTemplate: () => 'Registration not approved',
+    bodyTemplate: (data) => {
+      const reason = data.reason ? String(data.reason) : null;
+      const championshipName = String(data.championshipName ?? 'the championship');
+      return reason
+        ? `Your application to ${championshipName} was not approved: ${reason}`
+        : `Your application to ${championshipName} was not approved.`;
+    },
+  },
+
+  // ---- Organization / Achievement / Certificate / Signup (2026-08-26) -----
+
+  organization_created: {
+    key: 'organization_created',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for organization_created');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => 'Organization workspace created',
+    bodyTemplate: (data) => `${String(data.organizationName ?? 'Your organization')} is ready to set up.`,
+  },
+
+  achievement_created: {
+    key: 'achievement_created',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for achievement_created');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => 'New achievement added',
+    bodyTemplate: (data) => String(data.title ?? 'A new achievement was added to your profile.'),
+  },
+
+  certificate_generated: {
+    key: 'certificate_generated',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for certificate_generated');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => 'Your certificate is ready',
+    bodyTemplate: (data) => String(data.title ?? 'A certificate was generated for you.'),
+  },
+
+  account_created: {
+    key: 'account_created',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for account_created');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => 'Welcome to EOS',
+    bodyTemplate: () => 'Your account is ready. Complete your profile to get started.',
+  },
+
+  account_security_changed: {
+    key: 'account_security_changed',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for account_security_changed');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => 'Account security updated',
+    bodyTemplate: () => 'Your password was changed. If this wasn’t you, review your account.',
+  },
+
+  // ---- Corrections (2026-08-27) - two rows mis-scoped as blocked earlier -------
+
+  fixtures_published: {
+    key: 'fixtures_published',
+    // Same shape as the match_* family: the audience is every team in the newly-
+    // generated draw, composed from real ids at the call site - no single teamId in
+    // RuleContext could express that.
+    defaultAudience: () => { throw new Error('fixtures_published requires an explicit audience'); },
+    titleTemplate: () => 'Fixtures are now available',
+    bodyTemplate: (data) => `Fixtures for ${String(data.disciplineName ?? 'the draw')} are ready to view.`,
+  },
+
+  match_score_locked: {
+    key: 'match_score_locked',
+    defaultAudience: () => { throw new Error('match_score_locked requires an explicit audience'); },
+    titleTemplate: () => 'Match score locked',
+    bodyTemplate: (data) => String(data.body ?? 'This scorecard is now locked.'),
+  },
+
+  // ---- Claims (J4-E5) ------------------------------------------------------
+  //
+  // Posted via createNotification() directly, not notify() - claims.routes.ts
+  // already has its exact title/body in hand and there is no template to run.
+  // Registered here anyway so `type` is checked against ONE list: a key that
+  // exists only for createNotification() callers is still a key a typo can get
+  // wrong, and this is what makes that a compile error instead of a runtime one.
+  claim_submitted: {
+    key: 'claim_submitted',
+    defaultAudience: () => { throw new Error('claim_submitted is posted via createNotification(), not notify()'); },
+    titleTemplate: () => 'An achievement claim needs review',
+  },
+  claim_approved: {
+    key: 'claim_approved',
+    defaultAudience: () => { throw new Error('claim_approved is posted via createNotification(), not notify()'); },
+    titleTemplate: () => 'Your claim was validated',
+  },
+  claim_rejected: {
+    key: 'claim_rejected',
+    defaultAudience: () => { throw new Error('claim_rejected is posted via createNotification(), not notify()'); },
+    titleTemplate: () => 'Your claim was not accepted',
+  },
+} satisfies Record<string, NotificationTypeDef>;
+
+export type NotificationTypeKey = keyof typeof NOTIFICATION_TYPES;

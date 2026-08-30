@@ -13,6 +13,7 @@ import { renderCertificateHtml, sampleFacts } from './render.js';
 import { CERTIFICATE_PRESETS, presetById } from './presets.js';
 import { certificateActivity, certificateOverview, certificateTrail, statusOf } from './overview.js';
 import { env } from '../../config/env.js';
+import { notify } from '@semp/notifications/server/notify.js';
 
 // Certificates: templates (J4-E6), bulk issue (J4-E7), and the register behind them.
 // Public verification lives in the public router - it must be reachable with no account.
@@ -350,6 +351,18 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
         });
         issued++;
         results.push({ achievement_id: a.id, ok: true, serial: cert.serial });
+        if (a.user_id) {
+          try {
+            await notify(prisma, {
+              type: 'certificate_generated',
+              userId: a.user_id,
+              senderId: req.user!.id,
+              data: { title: a.title },
+            });
+          } catch (err) {
+            console.error(`[certificates] certificate_generated notification failed for ${cert.id}:`, err);
+          }
+        }
       } catch (e: any) {
         // The partial unique index catches a re-run: somebody already has this
         // certificate, which is a skip and not an error.

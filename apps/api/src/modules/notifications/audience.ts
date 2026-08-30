@@ -1,7 +1,8 @@
-import type { NotificationAudience, NotificationType } from '@semp/shared';
+import type { NotificationAudience } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import type { JsonValue } from '@prisma/client/runtime/library';
 import type { AudienceRule } from '@semp/notifications/core/rules.js';
+import type { NotificationTypeKey } from '@semp/notifications/core/registry.js';
 import { matches } from '@semp/notifications/server/matches.js';
 import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
 
@@ -536,7 +537,8 @@ export function createNotification(
     organization_id?: string | null;
     target_user_id?: string | null;
     sender_id?: string | null;
-    type: NotificationType;
+    // A registry key, not a bare string - see notify.ts's NotifyInput for why.
+    type: NotificationTypeKey;
     audience: NotificationAudience;
     title: string;
     body?: string | null;

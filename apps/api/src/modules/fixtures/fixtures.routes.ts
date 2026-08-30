@@ -17,6 +17,8 @@ import { resolveStageAdvancement } from './domain/stage-resolver.js';
 import { clashesByFixture, findClashes } from './domain/clashes.js';
 import { recomputeStandingsForFixtureAtomic, resolveRuleForDraw, resolveSchemeForDraw } from '../standings/standings.service.js';
 import { notify } from '@semp/notifications/server/notify.js';
+import { Rules } from '@semp/notifications/core/rules.js';
+import { matchAudience, notifyMatch } from './match-audience.js';
 import { advanceWinner, propagateByes } from './bracket.js';
 import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
 import {
@@ -144,13 +146,30 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         where: { id: req.params.id },
         include: {
           tournament_formats: true,
-          tournament_sports: { include: { tournament_formats: true } },
+          disciplines: { select: { name: true } },
+          tournament_sports: { include: { tournament_formats: true, tournaments: { select: { championship_id: true } } } },
         },
       });
       if (!td) throw new NotFoundError('Tournament discipline');
 
       const formatName = td.tournament_formats?.name ?? td.tournament_sports.tournament_formats?.name;
       if (!formatName) throw new BusinessRuleError('No format configured for this draw');
+      const championshipId = td.tournament_sports.tournaments?.championship_id ?? null;
+      const notifyFixturesGenerated = async (rows: Array<{ home_team_id: string | null; away_team_id: string | null }>) => {
+        if (championshipId) {
+          try {
+            await notify(prisma, { type: 'fixtures_generated', championshipId, senderId: req.user!.id, data: { disciplineName: td.disciplines?.name } });
+          } catch (err) {
+            console.error(`[fixtures] fixtures_generated notification failed for draw ${td.id}:`, err);
+          }
+        }
+        // Players/teams get a separate notification from the organiser's - same
+        // trigger, different audience (the trigger doc's "Fixtures published" row).
+        const teamIds = [...new Set(rows.flatMap((f) => [f.home_team_id, f.away_team_id]).filter((t): t is string => !!t))];
+        if (teamIds.length > 0) {
+          await notifyMatch(prisma, 'fixtures_published', Rules.compose(teamIds.map((t) => Rules.teamMembers(t))), req.user!.id, { disciplineName: td.disciplines?.name });
+        }
+      };
 
       const params: Record<string, unknown> = {
         ...(td.tournament_sports.format_config as object),
@@ -215,6 +234,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
           where: { tournament_discipline_id: td.id },
           orderBy: [{ pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
         });
+        if (toCreate.length) await notifyFixturesGenerated(rows);
         res.status(201).json(rows);
         return;
       }
@@ -270,6 +290,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         where: { tournament_discipline_id: td.id },
         orderBy: [{ match_no: { sort: 'asc', nulls: 'last' } }, { pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
       });
+      await notifyFixturesGenerated(rows);
       res.status(201).json(rows);
     }));
 
@@ -282,7 +303,13 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     drawOrganiser,
     validateBody(generateAllStagesSchema),
     asyncHandler(async (req, res) => {
-      const td = await prisma.tournament_disciplines.findUnique({ where: { id: req.params.id } });
+      const td = await prisma.tournament_disciplines.findUnique({
+        where: { id: req.params.id },
+        include: {
+          disciplines: { select: { name: true } },
+          tournament_sports: { select: { tournaments: { select: { championship_id: true } } } },
+        },
+      });
       if (!td) throw new NotFoundError('Tournament discipline');
 
       let teams: TeamRef[];
@@ -333,6 +360,20 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         where: { tournament_discipline_id: td.id },
         orderBy: [{ stage_sequence: 'asc' }, { pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
       });
+      const championshipId = td.tournament_sports?.tournaments?.championship_id ?? null;
+      if (championshipId) {
+        try {
+          await notify(prisma, { type: 'fixtures_generated', championshipId, senderId: req.user!.id, data: { disciplineName: td.disciplines?.name } });
+        } catch (err) {
+          console.error(`[fixtures] fixtures_generated notification failed for draw ${td.id}:`, err);
+        }
+      }
+      // Players/teams get a separate notification - only stage-1 fixtures have real
+      // team ids at this point (later stages are still TBD placeholders).
+      const generatedTeamIds = [...new Set(rows.flatMap((f) => [f.home_team_id, f.away_team_id]).filter((t): t is string => !!t))];
+      if (generatedTeamIds.length > 0) {
+        await notifyMatch(prisma, 'fixtures_published', Rules.compose(generatedTeamIds.map((t) => Rules.teamMembers(t))), req.user!.id, { disciplineName: td.disciplines?.name });
+      }
       res.status(201).json(rows);
     }));
 
@@ -372,15 +413,16 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     // Scoring a match (going live or completing) requires both teams to be known - a
     // TBD bracket slot can't be played. Fetch once and reuse for the winner check.
     let fxTeams: {
-      home_team_id: string | null; away_team_id: string | null;
-      live_started_at: Date | null; tournament_disciplines: { format_config: any } | null;
+      home_team_id: string | null; away_team_id: string | null; status: string;
+      live_started_at: Date | null; official_id: string | null;
+      tournament_disciplines: { format_config: any } | null;
     } | null = null;
     const needsTeams = b.status === 'live' || b.status === 'completed';
-    if (needsTeams || b.winner_team_id != null) {
+    if (needsTeams || b.winner_team_id != null || b.status === 'cancelled') {
       fxTeams = await prisma.fixtures.findUnique({
         where: { id: req.params.id },
         select: {
-          home_team_id: true, away_team_id: true, live_started_at: true,
+          home_team_id: true, away_team_id: true, status: true, live_started_at: true, official_id: true,
           tournament_disciplines: { select: { format_config: true } },
         },
       });
@@ -412,6 +454,16 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     const headlineChanged = Object.keys(data).length > 0;
     if (headlineChanged) {
       await prisma.fixtures.update({ where: { id: req.params.id }, data });
+    }
+    // First-ever transition into 'live' (mirrors the live_started_at "only if not
+    // already set" test above) - a resumed match after a postponement doesn't re-fire.
+    if (b.status === 'live' && fxTeams && !fxTeams.live_started_at) {
+      const audience = await matchAudience(prisma, fxTeams.home_team_id, fxTeams.away_team_id, [fxTeams.official_id]);
+      await notifyMatch(prisma, 'match_live', audience, req.user!.id, { body: 'The match is now live.' });
+    }
+    if (b.status === 'cancelled' && fxTeams && fxTeams.status !== 'cancelled') {
+      const audience = await matchAudience(prisma, fxTeams.home_team_id, fxTeams.away_team_id, [fxTeams.official_id]);
+      await notifyMatch(prisma, 'match_cancelled', audience, req.user!.id, { body: 'This match has been cancelled.' });
     }
     let persisted = true;
     if ('live_state' in b || 'live_log' in b) {
@@ -592,6 +644,28 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       await advanceWinner(prisma, req.params.id);
       await resolveStageAdvancement(prisma, updated.tournament_discipline_id);
       await remindCustomPointsIfNeeded(prisma, req.params.id, req.user!.id);
+
+      try {
+        const td = await prisma.tournament_disciplines.findUnique({
+          where: { id: updated.tournament_discipline_id },
+          select: { tournament_sports: { select: { tournaments: { select: { championship_id: true } } } } },
+        });
+        const championshipId = td?.tournament_sports?.tournaments?.championship_id;
+        if (championshipId) {
+          await notify(prisma, {
+            type: 'result_submitted',
+            championshipId,
+            senderId: req.user!.id,
+            data: { body: 'A match result is ready to review.' },
+          });
+        }
+      } catch (err) {
+        console.error(`[fixtures] result_submitted notification failed for fixture ${req.params.id}:`, err);
+      }
+    }
+    if ((req.body.status ?? 'completed') === 'cancelled' && fixture.status !== 'cancelled') {
+      const audience = await matchAudience(prisma, fixture.home_team_id, fixture.away_team_id, [fixture.official_id]);
+      await notifyMatch(prisma, 'match_cancelled', audience, req.user!.id, { body: 'This match has been cancelled.' });
     }
     res.json(updated);
   }));
@@ -830,6 +904,37 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     next();
   });
 
+  // Manual edits through the generic editor (schedule/venue/opponent/cancel) - the
+  // one PATCH path that isn't a bespoke route above, so it's the only place these
+  // four can actually change. Only fires on a genuine change, never on an
+  // unrelated field edit (e.g. round/pool_number).
+  const notifyFixtureFieldChanges = async (_id: string, before: any, after: any) => {
+    if (!before) return;
+    const audience = await matchAudience(prisma, after.home_team_id, after.away_team_id, [after.official_id]);
+    if (before.scheduled_at == null && after.scheduled_at != null) {
+      await notifyMatch(prisma, 'match_scheduled', audience, null, { body: 'Your match has been scheduled.' });
+    } else if (
+      before.scheduled_at != null && after.scheduled_at != null &&
+      new Date(before.scheduled_at).getTime() !== new Date(after.scheduled_at).getTime()
+    ) {
+      await notifyMatch(prisma, 'match_rescheduled', audience, null, { body: 'This match’s time has changed.' });
+    }
+    if (before.venue_ground_id !== after.venue_ground_id) {
+      await notifyMatch(prisma, 'match_venue_changed', audience, null, { body: 'This match’s venue has changed.' });
+    }
+    // Only a genuine swap on an already-real match - a TBD slot getting its first
+    // real team is a qualifier resolving (stage-resolver.ts), not an "opponent change".
+    if (
+      before.home_team_id && before.away_team_id &&
+      (before.home_team_id !== after.home_team_id || before.away_team_id !== after.away_team_id)
+    ) {
+      await notifyMatch(prisma, 'match_opponent_changed', audience, null, { body: 'The opponent for this match has changed.' });
+    }
+    if (before.status !== 'cancelled' && after.status === 'cancelled') {
+      await notifyMatch(prisma, 'match_cancelled', audience, null, { body: 'This match has been cancelled.' });
+    }
+  };
+
   router.use('/fixtures', makeCrudRouter(prisma.fixtures, {
     name: 'Fixture',
     createSchema: createFixtureSchema,
@@ -838,6 +943,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     orderBy: [{ pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
     createGuards: [crudGuard],
     writeGuards: [crudGuard, notLocked],
+    afterUpdate: notifyFixtureFieldChanges,
   }));
 
   return router;

@@ -4,6 +4,8 @@ import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import { recomputeStandingsForFixture } from '../standings/standings.service.js';
 import { createNotification } from '../notifications/audience.js';
+import { notify } from '@semp/notifications/server/notify.js';
+import { Rules } from '@semp/notifications/core/rules.js';
 import { advanceWinnerStrict } from './bracket.js';
 import { deriveAchievements, queueCertificates, writeLifetimeEntries } from './downstream.js';
 import { resolveFixtureParticipants, type FixtureParticipants } from './participants.js';
@@ -179,7 +181,7 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
   // Everything that must be all-or-nothing happens in here. The audit entry and any
   // notification are deliberately OUTSIDE: an audit row describing a rolled-back lock
   // would be a lie, and an email cannot be un-sent.
-  const { fx, label, championshipId, fromStatus, participants } = await prisma.$transaction(async (tx) => {
+  const { fx, label, championshipId, fromStatus, participants, newAchievements } = await prisma.$transaction(async (tx) => {
     const current = await tx.fixtures.findUnique({ where: { id: fixtureId }, ...FIXTURE_FOR_LOCK });
     if (!current) throw new NotFoundError('Fixture');
     assertLockable(current);
@@ -231,7 +233,7 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
     //       this transaction three more times, and they receive the people already
     //       resolved rather than each working it out again.
     await writeLifetimeEntries(tx, locked.id, { participants });
-    await deriveAchievements(tx, locked.id, { participants });
+    const newAchievements = await deriveAchievements(tx, locked.id, { participants });
     await queueCertificates(tx, locked.id, { participants });
 
     return {
@@ -240,6 +242,7 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
       championshipId: championshipOf(current),
       fromStatus: current.scorecard_status,
       participants,
+      newAchievements,
     };
   });
 
@@ -261,6 +264,32 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
   // back, so one sent inside the transaction would survive a failure that undid the
   // very thing it announces.
   await notifyParticipants(prisma, req, { fixture: fx, label, championshipId, participants });
+
+  // Same reasoning as notifyParticipants: the achievement rows are already
+  // committed (written inside the transaction above), so telling people about
+  // them happens out here - never inside the 5s-capped transaction itself.
+  for (const a of newAchievements) {
+    try {
+      await notify(prisma, { type: 'achievement_created', userId: a.user_id, senderId: null, data: { title: a.title } });
+    } catch (err) {
+      console.error(`[lock] achievement_created notification failed for user ${a.user_id}:`, err);
+    }
+  }
+
+  // Separate from notifyParticipants above (players) - this tells the organiser and
+  // the assigned official the card is now official, matching the trigger doc's
+  // "Match score locked -> Organizer/Official" row.
+  if (championshipId) {
+    try {
+      const audience = Rules.compose([
+        Rules.role('organiser', championshipId),
+        ...(fx.official_id ? [Rules.directUser(fx.official_id)] : []),
+      ]);
+      await notify(prisma, { type: 'match_score_locked', audience, senderId: req.user!.id, data: { body: `The scorecard for ${label} is now locked.` } });
+    } catch (err) {
+      console.error(`[lock] match_score_locked notification failed for fixture ${fx.id}:`, err);
+    }
+  }
 
   // Career statistics, refreshed for exactly the people this result touched (J4-E3).
   // Outside the transaction and deliberately not awaited into the lock's success: the

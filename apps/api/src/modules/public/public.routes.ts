@@ -91,6 +91,97 @@ export function makePublicRouter(prisma: Prisma): Router {
     res.json(draws);
   }));
 
+  // Public sports profile card - reachable with no account, same reasoning as
+  // certificate verification below: a profile someone deliberately made public is
+  // only actually public if a stranger with no login can open it.
+  //
+  // Gated on the SUBJECT's own `public_profile` choice, not the viewer's - unlike
+  // /people/:userId/profile (shared-institution only), this is the one profile
+  // view where "who's asking" does not matter at all.
+  //
+  // 404 whether the handle does not exist or exists but is private, matching
+  // resolve()'s share-token pattern above - a stranger can never tell which.
+  //
+  // v1 ships one fixed set of fields (identity + the verified record); letting the
+  // owner choose per-field is tracked as follow-up, not built here. Never their
+  // contact details, and never anyone else's data (no roster, no opponents).
+  //
+  // `public_stats` is a second, narrower gate UNDER `public_profile`: the identity
+  // card (name/tagline/handle/sports) needs only public_profile, but the verified
+  // record (win/loss, medals, achievements) needs public_stats too - someone can
+  // want a public "business card" without broadcasting their whole playing record
+  // to any stranger with the link. Previously this column was read and written by
+  // /me/identity and /me/privacy but checked by nothing - it stored a value that
+  // changed nothing. This is the one place that value now actually does something.
+  router.get('/profiles/:handle', asyncHandler(async (req, res) => {
+    const user = await prisma.users.findFirst({
+      where: { handle: { equals: req.params.handle, mode: 'insensitive' } },
+      select: {
+        id: true, name: true, handle: true, tagline: true, preferred_sports: true,
+        avatar_url: true, sportagon_id: true, officiates: true,
+        email_verified_at: true, phone_verified_at: true,
+        profile_privacy: { select: { public_profile: true, public_stats: true } },
+      },
+    });
+    if (!user?.profile_privacy?.public_profile) throw new NotFoundError('Public profile');
+
+    const base = {
+      name: user.name,
+      handle: user.handle,
+      sportagon_id: user.sportagon_id,
+      tagline: user.tagline,
+      avatar_url: user.avatar_url,
+      preferred_sports: user.preferred_sports,
+      officiates: user.officiates,
+      verified_contact: !!(user.email_verified_at && user.phone_verified_at),
+    };
+
+    if (!user.profile_privacy.public_stats) { res.json(base); return; }
+
+    // The verified record only - same LIVE filter records.routes.ts uses.
+    // Provisional (unlocked) results have no business in front of a stranger.
+    const [entries, achievements] = await Promise.all([
+      prisma.lifetime_entries.findMany({
+        where: { user_id: user.id, superseded_at: null },
+        select: { detail: true },
+      }),
+      prisma.achievements.findMany({
+        where: { user_id: user.id, superseded_at: null },
+        orderBy: [{ occurred_on: 'desc' }, { created_at: 'desc' }],
+        select: { medal: true, kind: true, title: true, occurred_on: true, detail: true },
+      }),
+    ]);
+
+    const medals = { gold: 0, silver: 0, bronze: 0 };
+    let awards = 0;
+    for (const a of achievements) {
+      if (a.medal && a.medal in medals) medals[a.medal as keyof typeof medals] += 1;
+      if (a.kind === 'award') awards += 1;
+    }
+    const outcomes = { won: 0, lost: 0, drew: 0 };
+    for (const e of entries) {
+      const outcome = (e.detail as { outcome?: string } | null)?.outcome;
+      if (outcome && outcome in outcomes) outcomes[outcome as keyof typeof outcomes] += 1;
+    }
+
+    res.json({
+      ...base,
+      stats: {
+        events: entries.length,
+        ...outcomes,
+        medals,
+        total_medals: medals.gold + medals.silver + medals.bronze,
+        awards,
+      },
+      achievements: achievements.map((a) => ({
+        title: a.title,
+        medal: a.medal,
+        date: a.occurred_on,
+        sport: (a.detail as { sport?: string } | null)?.sport ?? null,
+      })),
+    });
+  }));
+
   // Certificate verification (J4-E8).
   //
   // The whole point of a certificate is that a STRANGER can check it - an employer, a

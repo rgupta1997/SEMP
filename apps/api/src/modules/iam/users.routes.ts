@@ -7,6 +7,7 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { ForbiddenError } from '../../shared/errors.js';
 import { deriveProvisionedPassword, findUserByPhone, hashProvisionedPassword, maskEmail, maskPhone, phoneLast10 } from './users.helpers.js';
+import { notify } from '@semp/notifications/server/notify.js';
 
 // Fields safe to return to any caller (never the password hash).
 const PUBLIC_SELECT = {
@@ -216,6 +217,13 @@ export function makeUsersRouter(prisma: Prisma): Router {
     const data: Record<string, unknown> = { ...rest };
     if (typeof password === 'string' && password) data.password_hash = await bcrypt.hash(password, 10);
     const user = await prisma.users.update({ where: { id: req.params.id }, data, select: PUBLIC_SELECT });
+    if (typeof password === 'string' && password) {
+      try {
+        await notify(prisma, { type: 'account_security_changed', userId: req.params.id, senderId: req.user!.id, data: {} });
+      } catch (err) {
+        console.error(`[users] account_security_changed notification failed for ${req.params.id}:`, err);
+      }
+    }
     res.json(user);
   }));
 

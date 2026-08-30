@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const recompute = vi.fn(async () => {});
 const advance = vi.fn(async () => {});
 const lifetime = vi.fn(async () => {});
-const achievements = vi.fn(async () => {});
+const achievements = vi.fn(async () => [] as Array<{ user_id: string; title: string }>);
 const certificates = vi.fn(async () => {});
 const auditFn = vi.fn(async () => {});
 // Resolving participants and telling them are separate concerns with their own
@@ -102,7 +102,10 @@ const REQ: any = { user: { id: 'organiser1', email: 'org@iimb.ac.in' }, ip: '::1
 
 beforeEach(() => {
   for (const m of [recompute, advance, lifetime, achievements, certificates, auditFn, notify]) m.mockReset();
-  for (const m of [recompute, advance, lifetime, achievements, certificates, auditFn, notify]) m.mockResolvedValue(undefined as never);
+  for (const m of [recompute, advance, lifetime, certificates, auditFn, notify]) m.mockResolvedValue(undefined as never);
+  // deriveAchievements returns who newly earned one (empty here, not undefined) -
+  // a different contract from the other void downstream seams above.
+  achievements.mockResolvedValue([] as never);
   resolveParticipants.mockReset();
   resolveParticipants.mockResolvedValue({ resolved: [{ user_id: 'u1', team_id: 'tA', name: 'A Player' }], unmatched: [] } as never);
 });

@@ -44,6 +44,7 @@ import { CertificateDetailPage } from './pages/organization/certificates/Certifi
 import { TemplateGalleryPage } from './pages/organization/certificates/TemplateGalleryPage';
 import { TemplatePreviewPage } from './pages/organization/certificates/TemplatePreviewPage';
 import { VerifyCertificatePage } from './pages/public/VerifyCertificatePage';
+import { PublicProfilePage } from './pages/public/PublicProfilePage';
 import { AdminPage } from './pages/organization/AdminPage';
 import { MembersPage } from './pages/organization/MembersPage';
 import { InvitationsPage } from './pages/organization/InvitationsPage';
@@ -190,6 +191,12 @@ function AppRoutes() {
   const verifyMatch = useMatch('/verify/:token');
   const verifyRoot = useMatch('/verify');
   if (verifyMatch || verifyRoot) return <VerifyCertificatePage token={verifyMatch?.params.token} />;
+
+  // Public sports profile - outside the shell and outside auth for the same
+  // reason: a profile someone chose to make public has to be openable by a
+  // stranger with no account, or "public" does not mean anything.
+  const publicProfileMatch = useMatch('/p/:handle');
+  if (publicProfileMatch) return <PublicProfilePage handle={publicProfileMatch.params.handle} />;
 
   if (loading) return <div className="grid h-screen place-items-center"><Spinner /></div>;
   // Logged out: a public marketing landing page at the root, with the sign-in

@@ -21,13 +21,17 @@ interface Profile {
     sportagon_id: string | null; handle: string | null; tagline: string | null;
     preferred_sports: string[]; avatar_url: string | null;
   };
-  totals?: {
+  // Matches records.routes.ts's loadProfile() - this used to read `totals`/
+  // `entries` (a shape the API never actually returned), which is why every
+  // number on this page silently fell back to its `?? 0` default regardless of
+  // what the player had actually done.
+  stats?: {
     medals?: { gold: number; silver: number; bronze: number };
     awards?: number;
-    outcomes?: { won: number; lost: number; drew: number };
-    entries?: number;
+    won?: number; lost?: number; drew?: number;
+    events?: number;
   };
-  entries?: Array<{ id: string; date: string; title: string; kind: string; verified: boolean }>;
+  timeline?: Array<{ id: string; date: string; title: string; kind: string; verified: boolean }>;
   achievements?: Array<{ id: string; title: string; medal: string | null; date?: string; occurred_on?: string }>;
 }
 
@@ -94,13 +98,13 @@ export function PlayerDetailPage() {
   if (!data) return null;
 
   const p = data.person;
-  const medals = data.totals?.medals ?? { gold: 0, silver: 0, bronze: 0 };
-  const outcomes = data.totals?.outcomes ?? { won: 0, lost: 0, drew: 0 };
+  const medals = data.stats?.medals ?? { gold: 0, silver: 0, bronze: 0 };
+  const outcomes = { won: data.stats?.won ?? 0, lost: data.stats?.lost ?? 0, drew: data.stats?.drew ?? 0 };
   const played = outcomes.won + outcomes.lost + outcomes.drew;
   const isSelf = ctx?.user?.id === userId;
 
   const STATS: Array<[string, string | number]> = [
-    ['Events played', data.entries?.length ?? 0],
+    ['Events played', data.stats?.events ?? 0],
     ['Matches', played],
     ['Won', outcomes.won],
     ['Medals', medals.gold + medals.silver + medals.bronze],
@@ -178,7 +182,7 @@ export function PlayerDetailPage() {
           <Row k="Gold" v={<span style={{ fontFamily: MONO }}>{medals.gold}</span>} />
           <Row k="Silver" v={<span style={{ fontFamily: MONO }}>{medals.silver}</span>} />
           <Row k="Bronze" v={<span style={{ fontFamily: MONO }}>{medals.bronze}</span>} />
-          <Row k="Awards" v={<span style={{ fontFamily: MONO }}>{data.totals?.awards ?? 0}</span>} />
+          <Row k="Awards" v={<span style={{ fontFamily: MONO }}>{data.stats?.awards ?? 0}</span>} />
           <Row k="Record" v={<span style={{ fontFamily: MONO }}>{outcomes.won}W · {outcomes.lost}L · {outcomes.drew}D</span>} />
         </Section>
       </div>
@@ -189,9 +193,9 @@ export function PlayerDetailPage() {
         <p style={{ margin: '3px 0 8px', fontSize: 12.5, color: C.fg4 }}>
           Written to their record when a scorecard locked. Newest first.
         </p>
-        {(data.entries ?? []).length === 0 ? (
+        {(data.timeline ?? []).length === 0 ? (
           <p style={{ margin: 0, fontSize: 13.5, color: C.fg4 }}>Nothing yet. Entries appear when a scorecard locks.</p>
-        ) : data.entries!.slice(0, 25).map((e) => (
+        ) : data.timeline!.slice(0, 25).map((e) => (
           <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderTop: '1px solid #EFF2F7' }}>
             <span style={{ fontFamily: MONO, fontSize: 11, color: C.fg4, flex: 'none', width: 84 }}>
               {new Date(e.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}

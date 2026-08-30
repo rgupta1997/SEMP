@@ -2,7 +2,7 @@ import { Clock, Medal, Trophy, ShieldCheck } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { useApi, fmtDate } from '../../lib/hooks';
 import {
-  Badge, BackButton, Card, CardBody, CardHeader, EmptyState, PageHeader, Spinner, StatCard, cn,
+  Badge, Card, CardBody, CardHeader, EmptyState, Spinner, StatCard, cn,
 } from '../../components/ui';
 
 // The lifetime record (J4-E2) - a player's permanent, verified sporting history.
@@ -79,7 +79,7 @@ function ChipRow({ chips }: { chips: Chip[] }) {
   );
 }
 
-export function LifetimeRecordPage() {
+export function LifetimeRecordPage({ hideHonours }: { hideHonours?: boolean } = {}) {
   // No :userId → the signed-in player's own record.
   const { userId } = useParams();
   const { data, isLoading, error } = useApi<Profile>(userId ? `/people/${userId}/profile` : '/me/profile');
@@ -96,18 +96,10 @@ export function LifetimeRecordPage() {
   }
   if (!data) return null;
 
-  const { person, stats, timeline, achievements } = data;
-  const isSelf = !userId;
+  const { stats, timeline, achievements } = data;
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title={isSelf ? 'My record' : person.name}
-        subtitle="Everything played, in one place. Results an organiser has made official are marked Verified and count towards the totals below; nothing here can be edited - correcting the result is the only thing that changes it."
-      >
-        <BackButton to="/profile" className="mb-0">Dashboard</BackButton>
-      </PageHeader>
-
       {/* The totals count VERIFIED results only. The provisional hint is what
           keeps that from reading as data loss when a player can plainly see
           more matches on the timeline than the counter admits. */}
@@ -126,7 +118,7 @@ export function LifetimeRecordPage() {
         <StatCard label="Awards" value={stats.awards} />
       </div>
 
-      {achievements.length > 0 && (
+      {!hideHonours && achievements.length > 0 && (
         <Card>
           <CardHeader title="Honours" subtitle="Every medal, placement and award, each tied to a verified result." />
           <CardBody className="pt-0">

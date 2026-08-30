@@ -1,4 +1,5 @@
-import type { NotificationAudience, NotificationType } from '@semp/shared';
+import type { NotificationAudience } from '@semp/shared';
+import type { NotificationTypeKey } from '@semp/notifications/core/registry.js';
 
 // Shapes returned by GET /notifications (see notifications.routes.ts).
 export interface NotificationReactionSummary {
@@ -9,7 +10,7 @@ export interface NotificationReactionSummary {
 
 export interface NotificationDto {
   id: string;
-  type: NotificationType;
+  type: NotificationTypeKey;
   audience: NotificationAudience;
   title: string;
   body: string | null;
@@ -24,7 +25,7 @@ export interface NotificationDto {
 export interface PostableEvent { id: string; name: string }
 
 // Small visual hint per notification type for the feed.
-export function notificationMeta(type: NotificationType): { icon: 'megaphone' | 'check-circle-2' | 'bell'; label: string } {
+export function notificationMeta(type: NotificationTypeKey): { icon: 'megaphone' | 'check-circle-2' | 'bell'; label: string } {
   switch (type) {
     case 'event_lifecycle': return { icon: 'megaphone', label: 'Championship update' };
     case 'enrollment_approved': return { icon: 'check-circle-2', label: 'Approval' };
