@@ -1,5 +1,7 @@
 import {
   NOTIFICATION_TYPES,
+  type NotificationTypeDef,
+  type NotificationTypeKey,
   type RuleContext,
 } from '../core/registry.js';
 import type { AudienceRule } from '../core/rules.js';
@@ -35,7 +37,10 @@ export interface NotificationPrisma extends RecipientResolverPrisma {
 }
 
 export interface NotifyInput {
-  type: string;
+  // A registry key, not a bare string - an unregistered type is now a compile
+  // error at the call site instead of a runtime failure discovered by testing
+  // (see the check-constraint migration this replaced for exactly that story).
+  type: NotificationTypeKey;
   championshipId?: string;
   organizationId?: string;
   teamId?: string;
@@ -49,7 +54,13 @@ export async function notify(
   prisma: NotificationPrisma,
   input: NotifyInput,
 ) {
-  const definition = NOTIFICATION_TYPES[input.type];
+  // Widened to the common interface: `NOTIFICATION_TYPES[input.type]`, indexed
+  // by the full key union, otherwise infers a union of each entry's OWN
+  // literal shape - and TypeScript won't let you read an optional property
+  // (bodyTemplate) that's simply absent from some of those literals, even
+  // behind a truthy check. `satisfies` already proved every entry fits
+  // NotificationTypeDef, so this is a safe, not an unchecked, widening.
+  const definition: NotificationTypeDef = NOTIFICATION_TYPES[input.type];
 
   if (!definition) {
     throw new Error(`Unknown notification type: ${input.type}`);

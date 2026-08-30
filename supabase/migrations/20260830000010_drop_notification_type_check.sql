@@ -1,0 +1,25 @@
+-- ============================================================================
+-- Notification types are no longer validated in the database at all.
+--
+-- Every prior migration touching `notifications_type_check` (most recently
+-- 20260830000000_notification_v2_types.sql) rebuilt it rather than dropping it,
+-- on the reasoning that "an unconstrained type would let a typo become a
+-- notification nothing knows how to render." That reasoning held only as long
+-- as the constraint was the ONLY thing checking `type` - it was never kept in
+-- sync with packages/notifications/core/registry.ts (the actual definition of
+-- what a notification type IS), and that drift is exactly what silently broke
+-- all 28 Version 2 trigger points: correct at the application layer, rejected
+-- by Postgres on every attempt, with nothing surfacing the failure because
+-- every call site is (deliberately) best-effort.
+--
+-- The typo protection this constraint provided is replaced, not removed: both
+-- notify() and createNotification() now type their `type` parameter as
+-- `keyof typeof NOTIFICATION_TYPES` (packages/notifications/core/registry.ts),
+-- so an unregistered type is a TypeScript compile error at the call site -
+-- caught before the code ships, which is strictly earlier than a check
+-- constraint catches it at insert time. One list (the registry) instead of
+-- two, and adding a notification type is a code-only change from here on -
+-- no migration, because there is no longer anything in the database to update.
+-- ============================================================================
+
+alter table notifications drop constraint if exists notifications_type_check;

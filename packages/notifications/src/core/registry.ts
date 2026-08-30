@@ -14,7 +14,11 @@ export interface NotificationTypeDef {
   bodyTemplate?: (data: Record<string, unknown>) => string | null;
 }
 
-export const NOTIFICATION_TYPES: Record<string, NotificationTypeDef> = {
+// `satisfies` rather than a `: Record<string, NotificationTypeDef>` annotation
+// on purpose: an explicit annotation widens every key to `string`, which is
+// exactly what NotificationTypeKey below exists to avoid. `satisfies` still
+// checks every entry against the shape, but leaves the literal key union intact.
+export const NOTIFICATION_TYPES = {
   event_lifecycle: {
     key: 'event_lifecycle',
 
@@ -675,4 +679,29 @@ ${where}` : where;
     titleTemplate: () => 'Match score locked',
     bodyTemplate: (data) => String(data.body ?? 'This scorecard is now locked.'),
   },
-};
+
+  // ---- Claims (J4-E5) ------------------------------------------------------
+  //
+  // Posted via createNotification() directly, not notify() - claims.routes.ts
+  // already has its exact title/body in hand and there is no template to run.
+  // Registered here anyway so `type` is checked against ONE list: a key that
+  // exists only for createNotification() callers is still a key a typo can get
+  // wrong, and this is what makes that a compile error instead of a runtime one.
+  claim_submitted: {
+    key: 'claim_submitted',
+    defaultAudience: () => { throw new Error('claim_submitted is posted via createNotification(), not notify()'); },
+    titleTemplate: () => 'An achievement claim needs review',
+  },
+  claim_approved: {
+    key: 'claim_approved',
+    defaultAudience: () => { throw new Error('claim_approved is posted via createNotification(), not notify()'); },
+    titleTemplate: () => 'Your claim was validated',
+  },
+  claim_rejected: {
+    key: 'claim_rejected',
+    defaultAudience: () => { throw new Error('claim_rejected is posted via createNotification(), not notify()'); },
+    titleTemplate: () => 'Your claim was not accepted',
+  },
+} satisfies Record<string, NotificationTypeDef>;
+
+export type NotificationTypeKey = keyof typeof NOTIFICATION_TYPES;

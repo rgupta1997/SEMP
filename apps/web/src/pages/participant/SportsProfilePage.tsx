@@ -631,9 +631,13 @@ export function SportsProfilePage() {
               <ParticipantDashboard />
             </>
           )}
-          {/* Timeline and Achievements are two readings of the same lifetime
-              record - the page badges provisional rows on both. */}
-          {(active.key === 'timeline' || active.key === 'achievements') && <LifetimeRecordPage />}
+          {/* Timeline and Achievements read the same lifetime record, but are no
+              longer the same VIEW of it: Achievements keeps the Honours list
+              (its whole point) plus the chronological history underneath;
+              Timeline drops Honours so switching tabs actually shows something
+              different, instead of two pills rendering identical content. */}
+          {active.key === 'achievements' && <LifetimeRecordPage />}
+          {active.key === 'timeline' && <LifetimeRecordPage hideHonours />}
           {active.key === 'sports' && <SportsTab />}
           {active.key === 'teams' && <TeamsTab />}
           {active.key === 'certificates' && <CertificatesTab />}

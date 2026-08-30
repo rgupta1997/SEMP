@@ -1,5 +1,6 @@
 import type { Prisma } from '../../infra/prisma.js';
 import { notify } from '@semp/notifications/server/notify.js';
+import type { NotificationTypeKey } from '@semp/notifications/core/registry.js';
 import { Rules, type AudienceRule } from '@semp/notifications/core/rules.js';
 
 // The audience for a match-level notification (schedule/venue/opponent/cancel/live/
@@ -26,7 +27,7 @@ export async function matchAudience(
 }
 
 // Best-effort match notification - never fails the caller's request.
-export async function notifyMatch(prisma: Prisma, type: string, audience: AudienceRule, senderId: string | null, data: Record<string, unknown>): Promise<void> {
+export async function notifyMatch(prisma: Prisma, type: NotificationTypeKey, audience: AudienceRule, senderId: string | null, data: Record<string, unknown>): Promise<void> {
   if ((audience as { rules?: unknown[] }).rules?.length === 0) return; // nobody to tell (both slots still TBD)
   try {
     await notify(prisma, { type, audience, senderId, data });

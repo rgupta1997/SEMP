@@ -15,13 +15,14 @@ import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { resolveEntryRules, type EntryRules } from '../tournaments/domain/entry-rules.js';
 import { assertCanAddMember, assertCanLockRoster } from './domain/roster-policy.js';
 import { notify } from '@semp/notifications/server/notify.js';
+import type { NotificationTypeKey } from '@semp/notifications/core/registry.js';
 import { assertPlayerEligible, screenSquad, squadEntryRefusal } from '../championships/contingent.js';
 import { unitLabels } from '@semp/shared';
 
 // Best-effort: the roster/team write is already committed, so a notification
 // hiccup must never surface as a failed request. Matches the pattern already
 // used for fixtures/org-roles notifications.
-async function tellUser(prisma: Prisma, actorId: string, userId: string, type: string, data: Record<string, unknown>) {
+async function tellUser(prisma: Prisma, actorId: string, userId: string, type: NotificationTypeKey, data: Record<string, unknown>) {
   try {
     await notify(prisma, { type, userId, senderId: actorId, data });
   } catch (err) {

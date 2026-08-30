@@ -79,7 +79,7 @@ function ChipRow({ chips }: { chips: Chip[] }) {
   );
 }
 
-export function LifetimeRecordPage() {
+export function LifetimeRecordPage({ hideHonours }: { hideHonours?: boolean } = {}) {
   // No :userId → the signed-in player's own record.
   const { userId } = useParams();
   const { data, isLoading, error } = useApi<Profile>(userId ? `/people/${userId}/profile` : '/me/profile');
@@ -118,7 +118,7 @@ export function LifetimeRecordPage() {
         <StatCard label="Awards" value={stats.awards} />
       </div>
 
-      {achievements.length > 0 && (
+      {!hideHonours && achievements.length > 0 && (
         <Card>
           <CardHeader title="Honours" subtitle="Every medal, placement and award, each tied to a verified result." />
           <CardBody className="pt-0">
