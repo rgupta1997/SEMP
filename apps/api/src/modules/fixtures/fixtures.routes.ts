@@ -327,6 +327,13 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       });
       if (!td) throw new NotFoundError('Tournament discipline');
 
+      // Registration order, not shuffled: the wizard tells the organiser unpinned
+      // slots fill "in registration order," and applyManualAllocation places the
+      // manually-pinned teams first, then fills whatever's left with the remaining
+      // entrants IN THIS ARRAY'S ORDER - so that promise is only true if the base
+      // order handed to it actually is registration order. (The plain /generate
+      // route above still shuffles - that flow makes no such promise, and is
+      // untouched.)
       let teams: TeamRef[];
       if (req.body.team_ids?.length) {
         teams = req.body.team_ids.map((id: string) => ({ teamId: id }));
@@ -334,8 +341,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         const registered = await prisma.team_entries.findMany({
           where: { tournament_discipline_id: td.id },
           select: { team_id: true },
+          orderBy: { created_at: 'asc' },
         });
-        teams = shuffle(registered.map((e) => ({ teamId: e.team_id })));
+        teams = registered.map((e) => ({ teamId: e.team_id }));
       }
 
       const existing = await prisma.fixtures.findMany({

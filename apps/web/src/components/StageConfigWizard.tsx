@@ -7,13 +7,10 @@ import { Button, Card, Field, Input, Segmented, Select, Spinner, toast } from '.
 
 // Full wizard: configures an arbitrary-depth stage tree (a pool stage whose branches
 // feed either a knockout or ANOTHER pool stage, recursively), with optional manual
-// bracket seeding at any knockout node. Mirrors apps/api/.../stage-orchestrator.ts's
-// model exactly - see packages/shared/src/stage-config.ts for the wire format this
-// serializes to.
-//
-// Scope note: manual TEAM ALLOCATION (pinning a specific team to a specific stage-1
-// slot before pools are even formed) is still not exposed here - only manual
-// KNOCKOUT SEEDING (pairing entrants within a bracket) and multi-level chaining are.
+// bracket seeding at any knockout node AND optional manual team allocation (pinning
+// a specific team to a specific stage-1 slot before pools are even formed). Mirrors
+// apps/api/.../stage-orchestrator.ts's model exactly - see
+// packages/shared/src/stage-config.ts for the wire format this serializes to.
 
 interface TokenEntrant { token: string; label: string }
 
