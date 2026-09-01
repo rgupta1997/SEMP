@@ -15,6 +15,7 @@ import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { resolveEntryRules, type EntryRules } from '../tournaments/domain/entry-rules.js';
 import { assertCanAddMember, assertCanLockRoster } from './domain/roster-policy.js';
 import { notify } from '@semp/notifications/server/notify.js';
+import { Rules } from '@semp/notifications/core/rules.js';
 import type { NotificationTypeKey } from '@semp/notifications/core/registry.js';
 import { assertPlayerEligible, screenSquad, squadEntryRefusal } from '../championships/contingent.js';
 import { unitLabels } from '@semp/shared';
@@ -27,6 +28,54 @@ async function tellUser(prisma: Prisma, actorId: string, userId: string, type: N
     await notify(prisma, { type, userId, senderId: actorId, data });
   } catch (err) {
     console.error(`[teams] ${type} notification failed for user ${userId}:`, err);
+  }
+}
+
+// Coach + captain(s) + this org's admins - the people who can actually complete a
+// roster, not the whole squad (a player waiting to be added can't fix this).
+// Composed from real ids since no single Rule kind expresses that combination.
+async function notifyRosterIncomplete(prisma: Prisma, teamId: string, actorId: string, data: Record<string, unknown>): Promise<void> {
+  try {
+    const team = await prisma.teams.findUnique({
+      where: { id: teamId },
+      select: {
+        organization_id: true, coach_user_id: true,
+        team_members: { where: { is_active: true, role: { in: ['captain', 'vice_captain'] } }, select: { user_id: true } },
+      },
+    });
+    if (!team) return;
+    const rules = [];
+    if (team.coach_user_id) rules.push(Rules.directUser(team.coach_user_id));
+    for (const m of team.team_members) rules.push(Rules.directUser(m.user_id));
+    rules.push(Rules.orgAdmins(team.organization_id));
+    await notify(prisma, { type: 'roster_incomplete', audience: Rules.compose(rules), senderId: actorId, data });
+  } catch (err) {
+    console.error(`[teams] roster_incomplete notification failed for team ${teamId}:`, err);
+  }
+}
+
+// Checks the team's CURRENT active roster against ONE discipline's squad_min and
+// fires roster_incomplete if short. A discipline can become attached to an entry
+// from FOUR different places in this file - the single create-and-enter shortcut,
+// the bulk create-teams shortcut, entering an existing roster into championships,
+// and the later single-entry "pick your discipline" PATCH - so this is called from
+// all four, rather than wired into only one of them, which is what happened the
+// first time this was built.
+async function checkRosterIncomplete(prisma: Prisma, teamId: string, actorId: string, tournamentDisciplineId: string): Promise<void> {
+  try {
+    const [drawRow, count, team] = await Promise.all([
+      prisma.tournament_disciplines.findUnique({ where: { id: tournamentDisciplineId }, include: { disciplines: true } }),
+      prisma.team_members.count({ where: { team_id: teamId, is_active: true } }),
+      prisma.teams.findUnique({ where: { id: teamId }, select: { name: true } }),
+    ]);
+    if (!drawRow) return;
+    const rules = resolveEntryRules(drawRow, drawRow.disciplines ?? null);
+    if (count >= rules.squad_min) return;
+    await notifyRosterIncomplete(prisma, teamId, actorId, {
+      teamName: team?.name, count, squadMin: rules.squad_min, disciplineName: drawRow.disciplines?.name,
+    });
+  } catch (err) {
+    console.error(`[teams] roster_incomplete check failed for team ${teamId}:`, err);
   }
 }
 
@@ -305,6 +354,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       return team;
     });
     await tellUser(prisma, creatorId, creatorId, 'team_created', { teamName: name });
+    if (entryData) await checkRosterIncomplete(prisma, created.id, creatorId, entryData.tournament_discipline_id);
     res.status(201).json(await hydrateTeam(prisma, created.id));
   }));
 
@@ -394,6 +444,9 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     await prisma.$transaction(prepared.map((p) => prisma.team_entries.create({
       data: { team_id: team.id, organization_id: team.organization_id, org_unit_id: team.org_unit_id ?? null, status: 'forming', ...p },
     })));
+    for (const p of prepared) {
+      if (p.tournament_discipline_id) await checkRosterIncomplete(prisma, team.id, req.user!.id, p.tournament_discipline_id);
+    }
     res.status(201).json(await hydrateTeam(prisma, team.id));
   }));
 
@@ -417,6 +470,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       if (taken) throw new BusinessRuleError('Your organization already has a team in this discipline draw');
     }
     await prisma.team_entries.update({ where: { id: entry.id }, data: { tournament_discipline_id: drawId } });
+    if (drawId) await checkRosterIncomplete(prisma, team.id, req.user!.id, drawId);
     res.json(await hydrateTeam(prisma, team.id));
   }));
 
@@ -450,7 +504,15 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     if (!entry || entry.team_id !== req.params.id) throw new NotFoundError('Team entry');
     if (!entry.tournament_discipline_id) throw new BusinessRuleError('Link a discipline draw before locking this entry');
     const count = await prisma.team_members.count({ where: { team_id: req.params.id, is_active: true } });
-    assertCanLockRoster(entryRules(entry), count);
+    const rules = entryRules(entry);
+    // Best-effort, fired BEFORE the throw below. The PRIMARY trigger for this is
+    // actually the discipline-link PATCH above - the web app disables "Lock
+    // roster" while the squad is under minimum, so a real lock ATTEMPT against an
+    // incomplete roster normally never reaches this line. Kept as a backstop
+    // (a stale client, a race with someone else editing the roster) rather than
+    // load-bearing.
+    await checkRosterIncomplete(prisma, req.params.id, req.user!.id, entry.tournament_discipline_id);
+    assertCanLockRoster(rules, count);
     await prisma.team_entries.update({ where: { id: entry.id }, data: { status: 'roster_locked' } });
 
     try {
@@ -557,6 +619,11 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       }
       return out;
     });
+    // `created[i]` pairs 1:1 with `teams[i]` - the loop above pushes in the same
+    // order it iterates `teams`, with no filtering in between.
+    for (let i = 0; i < created.length; i++) {
+      await checkRosterIncomplete(prisma, created[i].id, creatorId, teams[i].tournament_discipline_id);
+    }
     res.status(201).json({ created: created.length, teams: created });
   }));
 

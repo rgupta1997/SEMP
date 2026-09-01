@@ -594,6 +594,24 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
       summary: `Withdrew certificate ${cert.serial} - ${req.body.reason}`,
       diff: { revoked: { from: false, to: true } },
     });
+
+    // Best-effort - the withdrawal already committed above. Only when the
+    // certificate has a linked account (some are issued to a recipient_name with
+    // no platform account).
+    if (cert.user_id) {
+      try {
+        await notify(prisma, {
+          type: 'certificate_validation_issue',
+          championshipId: cert.championship_id ?? undefined,
+          userId: cert.user_id,
+          senderId: req.user!.id,
+          data: { title: (cert.payload as any)?.title, serial: cert.serial, reason: req.body.reason },
+        });
+      } catch (err) {
+        console.error(`[certificates] certificate_validation_issue notification failed for ${cert.id}:`, err);
+      }
+    }
+
     res.json(row);
   }));
 

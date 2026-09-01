@@ -12,7 +12,7 @@ import {
 import type { Prisma } from '../infra/prisma.js';
 import { env } from '../config/env.js';
 import { makeCrudRouter } from './crud.js';
-import { errorHandler } from './middleware/error.js';
+import { makeErrorHandler } from './middleware/error.js';
 import { parseAuth, requireAuth, requireSuperAdmin } from './middleware/auth.js';
 import { makeGuards } from './middleware/permissions.js';
 import { makeEntitlementGuards } from './middleware/entitlements.js';
@@ -311,6 +311,6 @@ export function buildApp(prisma: Prisma) {
 
 
   app.use('/api', api);
-  app.use(errorHandler);
+  app.use(makeErrorHandler(prisma));
   return app;
 }

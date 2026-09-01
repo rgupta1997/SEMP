@@ -10,6 +10,7 @@ import { can } from '../../http/middleware/can.js';
 import { isCampusAdmin } from './campus-admin.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { audit, AUDIT_ACTIONS } from './audit.service.js';
+import { notify } from '@semp/notifications/server/notify.js';
 
 // The institution's own shape (J1-E4): Organisation -> Campus -> Department.
 //
@@ -289,9 +290,10 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
 
   router.post('/:id/units', structure, validateBody(createUnitSchema), asyncHandler(async (req, res) => {
     const { type, name, code, parent_id, display_order, status, admin_user_id } = req.body as z.infer<typeof createUnitSchema>;
-    const labels = unitLabels((await prisma.organizations.findUnique({
-      where: { id: req.params.id }, select: { settings: true },
-    }))?.settings);
+    const org = await prisma.organizations.findUnique({
+      where: { id: req.params.id }, select: { name: true, settings: true },
+    });
+    const labels = unitLabels(org?.settings);
 
     // The messages use this organisation's own nouns. A company that renamed its
     // levels to Office/Department should never be told what a "campus" needs.
@@ -346,6 +348,29 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
       organizationId: req.params.id,
       summary: `Added the ${type} ${row.name}`,
     });
+
+    // Best-effort, and never lets a notification hiccup surface as a failed
+    // creation - the unit is already committed above regardless.
+    try {
+      if (type === 'campus') {
+        await notify(prisma, {
+          type: 'campus_created',
+          organizationId: req.params.id,
+          senderId: req.user!.id,
+          data: { unitLabel: labels.campus, unitName: row.name, organizationName: org?.name ?? 'your organization' },
+        });
+      }
+      if (admin_user_id) {
+        await notify(prisma, {
+          type: 'campus_admin_assigned',
+          userId: admin_user_id,
+          senderId: req.user!.id,
+          data: { unitLabel: labels[type], unitName: row.name, organizationName: org?.name ?? 'your organization' },
+        });
+      }
+    } catch (err) {
+      console.error(`[org-units] notification failed for unit ${row.id}:`, err);
+    }
 
     res.status(201).json(row);
   }));
@@ -408,6 +433,23 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
         ...(before.display_order !== row.display_order ? { display_order: { from: before.display_order, to: row.display_order } } : {}),
       },
     });
+
+    // Best-effort - only when a NEW admin is being set, not when one is cleared
+    // (no PDF trigger for a removal yet, and "assigned" would be the wrong word).
+    if (row.admin_user_id && before.admin_user_id !== row.admin_user_id) {
+      try {
+        const org = await prisma.organizations.findUnique({ where: { id: req.params.id }, select: { name: true, settings: true } });
+        const labels = unitLabels(org?.settings);
+        await notify(prisma, {
+          type: 'campus_admin_assigned',
+          userId: row.admin_user_id,
+          senderId: req.user!.id,
+          data: { unitLabel: labels[row.type as 'campus' | 'department'], unitName: row.name, organizationName: org?.name ?? 'your organization' },
+        });
+      } catch (err) {
+        console.error(`[org-units] campus_admin_assigned notification failed for unit ${row.id}:`, err);
+      }
+    }
 
     res.json(row);
   }));

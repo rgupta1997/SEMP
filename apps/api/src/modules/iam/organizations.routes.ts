@@ -320,14 +320,35 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   router.post('/:id/members/bulk', guards.orgPermission('org.member.manage'), validateBody(bulkAddOrganizationMembersSchema), asyncHandler(async (req, res) => {
     const { user_ids, role } = req.body as { user_ids: string[]; role: string };
     const orgId = req.params.id;
+    const uniqueIds = [...new Set(user_ids)];
     const members = await prisma.$transaction(
-      [...new Set(user_ids)].map((user_id) => prisma.organization_members.upsert({
+      uniqueIds.map((user_id) => prisma.organization_members.upsert({
         where: { user_id_organization_id: { user_id, organization_id: orgId } },
         update: { role, status: 'active' },
         create: { user_id, organization_id: orgId, role },
         include: { users: { select: { id: true, name: true, email: true, phone: true } } },
       })),
     );
+
+    // Best-effort. This is a direct add, not an invite - org_invite_sent/accepted
+    // are reserved for someone who had no account yet and later signs themselves
+    // in; this is the notification for the case that actually happens through the
+    // member picker's checkbox+Add, where an existing account is added instantly
+    // with no consent step.
+    try {
+      const org = await prisma.organizations.findUnique({ where: { id: orgId }, select: { name: true } });
+      for (const userId of uniqueIds) {
+        await notify(prisma, {
+          type: 'org_member_added',
+          userId,
+          senderId: req.user!.id,
+          data: { organizationName: org?.name ?? 'an organization' },
+        });
+      }
+    } catch (err) {
+      console.error(`[organizations] org_member_added notification failed for org ${orgId}:`, err);
+    }
+
     res.status(201).json(members);
   }));
 

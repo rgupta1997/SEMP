@@ -37,7 +37,11 @@ export const NOTIFICATION_TYPES = {
       ]);
     },
 
+    // `data.visibility === 'public'` is a distinct trigger from `data.status` -
+    // a championship going from private (invite-only) to public in Settings, not
+    // a status transition. Checked first since `data.status` is absent on that call.
     titleTemplate: (data) => {
+      if (data.visibility === 'public') return 'This championship is now public';
       switch (data.status) {
         case 'registration_open':
           return 'Registration is open';
@@ -51,6 +55,9 @@ export const NOTIFICATION_TYPES = {
     },
 
     bodyTemplate: (data) => {
+      if (data.visibility === 'public') {
+        return 'This championship is no longer invite-only - anyone can now find and view it.';
+      }
       // `entrants` is the host's own noun for what competes - "campuses",
       // "batches", or absent for an open championship. It matters most here:
       // "open for organization registration" is simply false on an internal
@@ -265,6 +272,19 @@ export const NOTIFICATION_TYPES = {
 
 ${where}` : where;
     },
+  },
+
+  // Fired centrally from the error handler whenever a PlanLimitError reaches it
+  // (@semp/entitlements/server) - one hook regardless of which of the several
+  // routes (teams, members, events, staff seats) tripped the ceiling.
+  usage_limit_reached: {
+    key: 'usage_limit_reached',
+    defaultAudience: (ctx) => {
+      if (!ctx.organizationId) throw new Error('organizationId is required for usage_limit_reached');
+      return Rules.orgAdmins(ctx.organizationId);
+    },
+    titleTemplate: () => 'A plan limit has been reached',
+    bodyTemplate: (data) => `${String(data.message ?? 'Your plan has reached one of its limits.')} Upgrade to add more.`,
   },
 
   org_join_request: {
@@ -495,6 +515,17 @@ ${where}` : where;
     bodyTemplate: (data) => `${String(data.teamName ?? 'Your team')}'s roster is now locked in.`,
   },
 
+  // Coach/Captain/Admin only, not the whole roster (a player waiting to be added
+  // isn't who can fix this) - composed from real ids at the call site, since no
+  // single Rule kind expresses "this team's coach + captains + this org's
+  // admins" together.
+  roster_incomplete: {
+    key: 'roster_incomplete',
+    defaultAudience: () => { throw new Error('roster_incomplete requires an explicit audience'); },
+    titleTemplate: () => 'Team roster needs completion',
+    bodyTemplate: (data) => `${String(data.teamName ?? 'Your team')} has ${String(data.count ?? '?')} of the ${String(data.squadMin ?? '?')} players required to lock its roster for ${String(data.disciplineName ?? 'this draw')}.`,
+  },
+
   // ---- Fixture / Match / Result (2026-08-26) ------------------------------
   //
   // match_* types are always called with an explicit `audience` (both teams'
@@ -564,11 +595,91 @@ ${where}` : where;
     bodyTemplate: (data) => String(data.body ?? 'A match result is ready to review.'),
   },
 
+  // Fires on the scorer's draft -> submitted handoff, distinct from
+  // `result_submitted` (which fires later, on a *completed* result via
+  // PATCH /fixtures/:id/result). This is the earlier "somebody needs to look at
+  // this" signal in the scorecard state machine (draft -> submitted -> locked).
+  score_pending_validation: {
+    key: 'score_pending_validation',
+    defaultAudience: (ctx) => {
+      if (!ctx.championshipId) throw new Error('championshipId is required for score_pending_validation');
+      return Rules.role('organiser', ctx.championshipId);
+    },
+    titleTemplate: () => 'A scorecard needs validation',
+    bodyTemplate: (data) => `${String(data.label ?? 'A match')} has been submitted and is awaiting your review to lock it.`,
+  },
+
+  // The officiating assignment itself (PATCH /fixtures/:id/official). The
+  // reassigned-away "no longer officiating" side of that same route stays on the
+  // generic `manual` type - it isn't a named journey, just a courtesy heads-up.
+  match_official_assigned: {
+    key: 'match_official_assigned',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for match_official_assigned');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: (data) => `You're officiating ${String(data.label ?? 'a match')}`,
+    bodyTemplate: (data) => {
+      const details = data.details ? String(data.details) : '';
+      return `You've been assigned to score this match.${details ? ` ${details}` : ''} It's in your Officiating queue.`;
+    },
+  },
+
   team_qualifies: {
     key: 'team_qualifies',
     defaultAudience: () => { throw new Error('team_qualifies requires an explicit audience'); },
     titleTemplate: () => 'Your team has qualified',
     bodyTemplate: (data) => String(data.body ?? ''),
+  },
+
+  // Fired at lock time for a bracket fixture only (bracket_position != null) - a
+  // league/pool loss doesn't eliminate anyone, only a knockout one does. Derived
+  // from winner_team_id vs. home/away at the call site, not stored separately.
+  team_eliminated: {
+    key: 'team_eliminated',
+    defaultAudience: () => { throw new Error('team_eliminated requires an explicit audience'); },
+    titleTemplate: () => 'Your team has been eliminated',
+    bodyTemplate: (data) => `${String(data.label ?? 'Your match')} - the result is now official.`,
+  },
+
+  // Fired from PATCH /fixtures/:id/awards - only for genuinely NEW awards, never
+  // re-notifying for one already recorded in an earlier save (that route replaces
+  // the whole award list every time it's called - see the call site).
+  player_of_the_match: {
+    key: 'player_of_the_match',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for player_of_the_match');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => 'Player of the Match',
+    bodyTemplate: (data) => `You were named Player of the Match for ${String(data.label ?? 'your match')}.`,
+  },
+
+  // Any award type other than Player of the Match (Player of the Tournament, MVP,
+  // Top Scorer, Fair Play, Best Team, ...), plus untyped free-text awards - all
+  // recorded through the same fixture_awards route, just tagged to a different (or
+  // no) award_types catalog entry.
+  tournament_award: {
+    key: 'tournament_award',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for tournament_award');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: (data) => String(data.awardName ?? 'Tournament award'),
+    bodyTemplate: (data) => `You've received ${String(data.awardName ?? 'an award')}${data.label ? ` (${String(data.label)})` : ''}.`,
+  },
+
+  // Fired at the same lock-time hook as `team_eliminated`, but unconditionally
+  // (every locked result recomputes standings) and to the whole championship
+  // rather than just the two teams that played.
+  standings_updated: {
+    key: 'standings_updated',
+    defaultAudience: (ctx) => {
+      if (!ctx.championshipId) throw new Error('championshipId is required for standings_updated');
+      return Rules.everyone(ctx.championshipId);
+    },
+    titleTemplate: () => 'Standings updated',
+    bodyTemplate: (data) => `Standings have been updated after ${String(data.label ?? 'a match')}.`,
   },
 
   // ---- Event (2026-08-26) --------------------------------------------------
@@ -591,6 +702,20 @@ ${where}` : where;
     },
     titleTemplate: () => 'Registrations awaiting approval',
     bodyTemplate: (data) => `${String(data.orgName ?? 'An organization')} applied to ${String(data.championshipName ?? 'your championship')}.`,
+  },
+
+  // Direct confirmation to the applicant org itself. Distinct from
+  // `enrollment_approved`, which broadcasts "X has joined" to everyone already in
+  // the championship - that's news for the room, not a decision notice for the
+  // applicant. Mirrors `registration_rejected`'s audience/shape.
+  registration_approved: {
+    key: 'registration_approved',
+    defaultAudience: (ctx) => {
+      if (!ctx.organizationId) throw new Error('organizationId is required for registration_approved');
+      return Rules.orgAdmins(ctx.organizationId);
+    },
+    titleTemplate: () => 'Registration approved',
+    bodyTemplate: (data) => `Your application to ${String(data.championshipName ?? 'the championship')} was approved. You can now enter squads.`,
   },
 
   registration_rejected: {
@@ -678,6 +803,85 @@ ${where}` : where;
     defaultAudience: () => { throw new Error('match_score_locked requires an explicit audience'); },
     titleTemplate: () => 'Match score locked',
     bodyTemplate: (data) => String(data.body ?? 'This scorecard is now locked.'),
+  },
+
+  // ---- Organization: invites & campuses (Version 2, batch 1) --------------
+  //
+  // org_invite_sent / org_invite_accepted are deliberately NOT built yet. The PDF
+  // names "invite sent -> User" as a trigger, but that delivery is structurally
+  // impossible for the one case an org-member invite actually serves (a phone
+  // number with no account yet - there is no inbox to land in at send time), and
+  // the right resolution (what, if anything, reaches the invitee once they DO
+  // sign up and the invite auto-applies) needs a team decision, not a guess.
+  // Tracked as follow-up.
+
+  // Not a PDF trigger, and deliberately NOT worded as an invite - an admin adding
+  // an already-registered person via the member picker's checkbox+Add is instant
+  // and has no consent step at all, unlike org_invite_sent/org_invite_accepted
+  // above (which stay reserved for the real invite-and-wait flow, for someone with
+  // no account yet). Calling this "invitation accepted" would claim a decision
+  // that was never made by the person it happened to.
+  org_member_added: {
+    key: 'org_member_added',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for org_member_added');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => "You've been added to an organization",
+    bodyTemplate: (data) => `You are now a member of ${String(data.organizationName ?? 'an organization')}.`,
+  },
+
+  campus_created: {
+    key: 'campus_created',
+    defaultAudience: (ctx) => {
+      if (!ctx.organizationId) throw new Error('organizationId is required for campus_created');
+      return Rules.orgAdmins(ctx.organizationId);
+    },
+    titleTemplate: (data) => `A new ${String(data.unitLabel ?? 'campus').toLowerCase()} was added`,
+    bodyTemplate: (data) => `${String(data.unitName ?? 'A new campus')} is now part of ${String(data.organizationName ?? 'your organization')}.`,
+  },
+
+  campus_admin_assigned: {
+    key: 'campus_admin_assigned',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for campus_admin_assigned');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: (data) => `You are now a ${String(data.unitLabel ?? 'campus').toLowerCase()} admin`,
+    bodyTemplate: (data) => `You've been made admin of ${String(data.unitName ?? 'a campus')} at ${String(data.organizationName ?? 'your organization')}.`,
+  },
+
+  // Fired when an Annual Sports Impact Report job (POST /organizations/:id/reports/impact)
+  // finishes - this is the only asynchronous, job-based "report generation" in the
+  // codebase (report_jobs.kind is only ever 'impact'), so it's what "Event report
+  // generated" maps onto: the requester is told instead of having to keep polling
+  // GET /report-jobs/:jobId. Notifies on success only, not on a failed job.
+  event_report_generated: {
+    key: 'event_report_generated',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for event_report_generated');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => 'Your report is ready',
+    bodyTemplate: (data) => `The ${String(data.label ?? 'Impact')} report${data.seasonLabel ? ` for ${String(data.seasonLabel)}` : ''} is ready to view.`,
+  },
+
+  // Fired on POST /certificates/:certId/revoke - a recipient holding a document
+  // that is no longer valid needs to know, same as the issuer's audit trail does.
+  // Only fires when the certificate has a linked account (certificates.user_id is
+  // nullable - some are issued to a recipient_name with no platform account).
+  certificate_validation_issue: {
+    key: 'certificate_validation_issue',
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) throw new Error('userId is required for certificate_validation_issue');
+      return Rules.directUser(ctx.userId);
+    },
+    titleTemplate: () => 'A certificate of yours has been withdrawn',
+    bodyTemplate: (data) => {
+      const title = data.title ? `"${String(data.title)}" ` : '';
+      const serial = data.serial ? ` (${String(data.serial)})` : '';
+      return `Your certificate ${title}${serial}was withdrawn: ${String(data.reason ?? 'no reason given')}.`;
+    },
   },
 
   // ---- Claims (J4-E5) ------------------------------------------------------

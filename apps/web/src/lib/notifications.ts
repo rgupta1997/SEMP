@@ -29,6 +29,16 @@ export function notificationMeta(type: NotificationTypeKey): { icon: 'megaphone'
   switch (type) {
     case 'event_lifecycle': return { icon: 'megaphone', label: 'Championship update' };
     case 'enrollment_approved': return { icon: 'check-circle-2', label: 'Approval' };
+    case 'registration_approved': return { icon: 'check-circle-2', label: 'Approval' };
+    case 'match_official_assigned': return { icon: 'megaphone', label: 'Officiating' };
+    case 'score_pending_validation': return { icon: 'bell', label: 'Needs review' };
+    case 'team_eliminated': return { icon: 'bell', label: 'Result' };
+    case 'player_of_the_match': return { icon: 'check-circle-2', label: 'Award' };
+    case 'tournament_award': return { icon: 'check-circle-2', label: 'Award' };
+    case 'certificate_validation_issue': return { icon: 'bell', label: 'Certificate' };
+    case 'event_report_generated': return { icon: 'check-circle-2', label: 'Report' };
+    case 'usage_limit_reached': return { icon: 'bell', label: 'Plan limit' };
+    case 'standings_updated': return { icon: 'megaphone', label: 'Championship update' };
     default: return { icon: 'bell', label: 'Announcement' };
   }
 }

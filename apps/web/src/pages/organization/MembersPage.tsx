@@ -7,6 +7,7 @@ import { useOrgUnits, unitPath } from '../../lib/units';
 import { usePermissions } from '../../lib/permissions';
 import { titleCase } from '../../lib/format';
 import { DataList } from '../../components/primitives';
+import { PeoplePicker } from '../../components/PeoplePicker';
 import {
   Avatar, BackButton, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field,
   ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Spinner, toast,
@@ -129,6 +130,28 @@ function GrantModal({
   );
 }
 
+// Add members by phone/name, multi-select - the same picker Officials and
+// Co-organisers already use. This screen's own search bar only FILTERS the
+// members already loaded (see the ListToolbar below); it was never wired to
+// find someone who isn't a member yet, which is what this modal is for. An
+// unknown number gets a `user_invitations` row instead (target_type
+// 'org_member'), auto-applied the moment they sign in with that number.
+function AddMemberModal({ orgId, existingIds, onClose }: { orgId: string; existingIds: Set<string>; onClose: () => void }) {
+  const assignUsers = async (userIds: string[]) => { await api('POST', `/organizations/${orgId}/members/bulk`, { user_ids: userIds }); };
+  return (
+    <PeoplePicker
+      title="Add member"
+      subtitle="Search by phone and pick people to add. Unknown numbers get an invite to join."
+      assignedUserIds={existingIds}
+      assignedLabel="Member"
+      invite={{ target_type: 'org_member', target_id: orgId }}
+      invalidateKeys={[`/organizations/${orgId}/members`, 'notifications']}
+      onAssignUsers={assignUsers}
+      onClose={onClose}
+    />
+  );
+}
+
 /**
  * Rendered standalone at its own route, and embedded inside the Administration
  * rail. `embedded` suppresses the page header and org tabs - the rail already
@@ -138,6 +161,7 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
   const params = useParams();
   const orgId = orgIdProp ?? params.orgId ?? '';
   const [granting, setGranting] = useState<Member | null>(null);
+  const [adding, setAdding] = useState(false);
 
   // Two permissions, two different jobs, and this screen shows both.
   //
@@ -296,6 +320,7 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
         <CardBody>
           <ListToolbar>
             <SearchInput value={query} onChange={setQuery} placeholder="Search by name or email…" />
+            {canManageMembers && <Button onClick={() => setAdding(true)}>+ Add member</Button>}
           </ListToolbar>
 
           {view.length === 0 ? (
@@ -404,6 +429,14 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
           roles={roles}
           units={units}
           onClose={() => { setGranting(null); grants.refetch(); }}
+        />
+      )}
+
+      {adding && (
+        <AddMemberModal
+          orgId={orgId}
+          existingIds={new Set(all.map((m) => m.user_id))}
+          onClose={() => { setAdding(false); members.refetch(); }}
         />
       )}
     </>

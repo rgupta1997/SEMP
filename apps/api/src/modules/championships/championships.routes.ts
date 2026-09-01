@@ -511,7 +511,30 @@ export function makeEventsRouter(prisma: Prisma): Router {
         if (next) await assertMayHost(req.user!.id, !!req.user!.isSuperAdmin, next);
       }
     }
+    // Only look up the prior value when the request could actually cause a
+    // private -> public flip - a cheap extra query, but not worth paying on every
+    // unrelated field update.
+    const wasPrivate = req.body.visibility === 'public'
+      ? (await prisma.championships.findUnique({ where: { id: req.params.id }, select: { visibility: true } }))?.visibility !== 'public'
+      : false;
+
     const championship = await prisma.championships.update({ where: { id: req.params.id }, data: req.body });
+
+    if (wasPrivate) {
+      // Best-effort, matching every other side-effect notification in this codebase -
+      // the visibility change already committed above.
+      try {
+        await notify(prisma, {
+          type: 'event_lifecycle',
+          championshipId: championship.id,
+          senderId: req.user!.id,
+          data: { visibility: 'public' },
+        });
+      } catch (err) {
+        console.error(`[notifications] event_lifecycle (visibility) notify failed for ${championship.id}:`, err);
+      }
+    }
+
     res.json(championship);
   }));
 
