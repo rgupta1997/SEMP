@@ -82,6 +82,14 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       owner?: { user_id?: string; name?: string; email?: string; password?: string; phone?: string };
     };
 
+    // Two different people can each run their own "Sport Club" - names aren't
+    // globally unique. What would actually be a mistake is the SAME person
+    // creating it twice, so the check is scoped to organizations they already own.
+    const ownDuplicate = await prisma.organization_members.findFirst({
+      where: { user_id: req.user!.id, role: 'owner', organizations: { name: { equals: organization.name, mode: 'insensitive' } } },
+    });
+    if (ownDuplicate) throw new BusinessRuleError('You already have an organization with this name');
+
     // Resolve an existing POC: an explicitly chosen user, else a phone/email match.
     let pocUserId: string | null = null;
     if (owner) {
