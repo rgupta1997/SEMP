@@ -119,7 +119,7 @@ export function OrgDashboardPage() {
               : { background: 'rgba(255,255,255,.12)', color: 'var(--faint)', cursor: 'not-allowed' }),
           }}
         >
-          {canCreateEvent ? '+ Create event' : 'Create event · locked'}
+          {canCreateEvent ? '+ Create Event' : 'Create Event · locked'}
         </button>
       </div>
 

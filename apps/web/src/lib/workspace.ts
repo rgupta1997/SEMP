@@ -68,7 +68,6 @@ export const NAV: Record<ContextKind, NavItem[]> = {
     { key: 'discover', label: 'Discover', to: '/discover' },
     { key: 'officiating', label: 'Officiating', to: '/officiating', when: 'officiates' },
     { key: 'orgs', label: 'Organizations', to: '/organizations' },
-    { key: 'help', label: 'Help & guides', to: '/help' },
   ],
   org: [
     { key: 'dashboard', label: 'Dashboard', to: '/organizations/:id/overview' },

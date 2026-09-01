@@ -96,7 +96,7 @@ export function MyChampionshipsPage() {
         <PageHeader title="My events" subtitle="Everything you are playing in, hosting, or have finished." />
         <div className="flex flex-wrap gap-2">
           <Link to="/host" className="rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand-700">
-            Host an event
+            Create Event
           </Link>
           <Link to="/discover" className="rounded-lg bg-white px-3.5 py-2 text-sm font-semibold text-brand-600 ring-1 ring-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:ring-slate-700">
             Find events

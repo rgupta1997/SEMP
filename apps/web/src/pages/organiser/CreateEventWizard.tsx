@@ -170,7 +170,7 @@ export function CreateEventWizard() {
       <BackButton onClick={() => navigate('/championships')}>Back to championships</BackButton>
       <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
         <Card className="h-fit p-6">
-          <h2 className="mb-1 text-lg font-bold">Create championship</h2>
+          <h2 className="mb-1 text-lg font-bold">Create Event</h2>
           <p className="mb-5 text-sm text-slate-500 dark:text-slate-400">Step {step + 1} of {STEPS.length}</p>
           <Stepper current={step} steps={STEPS} />
           <p className="mt-6 text-xs text-slate-400 dark:text-slate-500">

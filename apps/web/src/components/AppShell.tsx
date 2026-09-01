@@ -69,7 +69,7 @@ function navFor(role: AppRole): NavGroup[] {
       { to: '/organizations', label: 'Organizations', icon: <Landmark size={16} /> },
       { to: '/discover', label: 'Discover', icon: <Compass size={16} /> },
       { to: '/championships', label: 'Championships', icon: <Trophy size={16} /> },
-      { to: '/host', label: 'Host', icon: <Plus size={16} /> },
+      { to: '/host', label: 'Create Event', icon: <Plus size={16} /> },
       { to: '/help', label: 'Help & guide', icon: '?' },
     ],
   }];
