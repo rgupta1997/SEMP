@@ -8,6 +8,7 @@ import { can } from '../../http/middleware/can.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { assertChampionshipTransition } from './domain/championship-lifecycle.js';
 import { notify } from '@semp/notifications/server/notify.js';
+import { Rules } from '@semp/notifications/core/rules.js';
 import { recomputeStandingsAtomic } from '../standings/standings.service.js';
 import { signShareToken } from '../public/share-token.js';
 import { listChampionshipFixtures } from './fixtures-list.js';
@@ -523,10 +524,17 @@ export function makeEventsRouter(prisma: Prisma): Router {
     if (wasPrivate) {
       // Best-effort, matching every other side-effect notification in this codebase -
       // the visibility change already committed above.
+      //
+      // Explicit audience, NOT event_lifecycle's default (poc/captain of already-
+      // approved orgs) - per the PDF, "Event published"'s recipient is the
+      // organiser, not the participants. The other event_lifecycle statuses
+      // (registration_open/ongoing/completed) keep the default poc/captain
+      // audience; this override is scoped to just this one call site.
       try {
         await notify(prisma, {
           type: 'event_lifecycle',
           championshipId: championship.id,
+          audience: Rules.role('organiser', championship.id),
           senderId: req.user!.id,
           data: { visibility: 'public' },
         });
