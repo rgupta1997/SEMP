@@ -5,6 +5,7 @@ import {
   type AudienceRule,
 } from '@semp/notifications/client';
 import { notificationHooks } from '../lib/notification.ts';
+import { titleCase } from '../lib/format';
 
 const AUDIENCES: AudienceRole[] = [
   'poc',
@@ -116,7 +117,7 @@ export function NotificationTestPanel() {
                       : 'border-slate-200'
                   }`}
                 >
-                  {role}
+                  {role === 'poc' ? 'POC' : titleCase(role)}
                 </button>
               );
             })}

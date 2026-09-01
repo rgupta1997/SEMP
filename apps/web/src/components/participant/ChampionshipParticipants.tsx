@@ -92,8 +92,8 @@ export function ChampionshipParticipants({ championshipId }: { championshipId: s
                 {org.org?.short_name && <span className="ml-2 text-slate-500 dark:text-slate-400">({org.org.short_name})</span>}
               </div>
               <div className="flex items-center gap-2">
-                <Badge tone="slate">{org.teams.length} team{org.teams.length === 1 ? '' : 's'}</Badge>
-                <Badge tone="slate">{org.playerCount} player{org.playerCount === 1 ? '' : 's'}</Badge>
+                <Badge tone="slate">{org.teams.length} Team{org.teams.length === 1 ? '' : 's'}</Badge>
+                <Badge tone="slate">{org.playerCount} Player{org.playerCount === 1 ? '' : 's'}</Badge>
               </div>
             </div>
           </div>
@@ -118,7 +118,7 @@ export function ChampionshipParticipants({ championshipId }: { championshipId: s
                         <span className="font-medium text-slate-800 dark:text-slate-200">{team.team_name}</span>
                         {team.sport?.name && <span className="text-xs text-slate-400 dark:text-slate-500">{team.sport.name}</span>}
                       </div>
-                      <Badge tone="slate">{team.players.length} player{team.players.length === 1 ? '' : 's'}</Badge>
+                      <Badge tone="slate">{team.players.length} Player{team.players.length === 1 ? '' : 's'}</Badge>
                     </button>
 
                     {isOpen && (team.players.length === 0 ? (

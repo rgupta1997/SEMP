@@ -3,6 +3,7 @@ import { Check, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Eye, Lock,
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { Badge, Button, Card, CardBody, Field, Input, Modal, PageHeader, Select, Spinner, Textarea, toast } from '../../components/ui';
 import { SheetPreview, openDoc } from '../organization/certificates/shared';
@@ -133,7 +134,7 @@ function TeamsTab() {
             {t.jersey_number != null && (
               <span style={{ fontFamily: MONO, fontSize: 13, color: 'var(--brand)' }}>#{t.jersey_number}</span>
             )}
-            <Badge tone={t.membership_role === 'captain' ? 'amber' : 'slate'}>{t.membership_role}</Badge>
+            <Badge tone={t.membership_role === 'captain' ? 'amber' : 'slate'}>{titleCase(t.membership_role)}</Badge>
           </div>
         ))}
     </div>

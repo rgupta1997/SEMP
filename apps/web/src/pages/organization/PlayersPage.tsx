@@ -9,6 +9,7 @@ import { api } from '../../lib/api';
 import { AddPlayersModal } from '../../components/AddPlayersModal';
 import { pluralise } from '@semp/shared';
 import { useOrgUnits, unitPath } from '../../lib/units';
+import { titleCase } from '../../lib/format';
 import {
   Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, PageHeader, Pagination,
   Modal, SearchInput, Select, cn, confirmDialog, toast, SURFACE, FilterChips,
@@ -544,7 +545,7 @@ export function PlayersPage() {
               {
                 key: 'status',
                 header: 'Status',
-                render: (row: Person) => <Badge tone={VERIFY_TONE[row.verification] ?? 'slate'}>{row.verification}</Badge>,
+                render: (row: Person) => <Badge tone={VERIFY_TONE[row.verification] ?? 'slate'}>{titleCase(row.verification)}</Badge>,
               },
               {
                 key: 'units',

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Trophy } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useApi, useTableControls, fmtDateRange } from '../lib/hooks';
+import { titleCase } from '../lib/format';
 import { useWorkspace } from '../lib/useWorkspace';
 import { Badge, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge, FilterChips } from '../components/ui';
 import { InvitationsInbox } from '../components/InvitationsInbox';
@@ -150,7 +151,7 @@ export function MyChampionshipsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {c.my_roles.map((r) => <Badge key={r} tone={ROLE_TONE[r] ?? 'slate'}>{r}</Badge>)}
+                  {c.my_roles.map((r) => <Badge key={r} tone={ROLE_TONE[r] ?? 'slate'}>{titleCase(r)}</Badge>)}
                   {/* Kept as a link so it can be opened in a new tab, but handled
                       here so the click switches workspace rather than just navigating. */}
                   <Link

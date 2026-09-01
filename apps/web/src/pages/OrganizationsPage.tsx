@@ -5,6 +5,7 @@ import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/useWorkspace';
 import { api } from '../lib/api';
 import { useApiMutation } from '../lib/hooks';
+import { titleCase } from '../lib/format';
 import { InstitutionFormModal } from '../components/InstitutionFormModal';
 import { JoinOrgModal } from '../components/JoinOrgModal';
 import { Badge, Button, Card, EmptyState, PageHeader, toast } from '../components/ui';
@@ -131,7 +132,7 @@ function Section({ title, memberships }: { title: string; memberships: any[] }) 
                 </div>
               </div>
               <div className="flex flex-col items-end gap-2">
-                <Badge tone="brand">{m.role}</Badge>
+                <Badge tone="brand">{titleCase(m.role)}</Badge>
                 {/* Owners/admins manage; members (and other roles) can still view the org's teams + members. */}
                 <button
                   onClick={() => open(m.organization_id)}

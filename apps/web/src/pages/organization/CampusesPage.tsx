@@ -8,6 +8,7 @@ import { useOrgUnits, type UnitNode } from '../../lib/units';
 import { useAuth } from '../../lib/auth';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { usePermissions } from '../../lib/permissions';
+import { titleCase } from '../../lib/format';
 import { CapabilityLock } from '../../components/CapabilityLock';
 import {
   Badge, Button, Card, CardBody, EmptyState, Field, Input, Modal, PageHeader, Select,
@@ -370,7 +371,7 @@ function PeoplePanel({ orgId, unit, people, labels, loading }: {
                     {p.member_code ? `${p.member_code} · ` : ''}{p.email ?? 'No email'}
                   </span>
                 </span>
-                {p.verification !== 'verified' && <Badge tone="amber">{p.verification}</Badge>}
+                {p.verification !== 'verified' && <Badge tone="amber">{titleCase(p.verification)}</Badge>}
               </li>
             ))}
           </ul>
@@ -593,7 +594,7 @@ export function CampusesPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-display text-[14px] font-bold text-slate-900 dark:text-slate-100">{c.name}</span>
-                          <Badge tone={STATUS_TONE[c.status as keyof typeof STATUS_TONE] ?? 'slate'}>{c.status}</Badge>
+                          <Badge tone={STATUS_TONE[c.status as keyof typeof STATUS_TONE] ?? 'slate'}>{titleCase(c.status)}</Badge>
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
                           <Counts node={c} labels={labels} />
@@ -637,7 +638,7 @@ export function CampusesPage() {
                               <div className="flex flex-wrap items-center gap-2">
                                 <span className="text-[13.5px] font-semibold text-slate-800 dark:text-slate-200">{d.name}</span>
                                 {d.code && <span className={MONO}>{d.code}</span>}
-                                <Badge tone={STATUS_TONE[d.status as keyof typeof STATUS_TONE] ?? 'slate'}>{d.status}</Badge>
+                                <Badge tone={STATUS_TONE[d.status as keyof typeof STATUS_TONE] ?? 'slate'}>{titleCase(d.status)}</Badge>
                               </div>
                               <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
                                 <Counts node={d} labels={labels} />

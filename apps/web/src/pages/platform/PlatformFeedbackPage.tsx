@@ -1,6 +1,7 @@
 import { FEEDBACK_STATUS, type FeedbackStatus } from '@semp/shared';
 import { api } from '../../lib/api';
 import { fmtDateTime, useApi, useApiMutation, useTableControls } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import {
   Badge, Button, Card, confirmDialog, EmptyState, Pagination, SearchInput, Select, Spinner,
 } from '../../components/ui';
@@ -84,13 +85,13 @@ export function PlatformFeedbackPage() {
                   <td className="px-4 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{fmtDateTime(r.created_at)}</td>
                   <td className="px-4 py-2">
                     <div className="flex items-center gap-2">
-                      <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge>
+                      <Badge tone={STATUS_TONE[r.status]}>{titleCase(r.status)}</Badge>
                       <Select
                         value={r.status}
                         onChange={(e) => setStatus.mutate({ id: r.id, status: e.target.value as FeedbackStatus })}
                         className="!min-w-[7.5rem] !py-1 text-xs"
                       >
-                        {FEEDBACK_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+                        {FEEDBACK_STATUS.map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
                       </Select>
                     </div>
                   </td>

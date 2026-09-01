@@ -5,6 +5,7 @@ import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { ENTRY_TYPE, TOURNAMENT_DISCIPLINE_STATUS } from '@semp/shared';
 import { usePermissions } from '../../../lib/permissions';
+import { titleCase } from '../../../lib/format';
 import { eventTemplateFor } from '../../../features/scoring/templates';
 import { Badge, Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge, toast } from '../../../components/ui';
 import { StageConfigWizard } from '../../../components/StageConfigWizard';
@@ -350,7 +351,7 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, d
             <label className="block">
               <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Entry</span>
               <Select value={dEntry} onChange={(e) => onDEntryChange(e.target.value)} className="w-full">
-                {ENTRY_TYPE.map((t) => <option key={t} value={t}>{t}</option>)}
+                {ENTRY_TYPE.map((t) => <option key={t} value={t}>{titleCase(t)}</option>)}
               </Select>
             </label>
             <label className="block">
@@ -389,7 +390,7 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, d
             <div className="grid grid-cols-3 gap-x-3">
               <Field label="Whole-sport entry">
                 <Select value={wholeEntry} onChange={(e) => onWholeEntryChange(e.target.value)}>
-                  {ENTRY_TYPE.map((t) => <option key={t} value={t}>{t}</option>)}
+                  {ENTRY_TYPE.map((t) => <option key={t} value={t}>{titleCase(t)}</option>)}
                 </Select>
               </Field>
               <Field label="Squad min"><Input type="number" min={1} value={wholeMin} disabled={wholeSquadFixed} onChange={(e) => setWholeMin(e.target.value)} /></Field>
@@ -468,7 +469,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
       <div className="grid grid-cols-3 gap-x-3">
         <Field label="Entry type">
           <Select value={entryType} onChange={(e) => onEntryTypeChange(e.target.value)}>
-            {ENTRY_TYPE.map((t) => <option key={t} value={t}>{t}</option>)}
+            {ENTRY_TYPE.map((t) => <option key={t} value={t}>{titleCase(t)}</option>)}
           </Select>
         </Field>
         <Field label="Squad min"><Input type="number" min={1} value={squadMin} disabled={squadFixed} onChange={(e) => setSquadMin(e.target.value)} /></Field>
@@ -476,7 +477,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
       </div>
       <Field label="Status">
         <Select value={status} onChange={(e) => setStatus(e.target.value)}>
-          {TOURNAMENT_DISCIPLINE_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+          {TOURNAMENT_DISCIPLINE_STATUS.map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
         </Select>
       </Field>
       <p className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
@@ -602,7 +603,7 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
                         <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">{d.squad_min}-{d.squad_max} · {venue?.name ?? 'no venue'}</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        {d.entry_type && <Badge tone="info">{d.entry_type}</Badge>}
+                        {d.entry_type && <Badge tone="info">{titleCase(d.entry_type)}</Badge>}
                         {effectiveFormat(d) && (
                           <Badge tone={d.format_id ? 'violet' : 'slate'}>{effectiveFormat(d)}</Badge>
                         )}
