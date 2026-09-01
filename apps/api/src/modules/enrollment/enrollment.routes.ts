@@ -116,7 +116,9 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
       },
     });
 
-    // An approval is announced to everyone in the championship.
+    // An approval is announced to everyone in the championship, AND separately
+    // confirmed directly to the applicant org - the broadcast is news for the room,
+    // not a decision notice for the org that was actually waiting on it.
     if (req.body.status === 'approved' && existing.status !== 'approved') {
       const orgName = existing.organizations?.short_name || existing.organizations?.name || 'An organization';
       await notify(prisma, {
@@ -129,6 +131,16 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
           championshipName: existing.championships?.name,
         },
       });
+      try {
+        await notify(prisma, {
+          type: 'registration_approved',
+          organizationId: existing.organization_id,
+          senderId: req.user!.id,
+          data: { championshipName: existing.championships?.name },
+        });
+      } catch (err) {
+        console.error(`[enrollment] registration_approved notification failed for ${existing.id}:`, err);
+      }
     }
 
     if (req.body.status === 'rejected' && existing.status !== 'rejected') {

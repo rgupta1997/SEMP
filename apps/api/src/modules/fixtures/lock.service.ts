@@ -211,6 +211,21 @@ export async function submitScorecard(prisma: Prisma, req: Request, fixtureId: s
     diff: { scorecard_status: { from: fx.scorecard_status, to: 'submitted' } },
   });
 
+  // Best-effort - the submission already committed above.
+  try {
+    const championshipId = championshipOf(fx);
+    if (championshipId) {
+      await notify(prisma, {
+        type: 'score_pending_validation',
+        championshipId,
+        senderId: req.user!.id,
+        data: { label: fixtureLabel(fx) },
+      });
+    }
+  } catch (err) {
+    console.error(`[fixtures] score_pending_validation notification failed for fixture ${fx.id}:`, err);
+  }
+
   return updated;
 }
 
@@ -368,6 +383,28 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
       await notify(prisma, { type: 'match_score_locked', audience, senderId: actorUserId, data: { body: `The scorecard for ${label} is now locked.` } });
     } catch (err) {
       console.error(`[lock] match_score_locked notification failed for fixture ${fx.id}:`, err);
+    }
+
+    // Standings recomputed above (inside the transaction) - tell the championship.
+    try {
+      await notify(prisma, { type: 'standings_updated', championshipId, senderId: req.user!.id, data: { label } });
+    } catch (err) {
+      console.error(`[lock] standings_updated notification failed for fixture ${fx.id}:`, err);
+    }
+  }
+
+  // A bracket fixture only (bracket_position != null) - a league/pool loss doesn't
+  // eliminate anyone, only a knockout one does. The 3rd-place fixture has no
+  // bracket_position, so it's naturally excluded (both its players are already
+  // eliminated - re-announcing that on a placement match would be confusing).
+  if (fx.bracket_position != null && fx.winner_team_id) {
+    const losingTeamId = fx.winner_team_id === fx.home_team_id ? fx.away_team_id : fx.home_team_id;
+    if (losingTeamId) {
+      try {
+        await notify(prisma, { type: 'team_eliminated', audience: Rules.teamMembers(losingTeamId), senderId: req.user!.id, data: { label } });
+      } catch (err) {
+        console.error(`[lock] team_eliminated notification failed for fixture ${fx.id}:`, err);
+      }
     }
   }
 

@@ -31,8 +31,10 @@ export class PlanLimitError extends Error {
   readonly cap: number;
   readonly current: number;
   readonly status = 402;
+  /** Set only on the org ladder - the personal ladder sets no ceilings today. */
+  readonly organizationId?: string;
 
-  constructor(limit: LimitKey, cap: number, current: number) {
+  constructor(limit: LimitKey, cap: number, current: number, organizationId?: string) {
     // Names the ceiling and where you are against it. Like the capability
     // message, it does NOT name the plan that would raise it: the wall says what
     // is in the way, the plan page says what it costs to move it.
@@ -43,6 +45,7 @@ export class PlanLimitError extends Error {
     this.limit = limit;
     this.cap = cap;
     this.current = current;
+    this.organizationId = organizationId;
   }
 }
 
@@ -102,7 +105,7 @@ export async function assertWithinOrgLimit(
 ): Promise<void> {
   const tier = await orgTier(prisma, organizationId);
   const cap = capFor('org', tier, key);
-  if (cap !== null && current >= cap) throw new PlanLimitError(key, cap, current);
+  if (cap !== null && current >= cap) throw new PlanLimitError(key, cap, current, organizationId);
 }
 
 /** The personal ladder sets no ceilings today; kept so callers need not care. */

@@ -643,6 +643,17 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     const fixture = await prisma.fixtures.findUnique({ where: { id: fixtureId } });
     if (!fixture) throw new NotFoundError('Fixture');
     const awards = req.body.awards as { award_name: string; award_type_id?: string | null; recipient_user_id: string }[];
+
+    // This route replaces the whole award list on every save, so a re-save of an
+    // unchanged award must not re-notify its recipient. Only whatever wasn't
+    // already recorded (by recipient + name + type) counts as newly awarded.
+    const existing = await prisma.fixture_awards.findMany({
+      where: { fixture_id: fixtureId },
+      select: { recipient_user_id: true, award_name: true, award_type_id: true },
+    });
+    const existingKeys = new Set(existing.map((e) => `${e.recipient_user_id}|${e.award_name}|${e.award_type_id ?? ''}`));
+    const newAwards = awards.filter((a) => !existingKeys.has(`${a.recipient_user_id}|${a.award_name}|${a.award_type_id ?? ''}`));
+
     // Replace-all: wipe the fixture's awards then re-insert, atomically.
     await prisma.$transaction([
       prisma.fixture_awards.deleteMany({ where: { fixture_id: fixtureId } }),
@@ -662,6 +673,44 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       include: { users: { select: { name: true } } },
       orderBy: { created_at: 'asc' },
     });
+
+    // Best-effort: the awards are already committed above. Player of the Match
+    // gets its own type; every other award type (or untyped free text) is a
+    // tournament_award - see the registry for why they share this one route.
+    if (newAwards.length > 0) {
+      try {
+        const typeIds = [...new Set(newAwards.map((a) => a.award_type_id).filter((id): id is string => !!id))];
+        const types = typeIds.length
+          ? await prisma.award_types.findMany({ where: { id: { in: typeIds } }, select: { id: true, code: true } })
+          : [];
+        const codeById = new Map(types.map((t) => [t.id, t.code]));
+        const withNames = await prisma.fixtures.findUnique({
+          where: { id: fixtureId },
+          select: {
+            teams_fixtures_home_team_idToteams: { select: { name: true } },
+            teams_fixtures_away_team_idToteams: { select: { name: true } },
+            tournament_disciplines: { select: { tournament_sports: { select: { tournaments: { select: { championship_id: true } } } } } },
+          },
+        });
+        const championshipId = withNames?.tournament_disciplines?.tournament_sports?.tournaments?.championship_id ?? undefined;
+        const home = withNames?.teams_fixtures_home_team_idToteams?.name ?? 'TBD';
+        const away = withNames?.teams_fixtures_away_team_idToteams?.name ?? 'TBD';
+        const label = `${home} vs ${away}`;
+        for (const a of newAwards) {
+          const code = a.award_type_id ? codeById.get(a.award_type_id) : null;
+          await notify(prisma, {
+            type: code === 'player_of_the_match' ? 'player_of_the_match' : 'tournament_award',
+            championshipId,
+            userId: a.recipient_user_id,
+            senderId: req.user!.id,
+            data: { label, awardName: a.award_name },
+          });
+        }
+      } catch (err) {
+        console.error(`[fixtures] award notifications failed for fixture ${fixtureId}:`, err);
+      }
+    }
+
     res.json(rows.map(awardView));
   }));
 
@@ -877,7 +926,17 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       if (officialId) {
         const details = [when ? `Scheduled for ${when}.` : 'Not scheduled yet.', where ? `At ${where}.` : null]
           .filter(Boolean).join(' ');
-        await tell(officialId, `You're officiating ${label}`, `You've been assigned to score this match. ${details} It's in your Officiating queue.`);
+        try {
+          await notify(prisma, {
+            type: 'match_official_assigned',
+            championshipId,
+            userId: officialId,
+            senderId: req.user!.id,
+            data: { label, details },
+          });
+        } catch (err) {
+          console.error(`[officials] assignment notification failed for fixture ${fx.id}:`, err);
+        }
       }
       // The previous official's queue silently loses a match otherwise, which is how
       // a match ends up with nobody at it.
