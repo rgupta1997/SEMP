@@ -71,7 +71,7 @@ export const NAV: Record<ContextKind, NavItem[]> = {
   ],
   org: [
     { key: 'dashboard', label: 'Dashboard', to: '/organizations/:id/overview' },
-    { key: 'players', label: 'Players', to: '/organizations/:id/students' },
+    { key: 'players', label: 'People', to: '/organizations/:id/students' },
     // Campuses & units is a WORKING screen, not a setting: it answers "who belongs
     // where", and a player can only be picked for the unit they belong to. It sat
     // inside Administration, which is where things go to be configured once and

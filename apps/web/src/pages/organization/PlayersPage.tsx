@@ -369,7 +369,7 @@ export function PlayersPage() {
         )}
         {canEditPeople && (
           <Button onClick={() => setAdding(true)}>
-            <UserPlus size={15} /> <span className="hidden sm:inline">Add player</span><span className="sm:hidden">Add</span>
+            <UserPlus size={15} /> <span className="hidden sm:inline">Add Person</span><span className="sm:hidden">Add</span>
           </Button>
         )}
       </PageHeader>
@@ -523,7 +523,7 @@ export function PlayersPage() {
               }] : []),
               {
                 key: 'player',
-                header: 'Player',
+                header: 'Person',
                 primary: true,
                 render: (row: Person) => (
                   <div className="flex items-center gap-3">
