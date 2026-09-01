@@ -25,7 +25,7 @@ export function OrganizationsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Your communities" subtitle="The organizations & groups you play for. Each fields teams per sport.">
-        <Button variant="outline" onClick={() => setFinding(true)}>Find an organization</Button>
+        <Button variant="outline" onClick={() => setFinding(true)}>Join Organization</Button>
         <Button onClick={() => setCreating(true)}>+ Create organization</Button>
       </PageHeader>
 
@@ -36,7 +36,7 @@ export function OrganizationsPage() {
           description="Create your own to enter teams and register for championships, or find one and request to join."
           action={(
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setFinding(true)}>Find an organization</Button>
+              <Button variant="outline" onClick={() => setFinding(true)}>Join Organization</Button>
               <Button onClick={() => setCreating(true)}>+ Create organization</Button>
             </div>
           )}
