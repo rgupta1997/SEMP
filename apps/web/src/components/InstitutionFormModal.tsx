@@ -30,6 +30,14 @@ function generatePassword(): string {
   return out;
 }
 
+// Hidden, not removed: the creator becomes the org's POC/owner by default, so
+// asking for a second one up front was a step nobody used. Flip back to true to
+// bring the toggle back.
+const SHOW_POC_ASSIGNMENT = false;
+// Hidden, not removed: organisers didn't know what to put here at creation time.
+// Still accepted by the API for whoever sets it later.
+const SHOW_CODE_FIELD = false;
+
 export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubmit }: InstitutionFormModalProps) {
   const qc = useQueryClient();
   const isEdit = mode === 'edit';
@@ -55,14 +63,20 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
   const submit = async () => {
     setError(null);
     if (!name.trim()) { setError('Organization name is required'); return; }
-    // Required, and required HERE rather than only on the server, so the message
-    // arrives beside the field rather than as a toast after a round trip. An
-    // institution's full name appears on every standings table, certificate and
-    // match row, and none of those have room for it on a phone.
-    if (shortName.trim().length < 2) { setError('A short name of at least 2 characters is required'); return; }
+    // City plus name is the uniqueness key the server checks on CREATE (two orgs of
+    // the same name in different cities are fine; the same city is what makes it a
+    // duplicate). Only enforced there - an existing organization predating this
+    // rule can still have its other fields edited without being forced to backfill
+    // a city first.
+    if (!isEdit && !city.trim()) { setError('City is required'); return; }
+    // Not something a person has to consciously fill in - it follows the name via
+    // suggestShort() unless they typed their own - so a blank value falls back to a
+    // fresh suggestion here rather than blocking Save. The server keeps the real
+    // minimum-length rule.
+    const resolvedShortName = shortName.trim() || suggestShort(name);
     const body: InstitutionFormBody = {
       name: name.trim(),
-      short_name: shortName.trim().toUpperCase(),
+      short_name: resolvedShortName.trim().toUpperCase(),
       code: code.trim() || undefined,
       city: city.trim() || undefined,
       country: country.trim() || 'India',
@@ -115,7 +129,7 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
             placeholder="e.g. VJTI"
           />
         </Field>
-        <Field label="Short name *" hint="Shown on standings, certificates and phone screens.">
+        <Field label="Short name" hint="Shown on standings, certificates and phone screens.">
           <Input
             value={shortName}
             onChange={(e) => { setShortTouched(true); setShortName(e.target.value.toUpperCase().slice(0, 12)); }}
@@ -124,12 +138,14 @@ export function InstitutionFormModal({ mode = 'create', initial, onClose, onSubm
             className="font-mono uppercase tracking-wide"
           />
         </Field>
-        <Field label="Code"><Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Optional" /></Field>
-        <Field label="City"><Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Optional" /></Field>
+        {SHOW_CODE_FIELD && (
+          <Field label="Code"><Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Optional" /></Field>
+        )}
+        <Field label={isEdit ? 'City' : 'City *'}><Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Mumbai" /></Field>
         <Field label="Country"><Input value={country} onChange={(e) => setCountry(e.target.value)} /></Field>
       </div>
 
-      {!isEdit && (
+      {!isEdit && SHOW_POC_ASSIGNMENT && (
         <div className="mt-2 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
           <div className="flex items-center justify-between">
             <div>
