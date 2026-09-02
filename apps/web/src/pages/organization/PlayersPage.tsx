@@ -347,7 +347,7 @@ export function PlayersPage() {
   if (isLoading || isError) {
     return (
       <div>
-        <PageHeader title="Players" subtitle="Everyone who belongs to this organisation." />
+        <PageHeader title="People" subtitle="Everyone who belongs to this organisation." />
         <QueryState query={{ isLoading, isError, error, refetch }} errorTitle="Could not load the directory"
           skeleton={<SkeletonList rows={8} />}>
           <span />
@@ -358,7 +358,7 @@ export function PlayersPage() {
 
   return (
     <div>
-      <PageHeader title="Players" subtitle="Everyone who belongs to this organisation, and what they have played.">
+      <PageHeader title="People" subtitle="Everyone who belongs to this organisation, and what they have played.">
         {canImport && (
           // Icon-only below sm: two full-width buttons under the title cost a whole
           // row of a 390px screen, and "Bulk upload" is not a word anybody needs

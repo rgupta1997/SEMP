@@ -237,7 +237,7 @@ export function AddPlayersModal({
 
   return (
     <Modal
-      title={rows.length === 1 ? 'Add a player' : `Add ${rows.length} players`}
+      title={rows.length === 1 ? 'Add a Person' : `Add ${rows.length} people`}
       onClose={onClose}
       size="4xl"
       dismissible={!busy}
@@ -323,7 +323,7 @@ export function AddPlayersModal({
         <div className="flex gap-2">
           <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
           <Button onClick={submit} disabled={busy || (attempted && !ready)}>
-            {busy ? 'Adding…' : rows.length === 1 ? 'Add player' : `Add ${rows.length} players`}
+            {busy ? 'Adding…' : rows.length === 1 ? 'Add Person' : `Add ${rows.length} people`}
           </Button>
         </div>
       </div>
