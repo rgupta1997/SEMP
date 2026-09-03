@@ -151,15 +151,14 @@ export async function saveTemplate(
     }
   }
 
-  // Same name from the same owner updates rather than duplicating - "save it again
-  // after tweaking" is the common case, not a new template.
-  const existing = await prisma.championship_templates.findFirst({
-    where: {
-      name: { equals: name.trim(), mode: 'insensitive' },
-      ...(organizationId ? { organization_id: organizationId } : { created_by: req.user!.id, organization_id: null }),
-    },
+  // A name is this person's across every scope they can save into, not per scope -
+  // switching "Who can use it" from themselves to an organisation they administer
+  // is not a different namespace, so it cannot be used to sidestep this check.
+  const duplicate = await prisma.championship_templates.findFirst({
+    where: { name: { equals: name.trim(), mode: 'insensitive' }, created_by: req.user!.id },
     select: { id: true },
   });
+  if (duplicate) throw new BusinessRuleError(`You already have a template named "${name.trim()}" - pick a different name.`);
 
   const data = {
     name: name.trim(),
@@ -171,13 +170,11 @@ export async function saveTemplate(
     updated_at: new Date(),
   };
 
-  const row = existing
-    ? await prisma.championship_templates.update({ where: { id: existing.id }, data })
-    : await prisma.championship_templates.create({ data });
+  const row = await prisma.championship_templates.create({ data });
 
   const summary = summarise(shape);
   await audit(prisma, req, {
-    action: existing ? 'championship.template_updated' : 'championship.template_saved',
+    action: 'championship.template_saved',
     target: { type: 'championship_templates', id: row.id, label: row.name },
     organizationId: organizationId ?? null,
     championshipId,

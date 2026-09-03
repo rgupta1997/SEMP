@@ -22,6 +22,9 @@ type Tab = 'participation' | 'performance' | 'inclusion' | 'benchmark' | 'impact
 // scheduled yet. They stay in the tab strip because hiding them makes the gap
 // invisible, and somebody would ask for a report that already exists.
 const PARKED: Tab[] = ['benchmark', 'impact'];
+// Hidden, not removed: the tab's data and rendering below are untouched, just not
+// reachable from the strip. Flip back to true to bring it back.
+const SHOW_INCLUSION_TAB = false;
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'participation', label: 'Participation' },
   { key: 'performance', label: 'Performance' },
@@ -132,7 +135,7 @@ export function OrgReportsPage() {
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
-          {TABS.map((t) => (
+          {TABS.filter((t) => SHOW_INCLUSION_TAB || t.key !== 'inclusion').map((t) => (
             <button
               key={t.key} type="button" onClick={() => setTab(t.key)}
               aria-current={tab === t.key}

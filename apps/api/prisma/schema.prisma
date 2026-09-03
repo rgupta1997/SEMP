@@ -445,7 +445,7 @@ model users {
   consent_at                                                               DateTime?                    @db.Timestamptz(6)
   consent_version                                                          String?
   erased_at                                                                DateTime?                    @db.Timestamptz(6)
-  personal_plan                                                            tier                         @default(free)
+  personal_plan                                                            tier                         @default(max)
   sportagon_id                                                             String?                      @unique(map: "uq_users_sportagon_id") @db.VarChar(20)
   handle                                                                   String?                      @db.VarChar(64)
   officiates                                                               Boolean                      @default(false)

@@ -2,7 +2,18 @@ import { PrismaClient } from '@prisma/client';
 
 // Single PrismaClient, created here and shared with every persistence adapter
 // via the composition root. The domain/application layers never import this.
-export const prisma = new PrismaClient();
+//
+// `transactionOptions` raises the default interactive-transaction budget from
+// Prisma's 5s (`timeout`) / 2s (`maxWait`) to 60s each. A handler whose
+// `prisma.$transaction(async (tx) => …)` body genuinely takes longer than 5s
+// (a heavier bulk import, several dependent writes) was hitting Prisma's own
+// "Transaction already closed" error and surfacing as a raw 500, not a
+// business-rule rejection - this is a client-wide default, not a per-call fix,
+// so every transaction gets the same headroom. An individual call can still
+// pass its own `{ timeout, maxWait }` to `$transaction` to override it.
+export const prisma = new PrismaClient({
+  transactionOptions: { maxWait: 60000, timeout: 60000 },
+});
 
 export type Prisma = typeof prisma;
 
