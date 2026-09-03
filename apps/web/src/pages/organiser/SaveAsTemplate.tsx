@@ -22,7 +22,6 @@ export function SaveAsTemplate({ eventId, championshipName }: { eventId: string;
   const [orgId, setOrgId] = useState('');
   const [saved, setSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [nameError, setNameError] = useState<string | null>(null);
 
   // Only organisations this person can actually save into; anything else is theirs.
   const orgs = (ctx?.organizations ?? [])
@@ -42,8 +41,7 @@ export function SaveAsTemplate({ eventId, championshipName }: { eventId: string;
   }
 
   const save = async () => {
-    setNameError(null);
-    if (name.trim().length < 2) { setNameError('Give the template a name'); return; }
+    if (name.trim().length < 2) { toast.error('Give the template a name'); return; }
     setBusy(true);
     try {
       const res: any = await api('POST', `/championships/${eventId}/save-template`, {
@@ -54,11 +52,7 @@ export function SaveAsTemplate({ eventId, championshipName }: { eventId: string;
       setSaved(res.name);
       toast.success('Template saved', 'You can start from it next time.');
     } catch (e: any) {
-      // Almost always the duplicate-name rule (a name is this person's across every
-      // scope they can save into - see templates.service.ts) - shown beside the
-      // field that caused it rather than as a toast that has scrolled away by the
-      // time someone looks back at the form.
-      setNameError(e.message ?? 'Could not save the template');
+      toast.error(e.message ?? 'Could not save the template');
     } finally { setBusy(false); }
   };
 
@@ -88,9 +82,8 @@ export function SaveAsTemplate({ eventId, championshipName }: { eventId: string;
 
           <div className="mt-4 grid gap-x-4 sm:grid-cols-2">
             <Field label="Template name">
-              <Input value={name} onChange={(e) => { setName(e.target.value); setNameError(null); }}
+              <Input value={name} onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Our annual inter-batch meet" maxLength={80} />
-              {nameError && <span className="mt-1 block text-xs text-rose-600 dark:text-rose-400">{nameError}</span>}
             </Field>
             {orgs.length > 0 && (
               <Field label="Who can use it" hint="An organisation's templates outlive whoever saved them.">
