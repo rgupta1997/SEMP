@@ -148,8 +148,8 @@ export function AddPlayersModal({
       <Modal title={added === 1 ? 'Player added' : `${added} players added`} onClose={onClose} size="3xl" dismissible={false}>
         <div className="space-y-4">
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            {added} of {total} {total === 1 ? 'person is' : 'people are'} now on the roll. Anyone new starts{' '}
-            <strong>awaiting verification</strong>.
+            {added} of {total} {total === 1 ? 'person is' : 'people are'} now on the roll, added as{' '}
+            <strong>verified</strong>.
             {skipped.length > 0 && ` ${skipped.length} ${skipped.length === 1 ? 'row was' : 'rows were'} not added.`}
           </p>
 
@@ -244,8 +244,9 @@ export function AddPlayersModal({
     >
       <div className="space-y-3">
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          Everyone added starts as <strong>awaiting verification</strong>. Anyone already on Sportagon with
-          this phone number or email is matched to their existing account rather than given a second one.
+          Everyone added here is added as <strong>verified</strong>, since you're vouching for them directly.
+          Anyone already on Sportagon with this phone number or email is matched to their existing account
+          rather than given a second one.
         </p>
 
         <div className={`hidden gap-2 px-1 font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500 sm:grid ${cols}`}>

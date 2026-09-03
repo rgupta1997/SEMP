@@ -304,15 +304,18 @@ export function makePeopleRouter(prisma: Prisma): Router {
         );
       }
 
-      // Placement onto the membership. Note what the DO UPDATE does NOT touch:
-      // `verification`. Re-running a file must not knock somebody already
-      // verified back to pending - that is what makes the import idempotent in
-      // the sense J1-E5-S2 actually means.
+      // Placement onto the membership. A roll import is the institution adding its
+      // own people - unlike a self-service join request, there is nobody else who
+      // needs to vouch for them, so they land verified, stamped with the admin who
+      // ran this import. Note what the DO UPDATE does NOT touch: `verification`.
+      // Re-running a file must not change a verification decision already made
+      // (including a rejection) - that is what makes the import idempotent in the
+      // sense J1-E5-S2 actually means.
       await tx.$executeRawUnsafe(
         `insert into organization_members
-           (user_id, organization_id, role, status, member_code, scholarship, verification)
+           (user_id, organization_id, role, status, member_code, scholarship, verification, verified_by, verified_at)
          select v.user_id::uuid, $1::uuid, 'member', 'active',
-                v.member_code, v.scholarship::boolean, 'pending'
+                v.member_code, v.scholarship::boolean, 'verified', $5::uuid, now()
          from unnest($2::text[], $3::text[], $4::text[])
            as v(user_id, member_code, scholarship)
          on conflict (user_id, organization_id) do update set
@@ -323,6 +326,7 @@ export function makePeopleRouter(prisma: Prisma): Router {
         resolved.map((x) => x.r.member_code),
         // Stringified for the same reason as above; `::boolean` restores it.
         resolved.map((x) => (x.r.scholarship == null ? null : String(x.r.scholarship))),
+        req.user!.id,
       );
 
       // Placement lives on its own table now, and is ADDITIVE: a sheet naming a
@@ -404,9 +408,13 @@ export function makePeopleRouter(prisma: Prisma): Router {
         ...(row.scholarship != null ? { scholarship: row.scholarship } : {}),
       },
       create: {
+        // An admin adding a person by hand is the institution vouching for them
+        // directly - there is nobody else to verify it, so this lands verified
+        // (unlike a self-service join request, which stays pending for an
+        // owner/admin to approve).
         user_id: userId, organization_id: organizationId, role: 'member', status: 'active',
         member_code: row.member_code, scholarship: row.scholarship,
-        verification: 'pending',
+        verification: 'verified', verified_by: req.user!.id, verified_at: new Date(),
       },
       include: { users: { select: { name: true, email: true, phone: true } } },
     });
@@ -427,7 +435,7 @@ export function makePeopleRouter(prisma: Prisma): Router {
       target: { type: 'organization_members', id: member.id, label: member.users?.name ?? 'Person' },
       organizationId,
       summary: `Added ${member.users?.name ?? 'a person'} to the roll`,
-      diff: { verification: { from: null, to: 'pending' } },
+      diff: { verification: { from: null, to: 'verified' } },
     });
 
     res.status(201).json({ ...personView(member), credential });

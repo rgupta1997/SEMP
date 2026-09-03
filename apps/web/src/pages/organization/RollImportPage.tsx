@@ -241,8 +241,8 @@ export function RollImportPage() {
               {busy ? 'Importing…' : `Import ${importable} ${importable === 1 ? 'person' : 'people'}`}
             </Button>
             <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-              Everyone imported starts as <strong>pending verification</strong>. Running the same file again
-              changes nothing.
+              Everyone imported is added as <strong>verified</strong>, since this is your own roll. Running the
+              same file again changes nothing.
             </p>
           </CardBody>
         </Card>
