@@ -417,23 +417,6 @@ export function TeamsPage() {
   const [bulkCreating, setBulkCreating] = useState(false);
   const [status, setStatus] = useState('all');
 
-  // Approved championships populate the shared header championship filter.
-  const eventOptions = useMemo(
-    // Deduped by championship. An organisation holds one entry PER CAMPUS in an
-    // internal event, so mapping entries straight to options produced the same
-    // championship two or three times over with identical names - and React keyed
-    // them identically too.
-    () => {
-      const byId = new Map<string, { id: string; name: string }>();
-      for (const e of approved) {
-        if (!e.championship_id || byId.has(e.championship_id)) continue;
-        byId.set(e.championship_id, { id: e.championship_id, name: e.championships?.name ?? 'Championship' });
-      }
-      return [...byId.values()];
-    },
-    [approved],
-  );
-
   const activeEvent = approved.find((e) => e.championship_id === eventId);
   const defaultEnrollmentId = activeEvent?.id;
   const drawsEventId = eventId || approved[0]?.championship_id || null;
@@ -461,6 +444,16 @@ export function TeamsPage() {
     return [...map.entries()].map(([id, name]) => ({ id, name }));
   }, [teams, eventId, tournamentFilter]);
 
+  // `eventId` is shared, app-wide state - with no header dropdown on this tab to
+  // show or clear it, a selection left over from another page (say, Events) must
+  // not go on silently filtering this tab's teams. Drop it if it isn't one of
+  // this tab's own championships; the deep-link effect below can still set a
+  // fresh one straight after.
+  useEffect(() => {
+    if (eventId && !approved.some((e) => e.championship_id === eventId)) setEventId('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId, playsFor]);
+
   // Seed the shared championship filter from a deep link (?championship=…), e.g. "Manage teams".
   useEffect(() => {
     const ev = searchParams.get('championship');
@@ -477,9 +470,10 @@ export function TeamsPage() {
   // Reset the tournament drill-down when the header championship changes.
   useEffect(() => { setTournamentFilter('all'); }, [eventId]);
 
-  // Register the shared Championship + Sport filters; read back the active sport.
+  // Register the shared Sport filter; read back the active sport. The championship
+  // filter is deliberately not published here - this tab's teams are scoped to the
+  // organisation, and a header dropdown for it read as an extra, unwanted control.
   const { sportId } = usePageFilters({
-    championships: eventOptions.length ? eventOptions : undefined,
     sports: sportOptions.length ? sportOptions : undefined,
   });
 
