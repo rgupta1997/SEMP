@@ -3,9 +3,9 @@ import {
   assertCapability,
   CapabilityRequiredError,
   entitlementSnapshot,
-  type EntitlementsPrisma,
 } from '@semp/entitlements/server';
 import type { CapabilityKey } from '@semp/entitlements';
+import type { Prisma } from '../../infra/prisma.js';
 import { DomainError, UnauthorizedError } from '../../shared/errors.js';
 
 // The subscription gate. Distinct from the permission gate next door, and the
@@ -50,7 +50,7 @@ export interface CapabilityGuardOptions {
   organizationIdFrom?: (req: Parameters<RequestHandler>[0]) => string | null | undefined;
 }
 
-export function makeEntitlementGuards(prisma: EntitlementsPrisma) {
+export function makeEntitlementGuards(prisma: Prisma) {
   /** Refuses with 403 CAPABILITY_REQUIRED unless the capability is granted. */
   function requireCapability(
     capability: CapabilityKey,
@@ -85,12 +85,35 @@ export function makeEntitlementGuards(prisma: EntitlementsPrisma) {
   /**
    * Everything the caller is entitled to, on both ladders. The client renders
    * every lock from this one payload rather than asking per capability.
+   *
+   * The org ladder is read for whichever organisation the caller names via
+   * `?organizationId=`, not their fixed home org - two organisations on
+   * different plans must never be able to borrow each other's capabilities just
+   * because the same person happens to belong to both. Falls back to the home
+   * org when the request names none, or names one this caller does not
+   * actually belong to.
    */
   const readSnapshot: RequestHandler = (req, res, next) => {
     const user = req.user;
     if (!user) return next(new UnauthorizedError());
 
-    entitlementSnapshot(prisma, { userId: user.id, organizationId: user.organizationId })
+    const requested = typeof req.query.organizationId === 'string' ? req.query.organizationId : null;
+
+    (async () => {
+      let organizationId = user.organizationId;
+      if (requested && requested !== organizationId) {
+        if (user.isSuperAdmin) {
+          organizationId = requested;
+        } else {
+          const member = await prisma.organization_members.findFirst({
+            where: { user_id: user.id, organization_id: requested, status: 'active' },
+            select: { id: true },
+          });
+          if (member) organizationId = requested;
+        }
+      }
+      return entitlementSnapshot(prisma, { userId: user.id, organizationId });
+    })()
       .then((snapshot) => res.json(snapshot))
       .catch(next);
   };

@@ -46,7 +46,6 @@ interface MyEvent {
 
 export function useWorkspace() {
   const { ctx } = useAuth();
-  const ent = useApi<EntitlementSnapshot>('/me/entitlements', !!ctx);
   // Assignments are per MATCH, which is the tightest scope in the product and the
   // only one whose nav goes straight to the console. Read from the fixtures this
   // person is actually the official on.
@@ -227,6 +226,19 @@ export function useWorkspace() {
   }, [storeKey, contexts.length, routeContextId]);
 
   const active = contexts.find((c) => c.id === activeId) ?? contexts[0] ?? null;
+
+  // Read for whichever ORGANISATION is active, not the account - two orgs on
+  // different plans must not be able to borrow each other's capabilities just
+  // because the same person administers both. Baked into the query path (rather
+  // than passed as a separate param) so switching orgs changes the cache key and
+  // refetches automatically; anything that is not an org context (My Space, an
+  // event) falls back to the account's home org, which is what the server
+  // already does when no organisationId is given.
+  const entPath = active?.kind === 'org'
+    ? `/me/entitlements?organizationId=${active.id}`
+    : '/me/entitlements';
+  const ent = useApi<EntitlementSnapshot>(entPath, !!ctx);
+
   // What is true of this PERSON, for the nav items that depend on it rather than
   // on the context. Read from the auth context, so somebody added to an event's
   // officials list mid-session sees Officiating appear on the next /me rather than
