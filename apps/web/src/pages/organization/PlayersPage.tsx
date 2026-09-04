@@ -641,6 +641,8 @@ export function PlayersPage() {
           // capability note shown while it loads accuses a plan of lacking
           // something it may well have.
           canBulk={ws.loading || ws.granted.has('bulk_player_upload')}
+          // Already on this roll - the picker shouldn't offer linking them again.
+          existingUserIds={new Set(people.map((p) => p.user_id))}
           onClose={() => setAdding(false)}
           onAdded={() => { refetch(); }}
         />

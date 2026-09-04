@@ -135,11 +135,16 @@ function groupByPhone(users: FoundUser[]): PhoneGroup[] {
 }
 
 export function AddPlayersModal({
-  orgId, canBulk, onClose, onAdded,
+  orgId, canBulk, existingUserIds, onClose, onAdded,
 }: {
   orgId: string;
   /** Whether this plan may add more than one person at a time. */
   canBulk: boolean;
+  /** Accounts already on this roll - search still shows them (removing them would
+   * hide the very fact that a phone has another account too), but linking one
+   * again would just be a no-op the organiser has to puzzle over, so it's shown
+   * as already added rather than offered. */
+  existingUserIds?: Set<string>;
   onClose: () => void;
   onAdded: () => void;
 }) {
@@ -192,6 +197,7 @@ export function AddPlayersModal({
   // "Start a new account on this number" either fills the existing blank row slot
   // (free on any plan) or has to open a new one, which only a bulk plan may do.
   const canQuickAdd = rows.some(isBlankRow) || canBulk;
+  const alreadyAdded = (id: string) => existingUserIds?.has(id) ?? false;
 
   const toggleLink = (u: FoundUser) => {
     setLinked((m) => {
@@ -459,22 +465,33 @@ export function AddPlayersModal({
                               </div>
                             </div>
                             {quickAdd}
-                            <span className={atCap && !linked.has(primary.id) ? 'opacity-40' : ''}>
-                              <Checkbox checked={linked.has(primary.id)} onChange={() => toggleLink(primary)} />
-                            </span>
+                            {alreadyAdded(primary.id) ? (
+                              <Badge tone="green">Added</Badge>
+                            ) : (
+                              <span className={atCap && !linked.has(primary.id) ? 'opacity-40' : ''}>
+                                <Checkbox checked={linked.has(primary.id)} onChange={() => toggleLink(primary)} />
+                              </span>
+                            )}
                           </div>
                         )}
                         {multi && isOpen && (
                           <div className="divide-y divide-slate-100 border-t border-slate-100 bg-slate-50/60 dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-800/30">
                             {g.users.map((u) => (
-                              <label key={u.id} className="flex cursor-pointer items-center gap-2 py-2 pl-9 pr-3 hover:bg-slate-100 dark:hover:bg-slate-800/60">
-                                <span className={atCap && !linked.has(u.id) ? 'opacity-40' : ''}>
-                                  <Checkbox checked={linked.has(u.id)} onChange={() => toggleLink(u)} />
-                                </span>
+                              <label
+                                key={u.id}
+                                className={`flex items-center gap-2 py-2 pl-9 pr-3 hover:bg-slate-100 dark:hover:bg-slate-800/60 ${alreadyAdded(u.id) ? '' : 'cursor-pointer'}`}
+                              >
                                 <div className="min-w-0 flex-1">
                                   <div className="truncate text-sm text-slate-800 dark:text-slate-200">{u.name}</div>
                                   <div className="truncate text-xs text-slate-500 dark:text-slate-400">{u.email}</div>
                                 </div>
+                                {alreadyAdded(u.id) ? (
+                                  <Badge tone="green">Added</Badge>
+                                ) : (
+                                  <span className={atCap && !linked.has(u.id) ? 'opacity-40' : ''}>
+                                    <Checkbox checked={linked.has(u.id)} onChange={() => toggleLink(u)} />
+                                  </span>
+                                )}
                               </label>
                             ))}
                           </div>
