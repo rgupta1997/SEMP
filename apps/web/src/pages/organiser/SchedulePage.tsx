@@ -331,7 +331,10 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
     return ta - tb || (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0);
   });
   const isLoading = fixturesLoading;
-  const generate = useApiMutation(() => api('POST', `/tournament-disciplines/${td.id}/fixtures/generate`, { params: {} }), [fixturesPath]);
+  const generate = useApiMutation(
+    (replace?: boolean) => api('POST', `/tournament-disciplines/${td.id}/fixtures/generate`, { params: {}, ...(replace ? { replace: true } : {}) }),
+    [fixturesPath],
+  );
   const [editing, setEditing] = useState<any | null>(null);
   const [creating, setCreating] = useState(false);
   const [view, setView] = useState<'list' | 'visual'>('visual');
@@ -383,10 +386,24 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
     state: { from: `/championships/${drawEventId}/schedule` },
   });
 
-  const runGenerate = () => generate.mutate(undefined, {
-    onSuccess: () => toast.success(isLeague && fixtures.length ? 'New teams added' : 'Draw generated'),
-    onError: (e: any) => toast.error(e.message),
-  });
+  // A rebuild over an existing (unplayed) draw discards its scheduling, grounds and
+  // official assignments, so the server refuses it outright unless told explicitly
+  // (generateDrawSchema.replace) - that's the confirmation this dialog performs.
+  // Leagues are exempt: "Add new teams" only adds fixtures, it never rebuilds.
+  const runGenerate = async () => {
+    if (!isLeague && fixtures.length > 0) {
+      const ok = await confirmDialog({
+        title: 'Regenerate draw',
+        confirmLabel: 'Regenerate',
+        message: 'This draw already has fixtures. Regenerating replaces them (and their times, grounds and officials) - continue?',
+      });
+      if (!ok) return;
+    }
+    generate.mutate(true, {
+      onSuccess: () => toast.success(isLeague && fixtures.length ? 'New teams added' : 'Draw generated'),
+      onError: (e: any) => toast.error(e.message),
+    });
+  };
 
   const groundLabel = (id: string | null) => { const g = grounds.find((x) => x.id === id); return g ? `${g.venues?.name ? g.venues.name + ' · ' : ''}${g.name}` : null; };
   const officialName = (id: string | null) => officials.find((o) => o.id === id)?.name ?? null;
