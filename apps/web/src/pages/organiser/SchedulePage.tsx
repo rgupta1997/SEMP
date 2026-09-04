@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Pencil, Trash2 } from 'lucide-react';
 import { FIXTURE_STATUS } from '@semp/shared';
 import { useEvent } from './EventLayout';
@@ -12,8 +13,9 @@ import { Badge, Button, Card, cn, confirmDialog, EmptyState, Field, Input, Modal
 import { Bracket, fixtureStatusLabel } from '../../components/Bracket';
 import { RoundRobinGrid } from '../../components/RoundRobinGrid';
 import { ScheduleTimeline } from '../../components/ScheduleTimeline';
+import { StageConfigWizard } from '../../components/StageConfigWizard';
 import { describeSlot, describeTieBlocked, isTieBlockedFor, resolveBranchLabels } from '../../lib/stageTree';
-import { titleCase } from '../../lib/format';
+import { isPoolShapedFormat, titleCase } from '../../lib/format';
 
 /**
  * The scoring entry point, on Schedule.
@@ -331,6 +333,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
     return ta - tb || (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0);
   });
   const isLoading = fixturesLoading;
+  const qc = useQueryClient();
   const generate = useApiMutation(
     (replace?: boolean) => api('POST', `/tournament-disciplines/${td.id}/fixtures/generate`, { params: {}, ...(replace ? { replace: true } : {}) }),
     [fixturesPath],
@@ -345,6 +348,15 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
   const drawNavigate = useNavigate();
   const { eventId: drawEventId } = useParams();
   const [editingFormat, setEditingFormat] = useState(false);
+  // A pool-shaped format (Groups + Knockout and the like) can never be built by the
+  // single-stage /fixtures/generate route below - it produces pools XOR a bracket,
+  // never both (apps/api/.../generators/index.ts). Only the stage-config wizard
+  // (generate-all) actually builds pools feeding a bracket, so that's the ONLY
+  // generation action offered here for these formats - EOS-127: an organiser who
+  // picked "Groups + Knockout" and pressed the plain Generate button got a bare
+  // knockout bracket with no pools, silently, because that button was never able
+  // to produce the combined shape it looked like it would.
+  const [configuringStages, setConfiguringStages] = useState(false);
 
   // Once any fixture has been played, regenerating would erase results - the server
   // refuses it, so disable the button and explain why rather than letting it 500.
@@ -376,6 +388,9 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
   }
   const stageGroups: [number, any[]][] = [...byStage.entries()].sort((a, b) => a[0] - b[0]);
   const multiStage = stageGroups.length > 1;
+  // Same substring test the backend's generator dispatch and the Setup → Sports
+  // "Configure stages" button both use - see isPoolShapedFormat's own doc comment.
+  const poolShaped = isPoolShapedFormat(formatLabel);
   const branchLabels = resolveBranchLabels(td.format_config);
   const stageLabel = (seq: number, groupHasBracket: boolean) =>
     branchLabels.get(seq) ?? (seq === 1 ? (groupHasBracket ? 'Bracket' : 'Pools') : `Stage ${seq}`);
@@ -437,16 +452,31 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
           )}
           {canManage && <Button size="sm" variant="subtle" onClick={() => setCreating(true)}>+ Add fixture</Button>}
           {canManage && (
-            <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={generate.isPending || (hasPlayed && !isLeague)}
-              title={isLeague && fixtures.length
-                ? 'Keeps existing matches and adds fixtures for newly-registered teams.'
-                : hasPlayed ? 'This draw has played matches - regenerating would erase those results.' : undefined}
-              onClick={() => {
-                if (isScoredSport(sportName)) { setPicking(true); return; }
-                runGenerate();
-              }}>
-              {generate.isPending ? 'Generating…' : fixtures.length ? (isLeague ? 'Add new teams' : 'Regenerate') : 'Generate draw'}
-            </Button>
+            poolShaped ? (
+              // Pools feeding a bracket can only ever come from the stage-config
+              // wizard (generate-all) - the plain single-stage route below can never
+              // produce both, so it is not offered at all for this shape of format.
+              <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={hasPlayed}
+                title={hasPlayed
+                  ? 'This draw has played matches - reconfiguring would erase those results.'
+                  : fixtures.length > 0 && !multiStage
+                    ? "This draw was built without its knockout stage - reconfigure it to add one."
+                    : undefined}
+                onClick={() => setConfiguringStages(true)}>
+                {fixtures.length ? 'Reconfigure stages' : 'Configure stages'}
+              </Button>
+            ) : (
+              <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={generate.isPending || (hasPlayed && !isLeague)}
+                title={isLeague && fixtures.length
+                  ? 'Keeps existing matches and adds fixtures for newly-registered teams.'
+                  : hasPlayed ? 'This draw has played matches - regenerating would erase those results.' : undefined}
+                onClick={() => {
+                  if (isScoredSport(sportName)) { setPicking(true); return; }
+                  runGenerate();
+                }}>
+                {generate.isPending ? 'Generating…' : fixtures.length ? (isLeague ? 'Add new teams' : 'Regenerate') : 'Generate draw'}
+              </Button>
+            )
           )}
         </div>
       </div>
@@ -571,6 +601,21 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
           onClose={() => setPicking(false)}
           onGenerate={() => { setPicking(false); runGenerate(); }}
         />
+      )}
+      {configuringStages && (
+        <Modal title="Configure stages" onClose={() => setConfiguringStages(false)} wide>
+          <StageConfigWizard
+            tournamentDisciplineId={td.id}
+            onGenerated={() => {
+              setConfiguringStages(false);
+              // The wizard invalidates its OWN per-discipline query key; this page
+              // reads the championship-wide fixtures list instead, so it needs its
+              // own refresh or the newly-built stages wouldn't show up here without
+              // a manual reload.
+              qc.invalidateQueries({ queryKey: [fixturesPath] });
+            }}
+          />
+        </Modal>
       )}
     </Card>
   );

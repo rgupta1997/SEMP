@@ -5,16 +5,10 @@ import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { ENTRY_TYPE, TOURNAMENT_DISCIPLINE_STATUS } from '@semp/shared';
 import { usePermissions } from '../../../lib/permissions';
-import { titleCase } from '../../../lib/format';
+import { isPoolShapedFormat, titleCase } from '../../../lib/format';
 import { eventTemplateFor } from '../../../features/scoring/templates';
 import { Badge, Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge, toast } from '../../../components/ui';
 import { StageConfigWizard } from '../../../components/StageConfigWizard';
-
-// Only group/pool-shaped formats have pools to branch out of - a plain Knockout or
-// League format has nothing for the stage wizard to configure, so it stays on the
-// existing single-stage flow entirely. Mirrors the substring test
-// apps/api/.../fixtures/domain/generators/index.ts uses to dispatch to generateGroups.
-const isPoolShapedFormat = (name?: string | null) => !!name && (name.trim().toLowerCase().includes('pool') || name.trim().toLowerCase().includes('group'));
 
 // Ranking/event sports (powerlifting, swimming, athletics) have no head-to-head matches,
 // so they're locked to the "Rankings" format. `eventTemplateFor` is the same per-sport
