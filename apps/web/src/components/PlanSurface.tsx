@@ -61,7 +61,12 @@ export function PlanSurface({ ladder, statePath, actionPath }: PlanSurfaceProps)
    */
   function refreshAll() {
     qc.invalidateQueries({ queryKey: [statePath] });
-    qc.invalidateQueries({ queryKey: ['/me/entitlements'] });
+    // Not an exact key: the org ladder's snapshot is now fetched as
+    // `/me/entitlements?organizationId=<id>` (see useWorkspace.ts), so an exact
+    // match on the bare path would silently stop catching it.
+    qc.invalidateQueries({
+      predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('/me/entitlements'),
+    });
   }
 
   async function choose(plan: PlanView, period: BillingPeriod) {

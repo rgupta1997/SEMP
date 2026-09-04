@@ -18,7 +18,7 @@ export function HostPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Your championships" subtitle="Create and run multi-sport championships for any community - schools, colleges, corporates, clubs.">
-        <Button onClick={() => navigate('/championships/new')}>+ Create championship</Button>
+        <Button onClick={() => navigate('/championships/new')}>+ Create Event</Button>
       </PageHeader>
 
       {isLoading ? <Spinner /> : hosted.length === 0 ? (
@@ -26,7 +26,7 @@ export function HostPage() {
           icon="＋"
           title="You're not hosting anything yet"
           description="Create a championship to set up tournaments, sports, disciplines, fixtures and approvals."
-          action={<Button onClick={() => navigate('/championships/new')}>+ Create championship</Button>}
+          action={<Button onClick={() => navigate('/championships/new')}>+ Create Event</Button>}
         />
       ) : (
         <div className="space-y-3">

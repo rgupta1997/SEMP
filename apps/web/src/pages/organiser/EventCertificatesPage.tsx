@@ -137,6 +137,7 @@ export function EventCertificatesPage() {
       {generating && (
         <GenerateModal
           orgId={host.id}
+          championship={{ id: eventId, name: championship.name }}
           templates={templates.data?.rows ?? []}
           onClose={() => setGenerating(false)}
           invalidate={[listPath]}

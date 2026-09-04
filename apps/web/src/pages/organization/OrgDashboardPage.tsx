@@ -7,6 +7,7 @@ import { usePocOnboarding } from '../../lib/onboarding';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { GettingStarted } from '../../components/onboarding/GettingStarted';
 import { Badge, Spinner, StatusBadge } from '../../components/ui';
+import { titleCase } from '../../lib/format';
 
 // The organisation dashboard (PG-20): what needs attention, and what is happening.
 //
@@ -118,7 +119,7 @@ export function OrgDashboardPage() {
               : { background: 'rgba(255,255,255,.12)', color: 'var(--faint)', cursor: 'not-allowed' }),
           }}
         >
-          {canCreateEvent ? '+ Create event' : 'Create event · locked'}
+          {canCreateEvent ? '+ Create Event' : 'Create Event · locked'}
         </button>
       </div>
 
@@ -280,7 +281,7 @@ export function OrgDashboardPage() {
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-2)' }}>{a.name}</div>
                 <div style={{ fontSize: 12, color: C.fg4 }}>{a.title}</div>
               </div>
-              <Badge tone={a.tag === 'GOLD' ? 'amber' : a.tag === 'TEAM' ? 'slate' : 'brand'}>{a.tag}</Badge>
+              <Badge tone={a.tag === 'GOLD' ? 'amber' : a.tag === 'TEAM' ? 'slate' : 'brand'}>{titleCase(a.tag)}</Badge>
             </div>
           ))}
         </div>

@@ -50,12 +50,12 @@ export function EventsListPage() {
   return (
     <div>
       <PageHeader title="Championships" subtitle="Every championship you organise, from draft to wrapped up.">
-        <Button onClick={() => navigate('/championships/new')}>+ Create championship</Button>
+        <Button onClick={() => navigate('/championships/new')}>+ Create Event</Button>
       </PageHeader>
 
       {isLoading ? <EventGridSkeleton /> : championships.length === 0 ? (
         <EmptyState icon="◆" title="No championships yet" description="Create your first championship to build tournaments, open registration and run match day."
-          action={<Button onClick={() => navigate('/championships/new')}>+ Create championship</Button>} />
+          action={<Button onClick={() => navigate('/championships/new')}>+ Create Event</Button>} />
       ) : (
         <>
           <ListToolbar>

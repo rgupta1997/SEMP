@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { useApi, useTableControls } from '../../lib/hooks';
 import { useOrgUnits, unitPath } from '../../lib/units';
 import { usePermissions } from '../../lib/permissions';
+import { titleCase } from '../../lib/format';
 import { DataList } from '../../components/primitives';
 import {
   Avatar, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field,
@@ -323,7 +324,7 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
                 {
                   key: 'membership',
                   header: 'Membership',
-                  render: (m) => <Badge tone={m.status === 'active' ? 'green' : 'amber'}>{m.status}</Badge>,
+                  render: (m) => <Badge tone={m.status === 'active' ? 'green' : 'amber'}>{titleCase(m.status)}</Badge>,
                 },
                 {
                   key: 'roles',
@@ -336,7 +337,7 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
                       return (
                         <span className="inline-flex items-center gap-1.5 text-[13px] text-slate-500 dark:text-slate-400">
                           <Lock size={13} />
-                          {IMPLIED[m.role] ?? m.role} <span className="text-slate-400">(from membership)</span>
+                          {IMPLIED[m.role] ?? titleCase(m.role)} <span className="text-slate-400">(from membership)</span>
                         </span>
                       );
                     }
@@ -346,7 +347,7 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
                           <div key={g.id} className="flex flex-wrap items-center gap-2">
                             <Badge tone="brand">{g.role?.name}</Badge>
                             <span className="t-eyebrow">{scopeLabel(g, units)}</span>
-                            <Badge tone={STATUS_TONE[g.status]}>{g.status}</Badge>
+                            <Badge tone={STATUS_TONE[g.status]}>{titleCase(g.status)}</Badge>
                             {canManageRoles && (
                               <>
                                 <button

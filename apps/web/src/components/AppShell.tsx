@@ -69,7 +69,7 @@ function navFor(role: AppRole): NavGroup[] {
       { to: '/organizations', label: 'Organizations', icon: <Landmark size={16} /> },
       { to: '/discover', label: 'Discover', icon: <Compass size={16} /> },
       { to: '/championships', label: 'Championships', icon: <Trophy size={16} /> },
-      { to: '/host', label: 'Host', icon: <Plus size={16} /> },
+      { to: '/host', label: 'Create Event', icon: <Plus size={16} /> },
       { to: '/help', label: 'Help & guide', icon: '?' },
     ],
   }];
@@ -98,6 +98,13 @@ function RoleSwitcher() {
 }
 
 const HEADER_SELECT = 'rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200';
+
+// Hidden, not removed: everyone is granted Elite by default for now (see
+// organizations.routes.ts / the users table default), so there is nothing to
+// upgrade to and no reason to surface a plan picker that would only confuse
+// someone who has never been asked to pay for anything. The /plans route and
+// PlanPage are untouched. Flip back to true once personal plans are for sale.
+const SHOW_MY_PLAN = false;
 
 function HeaderFilters() {
   const { eventId, setEventId, tournamentId, setTournamentId, sportId, setSportId, config } = useFilterBar();
@@ -355,10 +362,12 @@ export function AppShell() {
                           plan lives on its own Billing & Subscription tab, where the
                           people who can buy it are. Two independent ladders, and a
                           single menu item reaching both would imply otherwise. */}
-                      <button
-                        onClick={() => { setMenuOpen(false); navigate('/plans'); }}
-                        className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
-                      >My plan</button>
+                      {SHOW_MY_PLAN && (
+                        <button
+                          onClick={() => { setMenuOpen(false); navigate('/plans'); }}
+                          className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >My plan</button>
+                      )}
                       {/* The two controls the header gives up below sm. They live
                           here at every width so there is ONE place to look for
                           them, rather than a control that migrates at 640px. */}

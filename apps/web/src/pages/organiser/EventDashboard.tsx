@@ -23,7 +23,7 @@ export function EventDashboard() {
   const onboarding = useOrganiserOnboarding(eventId, championship.status, canManage, championship.entry);
 
   const tasks: { label: string; to: string; tone: 'amber' | 'brand' }[] = [];
-  if (pending.length) tasks.push({ label: `${pending.length} organization${pending.length > 1 ? 's' : ''} awaiting approval`, to: `/championships/${eventId}/approvals`, tone: 'amber' });
+  if (pending.length) tasks.push({ label: `${pending.length} organization${pending.length > 1 ? 's' : ''} awaiting approval`, to: `/championships/${eventId}/setup?tab=invite`, tone: 'amber' });
   if (tournaments.length === 0) tasks.push({ label: 'No tournament yet - add one to start configuring sports', to: `/championships/${eventId}/setup`, tone: 'brand' });
   if (venues.length === 0) tasks.push({ label: 'No venues added yet', to: `/championships/${eventId}/setup`, tone: 'brand' });
   if (championship.status === 'draft') tasks.push({ label: 'Championship is in draft - open registration when setup is ready', to: `/championships/${eventId}`, tone: 'brand' });

@@ -5,6 +5,7 @@ import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/useWorkspace';
 import { api } from '../lib/api';
 import { useApiMutation } from '../lib/hooks';
+import { titleCase } from '../lib/format';
 import { InstitutionFormModal } from '../components/InstitutionFormModal';
 import { JoinOrgModal } from '../components/JoinOrgModal';
 import { Badge, Button, Card, EmptyState, PageHeader, toast } from '../components/ui';
@@ -24,7 +25,7 @@ export function OrganizationsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Your communities" subtitle="The organizations & groups you play for. Each fields teams per sport.">
-        <Button variant="outline" onClick={() => setFinding(true)}>Find an organization</Button>
+        <Button variant="outline" onClick={() => setFinding(true)}>Join Organization</Button>
         <Button onClick={() => setCreating(true)}>+ Create organization</Button>
       </PageHeader>
 
@@ -35,7 +36,7 @@ export function OrganizationsPage() {
           description="Create your own to enter teams and register for championships, or find one and request to join."
           action={(
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setFinding(true)}>Find an organization</Button>
+              <Button variant="outline" onClick={() => setFinding(true)}>Join Organization</Button>
               <Button onClick={() => setCreating(true)}>+ Create organization</Button>
             </div>
           )}
@@ -131,7 +132,7 @@ function Section({ title, memberships }: { title: string; memberships: any[] }) 
                 </div>
               </div>
               <div className="flex flex-col items-end gap-2">
-                <Badge tone="brand">{m.role}</Badge>
+                <Badge tone="brand">{titleCase(m.role)}</Badge>
                 {/* Owners/admins manage; members (and other roles) can still view the org's teams + members. */}
                 <button
                   onClick={() => open(m.organization_id)}

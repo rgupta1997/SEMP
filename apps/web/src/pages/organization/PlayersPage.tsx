@@ -9,6 +9,7 @@ import { api } from '../../lib/api';
 import { AddPlayersModal } from '../../components/AddPlayersModal';
 import { pluralise } from '@semp/shared';
 import { useOrgUnits, unitPath } from '../../lib/units';
+import { titleCase } from '../../lib/format';
 import {
   Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, PageHeader, Pagination,
   Modal, SearchInput, Select, cn, confirmDialog, toast, SURFACE, FilterChips,
@@ -346,7 +347,7 @@ export function PlayersPage() {
   if (isLoading || isError) {
     return (
       <div>
-        <PageHeader title="Players" subtitle="Everyone who belongs to this organisation." />
+        <PageHeader title="People" subtitle="Everyone who belongs to this organisation." />
         <QueryState query={{ isLoading, isError, error, refetch }} errorTitle="Could not load the directory"
           skeleton={<SkeletonList rows={8} />}>
           <span />
@@ -357,7 +358,7 @@ export function PlayersPage() {
 
   return (
     <div>
-      <PageHeader title="Players" subtitle="Everyone who belongs to this organisation, and what they have played.">
+      <PageHeader title="People" subtitle="Everyone who belongs to this organisation, and what they have played.">
         {canImport && (
           // Icon-only below sm: two full-width buttons under the title cost a whole
           // row of a 390px screen, and "Bulk upload" is not a word anybody needs
@@ -368,7 +369,7 @@ export function PlayersPage() {
         )}
         {canEditPeople && (
           <Button onClick={() => setAdding(true)}>
-            <UserPlus size={15} /> <span className="hidden sm:inline">Add player</span><span className="sm:hidden">Add</span>
+            <UserPlus size={15} /> <span className="hidden sm:inline">Add Person</span><span className="sm:hidden">Add</span>
           </Button>
         )}
       </PageHeader>
@@ -522,7 +523,7 @@ export function PlayersPage() {
               }] : []),
               {
                 key: 'player',
-                header: 'Player',
+                header: 'Person',
                 primary: true,
                 render: (row: Person) => (
                   <div className="flex items-center gap-3">
@@ -544,7 +545,7 @@ export function PlayersPage() {
               {
                 key: 'status',
                 header: 'Status',
-                render: (row: Person) => <Badge tone={VERIFY_TONE[row.verification] ?? 'slate'}>{row.verification}</Badge>,
+                render: (row: Person) => <Badge tone={VERIFY_TONE[row.verification] ?? 'slate'}>{titleCase(row.verification)}</Badge>,
               },
               {
                 key: 'units',

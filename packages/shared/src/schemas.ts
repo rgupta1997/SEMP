@@ -357,7 +357,10 @@ export const createOrganizationSchema = z.object({
   short_name: shortName,
   code: z.string().optional(),
   logo_url: z.string().optional(),
-  city: z.string().optional(),
+  // Also REQUIRED on create, for the same reason as name: it is now half of the
+  // duplicate-organization check (same name + same city = reject), so there has
+  // to be one to check against.
+  city: z.string().min(1, 'City is required'),
   status: z.boolean().optional(),
   country: z.string().default('India'),
 });
