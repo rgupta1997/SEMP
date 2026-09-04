@@ -5,7 +5,9 @@
 # Prereqs:
 #   - AWS CLI v2, configured (`aws configure` or env creds) for the target account.
 #   - `npm run build:lambda --workspace @semp/api` already run (produces dist-lambda.zip).
-#   - apps/api/.env has DATABASE_URL / JWT_SECRET / WEB_ORIGIN (or export them
+#   - apps/api/.env has DATABASE_URL / JWT_SECRET / WEB_ORIGIN, used ONLY when the
+#     function does not exist yet. An existing function keeps its own environment
+#     unless DEPLOY_ENV=1 is passed. (or export them
 #     before running this script - it prefers already-exported values).
 #
 # Usage:
@@ -27,7 +29,11 @@ set -euo pipefail
 FUNCTION_NAME="${FUNCTION_NAME:-semp-api}"
 API_NAME="${API_NAME:-semp-api-gateway}"
 ROLE_NAME="${ROLE_NAME:-semp-api-lambda-role}"
-REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
+# ap-south-1 is where the database and the mail service live. It used to default to
+# us-east-1, which silently CREATED A SECOND semp-api in the wrong region: the
+# function came up, answered /health, and timed out on every request that touched the
+# database because it was crossing a continent to reach it.
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-ap-south-1}}"
 MEMORY_MB="${MEMORY_MB:-512}"
 TIMEOUT_SEC="${TIMEOUT_SEC:-15}"
 
@@ -112,24 +118,50 @@ else
   LAMBDA_DATABASE_URL="${DATABASE_URL}?connection_limit=${LAMBDA_DB_CONNECTION_LIMIT}"
 fi
 
-ENV_JSON=$(cat <<JSON
-{"Variables":{"DATABASE_URL":"${LAMBDA_DATABASE_URL}","JWT_SECRET":"${JWT_SECRET}","WEB_ORIGIN":"${WEB_ORIGIN}"}}
-JSON
-)
-
 # ---------- 2. Lambda function ----------
+#
+# THE DEPLOYED SECRETS ARE NOT TAKEN FROM .env WHEN THE FUNCTION ALREADY EXISTS.
+#
+# This used to push DATABASE_URL, JWT_SECRET and WEB_ORIGIN from apps/api/.env on
+# every deploy. On a developer's machine those are DEVELOPMENT values, so shipping
+# code also replaced the live JWT secret - signing every existing session out - and
+# set WEB_ORIGIN to http://localhost:5173, which blocks the real web app by CORS.
+# A code deploy must not be able to do that by accident.
+#
+# So: an EXISTING function keeps whatever environment it already has, and only its
+# code changes. To change a variable deliberately, either set it in the console or
+# pass DEPLOY_ENV=1 to push the local values on purpose.
 if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" >/dev/null 2>&1; then
   echo "== updating existing function $FUNCTION_NAME =="
   aws lambda update-function-code \
     --function-name "$FUNCTION_NAME" --region "$REGION" \
     --zip-file "fileb://${ZIP_PATH_FOR_AWS}" >/dev/null
   aws lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION"
-  aws lambda update-function-configuration \
-    --function-name "$FUNCTION_NAME" --region "$REGION" \
-    --environment "$ENV_JSON" \
-    --memory-size "$MEMORY_MB" --timeout "$TIMEOUT_SEC" >/dev/null
+
+  if [[ "${DEPLOY_ENV:-}" == "1" ]]; then
+    echo "== DEPLOY_ENV=1: overwriting the function's environment from .env =="
+    ENV_JSON=$(cat <<JSON
+{"Variables":{"DATABASE_URL":"${LAMBDA_DATABASE_URL}","JWT_SECRET":"${JWT_SECRET}","WEB_ORIGIN":"${WEB_ORIGIN}"}}
+JSON
+)
+    aws lambda update-function-configuration \
+      --function-name "$FUNCTION_NAME" --region "$REGION" \
+      --environment "$ENV_JSON" \
+      --memory-size "$MEMORY_MB" --timeout "$TIMEOUT_SEC" >/dev/null
+  else
+    echo "== keeping the function's existing environment (JWT_SECRET, WEB_ORIGIN, DATABASE_URL) =="
+    echo "   pass DEPLOY_ENV=1 to overwrite it from apps/api/.env"
+    aws lambda update-function-configuration \
+      --function-name "$FUNCTION_NAME" --region "$REGION" \
+      --memory-size "$MEMORY_MB" --timeout "$TIMEOUT_SEC" >/dev/null
+  fi
   aws lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION"
 else
+  # A NEW function has no environment to keep, so the local values are all there is.
+  ENV_JSON=$(cat <<JSON
+{"Variables":{"DATABASE_URL":"${LAMBDA_DATABASE_URL}","JWT_SECRET":"${JWT_SECRET}","WEB_ORIGIN":"${WEB_ORIGIN}"}}
+JSON
+)
   echo "== creating function $FUNCTION_NAME =="
   aws lambda create-function \
     --function-name "$FUNCTION_NAME" --region "$REGION" \
