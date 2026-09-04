@@ -214,14 +214,71 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
     res.status(201).json(rows);
   }));
 
+  // Can this organiser row be removed from the team? Two people are protected:
+  //
+  //   1. Whoever the championship was created under. Their row is seeded at
+  //      creation time (see POST /championships) WITHOUT an `assigned_by` - nobody
+  //      "added" them, the event exists because of them - so `assigned_by === null`
+  //      is exactly that row and no other. Most championships here have no host
+  //      organisation at all (an individual ran `POST /championships` themselves),
+  //      so this is the only signal that works for them.
+  //   2. When there IS a host organisation, any active member of it - removing an
+  //      institution's own staff from an event their institution is hosting would
+  //      read as kicking the host out of its own championship, no matter who
+  //      happened to add that particular row.
+  async function isProtectedOrganiser(championshipId: string, row: { user_id: string; assigned_by: string | null }): Promise<boolean> {
+    if (row.assigned_by === null) return true;
+    const championship = await prisma.championships.findUnique({
+      where: { id: championshipId },
+      select: { host_organization_id: true },
+    });
+    if (!championship?.host_organization_id) return false;
+    return !!(await prisma.organization_members.findFirst({
+      where: { organization_id: championship.host_organization_id, user_id: row.user_id, status: 'active' },
+      select: { id: true },
+    }));
+  }
+
+  // Remove a co-organiser (or any championship-scoped role holder) from the
+  // championship - except a protected one; see `isProtectedOrganiser`. The
+  // championship's host organisation (when it has one) keeps access regardless -
+  // `managesChampionship` also grants owner/admin members of the host org - so
+  // removing every OTHER row here can never lock everyone out.
+  router.delete('/championships/:eventId/roles/:assignmentId', eventOrganiser, asyncHandler(async (req, res) => {
+    const row = await prisma.user_championship_roles.findFirst({
+      where: { id: req.params.assignmentId, championship_id: req.params.eventId },
+    });
+    if (!row) throw new NotFoundError('Assignment');
+    if (await isProtectedOrganiser(req.params.eventId, row)) {
+      throw new BusinessRuleError("This person is the championship's default organiser and can't be removed from the organising team.");
+    }
+    await prisma.user_championship_roles.delete({ where: { id: row.id } });
+    res.status(204).send();
+  }));
+
   // List championship-scoped role assignments.
   router.get('/championships/:eventId/roles', asyncHandler(async (req, res) => {
-    const rows = await prisma.user_championship_roles.findMany({
-      where: { championship_id: req.params.eventId },
-      include: { users_user_championship_roles_user_idTousers: true, roles: true },
-      orderBy: { assigned_at: 'desc' },
-    });
-    res.json(rows);
+    const [rows, championship] = await Promise.all([
+      prisma.user_championship_roles.findMany({
+        where: { championship_id: req.params.eventId },
+        include: { users_user_championship_roles_user_idTousers: true, roles: true },
+        orderBy: { assigned_at: 'desc' },
+      }),
+      prisma.championships.findUnique({ where: { id: req.params.eventId }, select: { host_organization_id: true } }),
+    ]);
+
+    const hostMemberIds = championship?.host_organization_id
+      ? new Set((await prisma.organization_members.findMany({
+        where: {
+          organization_id: championship.host_organization_id,
+          status: 'active',
+          user_id: { in: rows.map((r) => r.user_id) },
+        },
+        select: { user_id: true },
+      })).map((m) => m.user_id))
+      : new Set<string>();
+
+    res.json(rows.map((r) => ({ ...r, is_host: r.assigned_by === null || hostMemberIds.has(r.user_id) })));
   }));
 
   return router;

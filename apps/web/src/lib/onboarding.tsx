@@ -43,6 +43,12 @@ export const POC_GUIDE: StepContent[] = [
     help: 'Open Members and search by name or mobile number to add people already on the platform. Unknown numbers get an invitation that auto-applies when they sign up. These are the people you can later put into teams.',
   },
   {
+    id: 'units',
+    title: 'List Campuses/Units',
+    description: 'Set up the campuses, departments or units your organization is structured around.',
+    help: 'Open Campuses & Units to add your organisation\'s structure - campuses, departments, or whatever it\'s divided into. People and teams can then be placed under the right one, and internal championships (contested between your own units) become available.',
+  },
+  {
     id: 'team',
     title: 'Create a team',
     description: 'A team is a reusable roster for one sport - create it once, enter it anywhere.',
@@ -96,7 +102,7 @@ export const ORGANISER_GUIDE: StepContent[] = [
   },
   {
     id: 'invite',
-    title: 'Invite organizations',
+    title: 'Invite organizations / teams',
     description: 'Invite organizations to participate, or approve those who applied.',
     help: 'From Setup → Invite, invite organizations directly, or review applications on the Entrants tab. Approved organizations can then enter teams into your draws. For a championship contested inside your own organisation, the same tab lists your campuses and batches instead: invite them, and each one’s administrator builds its squads.',
   },
@@ -129,10 +135,12 @@ function build(content: StepContent[], cta: Record<string, { label: string; to: 
 export function usePocOnboarding(orgId: string, enabled = true): OnboardingState {
   const on = enabled && !!orgId;
   const members = useApi<any[]>(on ? `/organizations/${orgId}/members` : null);
+  const units = useApi<{ units: any[] }>(on ? `/organizations/${orgId}/units` : null);
   const teams = useApi<any[]>(on ? `/teams?organization_id=${orgId}` : null);
   const enrollments = useApi<any[]>(on ? `/me/enrollments?organization_id=${orgId}` : null);
 
   const m = members.data ?? [];
+  const u = units.data?.units ?? [];
   const t = teams.data ?? [];
   const e = enrollments.data ?? [];
   const teamsHref = `/organizations/${orgId}/teams`;
@@ -149,6 +157,7 @@ export function usePocOnboarding(orgId: string, enabled = true): OnboardingState
     POC_GUIDE,
     {
       members: { label: 'Add members', to: `/organizations/${orgId}/members` },
+      units: { label: 'Add a campus/unit', to: `/organizations/${orgId}/campuses` },
       team: { label: 'Create a team', to: `${teamsHref}?create=1` },
       apply: { label: 'Browse championships', to: '/discover' },
       enter: { label: 'Enter a team', to: teamHref(teamToEnter?.id, 'championships') },
@@ -157,13 +166,14 @@ export function usePocOnboarding(orgId: string, enabled = true): OnboardingState
     },
     {
       members: m.some((x) => x.role !== 'owner'),
+      units: u.length > 0,
       team: t.length > 0,
       apply: e.length > 0,
       enter: t.some((x) => (x.team_entries ?? []).length > 0),
       roster: t.some((x) => (x.team_members ?? []).length > 0),
       lock: t.some((x) => (x.team_entries ?? []).some((en: any) => en.status === 'roster_locked')),
     },
-    members.isLoading || teams.isLoading || enrollments.isLoading,
+    members.isLoading || units.isLoading || teams.isLoading || enrollments.isLoading,
   );
 }
 
@@ -216,7 +226,7 @@ export function useOrganiserOnboarding(
     }
     : {
       content: null,
-      cta: { label: 'Invite organizations', to: `${setupHref}?tab=invite` },
+      cta: { label: 'Invite organizations / teams', to: `${setupHref}?tab=invite` },
     };
 
   return build(

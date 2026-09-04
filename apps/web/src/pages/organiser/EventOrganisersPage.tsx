@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
-import { useApi, fmtDate } from '../../lib/hooks';
-import { Avatar, Button, Card, EmptyState, Spinner } from '../../components/ui';
+import { useApi, useApiMutation, fmtDate } from '../../lib/hooks';
+import { Avatar, Button, Card, confirmDialog, EmptyState, Spinner } from '../../components/ui';
 import { PeoplePicker } from '../../components/PeoplePicker';
 import { EventOfficialsPage } from './EventOfficialsPage';
 
@@ -11,6 +11,11 @@ interface RoleAssignment {
   assigned_at: string;
   roles: { id: string; name: string };
   users_user_championship_roles_user_idTousers: { id: string; name: string; email: string; phone?: string | null };
+  /** Either whoever the championship was created under, or - when it has one -
+   * a member of its host organisation. Represents the event by default rather
+   * than someone the organising team added, so this row has no Remove button
+   * (the server refuses to remove it too). */
+  is_host: boolean;
 }
 
 // Add team members (co-organisers) by mobile/name, multi-select. A typed number
@@ -39,6 +44,10 @@ export function EventOrganisersPage() {
   const { data: roles = [], isLoading } = useApi<RoleAssignment[]>(`/championships/${eventId}/roles`);
   const { data: allRoles = [] } = useApi<any[]>('/roles');
   const [adding, setAdding] = useState(false);
+  const removeMut = useApiMutation(
+    (assignmentId: string) => api('DELETE', `/championships/${eventId}/roles/${assignmentId}`),
+    [`/championships/${eventId}/roles`],
+  );
 
   const organiserRoleId = allRoles.find((r) => r.name === 'Organiser')?.id;
   const organisers = roles.filter((r) => r.roles?.name === 'Organiser');
@@ -66,6 +75,7 @@ export function EventOrganisersPage() {
                 <th className="px-4 py-2 font-semibold text-slate-600 dark:text-slate-300">Organiser</th>
                 <th className="px-4 py-2 font-semibold text-slate-600 dark:text-slate-300">Contact</th>
                 <th className="px-4 py-2 font-semibold text-slate-600 dark:text-slate-300">Added</th>
+                <th className="px-4 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
@@ -81,6 +91,25 @@ export function EventOrganisersPage() {
                       {u?.phone && <div className="text-xs text-slate-400 dark:text-slate-500">{u.phone}</div>}
                     </td>
                     <td className="px-4 py-2 text-slate-500 dark:text-slate-400">{fmtDate(r.assigned_at)}</td>
+                    <td className="px-4 py-2 text-right">
+                      {r.is_host ? (
+                        <span className="text-xs text-slate-400 dark:text-slate-500" title="This championship's default organiser - can't be removed">Host</span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:text-rose-400"
+                          onClick={async () => {
+                            if (await confirmDialog({ title: 'Remove organiser', confirmLabel: 'Remove', message: `Remove ${u?.name} from this championship's organising team?` })) {
+                              removeMut.mutate(r.id);
+                            }
+                          }}
+                          disabled={removeMut.isPending}
+                        >
+                          Remove
+                        </Button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}

@@ -97,7 +97,7 @@ function OrgPicker({ value, onChange, excludeIds }: { value: Org[]; onChange: (o
         value={query}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
-        placeholder="Search organizations…"
+        placeholder="Search organizations / teams…"
       />
       {open && (
           <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-800 dark:bg-slate-900">
@@ -315,7 +315,7 @@ function OrganisationInvites({ eventId, path }: { eventId: string; path: string 
 
       <div className="flex flex-wrap items-end gap-2">
         <label className="min-w-[200px] flex-1">
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Organizations</span>
+          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Organizations / teams</span>
           <OrgPicker value={orgs} onChange={setOrgs} excludeIds={invitedIds} />
         </label>
         <Button onClick={submit} disabled={inviting || orgs.length === 0}>
