@@ -1,7 +1,7 @@
 import type { Request } from 'express';
 import type { Db, Prisma } from '../../infra/prisma.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
-import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
+import { audit, auditSystem, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import { recomputeStandingsForFixture } from '../standings/standings.service.js';
 import { createNotification } from '../notifications/audience.js';
 import { notify } from '@semp/notifications/server/notify.js';
@@ -241,7 +241,12 @@ export async function retractScorecard(prisma: Prisma, req: Request, fixtureId: 
 // lock: the transaction everything else in the product hangs off
 // ---------------------------------------------------------------------------
 
-export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: string) {
+// `req` is null for the auto-lock sweep (autoLockDueFixtures) - nobody is at the
+// keyboard, so there is no user to attribute the lock to. `locked_by` is nullable
+// for exactly this: a lock the product performed on its own behalf, not a person's.
+export async function lockScorecard(prisma: Prisma, req: Request | null, fixtureId: string) {
+  const actorUserId = req?.user?.id ?? null;
+
   // Everything that must be all-or-nothing happens in here. The audit entry and any
   // notification are deliberately OUTSIDE: an audit row describing a rolled-back lock
   // would be a lie, and an email cannot be un-sent.
@@ -259,7 +264,7 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
       data: {
         scorecard_status: 'locked',
         locked_at: new Date(),
-        locked_by: req.user!.id,
+        locked_by: actorUserId,
         // A played match becomes completed on lock; a walkover/bye keeps its own status.
         status: current.status === 'walkover' || current.status === 'bye' ? current.status : 'completed',
       },
@@ -316,11 +321,14 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
     };
   }, LOCK_TX);
 
-  await audit(prisma, req, {
+  const lockSummary = req
+    ? `Locked the scorecard for ${label} - the result is now official`
+    : `Auto-locked the scorecard for ${label} after 30 minutes with nobody reviewing it - the result is now official`;
+  const auditEntry = {
     action: AUDIT_ACTIONS.fixtureLocked,
     target: { type: 'fixtures', id: fx.id, label },
     championshipId,
-    summary: `Locked the scorecard for ${label} - the result is now official`,
+    summary: lockSummary,
     diff: {
       scorecard_status: { from: fromStatus, to: 'locked' },
       result: { from: null, to: `${fx.home_score ?? '-'}-${fx.away_score ?? '-'}` },
@@ -328,12 +336,14 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
       participants: { from: null, to: participants.resolved.length },
       unmatched_competitors: { from: null, to: participants.unmatched.length },
     },
-  });
+  };
+  if (req) await audit(prisma, req, auditEntry);
+  else await auditSystem(prisma, auditEntry);
 
   // Only now, once it has committed (J4-E1-S2). A notification cannot be rolled
   // back, so one sent inside the transaction would survive a failure that undid the
   // very thing it announces.
-  await notifyParticipants(prisma, req, { fixture: fx, label, championshipId, participants });
+  await notifyParticipants(prisma, actorUserId, { fixture: fx, label, championshipId, participants });
 
   // Same reasoning as notifyParticipants: the achievement rows are already
   // committed (written inside the transaction above), so telling people about
@@ -355,7 +365,7 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
         Rules.role('organiser', championshipId),
         ...(fx.official_id ? [Rules.directUser(fx.official_id)] : []),
       ]);
-      await notify(prisma, { type: 'match_score_locked', audience, senderId: req.user!.id, data: { body: `The scorecard for ${label} is now locked.` } });
+      await notify(prisma, { type: 'match_score_locked', audience, senderId: actorUserId, data: { body: `The scorecard for ${label} is now locked.` } });
     } catch (err) {
       console.error(`[lock] match_score_locked notification failed for fixture ${fx.id}:`, err);
     }
@@ -375,7 +385,7 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
 // design: the lock has already committed, and a notification failure must not be
 // reported as a failed lock - that would be a lie in the more damaging direction.
 async function notifyParticipants(
-  prisma: Prisma, req: Request,
+  prisma: Prisma, senderId: string | null,
   { fixture, label, championshipId, participants }: {
     fixture: { id: string; home_score: number | null; away_score: number | null };
     label: string;
@@ -392,7 +402,7 @@ async function notifyParticipants(
       await createNotification(prisma, {
         championship_id: championshipId,
         target_user_id: p.user_id,
-        sender_id: req.user!.id,
+        sender_id: senderId,
         type: 'event_lifecycle',
         audience: 'all', // ignored for direct notifications - target_user_id drives visibility
         title: `Result verified: ${label}`,
@@ -502,6 +512,55 @@ export async function lockScorecardsBulk(
     }
   }
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// auto-lock: a finished result nobody reviewed in time becomes official anyway
+//
+// There is no long-lived process here to hang a timer on - see
+// subscription.service.ts's applyDuePlanChanges for the same constraint on plan
+// downgrades. So this runs the same way: lazily, on a read the organiser's Results
+// screen makes constantly (GET /championships/:id/fixtures), scoped to that one
+// championship, and cheap when nothing is due (one indexed query).
+// ---------------------------------------------------------------------------
+
+export const AUTO_LOCK_GRACE_MINUTES = 30;
+
+export interface AutoLockSweepResult { checked: number; locked: number }
+
+// Locks every fixture whose result has sat unreviewed past the grace period,
+// exactly as if an organiser had pressed Lock - same transaction, same standings
+// recompute, same achievements, same notifications (see lockScorecard). A card
+// that turns out not to actually be lockable (a correction left it missing a
+// score, say) is left alone rather than failing the sweep; the next call retries
+// it, precisely how lockScorecardsBulk treats one bad card in a batch.
+export async function autoLockDueFixtures(
+  prisma: Prisma,
+  opts: { championshipId?: string; graceMinutes?: number } = {},
+): Promise<AutoLockSweepResult> {
+  const cutoff = new Date(Date.now() - (opts.graceMinutes ?? AUTO_LOCK_GRACE_MINUTES) * 60_000);
+  const due = await prisma.fixtures.findMany({
+    where: {
+      scorecard_status: { not: 'locked' },
+      completed_at: { not: null, lte: cutoff },
+      ...(opts.championshipId
+        ? { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: opts.championshipId } } } }
+        : {}),
+    },
+    select: { id: true },
+    take: 200, // a safety ceiling, not a real limit - nothing due ever piles up this high
+  });
+
+  let locked = 0;
+  for (const { id } of due) {
+    try {
+      await lockScorecard(prisma, null, id);
+      locked++;
+    } catch (err: any) {
+      console.error(`[auto-lock] fixture ${id} was due but could not be locked:`, err?.message ?? err);
+    }
+  }
+  return { checked: due.length, locked };
 }
 
 // ---------------------------------------------------------------------------

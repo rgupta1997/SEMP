@@ -417,7 +417,13 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     if ('away_score' in b) data.away_score = b.away_score ?? null;
     if ('winner_team_id' in b) data.winner_team_id = b.winner_team_id ?? null;
     if ('notes' in b) data.notes = b.notes ?? null;
-    if (b.status) data.status = b.status;
+    if (b.status) {
+      data.status = b.status;
+      // Same rule as /result: this is what the 30-minute auto-lock sweep reads, so
+      // it is stamped fresh on every 'completed' confirmation and cleared the
+      // moment the fixture is no longer finished (e.g. reopened back to 'live').
+      data.completed_at = b.status === 'completed' ? new Date() : null;
+    }
     // Scoring a match (going live or completing) requires both teams to be known - a
     // TBD bracket slot can't be played. Fetch once and reuse for the winner check.
     let fxTeams: {
@@ -671,6 +677,10 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         winner_team_id: winner,
         status: req.body.status ?? 'completed',
         notes: req.body.notes ?? fixture.notes,
+        // Restarts the 30-minute auto-lock grace period on every confirmation of
+        // 'completed' (a correction shouldn't let a stale timestamp fire mid-edit),
+        // and clears it the moment the result is no longer finished.
+        completed_at: (req.body.status ?? 'completed') === 'completed' ? new Date() : null,
       },
     });
     await refreshStandings(prisma, req.params.id);

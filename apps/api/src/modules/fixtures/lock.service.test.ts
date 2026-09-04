@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // The downstream seams and the standings engine are stubbed so a test can make any
 // one of them fail on demand - which is the only way to prove the lock is actually
@@ -10,6 +10,7 @@ const achievements = vi.fn(async () => [] as Array<{ user_id: string; title: str
 const certificates = vi.fn(async () => {});
 const statLines = vi.fn(async () => {});
 const auditFn = vi.fn(async () => {});
+const auditSystemFn = vi.fn(async () => {});
 // Resolving participants and telling them are separate concerns with their own
 // tests; here they are stubbed so a failure in one can be injected deliberately.
 const resolveParticipants = vi.fn(async () => ({ resolved: [{ user_id: 'u1', team_id: 'tA', name: 'A Player' }], unmatched: [] as any[] }));
@@ -32,12 +33,13 @@ vi.mock('./downstream.js', () => ({
 vi.mock('../iam/audit.service.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../iam/audit.service.js')>()),
   audit: (...a: any[]) => auditFn(...a as []),
+  auditSystem: (...a: any[]) => auditSystemFn(...a as []),
 }));
 vi.mock('./participants.js', () => ({ resolveFixtureParticipants: (...a: any[]) => resolveParticipants(...a as []) }));
 vi.mock('../notifications/audience.js', () => ({ createNotification: (...a: any[]) => notify(...a as []) }));
 
 const {
-  assertNotLocked, lockScorecard, lockScorecardsBulk, submitScorecard, unlockScorecard,
+  assertNotLocked, lockScorecard, lockScorecardsBulk, submitScorecard, unlockScorecard, autoLockDueFixtures,
 } = await import('./lock.service.js');
 
 // ---- test double --------------------------------------------------------
@@ -61,6 +63,7 @@ const FIXTURE = {
   locked_by: null as string | null,
   submitted_at: null as Date | null,
   submitted_by: null as string | null,
+  completed_at: null as Date | null,
   teams_fixtures_home_team_idToteams: { id: 'tA', name: 'IIMB', organization_id: 'o1' },
   teams_fixtures_away_team_idToteams: { id: 'tB', name: 'IIMA', organization_id: 'o2' },
   tournament_disciplines: {
@@ -111,8 +114,8 @@ function fakePrisma(overrides: FixtureOverrides = {}, siblingCount = 0) {
 const REQ: any = { user: { id: 'organiser1', email: 'org@iimb.ac.in' }, ip: '::1' };
 
 beforeEach(() => {
-  for (const m of [recompute, advance, lifetime, achievements, certificates, auditFn, notify]) m.mockReset();
-  for (const m of [recompute, advance, lifetime, certificates, auditFn, notify]) m.mockResolvedValue(undefined as never);
+  for (const m of [recompute, advance, lifetime, achievements, certificates, auditFn, auditSystemFn, notify]) m.mockReset();
+  for (const m of [recompute, advance, lifetime, certificates, auditFn, auditSystemFn, notify]) m.mockResolvedValue(undefined as never);
   // deriveAchievements returns who newly earned one (empty here, not undefined) -
   // a different contract from the other void downstream seams above.
   achievements.mockResolvedValue([] as never);
@@ -313,6 +316,118 @@ describe('lockScorecard · a knockout match must produce a winner', () => {
     const prisma = fakePrisma(KO, 4);
     await lockScorecard(prisma, REQ, 'fx1');
     expect(prisma.current.scorecard_status).toBe('locked');
+  });
+});
+
+describe('lockScorecard · auto-lock (no human actor)', () => {
+  it('locks with no locked_by and records it as a System audit entry', async () => {
+    const prisma = fakePrisma();
+    const out = await lockScorecard(prisma, null, 'fx1');
+
+    expect(out.scorecard_status).toBe('locked');
+    expect(out.locked_by).toBeNull();
+    expect(auditFn).not.toHaveBeenCalled();
+    expect(auditSystemFn).toHaveBeenCalledOnce();
+    const entry = (auditSystemFn.mock.calls[0] as any[])[1];
+    expect(entry.action).toBe('fixture.locked');
+    expect(entry.summary).toMatch(/auto-locked/i);
+  });
+
+  it('still notifies participants, with no sender attached', async () => {
+    const prisma = fakePrisma();
+    await lockScorecard(prisma, null, 'fx1');
+    expect(notify).toHaveBeenCalledOnce();
+    const sent = (notify.mock.calls[0] as any[])[1];
+    expect(sent.sender_id).toBeNull();
+  });
+});
+
+// ---- multi-fixture fake, for the sweep that scans across many at once --------
+function fakePrismaMulti(rows: Array<FixtureOverrides & { id: string }>) {
+  let table = new Map(rows.map((f) => [f.id, { ...FIXTURE, ...f }]));
+
+  const clientOver = (read: (id: string) => any, write: (id: string, row: any) => void) => ({
+    fixtures: {
+      findUnique: async ({ where }: any) => (read(where.id) ? { ...read(where.id) } : null),
+      update: async ({ where, data }: any) => {
+        const current = read(where.id);
+        if (!current) throw new Error('no such fixture');
+        const next = { ...current };
+        for (const [k, v] of Object.entries<any>(data)) {
+          next[k] = v && typeof v === 'object' && 'increment' in v ? next[k] + v.increment : v;
+        }
+        write(where.id, next);
+        return { ...next };
+      },
+      findMany: async ({ where }: any) => {
+        const cutoff: Date = where.completed_at.lte;
+        return [...table.values()]
+          .filter((f) => f.scorecard_status !== 'locked' && f.completed_at && f.completed_at <= cutoff)
+          .map((f) => ({ id: f.id }));
+      },
+      count: async () => 0,
+    },
+  });
+
+  const prisma: any = {
+    ...clientOver((id) => table.get(id), (id, row) => table.set(id, row)),
+    get current() { return table; },
+    $transaction: async (fn: any) => {
+      const staged = new Map(table);
+      const tx = clientOver((id) => staged.get(id), (id, row) => staged.set(id, row));
+      const out = await fn(tx);
+      table = staged;
+      return out;
+    },
+  };
+  return prisma;
+}
+
+describe('autoLockDueFixtures', () => {
+  const now = new Date('2026-09-04T12:00:00Z');
+  const longAgo = new Date(now.getTime() - 45 * 60_000);   // 45 min ago - due
+  const justNow = new Date(now.getTime() - 5 * 60_000);    // 5 min ago - not due yet
+
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(now); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('locks a result that has sat unreviewed past the grace period', async () => {
+    const prisma = fakePrismaMulti([{ id: 'fx1', scorecard_status: 'submitted', completed_at: longAgo }]);
+    const result = await autoLockDueFixtures(prisma);
+    expect(result).toEqual({ checked: 1, locked: 1 });
+    expect(prisma.current.get('fx1').scorecard_status).toBe('locked');
+  });
+
+  it('leaves one that has not been sitting long enough', async () => {
+    const prisma = fakePrismaMulti([{ id: 'fx1', scorecard_status: 'submitted', completed_at: justNow }]);
+    const result = await autoLockDueFixtures(prisma);
+    expect(result).toEqual({ checked: 0, locked: 0 });
+    expect(prisma.current.get('fx1').scorecard_status).toBe('submitted');
+  });
+
+  it('never touches one that is already locked', async () => {
+    const prisma = fakePrismaMulti([{ id: 'fx1', scorecard_status: 'locked', completed_at: longAgo }]);
+    const result = await autoLockDueFixtures(prisma);
+    expect(result).toEqual({ checked: 0, locked: 0 });
+  });
+
+  it('locks every due fixture independently - one not actually lockable does not stop the rest', async () => {
+    const prisma = fakePrismaMulti([
+      { id: 'fx1', scorecard_status: 'submitted', completed_at: longAgo },
+      // A correction since left it without a score - not really lockable, and must
+      // not take the sweep down with it (same guarantee as lockScorecardsBulk).
+      { id: 'fx2', scorecard_status: 'submitted', completed_at: longAgo, home_score: null, away_score: null },
+    ]);
+    const result = await autoLockDueFixtures(prisma);
+    expect(result).toEqual({ checked: 2, locked: 1 });
+    expect(prisma.current.get('fx1').scorecard_status).toBe('locked');
+    expect(prisma.current.get('fx2').scorecard_status).toBe('submitted');
+  });
+
+  it('honours a custom grace period', async () => {
+    const prisma = fakePrismaMulti([{ id: 'fx1', scorecard_status: 'submitted', completed_at: justNow }]);
+    const result = await autoLockDueFixtures(prisma, { graceMinutes: 1 });
+    expect(result).toEqual({ checked: 1, locked: 1 });
   });
 });
 
