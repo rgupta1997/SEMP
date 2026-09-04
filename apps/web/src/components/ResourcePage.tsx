@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Pencil, Trash2 } from 'lucide-react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useTableControls } from '../lib/hooks';
@@ -231,8 +232,18 @@ export function ResourcePage({ config }: { config: ResourceConfig }) {
                       {CHAMPIONSHIP_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
                     </select>
                   )}
-                  {!config.noEdit && canManage && <Button variant="ghost" onClick={() => setEditing(row)}>Edit</Button>}
-                  {!config.noDelete && canManage && <Button variant="danger" onClick={async () => { if (await confirmDialog({ title: 'Delete', confirmLabel: 'Delete', message: 'Delete this item?' })) del.mutate(row.id); }}>Del</Button>}
+                  {!config.noEdit && canManage && (
+                    <Button size="sm" variant="ghost" onClick={() => setEditing(row)} aria-label="Edit" title="Edit">
+                      <Pencil size={14} />
+                    </Button>
+                  )}
+                  {!config.noDelete && canManage && (
+                    <Button size="sm" variant="ghost" className="text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/20"
+                      onClick={async () => { if (await confirmDialog({ title: 'Delete', confirmLabel: 'Delete', message: 'Delete this item?' })) del.mutate(row.id); }}
+                      aria-label="Delete" title="Delete">
+                      <Trash2 size={14} />
+                    </Button>
+                  )}
                   {!canManage && <span className="text-xs text-slate-400 dark:text-slate-500">-</span>}
                 </td>
               </tr>

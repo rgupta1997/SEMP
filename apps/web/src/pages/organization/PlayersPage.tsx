@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Upload, UserPlus, Users } from 'lucide-react';
+import { Pencil, Upload, UserPlus, Users } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import { useApi, useTableControls } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
@@ -566,8 +566,12 @@ export function PlayersPage() {
                         type="button"
                         disabled={busy}
                         onClick={(e) => { e.stopPropagation(); setPlacing(row); }}
-                        className="tap text-xs font-semibold text-brand-600 hover:underline disabled:opacity-50 dark:text-brand-400"
-                      >Edit</button>
+                        aria-label={`Edit ${row.name}'s units`}
+                        title="Edit units"
+                        className="tap grid h-6 w-6 shrink-0 place-items-center rounded text-brand-600 hover:bg-brand-50 disabled:opacity-50 dark:text-brand-400 dark:hover:bg-brand-500/15"
+                      >
+                        <Pencil size={13} />
+                      </button>
                     )}
                   </div>
                 ),

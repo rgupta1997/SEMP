@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Pencil } from 'lucide-react';
 import { api } from '../../lib/api';
 import { fmtDate, useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import {
@@ -110,7 +111,9 @@ export function PlatformUsersPage() {
                   <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{u.organizations?.name ?? '-'}</td>
                   <td className="px-4 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{fmtDate(u.created_at)}</td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
-                    <Button size="sm" variant="ghost" onClick={() => setEditing(u)}>Edit</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setEditing(u)} aria-label={`Edit ${u.name}`} title="Edit">
+                      <Pencil size={14} />
+                    </Button>
                     {u.is_active && !u.is_super_admin && (
                       <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
                         onClick={async () => { if (await confirmDialog({ title: 'Deactivate user', confirmLabel: 'Deactivate', message: `Deactivate ${u.name}?` })) deactivate.mutate(u.id); }}>

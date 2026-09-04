@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Landmark } from 'lucide-react';
+import { Landmark, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { Badge, Button, Card, confirmDialog, EmptyState, ListToolbar, Pagination, SearchInput, Spinner, toast } from '../../components/ui';
@@ -59,10 +59,13 @@ export function PlatformInstitutionsPage() {
                   <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{i.city || '-'}</td>
                   <td className="px-4 py-2">{i.status === false ? <Badge tone="rose">inactive</Badge> : <Badge tone="green">active</Badge>}</td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
-                    <Button size="sm" variant="ghost" onClick={() => setEditing(i)}>Edit</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setEditing(i)} aria-label={`Edit ${i.name}`} title="Edit">
+                      <Pencil size={14} />
+                    </Button>
                     <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
-                      onClick={async () => { if (await confirmDialog({ title: 'Delete institution', confirmLabel: 'Delete', message: `Delete ${i.name}?` })) del.mutate(i.id, { onError: (e: any) => toast.error(e.message) }); }}>
-                      Delete
+                      onClick={async () => { if (await confirmDialog({ title: 'Delete institution', confirmLabel: 'Delete', message: `Delete ${i.name}?` })) del.mutate(i.id, { onError: (e: any) => toast.error(e.message) }); }}
+                      aria-label={`Delete ${i.name}`} title="Delete">
+                      <Trash2 size={14} />
                     </Button>
                   </td>
                 </tr>

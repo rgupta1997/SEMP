@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { Pencil, Trash2 } from 'lucide-react';
 import { FIXTURE_STATUS } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
@@ -291,8 +292,10 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
         {isEdit ? (
           <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
             onClick={async () => { if (await confirmDialog({ title: 'Delete fixture', confirmLabel: 'Delete', message: 'Delete this fixture? This cannot be undone.' })) remove.mutate(undefined, { onSuccess: () => toast.success('Fixture deleted'), onError: (e: any) => setError(e.message) }); }}
-            disabled={remove.isPending}>
-            {remove.isPending ? 'Deleting…' : 'Delete'}
+            disabled={remove.isPending}
+            aria-label="Delete fixture"
+            title={remove.isPending ? 'Deleting…' : 'Delete fixture'}>
+            <Trash2 size={16} />
           </Button>
         ) : <span />}
         <div className="flex gap-2">
@@ -453,7 +456,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
                 <div className="grid w-full grid-cols-2 items-center justify-items-center gap-2 sm:flex sm:w-auto sm:gap-3">
                   <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
                   {canManage && <ScoreButton fixture={f} />}
-                  {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)}>Edit</Button>}
+                  {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)} aria-label="Edit fixture" title="Edit fixture"><Pencil size={14} /></Button>}
                 </div>
               </div>
             ))}
@@ -522,7 +525,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
                 <div className="grid w-full grid-cols-2 items-center justify-items-center gap-2 sm:flex sm:w-auto sm:gap-3">
                   <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
                   {canManage && <ScoreButton fixture={f} />}
-                  {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)}>Edit</Button>}
+                  {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)} aria-label="Edit fixture" title="Edit fixture"><Pencil size={14} /></Button>}
                 </div>
               </div>
             ))}

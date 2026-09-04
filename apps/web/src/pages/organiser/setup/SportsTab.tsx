@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Medal } from 'lucide-react';
+import { Medal, Pencil, Trash2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
@@ -487,8 +487,10 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
       <div className="mt-2 flex items-center justify-between">
         <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
           onClick={async () => { if (await confirmDialog({ title: 'Delete discipline', confirmLabel: 'Delete discipline', message: `Delete the “${name}” discipline? Its unplayed fixtures and team entries will be removed. A discipline with completed or scored matches can’t be deleted.` })) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
-          disabled={remove.isPending}>
-          {remove.isPending ? 'Deleting…' : 'Delete discipline'}
+          disabled={remove.isPending}
+          aria-label="Delete discipline"
+          title={remove.isPending ? 'Deleting…' : 'Delete discipline'}>
+          <Trash2 size={16} />
         </Button>
         <div className="flex gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -536,8 +538,10 @@ function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportNam
       <div className="mt-2 flex items-center justify-between">
         <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
           onClick={async () => { if (await confirmDialog({ title: 'Remove sport', confirmLabel: 'Remove sport', message: `Remove “${sportName}” from this season? Its disciplines, unplayed fixtures and team entries will be removed. A sport with completed or scored matches can’t be removed.` })) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
-          disabled={remove.isPending}>
-          {remove.isPending ? 'Removing…' : 'Remove sport'}
+          disabled={remove.isPending}
+          aria-label="Remove sport"
+          title={remove.isPending ? 'Removing…' : 'Remove sport'}>
+          <Trash2 size={16} />
         </Button>
         <div className="flex gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -577,8 +581,12 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="subtle" onClick={() => setEditingSport(true)}>Edit sport</Button>
-          <Button size="md" variant="ghost" className="text-rose-600 hover:bg-rose-50 dark:text-white dark:hover:bg-rose-500/20" disabled={removeSport.isPending} onClick={confirmRemoveSport}>{removeSport.isPending ? 'Removing…' : 'Remove'}</Button>
+          <Button size="sm" variant="subtle" onClick={() => setEditingSport(true)} aria-label="Edit sport" title="Edit sport">
+            <Pencil size={14} />
+          </Button>
+          <Button size="sm" variant="ghost" className="text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/20" disabled={removeSport.isPending} onClick={confirmRemoveSport} aria-label="Remove sport" title={removeSport.isPending ? 'Removing…' : 'Remove sport'}>
+            <Trash2 size={14} />
+          </Button>
           <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)}>{open ? 'Hide' : 'Manage'} disciplines</Button>
         </div>
       </div>
@@ -608,14 +616,22 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
                           <Badge tone={d.format_id ? 'violet' : 'slate'}>{effectiveFormat(d)}</Badge>
                         )}
                         <StatusBadge status={d.status} />
-                        <span className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700 transition group-hover:bg-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:group-hover:bg-brand-500/25">✎ Edit</span>
+                        <span
+                          aria-label="Edit discipline"
+                          title="Edit discipline"
+                          className="inline-flex items-center rounded-lg bg-brand-50 p-1.5 text-brand-700 transition group-hover:bg-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:group-hover:bg-brand-500/25"
+                        >
+                          <Pencil size={14} />
+                        </span>
                       </div>
                     </button>
                     {isPoolShapedFormat(effectiveFormat(d)) && (
                       <Button size="sm" variant="ghost" className="ml-2 shrink-0" onClick={() => setConfiguringStages(d)}>Configure stages</Button>
                     )}
-                    <button type="button" title="Delete discipline" disabled={removeDiscipline.isPending} onClick={() => confirmRemoveDiscipline(d)}
-                      className="ml-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-base text-rose-600 transition hover:bg-rose-50 dark:text-white dark:hover:bg-rose-500/20">🗑</button>
+                    <button type="button" aria-label="Delete discipline" title={removeDiscipline.isPending ? 'Deleting…' : 'Delete discipline'} disabled={removeDiscipline.isPending} onClick={() => confirmRemoveDiscipline(d)}
+                      className="ml-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-rose-600 transition hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/20">
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 );
               })}

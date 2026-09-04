@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDate } from '../../lib/hooks';
@@ -105,8 +106,10 @@ export function EventOrganisersPage() {
                             }
                           }}
                           disabled={removeMut.isPending}
+                          aria-label={`Remove ${u?.name}`}
+                          title="Remove"
                         >
-                          Remove
+                          <Trash2 size={14} />
                         </Button>
                       )}
                     </td>

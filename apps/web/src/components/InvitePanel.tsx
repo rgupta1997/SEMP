@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
@@ -233,7 +234,9 @@ function CampusInvites({ eventId, path }: { eventId: string; path: string }) {
                 {u.invited && <Badge tone="green">In</Badge>}
                 {u.invited ? (
                   <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
-                    disabled={busy !== null} onClick={() => withdraw(u)}>Remove</Button>
+                    disabled={busy !== null} onClick={() => withdraw(u)} aria-label={`Remove ${u.name}`} title="Remove">
+                    <Trash2 size={14} />
+                  </Button>
                 ) : (
                   <Button size="sm" disabled={busy !== null} onClick={() => invite(u)}>
                     {busy === u.key ? 'Adding…' : '+ Add'}

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Lock, ShieldCheck, Users } from 'lucide-react';
+import { Lock, ShieldCheck, Trash2, Users } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useTableControls } from '../../lib/hooks';
@@ -356,9 +356,11 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
                                   {g.status === 'SUSPENDED' ? 'Restore' : 'Suspend'}
                                 </button>
                                 <button
-                                  className="tap text-[12px] font-semibold text-rose-600 hover:underline dark:text-rose-400"
-                                  onClick={() => revoke(g)}>
-                                  Remove
+                                  className="tap grid h-6 w-6 shrink-0 place-items-center rounded text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/15"
+                                  onClick={() => revoke(g)}
+                                  aria-label={`Remove ${g.role?.name} role`}
+                                  title="Remove role">
+                                  <Trash2 size={13} />
                                 </button>
                               </>
                             )}
