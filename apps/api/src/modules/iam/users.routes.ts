@@ -31,11 +31,18 @@ export function makeUsersRouter(prisma: Prisma): Router {
   // List/search users - open to any authenticated caller (used by assign/roster
   // pickers). `q` matches name/email and, on its digits, phone; `limit` caps the
   // result count so pickers can show just the first few by default.
+  //
+  // `phone_only=1` narrows matching to JUST the phone digits, dropping name/email
+  // entirely - for the roster search-and-link picker, where the point is finding
+  // every account on ONE phone number (Option B: several can share it), and a
+  // name/email hit that merely happens to contain the same digits would be a
+  // wrong answer, not a broader one.
   router.get('/', asyncHandler(async (req, res) => {
     const organizationId = req.query.organization_id as string | undefined;
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const take = req.query.limit ? Math.min(Math.max(Number(req.query.limit) || 0, 0), 100) : undefined;
     const qDigits = q.replace(/\D/g, '');
+    const phoneOnly = req.query.phone_only === '1' || req.query.phone_only === 'true';
 
     // Phone is stored with formatting (e.g. "+91 98765 43210"), so a plain contains
     // can't match a digits-only query. Resolve phone hits on the normalized form via
@@ -52,13 +59,15 @@ export function makeUsersRouter(prisma: Prisma): Router {
     const rows = await prisma.users.findMany({
       where: {
         ...(organizationId ? { organization_id: organizationId } : {}),
-        ...(q ? {
-          OR: [
-            { name: { contains: q, mode: 'insensitive' } },
-            { email: { contains: q, mode: 'insensitive' } },
-            ...(phoneIds.length ? [{ id: { in: phoneIds } }] : []),
-          ],
-        } : {}),
+        ...(phoneOnly
+          ? { id: { in: phoneIds } } // no digits yet -> phoneIds is [] -> no rows, not "everyone"
+          : q ? {
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { email: { contains: q, mode: 'insensitive' } },
+              ...(phoneIds.length ? [{ id: { in: phoneIds } }] : []),
+            ],
+          } : {}),
       },
       select: PUBLIC_SELECT,
       orderBy: { created_at: 'desc' },

@@ -29,6 +29,11 @@ import { GENDERS, validateRoster, type RosterContext, type RosterRow, type Roste
 // 'prefer_not_to_say' is reported as its own category rather than dropped.
 
 const rosterRowSchema = z.object({
+  // A specific account the caller already resolved (the search-and-link picker) -
+  // see the note on RosterRow.user_id for why this exists at all: a phone number
+  // is not unique here, and this is what lets a row point at exactly one account
+  // instead of leaving phone/email matching to guess among several.
+  user_id: z.string().uuid().nullish(),
   name: z.string().max(200).nullish(),
   email: z.string().max(200).nullish(),
   phone: z.string().max(40).nullish(),
@@ -52,7 +57,14 @@ const rosterImportSchema = z.object({
   consent_version: z.string().max(80).nullish(),
 });
 
-const addPersonSchema = rosterRowSchema.extend({ name: z.string().min(1).max(200) });
+// A name is required to CREATE a new account, but a row that links an existing
+// one already has a name - the account's own. Enforced as a refinement rather
+// than overriding the field to `.min(1)`, which would reject a link-only payload
+// (name left blank because the caller already picked an account) outright.
+const addPersonSchema = rosterRowSchema.refine(
+  (v) => !!v.user_id || !!(v.name && v.name.trim()),
+  { message: 'A name is required.', path: ['name'] },
+);
 
 // Bulk verification (J1-E6). Capped at one roll's worth per call so a runaway client
 // cannot open a transaction over the whole table.
@@ -149,8 +161,9 @@ export function makePeopleRouter(prisma: Prisma): Router {
   async function loadContext(organizationId: string, rows: RosterRow[]): Promise<RosterContext> {
     const phones = [...new Set(rows.map((r) => phoneLast10(r.phone)).filter((p) => p.length === 10))];
     const emails = [...new Set(rows.map((r) => (r.email ?? '').trim().toLowerCase()).filter(Boolean))];
+    const linkedIds = [...new Set(rows.map((r) => r.user_id).filter((id): id is string => !!id))];
 
-    const [byPhone, byEmail, units, members] = await Promise.all([
+    const [byPhone, byEmail, units, members, byId] = await Promise.all([
       phones.length
         ? prisma.$queryRawUnsafe<Array<{ id: string; name: string; phone: string | null }>>(
           `select id, name, phone from users
@@ -166,10 +179,16 @@ export function makePeopleRouter(prisma: Prisma): Router {
         where: { organization_id: organizationId },
         select: { user_id: true, member_code: true },
       }),
+      // Rows carrying an explicit `user_id` (the search-and-link picker) skip
+      // phone/email matching entirely, so their account is looked up directly here.
+      linkedIds.length
+        ? prisma.users.findMany({ where: { id: { in: linkedIds } }, select: { id: true, name: true, email: true } })
+        : Promise.resolve([]),
     ]);
 
     return {
       usersByPhone: new Map(byPhone.map((u) => [phoneLast10(u.phone), { id: u.id, name: u.name }])),
+      usersById: new Map(byId.map((u) => [u.id, { id: u.id, name: u.name, email: u.email }])),
       usersByEmail: new Map(byEmail.map((u) => [u.email.toLowerCase(), { id: u.id, name: u.name }])),
       unitsByName: new Map(units.map((u) => [u.name.trim().toLowerCase(), { id: u.id, type: u.type }])),
       memberUserIds: new Set(members.map((m) => m.user_id)),

@@ -9,6 +9,7 @@ import { parseDob, parseGender, parseScholarship, validateRoster, type RosterCon
 const ctx = (over: Partial<RosterContext> = {}): RosterContext => ({
   usersByPhone: new Map(),
   usersByEmail: new Map(),
+  usersById: new Map(),
   unitsByName: new Map([
     ['computer science', { id: 'unit-cs', type: 'campus' }],
     ['2024', { id: 'unit-2024', type: 'department' }],
@@ -49,6 +50,57 @@ describe('validateRoster · resolution', () => {
       memberUserIds: new Set(['u1']),
     });
     expect(validateRoster([row()], c).rows[0].verdict).toBe('update');
+  });
+});
+
+describe('validateRoster · linking a specific account (user_id)', () => {
+  it('links straight to the named account - no name/email/phone required', () => {
+    const c = ctx({ usersById: new Map([['u1', { id: 'u1', name: 'Asha Rao', email: 'asha@iimb.ac.in' }]]) });
+    const r = validateRoster([{ user_id: 'u1' }], c).rows[0];
+    expect(r.verdict).toBe('match');
+    expect(r.user_id).toBe('u1');
+    expect(r.name).toBe('Asha Rao');
+    expect(r.email).toBe('asha@iimb.ac.in');
+    expect(r.message).toMatch(/linked to/i);
+  });
+
+  it('rejects a user_id nobody recognises, rather than silently creating a new account', () => {
+    const r = validateRoster([{ user_id: 'ghost' }], ctx()).rows[0];
+    expect(r.verdict).toBe('reject');
+    expect(r.message).toMatch(/could not be found/i);
+  });
+
+  it('wins over phone/email matching even when a row carries both - the whole point is removing that ambiguity', () => {
+    const c = ctx({
+      usersById: new Map([['u-picked', { id: 'u-picked', name: 'Second Account', email: 'work@iimb.ac.in' }]]),
+      // Same phone resolves to a DIFFERENT account via the old ambiguous path -
+      // this is exactly the Option B scenario (one number, two accounts).
+      usersByPhone: new Map([['9876543210', { id: 'u-other', name: 'First Account' }]]),
+    });
+    const r = validateRoster([{ user_id: 'u-picked', phone: '9876543210', name: 'Ignored', email: 'ignored@x.com' }], c).rows[0];
+    expect(r.user_id).toBe('u-picked');
+    expect(r.name).toBe('Second Account');
+  });
+
+  it('reports an already-a-member linked account as an update, same as any other match', () => {
+    const c = ctx({
+      usersById: new Map([['u1', { id: 'u1', name: 'Asha Rao', email: 'asha@iimb.ac.in' }]]),
+      memberUserIds: new Set(['u1']),
+    });
+    expect(validateRoster([{ user_id: 'u1' }], c).rows[0].verdict).toBe('update');
+  });
+
+  it('still honours placement and member-code checks on a linked row', () => {
+    const c = ctx({ usersById: new Map([['u1', { id: 'u1', name: 'Asha Rao', email: 'asha@iimb.ac.in' }]]) });
+    const r = validateRoster([{ user_id: 'u1', campus: 'Computer Science' }], c).rows[0];
+    expect(r.org_unit_id).toBe('unit-cs');
+  });
+
+  it('flags the same account linked twice in one batch', () => {
+    const c = ctx({ usersById: new Map([['u1', { id: 'u1', name: 'Asha Rao', email: 'asha@iimb.ac.in' }]]) });
+    const report = validateRoster([{ user_id: 'u1' }, { user_id: 'u1' }], c);
+    expect(report.rows.map((r) => r.verdict)).toEqual(['reject', 'reject']);
+    expect(report.rows[0].message).toMatch(/more than once/i);
   });
 });
 
