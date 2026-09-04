@@ -9,7 +9,7 @@ import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { pluralise } from '@semp/shared';
 import { useOrgUnits, unitPath } from '../../lib/units';
-import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge, Tabs, INSET} from '../../components/ui';
+import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchableSelect, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge, Tabs, INSET} from '../../components/ui';
 
 // A roster can be entered into several championships; these read its team_entries.
 function teamEntries(team: any): any[] { return team.team_entries ?? []; }
@@ -293,7 +293,13 @@ function InlineCreateTeam({ institutionId, kind, onClose }: {
           ? 'Add a team for your organization, then enter it into a championship & pick a discipline when you’re ready.'
           : `Add a ${noun.toLowerCase()} squad, then enter it into one of this organisation's internal championships when you’re ready.`}
       </p>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+      {/* Top-aligned, not bottom-aligned: the Short name column carries an extra hint
+          line under its input that the other columns don't have, and `items-end`
+          would push everyone's INPUT down to keep BOTTOMS level - which is what was
+          making Team name and Sport visibly sag below Short name. Top-aligning keeps
+          every label (and so every input) on the same line regardless of what any
+          one column has underneath it. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <label className="block flex-1">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Team name</span>
           <Input
@@ -328,10 +334,15 @@ function InlineCreateTeam({ institutionId, kind, onClose }: {
         </label>
         <label className="block sm:w-56">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Sport</span>
-          <Select value={sportId} onChange={(e) => setSportId(e.target.value)}>
-            <option value="">- select a sport -</option>
-            {sports.map((s) => <option key={s.id} value={s.id}>{s.icon ? `${s.icon} ` : ''}{s.name}</option>)}
-          </Select>
+          <SearchableSelect
+            value={sportId}
+            onChange={setSportId}
+            options={sports.map((s) => ({ id: s.id, label: s.name, icon: s.icon }))}
+            placeholder="- select a sport -"
+            searchPlaceholder="Search sports…"
+            emptyLabel="No sports match"
+            className="w-full"
+          />
         </label>
         {/* Which one - never which KIND. The tab answered that, and a picker with a
             single option is a question not worth putting on the screen, so it is
@@ -352,7 +363,12 @@ function InlineCreateTeam({ institutionId, kind, onClose }: {
             </Select>
           </label>
         )}
-        <Button disabled={!name.trim() || !sportId || create.isPending} onClick={submit}>{create.isPending ? 'Creating…' : 'Create team'}</Button>
+        <div className="block">
+          {/* Matches the real labels' height so the button lines up with the inputs,
+              not with the labels above them. */}
+          <span aria-hidden="true" className="invisible mb-1.5 block text-xs font-semibold">Create</span>
+          <Button disabled={!name.trim() || !sportId || create.isPending} onClick={submit}>{create.isPending ? 'Creating…' : 'Create team'}</Button>
+        </div>
       </div>
       <p className="mt-2.5 text-xs text-slate-500 dark:text-slate-400">
         {kind === 'organization'
