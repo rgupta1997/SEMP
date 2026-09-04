@@ -4,6 +4,7 @@ import { Link, useLocation, useParams } from 'react-router-dom';
 import { useApi, useTableControls, fmtDateRange } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
 import { useWorkspace } from '../../lib/useWorkspace';
+import { titleCase } from '../../lib/format';
 import { InvitationsInbox } from '../../components/InvitationsInbox';
 import {
   Badge, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Spinner, StatusBadge, SURFACE, FilterChips,
@@ -141,7 +142,7 @@ export function OrgEventsPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <Badge tone={REL_TONE[r.relationship] ?? 'slate'}>{r.relationship}</Badge>
+                      <Badge tone={REL_TONE[r.relationship] ?? 'slate'}>{titleCase(r.relationship)}</Badge>
                     </td>
                     {/* The number an organiser wants before the participant count:
                         how much of US is actually in this. */}

@@ -1,6 +1,7 @@
 import { Clock, Medal, Trophy, ShieldCheck } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { useApi, fmtDate } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import {
   Badge, Card, CardBody, CardHeader, EmptyState, Spinner, StatCard, cn,
 } from '../../components/ui';
@@ -134,7 +135,7 @@ export function LifetimeRecordPage({ hideHonours }: { hideHonours?: boolean } = 
                       </span>
                     </span>
                   </span>
-                  <Badge tone={a.kind === 'award' ? 'violet' : 'slate'}>{a.kind}</Badge>
+                  <Badge tone={a.kind === 'award' ? 'violet' : 'slate'}>{titleCase(a.kind)}</Badge>
                 </li>
               ))}
             </ul>

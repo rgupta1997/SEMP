@@ -3,6 +3,7 @@ import { BadgeCheck, Building2, ExternalLink } from 'lucide-react';
 import { ORG_VERIFICATION_STATUS, type OrgVerificationStatus } from '@semp/shared';
 import { api } from '../../lib/api';
 import { fmtDate, fmtDateTime, useApi, useApiMutation, useTableControls } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import {
   Badge, Button, Card, EmptyState, Field, FilterChips, Modal, Pagination, SearchInput, Spinner,
   Textarea, confirmDialog, toast,
@@ -211,7 +212,7 @@ export function PlatformVerificationRequestsPage() {
                         <Building2 size={16} className="text-slate-400" />
                         <span className="font-semibold text-slate-800 dark:text-slate-100">{org?.name ?? 'Unknown organisation'}</span>
                         {org?.verified && <Badge tone="green">already verified</Badge>}
-                        <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge>
+                        <Badge tone={STATUS_TONE[r.status]}>{titleCase(r.status)}</Badge>
                       </div>
                       <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                         {[org?.kind, org?.city, org?.country, org?.code && `code ${org.code}`].filter(Boolean).join(' · ')}

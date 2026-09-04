@@ -78,9 +78,30 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   router.post('/', validateBody(createOrganizationWithOwnerSchema), asyncHandler(async (req, res) => {
     const { owner, ...organization } = req.body as {
       name: string; short_name?: string; code?: string; logo_url?: string;
-      city?: string; status?: boolean; country?: string;
+      city: string; status?: boolean; country?: string;
       owner?: { user_id?: string; name?: string; email?: string; password?: string; phone?: string };
     };
+
+    // The SAME person cannot create the same-named org twice, regardless of city -
+    // scoped to organizations they already own, so two different people can still
+    // each run their own "Sport Club".
+    const ownDuplicate = await prisma.organization_members.findFirst({
+      where: { user_id: req.user!.id, role: 'owner', organizations: { name: { equals: organization.name, mode: 'insensitive' } } },
+    });
+    if (ownDuplicate) throw new BusinessRuleError('You already have an organization with this name');
+
+    // Separately, name + city together identify a real-world institution: two
+    // DIFFERENT people should not each be able to register "Sport Club, Mumbai".
+    // Unlike the check above, this one is not scoped to the requester - it looks
+    // at every organization, because the conflict is with the institution, not
+    // with who happens to own it.
+    const sameNameAndCity = await prisma.organizations.findFirst({
+      where: {
+        name: { equals: organization.name, mode: 'insensitive' },
+        city: { equals: organization.city, mode: 'insensitive' },
+      },
+    });
+    if (sameNameAndCity) throw new BusinessRuleError(`An organization named "${organization.name}" already exists in ${organization.city}`);
 
     // Resolve an existing POC: an explicitly chosen user, else a phone/email match.
     let pocUserId: string | null = null;

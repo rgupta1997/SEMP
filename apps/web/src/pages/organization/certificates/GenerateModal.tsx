@@ -15,17 +15,20 @@ const KINDS: Array<{ key: 'medal' | 'placement' | 'award'; label: string; blurb:
   { key: 'award', label: 'Awards', blurb: 'Player of the match and the rest' },
 ];
 
-export function GenerateModal({ orgId, templates, onClose, invalidate }: {
-  orgId: string; templates: Template[]; onClose: () => void; invalidate: (string | null)[];
+export function GenerateModal({ orgId, championship, templates, onClose, invalidate }: {
+  orgId: string; championship?: Champ; templates: Template[]; onClose: () => void; invalidate: (string | null)[];
 }) {
-  const [champId, setChampId] = useState('');
+  // Opened from a specific event's own Certificates tab, `championship` is already
+  // known - asking the person to pick it again from a list of everything their
+  // institution has ever run is a question that has only one honest answer.
+  const [champId, setChampId] = useState(championship?.id ?? '');
   const [templateId, setTemplateId] = useState('');
   const [kinds, setKinds] = useState<string[]>(['medal', 'placement']);
   const [outcome, setOutcome] = useState<GenerateResult | null>(null);
 
   // Only championships this institution actually took part in - offering the whole
   // platform would be a picker of things that can only produce an empty batch.
-  const champs = useApi<Champ[]>('/championships/mine');
+  const champs = useApi<Champ[]>(championship ? null : '/championships/mine');
   const generate = useApiMutation(
     (body: any) => api('POST', `/organizations/${orgId}/certificates/generate`, body),
     invalidate,
@@ -66,13 +69,20 @@ export function GenerateModal({ orgId, templates, onClose, invalidate }: {
           same honour is skipped, so running this twice is safe.
         </p>
 
-        <label className="grid gap-1 text-sm">
-          <span className="font-medium text-slate-700 dark:text-slate-300">Championship</span>
-          <Select value={champId} onChange={(e) => setChampId(e.target.value)}>
-            <option value="">Choose a championship…</option>
-            {(champs.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </Select>
-        </label>
+        {championship ? (
+          <div className="grid gap-1 text-sm">
+            <span className="font-medium text-slate-700 dark:text-slate-300">Championship</span>
+            <p className="text-slate-600 dark:text-slate-400">{championship.name}</p>
+          </div>
+        ) : (
+          <label className="grid gap-1 text-sm">
+            <span className="font-medium text-slate-700 dark:text-slate-300">Championship</span>
+            <Select value={champId} onChange={(e) => setChampId(e.target.value)}>
+              <option value="">Choose a championship…</option>
+              {(champs.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          </label>
+        )}
 
         <label className="grid gap-1 text-sm">
           <span className="font-medium text-slate-700 dark:text-slate-300">Template</span>

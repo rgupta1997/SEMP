@@ -13,6 +13,13 @@ import { KpiTile, whenish, type Delta, type Template } from './shared';
 // gets out of the way. The register, the gallery and each certificate are their own
 // screens, because they are their own jobs.
 
+// Hidden, not removed: the /verify page and its route are untouched, just not
+// linked from here. Flip back to true to bring the entry points back.
+const SHOW_QR_VERIFIER = false;
+// Hidden, not removed: the Players import screen is untouched, just not linked
+// from here.
+const SHOW_UPLOAD_PARTICIPANTS = false;
+
 interface Overview {
   kpis: { issued: Delta; pending_generation: Delta; this_month: Delta; verification_scans: Delta };
   revoked: number;
@@ -36,10 +43,10 @@ export function CertificatesDashboard() {
 
   const actions = [
     { to: '#generate', icon: Sparkles, label: 'Generate certificates', hint: 'From a locked championship', onClick: () => setGen(true) },
-    { to: `/organizations/${orgId}/students/import`, icon: Upload, label: 'Upload participants', hint: 'Import a roll on the Players page' },
+    ...(SHOW_UPLOAD_PARTICIPANTS ? [{ to: `/organizations/${orgId}/students/import`, icon: Upload, label: 'Upload participants', hint: 'Import a roll on the Players page' }] : []),
     { to: `/organizations/${orgId}/certificates/templates`, icon: LayoutTemplate, label: 'Certificate templates', hint: `${templates.data?.rows.length ?? 0} in use` },
     { to: `/organizations/${orgId}/certificates/register`, icon: FileText, label: 'Issued register', hint: `${k?.issued.value ?? 0} issued` },
-    { to: '/verify', icon: QrCode, label: 'QR verifier', hint: 'Check a certificate is real' },
+    ...(SHOW_QR_VERIFIER ? [{ to: '/verify', icon: QrCode, label: 'QR verifier', hint: 'Check a certificate is real' }] : []),
   ];
 
   return (
@@ -48,9 +55,11 @@ export function CertificatesDashboard() {
         title="Certificates"
         subtitle="Issue, withdraw and verify — every one carries a signature a stranger can check."
       >
-        <Button variant="ghost" onClick={() => window.open('/verify', '_blank', 'noopener')}>
-          <ScanLine size={15} aria-hidden />QR verifier
-        </Button>
+        {SHOW_QR_VERIFIER && (
+          <Button variant="ghost" onClick={() => window.open('/verify', '_blank', 'noopener')}>
+            <ScanLine size={15} aria-hidden />QR verifier
+          </Button>
+        )}
         <Button onClick={() => setGen(true)}>
           <Sparkles size={15} aria-hidden />Generate certificates
         </Button>
@@ -97,7 +106,7 @@ export function CertificatesDashboard() {
           )}
         </Card>
 
-        <Card className="h-fit p-0">
+        <Card className="flex h-fit flex-col p-0 lg:h-full">
           <div className="border-b border-slate-200 px-4 py-2.5 dark:border-slate-800">
             <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Quick actions</h2>
           </div>

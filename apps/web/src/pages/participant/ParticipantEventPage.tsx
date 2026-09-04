@@ -114,7 +114,7 @@ export function ParticipantEventPage() {
               <CardBody className="pt-0">
                 {(t.entry_type || t.squad_min != null || t.format) && (
                   <div className="mb-2 flex flex-wrap gap-1.5">
-                    {t.entry_type && <Badge tone="info">{t.entry_type}</Badge>}
+                    {t.entry_type && <Badge tone="info">{titleCase(t.entry_type)}</Badge>}
                     {t.squad_min != null && t.squad_max != null && <Badge tone="slate">squad {t.squad_min}–{t.squad_max}</Badge>}
                     {t.format && <Badge tone="brand">{t.format}</Badge>}
                   </div>

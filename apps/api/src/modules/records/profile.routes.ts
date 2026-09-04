@@ -93,6 +93,21 @@ export function makeProfileRouter(prisma: Prisma): Router {
     res.json(await identity(req.user!.id));
   }));
 
+  // Live availability check while someone is typing a handle, so a taken name
+  // surfaces before Save rather than after a round trip. Deliberately not the
+  // public `/profiles/:handle` lookup - that 404s for private profiles too (so a
+  // stranger can't tell the difference), which would make a taken-but-private
+  // handle look available here and fail anyway on Save.
+  router.get('/me/identity/handle-availability', asyncHandler(async (req, res) => {
+    const handle = String(req.query.handle ?? '');
+    if (!HANDLE.test(handle)) { res.json({ available: false }); return; }
+    const taken = await prisma.users.findFirst({
+      where: { handle: { equals: handle, mode: 'insensitive' }, id: { not: req.user!.id } },
+      select: { id: true },
+    });
+    res.json({ available: !taken });
+  }));
+
   router.patch('/me/identity', validateBody(updateProfileSchema), asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof updateProfileSchema>;
 

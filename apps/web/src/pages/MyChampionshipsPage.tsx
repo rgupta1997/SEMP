@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Trophy } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useApi, useTableControls, fmtDateRange } from '../lib/hooks';
+import { titleCase } from '../lib/format';
 import { useWorkspace } from '../lib/useWorkspace';
 import { Badge, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge, FilterChips } from '../components/ui';
 import { InvitationsInbox } from '../components/InvitationsInbox';
@@ -95,7 +96,7 @@ export function MyChampionshipsPage() {
         <PageHeader title="My events" subtitle="Everything you are playing in, hosting, or have finished." />
         <div className="flex flex-wrap gap-2">
           <Link to="/host" className="rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand-700">
-            Host an event
+            Create Event
           </Link>
           <Link to="/discover" className="rounded-lg bg-white px-3.5 py-2 text-sm font-semibold text-brand-600 ring-1 ring-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:ring-slate-700">
             Find events
@@ -150,7 +151,7 @@ export function MyChampionshipsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {c.my_roles.map((r) => <Badge key={r} tone={ROLE_TONE[r] ?? 'slate'}>{r}</Badge>)}
+                  {c.my_roles.map((r) => <Badge key={r} tone={ROLE_TONE[r] ?? 'slate'}>{titleCase(r)}</Badge>)}
                   {/* Kept as a link so it can be opened in a new tab, but handled
                       here so the click switches workspace rather than just navigating. */}
                   <Link

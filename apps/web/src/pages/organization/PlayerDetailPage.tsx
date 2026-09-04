@@ -1,6 +1,7 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../lib/auth';
 import { useApi } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import { Avatar, BackButton, Badge, EmptyState, Spinner } from '../../components/ui';
 
 // One player, as their institution sees them (PG-21b).
@@ -128,7 +129,7 @@ export function PlayerDetailPage() {
         </div>
         {member && (
           <Badge tone={member.verification === 'verified' ? 'green' : member.verification === 'rejected' ? 'rose' : 'amber'}>
-            {member.verification}
+            {titleCase(member.verification)}
           </Badge>
         )}
       </div>

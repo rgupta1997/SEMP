@@ -9,6 +9,7 @@ import { Bracket, fixtureStatusLabel } from '../../components/Bracket';
 import { RoundRobinGrid } from '../../components/RoundRobinGrid';
 import { ScheduleTimeline } from '../../components/ScheduleTimeline';
 import { describeSlot, describeTieBlocked, isTieBlockedFor, resolveBranchLabels } from '../../lib/stageTree';
+import { titleCase } from '../../lib/format';
 
 interface Ground { id: string; name: string; venue_id?: string | null; venues?: { id?: string; name?: string } }
 interface Venue { id: string; name: string }
@@ -104,7 +105,7 @@ function FixtureModal({ fixture, tdId, drawPath, grounds, venues, officials, tea
         </Field>
         <Field label="Status">
           <Select value={status} onChange={(e) => setStatus(e.target.value)}>
-            {FIXTURE_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+            {FIXTURE_STATUS.map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
           </Select>
         </Field>
       </div>
@@ -231,7 +232,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
             <span className="font-semibold text-slate-900 dark:text-slate-100">{td.disciplines?.name ?? sportName}</span>
             {formatLabel && <Badge tone="violet">{formatLabel}</Badge>}
           </div>
-          <div className="text-xs text-slate-500 dark:text-slate-400">{td.entry_type} draw · {fixtures.length} fixture{fixtures.length === 1 ? '' : 's'}</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">{titleCase(td.entry_type)} Draw · {fixtures.length} fixture{fixtures.length === 1 ? '' : 's'}</div>
         </div>
         <div className="flex items-center gap-2">
           {fixtures.length > 0 && !isRanking && (

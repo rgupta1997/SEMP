@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Check, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Eye, Lock, Pencil, ShieldCheck, X } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
+import { titleCase } from '../../lib/format';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { Badge, Button, Card, CardBody, Field, Input, Modal, PageHeader, Select, Spinner, Textarea, toast } from '../../components/ui';
 import { SheetPreview, openDoc } from '../organization/certificates/shared';
@@ -133,7 +134,7 @@ function TeamsTab() {
             {t.jersey_number != null && (
               <span style={{ fontFamily: MONO, fontSize: 13, color: 'var(--brand)' }}>#{t.jersey_number}</span>
             )}
-            <Badge tone={t.membership_role === 'captain' ? 'amber' : 'slate'}>{t.membership_role}</Badge>
+            <Badge tone={t.membership_role === 'captain' ? 'amber' : 'slate'}>{titleCase(t.membership_role)}</Badge>
           </div>
         ))}
     </div>
@@ -278,6 +279,23 @@ function EditProfileModal({ id, onClose, onSaved }: { id: Identity; onClose: () 
 
   const availableSports = (sportsList ?? []).filter((s) => !sports.includes(s.name));
 
+  // Debounced live availability check - lets someone know a handle is taken
+  // before Save round-trips, rather than only after. Skipped when the value is
+  // what they already have (nothing to check) or fails the format regex outright,
+  // since a malformed handle can't be "available" in any meaningful sense.
+  const [debouncedHandle, setDebouncedHandle] = useState(handleValue);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedHandle(handleValue), 400);
+    return () => clearTimeout(t);
+  }, [handleValue]);
+  const normalizedHandle = debouncedHandle.trim().toLowerCase();
+  const currentHandle = (id.controlled.handle ?? '').toLowerCase();
+  const shouldCheckHandle = normalizedHandle.length > 0 && normalizedHandle !== currentHandle && HANDLE_RE.test(normalizedHandle);
+  const { data: availability, isFetching: checkingHandle } = useApi<{ available: boolean }>(
+    shouldCheckHandle ? `/me/identity/handle-availability?handle=${encodeURIComponent(normalizedHandle)}` : null,
+  );
+  const handleTaken = shouldCheckHandle && availability?.available === false;
+
   // A single action, not "pick then remember to click Add" - a picked value that
   // never gets clicked into the list is silently dropped on save with nothing
   // telling you it didn't count, which is exactly the shape of bug this replaces.
@@ -294,6 +312,10 @@ function EditProfileModal({ id, onClose, onSaved }: { id: Identity; onClose: () 
     // corrects one, never removes it.
     if (trimmedHandle && !HANDLE_RE.test(trimmedHandle)) {
       setHandleError('Use 4-40 lowercase letters, numbers or hyphens');
+      return;
+    }
+    if (trimmedHandle && trimmedHandle === normalizedHandle && handleTaken) {
+      setHandleError('That handle is already taken');
       return;
     }
     setHandleError(null);
@@ -374,7 +396,15 @@ function EditProfileModal({ id, onClose, onSaved }: { id: Identity; onClose: () 
             maxLength={40}
             style={{ fontFamily: MONO }}
           />
-          {handleError && <span className="mt-1 block text-xs text-rose-600 dark:text-rose-400">{handleError}</span>}
+          {handleError ? (
+            <span className="mt-1 block text-xs text-rose-600 dark:text-rose-400">{handleError}</span>
+          ) : shouldCheckHandle && checkingHandle ? (
+            <span className="mt-1 block text-xs text-slate-400 dark:text-slate-500">Checking availability…</span>
+          ) : handleTaken ? (
+            <span className="mt-1 block text-xs text-rose-600 dark:text-rose-400">That handle is already taken</span>
+          ) : shouldCheckHandle && availability?.available ? (
+            <span className="mt-1 block text-xs text-emerald-600 dark:text-emerald-400">Available</span>
+          ) : null}
         </Field>
       </div>
     </Modal>
