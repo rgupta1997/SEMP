@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SportStatsPanel } from '../../features/stats/SportStatsPanel';
 import { Check, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Eye, Lock, Pencil, ShieldCheck, X } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
@@ -50,7 +51,11 @@ const TABS: Array<{ key: TabKey; label: string; needs?: 'advanced_stats' }> = [
   { key: 'sports', label: 'Sports' },
   { key: 'teams', label: 'Teams' },
   { key: 'timeline', label: 'Timeline' },
-  { key: 'statistics', label: 'Statistics', needs: 'advanced_stats' },
+  // NOT GATED. Your own record of your own matches is not a premium feature - the
+  // figures were produced by results you played, and a profile that will not show
+  // them is a profile that cannot answer the first question anybody asks of it.
+  // The plan-gated thing was always the exportable sports CV, not the statistics.
+  { key: 'statistics', label: 'Statistics' },
   { key: 'achievements', label: 'Achievements' },
   { key: 'certificates', label: 'Certificates' },
 ];
@@ -641,7 +646,10 @@ export function SportsProfilePage() {
           {active.key === 'sports' && <SportsTab />}
           {active.key === 'teams' && <TeamsTab />}
           {active.key === 'certificates' && <CertificatesTab />}
-          {active.key === 'statistics' && <ParticipantDashboard />}
+          {/* The Statistics tab used to render ParticipantDashboard - the same
+              component as Overview - so two tabs showed identical content and
+              neither showed a career record. */}
+          {active.key === 'statistics' && <SportStatsPanel />}
         </>
       )}
     </div>

@@ -6,8 +6,8 @@ import { recomputeStandingsForFixture } from '../standings/standings.service.js'
 import { createNotification } from '../notifications/audience.js';
 import { notify } from '@semp/notifications/server/notify.js';
 import { Rules } from '@semp/notifications/core/rules.js';
-import { advanceWinnerStrict } from './bracket.js';
-import { deriveAchievements, queueCertificates, writeLifetimeEntries } from './downstream.js';
+import { advanceWinnerStrict, computeParentPosition } from './bracket.js';
+import { deriveAchievements, queueCertificates, writeLifetimeEntries, writeStatLines } from './downstream.js';
 import { resolveFixtureParticipants, type FixtureParticipants } from './participants.js';
 import { refreshCareerStatsForFixture } from '../records/career-stats.service.js';
 
@@ -83,6 +83,53 @@ function assertLockable(fx: {
 }
 
 /**
+ * A KNOCKOUT MATCH MUST PRODUCE A WINNER.
+ *
+ * This is a dead-end guard, and the dead end was real: locking a drawn semi-final
+ * published a result with no winner, `advanceWinnerStrict` returned early because
+ * there was nobody to advance, and the Final sat with both slots empty forever. The
+ * organiser was told nothing - the bracket simply stopped, and the only way out was
+ * to notice, unlock, and invent a winner.
+ *
+ * So it is refused at the point of locking, with a message that says what to do.
+ * A draw is still perfectly legal in a league, in a group stage and in the Final of
+ * a bracket: the test is not "is this a draw" but "does somebody have to advance
+ * from here", which is exactly what `computeParentPosition` answers. It returns null
+ * for a league (no bracket position), for a non-power-of-two bracket, and for the
+ * final - so none of those are touched.
+ */
+async function assertKnockoutHasWinner(tx: Db, fx: {
+  id: string;
+  tournament_discipline_id: string;
+  bracket_position: number | null;
+  stage_sequence: number | null;
+  winner_team_id: string | null;
+  status: string;
+}): Promise<void> {
+  if (fx.winner_team_id) return;
+  if (fx.bracket_position == null) return;
+  // A walkover or a bye is decided without play and carries its own winner rules.
+  if (fx.status === 'walkover' || fx.status === 'bye') return;
+
+  const sibs = await tx.fixtures.count({
+    where: {
+      tournament_discipline_id: fx.tournament_discipline_id,
+      bracket_position: { not: null },
+      stage_sequence: fx.stage_sequence ?? 1,
+    },
+  });
+  // Same arithmetic the advancement uses, so the guard and the propagation cannot
+  // disagree about whether there is a next round.
+  if (!computeParentPosition(sibs, fx.bracket_position)) return;
+
+  throw new BusinessRuleError(
+    'This is a knockout match, so one side has to go through - but no winner is recorded. '
+    + 'Play a decider, or open the scorecard and set the winner, then lock it. '
+    + 'A drawn result here would leave the next round with an empty slot.',
+  );
+}
+
+/**
  * The competitor rows of a ranking event, or null when this is an ordinary
  * head-to-head fixture. Mirrors how `resolveFixtureParticipants` reads the same
  * state, so the two cannot disagree about what counts as an event.
@@ -102,6 +149,23 @@ function fixtureLabel(fx: any): string {
   const where = [sport, discipline].filter(Boolean).join(' · ');
   return where ? `${home} vs ${away}, ${where}` : `${home} vs ${away}`;
 }
+
+/**
+ * How long the lock transaction may take.
+ *
+ * Prisma's default is five seconds, and the lock genuinely does a lot inside one
+ * atomic step: publish the result, advance the bracket, recompute standings, resolve
+ * participants, write the timeline, derive achievements, and write a stat line per
+ * player. A cricket match is twenty-two people; a slow pooled connection turns that
+ * into a 500 and NO LOCK AT ALL - which is what happened, courtside, on a squad of
+ * eleven a side.
+ *
+ * Raising it is the right trade rather than splitting the work up: every step here
+ * has to commit or roll back together, and a half-published result is far worse than
+ * a lock that takes four seconds. `maxWait` is how long to queue for a connection
+ * before starting, which is a different failure and worth its own budget.
+ */
+const LOCK_TX = { timeout: 30_000, maxWait: 10_000 } as const;
 
 const FIXTURE_FOR_LOCK = {
   include: {
@@ -185,6 +249,9 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
     const current = await tx.fixtures.findUnique({ where: { id: fixtureId }, ...FIXTURE_FOR_LOCK });
     if (!current) throw new NotFoundError('Fixture');
     assertLockable(current);
+    // Before publishing anything: a bracket match with nobody to advance would
+    // stall the next round silently.
+    await assertKnockoutHasWinner(tx, current);
 
     // 1 · publish the verified result
     const locked = await tx.fixtures.update({
@@ -235,6 +302,9 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
     await writeLifetimeEntries(tx, locked.id, { participants });
     const newAchievements = await deriveAchievements(tx, locked.id, { participants });
     await queueCertificates(tx, locked.id, { participants });
+    // Per-player stat lines, derived from the rally log. Best-effort by design -
+    // see writeStatLines: a stale statistic beats a scorecard that will not lock.
+    await writeStatLines(tx, locked.id, { participants });
 
     return {
       fx: locked,
@@ -244,7 +314,7 @@ export async function lockScorecard(prisma: Prisma, req: Request, fixtureId: str
       participants,
       newAchievements,
     };
-  });
+  }, LOCK_TX);
 
   await audit(prisma, req, {
     action: AUDIT_ACTIONS.fixtureLocked,
@@ -376,6 +446,7 @@ export async function unlockScorecard(prisma: Prisma, req: Request, fixtureId: s
     await writeLifetimeEntries(tx, unlocked.id, supersede);
     await deriveAchievements(tx, unlocked.id, supersede);
     await queueCertificates(tx, unlocked.id, supersede);
+    await writeStatLines(tx, unlocked.id, supersede);
 
     return {
       fx: unlocked,
@@ -383,7 +454,7 @@ export async function unlockScorecard(prisma: Prisma, req: Request, fixtureId: s
       championshipId: championshipOf(current),
       fromVersion: current.lock_version,
     };
-  });
+  }, LOCK_TX);
 
   await audit(prisma, req, {
     action: AUDIT_ACTIONS.fixtureUnlocked,

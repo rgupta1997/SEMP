@@ -46,6 +46,7 @@ import { makeReportsRouter } from '../modules/reports/reports.routes.js';
 import { makeBenchmarkRouter } from '../modules/reports/benchmark.routes.js';
 import { makeImpactRouter, makeImpactBuilder } from '../modules/reports/impact.routes.js';
 import { makeFixturesRouter } from '../modules/fixtures/fixtures.routes.js';
+import { makeScoringFormatsRouter } from '../modules/scoring/formats.routes.js';
 import { makeNotificationsRouter } from '../modules/notifications/notifications.routes.js';
 import { makeDemoRequestsRouter } from '../modules/marketing/demo-requests.routes.js';
 import { makeFeedbackRouter } from '../modules/marketing/feedback.routes.js';
@@ -201,6 +202,7 @@ export function buildApp(prisma: Prisma) {
 
   // ----- Phase 5: fixtures -----
   api.use('/', makeFixturesRouter(prisma));
+  api.use('/', makeScoringFormatsRouter(prisma));
 
   // ----- Records, certificates, people and reports (lifted from the wave branch) -----
 

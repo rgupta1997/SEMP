@@ -59,6 +59,12 @@ const DEFS: Record<string, Partial<SportDef> & { archetype: Archetype }> = {
   'table tennis': { archetype: 'rally', segLabel: 'Game',  segMax: 5, pointButtons: [1] },
   'table-tennis': { archetype: 'rally', segLabel: 'Game',  segMax: 5, pointButtons: [1] },
   squash:         { archetype: 'rally', segLabel: 'Game',  segMax: 5, pointButtons: [1] },
+  // These five now score through the rules-aware rally kernel (see
+  // features/scoring/RacquetDeck.tsx). The entries here remain the archetype
+  // fallback the console still consults for structure/depth decisions - and for
+  // pickleball they were missing entirely, so it fell through to the generic
+  // "Period, best of 2" default despite being a P0 sport.
+  pickleball:     { archetype: 'rally', segLabel: 'Game',  segMax: 3, pointButtons: [1] },
 
   // ── Cricket: ball-by-ball runs & wickets across innings ──────────────────────
   cricket:        { archetype: 'cricket', segLabel: 'Innings', segMax: 2, pointButtons: [0, 1, 2, 3, 4, 6] },
@@ -111,11 +117,34 @@ export function cricketScore(s: MatchState, side: 'A' | 'B'): string {
   return `${runs}/${wkt} (${oversStr(balls)})`;
 }
 
-export interface LogEntry { t: string; team?: 'A' | 'B'; txt: string; player?: string; kind?: string }
+/**
+ * One line of the human-readable timeline.
+ *
+ * `playerId` is the fix that unblocks every per-player statistic outside the
+ * racquet family. The console resolved the acting person to a real `users.id`
+ * (EventDeck reads team_members.users.id) and this reducer then built the entry
+ * from `playerName` alone - so the identifier was destroyed four lines after it
+ * was captured, and a kabaddi raid or a football goal could never be attributed to
+ * anybody. `player` stays for display; nothing that reads it needs changing.
+ */
+export interface LogEntry {
+  t: string;
+  team?: 'A' | 'B';
+  txt: string;
+  player?: string;
+  /** The acting person, as a real user id. */
+  playerId?: string;
+  /** The second person, where the event has one (an assist, a fielder). */
+  secondId?: string;
+  secondName?: string;
+  /** A magnitude, where the event carries one (a raid worth 3). */
+  value?: number;
+  kind?: string;
+}
 
 export type Action =
   | { type: 'POINT'; team?: 'A' | 'B'; pts?: number; label?: string }
-  | { type: 'EVENT'; team?: 'A' | 'B'; key: string; label: string; pts?: number; playerId?: string; playerName?: string }
+  | { type: 'EVENT'; team?: 'A' | 'B'; key: string; label: string; pts?: number; playerId?: string; playerName?: string; secondId?: string; secondName?: string; value?: number }
   | { type: 'NEXT_SEG' }
   | { type: 'END_FINAL' }
   | { type: 'REOPEN' }
@@ -143,7 +172,22 @@ export function reduce(def: SportDef, s: MatchState, action: Action): { state: M
         if (action.team === 'A') ns.a += pts; else if (action.team === 'B') ns.b += pts;
       }
       const txt = `${action.label}${action.playerName ? ` · ${action.playerName}` : ''}`;
-      return { state: ns, entry: { t: `${def.segLabel} ${ns.seg}`, team: action.team, txt, player: action.playerName, kind: action.key } };
+      return {
+        state: ns,
+        entry: {
+          t: `${def.segLabel} ${ns.seg}`,
+          team: action.team,
+          txt,
+          player: action.playerName,
+          // CARRY THE ID. Everything downstream - fixture_events, the stat lines,
+          // a career total - hangs off this and had nothing to hang off before.
+          ...(action.playerId ? { playerId: action.playerId } : {}),
+          ...(action.secondId ? { secondId: action.secondId } : {}),
+          ...(action.secondName ? { secondName: action.secondName } : {}),
+          ...(action.value !== undefined ? { value: action.value } : {}),
+          kind: action.key,
+        },
+      };
     }
     case 'WICKET': {
       if (ns.batting === 'A') { ns.wktA += 1; ns.ballsA += 1; } else { ns.wktB += 1; ns.ballsB += 1; }

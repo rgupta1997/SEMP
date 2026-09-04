@@ -179,6 +179,37 @@ body {
   @apply text-slate-900 antialiased;
   background-color: var(--canvas);
   font-family: var(--font-sans);
+  /* AN APP, NOT A DOCUMENT.
+     `cursor: auto` shows an I-beam over every run of text, so hovering a team
+     name, a table header or a status chip suggested you could type into it. The
+     arrow is the honest default for chrome; the three cases below opt back out.
+     This does not affect selection - text is still selectable and copyable. */
+  cursor: default;
+}
+
+/* Typing surfaces keep the I-beam, because there you really can type. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+textarea,
+[contenteditable="true"] {
+  cursor: text;
+}
+
+/* Anything that acts on a click says so. Tailwind's preflight resets buttons to
+   `cursor: default`, and most of ours never set it back - so the arrow was right
+   but the POINTER was missing, which is the other half of the same complaint. */
+button:not(:disabled),
+summary,
+label[for],
+select:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+a[href] {
+  cursor: pointer;
+}
+
+button:disabled,
+select:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
 }
 
 .dark body { @apply bg-slate-950 text-slate-100; }

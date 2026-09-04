@@ -113,9 +113,6 @@ model fixtures {
   winner_team_id                       String?                @db.Uuid
   live_state                           Json                   @default("{}")
   live_log                             Json                   @default("[]")
-  stage_sequence                       Int                    @default(1) @db.SmallInt
-  home_slot_label                      String?                @db.VarChar
-  away_slot_label                      String?                @db.VarChar
   scorecard_status                     String                 @default("draft") @db.VarChar
   submitted_at                         DateTime?              @db.Timestamptz(6)
   submitted_by                         String?                @db.Uuid
@@ -123,19 +120,26 @@ model fixtures {
   locked_by                            String?                @db.Uuid
   lock_version                         Int                    @default(0)
   live_started_at                      DateTime?              @db.Timestamptz(6)
+  stage_sequence                       Int                    @default(1) @db.SmallInt
+  home_slot_label                      String?                @db.VarChar
+  away_slot_label                      String?                @db.VarChar
   /// Sequential within the championship, in scheduled order. Assigned at creation.
   match_no                             Int?
+  scoring_format_id                    String?                @db.Uuid
   certificates                         certificates[]
+  cricket_innings                      cricket_innings[]
   fixture_awards                       fixture_awards[]
   fixture_events                       fixture_events[]
   teams_fixtures_away_team_idToteams   teams?                 @relation("fixtures_away_team_idToteams", fields: [away_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   teams_fixtures_home_team_idToteams   teams?                 @relation("fixtures_home_team_idToteams", fields: [home_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users_fixtures_locked_byTousers      users?                 @relation("fixtures_locked_byTousers", fields: [locked_by], references: [id], onUpdate: NoAction)
   users                                users?                 @relation(fields: [official_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  scoring_formats                      scoring_formats?       @relation(fields: [scoring_format_id], references: [id], onUpdate: NoAction)
   users_fixtures_submitted_byTousers   users?                 @relation("fixtures_submitted_byTousers", fields: [submitted_by], references: [id], onUpdate: NoAction)
   tournament_disciplines               tournament_disciplines @relation(fields: [tournament_discipline_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   venue_grounds                        venue_grounds?         @relation(fields: [venue_ground_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   teams_fixtures_winner_team_idToteams teams?                 @relation("fixtures_winner_team_idToteams", fields: [winner_team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  player_match_stats                   player_match_stats[]
 
   @@index([away_team_id], map: "idx_fixtures_away_team_id")
   @@index([home_team_id], map: "idx_fixtures_home_team_id")
@@ -147,6 +151,7 @@ model fixtures {
   @@index([official_id, scheduled_at], map: "idx_fixtures_official_scheduled")
   @@index([tournament_discipline_id, stage_sequence, pool_number], map: "idx_fixtures_stage_sequence")
   @@index([tournament_discipline_id, scorecard_status], map: "idx_fixtures_scorecard_status")
+  @@index([scoring_format_id], map: "idx_fixtures_scoring_format")
 }
 
 model organizations {
@@ -186,8 +191,10 @@ model organizations {
   org_verification_requests             org_verification_requests[]
   organization_members                  organization_members[]
   users_organizations_created_byTousers users?                       @relation("organizations_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction)
+  player_match_stats                    player_match_stats[]
   report_jobs                           report_jobs[]
   roles                                 roles[]
+  scoring_formats                       scoring_formats[]
   standings                             standings[]
   subscriptions                         subscriptions[]
   team_entries                          team_entries[]
@@ -258,6 +265,8 @@ model sports {
   award_types        award_types[]
   career_stats       career_stats[]
   disciplines        disciplines[]
+  player_match_stats player_match_stats[]
+  scoring_formats    scoring_formats[]
   teams              teams[]
   tournament_sports  tournament_sports[]
 }
@@ -282,28 +291,31 @@ model team_members {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model teams {
-  id                                      String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  sport_id                                String         @db.Uuid
-  organization_id                         String         @db.Uuid
-  name                                    String         @db.VarChar
-  status                                  String         @default("forming") @db.VarChar
-  invite_token                            String?        @unique @db.VarChar
-  created_at                              DateTime       @default(now()) @db.Timestamptz(6)
-  updated_at                              DateTime       @default(now()) @db.Timestamptz(6)
-  coach_user_id                           String?        @db.Uuid
-  org_unit_id                             String?        @db.Uuid
+  id                                                     String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sport_id                                               String               @db.Uuid
+  organization_id                                        String               @db.Uuid
+  name                                                   String               @db.VarChar
+  status                                                 String               @default("forming") @db.VarChar
+  invite_token                                           String?              @unique @db.VarChar
+  created_at                                             DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at                                             DateTime             @default(now()) @db.Timestamptz(6)
+  coach_user_id                                          String?              @db.Uuid
+  org_unit_id                                            String?              @db.Uuid
   /// Scoreboard abbreviation, entered by whoever creates the squad. Required by the
   /// API on create; nullable here only because 136 rows predate the column.
-  short_name                              String?        @db.VarChar(12)
-  fixtures_fixtures_away_team_idToteams   fixtures[]     @relation("fixtures_away_team_idToteams")
-  fixtures_fixtures_home_team_idToteams   fixtures[]     @relation("fixtures_home_team_idToteams")
-  fixtures_fixtures_winner_team_idToteams fixtures[]     @relation("fixtures_winner_team_idToteams")
-  team_entries                            team_entries[]
-  team_members                            team_members[]
-  users                                   users?         @relation(fields: [coach_user_id], references: [id], onUpdate: NoAction)
-  organizations                           organizations  @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "teams_institution_id_fkey")
-  org_units                               org_units?     @relation(fields: [org_unit_id], references: [id], onUpdate: NoAction)
-  sports                                  sports         @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  short_name                                             String?              @db.VarChar(12)
+  cricket_innings_cricket_innings_batting_team_idToteams cricket_innings[]    @relation("cricket_innings_batting_team_idToteams")
+  cricket_innings_cricket_innings_bowling_team_idToteams cricket_innings[]    @relation("cricket_innings_bowling_team_idToteams")
+  fixtures_fixtures_away_team_idToteams                  fixtures[]           @relation("fixtures_away_team_idToteams")
+  fixtures_fixtures_home_team_idToteams                  fixtures[]           @relation("fixtures_home_team_idToteams")
+  fixtures_fixtures_winner_team_idToteams                fixtures[]           @relation("fixtures_winner_team_idToteams")
+  player_match_stats                                     player_match_stats[]
+  team_entries                                           team_entries[]
+  team_members                                           team_members[]
+  users                                                  users?               @relation(fields: [coach_user_id], references: [id], onUpdate: NoAction)
+  organizations                                          organizations        @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "teams_institution_id_fkey")
+  org_units                                              org_units?           @relation(fields: [org_unit_id], references: [id], onUpdate: NoAction)
+  sports                                                 sports               @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([organization_id], map: "idx_teams_institution_id")
   @@index([sport_id], map: "idx_teams_sport_id")
@@ -348,10 +360,13 @@ model tournament_disciplines {
   status              String              @default("upcoming") @db.VarChar
   display_order       Int                 @default(0)
   created_at          DateTime            @default(now()) @db.Timestamptz(6)
+  scoring_format_id   String?             @db.Uuid
+  round_formats       Json                @default("[]")
   fixtures            fixtures[]
   team_entries        team_entries[]
   disciplines         disciplines?        @relation(fields: [discipline_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   tournament_formats  tournament_formats? @relation(fields: [format_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  scoring_formats     scoring_formats?    @relation(fields: [scoring_format_id], references: [id], onUpdate: NoAction)
   tournament_sports   tournament_sports   @relation(fields: [tournament_sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   venues              venues?             @relation(fields: [venue_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -360,6 +375,7 @@ model tournament_disciplines {
   @@index([format_id], map: "idx_tournament_disciplines_format_id")
   @@index([tournament_sport_id], map: "idx_tournament_disciplines_tournament_sport_id")
   @@index([venue_id], map: "idx_tournament_disciplines_venue_id")
+  @@index([scoring_format_id], map: "idx_td_scoring_format")
 }
 
 model tournament_formats {
@@ -457,6 +473,7 @@ model users {
   achievement_claims_achievement_claims_user_idTousers                     achievement_claims[]         @relation("achievement_claims_user_idTousers")
   achievements                                                             achievements[]
   auth_tokens                                                              auth_tokens[]
+  board_match_lines                                                        board_match_lines[]
   career_stats                                                             career_stats[]
   certificate_templates                                                    certificate_templates[]
   certificates_certificates_issued_byTousers                               certificates[]               @relation("certificates_issued_byTousers")
@@ -470,6 +487,8 @@ model users {
   championship_organizations_championship_organizations_reviewed_byTousers championship_organizations[] @relation("championship_organizations_reviewed_byTousers")
   championship_templates                                                   championship_templates[]
   claim_evidence                                                           claim_evidence[]
+  cricket_batting_lines_cricket_batting_lines_bowler_idTousers             cricket_batting_lines[]      @relation("cricket_batting_lines_bowler_idTousers")
+  cricket_batting_lines_cricket_batting_lines_fielder_idTousers            cricket_batting_lines[]      @relation("cricket_batting_lines_fielder_idTousers")
   demo_requests                                                            demo_requests[]
   demo_sandboxes_demo_sandboxes_created_byTousers                          demo_sandboxes[]             @relation("demo_sandboxes_created_byTousers")
   demo_sandboxes_demo_sandboxes_organiser_user_idTousers                   demo_sandboxes[]             @relation("demo_sandboxes_organiser_user_idTousers")
@@ -477,6 +496,7 @@ model users {
   feedback_feedback_user_idTousers                                         feedback[]                   @relation("feedback_user_idTousers")
   fixture_awards                                                           fixture_awards[]
   fixture_events                                                           fixture_events[]
+  fixture_events_fixture_events_second_user_idTousers                      fixture_events[]             @relation("fixture_events_second_user_idTousers")
   fixtures_fixtures_locked_byTousers                                       fixtures[]                   @relation("fixtures_locked_byTousers")
   fixtures                                                                 fixtures[]
   fixtures_fixtures_submitted_byTousers                                    fixtures[]                   @relation("fixtures_submitted_byTousers")
@@ -494,8 +514,12 @@ model users {
   organization_members                                                     organization_members[]
   organization_members_organization_members_verified_byTousers             organization_members[]       @relation("organization_members_verified_byTousers")
   organizations_organizations_created_byTousers                            organizations[]              @relation("organizations_created_byTousers")
+  player_match_stats_player_match_stats_partner_user_idTousers             player_match_stats[]         @relation("player_match_stats_partner_user_idTousers")
+  player_match_stats_player_match_stats_user_idTousers                     player_match_stats[]         @relation("player_match_stats_user_idTousers")
   profile_privacy                                                          profile_privacy?
+  racquet_match_lines                                                      racquet_match_lines[]
   report_jobs                                                              report_jobs[]
+  scoring_formats                                                          scoring_formats[]
   subscription_events                                                      subscription_events[]
   subscriptions_subscriptions_created_byTousers                            subscriptions[]              @relation("subscriptions_created_byTousers")
   subscriptions_subscriptions_user_idTousers                               subscriptions[]              @relation("subscriptions_user_idTousers")
@@ -969,6 +993,8 @@ model career_stats {
   first_on        DateTime?     @db.Date
   last_on         DateTime?     @db.Date
   computed_at     DateTime      @default(now()) @db.Timestamptz(6)
+  stats           Json          @default("{}")
+  tier            String        @default("all") @db.VarChar(12)
   disciplines     disciplines?  @relation(fields: [discipline_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   sports          sports        @relation(fields: [sport_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -976,6 +1002,8 @@ model career_stats {
 
   @@index([organization_id, sport_id, grain], map: "idx_career_stats_org_sport")
   @@index([user_id, grain, last_on(sort: Desc)], map: "idx_career_stats_user")
+  @@index([organization_id, sport_id, tier, grain], map: "idx_career_stats_org_tier")
+  @@index([user_id, sport_id, tier, grain], map: "idx_career_stats_user_sport_tier")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -1220,23 +1248,30 @@ model user_org_roles {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model fixture_events {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  fixture_id     String   @db.Uuid
-  rubber_key     String?  @db.VarChar(40)
-  team_side      String?  @db.Char(1)
-  event_key      String   @db.VarChar(40)
-  label          String   @db.VarChar(120)
-  points         Int      @default(0)
-  player_user_id String?  @db.Uuid
-  segment        String?  @db.VarChar(40)
-  seq            Int      @default(0)
-  created_at     DateTime @default(now()) @db.Timestamptz(6)
-  fixtures       fixtures @relation(fields: [fixture_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users          users?   @relation(fields: [player_user_id], references: [id], onUpdate: NoAction)
+  id                                         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fixture_id                                 String   @db.Uuid
+  rubber_key                                 String?  @db.VarChar(40)
+  team_side                                  String?  @db.Char(1)
+  event_key                                  String   @db.VarChar(40)
+  label                                      String   @db.VarChar(120)
+  points                                     Int      @default(0)
+  player_user_id                             String?  @db.Uuid
+  segment                                    String?  @db.VarChar(40)
+  seq                                        Int      @default(0)
+  created_at                                 DateTime @default(now()) @db.Timestamptz(6)
+  metric_value                               Decimal? @db.Decimal
+  second_user_id                             String?  @db.Uuid
+  period_no                                  Int?     @db.SmallInt
+  clock_seconds                              Int?
+  meta                                       Json     @default("{}")
+  fixtures                                   fixtures @relation(fields: [fixture_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                                      users?   @relation(fields: [player_user_id], references: [id], onUpdate: NoAction)
+  users_fixture_events_second_user_idTousers users?   @relation("fixture_events_second_user_idTousers", fields: [second_user_id], references: [id], onUpdate: NoAction)
 
   @@index([fixture_id], map: "idx_fixture_events_fixture")
   @@index([event_key], map: "idx_fixture_events_key")
   @@index([player_user_id], map: "idx_fixture_events_player")
+  @@index([second_user_id], map: "idx_fixture_events_second")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -1343,6 +1378,339 @@ model org_unit_members {
   @@index([organization_id, user_id], map: "idx_org_unit_members_org")
   @@index([org_unit_id], map: "idx_org_unit_members_unit")
   @@index([user_id], map: "idx_org_unit_members_user")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model player_match_stats {
+  id                                              String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fixture_id                                      String                   @db.Uuid
+  user_id                                         String                   @db.Uuid
+  team_id                                         String?                  @db.Uuid
+  organization_id                                 String?                  @db.Uuid
+  sport_id                                        String?                  @db.Uuid
+  rubber_key                                      String?                  @db.VarChar(40)
+  partner_user_id                                 String?                  @db.Uuid
+  position                                        String?                  @db.VarChar(24)
+  role                                            String                   @default("player") @db.VarChar(16)
+  played                                          Boolean                  @default(true)
+  minutes                                         Int?
+  outcome                                         String?                  @db.VarChar(8)
+  stats                                           Json                     @default("{}")
+  occurred_on                                     DateTime                 @db.Date
+  source                                          String                   @default("locked_result") @db.VarChar(24)
+  lock_version                                    Int?
+  superseded_at                                   DateTime?                @db.Timestamptz(6)
+  computed_at                                     DateTime                 @default(now()) @db.Timestamptz(6)
+  board_match_lines                               board_match_lines?
+  combat_match_lines                              combat_match_lines?
+  cricket_batting_lines                           cricket_batting_lines[]
+  cricket_bowling_lines                           cricket_bowling_lines[]
+  cricket_fielding_lines                          cricket_fielding_lines[]
+  invasion_match_lines                            invasion_match_lines?
+  net_match_lines                                 net_match_lines?
+  fixtures                                        fixtures                 @relation(fields: [fixture_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations                                   organizations?           @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+  users_player_match_stats_partner_user_idTousers users?                   @relation("player_match_stats_partner_user_idTousers", fields: [partner_user_id], references: [id], onUpdate: NoAction)
+  sports                                          sports?                  @relation(fields: [sport_id], references: [id], onUpdate: NoAction)
+  teams                                           teams?                   @relation(fields: [team_id], references: [id], onUpdate: NoAction)
+  users_player_match_stats_user_idTousers         users                    @relation("player_match_stats_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  racquet_match_lines                             racquet_match_lines[]
+  raid_match_lines                                raid_match_lines?
+
+  @@index([fixture_id], map: "idx_pms_fixture")
+  @@index([organization_id, sport_id], map: "idx_pms_org")
+  @@index([stats(ops: JsonbPathOps)], map: "idx_pms_stats", type: Gin)
+  @@index([user_id, occurred_on(sort: Desc)], map: "idx_pms_user")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model scoring_formats {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id        String?                  @db.Uuid
+  sport_id               String?                  @db.Uuid
+  name                   String                   @db.VarChar(160)
+  preset_key             String?                  @db.VarChar(60)
+  config                 Json                     @default("{}")
+  is_system              Boolean                  @default(false)
+  archived_at            DateTime?                @db.Timestamptz(6)
+  created_by             String?                  @db.Uuid
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  fixtures               fixtures[]
+  users                  users?                   @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+  organizations          organizations?           @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sports                 sports?                  @relation(fields: [sport_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tournament_disciplines tournament_disciplines[]
+
+  @@index([organization_id], map: "idx_scoring_formats_org")
+  @@index([sport_id], map: "idx_scoring_formats_sport")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model board_match_lines {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  line_id            String             @unique(map: "uq_board_line") @db.Uuid
+  units_won          Int                @default(0)
+  units_lost         Int                @default(0)
+  points_scored      Int                @default(0)
+  queens             Int                @default(0)
+  coins              Int                @default(0)
+  highest_break      Int                @default(0)
+  breaks_50          Int                @default(0)
+  centuries          Int                @default(0)
+  result_points_x2   Int?               @db.SmallInt
+  colour             String?            @db.VarChar(5)
+  board_no           Int?               @db.SmallInt
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  minutes            Int?
+  opponent_user_id   String?            @db.Uuid
+  player_match_stats player_match_stats @relation(fields: [line_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users              users?             @relation(fields: [opponent_user_id], references: [id], onUpdate: NoAction)
+
+  @@index([line_id], map: "idx_board_lines_line")
+  @@index([opponent_user_id], map: "idx_board_opponent")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model combat_match_lines {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  line_id            String             @unique(map: "uq_combat_line") @db.Uuid
+  weight_class       String?            @db.VarChar(24)
+  side_used          String?            @db.VarChar(5)
+  bouts              Int                @default(0)
+  rounds_won         Int                @default(0)
+  rounds_lost        Int                @default(0)
+  touches_for        Int                @default(0)
+  touches_against    Int                @default(0)
+  win_by             String?            @db.VarChar(16)
+  penalties          Int                @default(0)
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  minutes            Int?
+  stoppages          Int                @default(0)
+  player_match_stats player_match_stats @relation(fields: [line_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([line_id], map: "idx_combat_lines_line")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model cricket_batting_lines {
+  id                                            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  line_id                                       String             @db.Uuid
+  innings                                       Int                @db.SmallInt
+  bat_position                                  Int?               @db.SmallInt
+  runs                                          Int                @default(0)
+  balls_faced                                   Int                @default(0)
+  fours                                         Int                @default(0)
+  sixes                                         Int                @default(0)
+  dismissal                                     String             @default("not_out") @db.VarChar(20)
+  bowler_id                                     String?            @db.Uuid
+  fielder_id                                    String?            @db.Uuid
+  created_at                                    DateTime           @default(now()) @db.Timestamptz(6)
+  users_cricket_batting_lines_bowler_idTousers  users?             @relation("cricket_batting_lines_bowler_idTousers", fields: [bowler_id], references: [id], onUpdate: NoAction)
+  users_cricket_batting_lines_fielder_idTousers users?             @relation("cricket_batting_lines_fielder_idTousers", fields: [fielder_id], references: [id], onUpdate: NoAction)
+  player_match_stats                            player_match_stats @relation(fields: [line_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([line_id, innings], map: "uq_bat_line")
+  @@index([bowler_id], map: "idx_bat_bowler")
+  @@index([line_id], map: "idx_bat_lines_line")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model cricket_bowling_lines {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  line_id            String             @db.Uuid
+  innings            Int                @db.SmallInt
+  balls_bowled       Int                @default(0)
+  maidens            Int                @default(0)
+  runs_conceded      Int                @default(0)
+  wickets            Int                @default(0)
+  wides              Int                @default(0)
+  no_balls           Int                @default(0)
+  dots               Int                @default(0)
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  player_match_stats player_match_stats @relation(fields: [line_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([line_id, innings], map: "uq_bowl_line")
+  @@index([line_id], map: "idx_bowl_lines_line")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model cricket_fielding_lines {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  line_id            String             @db.Uuid
+  innings            Int                @db.SmallInt
+  catches            Int                @default(0)
+  stumpings          Int                @default(0)
+  run_outs           Int                @default(0)
+  drops              Int                @default(0)
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  player_match_stats player_match_stats @relation(fields: [line_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([line_id, innings], map: "uq_field_line")
+  @@index([line_id], map: "idx_field_lines_line")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model cricket_innings {
+  id                                           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fixture_id                                   String   @db.Uuid
+  innings                                      Int      @db.SmallInt
+  batting_team_id                              String?  @db.Uuid
+  bowling_team_id                              String?  @db.Uuid
+  runs                                         Int      @default(0)
+  wickets                                      Int      @default(0)
+  balls                                        Int      @default(0)
+  wides                                        Int      @default(0)
+  no_balls                                     Int      @default(0)
+  byes                                         Int      @default(0)
+  leg_byes                                     Int      @default(0)
+  penalty_runs                                 Int      @default(0)
+  ended_by                                     String?  @db.VarChar(12)
+  target                                       Int?
+  created_at                                   DateTime @default(now()) @db.Timestamptz(6)
+  teams_cricket_innings_batting_team_idToteams teams?   @relation("cricket_innings_batting_team_idToteams", fields: [batting_team_id], references: [id], onUpdate: NoAction)
+  teams_cricket_innings_bowling_team_idToteams teams?   @relation("cricket_innings_bowling_team_idToteams", fields: [bowling_team_id], references: [id], onUpdate: NoAction)
+  fixtures                                     fixtures @relation(fields: [fixture_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([fixture_id, innings], map: "uq_cricket_innings")
+  @@index([fixture_id], map: "idx_cricket_innings_fixture")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model invasion_match_lines {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  line_id            String             @unique(map: "uq_invasion_line") @db.Uuid
+  position           String?            @db.VarChar(24)
+  minutes            Int?
+  started            Boolean            @default(true)
+  goals              Int                @default(0)
+  assists            Int                @default(0)
+  own_goals          Int                @default(0)
+  shots              Int                @default(0)
+  saves              Int                @default(0)
+  clean_sheet        Boolean            @default(false)
+  yellows            Int                @default(0)
+  reds               Int                @default(0)
+  pens_scored        Int                @default(0)
+  pens_missed        Int                @default(0)
+  points_scored      Int                @default(0)
+  fg_1               Int                @default(0)
+  fg_2               Int                @default(0)
+  fg_3               Int                @default(0)
+  rebounds           Int                @default(0)
+  steals             Int                @default(0)
+  blocks             Int                @default(0)
+  turnovers          Int                @default(0)
+  fouls              Int                @default(0)
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  player_match_stats player_match_stats @relation(fields: [line_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([line_id], map: "idx_invasion_lines_line")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model net_match_lines {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  line_id            String             @unique(map: "uq_net_line") @db.Uuid
+  position           String?            @db.VarChar(24)
+  points_scored      Int                @default(0)
+  aces               Int                @default(0)
+  kills              Int                @default(0)
+  blocks             Int                @default(0)
+  digs               Int                @default(0)
+  service_errors     Int                @default(0)
+  attack_errors      Int                @default(0)
+  reception_errors   Int                @default(0)
+  sets_played        Int                @default(0)
+  sets_won           Int                @default(0)
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  minutes            Int?
+  points_won         Int                @default(0)
+  sets_lost          Int                @default(0)
+  player_match_stats player_match_stats @relation(fields: [line_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([line_id], map: "idx_net_lines_line")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model racquet_match_lines {
+  id                    String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  line_id               String             @db.Uuid
+  rubber_key            String?            @db.VarChar(40)
+  partner_user_id       String?            @db.Uuid
+  points_won            Int                @default(0)
+  points_lost           Int                @default(0)
+  service_points_played Int                @default(0)
+  service_points_won    Int                @default(0)
+  return_points_played  Int                @default(0)
+  return_points_won     Int                @default(0)
+  games_won             Int                @default(0)
+  games_lost            Int                @default(0)
+  sets_won              Int                @default(0)
+  sets_lost             Int                @default(0)
+  deciders_won          Int                @default(0)
+  deuce_points_played   Int                @default(0)
+  deuce_points_won      Int                @default(0)
+  tiebreaks_won         Int                @default(0)
+  tiebreaks_lost        Int                @default(0)
+  longest_streak        Int                @default(0)
+  comeback_win          Boolean            @default(false)
+  aces                  Int                @default(0)
+  double_faults         Int                @default(0)
+  break_points_played   Int                @default(0)
+  break_points_won      Int                @default(0)
+  break_points_saved    Int                @default(0)
+  lets                  Int                @default(0)
+  created_at            DateTime           @default(now()) @db.Timestamptz(6)
+  deciders_lost         Int                @default(0)
+  first_serves_in       Int                @default(0)
+  winners               Int                @default(0)
+  unforced_errors       Int                @default(0)
+  retired               Boolean            @default(false)
+  walkover_received     Boolean            @default(false)
+  whitewash             Boolean            @default(false)
+  player_match_stats    player_match_stats @relation(fields: [line_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                 users?             @relation(fields: [partner_user_id], references: [id], onUpdate: NoAction)
+
+  @@index([line_id], map: "idx_racquet_lines_line")
+  @@index([partner_user_id], map: "idx_racquet_lines_partner")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model raid_match_lines {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  line_id            String             @unique(map: "uq_raid_line") @db.Uuid
+  position           String?            @db.VarChar(24)
+  raid_points        Int                @default(0)
+  raids              Int                @default(0)
+  successful_raids   Int                @default(0)
+  super_raids        Int                @default(0)
+  do_or_die_won      Int                @default(0)
+  tackle_points      Int                @default(0)
+  tackles            Int                @default(0)
+  super_tackles      Int                @default(0)
+  bonus_points       Int                @default(0)
+  all_outs           Int                @default(0)
+  touch_points       Int                @default(0)
+  dream_run_seconds  Int                @default(0)
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  minutes            Int?
+  player_match_stats player_match_stats @relation(fields: [line_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([line_id], map: "idx_raid_lines_line")
 }
 
 enum billing_period {

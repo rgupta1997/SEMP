@@ -4,6 +4,9 @@ import {
   supersedeAchievements, supersedeLifetimeEntries,
   writeAchievementsFor, writeLifetimeEntriesFor,
 } from '../records/records.service.js';
+import { supersedePlayerMatchStats, writePlayerMatchStats } from '../records/player-stats.service.js';
+import { writeFixtureEvents } from '../records/fixture-events.service.js';
+import { writeCricketLines } from '../records/cricket-lines.service.js';
 
 // The seams the lock transaction propagates through.
 //
@@ -53,6 +56,38 @@ export async function deriveAchievements(
     return [];
   }
   return writeAchievementsFor(db, fixtureId, opts.participants ?? NO_PARTICIPANTS);
+}
+
+/**
+ * Per-player statistics: one row per person per fixture, carrying both the
+ * appearance and the sport-specific stat line.
+ *
+ * Best-effort, unlike its siblings. Standings and the bracket must be consistent
+ * with a published result or the lock is a lie; a statistics table that is briefly
+ * stale is a worse product than a scorecard that will not lock. The write is
+ * idempotent (delete-then-insert per fixture), so the next lock repairs it.
+ */
+export async function writeStatLines(db: Db, fixtureId: string, opts: SupersedeOptions = {}): Promise<void> {
+  try {
+    if (opts.supersedeVersion != null) {
+      await supersedePlayerMatchStats(db, fixtureId, opts.supersedeVersion);
+      return;
+    }
+    // The FACTS first, then the stats derived from them. Order matters: the stat
+    // lines are a cache over these rows, and a cache written before its source is a
+    // cache nothing can check.
+    await writeFixtureEvents(db, fixtureId, opts.participants ?? NO_PARTICIPANTS);
+    await writePlayerMatchStats(db, fixtureId, opts.participants ?? NO_PARTICIPANTS);
+    // Cricket LAST, and only cricket. Its detail is per innings rather than per
+    // match, so it hangs off spine rows the line above has already written - which
+    // is also what stops a ball log naming a non-participant from inventing an
+    // appearance. A no-op for every other sport.
+    await writeCricketLines(db, fixtureId);
+  } catch (e) {
+    // Also the path taken before 20260903000000 is applied: the table does not exist
+    // yet, and a lock must not depend on a migration nobody has run.
+    console.error('[player-stats] write failed for fixture', fixtureId, e);
+  }
 }
 
 // module 07b - certificates queued for generation off the back of a verified result.

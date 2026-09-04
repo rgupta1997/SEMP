@@ -182,7 +182,22 @@ export const EVENT_ROLE_CODES = ['organiser', 'official', 'poc', 'captain', 'par
  * Settings included, because `org_admin` is an unrestricted role - in its own
  * context.
  */
-export const eventRoleCodes = (roleCodes: string[]) => roleCodes.filter((c) => EVENT_ROLE_CODES.includes(c));
+/**
+ * Platform-wide roles, which are not scoped to an organisation OR an event.
+ *
+ * The "an event role overrides an org role" rule below exists so an Org Admin
+ * entered into somebody else's event does not inherit the organiser's console
+ * there. That reasoning does not apply to a platform role: the super admin is not
+ * standing in an org's shoes, and there is no event role for them to be overridden
+ * by. Filtering them out anyway collapsed their event nav to the published view -
+ * so a super admin could see a championship and not its Setup, Organisers,
+ * Communications, Certificates or Settings, while ROLE_NAV.super_admin = null
+ * (and this file's own comment) says they see the whole nav.
+ */
+export const PLATFORM_ROLE_CODES = ['super_admin'];
+
+export const eventRoleCodes = (roleCodes: string[]) =>
+  roleCodes.filter((c) => EVENT_ROLE_CODES.includes(c) || PLATFORM_ROLE_CODES.includes(c));
 
 /**
  * The second filter: what each role may reach inside a context.

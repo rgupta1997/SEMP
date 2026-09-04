@@ -30,6 +30,23 @@ interface MatchDetail {
     jersey_number: number | null;
     teammates: { name: string; phone: string | null; role: string; jersey_number: number | null }[];
   };
+  /**
+   * The player's OWN numbers for this match.
+   *
+   * Null when they were not part of it. `played: false` means they were named in
+   * the squad but did not take part - a different thing from having played and
+   * scored nothing, and a profile that conflated the two would put a duck on
+   * somebody who never batted.
+   */
+  my_stats?: {
+    played: boolean;
+    outcome: 'won' | 'lost' | 'drew' | null;
+    position: string | null;
+    /** False while the result can still change - said out loud, not implied. */
+    official: boolean;
+    groups: { title: string; items: { label: string; value: string | number }[] }[];
+    note?: string;
+  } | null;
 }
 
 function Detail({ label, value }: { label: string; value: ReactNode }) {
@@ -130,7 +147,51 @@ export function ParticipantMatchPage() {
             )}
           </CardBody>
         </Card>
+
+        <MyStatsCard stats={data.my_stats} />
       </div>
     </div>
+  );
+}
+
+/**
+ * The player's own statistics for this match.
+ *
+ * Rendered from whatever the API sends rather than from a per-sport layout: the
+ * server already knows that cricket is three groups and a table-tennis rubber is
+ * one, so this component stays the same shape for all twenty-seven sports.
+ *
+ * Absent for a sport that records no individual detail, which is honest - an empty
+ * card headed "Your statistics" reads as something broken.
+ */
+function MyStatsCard({ stats }: { stats?: MatchDetail['my_stats'] }) {
+  if (!stats) return null;
+
+  return (
+    <Card>
+      <CardHeader
+        title="Your statistics"
+        subtitle={stats.official
+          ? 'From the official result.'
+          : 'Provisional - this result has not been made official yet.'}
+      />
+      <CardBody>
+        {stats.note && (
+          <p className="text-sm text-slate-400 dark:text-slate-500">{stats.note}</p>
+        )}
+        {stats.groups.map((g) => (
+          <div key={g.title} className="mb-4 last:mb-0">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              {g.title}
+            </div>
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {g.items.map((it) => (
+                <Detail key={it.label} label={it.label} value={String(it.value)} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </CardBody>
+    </Card>
   );
 }

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { sportRecordsFor, sportStatsFilterOptions } from './sport-stats.service.js';
 import type { Prisma } from '../../infra/prisma.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -217,6 +218,43 @@ export function makeRecordsRouter(prisma: Prisma): Router {
    * the lock maintains - so a player page is one indexed lookup rather than a scan, and
    * the discipline and format breakdowns exist at all.
    */
+  /**
+   * A person's SPORT-LEVEL record: every sport, split by competition tier, with the
+   * disciplines under each.
+   *
+   * The one endpoint a profile's Statistics tab needs. `career-stats` below is the
+   * flat row dump this is built from - kept because other callers page over it, but
+   * a screen should not have to assemble a hierarchy out of it.
+   *
+   * `?sport=` and `?discipline=` narrow it; `?organization=` scopes it to one
+   * institution's view of the person, which is what career_stats actually stores.
+   */
+  router.get('/people/:userId/sport-stats', asyncHandler(async (req, res) => {
+    await authorize(req.user!.id, !!req.user!.isSuperAdmin, req.params.userId);
+    const org = typeof req.query.organization === 'string' ? req.query.organization : null;
+    const [sports, options] = await Promise.all([
+      sportRecordsFor(prisma, req.params.userId, org, {
+        sportId: typeof req.query.sport === 'string' ? req.query.sport : null,
+        disciplineId: typeof req.query.discipline === 'string' ? req.query.discipline : null,
+      }),
+      sportStatsFilterOptions(prisma, req.params.userId, org),
+    ]);
+    res.json({ sports, filters: options });
+  }));
+
+  /** The same, for the signed-in person - what the Statistics tab calls. */
+  router.get('/me/sport-stats', asyncHandler(async (req, res) => {
+    const org = typeof req.query.organization === 'string' ? req.query.organization : null;
+    const [sports, options] = await Promise.all([
+      sportRecordsFor(prisma, req.user!.id, org, {
+        sportId: typeof req.query.sport === 'string' ? req.query.sport : null,
+        disciplineId: typeof req.query.discipline === 'string' ? req.query.discipline : null,
+      }),
+      sportStatsFilterOptions(prisma, req.user!.id, org),
+    ]);
+    res.json({ sports, filters: options });
+  }));
+
   router.get('/people/:userId/career-stats', asyncHandler(async (req, res) => {
     await authorize(req.user!.id, !!req.user!.isSuperAdmin, req.params.userId);
     const grain = ['sport', 'discipline', 'format'].includes(String(req.query.grain))

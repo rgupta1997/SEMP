@@ -83,8 +83,8 @@ function TeamRow({ name, org, score, isWinner, decided, warning }:
   );
 }
 
-function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect }:
-  { fixture: BracketFixture; x: number; top: number; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; onSelect?: (f: BracketFixture) => void }) {
+function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect, onScore }:
+  { fixture: BracketFixture; x: number; top: number; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; onSelect?: (f: BracketFixture) => void; onScore?: (f: BracketFixture) => void }) {
   const isBye = fixture.status === 'bye';
   const decided = fixture.winner_team_id != null;
   const tieBlocked = fixture.live_state?.tie_blocked ?? null;
@@ -103,21 +103,18 @@ function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect }:
   // slot whose teams are still TBD), or a bye to adjust its teams/status or delete it.
   const clickable = !!onSelect;
 
-  const body = (
-    <>
-      <div
-        className="flex items-center justify-between gap-1 px-2.5 text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500"
-        style={{ height: META_H }}
-      >
-        <span className="truncate">{fixture.scheduled_at ? fmtDateTime(fixture.scheduled_at) : 'Unscheduled'}</span>
-        {fixture.status && fixture.status !== 'bye' && <StatusBadge status={fixture.status} label={fixtureStatusLabel(fixture.status)} />}
-      </div>
-      <div className="border-t border-slate-100 dark:border-slate-800">
-        <TeamRow name={home} org={homeOrg} score={fixture.home_score} isWinner={decided && fixture.winner_team_id === fixture.home_team_id} decided={decided} warning={!!homeTieMsg} />
-        <div className="border-t border-slate-100 dark:border-slate-800" />
-        <TeamRow name={away} org={awayOrg} score={isBye ? null : fixture.away_score} isWinner={decided && fixture.winner_team_id === fixture.away_team_id} decided={decided} warning={!!awayTieMsg} />
-      </div>
-    </>
+  // Scoreable straight from the tree: both sides known, and not a state that can
+  // never be played. A later-round slot still showing TBD has nothing to score.
+  const scorable = !!onScore && !!fixture.home_team_id && !!fixture.away_team_id
+    && !['cancelled', 'postponed', 'bye'].includes(fixture.status ?? '');
+  const played = ['completed', 'walkover'].includes(fixture.status ?? '');
+
+  const teamRows = (
+    <div className="border-t border-slate-100 dark:border-slate-800">
+      <TeamRow name={home} org={homeOrg} score={fixture.home_score} isWinner={decided && fixture.winner_team_id === fixture.home_team_id} decided={decided} warning={!!homeTieMsg} />
+      <div className="border-t border-slate-100 dark:border-slate-800" />
+      <TeamRow name={away} org={awayOrg} score={isBye ? null : fixture.away_score} isWinner={decided && fixture.winner_team_id === fixture.away_team_id} decided={decided} warning={!!awayTieMsg} />
+    </div>
   );
 
   const base = cn(
@@ -126,20 +123,51 @@ function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect }:
   );
   const style = { width: MATCH_W, height: MATCH_H, left: x, top };
 
-  if (clickable) {
-    return (
-      <button
-        type="button"
-        title={isBye ? 'Edit this bye' : 'Schedule this match'}
-        onClick={() => onSelect!(fixture)}
-        className={cn(base, 'cursor-pointer text-left transition-colors hover:border-brand-400 hover:shadow focus:outline-none focus:ring-2 focus:ring-brand-400/40')}
-        style={style}
+  // A DIV, not a button: the score action lives inside the card and a button
+  // cannot contain another one. The team rows carry the edit click instead.
+  return (
+    <div
+      className={cn(base, clickable && 'transition-colors hover:border-brand-400 hover:shadow')}
+      style={style}
+    >
+      <div
+        className="flex items-center justify-between gap-1 pl-2.5 pr-1 text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500"
+        style={{ height: META_H }}
       >
-        {body}
-      </button>
-    );
-  }
-  return <div className={base} style={style}>{body}</div>;
+        <span className="truncate">{fixture.scheduled_at ? fmtDateTime(fixture.scheduled_at) : 'Unscheduled'}</span>
+        <span className="flex shrink-0 items-center gap-1">
+          {fixture.status && fixture.status !== 'bye' && <StatusBadge status={fixture.status} label={fixtureStatusLabel(fixture.status)} />}
+          {scorable && (
+            <button
+              type="button"
+              title={played ? 'Open the scorecard' : fixture.status === 'live' ? 'Resume scoring' : 'Score this match'}
+              onClick={(e) => { e.stopPropagation(); onScore!(fixture); }}
+              className={cn(
+                'rounded px-1.5 py-px text-[9px] font-bold uppercase tracking-wide transition-colors',
+                fixture.status === 'live'
+                  ? 'bg-brand-600 text-white hover:bg-brand-700'
+                  : played
+                    ? 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    : 'border border-slate-300 text-slate-600 hover:border-brand-400 hover:text-brand-700 dark:border-slate-600 dark:text-slate-300',
+              )}
+            >
+              {fixture.status === 'live' ? 'Resume' : played ? 'Card' : 'Score'}
+            </button>
+          )}
+        </span>
+      </div>
+      {clickable ? (
+        <button
+          type="button"
+          title={isBye ? 'Edit this bye' : 'Schedule this match'}
+          onClick={() => onSelect!(fixture)}
+          className="block w-full cursor-pointer text-left focus:outline-none focus:ring-2 focus:ring-brand-400/40"
+        >
+          {teamRows}
+        </button>
+      ) : teamRows}
+    </div>
+  );
 }
 
 // Renders a single-elimination knockout draw as a left-to-right bracket tree.
@@ -147,8 +175,8 @@ function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect }:
 // (every round has half the matches of the previous one), keyed by
 // bracket_position. Matches without a bracket_position (e.g. a 3rd-place
 // playoff) are rendered separately below the tree.
-export function Bracket({ fixtures, teamName, teamOrg, onSelect }:
-  { fixtures: BracketFixture[]; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; onSelect?: (f: BracketFixture) => void }) {
+export function Bracket({ fixtures, teamName, teamOrg, onSelect, onScore }:
+  { fixtures: BracketFixture[]; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; onSelect?: (f: BracketFixture) => void; onScore?: (f: BracketFixture) => void }) {
   const { rounds, extras, centers, width, height } = useMemo(() => {
     const bracketed = fixtures.filter((f) => f.bracket_position != null);
     const extras = fixtures.filter((f) => f.bracket_position == null);
@@ -241,6 +269,7 @@ export function Bracket({ fixtures, teamName, teamOrg, onSelect }:
               teamName={teamName}
               teamOrg={teamOrg}
               onSelect={onSelect}
+              onScore={onScore}
             />
           )),
         )}
@@ -255,7 +284,7 @@ export function Bracket({ fixtures, teamName, teamOrg, onSelect }:
                 {f.round ?? 'Match'}
               </div>
               <div className="relative" style={{ height: MATCH_H }}>
-                <MatchCard fixture={f} x={0} top={0} teamName={teamName} teamOrg={teamOrg} onSelect={onSelect} />
+                <MatchCard fixture={f} x={0} top={0} teamName={teamName} teamOrg={teamOrg} onSelect={onSelect} onScore={onScore} />
               </div>
             </div>
           ))}

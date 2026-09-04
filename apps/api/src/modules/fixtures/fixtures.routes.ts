@@ -20,7 +20,7 @@ import { notify } from '@semp/notifications/server/notify.js';
 import { Rules } from '@semp/notifications/core/rules.js';
 import { matchAudience, notifyMatch } from './match-audience.js';
 import { advanceWinner, propagateByes } from './bracket.js';
-import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
+import { ROLE_CODES, roleWhereByCode, formatIdsForDraw } from '@semp/shared';
 import {
   assertNotLocked, lockScorecard, lockScorecardsBulk, lockStatusForChampionship,
   retractScorecard, submitScorecard, unlockScorecard,
@@ -344,7 +344,15 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         prisma.fixtures.createMany({ data: inserts.map((f) => ({ tournament_discipline_id: td.id, ...f })) }),
         // Persisted so stage-resolver.ts can re-derive the tree later (format_config
         // already exists as a free-form jsonb column on this row).
-        prisma.tournament_disciplines.update({ where: { id: td.id }, data: { format_config: req.body.config } }),
+        //
+        // MERGE, DO NOT REPLACE. This column carries two unrelated things - the stage
+        // tree written here, and the scoring template read by the web console's
+        // resolveTemplate(). Assigning req.body.config wholesale silently destroyed
+        // format_config.scoring every time a staged draw was generated.
+        prisma.tournament_disciplines.update({
+          where: { id: td.id },
+          data: { format_config: { ...(td.format_config as object), ...req.body.config } },
+        }),
       ]);
 
       await propagateByes(prisma, td.id); // stage-1 byes only, unchanged signature (default stageSequence = 1)
@@ -528,7 +536,33 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     // every ranked org, instead of the template default.
     const ranking_points = rule?.scheme === 'ranking' ? rule.places : null;
     const ranking_participation = rule?.scheme === 'ranking' ? rule.participation : 0;
-    res.json({ ...fixture, point_scheme: rule?.scheme ?? null, ranking_points, ranking_participation });
+    // Every scoring format this fixture could resolve to, so the console can walk
+    // the ladder (fixture -> round -> draw -> sport default) without a second round
+    // trip per rung. WITHOUT THIS the console received no format rows at all, so
+    // resolveFormat could not look up any id and every match - even one whose draw
+    // had a format chosen - fell through to the sport default. That is the bug this
+    // closes; the console's own comment had been promising this payload.
+    let scoring_formats: unknown[] = [];
+    try {
+      const ids = formatIdsForDraw(
+        { scoring_format_id: (tdx as { scoring_format_id?: string | null })?.scoring_format_id ?? null,
+          round_formats: (tdx as { round_formats?: unknown })?.round_formats },
+        [{ scoring_format_id: (fixture as { scoring_format_id?: string | null }).scoring_format_id ?? null }],
+      );
+      if (ids.length) {
+        scoring_formats = await prisma.$queryRaw`
+          select id, name, config, organization_id, is_system, archived_at
+          from scoring_formats where id = any(${ids}::uuid[])`;
+      }
+    } catch {
+      // Columns/table not migrated yet - the ladder falls through to the sport
+      // default, which is a real published format rather than a generic counter.
+    }
+
+    res.json({
+      ...fixture, point_scheme: rule?.scheme ?? null, ranking_points, ranking_participation,
+      scoring_formats,
+    });
   }));
 
   // ---- Awards (player-of-the-match etc.) ----

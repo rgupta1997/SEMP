@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
@@ -14,8 +14,11 @@ import {
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { rankingContributions, detailedContributions } from '@semp/shared';
-import type { TieSpec, EventSpec, ScoringMode } from '@semp/shared';
+import { rankingContributions, detailedContributions, foldCricket, foldRally, isCricketSport, isKernelSport, isRacquetSport, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, type CricketLog, type CricketState } from '@semp/shared';
+import type { TieSpec, EventSpec, ScoringMode, KernelState, Pairing, RallyLog, Side } from '@semp/shared';
+import { RacquetDeck, hydrateRally, hydrateFirstServer } from '../../features/scoring/RacquetDeck';
+import { CricketDeck } from '../../features/scoring/CricketDeck';
+import { TeamDeck } from '../../features/scoring/TeamDeck';
 
 // Walkover is handled separately (it needs a winner + reason); these are the plain
 // status-only secondary actions. Postpone is intentionally omitted here - it's done
@@ -171,7 +174,27 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
   const sportName = sportNameOf(fixture);
   const template = resolveTemplate(fixture);
   const singleDef: SportDef = template.single ?? sportDef(sportName);
-  const tieSpec = (template.fixtureType === 'tie' && template.tie) ? template.tie : tieTemplateFor(sportName)?.tie;
+
+  /**
+   * A TEAM TIE IS A PROPERTY OF THE DISCIPLINE, NOT THE SPORT.
+   *
+   * `tieTemplateFor` is keyed by sport alone, so it hands back the 5-rubber
+   * MS/WS/MD/WD/XD set for EVERY table-tennis fixture - including a Men's Singles
+   * quarter-final, which then opened as "Team tie · 5 rubbers" and asked the
+   * official to score Women's Doubles inside a men's singles match.
+   *
+   * The discipline already says which it is: `disciplines.entry_type` is
+   * individual | doubles | team, and only a `team` discipline ("Mixed", "Whole
+   * sport") is a tie. Singles and doubles draws are one contest between two sides.
+   *
+   * An explicitly stored template still wins - if an organiser has configured this
+   * draw as a tie, that is a decision, not an inference.
+   */
+  const disciplineEntry: string | null = fixture?.tournament_disciplines?.disciplines?.entry_type ?? null;
+  const tieAllowed = template.fixtureType === 'tie' || disciplineEntry === null || disciplineEntry === 'team';
+  const tieSpec = (template.fixtureType === 'tie' && template.tie)
+    ? template.tie
+    : tieAllowed ? tieTemplateFor(sportName)?.tie : undefined;
   const eventSpec = (template.fixtureType === 'event' && template.event) ? template.event : eventTemplateFor(sportName)?.event;
 
   // Ranking/event sports (powerlifting/swimming/athletics) have no head-to-head match,
@@ -199,15 +222,58 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
     else if (live.live_state?.event && eventSpec) setStructure('event');
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
 
-  // Measured/time single sports have no per-tick scoring, so they're manual-only. Cricket
-  // & box cricket are recorded as a final scorecard (runs/wkts/overs) rather than ball-by-
-  // ball here, so they're manual-only too - the detailed live deck is retired for cricket.
-  const manualOnlyArchetype = singleDef.archetype === 'time' || singleDef.archetype === 'cricket';
+  // Measured/time single sports have no per-tick scoring, so they're manual-only.
+  //
+  // CRICKET IS NO LONGER ONE OF THEM. It used to be listed here because the only
+  // cricket deck was a tap counter with no notion of an over; now it has a real
+  // ball-by-ball engine. Leaving it in this list made `forcedManual` true for
+  // cricket, which pinned effectiveMode to 'manual' and left CricketConsole
+  // unreachable - the deck rendered nowhere.
+  const manualOnlyArchetype = singleDef.archetype === 'time';
   const forcedManual = structure === 'single' && manualOnlyArchetype;
+
+  // What the FORMAT says it wants. A corporate 15-over game nobody can staff
+  // declares `entryMode: 'summary'`, and opening the full ball-by-ball deck for it
+  // asks an organiser to score 180 deliveries they were never going to score.
+  const formatEntryMode = useMemo<ScoringMode | null>(() => {
+    if (!isCricketSport(sportName)) return null;
+    const td = fixture?.tournament_disciplines ?? {};
+    const resolved = resolveMatchFormat(
+      {
+        scoring_format_id: fixture?.scoring_format_id ?? null,
+        round: fixture?.round ?? null,
+        stage_sequence: fixture?.stage_sequence ?? null,
+        frozen_format: (live?.live_state as any)?.format ?? null,
+      },
+      { scoring_format_id: td.scoring_format_id ?? null, round_formats: td.round_formats, sport: sportName },
+      (fixture?.scoring_formats ?? []) as any[],
+    );
+    if (!isCricketFormat(resolved.format)) return null;
+    return resolved.format.entryMode === 'summary' ? 'manual' : 'detailed';
+  }, [fixture, live?.live_state, sportName]);
+
   const storedMode = fixture?.tournament_disciplines?.format_config?.scoring?.scoringMode as ScoringMode | undefined;
-  const [mode, setMode] = useState<ScoringMode>(storedMode ?? (manualOnlyArchetype ? 'manual' : 'detailed'));
+  // The order is the same one the format ladder uses: an EXPLICIT choice on the draw
+  // beats what the format merely prefers, which beats the archetype's default.
+  // Either way it is only a DEFAULT - the toggle stays, because manual entry has to
+  // be able to overrule the engine at any point.
+  const [mode, setMode] = useState<ScoringMode>(
+    storedMode ?? formatEntryMode ?? (manualOnlyArchetype ? 'manual' : 'detailed'),
+  );
   const effectiveMode: ScoringMode = forcedManual ? 'manual' : mode;
   const showDepth = structure !== 'event' && !forcedManual;
+
+  // The format only arrives with the live snapshot, which lands after the first
+  // render, so the initial useState above may have guessed before it knew. This is a
+  // ONE-SHOT correction, guarded by `touched` exactly as the structure seed is: if
+  // the official has already picked a mode, a late-arriving format must not stomp it.
+  const modeSeeded = useRef(false);
+  useEffect(() => {
+    if (modeSeeded.current || touched.current) return;
+    if (storedMode || !formatEntryMode) return;
+    modeSeeded.current = true;
+    setMode(formatEntryMode);
+  }, [formatEntryMode, storedMode]);
   // Multi-competitor events default to a simple team ranking (which team did well); the
   // detailed per-athlete console is kept available behind this toggle.
 
@@ -287,10 +353,30 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
         : structure === 'tie' && tieSpec
           ? <TieConsole key={`tie-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={tieSpec} mode={effectiveMode} live={live} invalidate={invalidate} onDone={onDone} />
           : effectiveMode === 'manual'
-            ? singleDef.archetype === 'cricket'
+            // Manual mode draws a FORM, and cricket's form is runs/wickets/overs
+            // rather than a pair of numbers. This is also where a format declaring
+            // `entryMode: 'summary'` lands.
+            ? isCricketSport(sportName)
               ? <CricketManualResult key={`cman-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} live={live} invalidate={invalidate} onDone={onDone} />
               : <ManualResult key={`man-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} live={live} invalidate={invalidate} onDone={onDone} />
-            : <LiveConsole key={`live-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} live={live} invalidate={invalidate} onDone={onDone} />}
+            // Racquet sports score through the rules-aware kernel: real targets,
+            // win-by, caps, deuce and serve tracking, instead of a tap counter whose
+            // "next set" button awarded the game to whoever happened to be ahead.
+            : isRacquetSport(sportName)
+              ? <RacquetConsole key={`rac-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} live={live} invalidate={invalidate} onDone={onDone} />
+              // Every OTHER kernel sport - invasion, raid, net, board, combat - runs
+              // the same kernel through a period-based deck: clock-terminated halves,
+              // aggregate scoring, and actions attributed to a person.
+              : isKernelSport(sportName)
+                ? <TeamConsole key={`team-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} live={live} invalidate={invalidate} onDone={onDone} />
+                // Cricket has its OWN engine, not the kernel: the scoring unit is a
+                // delivery whose outcome credits three people at once, and an over
+                // is six LEGAL balls. It reaches that engine through the same
+                // format ladder as everything else.
+                : isCricketSport(sportName)
+                  ? <CricketConsole key={`cri-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} live={live} invalidate={invalidate} onDone={onDone} />
+                  // The measured sports keep their own console by design.
+                  : <LiveConsole key={`live-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} live={live} invalidate={invalidate} onDone={onDone} />}
     </>
   );
 }
@@ -433,6 +519,406 @@ function AwardsPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixture
       </CardBody>
     </Card>
   );
+}
+
+/* --------------------------- Racquet console ---------------------------- */
+/**
+ * The five racquet sports score through the rally kernel. This wrapper does three
+ * things and nothing else: resolve which format is in force, persist the append-only
+ * rally log, and derive the headline the rest of the platform reads.
+ *
+ * The rally log lives in `live_state.rally` and the resolved format is SNAPSHOTTED
+ * into `live_state.format` on the first tap - a played match must stay reproducible
+ * under the rules it was played under, even if the format is edited afterwards.
+ * `live_log` continues to carry the human-readable timeline so every existing reader
+ * keeps working.
+ */
+function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
+  { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+  const sport = sportNameOf(fixture);
+  const td = fixture?.tournament_disciplines ?? {};
+
+  const resolved = useMemo(() => resolveFormat(
+    {
+      scoring_format_id: fixture?.scoring_format_id ?? null,
+      round: fixture?.round ?? null,
+      stage_sequence: fixture?.stage_sequence ?? null,
+      frozen_format: (live?.live_state as any)?.format ?? null,
+    },
+    { scoring_format_id: td.scoring_format_id ?? null, round_formats: td.round_formats, sport },
+    // Formats referenced by id are supplied by the API alongside the fixture; until
+    // that endpoint lands the ladder falls through to the sport default, which is a
+    // real published format rather than a generic counter.
+    (fixture?.scoring_formats ?? []) as any[],
+  ), [fixture, live?.live_state, sport, td.round_formats, td.scoring_format_id]);
+
+  const [log, setLog] = useState<RallyLog>(() => hydrateRally(live?.live_state));
+  const [firstServer, setFirstServer] = useState<Side>(() => hydrateFirstServer(live?.live_state));
+  const [status, setStatus] = useState<string>(fixture.status);
+  const [busy, setBusy] = useState(false);
+  const seeded = useRef(false);
+
+  useEffect(() => {
+    if (!seeded.current && live) {
+      setLog(hydrateRally(live.live_state));
+      setFirstServer(hydrateFirstServer(live.live_state));
+      seeded.current = true;
+    }
+  }, [live]);
+
+  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
+  const format = resolved.format;
+
+  const pairing: Pairing | undefined = useMemo(() => {
+    const home = rosterPeople(homeTeam(fixture)).map((p) => p.name);
+    const away = rosterPeople(awayTeam(fixture)).map((p) => p.name);
+    if (!home.length && !away.length) return undefined;
+    // Two names a side means doubles; the kernel's resolvers need them in nominated
+    // order, which is the roster order until a nomination UI exists.
+    return { A: home.slice(0, 2), B: away.slice(0, 2) };
+  }, [fixture]);
+
+  if (!format) {
+    return <EmptyState title="No scoring format" description="This sport has no racquet format configured." />;
+  }
+
+  const save = (nextLog: RallyLog, state: KernelState, done: boolean, after?: () => void) => {
+    const env = resultEnvelope(format, state);
+    // A match is only ever completed when the KERNEL says it ended - a target
+    // reached by the required margin, a cap, or an explicit end event (retire,
+    // walkover, award). Without this a sign-off part-way through game one wrote
+    // `completed` with a 0-0 headline and no winner, which standings then read as a
+    // legitimate draw. The deck no longer offers it, and this makes it unreachable
+    // even if another caller asks.
+    const reallyDone = done && env.ended;
+    const st = reallyDone
+      ? 'completed'
+      : (status === 'scheduled' || status === 'completed' || status === 'confirmed' ? 'live' : status);
+    const winner_team_id = !reallyDone || env.winner === null
+      ? null
+      : env.winner === 'A' ? fixture.home_team_id : fixture.away_team_id;
+    setStatus(st);
+    setBusy(true);
+    persist.mutate(
+      {
+        live_state: {
+          ...(live?.live_state ?? {}),
+          rally: nextLog,
+          firstServer,
+          // Snapshot on first write, then leave alone.
+          format: (live?.live_state as any)?.format ?? format,
+        },
+        live_log: rallyTimeline(format, nextLog, firstServer, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
+        home_score: env.headline[0],
+        away_score: env.headline[1],
+        status: st,
+        winner_team_id,
+      },
+      {
+        onSuccess: () => { setBusy(false); after?.(); },
+        onError: (e: any) => { setBusy(false); toast.error(e.message); },
+      },
+    );
+  };
+
+  return (
+    <RacquetDeck
+      format={format}
+      provenance={resolved.source}
+      homeName={teamLabel(homeTeam(fixture))}
+      awayName={teamLabel(awayTeam(fixture))}
+      homeOrg={orgLabel(homeTeam(fixture))}
+      awayOrg={orgLabel(awayTeam(fixture))}
+      pairing={pairing}
+      log={log}
+      firstServer={firstServer}
+      busy={busy}
+      onFirstServerChange={(s) => { setFirstServer(s); }}
+      onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
+      onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
+    />
+  );
+}
+
+/* ----------------------------- Cricket console ----------------------------- */
+/**
+ * Cricket's console. Same plumbing as RacquetConsole - resolve through the ladder,
+ * persist an append-only log, snapshot the rules on first score - and a different
+ * engine underneath, because none of the kernel's vocabulary fits a delivery.
+ *
+ * The format comes from `resolveMatchFormat`, which walks the SAME seven rungs as
+ * every other sport. That is the whole point of the union: "the Final plays a full
+ * twenty overs but the group games are tens" is set exactly where "the Final is best
+ * of five" is set, and behaves identically.
+ */
+function CricketConsole({ fixture, fixtureId, live, invalidate, onDone }:
+  { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+  const sport = sportNameOf(fixture);
+  const td = fixture?.tournament_disciplines ?? {};
+
+  const resolved = useMemo(() => resolveMatchFormat(
+    {
+      scoring_format_id: fixture?.scoring_format_id ?? null,
+      round: fixture?.round ?? null,
+      stage_sequence: fixture?.stage_sequence ?? null,
+      frozen_format: (live?.live_state as any)?.format ?? null,
+    },
+    { scoring_format_id: td.scoring_format_id ?? null, round_formats: td.round_formats, sport },
+    (fixture?.scoring_formats ?? []) as any[],
+  ), [fixture, live?.live_state, sport, td.round_formats, td.scoring_format_id]);
+
+  const [log, setLog] = useState<CricketLog>(() => hydrateCricket(live?.live_state));
+  const [status, setStatus] = useState<string>(fixture.status);
+  const [busy, setBusy] = useState(false);
+  const seeded = useRef(false);
+
+  useEffect(() => {
+    if (!seeded.current && live) {
+      setLog(hydrateCricket(live.live_state));
+      seeded.current = true;
+    }
+  }, [live]);
+
+  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
+  const format = resolved.format;
+
+  // The ladder returns the union; only a cricket format can drive this console. A
+  // rally format here would mean the sport was mis-routed, which is worth saying
+  // rather than rendering a broken deck.
+  if (!isCricketFormat(format)) {
+    return <EmptyState title="No cricket format" description="This draw has no cricket format configured." />;
+  }
+
+  const save = (nextLog: CricketLog, state: CricketState, done: boolean, after?: () => void) => {
+    // Completed only when the ENGINE says the match ended - a chase passed, the last
+    // innings closed, or an explicit end event. The racquet deck once allowed a
+    // sign-off part-way through and wrote a completed 0-0 that standings read as a
+    // draw; this makes that unreachable here too.
+    const reallyDone = done && state.ended;
+    const st = reallyDone
+      ? 'completed'
+      : (status === 'scheduled' || status === 'completed' || status === 'confirmed' ? 'live' : status);
+    const winner_team_id = !reallyDone || state.winner === null
+      ? null
+      : state.winner === 'A' ? fixture.home_team_id : fixture.away_team_id;
+    const headline = cricketHeadline(state);
+    setStatus(st);
+    setBusy(true);
+    persist.mutate(
+      {
+        live_state: {
+          ...(live?.live_state ?? {}),
+          cricket: nextLog,
+          // Snapshot on first write, then leave alone - a played match stays
+          // reproducible under the rules it was played under.
+          format: (live?.live_state as any)?.format ?? format,
+        },
+        live_log: cricketTimeline(state, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
+        // The headline is RUNS per side, which is what standings compare.
+        home_score: headline[0],
+        away_score: headline[1],
+        status: st,
+        winner_team_id,
+      },
+      {
+        onSuccess: () => { setBusy(false); after?.(); },
+        onError: (e: any) => { setBusy(false); toast.error(e.message); },
+      },
+    );
+  };
+
+  return (
+    <CricketDeck
+      format={format}
+      provenance={resolved.source}
+      homeName={teamLabel(homeTeam(fixture))}
+      awayName={teamLabel(awayTeam(fixture))}
+      homeOrg={orgLabel(homeTeam(fixture))}
+      awayOrg={orgLabel(awayTeam(fixture))}
+      homeSquad={rosterPeople(homeTeam(fixture))}
+      awaySquad={rosterPeople(awayTeam(fixture))}
+      log={log}
+      busy={busy}
+      onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
+      onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
+    />
+  );
+}
+
+/** The ball log off live_state, defensively - a hand-edited state must not throw. */
+function hydrateCricket(liveState: any): CricketLog {
+  const raw = liveState?.cricket;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((e: any) => e && typeof e === 'object' && typeof e.t === 'string');
+}
+
+/** The human-readable timeline every existing reader of live_log expects. */
+function cricketTimeline(state: CricketState, homeName: string, awayName: string): LogEntry[] {
+  const out: LogEntry[] = [];
+  for (const inn of state.innings) {
+    const side = inn.battingSide === 'A' ? homeName : awayName;
+    out.unshift({
+      t: `Innings ${inn.innings}`,
+      team: inn.battingSide,
+      txt: `${side} ${inningsLine(inn, state.format.ballsPerOver)}`
+        + (inn.endedBy ? ` — ${inn.endedBy.replace('_', ' ')}` : ''),
+      kind: 'innings',
+    });
+  }
+  if (state.margin) {
+    out.unshift({ t: 'Result', txt: state.margin, kind: 'end' });
+  }
+  return out.slice(0, 80);
+}
+
+/** The human-readable timeline every existing reader of live_log expects. */
+function rallyTimeline(format: any, log: RallyLog, firstServer: Side, homeName: string, awayName: string): LogEntry[] {
+  const { trace } = foldRally(format, log, firstServer);
+  const nameOf = (s: Side) => (s === 'A' ? homeName : awayName);
+  const out: LogEntry[] = [];
+  trace.forEach((t, i) => {
+    const unit = t.unitsWon.map((u) => `${u.label} ${u.score[0]}–${u.score[1]}`).join(' · ');
+    const txt = t.event.t === 'point'
+      ? (t.scored ? `Point to ${nameOf(t.scored)}` : `${nameOf((t.event as any).side)} won the rally — no point`)
+      : t.event.t;
+    out.unshift({
+      t: `#${i + 1}`,
+      team: t.scored ?? undefined,
+      txt: unit ? `${txt} · ${unit}` : txt,
+      kind: t.event.t,
+    });
+  });
+  return out.slice(0, 80);
+}
+
+/* ----------------------------- Team console ----------------------------- */
+/**
+ * The kernel console for every non-racquet family.
+ *
+ * Identical plumbing to RacquetConsole - resolve the format, persist an append-only
+ * log, snapshot the rules on first score - and a different deck, because a football
+ * half ends on a whistle rather than a score and a goal belongs to a person.
+ */
+function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
+  { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+  const sport = sportNameOf(fixture);
+  const td = fixture?.tournament_disciplines ?? {};
+
+  const resolved = useMemo(() => resolveFormat(
+    {
+      scoring_format_id: fixture?.scoring_format_id ?? null,
+      round: fixture?.round ?? null,
+      stage_sequence: fixture?.stage_sequence ?? null,
+      frozen_format: (live?.live_state as any)?.format ?? null,
+    },
+    { scoring_format_id: td.scoring_format_id ?? null, round_formats: td.round_formats, sport },
+    (fixture?.scoring_formats ?? []) as any[],
+  ), [fixture, live?.live_state, sport, td.round_formats, td.scoring_format_id]);
+
+  const [log, setLog] = useState<RallyLog>(() => hydrateRally(live?.live_state));
+  const [status, setStatus] = useState<string>(fixture.status);
+  const [busy, setBusy] = useState(false);
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seeded.current && live) { setLog(hydrateRally(live.live_state)); seeded.current = true; }
+  }, [live]);
+
+  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
+  const format = resolved.format;
+
+  // Full rosters, not just two: an invasion sport attributes to eleven people, so
+  // the pairing shortcut the racquet deck uses would drop most of the squad.
+  const roster = useMemo(() => ({
+    A: rosterPeople(homeTeam(fixture)).map((x) => ({ id: x.id, name: x.name })),
+    B: rosterPeople(awayTeam(fixture)).map((x) => ({ id: x.id, name: x.name })),
+  }), [fixture]);
+
+  if (!format) {
+    return <EmptyState title="No scoring format" description="This sport has no kernel format configured." />;
+  }
+
+  const save = (nextLog: RallyLog, state: KernelState, done: boolean, after?: () => void) => {
+    const env = resultEnvelope(format, state);
+    // Only the KERNEL ends a match - the same guard the racquet console keeps, so a
+    // sign-off part-way through cannot publish a 0-0 with no winner.
+    const reallyDone = done && env.ended;
+    const st = reallyDone
+      ? 'completed'
+      : (status === 'scheduled' || status === 'completed' || status === 'confirmed' ? 'live' : status);
+    const winner_team_id = !reallyDone || env.winner === null
+      ? null
+      : env.winner === 'A' ? fixture.home_team_id : fixture.away_team_id;
+    setStatus(st);
+    setBusy(true);
+    persist.mutate(
+      {
+        live_state: {
+          ...(live?.live_state ?? {}),
+          rally: nextLog,
+          format: (live?.live_state as any)?.format ?? format,
+        },
+        // The attributed actions ARE the timeline here, and what the fact writer
+        // reads to fill fixture_events.
+        live_log: teamTimeline(nextLog, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
+        home_score: env.headline[0],
+        away_score: env.headline[1],
+        status: st,
+        winner_team_id,
+      },
+      {
+        onSuccess: () => { setBusy(false); after?.(); },
+        onError: (e: any) => { setBusy(false); toast.error(e.message); },
+      },
+    );
+  };
+
+  return (
+    <TeamDeck
+      format={format}
+      provenance={resolved.source}
+      sportName={sport}
+      homeName={teamLabel(homeTeam(fixture))}
+      awayName={teamLabel(awayTeam(fixture))}
+      homeOrg={orgLabel(homeTeam(fixture))}
+      awayOrg={orgLabel(awayTeam(fixture))}
+      roster={roster}
+      log={log}
+      busy={busy}
+      onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
+      onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
+    />
+  );
+}
+
+/**
+ * The timeline for an attributed log.
+ *
+ * `playerId` is carried through so the fact writer can attribute the action - which
+ * is the whole reason a kabaddi raid or a football goal can now reach somebody's
+ * career record.
+ */
+function teamTimeline(log: RallyLog, homeName: string, awayName: string): LogEntry[] {
+  const nameOf = (s: Side) => (s === 'A' ? homeName : awayName);
+  const out: LogEntry[] = [];
+  log.forEach((ev, i) => {
+    const any = ev as any;
+    const who = any.playerName ? ` · ${any.playerName}` : '';
+    const txt = ev.t === 'point'
+      ? `${any.label ?? 'Point'}${any.pts > 1 ? ` (+${any.pts})` : ''}${who}`
+      : ev.t === 'endPeriod' ? 'Period ended'
+        : ev.t;
+    out.unshift({
+      t: `#${i + 1}`,
+      team: (any.side as Side) ?? undefined,
+      txt,
+      ...(any.playerName ? { player: any.playerName } : {}),
+      ...(any.playerId ? { playerId: any.playerId } : {}),
+      ...(any.secondId ? { secondId: any.secondId, secondName: any.secondName } : {}),
+      ...(any.value !== undefined ? { value: any.value } : {}),
+      kind: any.kind ?? ev.t,
+    });
+  });
+  return out.slice(0, 120);
 }
 
 /* ----------------------------- Live console ----------------------------- */
@@ -599,14 +1085,10 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
           <Card>
             <CardHeader title="Scoring" subtitle={`${def.segLabel} ${def.archetype === 'cricket' ? state.inn : state.seg}${def.archetype !== 'cricket' ? ` of ${def.segMax}` : ''}${state.ended ? ' · frozen' : ''}`} />
             <CardBody className="space-y-4">
-              {def.archetype === 'cricket' ? (
-                <CricketDeck def={def} dispatch={dispatch} />
-              ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  <SideDeck name={homeName} org={homeOrg} side="A" def={def} dispatch={dispatch} disabled={state.ended} />
-                  <SideDeck name={awayName} org={awayOrg} side="B" def={def} dispatch={dispatch} disabled={state.ended} />
-                </div>
-              )}
+              <div className="grid grid-cols-2 gap-3">
+                <SideDeck name={homeName} org={homeOrg} side="A" def={def} dispatch={dispatch} disabled={state.ended} />
+                <SideDeck name={awayName} org={awayOrg} side="B" def={def} dispatch={dispatch} disabled={state.ended} />
+              </div>
 
               {!!def.events?.length && def.archetype !== 'cricket' && (
                 <div className="grid grid-cols-2 gap-3">
@@ -1374,22 +1856,13 @@ function EventDeck({ side, name, def, team, dispatch, disabled }: { side: 'A' | 
   );
 }
 
-function CricketDeck({ def, dispatch }: { def: SportDef; dispatch: (a: Action) => void }) {
-  return (
-    <div>
-      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Runs off the bat</div>
-      <div className="grid grid-cols-6 gap-2">
-        {def.pointButtons.map((r) => (
-          <Button key={r} variant={r === 4 || r === 6 ? 'primary' : 'outline'} className="justify-center text-base" onClick={() => dispatch({ type: 'POINT', pts: r })}>{r}</Button>
-        ))}
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <Button variant="danger" onClick={() => dispatch({ type: 'WICKET' })}>Wicket</Button>
-        <Button variant="outline" onClick={() => dispatch({ type: 'SWITCH_INNINGS' })}>Switch innings</Button>
-      </div>
-    </div>
-  );
-}
+// The cricket TAP PAD that used to live here is gone. It counted runs and wickets
+// and offered a "switch innings" button, with no notion of an over, a strike, or a
+// bowler - so it could not tell a wide from a legal ball and credited nothing to
+// anybody. Cricket now scores through features/scoring/CricketDeck against its own
+// engine. Nothing reaches this file's LiveConsole with the cricket archetype any
+// more: `cricket` and `box cricket` are the only two sports that carry it, and both
+// route to CricketConsole above.
 
 // Runs / wickets / overs trio for one cricket side - shared by the live quick-result
 // and the manual final-score form so both read and behave identically.

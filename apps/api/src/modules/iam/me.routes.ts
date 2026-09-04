@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { myMatchStats } from '../records/my-match-stats.service.js';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
@@ -659,6 +660,12 @@ export function makeMeRouter(prisma: Prisma): Router {
           .map((tm: any) => ({ name: tm.users?.name ?? '-', phone: tm.users?.phone ?? null, role: tm.role, jersey_number: tm.jersey_number }))
           .sort((a: any, b: any) => (a.jersey_number ?? 999) - (b.jersey_number ?? 999)),
       },
+      // THE PLAYER'S OWN NUMBERS. Everything needed was already being written -
+      // the spine row and the typed per-category detail - and nothing read it back
+      // for the person it belonged to, so this endpoint returned a scoreline and
+      // not one statistic the player had produced.
+      my_stats: await myMatchStats(prisma, f.id, req.user!.id,
+        mine.sports?.name ?? ts?.sports?.name ?? null),
     });
   }));
 

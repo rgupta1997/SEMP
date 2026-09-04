@@ -20,3 +20,14 @@ Sportagon_EOS_Product_Breakdown_v1.0.xlsx
 /Sportagon EOS UI mockups (1)
 # Screenshot harness output (apps/web/tools/shoot.mjs)
 .shots/
+
+# Test-bench state, per machine. The manifest records the exact row ids a seed
+# inserted so cleanup can delete those and only those - committing it would let one
+# machine's cleanup try to delete another machine's rows.
+apps/api/scripts/.seed-*-manifest.json
+
+# QA harness output: screenshots and the fixture list the console sweep walks. Both
+# are regenerated on every run and describe one machine's bench.
+apps/web/scripts/qa-shots/
+apps/web/scripts/qa-console-shots/
+apps/web/scripts/qa-consoles.json

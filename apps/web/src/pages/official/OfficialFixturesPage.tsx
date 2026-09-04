@@ -11,7 +11,7 @@ export function OfficialFixturesPage() {
   // Upcoming / Live / Completed (F-053). Tabs rather than a dropdown, because these
   // are three different jobs - one to prepare for, one to do now, one to look back
   // at - and a dropdown hides two of them behind the third.
-  const [status, setStatus] = useState<'scheduled' | 'live' | 'completed'>('live');
+  const [status, setStatus] = useState<'scheduled' | 'live' | 'completed' | null>(null);
 
   // Championship + Sport come from the shared header filter; sport cascades on championship.
   const { eventId } = useFilterBar();
@@ -25,6 +25,23 @@ export function OfficialFixturesPage() {
     { key: 'scheduled' as const, label: 'Upcoming', count: upcoming },
     { key: 'completed' as const, label: 'Completed', count: done },
   ];
+
+  /**
+   * WHICH TAB AN OFFICIAL LANDS ON.
+   *
+   * It used to be hard-coded to 'live', which is the right answer only while a match
+   * is actually in progress. Every other time - and that is most of the time,
+   * including the morning of the event - the official arrived to an empty list with
+   * "Upcoming 17" sitting unread beside it, and the first thing the product told them
+   * was that they had nothing to do.
+   *
+   * So: live if anything is live, otherwise upcoming, otherwise completed. Live keeps
+   * priority because a match in progress is the only urgent one. `null` until the
+   * fixtures land, so this is a first-render choice and never fights a tab the
+   * official has since picked themselves.
+   */
+  const landing = live > 0 ? 'live' : upcoming > 0 ? 'scheduled' : done > 0 ? 'completed' : 'live';
+  const active = status ?? landing;
 
   const eventOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -46,10 +63,10 @@ export function OfficialFixturesPage() {
 
   const filtered = useMemo(
     () => fixtures.filter((f) =>
-      f.status === status &&
+      f.status === active &&
       (!sportId || sportName(f) === sportId) &&
       (!eventId || eventInfo(f)?.id === eventId)),
-    [fixtures, status, sportId, eventId],
+    [fixtures, active, sportId, eventId],
   );
   const t = useTableControls(filtered, {
     search: (f) => `${teamLabel(homeTeam(f))} ${teamLabel(awayTeam(f))} ${eventLabel(f)} ${venueLabel(f)} ${disciplineLabel(f)}`,
@@ -64,7 +81,7 @@ export function OfficialFixturesPage() {
     <div>
       <PageHeader title="Officiating" subtitle="Matches assigned to you, and the console for the one you are on." />
       <FilterChips
-        value={status}
+        value={active}
         onChange={setStatus}
         options={TABS.map((t2) => ({
           key: t2.key,

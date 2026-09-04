@@ -1,4 +1,6 @@
+import { competitionTier, type CompetitionTier } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
+import { recomputeCareerStatBags } from './player-stats.service.js';
 
 // Materialising a career (J4-E3).
 //
@@ -11,24 +13,44 @@ import type { Prisma } from '../../infra/prisma.js';
 //
 // The three grains (sport / discipline / format) are written in ONE transaction, so a
 // reader can never catch the sport total disagreeing with the disciplines under it.
+//
+// EACH GRAIN IS ALSO SPLIT BY TIER - inter, intra, and the 'all' rollup of both. A
+// career total that adds an inter-institution result to an inter-department one is a
+// career total that lies, which is why cricket keeps first-class, List A and T20
+// apart. The rollup is STORED rather than summed on read, so no consumer has to
+// re-implement it and get it wrong; it is written in the same transaction as its
+// parts, so the two can never disagree.
+//
+// WHY RESCORING IS SAFE. Everything below reads only rows with `superseded_at is
+// null`. Unlocking a scorecard supersedes its rows and calls this again, so the
+// result drops out of the career record by the same path it entered - no
+// compensating delta, nothing to get wrong. Re-locking re-inserts and recomputes.
+// The record is a pure function of the live rows at all times.
 
 export type Grain = 'sport' | 'discipline' | 'format';
+
+/** 'all' is the rollup of the tiers beneath it, stored rather than summed on read. */
+type TierScope = CompetitionTier | 'all';
 
 interface Bucket {
   sport_id: string;
   discipline_id: string | null;
   format: string | null;
   grain: Grain;
+  tier: TierScope;
   played: number; won: number; lost: number; drawn: number;
   gold: number; silver: number; bronze: number; awards: number;
   first_on: Date | null; last_on: Date | null;
 }
 
-const key = (sportId: string, disciplineId: string | null, format: string | null) =>
-  `${sportId}|${disciplineId ?? ''}|${format ?? ''}`;
+const key = (sportId: string, disciplineId: string | null, format: string | null, tier: TierScope) =>
+  `${sportId}|${disciplineId ?? ''}|${format ?? ''}|${tier}`;
 
-const blank = (sport_id: string, discipline_id: string | null, format: string | null, grain: Grain): Bucket => ({
-  sport_id, discipline_id, format, grain,
+const blank = (
+  sport_id: string, discipline_id: string | null, format: string | null,
+  grain: Grain, tier: TierScope,
+): Bucket => ({
+  sport_id, discipline_id, format, grain, tier,
   played: 0, won: 0, lost: 0, drawn: 0, gold: 0, silver: 0, bronze: 0, awards: 0,
   first_on: null, last_on: null,
 });
@@ -74,7 +96,17 @@ export async function recomputeCareerStats(prisma: Prisma, userId: string, organ
           select: {
             discipline_id: true,
             tournament_formats: { select: { name: true } },
-            tournament_sports: { select: { sport_id: true } },
+            tournament_sports: {
+              select: {
+                sport_id: true,
+                // The championship's entry_level is what decides the TIER: entries
+                // that are organisations mean institution-against-institution;
+                // entries that are campuses or departments mean intra.
+                tournaments: {
+                  select: { championships: { select: { entry_level: true } } },
+                },
+              },
+            },
           },
         },
       },
@@ -84,6 +116,7 @@ export async function recomputeCareerStats(prisma: Prisma, userId: string, organ
     discipline_id: f.tournament_disciplines?.discipline_id ?? null,
     format: f.tournament_disciplines?.tournament_formats?.name ?? null,
     sport_id: f.tournament_disciplines?.tournament_sports?.sport_id ?? null,
+    entry_level: f.tournament_disciplines?.tournament_sports?.tournaments?.championships?.entry_level ?? null,
   }]));
 
   const buckets = new Map<string, Bucket>();
@@ -107,12 +140,21 @@ export async function recomputeCareerStats(prisma: Prisma, userId: string, organ
       if (shape.format) levels.push([shape.discipline_id, shape.format, 'format']);
     }
 
+    // The event's own shape decides the tier. A result with no shape on record - one
+    // written before the fixture was attributed - counts as inter, which is what an
+    // ordinary championship is; guessing intra would quietly demote real results.
+    const tier = competitionTier(shape?.entry_level ?? null);
+
+    // Every grain is written twice: once at its tier, once into the rollup. Both in
+    // this loop, so a bucket can never exist at one and not the other.
     for (const [disciplineId, format, grain] of levels) {
-      const k = key(sportId, disciplineId, format);
-      if (!buckets.has(k)) buckets.set(k, blank(sportId, disciplineId, format, grain));
-      const b = buckets.get(k)!;
-      apply(b);
-      span(b, on);
+      for (const scope of [tier, 'all'] as TierScope[]) {
+        const k = key(sportId, disciplineId, format, scope);
+        if (!buckets.has(k)) buckets.set(k, blank(sportId, disciplineId, format, grain, scope));
+        const b = buckets.get(k)!;
+        apply(b);
+        span(b, on);
+      }
     }
   };
 
@@ -194,6 +236,12 @@ export async function refreshCareerStatsForFixture(prisma: Prisma, fixtureId: st
     for (const p of people) {
       await recomputeCareerStats(prisma, p.userId, p.organizationId).catch((e) =>
         console.error('[career-stats] recompute failed', p, e));
+      // The sport-specific measures (points won, service win %, longest streak…)
+      // fold into career_stats.stats AFTER the rows exist - recomputeCareerStats
+      // deletes and re-inserts them, so updating the bag first would write to rows
+      // that are about to be replaced.
+      await recomputeCareerStatBags(prisma, p.userId, p.organizationId).catch((e) =>
+        console.error('[career-stats] stat bag fold failed', p, e));
     }
     return people.length;
   } catch (e) {

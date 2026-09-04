@@ -8,6 +8,7 @@ const advance = vi.fn(async () => {});
 const lifetime = vi.fn(async () => {});
 const achievements = vi.fn(async () => [] as Array<{ user_id: string; title: string }>);
 const certificates = vi.fn(async () => {});
+const statLines = vi.fn(async () => {});
 const auditFn = vi.fn(async () => {});
 // Resolving participants and telling them are separate concerns with their own
 // tests; here they are stubbed so a failure in one can be injected deliberately.
@@ -15,11 +16,15 @@ const resolveParticipants = vi.fn(async () => ({ resolved: [{ user_id: 'u1', tea
 const notify = vi.fn(async () => ({}));
 
 vi.mock('../standings/standings.service.js', () => ({ recomputeStandingsForFixture: (...a: any[]) => recompute(...a as []) }));
-vi.mock('./bracket.js', () => ({ advanceWinnerStrict: (...a: any[]) => advance(...a as []) }));
+vi.mock('./bracket.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./bracket.js')>()),
+  advanceWinnerStrict: (...a: any[]) => advance(...a as []),
+}));
 vi.mock('./downstream.js', () => ({
   writeLifetimeEntries: (...a: any[]) => lifetime(...a as []),
   deriveAchievements: (...a: any[]) => achievements(...a as []),
   queueCertificates: (...a: any[]) => certificates(...a as []),
+  writeStatLines: (...a: any[]) => statLines(...a as []),
 }));
 // Spread the real module: it exports the AUDIT_ACTIONS catalogue as well as audit(),
 // and a mock that replaces only the function leaves the constant undefined at import
@@ -46,6 +51,11 @@ const FIXTURE = {
   status: 'live',
   home_team_id: 'tA', away_team_id: 'tB',
   home_score: 3, away_score: 1,
+  winner_team_id: 'tA' as string | null,
+  // Null = not a bracket (a league fixture). A test overrides it to exercise the
+  // knockout dead-end guard.
+  bracket_position: null as number | null,
+  stage_sequence: 1 as number | null,
   lock_version: 0,
   locked_at: null as Date | null,
   locked_by: null as string | null,
@@ -64,7 +74,7 @@ const FIXTURE = {
 // "not lockable" paths, and the literal above infers those as number/string.
 type FixtureOverrides = Partial<Record<keyof typeof FIXTURE, unknown>>;
 
-function fakePrisma(overrides: FixtureOverrides = {}) {
+function fakePrisma(overrides: FixtureOverrides = {}, siblingCount = 0) {
   let committed: any = { ...FIXTURE, ...overrides };
 
   const clientOver = (read: () => any, write: (row: any) => void) => ({
@@ -79,7 +89,7 @@ function fakePrisma(overrides: FixtureOverrides = {}) {
         write(next);
         return { ...next };
       },
-      count: async () => 0,
+      count: async () => siblingCount,
     },
   });
 
@@ -151,6 +161,7 @@ describe('lockScorecard', () => {
     expect(lifetime).toHaveBeenCalledOnce();
     expect(achievements).toHaveBeenCalledOnce();
     expect(certificates).toHaveBeenCalledOnce();
+    expect(statLines).toHaveBeenCalledOnce();
   });
 
   it('audits the lock AFTER the transaction commits, never inside it', async () => {
@@ -238,6 +249,69 @@ describe('lockScorecard · notifying participants (J4-E1-S2)', () => {
     // The lock resolves regardless - it has already committed, and reporting it as
     // failed would be a lie in the more damaging direction.
     await expect(lockScorecard(prisma, REQ, 'fx1')).resolves.toBeDefined();
+    expect(prisma.current.scorecard_status).toBe('locked');
+  });
+});
+
+describe('lockScorecard · a knockout match must produce a winner', () => {
+  // THE DEAD END this guards. Locking a drawn semi-final published a result with no
+  // winner; advancement returned early because there was nobody to advance; and the
+  // Final sat with both slots empty forever, with nothing telling the organiser why.
+  // Found by driving a real championship through the API, not by a unit test.
+
+  // 3 bracket positions = a 4-team bracket: SF, SF, Final.
+  const KO = { bracket_position: 0, stage_sequence: 1, winner_team_id: null, home_score: 1, away_score: 1 };
+
+  it('refuses to lock a drawn semi-final, and says what to do', async () => {
+    const prisma = fakePrisma(KO, 3);
+    await expect(lockScorecard(prisma, REQ, 'fx1')).rejects.toThrow(/knockout/i);
+    // Nothing published: the card is still submitted, not locked.
+    expect(prisma.current.scorecard_status).toBe('submitted');
+    expect(advance).not.toHaveBeenCalled();
+  });
+
+  it('the message tells the organiser how to resolve it', async () => {
+    const prisma = fakePrisma(KO, 3);
+    await expect(lockScorecard(prisma, REQ, 'fx1'))
+      .rejects.toThrow(/set the winner|decider/i);
+  });
+
+  it('locks the same match once a winner is recorded', async () => {
+    const prisma = fakePrisma({ ...KO, winner_team_id: 'tA', home_score: 2, away_score: 1 }, 3);
+    await lockScorecard(prisma, REQ, 'fx1');
+    expect(prisma.current.scorecard_status).toBe('locked');
+    expect(advance).toHaveBeenCalled();
+  });
+
+  it('allows a DRAW in a league, where nobody has to advance', async () => {
+    // No bracket position at all - a round-robin fixture. A draw is a real result
+    // here and standings already carry a draw value for it.
+    const prisma = fakePrisma({ bracket_position: null, winner_team_id: null, home_score: 1, away_score: 1 }, 0);
+    await lockScorecard(prisma, REQ, 'fx1');
+    expect(prisma.current.scorecard_status).toBe('locked');
+  });
+
+  it('allows a DRAW in the FINAL, which has no next round', async () => {
+    // bracket_position 2 in a 4-team bracket IS the final; computeParentPosition
+    // returns null for it, so there is no empty slot to leave behind.
+    const prisma = fakePrisma({ bracket_position: 2, stage_sequence: 1, winner_team_id: null, home_score: 1, away_score: 1 }, 3);
+    await lockScorecard(prisma, REQ, 'fx1');
+    expect(prisma.current.scorecard_status).toBe('locked');
+  });
+
+  it('allows a walkover with no winner recorded', async () => {
+    // Decided without play; the status is the record.
+    const prisma = fakePrisma({ ...KO, status: 'walkover', home_score: null, away_score: null }, 3);
+    await lockScorecard(prisma, REQ, 'fx1');
+    expect(prisma.current.scorecard_status).toBe('locked');
+  });
+
+  it('does not fire on a bracket that is not a clean power of two', async () => {
+    // computeParentPosition refuses to guess there, so the guard must not either -
+    // it would make such a draw unlockable with no way forward, which is a worse
+    // dead end than the one it is preventing.
+    const prisma = fakePrisma(KO, 4);
+    await lockScorecard(prisma, REQ, 'fx1');
     expect(prisma.current.scorecard_status).toBe('locked');
   });
 });

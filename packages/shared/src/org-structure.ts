@@ -201,3 +201,49 @@ export function contingentOf(row: { organization_id?: string | null; org_unit_id
   if (!orgId) return null;
   return { orgId, unitId: row?.org_unit_id ?? null };
 }
+
+// ============================================================================
+// COMPETITION TIER - the level a result was won at.
+//
+// A career record that adds every result together is a career record that lies. A
+// hundred against another institution and a hundred in an inter-department game are
+// not the same hundred, and cricket has said so for a century by keeping first-class,
+// List A and T20 apart. The same distinction here is INTER (institution against
+// institution) and INTRA (units of one institution against each other).
+//
+// Derived from `entry_level`, which already decides who competes - so the tier cannot
+// drift away from the shape of the event that produced it, and no organiser has to
+// remember to tag anything.
+// ============================================================================
+
+export const COMPETITION_TIERS = ['inter', 'intra'] as const;
+export type CompetitionTier = (typeof COMPETITION_TIERS)[number];
+
+/** Tier plus the rollup, which is the row a profile leads with. */
+export const TIER_SCOPES = ['all', ...COMPETITION_TIERS] as const;
+export type TierScope = (typeof TIER_SCOPES)[number];
+
+export const TIER_META: Record<CompetitionTier, { label: string; short: string; hint: string }> = {
+  inter: {
+    label: 'Inter-institution',
+    short: 'Inter',
+    hint: 'Against other institutions - the record that travels with you.',
+  },
+  intra: {
+    label: 'Intra-institution',
+    short: 'Intra',
+    hint: 'Between campuses, departments or houses of one institution.',
+  },
+};
+
+/** Which tier a result belongs to, from the shape of the event that produced it. */
+export function competitionTier(level: EntryLevel | string | null | undefined): CompetitionTier {
+  // Unknown or absent reads as INTER, because that is what an ordinary championship
+  // is and what every row written before this existed actually was. Guessing intra
+  // would quietly demote real results.
+  if (!level) return 'inter';
+  return (ENTRY_LEVELS as readonly string[]).includes(level)
+    && isIntraLevel(level as EntryLevel) ? 'intra' : 'inter';
+}
+
+export const tierLabel = (t: CompetitionTier): string => TIER_META[t].label;

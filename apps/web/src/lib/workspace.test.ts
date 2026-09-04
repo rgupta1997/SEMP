@@ -159,6 +159,25 @@ describe('being involved in an event without holding a role in it', () => {
   it('leaves the personal context unfiltered', () => {
     expect(keys(resolveNav(ctx({ id: 'me', kind: 'personal', roleCodes: [] }), ALL, OFFICIATES))).toEqual(keys(NAV.personal));
   });
+
+  it('does NOT treat the platform super admin as holding no event role', () => {
+    // `super_admin` is not an org role standing in an org's shoes - it is platform
+    // wide, and there is no event role for it to be overridden by. Filtering it out
+    // with the org roles collapsed the super admin's event nav to the published
+    // five, so they could open a championship and find no Setup tab, while
+    // ROLE_NAV.super_admin = null says they see everything.
+    const nav = keys(involved(['super_admin']));
+    expect(nav).toEqual(keys(NAV.event));
+    for (const op of ['setup', 'settings', 'organisers', 'communications', 'certificates']) {
+      expect(nav, op).toContain(op);
+    }
+  });
+
+  it('still lets an event role narrow a super admin who also holds one', () => {
+    // Unrestricted wins when held alongside a narrower role - same rule as an
+    // organiser who is also an official.
+    expect(keys(involved(['super_admin', 'official']))).toEqual(keys(NAV.event));
+  });
 });
 
 describe('items that depend on the person rather than the context', () => {

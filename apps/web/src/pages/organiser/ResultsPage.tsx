@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import {
   CheckCircle2, ChevronRight, Clock, Eye, Flag, Lock, LockOpen, Pencil, Radio, ShieldCheck, Users,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEvent } from './EventLayout';
 import { useAuth } from '../../lib/auth';
@@ -640,11 +640,18 @@ export function ResultsPage() {
         </div>
       )}
 
-      {/* Said once, quietly, so the missing cards are not a mystery. */}
+      {/* Said once, quietly, so the missing cards are not a mystery - and now with a
+          way to act on it. This used to read "start them from Schedule", which was a
+          dead end: Schedule had no scoring entry point, so the only way to start a
+          match was to edit its status field by hand. Schedule has a Score button on
+          every row now, and this links straight there. */}
       {hiddenCount > 0 && (
         <p className="t-meta">
           {hiddenCount} scheduled {hiddenCount === 1 ? 'match is' : 'matches are'} not shown here —
-          start them from Schedule and they appear.
+          they appear once scoring starts.{' '}
+          <Link to={`/championships/${eventId}/schedule`} className="font-medium underline underline-offset-2">
+            Score a match from Schedule
+          </Link>
         </p>
       )}
 
