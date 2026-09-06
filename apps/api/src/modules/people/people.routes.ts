@@ -349,10 +349,11 @@ export function makePeopleRouter(prisma: Prisma): Router {
       );
 
       // Placement lives on its own table now, and is ADDITIVE: a sheet naming a
-      // campus adds that campus, and re-importing never strips units somebody was
-      // given on the Campuses screen. `do nothing` on conflict is what keeps
-      // re-running the same file a no-op rather than an error.
-      const placements = resolved.filter((x) => x.r.org_unit_id);
+      // campus AND a batch places the person in both (flattened here to one row
+      // per unit per person, not one row per person), and re-importing never
+      // strips units somebody was given on the Campuses screen. `do nothing` on
+      // conflict is what keeps re-running the same file a no-op rather than an error.
+      const placements = resolved.flatMap((x) => x.r.org_unit_ids.map((org_unit_id) => ({ org_unit_id, userId: x.userId })));
       if (placements.length) {
         await tx.$executeRawUnsafe(
           `insert into org_unit_members (organization_id, org_unit_id, user_id)
@@ -360,8 +361,8 @@ export function makePeopleRouter(prisma: Prisma): Router {
            from unnest($2::text[], $3::text[]) as v(org_unit_id, user_id)
            on conflict (org_unit_id, user_id) do nothing`,
           organizationId,
-          placements.map((x) => x.r.org_unit_id),
-          placements.map((x) => x.userId),
+          placements.map((p) => p.org_unit_id),
+          placements.map((p) => p.userId),
         );
       }
 
@@ -442,9 +443,9 @@ export function makePeopleRouter(prisma: Prisma): Router {
     // the person in both, and re-importing a corrected sheet adds rather than
     // replaces - an import that silently dropped somebody's other units would undo
     // work done on the Campuses screen.
-    if (row.org_unit_id) {
+    if (row.org_unit_ids.length) {
       await prisma.org_unit_members.createMany({
-        data: [{ organization_id: organizationId, org_unit_id: row.org_unit_id, user_id: userId }],
+        data: row.org_unit_ids.map((org_unit_id) => ({ organization_id: organizationId, org_unit_id, user_id: userId })),
         skipDuplicates: true,
       });
     }

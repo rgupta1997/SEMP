@@ -93,7 +93,7 @@ describe('validateRoster · linking a specific account (user_id)', () => {
   it('still honours placement and member-code checks on a linked row', () => {
     const c = ctx({ usersById: new Map([['u1', { id: 'u1', name: 'Asha Rao', email: 'asha@iimb.ac.in' }]]) });
     const r = validateRoster([{ user_id: 'u1', campus: 'Computer Science' }], c).rows[0];
-    expect(r.org_unit_id).toBe('unit-cs');
+    expect(r.org_unit_ids).toEqual(['unit-cs']);
   });
 
   it('flags the same account linked twice in one batch', () => {
@@ -145,30 +145,31 @@ describe('validateRoster · rejections', () => {
     expect(r.message).toMatch(/no campus called "Compter Science" exists/i);
   });
 
-  it('resolves a known campus, and lets the department win when both are given', () => {
+  it('resolves a known campus, and places the person in both when a department is also given', () => {
     const campus = validateRoster([row({ campus: 'Computer Science' })], ctx()).rows[0];
-    expect(campus.org_unit_id).toBe('unit-cs');
-    // The department places somebody more precisely, so it is the one that sticks.
+    expect(campus.org_unit_ids).toEqual(['unit-cs']);
+    // A row naming both places the person in both - the department does not
+    // silently discard the campus, or vice versa.
     const both = validateRoster([row({ campus: 'Computer Science', department: '2024' })], ctx()).rows[0];
-    expect(both.org_unit_id).toBe('unit-2024');
+    expect(both.org_unit_ids).toEqual(['unit-cs', 'unit-2024']);
   });
 
   // Institutions have saved spreadsheets with the old headers. Breaking those is a
   // worse outcome than carrying two names for one field, so both are accepted.
   it('still accepts the old programme/batch column headers', () => {
     const prog = validateRoster([row({ programme: 'Computer Science' })], ctx()).rows[0];
-    expect(prog.org_unit_id).toBe('unit-cs');
+    expect(prog.org_unit_ids).toEqual(['unit-cs']);
     const batch = validateRoster([row({ batch: '2024' })], ctx()).rows[0];
-    expect(batch.org_unit_id).toBe('unit-2024');
-    // Mixed headers in one file resolve the same way as matched ones.
+    expect(batch.org_unit_ids).toEqual(['unit-2024']);
+    // Mixed headers in one file resolve the same way as matched ones - both stick.
     const mixed = validateRoster([row({ programme: 'Computer Science', department: '2024' })], ctx()).rows[0];
-    expect(mixed.org_unit_id).toBe('unit-2024');
+    expect(mixed.org_unit_ids).toEqual(['unit-cs', 'unit-2024']);
   });
 
   it('prefers the current column name when a row carries both it and its alias', () => {
     const r = validateRoster([row({ campus: 'Computer Science', programme: 'Nonsense' })], ctx()).rows[0];
     expect(r.verdict).not.toBe('reject');
-    expect(r.org_unit_id).toBe('unit-cs');
+    expect(r.org_unit_ids).toEqual(['unit-cs']);
   });
 
   it('refuses a member code already held by somebody else here', () => {

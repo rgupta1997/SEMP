@@ -78,7 +78,9 @@ export interface RosterRowResult {
   phone: string | null;
   /** Resolved on a match; null when the person will be created. */
   user_id: string | null;
-  org_unit_id: string | null;
+  /** Every unit this row named, resolved - a row can place someone in both a
+   * campus and a department at once. Empty when it named none. */
+  org_unit_ids: string[];
   member_code: string | null;
   gender: Gender | null;
   date_of_birth: string | null;
@@ -165,7 +167,7 @@ export function validateRoster(rows: RosterRow[], ctx: RosterContext): RosterRep
 
     const base = {
       index, name, email, phone: norm(r.phone) || null,
-      user_id: null as string | null, org_unit_id: null as string | null,
+      user_id: null as string | null, org_unit_ids: [] as string[],
       member_code: memberCode, gender: null as Gender | null,
       date_of_birth: null as string | null, scholarship: null as boolean | null,
     };
@@ -204,10 +206,13 @@ export function validateRoster(rows: RosterRow[], ctx: RosterContext): RosterRep
     // what compete in an intra-organisation championship, how a typo becomes an
     // entrant in one.
     //
-    // Most specific wins: the department places a person more precisely than the
-    // campus, so it is read last and overwrites. The alias columns fold in beside
-    // their current names, so a sheet with either header lands in the same place.
-    let unitId: string | null = null;
+    // BOTH are kept, not just the more specific one: a row naming a campus AND a
+    // department means exactly that - place this person in both. An earlier version
+    // of this loop resolved them into a single id and let the department silently
+    // overwrite the campus, so a sheet that named both ended up placing the person
+    // in only one of them with no error. The alias columns fold in beside their
+    // current names, so a sheet with either header lands in the same place.
+    const unitIds: string[] = [];
     const placements = [
       ['campus', r.campus ?? r.programme],
       ['department', r.department ?? r.batch],
@@ -217,7 +222,7 @@ export function validateRoster(rows: RosterRow[], ctx: RosterContext): RosterRep
       if (!key) continue;
       const unit = ctx.unitsByName.get(key);
       if (!unit) return reject(`No ${label} called "${norm(raw)}" exists - create it under Structure first.`);
-      unitId = unit.id;
+      unitIds.push(unit.id);
     }
 
     // Resolution order, per J1-E5-S2: an explicit link, then phone, then email,
@@ -239,7 +244,7 @@ export function validateRoster(rows: RosterRow[], ctx: RosterContext): RosterRep
     const resolved = {
       ...base,
       user_id: matched?.id ?? null,
-      org_unit_id: unitId,
+      org_unit_ids: [...new Set(unitIds)],
       gender: gender ?? null,
       date_of_birth: dob ?? null,
       scholarship: scholarship ?? null,

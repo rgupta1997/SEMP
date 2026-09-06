@@ -193,7 +193,10 @@ export function makeFixturesRouter(prisma: Prisma): Router {
 
       const existing = await prisma.fixtures.findMany({
         where: { tournament_discipline_id: td.id },
-        select: { id: true, home_team_id: true, away_team_id: true, status: true, home_score: true, away_score: true },
+        select: {
+          id: true, home_team_id: true, away_team_id: true, status: true, home_score: true, away_score: true,
+          bracket_position: true, pool_number: true,
+        },
       });
 
       // Incremental generate: a league / round-robin that already has fixtures keeps
@@ -201,9 +204,21 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       // "pending" teams - the ones not yet in any fixture. Each pending team is paired
       // with every other team it hasn't been drawn against. Knockout / pool draws can't
       // be partially extended, so they fall through to a full rebuild below.
+      //
+      // But that only holds when the EXISTING fixtures are actually a league draw. An
+      // organiser can change a discipline's format after already generating a Knockout
+      // (or pool) draw for it - the fixtures sitting there still carry a bracket
+      // position/pool number from that shape, and "add new teams" onto them makes no
+      // sense: every team already appears in some fixture, so nothing would ever be
+      // added, while the leftover bracket rows keep the Schedule page showing a bracket
+      // instead of the league's crosstable, with no way back short of this check. A
+      // round-robin generator never sets either field (see round-robin.ts), so their
+      // presence here is exactly the signal that this draw needs a real rebuild, not
+      // an addition - handled by falling through to the rebuild path below.
       const name = formatName.trim().toLowerCase();
       const isLeague = name.includes('league') || name.includes('round robin') || name.includes('round-robin');
-      if (isLeague && existing.length > 0) {
+      const looksLikeLeagueDraw = existing.every((f) => f.bracket_position == null && f.pool_number == null);
+      if (isLeague && existing.length > 0 && looksLikeLeagueDraw) {
         const placed = new Set<string>();
         for (const f of existing) { if (f.home_team_id) placed.add(f.home_team_id); if (f.away_team_id) placed.add(f.away_team_id); }
         const pairKey = (a: string, b: string) => [a, b].sort().join('|');

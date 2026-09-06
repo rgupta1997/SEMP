@@ -109,11 +109,19 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
   // nothing on a team list, a fixture card or a scoreboard.
   const short = (entryUnitId ? pickable.find((u) => u.id === entryUnitId)?.name : null)
     || organization?.short_name || organization?.name || 'Team';
-  // Default team name keeps the championship name (not the sport - the discipline row
-  // already shows that); a sub-discipline like "Men's"/"Women's" is appended so two
-  // teams in the same sport stay distinct.
-  const champName = enrollment?.championships?.name ?? '';
-  const defaultName = (d: any) => `${short} ${champName}${d.disciplines?.name ? ` ${d.disciplines.name}` : ''}`.replace(/\s+/g, ' ').trim();
+  // Every team here is named automatically: "<who> Sport Discipline". `short` is
+  // always in front, campus/department tab or not - an open championship holds
+  // OTHER organisations' entries too, and "Cricket Whole sport" from two
+  // different institutions would be exactly as indistinguishable on the bracket,
+  // the standings and the scoreboard as two campuses' squads sharing a name is
+  // on an internal one. Nothing asks for a name here - whoever opens the team
+  // afterwards to add its real players can rename it there, same as any other team.
+  const autoName = (d: any) => {
+    const sport = d.tournament_sports?.sports?.name ?? 'Team';
+    const disc = d.disciplines?.name;
+    const base = disc ? `${sport} ${disc}` : sport;
+    return `${short} ${base}`.replace(/\s+/g, ' ').trim();
+  };
 
   const create = useApiMutation<{ teams: any[] }, { created: number; teams: any[] }>(
     (body) => api('POST', '/teams/bulk', body),
@@ -127,15 +135,23 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
     setError(null);
     if (!enrollment || selected.size === 0) { setError('Select at least one discipline'); return; }
     if (kind !== 'organization' && !bulkUnitId) { setError(`Pick which ${unitNoun.toLowerCase()} these squads play for`); return; }
-    const teams = available.filter((d) => selected.has(d.id)).map((d) => ({
-      championship_id: enrollment.championship_id,
-      organization_id: organization.id,
-      championship_organization_id: enrollment.id,
-      org_unit_id: entryUnitId,
-      sport_id: d.tournament_sports.sport_id,
-      tournament_discipline_id: d.id,
-      name: defaultName(d),
-    }));
+    const teams = available.filter((d) => selected.has(d.id)).map((d) => {
+      const name = autoName(d);
+      return {
+        championship_id: enrollment.championship_id,
+        organization_id: organization.id,
+        championship_organization_id: enrollment.id,
+        org_unit_id: entryUnitId,
+        sport_id: d.tournament_sports.sport_id,
+        tournament_discipline_id: d.id,
+        name,
+        // The API requires an abbreviation too (the scoreboard short name); this
+        // form has no field for one, so it's derived from the same auto name -
+        // it's just an initialism, not something worth a decision of its own,
+        // and it can be edited from the team's own page same as the name can.
+        short_name: suggestShort(name),
+      };
+    });
     create.mutate({ teams }, {
       onSuccess: (r) => { if (r.teams?.[0]) navigate(`/organizations/${organization.id}/teams/${r.teams[0].id}`); else onClose(); },
       onError: (e: any) => setError(e.message),
@@ -193,7 +209,7 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
               <Checkbox checked={selected.has(d.id)} onChange={() => toggle(d.id)} />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">{drawLabel(d)}</div>
-                <div className="truncate text-xs text-slate-400 dark:text-slate-500">{d.entry_type} · {squadText(d)}{drawFormatName(d, formats) ? ` · ${drawFormatName(d, formats)}` : ''} · {defaultName(d)}</div>
+                <div className="truncate text-xs text-slate-400 dark:text-slate-500">{d.entry_type} · {squadText(d)}{drawFormatName(d, formats) ? ` · ${drawFormatName(d, formats)}` : ''} · {autoName(d)}</div>
               </div>
             </label>
           ))}
