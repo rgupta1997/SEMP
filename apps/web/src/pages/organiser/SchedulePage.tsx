@@ -360,7 +360,9 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
 
   // Once any fixture has been played, regenerating would erase results - the server
   // refuses it, so disable the button and explain why rather than letting it 500.
-  const hasPlayed = fixtures.some((f) => ['completed', 'walkover', 'bye'].includes(f.status) || f.home_score != null || f.away_score != null);
+  // A bye has no real result to lose (mirrors the server's own check, which also
+  // leaves 'bye' out - see fixtures.routes.ts), so it doesn't count as played here.
+  const hasPlayed = fixtures.some((f) => ['completed', 'walkover'].includes(f.status) || f.home_score != null || f.away_score != null);
   // Leagues generate incrementally (keep existing matches, add the new teams' fixtures),
   // so the action stays available mid-tournament; knockout/pool draws rebuild from
   // scratch and are blocked once anything's been played.

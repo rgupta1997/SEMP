@@ -2,7 +2,14 @@ import { PrismaClient } from '@prisma/client';
 
 // Single PrismaClient, created here and shared with every persistence adapter
 // via the composition root. The domain/application layers never import this.
-export const prisma = new PrismaClient();
+//
+// Prisma's interactive-transaction defaults (2s to acquire a slot, 5s to run) are
+// tuned for simple CRUD; a few of ours (standings recompute, multi-stage fixture
+// generation) legitimately do more work than that inside one atomic transaction.
+// Raised to 60s so those fail on an actual problem, not on the clock.
+export const prisma = new PrismaClient({
+  transactionOptions: { maxWait: 60_000, timeout: 60_000 },
+});
 
 export type Prisma = typeof prisma;
 
