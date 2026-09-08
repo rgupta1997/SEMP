@@ -529,7 +529,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button disabled={update.isPending || regenerate.isPending} onClick={save}>
             {update.isPending ? 'Saving…' : regenerate.isPending ? 'Regenerating…'
-              : willAutoRegenerate ? 'Save and regenerate' : willNeedStageConfig ? 'Save and configure stages' : 'Save changes'}
+              : willAutoRegenerate ? 'Save and regenerate fixtures' : willNeedStageConfig ? 'Save and configure stages' : 'Save changes'}
           </Button>
         </div>
       </div>
