@@ -76,12 +76,10 @@ export function EventCertificatesPage() {
         title="Certificates"
         subtitle={`Issued by ${host.name}, from this event's locked results.`}
       >
-        <Link
-          to={`/organizations/${host.id}/certificates/register`}
-          className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-400"
-        >
-          Full register →
-        </Link>
+        {/* The full issued register is an ORGANIZATION-workspace surface (every
+            certificate the institution has ever issued, across every event) - it
+            stays on the org's own Certificates page, not duplicated as a shortcut
+            here on the event's. */}
         {canManage && (
           <Button onClick={() => setGenerating(true)}>
             <Award size={15} aria-hidden />Generate certificates
