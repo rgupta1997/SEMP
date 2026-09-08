@@ -60,8 +60,11 @@ export interface RosterContext {
   usersByEmail: Map<string, { id: string; name: string }>;
   /** Accounts explicitly referenced by a row's `user_id`, keyed by that id. */
   usersById: Map<string, { id: string; name: string; email: string }>;
-  /** Org units of this institution: lowercased name -> { id, type }. */
-  unitsByName: Map<string, { id: string; type: string }>;
+  /** Org units of this institution: lowercased name -> { id, type, parent_id }.
+   * `parent_id` is a department's campus (null for a campus itself, the org's
+   * structure being exactly two levels) - see the note above the placements loop
+   * for why it's carried here. */
+  unitsByName: Map<string, { id: string; type: string; parent_id: string | null }>;
   /** Members already in this institution, by user id. */
   memberUserIds: Set<string>;
   /** member_code (lowercased) -> the user id already holding it here. */
@@ -212,6 +215,10 @@ export function validateRoster(rows: RosterRow[], ctx: RosterContext): RosterRep
     // overwrite the campus, so a sheet that named both ended up placing the person
     // in only one of them with no error. The alias columns fold in beside their
     // current names, so a sheet with either header lands in the same place.
+    //
+    // A department's own campus is added too, even when the sheet named only the
+    // department - a batch belongs to exactly one campus, so knowing the batch
+    // already tells us the campus without anyone typing it twice.
     const unitIds: string[] = [];
     const placements = [
       ['campus', r.campus ?? r.programme],
@@ -223,6 +230,7 @@ export function validateRoster(rows: RosterRow[], ctx: RosterContext): RosterRep
       const unit = ctx.unitsByName.get(key);
       if (!unit) return reject(`No ${label} called "${norm(raw)}" exists - create it under Structure first.`);
       unitIds.push(unit.id);
+      if (unit.parent_id) unitIds.push(unit.parent_id);
     }
 
     // Resolution order, per J1-E5-S2: an explicit link, then phone, then email,

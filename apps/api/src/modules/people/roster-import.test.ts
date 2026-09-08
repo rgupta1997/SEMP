@@ -11,8 +11,8 @@ const ctx = (over: Partial<RosterContext> = {}): RosterContext => ({
   usersByEmail: new Map(),
   usersById: new Map(),
   unitsByName: new Map([
-    ['computer science', { id: 'unit-cs', type: 'campus' }],
-    ['2024', { id: 'unit-2024', type: 'department' }],
+    ['computer science', { id: 'unit-cs', type: 'campus', parent_id: null }],
+    ['2024', { id: 'unit-2024', type: 'department', parent_id: 'unit-cs' }],
   ]),
   memberUserIds: new Set(),
   memberCodeOwner: new Map(),
@@ -154,13 +154,20 @@ describe('validateRoster · rejections', () => {
     expect(both.org_unit_ids).toEqual(['unit-cs', 'unit-2024']);
   });
 
+  // A batch belongs to exactly one campus - naming the batch already says which
+  // campus, so the row doesn't have to name both for the person to end up in both.
+  it('adds a department row to its own campus automatically, even when the sheet named only the department', () => {
+    const r = validateRoster([row({ department: '2024' })], ctx()).rows[0];
+    expect(r.org_unit_ids).toEqual(['unit-2024', 'unit-cs']);
+  });
+
   // Institutions have saved spreadsheets with the old headers. Breaking those is a
   // worse outcome than carrying two names for one field, so both are accepted.
   it('still accepts the old programme/batch column headers', () => {
     const prog = validateRoster([row({ programme: 'Computer Science' })], ctx()).rows[0];
     expect(prog.org_unit_ids).toEqual(['unit-cs']);
     const batch = validateRoster([row({ batch: '2024' })], ctx()).rows[0];
-    expect(batch.org_unit_ids).toEqual(['unit-2024']);
+    expect(batch.org_unit_ids).toEqual(['unit-2024', 'unit-cs']);
     // Mixed headers in one file resolve the same way as matched ones - both stick.
     const mixed = validateRoster([row({ programme: 'Computer Science', department: '2024' })], ctx()).rows[0];
     expect(mixed.org_unit_ids).toEqual(['unit-cs', 'unit-2024']);

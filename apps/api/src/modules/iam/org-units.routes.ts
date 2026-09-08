@@ -419,6 +419,19 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
   // and "this person is in Bangalore, Sales and Batch 2026" (the correction, done
   // from a person). Offering only one of them makes the other a loop of clicks.
 
+  // A department's membership implies its campus's too: a batch belongs to
+  // exactly one campus, so placing somebody in the batch already says which
+  // campus they're in. Both write paths below funnel through this rather than
+  // each re-deriving it, so a person is never left in a department with no row
+  // for the campus above it, whichever screen put them there.
+  async function withParentCampuses(unitIds: string[]): Promise<string[]> {
+    if (unitIds.length === 0) return unitIds;
+    const rows = await prisma.org_units.findMany({ where: { id: { in: unitIds } }, select: { id: true, parent_id: true } });
+    const withParents = new Set(unitIds);
+    for (const r of rows) if (r.parent_id) withParents.add(r.parent_id);
+    return [...withParents];
+  }
+
   router.get('/:id/units/:unitId/members', asyncHandler(async (req, res) => {
     const rows = await prisma.org_unit_members.findMany({
       where: { organization_id: req.params.id, org_unit_id: req.params.unitId },
@@ -446,8 +459,12 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
     const eligible = members.map((m) => m.user_id);
     const skipped = req.body.user_ids.filter((id: string) => !eligible.includes(id));
 
-    const created = await prisma.org_unit_members.createMany({
-      data: eligible.map((user_id) => ({ organization_id: req.params.id, org_unit_id: unit.id, user_id })),
+    // Cascading onto the parent campus means this can write up to two rows per
+    // person - the raw insert count no longer says "how many PEOPLE were added",
+    // which is what both the audit log and the caller actually want to know.
+    const unitIds = await withParentCampuses([unit.id]);
+    await prisma.org_unit_members.createMany({
+      data: eligible.flatMap((user_id) => unitIds.map((org_unit_id) => ({ organization_id: req.params.id, org_unit_id, user_id }))),
       skipDuplicates: true,
     });
 
@@ -455,10 +472,10 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
       action: AUDIT_ACTIONS.orgUnitUpdated,
       target: { type: 'org_units', id: unit.id, label: unit.name },
       organizationId: req.params.id,
-      summary: `Added ${created.count} ${created.count === 1 ? 'person' : 'people'} to ${unit.name}`,
+      summary: `Added ${eligible.length} ${eligible.length === 1 ? 'person' : 'people'} to ${unit.name}`,
     });
 
-    res.json({ added: created.count, skipped: skipped.length });
+    res.json({ added: eligible.length, skipped: skipped.length });
   }));
 
   router.delete('/:id/units/:unitId/members/:userId', placementInUnit, asyncHandler(async (req, res) => {
@@ -494,17 +511,25 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
       if (owned !== wanted.length) throw new NotFoundError('Campus or department');
     }
 
+    // Expanded AFTER ownership is confirmed on what was actually asked for - a
+    // department's own campus is added alongside it, same as every other write
+    // path onto org_unit_members. This is what keeps a department ticked without
+    // its campus also ticked from silently losing the campus on the next save:
+    // the campus is derived fresh from whichever departments are still wanted,
+    // not carried over as a leftover the caller has to remember to re-send.
+    const expanded = await withParentCampuses(wanted);
+
     await prisma.$transaction([
       prisma.org_unit_members.deleteMany({
-        where: { organization_id: req.params.id, user_id: req.params.userId, org_unit_id: { notIn: wanted.length ? wanted : ['00000000-0000-0000-0000-000000000000'] } },
+        where: { organization_id: req.params.id, user_id: req.params.userId, org_unit_id: { notIn: expanded.length ? expanded : ['00000000-0000-0000-0000-000000000000'] } },
       }),
       prisma.org_unit_members.createMany({
-        data: wanted.map((org_unit_id) => ({ organization_id: req.params.id, org_unit_id, user_id: req.params.userId })),
+        data: expanded.map((org_unit_id) => ({ organization_id: req.params.id, org_unit_id, user_id: req.params.userId })),
         skipDuplicates: true,
       }),
     ]);
 
-    res.json({ unit_ids: wanted });
+    res.json({ unit_ids: expanded });
   }));
 
   // What deleting would actually cost, so the UI can say it before asking. A count is

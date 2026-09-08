@@ -156,7 +156,10 @@ export function usePocOnboarding(orgId: string, enabled = true): OnboardingState
   return build(
     POC_GUIDE,
     {
-      members: { label: 'Add members', to: `/organizations/${orgId}/members` },
+      // The People page (Students route), not the standalone Members/Administration
+      // screen - it's where "Add person"/bulk import actually live, which is what
+      // this step is actually asking the organiser to go do.
+      members: { label: 'Add members', to: `/organizations/${orgId}/students` },
       units: { label: 'Add a campus/unit', to: `/organizations/${orgId}/campuses` },
       team: { label: 'Create a team', to: `${teamsHref}?create=1` },
       apply: { label: 'Browse championships', to: '/discover' },

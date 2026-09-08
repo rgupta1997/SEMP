@@ -174,7 +174,7 @@ export function makePeopleRouter(prisma: Prisma): Router {
       emails.length
         ? prisma.users.findMany({ where: { email: { in: emails } }, select: { id: true, name: true, email: true } })
         : Promise.resolve([]),
-      prisma.org_units.findMany({ where: { organization_id: organizationId }, select: { id: true, name: true, type: true } }),
+      prisma.org_units.findMany({ where: { organization_id: organizationId }, select: { id: true, name: true, type: true, parent_id: true } }),
       prisma.organization_members.findMany({
         where: { organization_id: organizationId },
         select: { user_id: true, member_code: true },
@@ -190,7 +190,7 @@ export function makePeopleRouter(prisma: Prisma): Router {
       usersByPhone: new Map(byPhone.map((u) => [phoneLast10(u.phone), { id: u.id, name: u.name }])),
       usersById: new Map(byId.map((u) => [u.id, { id: u.id, name: u.name, email: u.email }])),
       usersByEmail: new Map(byEmail.map((u) => [u.email.toLowerCase(), { id: u.id, name: u.name }])),
-      unitsByName: new Map(units.map((u) => [u.name.trim().toLowerCase(), { id: u.id, type: u.type }])),
+      unitsByName: new Map(units.map((u) => [u.name.trim().toLowerCase(), { id: u.id, type: u.type, parent_id: u.parent_id }])),
       memberUserIds: new Set(members.map((m) => m.user_id)),
       memberCodeOwner: new Map(
         members.filter((m) => m.member_code).map((m) => [m.member_code!.trim().toLowerCase(), m.user_id]),
