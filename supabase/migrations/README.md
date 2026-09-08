@@ -66,3 +66,23 @@ The 125 rows with a null `championship_id` and `audience = 'all'` look alarming 
 fine — every one carries a `target_user_id`, so the first branch claims them before the
 `'all'` branch is ever evaluated. A naive count that ignores that precedence reports a
 false positive; the query above is the one to trust.
+
+---
+
+## Applied 2026-09-08 — `20260904000000_fixture_completed_at`
+
+Arrived with PR #21 (`EOS-sprint-2-continues`) and was applied by hand against the EOS
+database after the merge:
+
+```
+npx tsx scripts/apply-migration.ts ../../supabase/migrations/20260904000000_fixture_completed_at.sql
+```
+
+All three statements succeeded. Verified afterwards against `information_schema` /
+`pg_indexes`: `fixtures.completed_at` exists as nullable `timestamp with time zone`, and
+the partial index `idx_fixtures_autolock_due` is present. `apps/api/prisma/schema.prisma`
+already carried the column from the PR, so no `prisma db pull` was needed.
+
+**The status table above is stale** — it describes 59 files and the folder now holds 89.
+The 30 files added since the 2026-08-25 reconciliation have not been re-audited here; this
+entry vouches only for the one migration it names.
