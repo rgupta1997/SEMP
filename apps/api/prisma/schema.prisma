@@ -779,10 +779,22 @@ model demo_requests {
   handled_by   String?  @db.Uuid
   created_at   DateTime @default(now()) @db.Timestamptz(6)
   updated_at   DateTime @default(now()) @db.Timestamptz(6)
+  /// The marketing form's remaining five answers - see
+  /// supabase/migrations/20260908000000_demo_request_details.sql. `event_date` is text
+  /// on purpose: the form accepts "mid-January" as readily as a date.
+  city              String?  @db.VarChar
+  event_date        String?
+  sport_count       Int?
+  participant_count Int?
+  source            String?  @db.VarChar
   users        users?   @relation(fields: [handled_by], references: [id], onUpdate: NoAction)
 
   @@index([created_at(sort: Desc)], map: "idx_demo_requests_created")
   @@index([status], map: "idx_demo_requests_status")
+  // idx_demo_requests_participants is deliberately absent: it is a PARTIAL index
+  // (`where participant_count is not null`), which Prisma cannot express and
+  // `db pull` therefore skips. Declaring it unfiltered here would make this file
+  // claim an index the database does not have.
 }
 
 /// User feedback from the public pages + in-app shell. championship_id / user_id are kept

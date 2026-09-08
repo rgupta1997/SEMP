@@ -935,9 +935,21 @@ export const reviewVerificationRequestSchema = z
   });
 
 // ---------- Demo requests ("Book a demo" leads) ----------
+/** An optional field that an HTML form leaves as '' rather than omitting. Maps ''
+ *  and null to undefined before the inner schema runs, so "unanswered" survives
+ *  coercion instead of becoming 0 (Number('') === 0) or an empty string in the DB. */
+const blankish = <T extends z.ZodTypeAny>(inner: T) =>
+  z.preprocess((v) => (v === '' || v === null ? undefined : v), inner.optional());
+
 // Submitted from the public, unauthenticated landing page. Only name + email are
 // required; the rest help the team tailor the demo. `message` is trimmed/capped to
 // keep the capture endpoint from being abused as free storage.
+//
+// EVERY FIELD THE MARKETING FORM SENDS MUST APPEAR HERE. This is a plain
+// z.object(), so Zod STRIPS keys it does not know rather than rejecting them:
+// a field added to landing-page-v2's form and not added here submits with an
+// HTTP 201 and is then thrown away silently. That is exactly how the five
+// fields below went missing before 20260908000000_demo_request_details.sql.
 export const createDemoRequestSchema = z.object({
   name: z.string().min(1).max(120),
   email: z.string().email(),
@@ -946,6 +958,17 @@ export const createDemoRequestSchema = z.object({
   sport: z.string().max(120).optional(),
   phone: z.string().max(40).optional(),
   message: z.string().max(2000).optional(),
+  city: z.string().max(120).optional(),
+  // Text, not z.coerce.date() - the form takes "mid-January" as readily as a date.
+  event_date: z.string().max(120).optional(),
+  // The form sends these as strings (<input type="number">), so they need coercing -
+  // but NOT with a bare z.coerce.number(): Number('') is 0, so an untouched
+  // "Approx. number of sports" would be stored as a confident zero rather than left
+  // unanswered. blankish() maps '' and null to undefined BEFORE coercion, so blank
+  // stays blank. Bounded as well, so a fat-fingered 600000000 cannot overflow int4.
+  sport_count: blankish(z.coerce.number().int().min(0).max(1000)),
+  participant_count: blankish(z.coerce.number().int().min(0).max(1_000_000)),
+  source: z.string().max(160).optional(),
 });
 
 // Admin-only triage update - move a lead through its lifecycle and/or annotate it.

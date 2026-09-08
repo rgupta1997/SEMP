@@ -86,3 +86,20 @@ already carried the column from the PR, so no `prisma db pull` was needed.
 **The status table above is stale** — it describes 59 files and the folder now holds 89.
 The 30 files added since the 2026-08-25 reconciliation have not been re-audited here; this
 entry vouches only for the one migration it names.
+
+---
+
+## Applied 2026-09-08 — `20260908000000_demo_request_details`
+
+Adds `city`, `event_date`, `sport_count`, `participant_count` and `source` to
+`demo_requests`, so the marketing site's "Book a demo" form has somewhere to put
+the five answers it collects beyond name / email / phone / organisation / type.
+
+Applied with the same runner; all seven statements succeeded. Verified by
+submitting the real form in a browser against the real API and reading the row
+back — every column landed, including `event_date` as typed ("mid-January, TBC")
+and both counts as integers.
+
+Note `event_date` is **text, not date**, on purpose: the form accepts prose. And
+`idx_demo_requests_participants` is a partial index, which Prisma cannot express,
+so it is deliberately absent from `schema.prisma` — see the comment there.
