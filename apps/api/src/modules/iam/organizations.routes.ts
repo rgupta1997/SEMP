@@ -321,6 +321,18 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     const { user_ids, role } = req.body as { user_ids: string[]; role: string };
     const orgId = req.params.id;
     const uniqueIds = [...new Set(user_ids)];
+
+    // Re-adding an existing active member (e.g. to refresh their role) is not a
+    // new add, and must not claim to be one - checked before the upsert below,
+    // same as the awards route's existingKeys guard.
+    const alreadyActive = new Set(
+      (await prisma.organization_members.findMany({
+        where: { organization_id: orgId, user_id: { in: uniqueIds }, status: 'active' },
+        select: { user_id: true },
+      })).map((m) => m.user_id),
+    );
+    const newlyAddedIds = uniqueIds.filter((id) => !alreadyActive.has(id));
+
     const members = await prisma.$transaction(
       uniqueIds.map((user_id) => prisma.organization_members.upsert({
         where: { user_id_organization_id: { user_id, organization_id: orgId } },
@@ -335,18 +347,20 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     // in; this is the notification for the case that actually happens through the
     // member picker's checkbox+Add, where an existing account is added instantly
     // with no consent step.
-    try {
-      const org = await prisma.organizations.findUnique({ where: { id: orgId }, select: { name: true } });
-      for (const userId of uniqueIds) {
-        await notify(prisma, {
-          type: 'org_member_added',
-          userId,
-          senderId: req.user!.id,
-          data: { organizationName: org?.name ?? 'an organization' },
-        });
+    if (newlyAddedIds.length > 0) {
+      try {
+        const org = await prisma.organizations.findUnique({ where: { id: orgId }, select: { name: true } });
+        for (const userId of newlyAddedIds) {
+          await notify(prisma, {
+            type: 'org_member_added',
+            userId,
+            senderId: req.user!.id,
+            data: { organizationName: org?.name ?? 'an organization' },
+          });
+        }
+      } catch (err) {
+        console.error(`[organizations] org_member_added notification failed for org ${orgId}:`, err);
       }
-    } catch (err) {
-      console.error(`[organizations] org_member_added notification failed for org ${orgId}:`, err);
     }
 
     res.status(201).json(members);
