@@ -23,7 +23,7 @@ const slugify = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-'
 // form is the thing it exists to stop happening - and the library is theirs as much
 // as ours: anything saved from an event they have already run appears above the
 // built-ins.
-const STEPS = ['Shape', 'Championship profile', 'Sports & disciplines', 'Invite organizations', 'Open registration'];
+const STEPS = ['Shape', 'Championship profile', 'Sports & disciplines', 'Invite organizations / teams', 'Open registration'];
 const LAST_STEP = STEPS.length - 1;
 
 export function CreateEventWizard() {

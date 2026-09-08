@@ -9,7 +9,7 @@ import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { pluralise } from '@semp/shared';
 import { useOrgUnits, unitPath } from '../../lib/units';
-import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge, Tabs, INSET} from '../../components/ui';
+import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchableSelect, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge, Tabs, INSET} from '../../components/ui';
 
 // A roster can be entered into several championships; these read its team_entries.
 function teamEntries(team: any): any[] { return team.team_entries ?? []; }
@@ -109,11 +109,19 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
   // nothing on a team list, a fixture card or a scoreboard.
   const short = (entryUnitId ? pickable.find((u) => u.id === entryUnitId)?.name : null)
     || organization?.short_name || organization?.name || 'Team';
-  // Default team name keeps the championship name (not the sport - the discipline row
-  // already shows that); a sub-discipline like "Men's"/"Women's" is appended so two
-  // teams in the same sport stay distinct.
-  const champName = enrollment?.championships?.name ?? '';
-  const defaultName = (d: any) => `${short} ${champName}${d.disciplines?.name ? ` ${d.disciplines.name}` : ''}`.replace(/\s+/g, ' ').trim();
+  // Every team here is named automatically: "<who> Sport Discipline". `short` is
+  // always in front, campus/department tab or not - an open championship holds
+  // OTHER organisations' entries too, and "Cricket Whole sport" from two
+  // different institutions would be exactly as indistinguishable on the bracket,
+  // the standings and the scoreboard as two campuses' squads sharing a name is
+  // on an internal one. Nothing asks for a name here - whoever opens the team
+  // afterwards to add its real players can rename it there, same as any other team.
+  const autoName = (d: any) => {
+    const sport = d.tournament_sports?.sports?.name ?? 'Team';
+    const disc = d.disciplines?.name;
+    const base = disc ? `${sport} ${disc}` : sport;
+    return `${short} ${base}`.replace(/\s+/g, ' ').trim();
+  };
 
   const create = useApiMutation<{ teams: any[] }, { created: number; teams: any[] }>(
     (body) => api('POST', '/teams/bulk', body),
@@ -127,15 +135,23 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
     setError(null);
     if (!enrollment || selected.size === 0) { setError('Select at least one discipline'); return; }
     if (kind !== 'organization' && !bulkUnitId) { setError(`Pick which ${unitNoun.toLowerCase()} these squads play for`); return; }
-    const teams = available.filter((d) => selected.has(d.id)).map((d) => ({
-      championship_id: enrollment.championship_id,
-      organization_id: organization.id,
-      championship_organization_id: enrollment.id,
-      org_unit_id: entryUnitId,
-      sport_id: d.tournament_sports.sport_id,
-      tournament_discipline_id: d.id,
-      name: defaultName(d),
-    }));
+    const teams = available.filter((d) => selected.has(d.id)).map((d) => {
+      const name = autoName(d);
+      return {
+        championship_id: enrollment.championship_id,
+        organization_id: organization.id,
+        championship_organization_id: enrollment.id,
+        org_unit_id: entryUnitId,
+        sport_id: d.tournament_sports.sport_id,
+        tournament_discipline_id: d.id,
+        name,
+        // The API requires an abbreviation too (the scoreboard short name); this
+        // form has no field for one, so it's derived from the same auto name -
+        // it's just an initialism, not something worth a decision of its own,
+        // and it can be edited from the team's own page same as the name can.
+        short_name: suggestShort(name),
+      };
+    });
     create.mutate({ teams }, {
       onSuccess: (r) => { if (r.teams?.[0]) navigate(`/organizations/${organization.id}/teams/${r.teams[0].id}`); else onClose(); },
       onError: (e: any) => setError(e.message),
@@ -193,7 +209,7 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
               <Checkbox checked={selected.has(d.id)} onChange={() => toggle(d.id)} />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">{drawLabel(d)}</div>
-                <div className="truncate text-xs text-slate-400 dark:text-slate-500">{d.entry_type} · {squadText(d)}{drawFormatName(d, formats) ? ` · ${drawFormatName(d, formats)}` : ''} · {defaultName(d)}</div>
+                <div className="truncate text-xs text-slate-400 dark:text-slate-500">{d.entry_type} · {squadText(d)}{drawFormatName(d, formats) ? ` · ${drawFormatName(d, formats)}` : ''} · {autoName(d)}</div>
               </div>
             </label>
           ))}
@@ -293,7 +309,13 @@ function InlineCreateTeam({ institutionId, kind, onClose }: {
           ? 'Add a team for your organization, then enter it into a championship & pick a discipline when you’re ready.'
           : `Add a ${noun.toLowerCase()} squad, then enter it into one of this organisation's internal championships when you’re ready.`}
       </p>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+      {/* Top-aligned, not bottom-aligned: the Short name column carries an extra hint
+          line under its input that the other columns don't have, and `items-end`
+          would push everyone's INPUT down to keep BOTTOMS level - which is what was
+          making Team name and Sport visibly sag below Short name. Top-aligning keeps
+          every label (and so every input) on the same line regardless of what any
+          one column has underneath it. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <label className="block flex-1">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Team name</span>
           <Input
@@ -328,10 +350,15 @@ function InlineCreateTeam({ institutionId, kind, onClose }: {
         </label>
         <label className="block sm:w-56">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Sport</span>
-          <Select value={sportId} onChange={(e) => setSportId(e.target.value)}>
-            <option value="">- select a sport -</option>
-            {sports.map((s) => <option key={s.id} value={s.id}>{s.icon ? `${s.icon} ` : ''}{s.name}</option>)}
-          </Select>
+          <SearchableSelect
+            value={sportId}
+            onChange={setSportId}
+            options={sports.map((s) => ({ id: s.id, label: s.name, icon: s.icon }))}
+            placeholder="- select a sport -"
+            searchPlaceholder="Search sports…"
+            emptyLabel="No sports match"
+            className="w-full"
+          />
         </label>
         {/* Which one - never which KIND. The tab answered that, and a picker with a
             single option is a question not worth putting on the screen, so it is
@@ -352,7 +379,12 @@ function InlineCreateTeam({ institutionId, kind, onClose }: {
             </Select>
           </label>
         )}
-        <Button disabled={!name.trim() || !sportId || create.isPending} onClick={submit}>{create.isPending ? 'Creating…' : 'Create team'}</Button>
+        <div className="block">
+          {/* Matches the real labels' height so the button lines up with the inputs,
+              not with the labels above them. */}
+          <span aria-hidden="true" className="invisible mb-1.5 block text-xs font-semibold">Create</span>
+          <Button disabled={!name.trim() || !sportId || create.isPending} onClick={submit}>{create.isPending ? 'Creating…' : 'Create team'}</Button>
+        </div>
       </div>
       <p className="mt-2.5 text-xs text-slate-500 dark:text-slate-400">
         {kind === 'organization'
@@ -417,23 +449,6 @@ export function TeamsPage() {
   const [bulkCreating, setBulkCreating] = useState(false);
   const [status, setStatus] = useState('all');
 
-  // Approved championships populate the shared header championship filter.
-  const eventOptions = useMemo(
-    // Deduped by championship. An organisation holds one entry PER CAMPUS in an
-    // internal event, so mapping entries straight to options produced the same
-    // championship two or three times over with identical names - and React keyed
-    // them identically too.
-    () => {
-      const byId = new Map<string, { id: string; name: string }>();
-      for (const e of approved) {
-        if (!e.championship_id || byId.has(e.championship_id)) continue;
-        byId.set(e.championship_id, { id: e.championship_id, name: e.championships?.name ?? 'Championship' });
-      }
-      return [...byId.values()];
-    },
-    [approved],
-  );
-
   const activeEvent = approved.find((e) => e.championship_id === eventId);
   const defaultEnrollmentId = activeEvent?.id;
   const drawsEventId = eventId || approved[0]?.championship_id || null;
@@ -461,6 +476,16 @@ export function TeamsPage() {
     return [...map.entries()].map(([id, name]) => ({ id, name }));
   }, [teams, eventId, tournamentFilter]);
 
+  // `eventId` is shared, app-wide state - with no header dropdown on this tab to
+  // show or clear it, a selection left over from another page (say, Events) must
+  // not go on silently filtering this tab's teams. Drop it if it isn't one of
+  // this tab's own championships; the deep-link effect below can still set a
+  // fresh one straight after.
+  useEffect(() => {
+    if (eventId && !approved.some((e) => e.championship_id === eventId)) setEventId('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId, playsFor]);
+
   // Seed the shared championship filter from a deep link (?championship=…), e.g. "Manage teams".
   useEffect(() => {
     const ev = searchParams.get('championship');
@@ -477,9 +502,10 @@ export function TeamsPage() {
   // Reset the tournament drill-down when the header championship changes.
   useEffect(() => { setTournamentFilter('all'); }, [eventId]);
 
-  // Register the shared Championship + Sport filters; read back the active sport.
+  // Register the shared Sport filter; read back the active sport. The championship
+  // filter is deliberately not published here - this tab's teams are scoped to the
+  // organisation, and a header dropdown for it read as an extra, unwanted control.
   const { sportId } = usePageFilters({
-    championships: eventOptions.length ? eventOptions : undefined,
     sports: sportOptions.length ? sportOptions : undefined,
   });
 

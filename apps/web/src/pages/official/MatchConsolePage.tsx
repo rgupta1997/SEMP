@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
@@ -507,7 +508,9 @@ function AwardsPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixture
                     {people.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.team}</option>)}
                   </Select>
                 </Field>
-                <Button variant="ghost" size="sm" className="mb-1" onClick={() => remove(i)}>Remove</Button>
+                <Button variant="ghost" size="sm" className="mb-1" onClick={() => remove(i)} aria-label="Remove award" title="Remove">
+                  <Trash2 size={14} />
+                </Button>
               </div>
             ))}
             <div className="flex items-center justify-between pt-1">
@@ -1698,7 +1701,9 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
                       {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                     </Select>
                   </Field>
-                  <Button variant="ghost" size="sm" className="mb-1" onClick={() => removeP(p.id)}>Remove</Button>
+                  <Button variant="ghost" size="sm" className="mb-1" onClick={() => removeP(p.id)} aria-label="Remove participant" title="Remove">
+                    <Trash2 size={14} />
+                  </Button>
                 </div>
                 {pickOne ? (
                   <div className="mt-2 grid grid-cols-[1fr_140px] items-end gap-2">

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type {
   ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes, ReactNode,
   SelectHTMLAttributes, TextareaHTMLAttributes,
@@ -69,6 +69,124 @@ export function Select({ className = '', ...p }: SelectHTMLAttributes<HTMLSelect
         {...p}
       />
       <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" aria-hidden><ChevronDown size={14} /></span>
+    </div>
+  );
+}
+
+export interface SearchableSelectOption { id: string; label: string; icon?: ReactNode }
+
+/**
+ * A plain `<select>` is fine for a handful of options; it stops being fine once
+ * the list is the sports catalogue (fifty-plus entries) and finding your own
+ * means scrolling and reading every one. Same trigger styling as `Select`, but
+ * opening it drops a search box on top of the list so typing narrows it instead.
+ */
+export function SearchableSelect({
+  value, onChange, options, placeholder = 'Select…', searchPlaceholder = 'Search…', emptyLabel = 'No matches', className = '',
+}: {
+  value: string;
+  onChange: (id: string) => void;
+  options: SearchableSelectOption[];
+  placeholder?: string;
+  searchPlaceholder?: string;
+  emptyLabel?: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [highlight, setHighlight] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const selected = options.find((o) => o.id === value);
+  const filtered = query.trim()
+    ? options.filter((o) => o.label.toLowerCase().includes(query.trim().toLowerCase()))
+    : options;
+
+  // Closing on an outside click, not just blur: the search box and the list
+  // live in the same panel, so tabbing between them must not close it.
+  useEffect(() => {
+    if (!open) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [open]);
+
+  // Fresh search, and the current value in view, every time it opens.
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setHighlight(Math.max(0, options.findIndex((o) => o.id === value)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useEffect(() => { setHighlight(0); }, [query]);
+  useEffect(() => { itemRefs.current[highlight]?.scrollIntoView({ block: 'nearest' }); }, [highlight]);
+
+  const select = (id: string) => { onChange(id); setOpen(false); };
+  const full = /\bw-full\b/.test(className);
+
+  return (
+    <div ref={rootRef} className={cn('relative shrink-0', full ? 'w-full' : 'inline-block', className)}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(fieldBase, 'flex w-full items-center justify-between gap-2 pr-2.5 text-left', !full && 'min-w-[9.5rem]')}
+      >
+        <span className={cn('flex items-center gap-1.5 truncate', !selected && 'text-slate-400 dark:text-slate-500')}>
+          {selected ? <>{selected.icon} {selected.label}</> : placeholder}
+        </span>
+        <ChevronDown size={14} className="shrink-0 text-slate-400 dark:text-slate-500" aria-hidden />
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 top-[calc(100%+4px)] z-30 w-full min-w-[14rem] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight((h) => Math.min(h + 1, filtered.length - 1)); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight((h) => Math.max(h - 1, 0)); }
+            else if (e.key === 'Enter') { e.preventDefault(); if (filtered[highlight]) select(filtered[highlight].id); }
+            else if (e.key === 'Escape') { e.preventDefault(); setOpen(false); }
+          }}
+        >
+          <div className="relative border-b border-slate-100 p-2 dark:border-slate-700">
+            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" aria-hidden><Search size={14} /></span>
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={searchPlaceholder}
+              className={cn(fieldBase, 'w-full pl-8')}
+            />
+          </div>
+          <div className="max-h-56 overflow-y-auto py-1" role="listbox">
+            {filtered.length === 0 ? (
+              <p className="px-3 py-6 text-center text-sm text-slate-400 dark:text-slate-500">{emptyLabel}</p>
+            ) : (
+              filtered.map((o, i) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  ref={(el) => { itemRefs.current[i] = el; }}
+                  role="option"
+                  aria-selected={o.id === value}
+                  onMouseEnter={() => setHighlight(i)}
+                  onClick={() => select(o.id)}
+                  className={cn(
+                    'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
+                    i === highlight
+                      ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
+                      : 'text-slate-700 dark:text-slate-200',
+                  )}
+                >
+                  <span className="flex flex-1 items-center gap-1.5 truncate">{o.icon} {o.label}</span>
+                  {o.id === value && <Check size={14} className="shrink-0 text-brand-600 dark:text-brand-400" aria-hidden />}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

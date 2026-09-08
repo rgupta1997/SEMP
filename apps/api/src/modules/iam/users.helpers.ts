@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { createHash } from 'node:crypto';
 import { Prisma as PrismaNS } from '@prisma/client';
 import type { Prisma } from '../../infra/prisma.js';
 
@@ -15,6 +16,17 @@ export function maskPhone(s?: string | null): string {
   if (!d) return '';
   if (d.length <= 2) return '••';
   return `${'•'.repeat(d.length - 2)}${d.slice(-2)}`;
+}
+
+// A short, non-reversible fingerprint of a phone's last 10 digits. Exists so a
+// MASKED list can still be grouped by "these accounts share a number" (Option B) -
+// the grouping key a client compares by equality, never the digits themselves.
+// Empty for no/partial phone, so those accounts each get their own group instead
+// of being lumped together under one blank key.
+export function phoneGroupKey(s?: string | null): string {
+  const last10 = phoneLast10(s);
+  if (last10.length < 10) return '';
+  return createHash('sha256').update(last10).digest('hex').slice(0, 16);
 }
 
 // Mask an email's local part, keeping the first two chars and the domain.

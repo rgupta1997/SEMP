@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../lib/hooks';
 import { useAuth } from '../lib/auth';
@@ -54,6 +55,31 @@ const card: React.CSSProperties = {
 const cardTitle: React.CSSProperties = { fontFamily: POP, fontWeight: 800, fontSize: 15, marginBottom: 12 };
 
 const initials = (s: string | null) => (s ?? '?').split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+
+// Every list on this page - live matches, pending actions, teams, results - can
+// grow without bound (a busy account really can have a dozen live matches at
+// once), and this is the first screen after signing in. A card that stretches to
+// fit all of them pushes everything below it off-screen instead of staying a
+// fixed-height overview - so each is capped and reveals the rest a click away,
+// the same trade the rest of the product makes for any list that can grow.
+const ROW_LIMIT = 5;
+
+/** "View more (N)" / "View less" - only rendered once there's actually a rest to reveal. */
+function ViewToggle({ total, shown, expanded, onToggle }: { total: number; shown: number; expanded: boolean; onToggle: () => void }) {
+  if (total <= shown && !expanded) return null;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      style={{
+        marginTop: 10, fontFamily: POP, fontWeight: 700, fontSize: 12.5, color: C.blue,
+        background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+      }}
+    >
+      {expanded ? 'View less' : `View more (${total - shown})`}
+    </button>
+  );
+}
 
 function when(iso: string | null) {
   if (!iso) return 'Time to be confirmed';
@@ -137,6 +163,12 @@ export function MyGamePage() {
   const { ctx } = useAuth();
   const { data, isLoading } = useApi<Home>('/me/home');
   const nav = useNavigate();
+  // One flag per list - independent, since expanding "Live now" has nothing to do
+  // with wanting the full "Recent results".
+  const [expandedLive, setExpandedLive] = useState(false);
+  const [expandedPending, setExpandedPending] = useState(false);
+  const [expandedTeams, setExpandedTeams] = useState(false);
+  const [expandedRecent, setExpandedRecent] = useState(false);
 
   if (isLoading) return <Spinner />;
   const d = data ?? { next: null, live: [], pending: [], recent: [], teams: [], stats: { games: 0, events: 0, sports: 0, wins: 0 } };
@@ -189,7 +221,7 @@ export function MyGamePage() {
           </div>
           {d.live.length === 0
             ? <p style={{ margin: 0, fontSize: 13, color: C.faint }}>Nothing of yours is being played right now.</p>
-            : d.live.map((g) => (
+            : (expandedLive ? d.live : d.live.slice(0, ROW_LIMIT)).map((g) => (
               <div key={g.id} onClick={() => nav(`/profile/matches/${g.id}`)} role="button" tabIndex={0}
                 onKeyDown={(e) => e.key === 'Enter' && nav(`/profile/matches/${g.id}`)}
                 style={{ cursor: 'pointer', padding: '11px 12px', borderRadius: 10, background: C.blue50, marginBottom: 8 }}>
@@ -204,13 +236,14 @@ export function MyGamePage() {
                 <div style={{ fontSize: 11.5, color: C.fg4, marginTop: 6 }}>{[g.sport, g.championship?.name].filter(Boolean).join(' · ')}</div>
               </div>
             ))}
+          <ViewToggle total={d.live.length} shown={ROW_LIMIT} expanded={expandedLive} onToggle={() => setExpandedLive((v) => !v)} />
         </div>
 
         <div style={card}>
           <div style={cardTitle}>Pending actions</div>
           {d.pending.length === 0
             ? <p style={{ margin: 0, fontSize: 13, color: C.faint }}>Nothing needs you right now.</p>
-            : d.pending.map((p) => (
+            : (expandedPending ? d.pending : d.pending.slice(0, ROW_LIMIT)).map((p) => (
               <div key={p.id} onClick={() => nav(`/score/${p.id}`)} role="button" tabIndex={0}
                 onKeyDown={(e) => e.key === 'Enter' && nav(`/score/${p.id}`)}
                 style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: `1px solid ${C.surface}` }}>
@@ -224,6 +257,7 @@ export function MyGamePage() {
                 <span aria-hidden style={{ color: C.faint }}>›</span>
               </div>
             ))}
+          <ViewToggle total={d.pending.length} shown={ROW_LIMIT} expanded={expandedPending} onToggle={() => setExpandedPending((v) => !v)} />
         </div>
 
         <div style={card}>
@@ -238,22 +272,27 @@ export function MyGamePage() {
                 Find something to play →
               </Link>
             </div>
-          ) : d.teams.map((t) => (
-            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: `1px solid ${C.surface}` }}>
-              <span aria-hidden style={{
-                width: 28, height: 28, borderRadius: 8, background: C.brandSoft, color: C.blue,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: POP, fontWeight: 700, fontSize: 11,
-              }}>{initials(t.organization ?? t.name)}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: C.fg2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</div>
-                <div style={{ fontSize: 11.5, color: C.fg4, marginTop: 2 }}>{[t.organization, t.sport].filter(Boolean).join(' · ')}</div>
-              </div>
-              <span style={{
-                fontFamily: MONO, fontSize: 9.5, letterSpacing: '.06em', textTransform: 'uppercase',
-                padding: '3px 7px', borderRadius: 999, background: C.surface, color: C.fg3,
-              }}>{t.role}</span>
-            </div>
-          ))}
+          ) : (
+            <>
+              {(expandedTeams ? d.teams : d.teams.slice(0, ROW_LIMIT)).map((t) => (
+                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: `1px solid ${C.surface}` }}>
+                  <span aria-hidden style={{
+                    width: 28, height: 28, borderRadius: 8, background: C.brandSoft, color: C.blue,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: POP, fontWeight: 700, fontSize: 11,
+                  }}>{initials(t.organization ?? t.name)}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: C.fg2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</div>
+                    <div style={{ fontSize: 11.5, color: C.fg4, marginTop: 2 }}>{[t.organization, t.sport].filter(Boolean).join(' · ')}</div>
+                  </div>
+                  <span style={{
+                    fontFamily: MONO, fontSize: 9.5, letterSpacing: '.06em', textTransform: 'uppercase',
+                    padding: '3px 7px', borderRadius: 999, background: C.surface, color: C.fg3,
+                  }}>{t.role}</span>
+                </div>
+              ))}
+              <ViewToggle total={d.teams.length} shown={ROW_LIMIT} expanded={expandedTeams} onToggle={() => setExpandedTeams((v) => !v)} />
+            </>
+          )}
         </div>
       </div>
 
@@ -262,7 +301,7 @@ export function MyGamePage() {
         <div style={cardTitle}>Recent results</div>
         {d.recent.length === 0
           ? <p style={{ margin: 0, fontSize: 13, color: C.faint }}>Your results will appear here once you have played.</p>
-          : d.recent.map((r) => {
+          : (expandedRecent ? d.recent : d.recent.slice(0, ROW_LIMIT)).map((r) => {
             const won = r.result === 'won', lost = r.result === 'lost';
             return (
               <div key={r.id} onClick={() => nav(`/profile/matches/${r.id}`)} role="button" tabIndex={0}
@@ -283,6 +322,7 @@ export function MyGamePage() {
               </div>
             );
           })}
+        <ViewToggle total={d.recent.length} shown={ROW_LIMIT} expanded={expandedRecent} onToggle={() => setExpandedRecent((v) => !v)} />
       </div>
 
       <style>{`@media (max-width: 860px){ .mg-top{ grid-template-columns: 1fr !important } }`}</style>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../../../lib/api';
-import { MapPin } from 'lucide-react';
+import { MapPin, Pencil, Trash2 } from 'lucide-react';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Spinner } from '../../../components/ui';
 
@@ -53,12 +53,16 @@ function VenueModal({ eventId, path, venue, onClose }: { eventId: string; path: 
           <div className="mt-5 flex items-center justify-between">
             <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
               onClick={async () => { if (await confirmDialog({ title: 'Delete venue', confirmLabel: 'Delete', message: `Delete “${venue.name}”? This cannot be undone.` })) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
-              disabled={remove.isPending}>
-              {remove.isPending ? 'Deleting…' : 'Delete'}
+              disabled={remove.isPending}
+              aria-label="Delete venue"
+              title={remove.isPending ? 'Deleting…' : 'Delete venue'}>
+              <Trash2 size={16} />
             </Button>
             <div className="flex gap-2">
               <Button variant="ghost" onClick={onClose}>Close</Button>
-              <Button onClick={() => setEditing(true)}>Edit</Button>
+              <Button onClick={() => setEditing(true)} aria-label="Edit venue" title="Edit venue">
+                <Pencil size={16} />
+              </Button>
             </div>
           </div>
         </>

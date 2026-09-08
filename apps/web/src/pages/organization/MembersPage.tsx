@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Lock, ShieldCheck, Users } from 'lucide-react';
+import { Lock, ShieldCheck, Trash2, Users } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useTableControls } from '../../lib/hooks';
@@ -8,7 +8,7 @@ import { usePermissions } from '../../lib/permissions';
 import { titleCase } from '../../lib/format';
 import { DataList } from '../../components/primitives';
 import {
-  Avatar, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field,
+  Avatar, BackButton, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field,
   ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Spinner, toast,
 } from '../../components/ui';
 
@@ -249,6 +249,11 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
     <>
       {!embedded && (
         <>
+          {/* Reached two ways: as an Administration tab (embedded, where the rail
+              already says where you are) and as its own deep link from the "Add
+              members" onboarding step - which drops you here with no trail back to
+              the dashboard you came from. Only the second case needs this. */}
+          <BackButton to={`/organizations/${orgId}/overview`}>Back to Dashboard</BackButton>
           <PageHeader title="Members" subtitle="Who belongs to this organisation, and what each of them may do." />
         </>
       )}
@@ -356,9 +361,11 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
                                   {g.status === 'SUSPENDED' ? 'Restore' : 'Suspend'}
                                 </button>
                                 <button
-                                  className="tap text-[12px] font-semibold text-rose-600 hover:underline dark:text-rose-400"
-                                  onClick={() => revoke(g)}>
-                                  Remove
+                                  className="tap grid h-6 w-6 shrink-0 place-items-center rounded text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/15"
+                                  onClick={() => revoke(g)}
+                                  aria-label={`Remove ${g.role?.name} role`}
+                                  title="Remove role">
+                                  <Trash2 size={13} />
                                 </button>
                               </>
                             )}

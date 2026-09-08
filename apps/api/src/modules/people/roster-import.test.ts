@@ -9,9 +9,10 @@ import { parseDob, parseGender, parseScholarship, validateRoster, type RosterCon
 const ctx = (over: Partial<RosterContext> = {}): RosterContext => ({
   usersByPhone: new Map(),
   usersByEmail: new Map(),
+  usersById: new Map(),
   unitsByName: new Map([
-    ['computer science', { id: 'unit-cs', type: 'campus' }],
-    ['2024', { id: 'unit-2024', type: 'department' }],
+    ['computer science', { id: 'unit-cs', type: 'campus', parent_id: null }],
+    ['2024', { id: 'unit-2024', type: 'department', parent_id: 'unit-cs' }],
   ]),
   memberUserIds: new Set(),
   memberCodeOwner: new Map(),
@@ -49,6 +50,57 @@ describe('validateRoster · resolution', () => {
       memberUserIds: new Set(['u1']),
     });
     expect(validateRoster([row()], c).rows[0].verdict).toBe('update');
+  });
+});
+
+describe('validateRoster · linking a specific account (user_id)', () => {
+  it('links straight to the named account - no name/email/phone required', () => {
+    const c = ctx({ usersById: new Map([['u1', { id: 'u1', name: 'Asha Rao', email: 'asha@iimb.ac.in' }]]) });
+    const r = validateRoster([{ user_id: 'u1' }], c).rows[0];
+    expect(r.verdict).toBe('match');
+    expect(r.user_id).toBe('u1');
+    expect(r.name).toBe('Asha Rao');
+    expect(r.email).toBe('asha@iimb.ac.in');
+    expect(r.message).toMatch(/linked to/i);
+  });
+
+  it('rejects a user_id nobody recognises, rather than silently creating a new account', () => {
+    const r = validateRoster([{ user_id: 'ghost' }], ctx()).rows[0];
+    expect(r.verdict).toBe('reject');
+    expect(r.message).toMatch(/could not be found/i);
+  });
+
+  it('wins over phone/email matching even when a row carries both - the whole point is removing that ambiguity', () => {
+    const c = ctx({
+      usersById: new Map([['u-picked', { id: 'u-picked', name: 'Second Account', email: 'work@iimb.ac.in' }]]),
+      // Same phone resolves to a DIFFERENT account via the old ambiguous path -
+      // this is exactly the Option B scenario (one number, two accounts).
+      usersByPhone: new Map([['9876543210', { id: 'u-other', name: 'First Account' }]]),
+    });
+    const r = validateRoster([{ user_id: 'u-picked', phone: '9876543210', name: 'Ignored', email: 'ignored@x.com' }], c).rows[0];
+    expect(r.user_id).toBe('u-picked');
+    expect(r.name).toBe('Second Account');
+  });
+
+  it('reports an already-a-member linked account as an update, same as any other match', () => {
+    const c = ctx({
+      usersById: new Map([['u1', { id: 'u1', name: 'Asha Rao', email: 'asha@iimb.ac.in' }]]),
+      memberUserIds: new Set(['u1']),
+    });
+    expect(validateRoster([{ user_id: 'u1' }], c).rows[0].verdict).toBe('update');
+  });
+
+  it('still honours placement and member-code checks on a linked row', () => {
+    const c = ctx({ usersById: new Map([['u1', { id: 'u1', name: 'Asha Rao', email: 'asha@iimb.ac.in' }]]) });
+    const r = validateRoster([{ user_id: 'u1', campus: 'Computer Science' }], c).rows[0];
+    expect(r.org_unit_ids).toEqual(['unit-cs']);
+  });
+
+  it('flags the same account linked twice in one batch', () => {
+    const c = ctx({ usersById: new Map([['u1', { id: 'u1', name: 'Asha Rao', email: 'asha@iimb.ac.in' }]]) });
+    const report = validateRoster([{ user_id: 'u1' }, { user_id: 'u1' }], c);
+    expect(report.rows.map((r) => r.verdict)).toEqual(['reject', 'reject']);
+    expect(report.rows[0].message).toMatch(/more than once/i);
   });
 });
 
@@ -93,30 +145,38 @@ describe('validateRoster · rejections', () => {
     expect(r.message).toMatch(/no campus called "Compter Science" exists/i);
   });
 
-  it('resolves a known campus, and lets the department win when both are given', () => {
+  it('resolves a known campus, and places the person in both when a department is also given', () => {
     const campus = validateRoster([row({ campus: 'Computer Science' })], ctx()).rows[0];
-    expect(campus.org_unit_id).toBe('unit-cs');
-    // The department places somebody more precisely, so it is the one that sticks.
+    expect(campus.org_unit_ids).toEqual(['unit-cs']);
+    // A row naming both places the person in both - the department does not
+    // silently discard the campus, or vice versa.
     const both = validateRoster([row({ campus: 'Computer Science', department: '2024' })], ctx()).rows[0];
-    expect(both.org_unit_id).toBe('unit-2024');
+    expect(both.org_unit_ids).toEqual(['unit-cs', 'unit-2024']);
+  });
+
+  // A batch belongs to exactly one campus - naming the batch already says which
+  // campus, so the row doesn't have to name both for the person to end up in both.
+  it('adds a department row to its own campus automatically, even when the sheet named only the department', () => {
+    const r = validateRoster([row({ department: '2024' })], ctx()).rows[0];
+    expect(r.org_unit_ids).toEqual(['unit-2024', 'unit-cs']);
   });
 
   // Institutions have saved spreadsheets with the old headers. Breaking those is a
   // worse outcome than carrying two names for one field, so both are accepted.
   it('still accepts the old programme/batch column headers', () => {
     const prog = validateRoster([row({ programme: 'Computer Science' })], ctx()).rows[0];
-    expect(prog.org_unit_id).toBe('unit-cs');
+    expect(prog.org_unit_ids).toEqual(['unit-cs']);
     const batch = validateRoster([row({ batch: '2024' })], ctx()).rows[0];
-    expect(batch.org_unit_id).toBe('unit-2024');
-    // Mixed headers in one file resolve the same way as matched ones.
+    expect(batch.org_unit_ids).toEqual(['unit-2024', 'unit-cs']);
+    // Mixed headers in one file resolve the same way as matched ones - both stick.
     const mixed = validateRoster([row({ programme: 'Computer Science', department: '2024' })], ctx()).rows[0];
-    expect(mixed.org_unit_id).toBe('unit-2024');
+    expect(mixed.org_unit_ids).toEqual(['unit-cs', 'unit-2024']);
   });
 
   it('prefers the current column name when a row carries both it and its alias', () => {
     const r = validateRoster([row({ campus: 'Computer Science', programme: 'Nonsense' })], ctx()).rows[0];
     expect(r.verdict).not.toBe('reject');
-    expect(r.org_unit_id).toBe('unit-cs');
+    expect(r.org_unit_ids).toEqual(['unit-cs']);
   });
 
   it('refuses a member code already held by somebody else here', () => {

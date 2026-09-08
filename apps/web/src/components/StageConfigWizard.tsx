@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
 import { describeSlot } from '../lib/stageTree';
@@ -239,7 +240,9 @@ function GroupEditor({ node, onChange, entrants, depth }: { node: GroupDraft; on
                   <Field label="Name"><Input value={b.label} onChange={(e) => updateBranch(b.id, { label: e.target.value })} placeholder="e.g. Cup" /></Field>
                   <Field label="From rank"><Input type="number" min={1} value={b.rankFrom} onChange={(e) => updateBranch(b.id, { rankFrom: Number(e.target.value) || 1 })} /></Field>
                   <Field label="To rank"><Input type="number" min={1} value={b.rankTo} onChange={(e) => updateBranch(b.id, { rankTo: Number(e.target.value) || 1 })} /></Field>
-                  <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400" onClick={() => removeBranch(b.id)} disabled={node.branches.length <= 1}>Remove</Button>
+                  <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400" onClick={() => removeBranch(b.id)} disabled={node.branches.length <= 1} aria-label="Remove branch" title="Remove branch">
+                    <Trash2 size={14} />
+                  </Button>
                 </div>
                 <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
                   <div className="mb-2 text-xs text-slate-400 dark:text-slate-500">

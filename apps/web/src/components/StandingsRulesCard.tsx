@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Pencil } from 'lucide-react';
 import { DEFAULT_STANDINGS_RULE, type StandingsRule, type StandingsScheme } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
@@ -216,7 +217,11 @@ function ScopeRuleEditor({ eventId, scopeType, option, override, fallback }: {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {frozen && <Button variant="outline" onClick={() => setEditing(true)}>Edit</Button>}
+          {frozen && (
+            <Button variant="outline" onClick={() => setEditing(true)} aria-label={`Edit ${option.name} rules`} title="Edit">
+              <Pencil size={14} />
+            </Button>
+          )}
           {!override && !open && <Button variant="ghost" onClick={() => setOpen(true)}>Customize</Button>}
         </div>
       </div>

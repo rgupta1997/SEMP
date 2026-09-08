@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { TEAM_MEMBER_ROLE } from '@semp/shared';
 import { useAuth } from '../../lib/auth';
@@ -602,7 +603,16 @@ export function RosterPage() {
                       ) : (
                         <Badge tone={m.role === 'captain' ? 'brand' : 'slate'}>{titleCase(m.role)}</Badge>
                       )}
-                      {!allLocked && canManage && <button onClick={async () => { if (await confirmDialog({ title: 'Remove member', message: `Remove ${m.users?.name ?? 'this member'} from the squad?`, confirmLabel: 'Remove' })) removeMember.mutate(m.id, { onError: (err: any) => toast.error(err.message) }); }} className="text-sm text-rose-500 hover:underline">Remove</button>}
+                      {!allLocked && canManage && (
+                        <button
+                          onClick={async () => { if (await confirmDialog({ title: 'Remove member', message: `Remove ${m.users?.name ?? 'this member'} from the squad?`, confirmLabel: 'Remove' })) removeMember.mutate(m.id, { onError: (err: any) => toast.error(err.message) }); }}
+                          aria-label={`Remove ${m.users?.name ?? 'this member'}`}
+                          title="Remove from squad"
+                          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-rose-500 transition hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
