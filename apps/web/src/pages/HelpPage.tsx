@@ -85,7 +85,7 @@ const SERVICES = [
 ] as const;
 
 const card: React.CSSProperties = {
-  background: '#fff', border: '1px solid var(--line)', borderRadius: 14, padding: 20,
+  background: 'var(--surface-1)', border: '1px solid var(--line)', borderRadius: 14, padding: 20,
 };
 
 export function HelpPage() {
@@ -118,7 +118,7 @@ export function HelpPage() {
       <PageHeader title="Help & guides" subtitle={headline} />
 
       {/* ---- the four rules ---- */}
-      <div style={{ ...card, background: 'var(--ink)', border: 'none', color: '#fff' }}>
+      <div style={{ ...card, background: 'var(--surface-inverse)', border: 'none', color: 'var(--on-surface-inverse)' }}>
         <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--accent)' }}>
           How this product thinks
         </div>
@@ -160,12 +160,12 @@ export function HelpPage() {
           <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: '1px solid #EFF2F7' }}>
             <span aria-hidden style={{
               width: 9, height: 9, borderRadius: '50%',
-              background: state === 'operational' ? '#1E9E5A' : '#E9920B',
+              background: state === 'operational' ? 'var(--ok-ink)' : 'var(--amber-ink)',
             }} />
             <span style={{ flex: 1, fontSize: 13.5, color: 'var(--ink-2)' }}>{name}</span>
             <span style={{
               fontFamily: MONO, fontSize: 9.5, letterSpacing: '.1em', textTransform: 'uppercase',
-              color: state === 'operational' ? '#1E9E5A' : '#E9920B',
+              color: state === 'operational' ? 'var(--ok-ink)' : 'var(--amber-ink)',
             }}>{state}</span>
           </div>
         ))}

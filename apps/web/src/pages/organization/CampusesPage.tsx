@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Building2, ChevronRight, Pencil, Plus, ShieldCheck, Trash2, Users } from 'lucide-react';
-import { UNIT_LABEL_PRESETS, type UnitLabels } from '@semp/shared';
+import { UNIT_LABEL_PRESETS, pluralise, type UnitLabels } from '@semp/shared';
 import { api } from '../../lib/api';
 import { useParams } from 'react-router-dom';
 import { useApi } from '../../lib/hooks';
@@ -268,7 +268,7 @@ function Counts({ node, labels }: { node: UnitNode; labels: UnitLabels }) {
       {node.type === 'campus' && node.children.length > 0 && (
         <span className="flex items-baseline gap-1.5">
           <span className="text-[13.5px] font-semibold tabular-nums text-slate-800 dark:text-slate-100">{node.children.length}</span>
-          <span className={MONO}>{labels.department}s</span>
+          <span className={MONO}>{pluralise(labels.department)}</span>
         </span>
       )}
     </div>
@@ -326,7 +326,7 @@ function PeoplePanel({ orgId, unit, people, labels, loading }: {
 
   const rows = peopleIn(people, unit);
   const unplacedNote = unit.type === 'campus' && (unit.children ?? []).length > 0
-    ? `People in its ${labels.department.toLowerCase()}s are listed separately unless they were added here too.`
+    ? `People in its ${pluralise(labels.department).toLowerCase()} are listed separately unless they were added here too.`
     : null;
 
   return (
@@ -471,7 +471,7 @@ export function CampusesPage() {
 
     const lines = [
       impact?.members ? `${impact.members} ${impact.members === 1 ? 'person loses their placement' : 'people lose their placement'} (they stay members).` : null,
-      impact?.departments?.length ? `${impact.departments.length} ${labels.department.toLowerCase()}${impact.departments.length === 1 ? '' : 's'} beneath it go with it.` : null,
+      impact?.departments?.length ? `${impact.departments.length} ${(impact.departments.length === 1 ? labels.department : pluralise(labels.department)).toLowerCase()} beneath it go with it.` : null,
     ].filter(Boolean).join(' ');
 
     const ok = await confirmDialog({
@@ -495,7 +495,7 @@ export function CampusesPage() {
   return (
     <>
       <PageHeader
-        title={`${labels.campus}es & ${labels.department}s`}
+        title={`${pluralise(labels.campus)} & ${pluralise(labels.department)}`}
         subtitle="Who belongs where — and who competes for whom in a championship run inside this organisation."
       />
 
@@ -514,7 +514,7 @@ export function CampusesPage() {
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-[240px]">
               <h3 className="font-display text-[16px] font-extrabold text-slate-900 dark:text-slate-100">
-                {labels.campus}es &amp; {labels.department}s
+                {pluralise(labels.campus)} &amp; {pluralise(labels.department)}
               </h3>
               <p className="mt-0.5 text-[13px] leading-relaxed text-slate-500 dark:text-slate-400">
                 The structure a scoped role is granted against — and the entrants of a

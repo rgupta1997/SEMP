@@ -10,9 +10,10 @@ import { BRAND } from '../lib/brand';
 import { ContextSwitcher } from './ContextSwitcher';
 import { useWorkspace } from '../lib/useWorkspace';
 import { applyTenantTheme } from '../lib/tenant-theme';
+import { navIcon } from '../lib/nav-icons';
 import { hrefFor, resolveNav } from '../lib/workspace';
 import { BottomNav } from './BottomNav';
-import { Lock as LockIcon, SlidersHorizontal } from 'lucide-react';
+import { Lock as LockIcon, PanelLeftClose, PanelLeftOpen, SlidersHorizontal } from 'lucide-react';
 import { parseEventId } from '../lib/championship-nav';
 import { FeedbackWidget } from './FeedbackWidget';
 import { Sheet } from './primitives';
@@ -177,6 +178,17 @@ export function AppShell() {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Desktop rail. Persisted because it is a workspace preference, not a per-page
+  // one - collapsing it on Fixtures and finding it expanded again on Standings
+  // would read as the app forgetting.
+  const [railed, setRailed] = useState(() => {
+    try { return localStorage.getItem('semp_sidebar_railed') === '1'; } catch { return false; }
+  });
+  const toggleRail = () => setRailed((v) => {
+    const next = !v;
+    try { localStorage.setItem('semp_sidebar_railed', next ? '1' : '0'); } catch { /* private mode */ }
+    return next;
+  });
 
   const signOut = () => { logout(); navigate('/', { replace: true }); };
 
@@ -238,7 +250,10 @@ export function AppShell() {
           viewport WITHOUT the collapsible browser chrome, so the shell rendered
           60-110px taller than the window and its bottom row was unreachable until
           you scrolled the chrome away. */}
-      <div className="h-screen h-dvh overflow-hidden md:grid md:grid-cols-[240px_1fr]">
+      <div
+        className="h-screen h-dvh overflow-hidden md:grid"
+        style={{ ['--rail-w' as string]: railed ? '72px' : '240px', gridTemplateColumns: 'var(--rail-w) 1fr' }}
+      >
         {/* Mobile scrim */}
         {sidebarOpen && <div className="animate-backdrop fixed inset-0 z-scrim bg-slate-900/50 backdrop-blur-sm md:hidden" onClick={() => setSidebarOpen(false)} />}
 
@@ -246,17 +261,18 @@ export function AppShell() {
         <aside
           style={{ backgroundColor: 'var(--sidebar-bg)', borderColor: 'var(--sidebar-border)' }}
           className={cn(
-            'fixed inset-y-0 left-0 z-drawer flex w-[240px] flex-col overflow-hidden border-r text-slate-300 transition-transform duration-200 md:static md:z-auto md:translate-x-0 md:transition-none',
+            'fixed inset-y-0 left-0 z-drawer flex w-[240px] flex-col overflow-hidden border-r text-[var(--sidebar-fg)] transition-transform duration-200 md:static md:z-auto md:w-auto md:translate-x-0 md:transition-none',
             sidebarOpen ? 'translate-x-0' : '-translate-x-full',
           )}
         >
-          <div className="flex items-center gap-2.5 border-b px-4 py-3.5" style={{ borderColor: 'var(--sidebar-border)' }}>
-            <BrandMark variant="white" height={22} />
-            <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-[background-color,color,transform] duration-150 hover:bg-[var(--sidebar-active)] hover:text-white active:scale-90 md:hidden" aria-label="Close menu"><X size={16} /></button>
+          <div className={cn('flex items-center gap-2.5 border-b py-3.5', railed ? 'md:justify-center md:px-0 px-4' : 'px-4')} style={{ borderColor: 'var(--sidebar-border)' }}>
+            <BrandMark height={22} className={cn(railed && 'md:hidden')} />
+            {railed && <span className="hidden md:block"><BrandMark height={22} markOnly /></span>}
+            <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-[var(--sidebar-muted)] transition-[background-color,color,transform] duration-150 hover:bg-[var(--sidebar-active)] hover:text-[var(--sidebar-fg-strong)] active:scale-90 md:hidden" aria-label="Close menu"><X size={16} /></button>
           </div>
           {/* The switcher sits above the nav because it changes what the nav IS. */}
           {!isPlatform && ws.contexts.length > 0 && (
-            <div className="px-3 pt-3">
+            <div className={cn('px-3 pt-3', railed && 'md:hidden')}>
               <ContextSwitcher
                 contexts={ws.contexts}
                 active={ws.active}
@@ -269,6 +285,7 @@ export function AppShell() {
           <nav className="flex-1 overflow-y-auto px-3 py-4">
             {!isPlatform && ws.active && contextNav.map((it) => {
               const href = hrefFor(ws.active!, it);
+              const Icon = navIcon(it.key);
               // A locked item is shown, not hidden. Hiding it would leave someone
               // unable to discover the product does the thing at all - which loses
               // an upgrade rather than earning one. The page it opens names the
@@ -282,21 +299,23 @@ export function AppShell() {
                   // wherever you were.
                   end={it.end}
                   onClick={() => setSidebarOpen(false)}
-                  title={it.locked ? `Needs ${it.needs}` : undefined}
+                  title={it.locked ? `${it.label} - needs ${it.needs}` : it.label}
                   className={({ isActive }) => cn(
-                    'mb-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-[background-color,color] duration-150',
-                    isActive ? 'bg-[var(--sidebar-active)] text-white' : 'text-slate-400 hover:bg-[var(--sidebar-active)] hover:text-white',
+                    'mb-0.5 flex items-center gap-2.5 rounded-lg py-2 text-sm font-medium transition-[background-color,color] duration-150',
+                    railed ? 'md:justify-center md:px-0 px-2.5' : 'px-2.5',
+                    isActive ? 'bg-[var(--sidebar-active)] font-semibold text-[var(--sidebar-fg-strong)]' : 'text-[var(--sidebar-fg)] hover:bg-[var(--sidebar-active)] hover:text-[var(--sidebar-fg-strong)]',
                     it.locked && 'opacity-60',
                   )}
                 >
-                  <span className="flex-1">{it.label}</span>
-                  {it.locked && <LockIcon size={12} className="flex-none opacity-80" />}
+                  <Icon size={17} className="flex-none" />
+                  <span className={cn('flex-1', railed && 'md:hidden')}>{it.label}</span>
+                  {it.locked && <LockIcon size={12} className={cn('flex-none opacity-80', railed && 'md:hidden')} />}
                 </NavLink>
               );
             })}
             {groups.map((g) => (
               <div key={g.group} className="mb-4">
-                <div className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">{g.group}</div>
+                <div className={cn('px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--sidebar-muted)]', railed && 'md:hidden')}>{g.group}</div>
                 {g.items.map((it) => (
                   <NavLink
                     key={it.to}
@@ -304,13 +323,15 @@ export function AppShell() {
                     data-tour={`nav-${it.to}`}
                     end={it.end && !eventId}
                     onClick={() => setSidebarOpen(false)}
+                    title={it.label}
                     className={({ isActive }) => cn(
-                      'mb-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-[background-color,color] duration-150',
-                      isActive && !eventId ? 'bg-[var(--sidebar-active)] text-white' : 'text-slate-400 hover:bg-[var(--sidebar-active)] hover:text-white',
+                      'mb-0.5 flex items-center gap-2.5 rounded-lg py-2 text-sm font-medium transition-[background-color,color] duration-150',
+                      railed ? 'md:justify-center md:px-0 px-2.5' : 'px-2.5',
+                      isActive && !eventId ? 'bg-[var(--sidebar-active)] font-semibold text-[var(--sidebar-fg-strong)]' : 'text-[var(--sidebar-fg)] hover:bg-[var(--sidebar-active)] hover:text-[var(--sidebar-fg-strong)]',
                     )}
                   >
                     <span className="flex-none">{it.icon}</span>
-                    <span>{it.label}</span>
+                    <span className={cn(railed && 'md:hidden')}>{it.label}</span>
                   </NavLink>
                 ))}
               </div>
@@ -332,6 +353,15 @@ export function AppShell() {
           <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 sm:h-auto sm:flex-wrap sm:gap-x-4 sm:gap-y-2 sm:px-6 sm:py-3 dark:border-slate-800 dark:bg-slate-900">
             <div className="flex min-w-0 flex-1 items-center gap-1">
               <button onClick={() => setSidebarOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-600 transition-[background-color,transform] duration-150 hover:bg-slate-100 active:scale-90 md:hidden dark:text-slate-300 dark:hover:bg-slate-800" aria-label="Open menu"><Menu size={20} /></button>
+              {/* Rail toggle. Desktop only - on a phone the sidebar is a drawer and
+                  there is no rail to collapse to. */}
+              <button
+                onClick={toggleRail}
+                className="hidden h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-500 transition-[background-color,transform] duration-150 hover:bg-slate-100 active:scale-90 md:grid dark:text-slate-400 dark:hover:bg-slate-800"
+                aria-label={railed ? 'Expand sidebar' : 'Collapse sidebar'}
+                aria-pressed={railed}
+                title={railed ? 'Expand sidebar' : 'Collapse sidebar'}
+              >{railed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
               <div className="truncate text-sm font-semibold text-slate-700 sm:font-medium sm:text-slate-600 dark:text-slate-300">{subtitle}</div>
             </div>
             <HeaderFilters />

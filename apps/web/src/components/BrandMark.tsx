@@ -7,9 +7,16 @@ import { cn } from './ui';
 //   variant 'auto'  - follows the theme (swaps blue/white logo via dark: classes).
 //   variant 'white' - always-dark surfaces (e.g. the app sidebar).
 //   variant 'blue'  - always-light surfaces.
+//   markOnly        - the hexagon alone, no wordmark and no badge. For the
+//                     collapsed sidebar rail, where 72px cannot hold a wordmark.
 export function BrandMark({
-  variant = 'auto', height = 26, to, className = '',
-}: { variant?: 'blue' | 'white' | 'auto'; height?: number; to?: string; className?: string }) {
+  variant = 'auto', height = 26, to, className = '', markOnly = false,
+}: { variant?: 'blue' | 'white' | 'auto'; height?: number; to?: string; className?: string; markOnly?: boolean }) {
+  if (markOnly) {
+    const mark = <img src={BRAND.logo.mark} alt={BRAND.name} className={cn('block', className)} style={{ height }} />;
+    return to ? <Link to={to} className="inline-flex">{mark}</Link> : mark;
+  }
+
   const badge =
     variant === 'white' ? 'text-[#5CE1E6] border-[#5CE1E6]/40'
     : variant === 'blue' ? 'text-[#159FA6] border-[#BFE7E9]'

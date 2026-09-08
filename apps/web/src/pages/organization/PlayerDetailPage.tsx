@@ -14,7 +14,7 @@ import { Avatar, BackButton, Badge, EmptyState, Spinner } from '../../components
 
 const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
 const MONO = "'JetBrains Mono',ui-monospace,monospace";
-const C = { ink: 'var(--ink)', line: 'var(--line)', fg4: 'var(--muted)', brand: 'var(--brand)', green: '#1E9E5A' };
+const C = { ink: 'var(--ink)', line: 'var(--line)', fg4: 'var(--muted)', brand: 'var(--brand)', green: 'var(--ok-ink)' };
 
 interface Profile {
   person: {
@@ -37,7 +37,7 @@ interface Profile {
 }
 
 const card: React.CSSProperties = {
-  background: '#fff', border: `1px solid ${C.line}`, borderRadius: 14, padding: 18,
+  background: 'var(--surface-1)', border: `1px solid ${C.line}`, borderRadius: 14, padding: 18,
 };
 
 function Section({ title, chip, chipTone, children, note }: {
@@ -52,7 +52,7 @@ function Section({ title, chip, chipTone, children, note }: {
           padding: '3px 8px', borderRadius: 6,
           ...(chipTone === 'editable'
             ? { background: 'var(--brand-line)', color: C.brand }
-            : { background: '#EFF2F7', color: 'var(--ink-4)' }),
+            : { background: 'var(--surface-3)', color: 'var(--ink-4)' }),
         }}>{chip}</span>
       </div>
       <div style={{ marginTop: 12 }}>{children}</div>
@@ -206,7 +206,7 @@ export function PlayerDetailPage() {
                 the page disagree with what the player saw on their own profile. */}
             <span style={{
               fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase',
-              color: e.verified ? C.green : '#E9920B',
+              color: e.verified ? C.green : 'var(--amber-ink)',
             }}>{e.verified ? 'Verified' : 'Provisional'}</span>
           </div>
         ))}

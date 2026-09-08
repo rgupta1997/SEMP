@@ -1,9 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import {
-  Award, BarChart3, Building2, CalendarDays, Compass, FileBadge, LayoutGrid, Layers,
-  ListChecks, type LucideIcon, MoreHorizontal, Settings, Shield, Trophy, Users, Zap,
-} from 'lucide-react';
+import { LayoutGrid, type LucideIcon, MoreHorizontal } from 'lucide-react';
 import { hrefFor, type NavItem, type WorkspaceContext } from '../lib/workspace';
+import { NAV_ICONS } from '../lib/nav-icons';
 import { cn } from './ui';
 
 /**
@@ -28,35 +26,8 @@ import { cn } from './ui';
  * would have withheld.
  */
 
-/** Icons by nav key. The sidebar is text-only; a tab bar without icons is unusable. */
-const ICONS: Record<string, LucideIcon> = {
-  home: Zap,
-  dashboard: LayoutGrid,
-  players: Users,
-  structure: Building2,
-  teams: Shield,
-  events: Trophy,
-  discover: Compass,
-  achievements: Award,
-  certificates: FileBadge,
-  reports: BarChart3,
-  admin: Settings,
-  profile: Users,
-  orgs: Building2,
-  officiating: ListChecks,
-  help: Compass,
-  // event context
-  overview: LayoutGrid,
-  setup: Settings,
-  organisers: Users,
-  participants: Users,
-  schedule: CalendarDays,
-  results: ListChecks,
-  standings: BarChart3,
-  communications: Layers,
-  settings: Settings,
-  matchops: ListChecks,
-};
+/** Shared with the sidebar - see lib/nav-icons.ts. */
+const ICONS: Record<string, LucideIcon> = NAV_ICONS;
 
 interface Group { group: string; items: Array<{ to: string; label: string; icon: React.ReactNode; end?: boolean }> }
 

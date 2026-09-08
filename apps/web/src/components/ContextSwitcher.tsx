@@ -91,8 +91,11 @@ export function ContextSwitcher({
         aria-haspopup="listbox"
         style={{
           display: 'flex', alignItems: 'center', gap: 10, width: '100%', cursor: 'pointer',
-          padding: '10px 11px', borderRadius: 10, border: '1px solid rgba(255,255,255,.12)',
-          background: 'rgba(255,255,255,.05)', color: '#fff', textAlign: 'left',
+          // Token-driven, not white-on-translucent-white. These were
+          // rgba(255,255,255,…) + #fff, which only read on the old navy rail; on
+          // the light sidebar the org name disappeared into the background.
+          padding: '10px 11px', borderRadius: 10, border: '1px solid var(--sidebar-border)',
+          background: 'var(--sidebar-active)', color: 'var(--sidebar-fg-strong)', textAlign: 'left',
         }}
       >
         <span aria-hidden style={{
@@ -113,7 +116,7 @@ export function ContextSwitcher({
       {open && (
         <div role="listbox" style={{
           position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 40,
-          background: '#fff', border: '1px solid var(--line)', borderRadius: 12,
+          background: 'var(--surface-1)', border: '1px solid var(--line)', borderRadius: 12,
           boxShadow: '0 18px 40px -18px rgba(10,26,51,.45)', padding: 6, maxHeight: 380, overflowY: 'auto',
         }}>
           {groups.map((g) => {
@@ -156,7 +159,7 @@ export function ContextSwitcher({
                         {/* Verification is a trust signal, not an access gate - an
                             unverified org still works, it just does not carry the tick. */}
                         {c.kind === 'org' && c.verified && (
-                          <Check size={12} style={{ color: '#1E9E5A', flex: '0 0 auto' }} aria-label="Verified" />
+                          <Check size={12} style={{ color: 'var(--ok-ink)', flex: '0 0 auto' }} aria-label="Verified" />
                         )}
                       </span>
                       <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', marginTop: 1 }}>

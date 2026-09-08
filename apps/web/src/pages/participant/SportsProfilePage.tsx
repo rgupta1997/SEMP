@@ -77,7 +77,7 @@ interface CertRow {
 }
 
 const cardStyle: React.CSSProperties = {
-  background: '#fff', border: '1px solid var(--line)', borderRadius: 14, padding: 20,
+  background: 'var(--surface-1)', border: '1px solid var(--line)', borderRadius: 14, padding: 20,
 };
 const rowStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 12, padding: '11px 0', borderTop: '1px solid #EFF2F7',
@@ -473,7 +473,7 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
               <h2 style={{ fontFamily: POP, fontWeight: 900, fontSize: 24, margin: 0, letterSpacing: '-.02em' }}>{id.name}</h2>
               <button onClick={() => setEditOpen(true)} title="Edit profile" aria-label="Edit profile" style={{
                 display: 'grid', placeItems: 'center', width: 26, height: 26, flexShrink: 0, cursor: 'pointer',
-                borderRadius: 7, border: '1px solid var(--line)', background: '#fff', color: 'var(--muted)',
+                borderRadius: 7, border: '1px solid var(--line)', background: 'var(--surface-1)', color: 'var(--muted)',
               }}>
                 <Pencil size={12} aria-hidden />
               </button>
@@ -512,13 +512,13 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
               <button onClick={togglePublic} disabled={busy} style={{
                 display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
                 padding: '8px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600,
-                border: `1px solid ${id.privacy.public_profile ? '#1E9E5A' : '#C8D2E0'}`,
-                background: id.privacy.public_profile ? '#E4F6EC' : '#fff',
+                border: `1px solid ${id.privacy.public_profile ? 'var(--ok-ink)' : 'var(--line-2)'}`,
+                background: id.privacy.public_profile ? 'var(--ok-soft)' : '#fff',
                 color: id.privacy.public_profile ? '#1E6E45' : 'var(--ink-4)',
               }}>
                 <span aria-hidden style={{
                   width: 30, height: 16, borderRadius: 999, position: 'relative',
-                  background: id.privacy.public_profile ? '#1E9E5A' : '#C8D2E0', transition: 'background .15s',
+                  background: id.privacy.public_profile ? 'var(--ok-ink)' : 'var(--line-2)', transition: 'background .15s',
                 }}>
                   <span style={{
                     position: 'absolute', top: 2, left: id.privacy.public_profile ? 16 : 2,
@@ -539,7 +539,7 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
               }}>
                 <span aria-hidden style={{
                   width: 24, height: 13, borderRadius: 999, position: 'relative', flexShrink: 0,
-                  background: id.privacy.public_stats ? '#1E9E5A' : '#C8D2E0', transition: 'background .15s',
+                  background: id.privacy.public_stats ? 'var(--ok-ink)' : 'var(--line-2)', transition: 'background .15s',
                 }}>
                   <span style={{
                     position: 'absolute', top: 1.5, left: id.privacy.public_stats ? 12 : 1.5,
@@ -589,9 +589,9 @@ function VerifiedRecordsNotice({ visible }: { visible: boolean }) {
   return (
     <div style={{
       display: 'flex', gap: 11, alignItems: 'flex-start', padding: '13px 15px',
-      borderRadius: 10, background: '#E4F6EC', border: '1px solid #C7E9D5',
+      borderRadius: 10, background: 'var(--ok-soft)', border: '1px solid #C7E9D5',
     }}>
-      <ShieldCheck size={17} style={{ flex: '0 0 auto', color: '#1E9E5A', marginTop: 1 }} />
+      <ShieldCheck size={17} style={{ flex: '0 0 auto', color: 'var(--ok-ink)', marginTop: 1 }} />
       <div>
         <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1E6E45' }}>Verified records are always visible</div>
         <div style={{ fontSize: 12.5, color: '#33604A', marginTop: 2, lineHeight: 1.55 }}>
@@ -606,12 +606,12 @@ function VerifiedRecordsNotice({ visible }: { visible: boolean }) {
 function LockedTab({ label }: { label: string }) {
   return (
     <div style={{
-      background: '#fff', border: '1px dashed #C8D2E0', borderRadius: 14,
+      background: 'var(--surface-1)', border: '1px dashed var(--line)', borderRadius: 14,
       padding: 44, textAlign: 'center',
     }}>
       <div aria-hidden style={{
         width: 42, height: 42, margin: '0 auto 14px', borderRadius: 11,
-        background: '#EFF2F7', color: 'var(--muted)', display: 'grid', placeItems: 'center',
+        background: 'var(--surface-3)', color: 'var(--muted)', display: 'grid', placeItems: 'center',
       }}><Lock size={19} /></div>
       <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 18 }}>{label} needs advanced stats</div>
       <p style={{ fontSize: 13.5, color: 'var(--muted)', marginTop: 8, maxWidth: 400, marginInline: 'auto', lineHeight: 1.6 }}>

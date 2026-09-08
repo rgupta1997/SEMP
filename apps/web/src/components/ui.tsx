@@ -520,27 +520,57 @@ export function PageHeader({ title, subtitle, children }: { title: ReactNode; su
 }
 
 /* ----------------------------- StatCard ----------------------------- */
-// Blue-gradient stat tile (dashboard design). The value is echoed as a large,
-// faint watermark in the corner, mirroring the mockup's `data-bg-number`.
-export function StatCard({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode; accent?: boolean }) {
+// A QUIET TILE, NOT A POSTER.
+//
+// This was a blue gradient with white text and the value echoed behind it as a
+// 120px watermark. Four of them across the top of a dashboard made the loudest
+// thing on the page the row that carries the least information - and the
+// watermark meant the number appeared twice, at two sizes, in two opacities.
+//
+// Now: white surface, the figure at 28px in tabular numerals, an optional icon
+// chip, and an optional trend pill. The figure is the only bold thing in the
+// tile, so a row of them reads as data rather than as decoration.
+//
+// `accent` is kept for the callers that pass it, and now means "this is the
+// headline figure of the row" - it tints the icon chip and the value with the
+// brand rather than inverting the whole tile.
+export function StatCard({
+  label, value, hint, accent, icon, trend,
+}: {
+  label: string;
+  value: ReactNode;
+  hint?: ReactNode;
+  accent?: boolean;
+  icon?: ReactNode;
+  /** Period-over-period movement. `dir` picks the tone; omit for a neutral pill. */
+  trend?: { value: ReactNode; dir?: 'up' | 'down' };
+}) {
+  const tone =
+    trend?.dir === 'up' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+    : trend?.dir === 'down' ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300'
+    : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300';
+
   return (
-    // A DASHBOARD TILE, NOT A POSTER.
-    //
-    // `p-6` + a 36px value + a 120px watermark makes a ~290px tile. Three of them
-    // stacked full-width on a phone is 900px of chrome before the table they are
-    // introducing - which on Standings meant the championship table itself started
-    // two screens down. Halved below sm: smaller padding, a 26px value, and the
-    // watermark scaled to match rather than dominating a box a third the size.
-    <div
-      className="relative overflow-hidden rounded-2xl p-4 text-white shadow-[var(--card-shadow)] sm:p-6"
-      style={{ backgroundImage: 'linear-gradient(135deg, var(--stat-grad-from), var(--stat-grad-to))' }}
-    >
-      <div aria-hidden className="pointer-events-none absolute -bottom-3 -right-1 select-none text-[64px] font-extrabold leading-none tnum opacity-10 sm:-bottom-5 sm:-right-2 sm:text-[120px]">{value}</div>
-      <div className="relative">
-        <div className="text-[13px] font-medium opacity-90 sm:text-sm">{label}</div>
-        <div className="mt-1 text-[26px] font-bold leading-none tracking-tight tnum sm:mt-3 sm:text-4xl">{value}</div>
-        {hint && <div className="mt-1 text-[12.5px] opacity-80 sm:text-[13px]">{hint}</div>}
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-[var(--card-shadow)] sm:p-5 dark:border-slate-800 dark:bg-slate-900">
+      {icon && (
+        <div className={cn(
+          'mb-3 grid h-9 w-9 place-items-center rounded-lg',
+          accent ? 'bg-[var(--brand-tint)] text-[var(--brand)]' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+        )}>{icon}</div>
+      )}
+      <div className="text-[13px] font-medium text-slate-500 dark:text-slate-400">{label}</div>
+      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+        <span className={cn(
+          'text-[26px] font-bold leading-none tracking-tight tnum sm:text-[28px]',
+          accent ? 'text-[var(--brand-ink)] dark:text-[var(--on-brand)]' : 'text-slate-900 dark:text-slate-100',
+        )}>{value}</span>
+        {trend && (
+          <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-semibold tnum', tone)}>
+            {trend.dir === 'up' ? '↑ ' : trend.dir === 'down' ? '↓ ' : ''}{trend.value}
+          </span>
+        )}
       </div>
+      {hint && <div className="mt-2 text-[12.5px] leading-snug text-slate-500 dark:text-slate-400">{hint}</div>}
     </div>
   );
 }

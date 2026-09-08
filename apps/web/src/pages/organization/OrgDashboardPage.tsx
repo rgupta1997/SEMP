@@ -26,7 +26,7 @@ const C = {
   // half-applied. `deep` is the ramp's darkest step and `onDeep` is what reads on
   // it, so both follow the tenant and their contrast holds by construction.
   deep: 'var(--brand-deep)', onDeep: 'var(--on-brand)',
-  cyan: 'var(--accent)', amber: '#E9920B', amberSoft: '#FCF0DB', brandSoft: 'var(--brand-line)',
+  cyan: 'var(--accent)', amber: 'var(--amber-ink)', amberSoft: 'var(--amber-soft)', brandSoft: 'var(--brand-line)',
 };
 
 interface Dash {
@@ -44,7 +44,7 @@ interface Dash {
 }
 
 const card: React.CSSProperties = {
-  background: '#fff', border: `1px solid ${C.line}`, borderRadius: 14, padding: 18,
+  background: 'var(--surface-1)', border: `1px solid ${C.line}`, borderRadius: 14, padding: 18,
 };
 
 function initials(name: string) {
@@ -195,7 +195,7 @@ export function OrgDashboardPage() {
             <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 16 }}>Participation trend</div>
             {/* No fabricated comparison: the first season has no predecessor. */}
             {data?.yoy != null && (
-              <span style={{ fontFamily: MONO, fontSize: 11.5, color: data.yoy >= 0 ? '#1E9E5A' : '#DE3A3A' }}>
+              <span style={{ fontFamily: MONO, fontSize: 11.5, color: data.yoy >= 0 ? 'var(--ok-ink)' : 'var(--bad-ink)' }}>
                 {data.yoy >= 0 ? '▲' : '▼'} {Math.abs(data.yoy)}% YoY
               </span>
             )}
@@ -240,7 +240,7 @@ export function OrgDashboardPage() {
               }}>
                 <span aria-hidden style={{
                   width: 42, flex: 'none', textAlign: 'center', borderRadius: 9,
-                  background: '#F4F7FB', padding: '5px 0',
+                  background: 'var(--surface-2)', padding: '5px 0',
                 }}>
                   <span style={{ display: 'block', fontFamily: MONO, fontWeight: 700, fontSize: 15, color: C.ink }}>
                     {d.getDate()}

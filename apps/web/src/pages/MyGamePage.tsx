@@ -39,16 +39,16 @@ const C = {
   // the theme applied to the panel and not to what sits on it. A light step of the
   // same ramp instead, so it is their colour and the contrast is guaranteed.
   teal: 'var(--on-brand)',
-  line: 'var(--line)', line2: '#C8D2E0', fg2: 'var(--ink-2)', fg3: 'var(--ink-4)', fg4: 'var(--muted)',
-  faint: 'var(--faint)', ground: '#F7F9FC', surface: '#EFF2F7',
-  ok: '#1E9E5A', okSoft: '#E4F6EC', bad: '#DE3A3A', badSoft: '#FBE6E6',
-  warn: '#E9920B', warnSoft: '#FCF0DB', brandSoft: 'var(--brand-line)',
+  line: 'var(--line)', line2: 'var(--line-2)', fg2: 'var(--ink-2)', fg3: 'var(--ink-4)', fg4: 'var(--muted)',
+  faint: 'var(--faint)', ground: 'var(--surface-2)', surface: 'var(--surface-3)',
+  ok: 'var(--ok-ink)', okSoft: 'var(--ok-soft)', bad: 'var(--bad-ink)', badSoft: 'var(--bad-soft)',
+  warn: 'var(--amber-ink)', warnSoft: 'var(--amber-soft)', brandSoft: 'var(--brand-line)',
 };
 const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
 const MONO = "'JetBrains Mono',ui-monospace,monospace";
 
 const card: React.CSSProperties = {
-  background: '#fff', border: `1px solid ${C.line}`, borderRadius: 14,
+  background: 'var(--surface-1)', border: `1px solid ${C.line}`, borderRadius: 14,
   padding: 18, boxShadow: '0 1px 3px rgba(10,26,51,.08)',
 };
 const cardTitle: React.CSSProperties = { fontFamily: POP, fontWeight: 800, fontSize: 15, marginBottom: 12 };

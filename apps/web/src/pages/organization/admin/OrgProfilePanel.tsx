@@ -260,13 +260,13 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
     <>
       <div style={{
         borderRadius: 14, padding: '22px 24px',
-        background: verified ? '#E4F6EC' : 'var(--brand-tint)',
+        background: verified ? 'var(--ok-soft)' : 'var(--brand-tint)',
         border: `1px solid ${verified ? '#C7E9D5' : 'var(--brand-line)'}`,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span aria-hidden style={{
             width: 38, height: 38, borderRadius: 10, display: 'grid', placeItems: 'center',
-            background: verified ? '#1E9E5A' : 'var(--brand)', color: '#fff',
+            background: verified ? 'var(--ok-ink)' : 'var(--brand)', color: '#fff',
           }}>{verified ? <Check size={18} /> : pending ? <Clock size={18} /> : <ShieldCheck size={18} />}</span>
           <div>
             <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 18 }}>
@@ -307,7 +307,7 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
             {STEPS.map(([title, note], i) => (
               <div key={title} style={{ display: 'flex', gap: 12, padding: '11px 0', borderTop: i ? '1px solid #EFF2F7' : 'none' }}>
                 <span aria-hidden style={{
-                  flex: '0 0 auto', width: 24, height: 24, borderRadius: 999, background: '#EFF2F7',
+                  flex: '0 0 auto', width: 24, height: 24, borderRadius: 999, background: 'var(--surface-3)',
                   color: 'var(--ink-4)', display: 'grid', placeItems: 'center', fontFamily: MONO, fontSize: 11, fontWeight: 700,
                 }}>{i + 1}</span>
                 <div>
@@ -376,7 +376,7 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
           <ul style={{ margin: '12px 0 0', padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {BENEFITS.map((b) => (
               <li key={b} style={{ display: 'flex', gap: 9, fontSize: 13.5, color: 'var(--ink-4)' }}>
-                <Check size={15} style={{ flex: '0 0 auto', marginTop: 2, color: verified ? '#1E9E5A' : 'var(--faint)' }} />
+                <Check size={15} style={{ flex: '0 0 auto', marginTop: 2, color: verified ? 'var(--ok-ink)' : 'var(--faint)' }} />
                 {b}
               </li>
             ))}

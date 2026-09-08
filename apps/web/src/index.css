@@ -126,16 +126,58 @@
   --muted:  #6E7E96;
   --faint:  #9BA9BE;
   --line:   #E1E7F0;
+
+  /* PANEL SURFACES, as tokens rather than inline hex.
+     Pages written with inline `style` objects cannot use Tailwind's `dark:`
+     variant - an inline `background: '#fff'` is a literal and no class can
+     override it. Those pages painted their cards white and their text with
+     var(--ink), so in dark mode the card stayed white while any neighbouring
+     Tailwind-classed text turned light: a white card with invisible headings.
+     These two tokens give the inline-style pages a surface that follows the
+     theme. --surface-1 is a card, --surface-2 an inset strip inside one. */
+  --surface-1: #FFFFFF;
+  --surface-2: #F4F7FB;
+  --surface-3: #EFF2F7;   /* inset tiles and badges inside a card */
+  --line-2:    #C8D2E0;   /* the stronger hairline, and dashed empty-state borders */
+
+  /* AN ALWAYS-DARK SURFACE. The Help hero and the sign-in brand rail were painted
+     with `background: var(--ink)` - a TEXT token used as a surface. That worked
+     only while the ink happened to be near-black; the moment the ink flips for
+     dark mode the band turns near-white and its white text vanishes.
+     A band that is dark by design needs its own token, not the ink's value. */
+  --surface-inverse:    #0A1A33;
+  --on-surface-inverse: #FFFFFF;
+
+  /* Soft status tints, same reason: they were literal light hexes carrying
+     var(--ink-2) text, so flipping the ink alone would have broken them. Each
+     pairs an `-ink` (the glyph or label) with a `-soft` (its wash). */
+  --amber-soft: #FCF0DB;
+  --amber-ink:  #E9920B;
+  --ok-soft:    #E4F6EC;
+  --ok-ink:     #1E9E5A;
+  --bad-soft:   #FBE6E6;
+  --bad-ink:    #DE3A3A;
 }
 
 :root {
   /* -- Dashboard design system surfaces --
-     The sidebar follows the tenant ramp rather than a literal navy, so a school
-     with maroon colours gets a maroon-black chrome instead of Sportagon's. */
+     LIGHT CHROME. The sidebar was a solid --color-brand-900 ground with slate-300
+     labels on it. A dark rail is the loudest object on every screen in the product,
+     and it competes with the content it is meant to frame. It is now near-white,
+     with the active item carried by a tint and the label weight rather than by a
+     filled brand block.
+
+     The tenant still shows: --sidebar-bg and --sidebar-active are mixed FROM the
+     tenant ramp, so a school seeded maroon gets a faintly warm rail and a maroon
+     active tint. Quieter than a maroon-black rail, and it survives a bright seed -
+     a yellow tenant used to get a yellow-black sidebar that no label read on. */
   --canvas: #F7F9FC;                 /* app page background (prototype body) */
-  --sidebar-bg: var(--color-brand-900);
-  --sidebar-active: var(--color-brand-600);
-  --sidebar-border: var(--color-brand-800);
+  --sidebar-bg: color-mix(in srgb, var(--color-brand-600) 3%, #FFFFFF);
+  --sidebar-active: color-mix(in srgb, var(--color-brand-600) 10%, #FFFFFF);
+  --sidebar-border: var(--line);
+  --sidebar-fg: var(--ink-3);        /* resting nav label */
+  --sidebar-fg-strong: var(--brand-ink); /* active nav label */
+  --sidebar-muted: var(--faint);     /* group headings */
   --card-shadow: 0 2px 4px rgba(0, 0, 0, 0.02), 0 1px 2px rgba(0, 0, 0, 0.04);
 
   /* Stat card gradient (blue, white text) */
@@ -213,6 +255,54 @@ select:disabled,
 }
 
 .dark body { @apply bg-slate-950 text-slate-100; }
+
+/* The chrome tokens above are declared on :root, so dark mode MUST restate them -
+   a near-white rail on a slate-950 app is the classic version of this bug. Mixed
+   from the tenant ramp here too, into the dark ground rather than into white. */
+.dark {
+  /* The ink/line aliases above are declared on :root only, so every page written
+     with inline `var(--ink)` / `var(--line)` rendered near-black text and
+     near-white hairlines on a slate-950 canvas. Restated here, which fixes all of
+     those pages at once rather than one file at a time.
+
+     Paired deliberately with the --surface-* flip below: flipping the ink without
+     flipping the card gives light text on a white card, which is worse than the
+     bug it replaces. Both, or neither. */
+  --ink:    #F1F5F9;
+  --ink-2:  #E2E8F0;
+  --ink-3:  #CBD5E1;
+  --ink-4:  #A9B6CA;
+  --muted:  #94A3B8;
+  --faint:  #6B7A93;
+  --line:   #1E293B;
+
+  --surface-1: #0F172A;
+  --surface-2: #16203A;
+  --surface-3: #1C2740;
+  --line-2:    #293852;
+
+  /* Still dark, but lifted off the slate-950 page so the band reads as a band
+     rather than merging into the canvas. */
+  --surface-inverse:    #16203A;
+  --on-surface-inverse: #FFFFFF;
+
+  /* Tints go to a translucent wash of the same hue rather than a hand-picked
+     dark hex, so they sit correctly on whatever card they land on. The inks
+     lighten, because the light-mode ink fails contrast on a dark wash. */
+  --amber-soft: rgba(233, 146, 11, 0.18);
+  --amber-ink:  #F0B44E;
+  --ok-soft:    rgba(30, 158, 90, 0.20);
+  --ok-ink:     #4ADE80;
+  --bad-soft:   rgba(222, 58, 58, 0.20);
+  --bad-ink:    #F87171;
+
+  --sidebar-bg: color-mix(in srgb, var(--color-brand-600) 8%, #0B1220);
+  --sidebar-active: color-mix(in srgb, var(--color-brand-600) 22%, #0B1220);
+  --sidebar-border: #1E293B;
+  --sidebar-fg: #94A3B8;
+  --sidebar-fg-strong: #F1F5F9;
+  --sidebar-muted: #64748B;
+}
 
 /* Tabular figures - apply to scores, times, IDs, tables so digits don't jitter */
 .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
