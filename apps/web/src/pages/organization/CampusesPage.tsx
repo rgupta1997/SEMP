@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Building2, ChevronRight, Pencil, Plus, ShieldCheck, Trash2, Users } from 'lucide-react';
 import { UNIT_LABEL_PRESETS, pluralise, type UnitLabels } from '@semp/shared';
 import { api } from '../../lib/api';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../../lib/hooks';
 import { useOrgUnits, type UnitNode } from '../../lib/units';
 import { useAuth } from '../../lib/auth';
@@ -309,6 +309,10 @@ function PeoplePanel({ orgId, unit, people, labels, loading }: {
   loading: boolean;
 }) {
   const noun = unit?.type === 'campus' ? labels.campus : labels.department;
+  // Router navigation, not window.location.assign: the app is served under a
+  // basename (/app), which the router prepends and a raw location assignment does
+  // not. It also keeps this a client-side transition instead of a full reload.
+  const navigate = useNavigate();
 
   if (!unit) {
     return (
@@ -345,7 +349,7 @@ function PeoplePanel({ orgId, unit, people, labels, loading }: {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => { window.location.assign(`/organizations/${orgId}/students`); }}
+            onClick={() => { navigate(`/organizations/${orgId}/students`); }}
           >Manage in Players</Button>
         </div>
 

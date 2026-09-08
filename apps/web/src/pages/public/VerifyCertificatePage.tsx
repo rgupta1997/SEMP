@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, BadgeCheck, Check, HelpCircle, ShieldOff } from 'lucide-react';
 import { api } from '../../lib/api';
 import { BrandMark } from '../../components/BrandMark';
@@ -47,6 +48,11 @@ const Field = ({ label, value }: { label: string; value: string }) => (
 // <Route> tree (ahead of every auth check, like the share link), so there is no route
 // context to read params from - useParams would silently hand back undefined.
 export function VerifyCertificatePage({ token }: { token?: string }) {
+  // Router navigation, not window.location.assign: the app is served under a
+  // basename (/app) and only the router knows to prepend it. Getting this wrong
+  // here is expensive - the QR codes printed on issued certificates point at this
+  // page, and they cannot be reissued.
+  const navigate = useNavigate();
   const [result, setResult] = useState<Result | null>(null);
   const [failed, setFailed] = useState(false);
   // Reached without a code - somebody opened the verifier from inside the product,
@@ -77,7 +83,7 @@ export function VerifyCertificatePage({ token }: { token?: string }) {
           onSubmit={(e) => {
             e.preventDefault();
             const c = code.trim();
-            if (c) window.location.assign(`/verify/${encodeURIComponent(c)}`);
+            if (c) navigate(`/verify/${encodeURIComponent(c)}`);
           }}
         >
           <input

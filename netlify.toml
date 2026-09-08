@@ -1,15 +1,39 @@
-# Netlify config - SEMP frontend (Vite static build from the monorepo).
-# Set VITE_API_URL in Netlify UI → Site settings → Environment variables to your
-# Render API URL, e.g. https://semp-api.onrender.com  (no trailing slash, no /api).
+# Netlify config - ONE site, two builds.
+#
+#   /        the marketing site   (landing-page-v2)
+#   /app/    the product          (apps/web)
+#
+# The marketing site is the primary thing at the domain root; the app moved from
+# the root to /app. `tools/assemble-site.mjs` merges the two dist folders and
+# generates the publish-root _redirects, including a 301 for every URL prefix the
+# app used to own so existing links, invite emails and the QR codes printed on
+# issued certificates all keep working. Read that file before changing anything
+# here.
+#
+# Environment variables to set in Netlify UI -> Site settings -> Environment:
+#   VITE_API_URL  the API origin, no trailing slash and no /api
+#                 (e.g. https://<id>.execute-api.ap-south-1.amazonaws.com/prod)
+#                 BOTH builds need it: apps/web for every call, and the marketing
+#                 site for the "Book a demo" form. It is baked in at BUILD time,
+#                 so changing it needs a redeploy, not just a save.
+#
+# landing-page-v2 has its own npm install because it sits deliberately OUTSIDE
+# the npm workspaces - it neither depends on nor can be broken by the monorepo.
 [build]
-  command = "npm install && npm run build --workspace @semp/web"
-  publish = "apps/web/dist"
+  command = """
+    npm install &&
+    npm install --prefix landing-page-v2 &&
+    npm run build --workspace @semp/web &&
+    npm run build --prefix landing-page-v2 &&
+    node tools/assemble-site.mjs
+  """
+  publish = "dist"
 
 [build.environment]
   NODE_VERSION = "20"
 
-# SPA fallback: every client-side route serves index.html so deep links work.
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+# NO [[redirects]] HERE ON PURPOSE. Netlify applies _redirects file rules before
+# netlify.toml ones, and this deploy's rules are generated into dist/_redirects
+# by tools/assemble-site.mjs. Splitting them across both places would make the
+# effective order genuinely hard to reason about; keeping them in one generated
+# file means the ordering is the file's own top-to-bottom order.

@@ -24,8 +24,28 @@ npm run seed                     # create admin + Phase 1 foundational data
 ## Run
 
 ```bash
-npm run dev:api     # API on http://localhost:4000
-npm run dev:web     # Web on http://localhost:5173 (or next free port)
+npm run dev         # API + the app + the marketing site, all three
+```
+
+Then open **http://localhost:5173** — the marketing site, which is the root of
+the deployed site too. The app lives under **/app**:
+
+```
+http://localhost:5173/          marketing site   (landing-page-v2)
+http://localhost:5173/app/      the product      (apps/web)
+http://localhost:4000           the API
+```
+
+The marketing dev server proxies `/app` to the app's own dev server (5174), so
+development has one origin laid out exactly like the deploy — a path bug that
+only shows up under a prefix shows up here rather than first in production.
+
+Individually:
+
+```bash
+npm run dev:api      # API on http://localhost:4000
+npm run dev:web      # the app alone, http://localhost:5174/app/
+npm run dev:landing  # the marketing site alone, http://localhost:5173
 ```
 
 The web app is **role-aware**: the entire shell and screens change based on who

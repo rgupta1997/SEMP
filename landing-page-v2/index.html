@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/sportagon-mark.png" />
+
+    <title>Multi-Sport Tournament Management Software | Sportagon EOS</title>
+    <meta
+      name="description"
+      content="Run your entire sports event from one operating system. Registrations, teams, fixtures, live scoring, standings, certificates and reports for schools, colleges, corporates and tournament organizers. Start free."
+    />
+    <link rel="canonical" href="https://www.sportagon.in/eos" />
+    <meta name="theme-color" content="#004AAD" />
+
+    <!-- Apply a pinned theme before first paint, so a visitor who chose dark
+         doesn't get a white flash on every navigation. Nothing stored means no
+         attribute, which leaves prefers-color-scheme in charge. Key must match
+         KEY in src/lib/theme.js. -->
+    <script>
+      try {
+        var t = localStorage.getItem('sportagon_theme');
+        if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    </script>
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Sportagon EOS" />
+    <meta property="og:title" content="Multi-Sport Tournament Management Software | Sportagon EOS" />
+    <meta
+      property="og:description"
+      content="One operating system for the whole tournament: registrations, fixtures, live scoring, standings, certificates and reports."
+    />
+    <meta property="og:url" content="https://www.sportagon.in/eos" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Sportagon EOS",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Web",
+        "description": "End-to-end multi-sport tournament management: registrations, teams, fixtures, live scoring, standings, certificates and reports.",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "INR" }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

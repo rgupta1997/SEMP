@@ -218,7 +218,12 @@ function AppRoutes() {
 
 export function App() {
   return (
-    <BrowserRouter>
+    // basename comes from Vite's `base` (see vite.config.ts) rather than being
+    // written out again here, because the two MUST agree: `base` decides where the
+    // built assets live, basename decides which URL prefix the router strips. If
+    // they ever disagreed the app would load its JS and then route every path to
+    // the catch-all. One value, no drift.
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <ToastProvider>
         <ConfirmProvider>
           <TourProvider>
