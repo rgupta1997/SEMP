@@ -8,7 +8,7 @@ import { usePermissions } from '../../lib/permissions';
 import { titleCase } from '../../lib/format';
 import { DataList } from '../../components/primitives';
 import {
-  Avatar, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field,
+  Avatar, BackButton, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field,
   ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Spinner, toast,
 } from '../../components/ui';
 
@@ -249,6 +249,11 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
     <>
       {!embedded && (
         <>
+          {/* Reached two ways: as an Administration tab (embedded, where the rail
+              already says where you are) and as its own deep link from the "Add
+              members" onboarding step - which drops you here with no trail back to
+              the dashboard you came from. Only the second case needs this. */}
+          <BackButton to={`/organizations/${orgId}/overview`}>Back to Dashboard</BackButton>
           <PageHeader title="Members" subtitle="Who belongs to this organisation, and what each of them may do." />
         </>
       )}

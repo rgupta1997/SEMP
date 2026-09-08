@@ -61,7 +61,12 @@ interface Report {
 interface Outcome { total: number; added: number; skipped: RowResult[]; credentials: Credential[] }
 
 /** A person the search picker found - already a real account, just missing from this roll. */
-interface FoundUser { id: string; name: string; email: string; phone: string | null }
+interface FoundUser {
+  id: string; name: string; email: string; phone: string | null;
+  /** Non-reversible fingerprint of the real number, present even when `phone`
+   * arrives masked - see the note on groupByPhone. */
+  phone_key?: string | null;
+}
 
 /** A found account picked to link, plus the SAME placement fields a manual row gets -
  * being an existing account doesn't mean this institution already knows their roll
@@ -70,12 +75,6 @@ interface LinkedPerson extends FoundUser { member_code: string; unit: string }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const digits = (s: string) => s.replace(/\D/g, '');
-/** The last 10 digits, same convention `phoneLast10` uses server-side - "+91 98765
- * 43210" and "9876543210" are the same number, and must compare equal here too. */
-const last10 = (phone: string | null | undefined) => {
-  const d = digits(phone ?? '');
-  return d.length >= 10 ? d.slice(-10) : '';
-};
 
 // The first rules the server's validator applies, applied here too so an obvious
 // mistake costs a keystroke rather than a round trip. Everything it does NOT
@@ -114,19 +113,19 @@ function unitFields(unit: string): { campus?: string; department?: string } {
  * Every found account, grouped by phone number - the one signal that surfaces Option B
  * (several accounts sharing a number) instead of hiding it behind a single guess.
  *
- * Grouped by the last 10 digits, the same normalisation the server uses everywhere
- * else a phone is compared (phoneLast10) - "9876543210" and "+91 98765 43210" are
- * the same number and MUST land in the same group, or two accounts that share a
- * number look unrelated just because one of them was typed with a country code.
- * An account with no phone on file gets a group of its own rather than being
- * lumped under "no number".
+ * Grouped by `phone_key`, a fingerprint the server computes from the real number
+ * (see phoneGroupKey) - NOT by parsing `phone` here, which is masked to all but its
+ * last two digits until the searcher has typed the complete number. Two accounts
+ * sharing a number still land in the same group; the actual digits just aren't
+ * needed to tell them apart from a third account's different one. An account with
+ * no phone (or too few digits to fingerprint) gets a group of its own rather than
+ * being lumped under one blank key.
  */
 interface PhoneGroup { key: string; phone: string | null; users: FoundUser[] }
 function groupByPhone(users: FoundUser[]): PhoneGroup[] {
   const byKey = new Map<string, PhoneGroup>();
   for (const u of users) {
-    const l10 = last10(u.phone);
-    const key = l10 || `solo:${u.id}`;
+    const key = u.phone_key || `solo:${u.id}`;
     const g = byKey.get(key);
     if (g) g.users.push(u);
     else byKey.set(key, { key, phone: u.phone, users: [u] });
@@ -173,12 +172,16 @@ export function AddPlayersModal({
   // Phone-only: this picker's whole reason to exist is Option B (several accounts
   // on one number), so a hit on name or email would surface the WRONG kind of
   // match - somebody unrelated whose email happens to contain the same digits.
-  // Unmasked for now - real numbers, on purpose (a later pass, not this one).
+  // Masked (mask=1): a partial digit search can return other people's numbers, and
+  // there is no reason to show a stranger's full phone to someone typing a few
+  // digits - the server reveals it in full only once the complete 10-digit number
+  // has been typed and matches exactly, which is also the one case where only a
+  // single result remains, so there's nothing left to hide.
   // Nothing loads until there are enough digits to mean something - unlike a
   // typeahead that shows "the first 10 people" by default, a query too short to
   // narrow anything would just be noise above the manual rows.
   const queryDigits = digits(debounced);
-  const searchPath = queryDigits.length >= 3 ? `/users?q=${encodeURIComponent(queryDigits)}&phone_only=1&limit=25` : null;
+  const searchPath = queryDigits.length >= 3 ? `/users?q=${encodeURIComponent(queryDigits)}&phone_only=1&mask=1&limit=25` : null;
   const { data: found = [], isFetching: searching } = useApi<FoundUser[]>(searchPath);
   const resultGroups = useMemo(() => groupByPhone(found), [found]);
 
@@ -419,6 +422,11 @@ export function AddPlayersModal({
                     const isOpen = expanded.has(g.key);
                     const multi = g.users.length > 1;
                     const primary = g.users[0];
+                    // Masked numbers can't seed this - copying "••••••••10" into the
+                    // new row's phone field would hand the manual form a value that
+                    // isn't a real number at all. It only becomes available once the
+                    // number is actually revealed (the complete-match case below).
+                    const phoneRevealed = !!g.phone && !g.phone.includes('•');
                     // One "start a new account here" action per NUMBER, not per
                     // account under it - it means "someone else on this same
                     // number", which is a fact about the group, not any one row in it.
@@ -426,8 +434,10 @@ export function AddPlayersModal({
                       <button
                         type="button"
                         onClick={(e) => { e.preventDefault(); e.stopPropagation(); addRowWithPhone(g.phone!); }}
-                        disabled={!canQuickAdd}
-                        title="Start a new account on this number - e.g. with a work email"
+                        disabled={!canQuickAdd || !phoneRevealed}
+                        title={phoneRevealed
+                          ? 'Start a new account on this number - e.g. with a work email'
+                          : 'Type the complete number to reveal it before starting a new account on it'}
                         aria-label="Start a new account on this number"
                         className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-30 disabled:hover:bg-transparent dark:hover:bg-slate-700 dark:hover:text-slate-200"
                       >

@@ -6,7 +6,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { ForbiddenError } from '../../shared/errors.js';
-import { deriveProvisionedPassword, findUserByPhone, hashProvisionedPassword, maskEmail, maskPhone, phoneLast10 } from './users.helpers.js';
+import { deriveProvisionedPassword, findUserByPhone, hashProvisionedPassword, maskEmail, maskPhone, phoneGroupKey, phoneLast10 } from './users.helpers.js';
 import { notify } from '@semp/notifications/server/notify.js';
 
 // Fields safe to return to any caller (never the password hash).
@@ -76,11 +76,15 @@ export function makeUsersRouter(prisma: Prisma): Router {
 
     // Privacy: when `mask` is set (the assign pickers), hide each phone except the
     // one whose full number the searcher has typed correctly (last-10 exact match).
+    // `phone_key` rides along regardless of masking - it's what lets a caller group
+    // "these results share one number" (Option B) by equality without ever needing
+    // the real digits to do it, which a masked phone alone can't offer that anymore.
     const mask = req.query.mask === '1' || req.query.mask === 'true';
     const qLast10 = qDigits.length >= 10 ? qDigits.slice(-10) : '';
-    const out = mask
-      ? rows.map((u) => ({ ...u, phone: qLast10 && phoneLast10(u.phone) === qLast10 ? u.phone : maskPhone(u.phone) }))
-      : rows;
+    const out = rows.map((u) => {
+      const revealed = !mask || (!!qLast10 && phoneLast10(u.phone) === qLast10);
+      return { ...u, phone: revealed ? u.phone : maskPhone(u.phone), phone_key: phoneGroupKey(u.phone) };
+    });
     res.json(out);
   }));
 
