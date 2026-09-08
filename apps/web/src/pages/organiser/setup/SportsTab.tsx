@@ -407,8 +407,8 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, d
 }
 
 /* ----------------------------- Edit / delete discipline modal ----------------------------- */
-function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, formats, path, onClose }:
-  { discipline: any; sportName: string; sportFormatId?: string | null; venues: any[]; formats: any[]; path: string; onClose: () => void }) {
+function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, formats, path, fixturesPath, onClose, onNeedsStageConfig }:
+  { discipline: any; sportName: string; sportFormatId?: string | null; venues: any[]; formats: any[]; path: string; fixturesPath: string; onClose: () => void; onNeedsStageConfig: () => void }) {
   const [venueId, setVenueId] = useState(discipline.venue_id ?? '');
   const [entryType, setEntryType] = useState(discipline.entry_type ?? 'team');
   const [squadMin, setSquadMin] = useState(String(discipline.squad_min ?? 1));
@@ -424,8 +424,25 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
     if (s) { setSquadMin(String(s.min)); setSquadMax(String(s.max)); }
   };
 
-  const update = useApiMutation((body: any) => api('PATCH', `/tournament-disciplines/${discipline.id}`, body), [path], onClose);
+  // Whether saving will also touch the draw, and how. Blank format_id means
+  // "inherit the sport's", so the EFFECTIVE new format - not the raw id - is what
+  // decides whether this is buildable by the plain regenerate route at all.
+  const formatChanged = formatId !== (discipline.format_id ?? '');
+  const effectiveNewFormatName = formatId ? formats.find((f) => f.id === formatId)?.name : sportFormatName;
+  const targetPoolShaped = isPoolShapedFormat(effectiveNewFormatName);
+  // Pool-shaped formats (Groups + Knockout and the like) can only ever be built by
+  // the stage-config wizard - the plain generate route below produces pools XOR a
+  // bracket, never both (EOS-127) - so those hand off to the wizard instead of
+  // attempting a regenerate that would silently come out wrong.
+  const willAutoRegenerate = formatChanged && !targetPoolShaped;
+  const willNeedStageConfig = formatChanged && targetPoolShaped;
+
+  const update = useApiMutation((body: any) => api('PATCH', `/tournament-disciplines/${discipline.id}`, body), [path]);
   const remove = useApiMutation(() => api('DELETE', `/tournament-disciplines/${discipline.id}`), [path], onClose);
+  // Same endpoint the Schedule page's own Regenerate button calls - its guards
+  // (refuses over played matches, incremental-adds onto a genuine league draw,
+  // otherwise rebuilds) apply here exactly as they would there.
+  const regenerate = useApiMutation((body: any) => api('POST', `/tournament-disciplines/${discipline.id}/fixtures/generate`, body), [path, fixturesPath]);
 
   const save = () => {
     setError(null);
@@ -441,11 +458,33 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
         squad_max: Number(squadMax),
         status,
       },
-      { onError: (e: any) => setError(e.message) },
+      {
+        onSuccess: () => {
+          if (willNeedStageConfig) { onNeedsStageConfig(); return; }
+          if (!willAutoRegenerate) { onClose(); return; }
+          // `replace: true` always - this modal only reaches here because the
+          // organiser deliberately changed the format and asked to save it, which
+          // is the same explicit consent the Schedule page's confirm dialog
+          // collects before it does the same thing.
+          regenerate.mutate({ replace: true }, {
+            onSuccess: () => { toast.success('Format saved and the draw was regenerated'); onClose(); },
+            // The format itself is already saved at this point - only the rebuild
+            // failed (most likely because matches have already been played), so
+            // this stays open and says so rather than pretending nothing happened.
+            onError: (e: any) => setError(`Saved the new format, but the draw could not be regenerated: ${e.message}`),
+          });
+        },
+        onError: (e: any) => setError(e.message),
+      },
     );
   };
 
   const name = discipline.disciplines?.name ?? sportName;
+  const formatHint = willAutoRegenerate
+    ? 'Saving will regenerate this draw right away with the new format.'
+    : willNeedStageConfig
+      ? 'This format needs pool configuration - saving opens the stage-config wizard next.'
+      : 'Changing this affects the next draw - regenerate on the Schedule tab to apply.';
   return (
     <Modal title={`Edit discipline · ${name}`} onClose={onClose}>
       <Field label="Venue">
@@ -454,7 +493,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
           {venues.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
         </Select>
       </Field>
-      <Field label="Fixture format" hint="Changing this affects the next draw - regenerate on the Schedule tab to apply.">
+      <Field label="Fixture format" hint={formatHint}>
         <Select value={formatId} onChange={(e) => setFormatId(e.target.value)}>
           <option value="">Same as sport{sportFormatName ? ` (${sportFormatName})` : ''}</option>
           {formats.filter((f) => isRankingFormat(f.name) === isRankingFormat(sportFormatName)).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -488,7 +527,10 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
         </Button>
         <div className="flex gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={update.isPending} onClick={save}>{update.isPending ? 'Saving…' : 'Save changes'}</Button>
+          <Button disabled={update.isPending || regenerate.isPending} onClick={save}>
+            {update.isPending ? 'Saving…' : regenerate.isPending ? 'Regenerating…'
+              : willAutoRegenerate ? 'Save and regenerate' : willNeedStageConfig ? 'Save and configure stages' : 'Save changes'}
+          </Button>
         </div>
       </div>
     </Modal>
@@ -547,7 +589,8 @@ function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportNam
 }
 
 /* ----------------------------- Tournament-sport card ----------------------------- */
-function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws, drawsPath }: { ts: any; sportName: string; sportIcon?: string; formatName: string; formats: any[]; venues: any[]; draws: any[]; drawsPath: string }) {
+function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws, drawsPath, fixturesPath }: { ts: any; sportName: string; sportIcon?: string; formatName: string; formats: any[]; venues: any[]; draws: any[]; drawsPath: string; fixturesPath: string }) {
+  const qc = useQueryClient();
   const [open, setOpen] = useState(true);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
@@ -632,10 +675,22 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
             </div>
           )}
           {adding && <AddDisciplineModal tournamentSport={ts} existing={disciplines} venues={venues} formats={formats} drawsPath={drawsPath} onClose={() => setAdding(false)} />}
-          {editing && <EditDisciplineModal discipline={editing} sportName={sportName} sportFormatId={ts.format_id} venues={venues} formats={formats} path={drawsPath} onClose={() => setEditing(null)} />}
+          {editing && (
+            <EditDisciplineModal
+              discipline={editing} sportName={sportName} sportFormatId={ts.format_id} venues={venues} formats={formats}
+              path={drawsPath} fixturesPath={fixturesPath}
+              onClose={() => setEditing(null)}
+              // A pool-shaped format (Groups + Knockout and the like) can't be built by
+              // the plain regenerate this modal otherwise triggers - see EOS-127 - so
+              // saving into one hands off to the same stage-config wizard the row's own
+              // "Configure stages" button opens, instead of silently building a bare
+              // bracket with no pools.
+              onNeedsStageConfig={() => { const d = editing; setEditing(null); setConfiguringStages(d); }}
+            />
+          )}
           {configuringStages && (
             <Modal title="Configure stages" onClose={() => setConfiguringStages(null)} wide>
-              <StageConfigWizard tournamentDisciplineId={configuringStages.id} onGenerated={() => setConfiguringStages(null)} />
+              <StageConfigWizard tournamentDisciplineId={configuringStages.id} onGenerated={() => { qc.invalidateQueries({ queryKey: [fixturesPath] }); setConfiguringStages(null); }} />
             </Modal>
           )}
         </div>
@@ -659,6 +714,10 @@ export function SportsTab({ eventId }: { eventId: string }) {
   // per sport row); each SportRow gets the slice for its own tournament_sport.
   const drawsPath = `/championships/${eventId}/draws`;
   const { data: allDraws = [] } = useApi<any[]>(drawsPath);
+  // The Schedule page's own fixtures query - invalidated after a format change
+  // auto-regenerates a draw here, so Schedule shows the rebuilt draw without a
+  // stale cache needing a manual refresh to catch up.
+  const fixturesPath = `/championships/${eventId}/fixtures`;
   const [adding, setAdding] = useState(false);
 
   if (tournaments.length === 0) {
@@ -688,7 +747,7 @@ export function SportsTab({ eventId }: { eventId: string }) {
         <div className="grid gap-3">
           {tsports.map((ts) => (
             <SportRow key={ts.id} ts={ts} sportName={sportName(ts.sport_id)} sportIcon={sportIcon(ts.sport_id)} formatName={formatName(ts.format_id)} formats={formats} venues={venues}
-              draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} drawsPath={drawsPath} />
+              draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} drawsPath={drawsPath} fixturesPath={fixturesPath} />
           ))}
         </div>
       )}
