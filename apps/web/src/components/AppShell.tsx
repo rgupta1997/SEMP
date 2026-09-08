@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   BadgeCheck, Compass, Flag, FlaskConical, Landmark, Layers, LayoutGrid, LayoutList, Lock,
@@ -9,7 +9,7 @@ import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
 import { BRAND } from '../lib/brand';
 import { ContextSwitcher } from './ContextSwitcher';
 import { useWorkspace } from '../lib/useWorkspace';
-import { applyTenantTheme } from '../lib/tenant-theme';
+import { applyTenantTheme, DEFAULT_BRAND } from '../lib/tenant-theme';
 import { navIcon } from '../lib/nav-icons';
 import { hrefFor, resolveNav } from '../lib/workspace';
 import { BottomNav } from './BottomNav';
@@ -217,6 +217,25 @@ export function AppShell() {
 
   useEffect(() => () => applyTenantTheme(null), []);
 
+  /**
+   * Detect an actual workspace SWITCH (My Space <-> an org <-> an event), as
+   * opposed to ordinary navigation within the one you're already in - the two
+   * need different weight of animation, and only the shell knows which one just
+   * happened.
+   *
+   * Refs, mutated during render rather than in an effect: an effect fires one
+   * commit late, which is fine for a side effect but wrong here - the content
+   * pane's class and the wash overlay's key both have to be right in the SAME
+   * render that already remounts the content (key={pathname}), or the switch
+   * plays the wrong (or no) animation for that one frame.
+   */
+  const workspaceId = ws.active?.id ?? null;
+  const prevWorkspaceIdRef = useRef<string | null>(null);
+  const washGenRef = useRef(0);
+  const isWorkspaceSwitch = prevWorkspaceIdRef.current !== null && workspaceId !== null && prevWorkspaceIdRef.current !== workspaceId;
+  if (isWorkspaceSwitch) washGenRef.current += 1;
+  prevWorkspaceIdRef.current = workspaceId;
+
   const eventId = ctx ? parseEventId(pathname) : null;
   const { data: championship } = useApi<EventSummary>(eventId ? `/championships/${eventId}` : null);
 
@@ -270,6 +289,10 @@ export function AppShell() {
             {railed && <span className="hidden md:block"><BrandMark height={22} markOnly /></span>}
             <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-[var(--sidebar-muted)] transition-[background-color,color,transform] duration-150 hover:bg-[var(--sidebar-active)] hover:text-[var(--sidebar-fg-strong)] active:scale-90 md:hidden" aria-label="Close menu"><X size={16} /></button>
           </div>
+          {/* Keyed to the workspace, not the route: re-entering on every click
+              inside the same workspace would be noise, but a genuine switch
+              should read as "this whole side changed", not just its href. */}
+          <div key={workspaceId ?? 'none'} className="contents animate-sidebar-switch">
           {/* The switcher sits above the nav because it changes what the nav IS. */}
           {!isPlatform && ws.contexts.length > 0 && (
             <div className={cn('px-3 pt-3', railed && 'md:hidden')}>
@@ -337,6 +360,7 @@ export function AppShell() {
               </div>
             ))}
           </nav>
+          </div>
         </aside>
 
         {/* Main - pinned to the viewport height so only <main> scrolls; the sidebar
@@ -419,12 +443,31 @@ export function AppShell() {
           {/* pb-24 below md clears the tab bar; the bar carries its own
               safe-area padding for the home indicator beneath it. */}
           <main className="min-h-0 flex-1 overflow-auto bg-[var(--canvas)] p-4 pb-24 sm:p-6 md:pb-6 dark:bg-slate-950">
-            <div key={pathname} className={cn('mx-auto animate-page-enter', !eventId && 'max-w-6xl')}>
+            <div key={pathname} className={cn('mx-auto', isWorkspaceSwitch ? 'animate-workspace-enter' : 'animate-page-enter', !eventId && 'max-w-6xl')}>
               <Outlet />
             </div>
           </main>
           <BottomNav items={contextNav} groups={groups} ctx={ws.active} onMore={() => setSidebarOpen(true)} />
         </div>
+        {/* A thin top-loading-bar sweep on a real switch - never on first load
+            (washGenRef starts at 0 and only moves on an actual prev-id -> new-id
+            transition). Fixed Sportagon blue always, deliberately NOT the
+            KIND_META tile colour - an org's own brand shows all over the
+            sidebar and chrome already; this cue is the product saying "you
+            switched", not another surface for the tenant's colour. Always
+            mounted once unlocked so an unrelated re-render elsewhere can never
+            cut its animation short; re-keyed per switch so it replays cleanly
+            and settles back to invisible (animation-fill-mode both) until the
+            next one. Deliberately never covers the page - the cue that this is
+            a different space now, not a curtain over it. */}
+        {washGenRef.current > 0 && (
+          <div
+            key={washGenRef.current}
+            aria-hidden
+            className="pointer-events-none fixed inset-x-0 top-0 z-[80] h-[3px] animate-workspace-bar"
+            style={{ background: DEFAULT_BRAND }}
+          />
+        )}
         {showFeedback && (
           <FeedbackWidget
             championshipId={isChampionshipOverview ? fbSegs[1] : undefined}

@@ -29,6 +29,11 @@ import { GENDERS, validateRoster, type RosterContext, type RosterRow, type Roste
 // 'prefer_not_to_say' is reported as its own category rather than dropped.
 
 const rosterRowSchema = z.object({
+  // A specific account the caller already resolved (the search-and-link picker) -
+  // see the note on RosterRow.user_id for why this exists at all: a phone number
+  // is not unique here, and this is what lets a row point at exactly one account
+  // instead of leaving phone/email matching to guess among several.
+  user_id: z.string().uuid().nullish(),
   name: z.string().max(200).nullish(),
   email: z.string().max(200).nullish(),
   phone: z.string().max(40).nullish(),
@@ -52,7 +57,14 @@ const rosterImportSchema = z.object({
   consent_version: z.string().max(80).nullish(),
 });
 
-const addPersonSchema = rosterRowSchema.extend({ name: z.string().min(1).max(200) });
+// A name is required to CREATE a new account, but a row that links an existing
+// one already has a name - the account's own. Enforced as a refinement rather
+// than overriding the field to `.min(1)`, which would reject a link-only payload
+// (name left blank because the caller already picked an account) outright.
+const addPersonSchema = rosterRowSchema.refine(
+  (v) => !!v.user_id || !!(v.name && v.name.trim()),
+  { message: 'A name is required.', path: ['name'] },
+);
 
 // Bulk verification (J1-E6). Capped at one roll's worth per call so a runaway client
 // cannot open a transaction over the whole table.
@@ -149,8 +161,9 @@ export function makePeopleRouter(prisma: Prisma): Router {
   async function loadContext(organizationId: string, rows: RosterRow[]): Promise<RosterContext> {
     const phones = [...new Set(rows.map((r) => phoneLast10(r.phone)).filter((p) => p.length === 10))];
     const emails = [...new Set(rows.map((r) => (r.email ?? '').trim().toLowerCase()).filter(Boolean))];
+    const linkedIds = [...new Set(rows.map((r) => r.user_id).filter((id): id is string => !!id))];
 
-    const [byPhone, byEmail, units, members] = await Promise.all([
+    const [byPhone, byEmail, units, members, byId] = await Promise.all([
       phones.length
         ? prisma.$queryRawUnsafe<Array<{ id: string; name: string; phone: string | null }>>(
           `select id, name, phone from users
@@ -161,17 +174,23 @@ export function makePeopleRouter(prisma: Prisma): Router {
       emails.length
         ? prisma.users.findMany({ where: { email: { in: emails } }, select: { id: true, name: true, email: true } })
         : Promise.resolve([]),
-      prisma.org_units.findMany({ where: { organization_id: organizationId }, select: { id: true, name: true, type: true } }),
+      prisma.org_units.findMany({ where: { organization_id: organizationId }, select: { id: true, name: true, type: true, parent_id: true } }),
       prisma.organization_members.findMany({
         where: { organization_id: organizationId },
         select: { user_id: true, member_code: true },
       }),
+      // Rows carrying an explicit `user_id` (the search-and-link picker) skip
+      // phone/email matching entirely, so their account is looked up directly here.
+      linkedIds.length
+        ? prisma.users.findMany({ where: { id: { in: linkedIds } }, select: { id: true, name: true, email: true } })
+        : Promise.resolve([]),
     ]);
 
     return {
       usersByPhone: new Map(byPhone.map((u) => [phoneLast10(u.phone), { id: u.id, name: u.name }])),
+      usersById: new Map(byId.map((u) => [u.id, { id: u.id, name: u.name, email: u.email }])),
       usersByEmail: new Map(byEmail.map((u) => [u.email.toLowerCase(), { id: u.id, name: u.name }])),
-      unitsByName: new Map(units.map((u) => [u.name.trim().toLowerCase(), { id: u.id, type: u.type }])),
+      unitsByName: new Map(units.map((u) => [u.name.trim().toLowerCase(), { id: u.id, type: u.type, parent_id: u.parent_id }])),
       memberUserIds: new Set(members.map((m) => m.user_id)),
       memberCodeOwner: new Map(
         members.filter((m) => m.member_code).map((m) => [m.member_code!.trim().toLowerCase(), m.user_id]),
@@ -304,15 +323,18 @@ export function makePeopleRouter(prisma: Prisma): Router {
         );
       }
 
-      // Placement onto the membership. Note what the DO UPDATE does NOT touch:
-      // `verification`. Re-running a file must not knock somebody already
-      // verified back to pending - that is what makes the import idempotent in
-      // the sense J1-E5-S2 actually means.
+      // Placement onto the membership. A roll import is the institution adding its
+      // own people - unlike a self-service join request, there is nobody else who
+      // needs to vouch for them, so they land verified, stamped with the admin who
+      // ran this import. Note what the DO UPDATE does NOT touch: `verification`.
+      // Re-running a file must not change a verification decision already made
+      // (including a rejection) - that is what makes the import idempotent in the
+      // sense J1-E5-S2 actually means.
       await tx.$executeRawUnsafe(
         `insert into organization_members
-           (user_id, organization_id, role, status, member_code, scholarship, verification)
+           (user_id, organization_id, role, status, member_code, scholarship, verification, verified_by, verified_at)
          select v.user_id::uuid, $1::uuid, 'member', 'active',
-                v.member_code, v.scholarship::boolean, 'pending'
+                v.member_code, v.scholarship::boolean, 'verified', $5::uuid, now()
          from unnest($2::text[], $3::text[], $4::text[])
            as v(user_id, member_code, scholarship)
          on conflict (user_id, organization_id) do update set
@@ -323,13 +345,15 @@ export function makePeopleRouter(prisma: Prisma): Router {
         resolved.map((x) => x.r.member_code),
         // Stringified for the same reason as above; `::boolean` restores it.
         resolved.map((x) => (x.r.scholarship == null ? null : String(x.r.scholarship))),
+        req.user!.id,
       );
 
       // Placement lives on its own table now, and is ADDITIVE: a sheet naming a
-      // campus adds that campus, and re-importing never strips units somebody was
-      // given on the Campuses screen. `do nothing` on conflict is what keeps
-      // re-running the same file a no-op rather than an error.
-      const placements = resolved.filter((x) => x.r.org_unit_id);
+      // campus AND a batch places the person in both (flattened here to one row
+      // per unit per person, not one row per person), and re-importing never
+      // strips units somebody was given on the Campuses screen. `do nothing` on
+      // conflict is what keeps re-running the same file a no-op rather than an error.
+      const placements = resolved.flatMap((x) => x.r.org_unit_ids.map((org_unit_id) => ({ org_unit_id, userId: x.userId })));
       if (placements.length) {
         await tx.$executeRawUnsafe(
           `insert into org_unit_members (organization_id, org_unit_id, user_id)
@@ -337,8 +361,8 @@ export function makePeopleRouter(prisma: Prisma): Router {
            from unnest($2::text[], $3::text[]) as v(org_unit_id, user_id)
            on conflict (org_unit_id, user_id) do nothing`,
           organizationId,
-          placements.map((x) => x.r.org_unit_id),
-          placements.map((x) => x.userId),
+          placements.map((p) => p.org_unit_id),
+          placements.map((p) => p.userId),
         );
       }
 
@@ -404,9 +428,13 @@ export function makePeopleRouter(prisma: Prisma): Router {
         ...(row.scholarship != null ? { scholarship: row.scholarship } : {}),
       },
       create: {
+        // An admin adding a person by hand is the institution vouching for them
+        // directly - there is nobody else to verify it, so this lands verified
+        // (unlike a self-service join request, which stays pending for an
+        // owner/admin to approve).
         user_id: userId, organization_id: organizationId, role: 'member', status: 'active',
         member_code: row.member_code, scholarship: row.scholarship,
-        verification: 'pending',
+        verification: 'verified', verified_by: req.user!.id, verified_at: new Date(),
       },
       include: { users: { select: { name: true, email: true, phone: true } } },
     });
@@ -415,9 +443,9 @@ export function makePeopleRouter(prisma: Prisma): Router {
     // the person in both, and re-importing a corrected sheet adds rather than
     // replaces - an import that silently dropped somebody's other units would undo
     // work done on the Campuses screen.
-    if (row.org_unit_id) {
+    if (row.org_unit_ids.length) {
       await prisma.org_unit_members.createMany({
-        data: [{ organization_id: organizationId, org_unit_id: row.org_unit_id, user_id: userId }],
+        data: row.org_unit_ids.map((org_unit_id) => ({ organization_id: organizationId, org_unit_id, user_id: userId })),
         skipDuplicates: true,
       });
     }
@@ -427,7 +455,7 @@ export function makePeopleRouter(prisma: Prisma): Router {
       target: { type: 'organization_members', id: member.id, label: member.users?.name ?? 'Person' },
       organizationId,
       summary: `Added ${member.users?.name ?? 'a person'} to the roll`,
-      diff: { verification: { from: null, to: 'pending' } },
+      diff: { verification: { from: null, to: 'verified' } },
     });
 
     res.status(201).json({ ...personView(member), credential });

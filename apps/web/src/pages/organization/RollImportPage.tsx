@@ -5,6 +5,7 @@ import { api, ApiError } from '../../lib/api';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { CapabilityLock } from '../../components/CapabilityLock';
 import { downloadCsvTemplate, matrixToRows, readFileToMatrix, type ImportColumn } from '../../lib/import';
+import { useOrgUnits } from '../../lib/units';
 import {
   Badge, BackButton, Button, Card, CardBody, CardHeader, PageHeader, Spinner, toast, INSET,} from '../../components/ui';
 
@@ -29,10 +30,19 @@ const COLUMNS: ImportColumn[] = [
 ];
 
 const TEMPLATE_HEADERS = COLUMNS.map((c) => c.key);
-const TEMPLATE_SAMPLE = [[
-  'Asha Rao', 'asha@iimb.ac.in', '9876543210', 'Computer Science', '2024', 'CS-2024-017',
-  'female', '2005-04-03', 'yes',
-]];
+// Only ever shown when the org has genuinely built no structure yet - a name
+// invented here would otherwise be indistinguishable from a real one, and get
+// rejected the exact same way ("No campus called X exists") the moment someone
+// followed the example instead of reading past it.
+const PLACEHOLDER_CAMPUS = 'Computer Science';
+const PLACEHOLDER_BATCH = '2024';
+// A real date would be, and often IS, silently rewritten by whatever spreadsheet
+// app opens this file - Excel/Sheets recognise "2005-04-03" as a date value and
+// re-export it in the LOCAL system format on save (e.g. "03-04-2005"), which is
+// exactly the "date of birth should be YYYY-MM-DD" rejection this was causing.
+// Appending the format reminder makes the whole cell non-date-like text, so no
+// spreadsheet app touches it - it survives editing exactly as written.
+const SAMPLE_DOB = '2005-04-03 (YYYY-MM-DD)';
 
 interface RowResult {
   index: number;
@@ -63,6 +73,7 @@ const VERDICT_LABEL = {
 export function RollImportPage() {
   const { orgId } = useParams();
   const ws = useWorkspace();
+  const { flat: unitsFlat } = useOrgUnits(orgId);
   const fileRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -71,6 +82,17 @@ export function RollImportPage() {
   const [applied, setApplied] = useState(false);
 
   const reset = () => { setReport(null); setApplied(false); };
+
+  // The template's own campus/department, when this org has built its structure -
+  // showing a name that actually exists here is what lets a coordinator copy the
+  // pattern with confidence instead of guessing whether "Computer Science" means
+  // anything to THIS institution.
+  const sampleCampus = unitsFlat.find((u) => u.type === 'campus')?.name ?? PLACEHOLDER_CAMPUS;
+  const sampleDept = unitsFlat.find((u) => u.type === 'department')?.name ?? PLACEHOLDER_BATCH;
+  const templateSample = [[
+    'Asha Rao', 'asha@iimb.ac.in', '9876543210', sampleCampus, sampleDept, 'CS-2024-017',
+    'female', SAMPLE_DOB, 'yes',
+  ]];
 
   const onFile = async (file: File) => {
     try {
@@ -143,8 +165,8 @@ export function RollImportPage() {
       <Card>
         <CardHeader
           title="1 · Choose a file"
-          subtitle="Column headers are matched by name, so the order does not matter. Programmes and batches must already exist under Structure."
-          action={<Button variant="outline" size="sm" onClick={() => downloadCsvTemplate('student-roll-template.csv', TEMPLATE_HEADERS, TEMPLATE_SAMPLE)}>Download template</Button>}
+          subtitle="Column headers are matched by name, so the order does not matter. Programmes and batches must already exist under Structure, and date of birth must be YYYY-MM-DD."
+          action={<Button variant="outline" size="sm" onClick={() => downloadCsvTemplate('student-roll-template.csv', TEMPLATE_HEADERS, templateSample)}>Download template</Button>}
         />
         <CardBody className="space-y-3">
           <input
@@ -241,8 +263,8 @@ export function RollImportPage() {
               {busy ? 'Importing…' : `Import ${importable} ${importable === 1 ? 'person' : 'people'}`}
             </Button>
             <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-              Everyone imported starts as <strong>pending verification</strong>. Running the same file again
-              changes nothing.
+              Everyone imported is added as <strong>verified</strong>, since this is your own roll. Running the
+              same file again changes nothing.
             </p>
           </CardBody>
         </Card>

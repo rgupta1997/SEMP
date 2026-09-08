@@ -1,20 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Medal } from 'lucide-react';
+import { Medal, Pencil, Trash2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { ENTRY_TYPE, TOURNAMENT_DISCIPLINE_STATUS } from '@semp/shared';
 import { usePermissions } from '../../../lib/permissions';
-import { titleCase } from '../../../lib/format';
+import { isPoolShapedFormat, titleCase } from '../../../lib/format';
 import { eventTemplateFor } from '../../../features/scoring/templates';
 import { Badge, Button, Card, confirmDialog, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge, toast } from '../../../components/ui';
 import { StageConfigWizard } from '../../../components/StageConfigWizard';
-
-// Only group/pool-shaped formats have pools to branch out of - a plain Knockout or
-// League format has nothing for the stage wizard to configure, so it stays on the
-// existing single-stage flow entirely. Mirrors the substring test
-// apps/api/.../fixtures/domain/generators/index.ts uses to dispatch to generateGroups.
-const isPoolShapedFormat = (name?: string | null) => !!name && (name.trim().toLowerCase().includes('pool') || name.trim().toLowerCase().includes('group'));
 
 // Ranking/event sports (powerlifting, swimming, athletics) have no head-to-head matches,
 // so they're locked to the "Rankings" format. `eventTemplateFor` is the same per-sport
@@ -413,8 +407,8 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, d
 }
 
 /* ----------------------------- Edit / delete discipline modal ----------------------------- */
-function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, formats, path, onClose }:
-  { discipline: any; sportName: string; sportFormatId?: string | null; venues: any[]; formats: any[]; path: string; onClose: () => void }) {
+function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, formats, path, fixturesPath, onClose, onNeedsStageConfig }:
+  { discipline: any; sportName: string; sportFormatId?: string | null; venues: any[]; formats: any[]; path: string; fixturesPath: string; onClose: () => void; onNeedsStageConfig: () => void }) {
   const [venueId, setVenueId] = useState(discipline.venue_id ?? '');
   const [entryType, setEntryType] = useState(discipline.entry_type ?? 'team');
   const [squadMin, setSquadMin] = useState(String(discipline.squad_min ?? 1));
@@ -430,8 +424,25 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
     if (s) { setSquadMin(String(s.min)); setSquadMax(String(s.max)); }
   };
 
-  const update = useApiMutation((body: any) => api('PATCH', `/tournament-disciplines/${discipline.id}`, body), [path], onClose);
+  // Whether saving will also touch the draw, and how. Blank format_id means
+  // "inherit the sport's", so the EFFECTIVE new format - not the raw id - is what
+  // decides whether this is buildable by the plain regenerate route at all.
+  const formatChanged = formatId !== (discipline.format_id ?? '');
+  const effectiveNewFormatName = formatId ? formats.find((f) => f.id === formatId)?.name : sportFormatName;
+  const targetPoolShaped = isPoolShapedFormat(effectiveNewFormatName);
+  // Pool-shaped formats (Groups + Knockout and the like) can only ever be built by
+  // the stage-config wizard - the plain generate route below produces pools XOR a
+  // bracket, never both (EOS-127) - so those hand off to the wizard instead of
+  // attempting a regenerate that would silently come out wrong.
+  const willAutoRegenerate = formatChanged && !targetPoolShaped;
+  const willNeedStageConfig = formatChanged && targetPoolShaped;
+
+  const update = useApiMutation((body: any) => api('PATCH', `/tournament-disciplines/${discipline.id}`, body), [path]);
   const remove = useApiMutation(() => api('DELETE', `/tournament-disciplines/${discipline.id}`), [path], onClose);
+  // Same endpoint the Schedule page's own Regenerate button calls - its guards
+  // (refuses over played matches, incremental-adds onto a genuine league draw,
+  // otherwise rebuilds) apply here exactly as they would there.
+  const regenerate = useApiMutation((body: any) => api('POST', `/tournament-disciplines/${discipline.id}/fixtures/generate`, body), [path, fixturesPath]);
 
   const save = () => {
     setError(null);
@@ -447,11 +458,33 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
         squad_max: Number(squadMax),
         status,
       },
-      { onError: (e: any) => setError(e.message) },
+      {
+        onSuccess: () => {
+          if (willNeedStageConfig) { onNeedsStageConfig(); return; }
+          if (!willAutoRegenerate) { onClose(); return; }
+          // `replace: true` always - this modal only reaches here because the
+          // organiser deliberately changed the format and asked to save it, which
+          // is the same explicit consent the Schedule page's confirm dialog
+          // collects before it does the same thing.
+          regenerate.mutate({ replace: true }, {
+            onSuccess: () => { toast.success('Format saved and the draw was regenerated'); onClose(); },
+            // The format itself is already saved at this point - only the rebuild
+            // failed (most likely because matches have already been played), so
+            // this stays open and says so rather than pretending nothing happened.
+            onError: (e: any) => setError(`Saved the new format, but the draw could not be regenerated: ${e.message}`),
+          });
+        },
+        onError: (e: any) => setError(e.message),
+      },
     );
   };
 
   const name = discipline.disciplines?.name ?? sportName;
+  const formatHint = willAutoRegenerate
+    ? 'Saving will regenerate this draw right away with the new format.'
+    : willNeedStageConfig
+      ? 'This format needs pool configuration - saving opens the stage-config wizard next.'
+      : 'Changing this affects the next draw - regenerate on the Schedule tab to apply.';
   return (
     <Modal title={`Edit discipline · ${name}`} onClose={onClose}>
       <Field label="Venue">
@@ -460,7 +493,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
           {venues.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
         </Select>
       </Field>
-      <Field label="Fixture format" hint="Changing this affects the next draw - regenerate on the Schedule tab to apply.">
+      <Field label="Fixture format" hint={formatHint}>
         <Select value={formatId} onChange={(e) => setFormatId(e.target.value)}>
           <option value="">Same as sport{sportFormatName ? ` (${sportFormatName})` : ''}</option>
           {formats.filter((f) => isRankingFormat(f.name) === isRankingFormat(sportFormatName)).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -487,12 +520,17 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
       <div className="mt-2 flex items-center justify-between">
         <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
           onClick={async () => { if (await confirmDialog({ title: 'Delete discipline', confirmLabel: 'Delete discipline', message: `Delete the “${name}” discipline? Its unplayed fixtures and team entries will be removed. A discipline with completed or scored matches can’t be deleted.` })) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
-          disabled={remove.isPending}>
-          {remove.isPending ? 'Deleting…' : 'Delete discipline'}
+          disabled={remove.isPending}
+          aria-label="Delete discipline"
+          title={remove.isPending ? 'Deleting…' : 'Delete discipline'}>
+          <Trash2 size={16} />
         </Button>
         <div className="flex gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={update.isPending} onClick={save}>{update.isPending ? 'Saving…' : 'Save changes'}</Button>
+          <Button disabled={update.isPending || regenerate.isPending} onClick={save}>
+            {update.isPending ? 'Saving…' : regenerate.isPending ? 'Regenerating…'
+              : willAutoRegenerate ? 'Save and regenerate fixtures' : willNeedStageConfig ? 'Save and configure stages' : 'Save changes'}
+          </Button>
         </div>
       </div>
     </Modal>
@@ -536,8 +574,10 @@ function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportNam
       <div className="mt-2 flex items-center justify-between">
         <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
           onClick={async () => { if (await confirmDialog({ title: 'Remove sport', confirmLabel: 'Remove sport', message: `Remove “${sportName}” from this season? Its disciplines, unplayed fixtures and team entries will be removed. A sport with completed or scored matches can’t be removed.` })) remove.mutate(undefined, { onError: (e: any) => setError(e.message) }); }}
-          disabled={remove.isPending}>
-          {remove.isPending ? 'Removing…' : 'Remove sport'}
+          disabled={remove.isPending}
+          aria-label="Remove sport"
+          title={remove.isPending ? 'Removing…' : 'Remove sport'}>
+          <Trash2 size={16} />
         </Button>
         <div className="flex gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -549,7 +589,8 @@ function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportNam
 }
 
 /* ----------------------------- Tournament-sport card ----------------------------- */
-function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws, drawsPath }: { ts: any; sportName: string; sportIcon?: string; formatName: string; formats: any[]; venues: any[]; draws: any[]; drawsPath: string }) {
+function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws, drawsPath, fixturesPath }: { ts: any; sportName: string; sportIcon?: string; formatName: string; formats: any[]; venues: any[]; draws: any[]; drawsPath: string; fixturesPath: string }) {
+  const qc = useQueryClient();
   const [open, setOpen] = useState(true);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
@@ -577,8 +618,12 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="subtle" onClick={() => setEditingSport(true)}>Edit sport</Button>
-          <Button size="md" variant="ghost" className="text-rose-600 hover:bg-rose-50 dark:text-white dark:hover:bg-rose-500/20" disabled={removeSport.isPending} onClick={confirmRemoveSport}>{removeSport.isPending ? 'Removing…' : 'Remove'}</Button>
+          <Button size="sm" variant="subtle" onClick={() => setEditingSport(true)} aria-label="Edit sport" title="Edit sport">
+            <Pencil size={14} />
+          </Button>
+          <Button size="sm" variant="ghost" className="text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/20" disabled={removeSport.isPending} onClick={confirmRemoveSport} aria-label="Remove sport" title={removeSport.isPending ? 'Removing…' : 'Remove sport'}>
+            <Trash2 size={14} />
+          </Button>
           <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)}>{open ? 'Hide' : 'Manage'} disciplines</Button>
         </div>
       </div>
@@ -608,24 +653,44 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
                           <Badge tone={d.format_id ? 'violet' : 'slate'}>{effectiveFormat(d)}</Badge>
                         )}
                         <StatusBadge status={d.status} />
-                        <span className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-700 transition group-hover:bg-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:group-hover:bg-brand-500/25">✎ Edit</span>
+                        <span
+                          aria-label="Edit discipline"
+                          title="Edit discipline"
+                          className="inline-flex items-center rounded-lg bg-brand-50 p-1.5 text-brand-700 transition group-hover:bg-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:group-hover:bg-brand-500/25"
+                        >
+                          <Pencil size={14} />
+                        </span>
                       </div>
                     </button>
                     {isPoolShapedFormat(effectiveFormat(d)) && (
                       <Button size="sm" variant="ghost" className="ml-2 shrink-0" onClick={() => setConfiguringStages(d)}>Configure stages</Button>
                     )}
-                    <button type="button" title="Delete discipline" disabled={removeDiscipline.isPending} onClick={() => confirmRemoveDiscipline(d)}
-                      className="ml-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-base text-rose-600 transition hover:bg-rose-50 dark:text-white dark:hover:bg-rose-500/20">🗑</button>
+                    <button type="button" aria-label="Delete discipline" title={removeDiscipline.isPending ? 'Deleting…' : 'Delete discipline'} disabled={removeDiscipline.isPending} onClick={() => confirmRemoveDiscipline(d)}
+                      className="ml-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-rose-600 transition hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/20">
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 );
               })}
             </div>
           )}
           {adding && <AddDisciplineModal tournamentSport={ts} existing={disciplines} venues={venues} formats={formats} drawsPath={drawsPath} onClose={() => setAdding(false)} />}
-          {editing && <EditDisciplineModal discipline={editing} sportName={sportName} sportFormatId={ts.format_id} venues={venues} formats={formats} path={drawsPath} onClose={() => setEditing(null)} />}
+          {editing && (
+            <EditDisciplineModal
+              discipline={editing} sportName={sportName} sportFormatId={ts.format_id} venues={venues} formats={formats}
+              path={drawsPath} fixturesPath={fixturesPath}
+              onClose={() => setEditing(null)}
+              // A pool-shaped format (Groups + Knockout and the like) can't be built by
+              // the plain regenerate this modal otherwise triggers - see EOS-127 - so
+              // saving into one hands off to the same stage-config wizard the row's own
+              // "Configure stages" button opens, instead of silently building a bare
+              // bracket with no pools.
+              onNeedsStageConfig={() => { const d = editing; setEditing(null); setConfiguringStages(d); }}
+            />
+          )}
           {configuringStages && (
             <Modal title="Configure stages" onClose={() => setConfiguringStages(null)} wide>
-              <StageConfigWizard tournamentDisciplineId={configuringStages.id} onGenerated={() => setConfiguringStages(null)} />
+              <StageConfigWizard tournamentDisciplineId={configuringStages.id} onGenerated={() => { qc.invalidateQueries({ queryKey: [fixturesPath] }); setConfiguringStages(null); }} />
             </Modal>
           )}
         </div>
@@ -649,6 +714,10 @@ export function SportsTab({ eventId }: { eventId: string }) {
   // per sport row); each SportRow gets the slice for its own tournament_sport.
   const drawsPath = `/championships/${eventId}/draws`;
   const { data: allDraws = [] } = useApi<any[]>(drawsPath);
+  // The Schedule page's own fixtures query - invalidated after a format change
+  // auto-regenerates a draw here, so Schedule shows the rebuilt draw without a
+  // stale cache needing a manual refresh to catch up.
+  const fixturesPath = `/championships/${eventId}/fixtures`;
   const [adding, setAdding] = useState(false);
 
   if (tournaments.length === 0) {
@@ -678,7 +747,7 @@ export function SportsTab({ eventId }: { eventId: string }) {
         <div className="grid gap-3">
           {tsports.map((ts) => (
             <SportRow key={ts.id} ts={ts} sportName={sportName(ts.sport_id)} sportIcon={sportIcon(ts.sport_id)} formatName={formatName(ts.format_id)} formats={formats} venues={venues}
-              draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} drawsPath={drawsPath} />
+              draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} drawsPath={drawsPath} fixturesPath={fixturesPath} />
           ))}
         </div>
       )}

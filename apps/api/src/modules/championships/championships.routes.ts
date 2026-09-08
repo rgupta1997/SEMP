@@ -11,6 +11,7 @@ import { notify } from '@semp/notifications/server/notify.js';
 import { recomputeStandingsAtomic } from '../standings/standings.service.js';
 import { signShareToken } from '../public/share-token.js';
 import { listChampionshipFixtures } from './fixtures-list.js';
+import { autoLockDueFixtures } from '../fixtures/lock.service.js';
 import { managedChampionshipIds } from './manage-access.js';
 import { applyChampionshipTemplate } from './apply-template.js';
 import { captureShape, saveTemplate } from './templates.service.js';
@@ -586,8 +587,19 @@ export function makeEventsRouter(prisma: Prisma): Router {
   }));
 
   // All fixtures across the championship, flattened with team / ground / sport names -
-  // powers the schedule timeline (Gantt) view. Shared with the public share page.
+  // powers the schedule timeline (Gantt) view and the organiser's Results screen.
+  // Shared with the public share page.
   router.get('/:id/fixtures', asyncHandler(async (req, res) => {
+    // Lands any auto-lock this championship owes before the snapshot is taken -
+    // same "lazy sweep on the read that would otherwise show stale state" idea as
+    // landDuePlanChanges for billing. A finished result nobody reviewed for 30
+    // minutes becomes official here, on the exact screen that would show it
+    // waiting; errors never block the read itself.
+    try {
+      await autoLockDueFixtures(prisma, { championshipId: req.params.id });
+    } catch (err) {
+      console.error(`[auto-lock] sweep failed for championship ${req.params.id}:`, err);
+    }
     res.json(await listChampionshipFixtures(prisma, req.params.id));
   }));
 

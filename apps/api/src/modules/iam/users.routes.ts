@@ -6,7 +6,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { ForbiddenError } from '../../shared/errors.js';
-import { deriveProvisionedPassword, findUserByPhone, hashProvisionedPassword, maskEmail, maskPhone, phoneLast10 } from './users.helpers.js';
+import { deriveProvisionedPassword, findUserByPhone, hashProvisionedPassword, maskEmail, maskPhone, phoneGroupKey, phoneLast10 } from './users.helpers.js';
 import { notify } from '@semp/notifications/server/notify.js';
 
 // Fields safe to return to any caller (never the password hash).
@@ -31,11 +31,18 @@ export function makeUsersRouter(prisma: Prisma): Router {
   // List/search users - open to any authenticated caller (used by assign/roster
   // pickers). `q` matches name/email and, on its digits, phone; `limit` caps the
   // result count so pickers can show just the first few by default.
+  //
+  // `phone_only=1` narrows matching to JUST the phone digits, dropping name/email
+  // entirely - for the roster search-and-link picker, where the point is finding
+  // every account on ONE phone number (Option B: several can share it), and a
+  // name/email hit that merely happens to contain the same digits would be a
+  // wrong answer, not a broader one.
   router.get('/', asyncHandler(async (req, res) => {
     const organizationId = req.query.organization_id as string | undefined;
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const take = req.query.limit ? Math.min(Math.max(Number(req.query.limit) || 0, 0), 100) : undefined;
     const qDigits = q.replace(/\D/g, '');
+    const phoneOnly = req.query.phone_only === '1' || req.query.phone_only === 'true';
 
     // Phone is stored with formatting (e.g. "+91 98765 43210"), so a plain contains
     // can't match a digits-only query. Resolve phone hits on the normalized form via
@@ -52,13 +59,15 @@ export function makeUsersRouter(prisma: Prisma): Router {
     const rows = await prisma.users.findMany({
       where: {
         ...(organizationId ? { organization_id: organizationId } : {}),
-        ...(q ? {
-          OR: [
-            { name: { contains: q, mode: 'insensitive' } },
-            { email: { contains: q, mode: 'insensitive' } },
-            ...(phoneIds.length ? [{ id: { in: phoneIds } }] : []),
-          ],
-        } : {}),
+        ...(phoneOnly
+          ? { id: { in: phoneIds } } // no digits yet -> phoneIds is [] -> no rows, not "everyone"
+          : q ? {
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { email: { contains: q, mode: 'insensitive' } },
+              ...(phoneIds.length ? [{ id: { in: phoneIds } }] : []),
+            ],
+          } : {}),
       },
       select: PUBLIC_SELECT,
       orderBy: { created_at: 'desc' },
@@ -67,11 +76,15 @@ export function makeUsersRouter(prisma: Prisma): Router {
 
     // Privacy: when `mask` is set (the assign pickers), hide each phone except the
     // one whose full number the searcher has typed correctly (last-10 exact match).
+    // `phone_key` rides along regardless of masking - it's what lets a caller group
+    // "these results share one number" (Option B) by equality without ever needing
+    // the real digits to do it, which a masked phone alone can't offer that anymore.
     const mask = req.query.mask === '1' || req.query.mask === 'true';
     const qLast10 = qDigits.length >= 10 ? qDigits.slice(-10) : '';
-    const out = mask
-      ? rows.map((u) => ({ ...u, phone: qLast10 && phoneLast10(u.phone) === qLast10 ? u.phone : maskPhone(u.phone) }))
-      : rows;
+    const out = rows.map((u) => {
+      const revealed = !mask || (!!qLast10 && phoneLast10(u.phone) === qLast10);
+      return { ...u, phone: revealed ? u.phone : maskPhone(u.phone), phone_key: phoneGroupKey(u.phone) };
+    });
     res.json(out);
   }));
 

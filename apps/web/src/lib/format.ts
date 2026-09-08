@@ -1,3 +1,17 @@
+/**
+ * Does this format's name mean "pool stage(s) feeding a knockout", so ONLY the
+ * stage-config wizard (never the plain single-stage Generate button) can build it
+ * correctly? Mirrors the exact substring test the backend's own dispatcher uses to
+ * pick a generator (apps/api/.../fixtures/domain/generators/index.ts) - the two
+ * must never disagree about what counts as pool-shaped, or a format the wizard
+ * thinks it owns could still fall through to the single-stage route, and vice
+ * versa. Shared here (rather than duplicated per screen) so that stays true.
+ */
+export function isPoolShapedFormat(name?: string | null): boolean {
+  const n = (name ?? '').trim().toLowerCase();
+  return n.includes('pool') || n.includes('group');
+}
+
 // Title-case an enum/snake_case value for display: 'registration_open' -> 'Registration Open'.
 export function titleCase(value: string | null | undefined): string {
   if (!value) return '';

@@ -24,6 +24,16 @@ export const GENDERS = ['male', 'female', 'other', 'prefer_not_to_say'] as const
 export type Gender = (typeof GENDERS)[number];
 
 export interface RosterRow {
+  /**
+   * A SPECIFIC account, already disambiguated by the caller (the search-and-link
+   * picker), rather than left for phone/email matching to guess at. Necessary
+   * because a phone number is not an identity here - Option B (see
+   * accounts.service.ts) lets one number back several accounts with different
+   * emails, and `usersByPhone` below can only ever hold one of them. When this is
+   * set it wins outright: name/email/phone on the row are ignored for matching
+   * purposes (though harmless if a manual row also happens to carry them).
+   */
+  user_id?: string | null;
   name?: string | null;
   email?: string | null;
   phone?: string | null;
@@ -41,12 +51,20 @@ export interface RosterRow {
 
 /** What the caller looked up in the database so this can stay pure. */
 export interface RosterContext {
-  /** Existing accounts, by last-10 phone digits. */
+  /** Existing accounts, by last-10 phone digits. Collapses to ONE per number even
+   * when several accounts share it (Option B) - which is exactly why a row that
+   * already knows which account it means should carry `user_id` instead of
+   * relying on this. */
   usersByPhone: Map<string, { id: string; name: string }>;
   /** Existing accounts, by lowercased email. */
   usersByEmail: Map<string, { id: string; name: string }>;
-  /** Org units of this institution: lowercased name -> { id, type }. */
-  unitsByName: Map<string, { id: string; type: string }>;
+  /** Accounts explicitly referenced by a row's `user_id`, keyed by that id. */
+  usersById: Map<string, { id: string; name: string; email: string }>;
+  /** Org units of this institution: lowercased name -> { id, type, parent_id }.
+   * `parent_id` is a department's campus (null for a campus itself, the org's
+   * structure being exactly two levels) - see the note above the placements loop
+   * for why it's carried here. */
+  unitsByName: Map<string, { id: string; type: string; parent_id: string | null }>;
   /** Members already in this institution, by user id. */
   memberUserIds: Set<string>;
   /** member_code (lowercased) -> the user id already holding it here. */
@@ -63,7 +81,9 @@ export interface RosterRowResult {
   phone: string | null;
   /** Resolved on a match; null when the person will be created. */
   user_id: string | null;
-  org_unit_id: string | null;
+  /** Every unit this row named, resolved - a row can place someone in both a
+   * campus and a department at once. Empty when it named none. */
+  org_unit_ids: string[];
   member_code: string | null;
   gender: Gender | null;
   date_of_birth: string | null;
@@ -128,7 +148,9 @@ export function validateRoster(rows: RosterRow[], ctx: RosterContext): RosterRep
   const phoneCounts = new Map<string, number>();
   const emailCounts = new Map<string, number>();
   const codeCounts = new Map<string, number>();
+  const userIdCounts = new Map<string, number>();
   for (const r of rows) {
+    if (r.user_id) userIdCounts.set(r.user_id, (userIdCounts.get(r.user_id) ?? 0) + 1);
     const p = phoneLast10(r.phone);
     if (p.length === 10) phoneCounts.set(p, (phoneCounts.get(p) ?? 0) + 1);
     const e = lower(r.email);
@@ -138,32 +160,41 @@ export function validateRoster(rows: RosterRow[], ctx: RosterContext): RosterRep
   }
 
   const results = rows.map((r, index): RosterRowResult => {
-    const name = norm(r.name) || null;
-    const email = lower(r.email) || null;
+    // A row that already names its account (the search-and-link picker) skips
+    // phone/email matching entirely - see the note on RosterRow.user_id.
+    const linked = r.user_id ? ctx.usersById.get(r.user_id) : undefined;
+    const name = linked ? linked.name : (norm(r.name) || null);
+    const email = linked ? linked.email.toLowerCase() : (lower(r.email) || null);
     const phone = phoneLast10(r.phone);
     const memberCode = norm(r.member_code) || null;
 
     const base = {
       index, name, email, phone: norm(r.phone) || null,
-      user_id: null as string | null, org_unit_id: null as string | null,
+      user_id: null as string | null, org_unit_ids: [] as string[],
       member_code: memberCode, gender: null as Gender | null,
       date_of_birth: null as string | null, scholarship: null as boolean | null,
     };
     const reject = (message: string): RosterRowResult => ({ ...base, verdict: 'reject', message });
 
-    if (!name) return reject('Name is required.');
-    if (!email && phone.length !== 10) return reject('Give an email or a 10-digit phone number.');
-    if (email && !EMAIL.test(email)) return reject(`"${r.email}" is not a valid email address.`);
-    if (norm(r.phone) && phone.length !== 10) return reject(`"${r.phone}" is not a 10-digit phone number.`);
+    if (r.user_id && !linked) return reject('That account could not be found.');
+    if (r.user_id && (userIdCounts.get(r.user_id) ?? 0) > 1) {
+      return reject('This account appears more than once in this batch.');
+    }
+    if (!linked) {
+      if (!name) return reject('Name is required.');
+      if (!email && phone.length !== 10) return reject('Give an email or a 10-digit phone number.');
+      if (email && !EMAIL.test(email)) return reject(`"${r.email}" is not a valid email address.`);
+      if (norm(r.phone) && phone.length !== 10) return reject(`"${r.phone}" is not a 10-digit phone number.`);
 
-    if (phone.length === 10 && (phoneCounts.get(phone) ?? 0) > 1) {
-      return reject('This phone number appears on more than one row in the file.');
-    }
-    if (email && (emailCounts.get(email) ?? 0) > 1) {
-      return reject('This email appears on more than one row in the file.');
-    }
-    if (memberCode && (codeCounts.get(lower(memberCode)) ?? 0) > 1) {
-      return reject('This member code appears on more than one row in the file.');
+      if (phone.length === 10 && (phoneCounts.get(phone) ?? 0) > 1) {
+        return reject('This phone number appears on more than one row in the file.');
+      }
+      if (email && (emailCounts.get(email) ?? 0) > 1) {
+        return reject('This email appears on more than one row in the file.');
+      }
+      if (memberCode && (codeCounts.get(lower(memberCode)) ?? 0) > 1) {
+        return reject('This member code appears on more than one row in the file.');
+      }
     }
 
     const gender = parseGender(r.gender);
@@ -178,10 +209,17 @@ export function validateRoster(rows: RosterRow[], ctx: RosterContext): RosterRep
     // what compete in an intra-organisation championship, how a typo becomes an
     // entrant in one.
     //
-    // Most specific wins: the department places a person more precisely than the
-    // campus, so it is read last and overwrites. The alias columns fold in beside
-    // their current names, so a sheet with either header lands in the same place.
-    let unitId: string | null = null;
+    // BOTH are kept, not just the more specific one: a row naming a campus AND a
+    // department means exactly that - place this person in both. An earlier version
+    // of this loop resolved them into a single id and let the department silently
+    // overwrite the campus, so a sheet that named both ended up placing the person
+    // in only one of them with no error. The alias columns fold in beside their
+    // current names, so a sheet with either header lands in the same place.
+    //
+    // A department's own campus is added too, even when the sheet named only the
+    // department - a batch belongs to exactly one campus, so knowing the batch
+    // already tells us the campus without anyone typing it twice.
+    const unitIds: string[] = [];
     const placements = [
       ['campus', r.campus ?? r.programme],
       ['department', r.department ?? r.batch],
@@ -191,11 +229,16 @@ export function validateRoster(rows: RosterRow[], ctx: RosterContext): RosterRep
       if (!key) continue;
       const unit = ctx.unitsByName.get(key);
       if (!unit) return reject(`No ${label} called "${norm(raw)}" exists - create it under Structure first.`);
-      unitId = unit.id;
+      unitIds.push(unit.id);
+      if (unit.parent_id) unitIds.push(unit.parent_id);
     }
 
-    // Resolution order, per J1-E5-S2: phone, then email, then create.
-    const matched = (phone.length === 10 ? ctx.usersByPhone.get(phone) : undefined)
+    // Resolution order, per J1-E5-S2: an explicit link, then phone, then email,
+    // then create. `linked` wins outright - it is what the search-and-link picker
+    // used to remove the exact ambiguity phone/email matching cannot resolve on
+    // its own (Option B: several accounts can share one number).
+    const matched = linked
+      ?? (phone.length === 10 ? ctx.usersByPhone.get(phone) : undefined)
       ?? (email ? ctx.usersByEmail.get(email) : undefined)
       ?? null;
 
@@ -209,7 +252,7 @@ export function validateRoster(rows: RosterRow[], ctx: RosterContext): RosterRep
     const resolved = {
       ...base,
       user_id: matched?.id ?? null,
-      org_unit_id: unitId,
+      org_unit_ids: [...new Set(unitIds)],
       gender: gender ?? null,
       date_of_birth: dob ?? null,
       scholarship: scholarship ?? null,
@@ -219,7 +262,13 @@ export function validateRoster(rows: RosterRow[], ctx: RosterContext): RosterRep
     if (ctx.memberUserIds.has(matched.id)) {
       return { ...resolved, verdict: 'update', message: `Already in your institution - their placement and details will be updated.` };
     }
-    return { ...resolved, verdict: 'match', message: `Matched to an existing account (${matched.name}) - they will be added to your institution.` };
+    return {
+      ...resolved,
+      verdict: 'match',
+      message: linked
+        ? `Linked to ${matched.name}'s account - they will be added to your institution.`
+        : `Matched to an existing account (${matched.name}) - they will be added to your institution.`,
+    };
   });
 
   const summary = { total: results.length, create: 0, match: 0, update: 0, reject: 0 };

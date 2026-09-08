@@ -126,6 +126,8 @@ model fixtures {
   /// Sequential within the championship, in scheduled order. Assigned at creation.
   match_no                             Int?
   scoring_format_id                    String?                @db.Uuid
+  /// Stamped when status becomes 'completed' (cleared if it moves away). Drives the 30-minute auto-lock sweep in fixtures/lock.service.ts.
+  completed_at                         DateTime?              @db.Timestamptz(6)
   certificates                         certificates[]
   cricket_innings                      cricket_innings[]
   fixture_awards                       fixture_awards[]

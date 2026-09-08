@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import {
   DEMO_DEFAULT_SPORTS, DEMO_ORG_TEMPLATES, DEMO_CHAMP_KINDS,
   type DemoChampKind, type DemoSandboxStatus,
@@ -144,8 +145,9 @@ export function PlatformDemosPage() {
                             message: 'Erase this sandbox and every trace of its data (championships, teams, users, logins)? This cannot be undone.',
                           });
                           if (ok) remove.mutate(r.id, { onError: (e: any) => toast.error('Delete failed', e?.message) } as any);
-                        }}>
-                        Delete
+                        }}
+                        aria-label={`Delete ${r.client_name} demo`} title="Delete">
+                        <Trash2 size={14} />
                       </Button>
                     </td>
                   </tr>

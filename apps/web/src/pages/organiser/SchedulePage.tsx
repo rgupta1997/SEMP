@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import { Pencil, Trash2 } from 'lucide-react';
 import { FIXTURE_STATUS } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
@@ -11,8 +13,9 @@ import { Badge, Button, Card, cn, confirmDialog, EmptyState, Field, Input, Modal
 import { Bracket, fixtureStatusLabel } from '../../components/Bracket';
 import { RoundRobinGrid } from '../../components/RoundRobinGrid';
 import { ScheduleTimeline } from '../../components/ScheduleTimeline';
+import { StageConfigWizard } from '../../components/StageConfigWizard';
 import { describeSlot, describeTieBlocked, isTieBlockedFor, resolveBranchLabels } from '../../lib/stageTree';
-import { titleCase } from '../../lib/format';
+import { isPoolShapedFormat, titleCase } from '../../lib/format';
 
 /**
  * The scoring entry point, on Schedule.
@@ -291,8 +294,10 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
         {isEdit ? (
           <Button variant="ghost" className="text-rose-600 dark:text-rose-400"
             onClick={async () => { if (await confirmDialog({ title: 'Delete fixture', confirmLabel: 'Delete', message: 'Delete this fixture? This cannot be undone.' })) remove.mutate(undefined, { onSuccess: () => toast.success('Fixture deleted'), onError: (e: any) => setError(e.message) }); }}
-            disabled={remove.isPending}>
-            {remove.isPending ? 'Deleting…' : 'Delete'}
+            disabled={remove.isPending}
+            aria-label="Delete fixture"
+            title={remove.isPending ? 'Deleting…' : 'Delete fixture'}>
+            <Trash2 size={16} />
           </Button>
         ) : <span />}
         <div className="flex gap-2">
@@ -313,8 +318,8 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
   );
 }
 
-function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, sportName, formatLabel, teamName, teamOrg, grounds, venues, officials, canManage }:
-  { td: any; fixtures: any[]; fixturesLoading: boolean; fixturesPath: string; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
+function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, formatLabel, teamName, teamOrg, grounds, venues, officials, canManage }:
+  { td: any; fixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
   // The championship-wide list is ordered by schedule; restore the per-draw
   // pool → bracket order the visual (bracket / grid) view needs for layout.
   const fixtures = [...drawFixtures].sort((a, b) => (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0));
@@ -327,8 +332,20 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
     const tb = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Infinity;
     return ta - tb || (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0);
   });
-  const isLoading = fixturesLoading;
-  const generate = useApiMutation(() => api('POST', `/tournament-disciplines/${td.id}/fixtures/generate`, { params: {} }), [fixturesPath]);
+  // Team NAMES come from a separate, championship-wide query (teamsPath) - generating
+  // a draw only invalidates the fixtures themselves, and a fixture's home/away team_id
+  // is real the instant it's created. Rendering it before that other query has ever
+  // resolved is what produced EOS-131: a freshly generated League table showing every
+  // cell as "TBD" - not because the fixtures were wrong, but because the grid had
+  // nothing to look the names up in yet. Blocking on both queries here (rather than
+  // just fixturesLoading) keeps the grid from ever painting real fixtures with no
+  // names to show for them.
+  const isLoading = fixturesLoading || teamsLoading;
+  const qc = useQueryClient();
+  const generate = useApiMutation(
+    (replace?: boolean) => api('POST', `/tournament-disciplines/${td.id}/fixtures/generate`, { params: {}, ...(replace ? { replace: true } : {}) }),
+    [fixturesPath, teamsPath],
+  );
   const [editing, setEditing] = useState<any | null>(null);
   const [creating, setCreating] = useState(false);
   const [view, setView] = useState<'list' | 'visual'>('visual');
@@ -339,15 +356,35 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
   const drawNavigate = useNavigate();
   const { eventId: drawEventId } = useParams();
   const [editingFormat, setEditingFormat] = useState(false);
+  // A pool-shaped format (Groups + Knockout and the like) can never be built by the
+  // single-stage /fixtures/generate route below - it produces pools XOR a bracket,
+  // never both (apps/api/.../generators/index.ts). Only the stage-config wizard
+  // (generate-all) actually builds pools feeding a bracket, so that's the ONLY
+  // generation action offered here for these formats - EOS-127: an organiser who
+  // picked "Groups + Knockout" and pressed the plain Generate button got a bare
+  // knockout bracket with no pools, silently, because that button was never able
+  // to produce the combined shape it looked like it would.
+  const [configuringStages, setConfiguringStages] = useState(false);
 
   // Once any fixture has been played, regenerating would erase results - the server
   // refuses it, so disable the button and explain why rather than letting it 500.
-  const hasPlayed = fixtures.some((f) => ['completed', 'walkover', 'bye'].includes(f.status) || f.home_score != null || f.away_score != null);
+  // A bye has no real result to lose (mirrors the server's own check, which also
+  // leaves 'bye' out - see fixtures.routes.ts), so it doesn't count as played here.
+  const hasPlayed = fixtures.some((f) => ['completed', 'walkover'].includes(f.status) || f.home_score != null || f.away_score != null);
   // Leagues generate incrementally (keep existing matches, add the new teams' fixtures),
   // so the action stays available mid-tournament; knockout/pool draws rebuild from
   // scratch and are blocked once anything's been played.
   const isLeague = /league|round.?robin/i.test(formatLabel ?? '');
   const hasBracket = fixtures.some((f) => f.bracket_position != null);
+  // "Add new teams" only makes sense over a draw that IS actually a league/round-robin
+  // (a round-robin generator never sets bracket_position - see round-robin.ts). If the
+  // discipline's format was switched to League AFTER a Knockout/pool draw was already
+  // generated, these fixtures are leftovers from that shape: every team already
+  // appears in one of them, so "add new teams" would silently do nothing while the
+  // bracket stays a bracket forever - there'd be no way left to ever get the
+  // crosstable this format is supposed to show. Treat that case as the rebuild it
+  // actually is, same as any other format's Regenerate.
+  const leagueDrawMismatched = isLeague && hasBracket;
   // Ranking/event draws (powerlifting/swimming/athletics) have a single team-less event
   // fixture - no head-to-head, so the bracket/grid views don't apply. They get a simple
   // event-row view that names the discipline instead.
@@ -370,6 +407,9 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
   }
   const stageGroups: [number, any[]][] = [...byStage.entries()].sort((a, b) => a[0] - b[0]);
   const multiStage = stageGroups.length > 1;
+  // Same substring test the backend's generator dispatch and the Setup → Sports
+  // "Configure stages" button both use - see isPoolShapedFormat's own doc comment.
+  const poolShaped = isPoolShapedFormat(formatLabel);
   const branchLabels = resolveBranchLabels(td.format_config);
   const stageLabel = (seq: number, groupHasBracket: boolean) =>
     branchLabels.get(seq) ?? (seq === 1 ? (groupHasBracket ? 'Bracket' : 'Pools') : `Stage ${seq}`);
@@ -380,10 +420,40 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
     state: { from: `/championships/${drawEventId}/schedule` },
   });
 
-  const runGenerate = () => generate.mutate(undefined, {
-    onSuccess: () => toast.success(isLeague && fixtures.length ? 'New teams added' : 'Draw generated'),
-    onError: (e: any) => toast.error(e.message),
-  });
+  // A rebuild over an existing (unplayed) draw discards its scheduling, grounds and
+  // official assignments, so the server refuses it outright unless told explicitly
+  // (generateDrawSchema.replace) - that's the confirmation this dialog performs.
+  // Leagues are exempt: "Add new teams" only adds fixtures, it never rebuilds - unless
+  // the existing draw doesn't actually match (leagueDrawMismatched), in which case
+  // this IS a rebuild wearing the league button, and needs the same warning.
+  const runGenerate = async () => {
+    if ((!isLeague || leagueDrawMismatched) && fixtures.length > 0) {
+      const ok = await confirmDialog({
+        title: 'Regenerate draw',
+        confirmLabel: 'Regenerate',
+        message: leagueDrawMismatched
+          ? 'This draw still has its old Knockout/pool fixtures from before the format changed - regenerating replaces them with a real league draw. Continue?'
+          : 'This draw already has fixtures. Regenerating replaces them (and their times, grounds and officials) - continue?',
+      });
+      if (!ok) return;
+    }
+    // The response is the draw's full fixture list post-generate, whether anything
+    // was added or not - the incremental league path returns just as successfully
+    // when there was nobody new to add. Comparing its length to what was on screen
+    // a moment ago (captured by this closure) is what actually tells the two apart;
+    // the server has no separate "created: 0" flag to read instead.
+    const before = fixtures.length;
+    generate.mutate(true, {
+      onSuccess: (rows: any[]) => {
+        if (isLeague && !leagueDrawMismatched && before) {
+          toast.success(rows.length > before ? 'New teams added' : 'No new teams to add - everyone already has fixtures');
+        } else {
+          toast.success('Draw generated');
+        }
+      },
+      onError: (e: any) => toast.error(e.message),
+    });
+  };
 
   const groundLabel = (id: string | null) => { const g = grounds.find((x) => x.id === id); return g ? `${g.venues?.name ? g.venues.name + ' · ' : ''}${g.name}` : null; };
   const officialName = (id: string | null) => officials.find((o) => o.id === id)?.name ?? null;
@@ -417,16 +487,33 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
           )}
           {canManage && <Button size="sm" variant="subtle" onClick={() => setCreating(true)}>+ Add fixture</Button>}
           {canManage && (
-            <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={generate.isPending || (hasPlayed && !isLeague)}
-              title={isLeague && fixtures.length
-                ? 'Keeps existing matches and adds fixtures for newly-registered teams.'
-                : hasPlayed ? 'This draw has played matches - regenerating would erase those results.' : undefined}
-              onClick={() => {
-                if (isScoredSport(sportName)) { setPicking(true); return; }
-                runGenerate();
-              }}>
-              {generate.isPending ? 'Generating…' : fixtures.length ? (isLeague ? 'Add new teams' : 'Regenerate') : 'Generate draw'}
-            </Button>
+            poolShaped ? (
+              // Pools feeding a bracket can only ever come from the stage-config
+              // wizard (generate-all) - the plain single-stage route below can never
+              // produce both, so it is not offered at all for this shape of format.
+              <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={hasPlayed}
+                title={hasPlayed
+                  ? 'This draw has played matches - reconfiguring would erase those results.'
+                  : fixtures.length > 0 && !multiStage
+                    ? "This draw was built without its knockout stage - reconfigure it to add one."
+                    : undefined}
+                onClick={() => setConfiguringStages(true)}>
+                {fixtures.length ? 'Reconfigure stages' : 'Configure stages'}
+              </Button>
+            ) : (
+              <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={generate.isPending || (hasPlayed && (!isLeague || leagueDrawMismatched))}
+                title={isLeague && !leagueDrawMismatched && fixtures.length
+                  ? 'Keeps existing matches and adds fixtures for newly-registered teams.'
+                  : leagueDrawMismatched
+                    ? "This draw still has its old fixtures from before the format changed - regenerate to build this discipline's actual league draw."
+                    : hasPlayed ? 'This draw has played matches - regenerating would erase those results.' : undefined}
+                onClick={() => {
+                  if (isScoredSport(sportName)) { setPicking(true); return; }
+                  runGenerate();
+                }}>
+                {generate.isPending ? 'Generating…' : fixtures.length ? (isLeague && !leagueDrawMismatched ? 'Add new teams' : 'Regenerate') : 'Generate draw'}
+              </Button>
+            )
           )}
         </div>
       </div>
@@ -453,7 +540,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
                 <div className="grid w-full grid-cols-2 items-center justify-items-center gap-2 sm:flex sm:w-auto sm:gap-3">
                   <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
                   {canManage && <ScoreButton fixture={f} />}
-                  {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)}>Edit</Button>}
+                  {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)} aria-label="Edit fixture" title="Edit fixture"><Pencil size={14} /></Button>}
                 </div>
               </div>
             ))}
@@ -522,7 +609,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
                 <div className="grid w-full grid-cols-2 items-center justify-items-center gap-2 sm:flex sm:w-auto sm:gap-3">
                   <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
                   {canManage && <ScoreButton fixture={f} />}
-                  {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)}>Edit</Button>}
+                  {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)} aria-label="Edit fixture" title="Edit fixture"><Pencil size={14} /></Button>}
                 </div>
               </div>
             ))}
@@ -552,12 +639,27 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, fixturesPath, s
           onGenerate={() => { setPicking(false); runGenerate(); }}
         />
       )}
+      {configuringStages && (
+        <Modal title="Configure stages" onClose={() => setConfiguringStages(false)} wide>
+          <StageConfigWizard
+            tournamentDisciplineId={td.id}
+            onGenerated={() => {
+              setConfiguringStages(false);
+              // The wizard invalidates its OWN per-discipline query key; this page
+              // reads the championship-wide fixtures list instead, so it needs its
+              // own refresh or the newly-built stages wouldn't show up here without
+              // a manual reload.
+              qc.invalidateQueries({ queryKey: [fixturesPath] });
+            }}
+          />
+        </Modal>
+      )}
     </Card>
   );
 }
 
-function SportBlock({ ts, draws, allFixtures, fixturesLoading, fixturesPath, sportName, formatName, teamName, teamOrg, grounds, venues, officials, canManage }:
-  { ts: any; draws: any[]; allFixtures: any[]; fixturesLoading: boolean; fixturesPath: string; sportName: string; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
+function SportBlock({ ts, draws, allFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, formatName, teamName, teamOrg, grounds, venues, officials, canManage }:
+  { ts: any; draws: any[]; allFixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
   if (draws.length === 0) return null;
   // Effective format: the draw's own format wins, else the sport's (matches the
   // generate route's fallback).
@@ -571,7 +673,9 @@ function SportBlock({ ts, draws, allFixtures, fixturesLoading, fixturesPath, spo
             td={td}
             fixtures={allFixtures.filter((f) => f.tournament_discipline_id === td.id)}
             fixturesLoading={fixturesLoading}
+            teamsLoading={teamsLoading}
             fixturesPath={fixturesPath}
+            teamsPath={teamsPath}
             sportName={sportName}
             formatLabel={formatName(td.format_id) ?? formatName(ts.format_id)}
             teamName={teamName}
@@ -630,7 +734,14 @@ export function SchedulePage() {
   const active = tournamentId || tournaments[0]?.id || '';
   const { data: tsports = [], isLoading: tsportsLoading } = useApi<any[]>(active ? `/tournament-sports?tournament_id=${active}` : null);
   const { data: sports = [] } = useApi<any[]>('/sports');
-  const { data: teams = [] } = useApi<any[]>(`/teams?championship_id=${eventId}`);
+  const teamsPath = `/teams?championship_id=${eventId}`;
+  // isFetching, not isLoading: a generate/regenerate invalidates this alongside the
+  // fixtures it just created, and isLoading only covers the FIRST fetch - a
+  // background refetch after that leaves isLoading false while the cached team
+  // list is still the pre-generate one. isFetching stays true for both, which is
+  // what actually keeps a freshly generated draw from painting real fixtures
+  // against a team list that hasn't caught up yet (EOS-131's "blank league table").
+  const { data: teams = [], isFetching: teamsLoading } = useApi<any[]>(teamsPath);
   const { data: grounds = [] } = useApi<Ground[]>(`/championships/${eventId}/grounds`);
   // Venues come from the venues list directly (not derived from grounds) so a venue
   // with no courts yet still appears in the fixture's venue picker.
@@ -719,7 +830,7 @@ export function SchedulePage() {
         <EmptyState icon="⚑" title="No sports configured" description="Add sports & disciplines in Setup, then come back to generate fixtures." />
       ) : (
         <div className="space-y-6">
-          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} fixturesPath={fixturesPath} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManage} />)}
+          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} teamsLoading={teamsLoading} fixturesPath={fixturesPath} teamsPath={teamsPath} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManage} />)}
         </div>
       )}
     </div>

@@ -315,6 +315,33 @@ select:disabled,
 @keyframes page-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .animate-page-enter { animation: page-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) both; }
 
+/* Workspace switch (My Space <-> an organisation <-> an event) - a touch calmer
+   and slower than an ordinary route change, not louder: the same fade-and-settle
+   language as page-enter, held a little longer so it reads as deliberate rather
+   than instant, with no scale or big travel - this fires on every switch, all
+   day, and has to still feel quiet on the fiftieth one. */
+@keyframes workspace-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.animate-workspace-enter { animation: workspace-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Sidebar nav re-entrance on a workspace switch - a plain crossfade, no
+   direction to it, so it reads as "this settled into place" rather than
+   something sliding around next to where you're actually looking. */
+@keyframes sidebar-switch { from { opacity: 0; } to { opacity: 1; } }
+.animate-sidebar-switch { animation: sidebar-switch 240ms ease-out both; }
+
+/* The one cue that's actually meant to be noticed: a thin bar in the
+   destination workspace's own colour (its KIND_META tile - an institution's
+   brand for an org, the product teal for an event, the accent for personal
+   space) sweeping the top edge, the same restrained, familiar language as a
+   top-loading bar. It never covers the page, so switching stays calm no
+   matter how often it happens. */
+@keyframes workspace-bar {
+  0%   { transform: scaleX(0); opacity: 1; }
+  65%  { transform: scaleX(1); opacity: 1; }
+  100% { transform: scaleX(1); opacity: 0; }
+}
+.animate-workspace-bar { animation: workspace-bar 620ms cubic-bezier(0.4, 0, 0.2, 1) both; transform-origin: left; }
+
 /* Dropdown / popover entrance - slides from source (downward-opening menus) */
 @keyframes dropdown-enter { from { opacity: 0; transform: translateY(-6px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .animate-dropdown { animation: dropdown-enter 140ms cubic-bezier(0.16, 1, 0.3, 1) both; }
@@ -356,7 +383,8 @@ select:disabled,
 
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-up, .animate-tick, .skeleton, .animate-live,
-  .animate-page-enter, .animate-dropdown, .animate-backdrop { animation: none; }
+  .animate-page-enter, .animate-dropdown, .animate-backdrop,
+  .animate-workspace-enter, .animate-sidebar-switch, .animate-workspace-bar { animation: none; }
 }
 
 /* Thin, unobtrusive scrollbars */
