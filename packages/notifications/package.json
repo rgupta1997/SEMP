@@ -13,10 +13,14 @@
     "./client/*": "./src/client/*"
   },
   "scripts": {
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",
     "@semp/shared": "*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.5"
   }
 }

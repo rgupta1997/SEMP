@@ -698,16 +698,22 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         const label = `${home} vs ${away}`;
         for (const a of newAwards) {
           const code = a.award_type_id ? codeById.get(a.award_type_id) : null;
-          await notify(prisma, {
-            type: code === 'player_of_the_match' ? 'player_of_the_match' : 'tournament_award',
-            championshipId,
-            userId: a.recipient_user_id,
-            senderId: req.user!.id,
-            data: { label, awardName: a.award_name },
-          });
+          // Own try/catch per award: one recipient's notify() failing must not
+          // skip every award queued after it in this same batch.
+          try {
+            await notify(prisma, {
+              type: code === 'player_of_the_match' ? 'player_of_the_match' : 'tournament_award',
+              championshipId,
+              userId: a.recipient_user_id,
+              senderId: req.user!.id,
+              data: { label, awardName: a.award_name },
+            });
+          } catch (err) {
+            console.error(`[fixtures] award notification failed for ${a.recipient_user_id} on fixture ${fixtureId}:`, err);
+          }
         }
       } catch (err) {
-        console.error(`[fixtures] award notifications failed for fixture ${fixtureId}:`, err);
+        console.error(`[fixtures] award notifications setup failed for fixture ${fixtureId}:`, err);
       }
     }
 
