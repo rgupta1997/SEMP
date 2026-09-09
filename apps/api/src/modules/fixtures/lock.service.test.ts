@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Rules } from '@semp/notifications/core/rules.js';
 
 // The downstream seams and the standings engine are stubbed so a test can make any
 // one of them fail on demand - which is the only way to prove the lock is actually
@@ -15,6 +16,15 @@ const auditSystemFn = vi.fn(async () => {});
 // tests; here they are stubbed so a failure in one can be injected deliberately.
 const resolveParticipants = vi.fn(async () => ({ resolved: [{ user_id: 'u1', team_id: 'tA', name: 'A Player' }], unmatched: [] as any[] }));
 const notify = vi.fn(async () => ({}));
+// The v2 notify() (@semp/notifications) - a SEPARATE seam from createNotification
+// above. lockScorecard/submitScorecard call both: createNotification for the match
+// participants, notify() for achievement_created/match_score_locked/
+// standings_updated/team_eliminated/score_pending_validation. Left unmocked, these
+// calls hit the fake prisma's real (absent) `.notifications.create` and throw -
+// caught by each call site's own try/catch, so the fixture-locking assertions above
+// still pass while every one of these silently never fires. Mocking it here is what
+// makes that failure visible to a test instead of only to a console.error nobody reads.
+const notifyV2 = vi.fn(async (..._args: any[]) => ({} as any));
 
 vi.mock('../standings/standings.service.js', () => ({ recomputeStandingsForFixture: (...a: any[]) => recompute(...a as []) }));
 vi.mock('./bracket.js', async (importOriginal) => ({
@@ -37,6 +47,7 @@ vi.mock('../iam/audit.service.js', async (importOriginal) => ({
 }));
 vi.mock('./participants.js', () => ({ resolveFixtureParticipants: (...a: any[]) => resolveParticipants(...a as []) }));
 vi.mock('../notifications/audience.js', () => ({ createNotification: (...a: any[]) => notify(...a as []) }));
+vi.mock('@semp/notifications/server/notify.js', () => ({ notify: (...a: any[]) => notifyV2(...a as []) }));
 
 const {
   assertNotLocked, lockScorecard, lockScorecardsBulk, submitScorecard, unlockScorecard, autoLockDueFixtures,
@@ -58,6 +69,7 @@ const FIXTURE = {
   // knockout dead-end guard.
   bracket_position: null as number | null,
   stage_sequence: 1 as number | null,
+  official_id: null as string | null,
   lock_version: 0,
   locked_at: null as Date | null,
   locked_by: null as string | null,
@@ -114,14 +126,21 @@ function fakePrisma(overrides: FixtureOverrides = {}, siblingCount = 0) {
 const REQ: any = { user: { id: 'organiser1', email: 'org@iimb.ac.in' }, ip: '::1' };
 
 beforeEach(() => {
-  for (const m of [recompute, advance, lifetime, achievements, certificates, auditFn, auditSystemFn, notify]) m.mockReset();
-  for (const m of [recompute, advance, lifetime, certificates, auditFn, auditSystemFn, notify]) m.mockResolvedValue(undefined as never);
+  for (const m of [recompute, advance, lifetime, achievements, certificates, auditFn, auditSystemFn, notify, notifyV2]) m.mockReset();
+  for (const m of [recompute, advance, lifetime, certificates, auditFn, auditSystemFn, notify, notifyV2]) m.mockResolvedValue(undefined as never);
   // deriveAchievements returns who newly earned one (empty here, not undefined) -
   // a different contract from the other void downstream seams above.
   achievements.mockResolvedValue([] as never);
   resolveParticipants.mockReset();
   resolveParticipants.mockResolvedValue({ resolved: [{ user_id: 'u1', team_id: 'tA', name: 'A Player' }], unmatched: [] } as never);
 });
+
+// A single notifyV2 call's `type` and full input, regardless of which call among
+// several in the mock's history it was.
+function callOfType(type: string) {
+  const call = notifyV2.mock.calls.find((c: any[]) => c[1]?.type === type);
+  return call?.[1] as any;
+}
 
 // ---- tests --------------------------------------------------------------
 
@@ -148,6 +167,25 @@ describe('submitScorecard', () => {
 
   it('refuses to re-open a locked card', async () => {
     await expect(submitScorecard(fakePrisma({ scorecard_status: 'locked' }), REQ, 'fx1')).rejects.toThrow(/locked/i);
+  });
+
+  it('tells the organiser a scorecard needs validation', async () => {
+    const prisma = fakePrisma({ scorecard_status: 'draft' });
+    await submitScorecard(prisma, REQ, 'fx1');
+
+    const sent = callOfType('score_pending_validation');
+    expect(sent).toBeDefined();
+    expect(sent.championshipId).toBe('champ1');
+    expect(sent.data.label).toBe('IIMB vs IIMA, Badminton · Mens Singles');
+  });
+
+  it('does not notify when there is no championship to tell', async () => {
+    const prisma = fakePrisma({
+      scorecard_status: 'draft',
+      tournament_disciplines: null,
+    });
+    await submitScorecard(prisma, REQ, 'fx1');
+    expect(callOfType('score_pending_validation')).toBeUndefined();
   });
 });
 
@@ -428,6 +466,64 @@ describe('autoLockDueFixtures', () => {
     const prisma = fakePrismaMulti([{ id: 'fx1', scorecard_status: 'submitted', completed_at: justNow }]);
     const result = await autoLockDueFixtures(prisma, { graceMinutes: 1 });
     expect(result).toEqual({ checked: 1, locked: 1 });
+  });
+});
+
+describe('lockScorecard · match_score_locked (organiser + official)', () => {
+  it('composes the organiser role with the assigned official when one is set', async () => {
+    const prisma = fakePrisma({ official_id: 'ref1' });
+    await lockScorecard(prisma, REQ, 'fx1');
+
+    const sent = callOfType('match_score_locked');
+    expect(sent).toBeDefined();
+    expect(sent.audience).toEqual(Rules.compose([
+      Rules.role('organiser', 'champ1'),
+      Rules.directUser('ref1'),
+    ]));
+  });
+
+  it('is just the organiser role when no official is assigned', async () => {
+    const prisma = fakePrisma({ official_id: null });
+    await lockScorecard(prisma, REQ, 'fx1');
+
+    const sent = callOfType('match_score_locked');
+    expect(sent.audience).toEqual(Rules.compose([Rules.role('organiser', 'champ1')]));
+  });
+});
+
+describe('lockScorecard · standings_updated', () => {
+  it('fires unconditionally to the whole championship on every lock', async () => {
+    const prisma = fakePrisma();
+    await lockScorecard(prisma, REQ, 'fx1');
+
+    const sent = callOfType('standings_updated');
+    expect(sent).toBeDefined();
+    expect(sent.championshipId).toBe('champ1');
+    expect(sent.data.label).toBe('IIMB vs IIMA, Badminton · Mens Singles');
+  });
+});
+
+describe('lockScorecard · team_eliminated', () => {
+  it('tells the LOSING team when a bracket fixture is decided', async () => {
+    const prisma = fakePrisma({ bracket_position: 1, winner_team_id: 'tA', home_team_id: 'tA', away_team_id: 'tB' });
+    await lockScorecard(prisma, REQ, 'fx1');
+
+    const sent = callOfType('team_eliminated');
+    expect(sent).toBeDefined();
+    // tA won, so tB - the loser - is who gets told, never the winner.
+    expect(sent.audience).toEqual(Rules.teamMembers('tB'));
+  });
+
+  it('does not fire for a league/pool fixture (no bracket_position)', async () => {
+    const prisma = fakePrisma({ bracket_position: null, winner_team_id: 'tA' });
+    await lockScorecard(prisma, REQ, 'fx1');
+    expect(callOfType('team_eliminated')).toBeUndefined();
+  });
+
+  it('does not fire on a draw (no winner_team_id), even in a bracket', async () => {
+    const prisma = fakePrisma({ bracket_position: 1, winner_team_id: null });
+    await lockScorecard(prisma, REQ, 'fx1');
+    expect(callOfType('team_eliminated')).toBeUndefined();
   });
 });
 
