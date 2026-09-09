@@ -19,6 +19,7 @@ import { recomputeStandingsForFixtureAtomic, resolveRuleForDraw, resolveSchemeFo
 import { notify } from '@semp/notifications/server/notify.js';
 import { Rules } from '@semp/notifications/core/rules.js';
 import { matchAudience, notifyMatch } from './match-audience.js';
+import { newlyAwarded, notifyNewAwards, notifyOfficialAssignment, type AwardInput } from './fixtures.notifications.js';
 import { advanceWinner, propagateByes } from './bracket.js';
 import { ROLE_CODES, roleWhereByCode, formatIdsForDraw } from '@semp/shared';
 import {
@@ -642,17 +643,11 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     const fixtureId = req.params.id;
     const fixture = await prisma.fixtures.findUnique({ where: { id: fixtureId } });
     if (!fixture) throw new NotFoundError('Fixture');
-    const awards = req.body.awards as { award_name: string; award_type_id?: string | null; recipient_user_id: string }[];
+    const awards = req.body.awards as AwardInput[];
 
-    // This route replaces the whole award list on every save, so a re-save of an
-    // unchanged award must not re-notify its recipient. Only whatever wasn't
-    // already recorded (by recipient + name + type) counts as newly awarded.
-    const existing = await prisma.fixture_awards.findMany({
-      where: { fixture_id: fixtureId },
-      select: { recipient_user_id: true, award_name: true, award_type_id: true },
-    });
-    const existingKeys = new Set(existing.map((e) => `${e.recipient_user_id}|${e.award_name}|${e.award_type_id ?? ''}`));
-    const newAwards = awards.filter((a) => !existingKeys.has(`${a.recipient_user_id}|${a.award_name}|${a.award_type_id ?? ''}`));
+    // Must be captured before the replace-all below - a re-save of an unchanged
+    // award must not re-notify its recipient.
+    const newAwards = await newlyAwarded(prisma, fixtureId, awards);
 
     // Replace-all: wipe the fixture's awards then re-insert, atomically.
     await prisma.$transaction([
@@ -674,48 +669,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       orderBy: { created_at: 'asc' },
     });
 
-    // Best-effort: the awards are already committed above. Player of the Match
-    // gets its own type; every other award type (or untyped free text) is a
-    // tournament_award - see the registry for why they share this one route.
-    if (newAwards.length > 0) {
-      try {
-        const typeIds = [...new Set(newAwards.map((a) => a.award_type_id).filter((id): id is string => !!id))];
-        const types = typeIds.length
-          ? await prisma.award_types.findMany({ where: { id: { in: typeIds } }, select: { id: true, code: true } })
-          : [];
-        const codeById = new Map(types.map((t) => [t.id, t.code]));
-        const withNames = await prisma.fixtures.findUnique({
-          where: { id: fixtureId },
-          select: {
-            teams_fixtures_home_team_idToteams: { select: { name: true } },
-            teams_fixtures_away_team_idToteams: { select: { name: true } },
-            tournament_disciplines: { select: { tournament_sports: { select: { tournaments: { select: { championship_id: true } } } } } },
-          },
-        });
-        const championshipId = withNames?.tournament_disciplines?.tournament_sports?.tournaments?.championship_id ?? undefined;
-        const home = withNames?.teams_fixtures_home_team_idToteams?.name ?? 'TBD';
-        const away = withNames?.teams_fixtures_away_team_idToteams?.name ?? 'TBD';
-        const label = `${home} vs ${away}`;
-        for (const a of newAwards) {
-          const code = a.award_type_id ? codeById.get(a.award_type_id) : null;
-          // Own try/catch per award: one recipient's notify() failing must not
-          // skip every award queued after it in this same batch.
-          try {
-            await notify(prisma, {
-              type: code === 'player_of_the_match' ? 'player_of_the_match' : 'tournament_award',
-              championshipId,
-              userId: a.recipient_user_id,
-              senderId: req.user!.id,
-              data: { label, awardName: a.award_name },
-            });
-          } catch (err) {
-            console.error(`[fixtures] award notification failed for ${a.recipient_user_id} on fixture ${fixtureId}:`, err);
-          }
-        }
-      } catch (err) {
-        console.error(`[fixtures] award notifications setup failed for fixture ${fixtureId}:`, err);
-      }
-    }
+    await notifyNewAwards(prisma, fixtureId, newAwards, req.user!.id);
 
     res.json(rows.map(awardView));
   }));
@@ -907,48 +861,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
 
       // Best-effort: the assignment is committed, and a notification failure must not
       // be reported back as a failed assignment.
-      const home = fx.teams_fixtures_home_team_idToteams?.name ?? 'TBD';
-      const away = fx.teams_fixtures_away_team_idToteams?.name ?? 'TBD';
-      const sport = [fx.tournament_disciplines?.tournament_sports?.sports?.name, fx.tournament_disciplines?.disciplines?.name]
-        .filter(Boolean).join(' · ');
-      const where = fx.venue_grounds ? [fx.venue_grounds.venues?.name, fx.venue_grounds.name].filter(Boolean).join(' · ') : null;
-      const when = fx.scheduled_at ? new Date(fx.scheduled_at).toISOString() : null;
-      const label = [`${home} vs ${away}`, sport].filter(Boolean).join(' — ');
-      const tell = async (userId: string, title: string, body: string) => {
-        try {
-          // v2: the audience is a rule, not a string. 'manual' takes an explicit
-          // title/body and routes to one user, which is exactly this errand.
-          await notify(prisma, {
-            type: 'manual',
-            championshipId,
-            userId,
-            senderId: req.user!.id,
-            data: { title, body },
-          });
-        } catch (err) {
-          console.error(`[officials] assignment notification failed for fixture ${fx.id}:`, err);
-        }
-      };
-      if (officialId) {
-        const details = [when ? `Scheduled for ${when}.` : 'Not scheduled yet.', where ? `At ${where}.` : null]
-          .filter(Boolean).join(' ');
-        try {
-          await notify(prisma, {
-            type: 'match_official_assigned',
-            championshipId,
-            userId: officialId,
-            senderId: req.user!.id,
-            data: { label, details },
-          });
-        } catch (err) {
-          console.error(`[officials] assignment notification failed for fixture ${fx.id}:`, err);
-        }
-      }
-      // The previous official's queue silently loses a match otherwise, which is how
-      // a match ends up with nobody at it.
-      if (fx.official_id) {
-        await tell(fx.official_id, `No longer officiating ${label}`, 'The organiser has reassigned this match, so it has left your Officiating queue.');
-      }
+      await notifyOfficialAssignment(prisma, fx, championshipId, officialId, req.user!.id);
 
       res.json({ ok: true, official_id: updated.official_id, notified: true });
     }));

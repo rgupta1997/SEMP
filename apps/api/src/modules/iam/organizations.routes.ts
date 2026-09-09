@@ -11,7 +11,10 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { findUserByPhone, hashProvisionedPassword } from './users.helpers.js';
-import { notify } from '@semp/notifications/server/notify.js';
+import {
+  notifyOrganizationCreated, notifyJoinRequested, notifyJoinApproved, notifyJoinDeclined,
+  newlyAddedMembers, notifyNewOrgMembers,
+} from './organizations.notifications.js';
 // Organizations router: list/get are open reads. Any authenticated user can
 // create an organization (they become its first `owner`). Edits, deletes and
 // member management require an owner/admin of that org (or super admin).
@@ -146,16 +149,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
 
     // Best-effort - the organization is already committed, and a notification
     // hiccup must never be reported back as a failed creation.
-    try {
-      await notify(prisma, {
-        type: 'organization_created',
-        userId: req.user!.id,
-        senderId: req.user!.id,
-        data: { organizationName: created.name },
-      });
-    } catch (err) {
-      console.error(`[organizations] organization_created notification failed for ${created.id}:`, err);
-    }
+    await notifyOrganizationCreated(prisma, created.id, created.name, req.user!.id);
 
     // Surface the new login's credentials once so the actor can share them.
     const credentials = owner && provision && owner.name && owner.email
@@ -238,15 +232,8 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
 
     const actor = await prisma.users.findUnique({ where: { id: userId }, select: { name: true, email: true } });
     const who = actor?.name || actor?.email || 'Someone';
-    await notify(prisma, {
-      type: 'org_join_request',
-      organizationId: orgId,
-      senderId: userId,
-      data: {
-        who,
-        organizationName: org.name,
-      },
-    });
+    // Best-effort - the join request is already recorded above.
+    await notifyJoinRequested(prisma, orgId, org.name, userId, who);
     res.status(201).json(member);
   }));
 
@@ -322,16 +309,10 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     const orgId = req.params.id;
     const uniqueIds = [...new Set(user_ids)];
 
-    // Re-adding an existing active member (e.g. to refresh their role) is not a
-    // new add, and must not claim to be one - checked before the upsert below,
-    // same as the awards route's existingKeys guard.
-    const alreadyActive = new Set(
-      (await prisma.organization_members.findMany({
-        where: { organization_id: orgId, user_id: { in: uniqueIds }, status: 'active' },
-        select: { user_id: true },
-      })).map((m) => m.user_id),
-    );
-    const newlyAddedIds = uniqueIds.filter((id) => !alreadyActive.has(id));
+    // Must be captured before the upsert below - re-adding an existing active
+    // member (e.g. to refresh their role) is not a new add, and must not claim
+    // to be one.
+    const newlyAddedIds = await newlyAddedMembers(prisma, orgId, uniqueIds);
 
     const members = await prisma.$transaction(
       uniqueIds.map((user_id) => prisma.organization_members.upsert({
@@ -342,26 +323,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       })),
     );
 
-    // Best-effort. This is a direct add, not an invite - org_invite_sent/accepted
-    // are reserved for someone who had no account yet and later signs themselves
-    // in; this is the notification for the case that actually happens through the
-    // member picker's checkbox+Add, where an existing account is added instantly
-    // with no consent step.
-    if (newlyAddedIds.length > 0) {
-      try {
-        const org = await prisma.organizations.findUnique({ where: { id: orgId }, select: { name: true } });
-        for (const userId of newlyAddedIds) {
-          await notify(prisma, {
-            type: 'org_member_added',
-            userId,
-            senderId: req.user!.id,
-            data: { organizationName: org?.name ?? 'an organization' },
-          });
-        }
-      } catch (err) {
-        console.error(`[organizations] org_member_added notification failed for org ${orgId}:`, err);
-      }
-    }
+    await notifyNewOrgMembers(prisma, orgId, newlyAddedIds, req.user!.id);
 
     res.status(201).json(members);
   }));
@@ -434,14 +396,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       data: { status: 'active' },
       include: { users: { select: { id: true, name: true, email: true, phone: true } } },
     });
-    await notify(prisma, {
-      type: 'org_join_approved',
-      userId: member.user_id,
-      senderId: req.user!.id,
-      data: {
-        organizationName: await orgName(req.params.id),
-      },
-    });
+    await notifyJoinApproved(prisma, member.user_id, await orgName(req.params.id), req.user!.id);
     res.json(updated);
   }));
 
@@ -451,14 +406,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     });
     if (!member) throw new NotFoundError('Member');
     await prisma.organization_members.delete({ where: { id: member.id } });
-    await notify(prisma, {
-      type: 'org_join_declined',
-      userId: member.user_id,
-      senderId: req.user!.id,
-      data: {
-        organizationName: await orgName(req.params.id),
-      },
-    });
+    await notifyJoinDeclined(prisma, member.user_id, await orgName(req.params.id), req.user!.id);
     res.json({ ok: true });
   }));
 

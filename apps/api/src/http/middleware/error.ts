@@ -1,9 +1,9 @@
 import type { NextFunction, Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { PlanLimitError } from '@semp/entitlements/server';
-import { notify } from '@semp/notifications/server/notify.js';
 import type { Prisma as Db } from '../../infra/prisma.js';
 import { DomainError } from '../../shared/errors.js';
+import { notifyUsageLimitReached } from './error.notifications.js';
 
 // Central error handler: the only place that knows HTTP status codes. A factory
 // so it can notify org admins on a PlanLimitError without every one of the
@@ -33,17 +33,7 @@ export function makeErrorHandler(prisma: Db) {
           details: { limit: err.limit, cap: err.cap, current: err.current },
         },
       });
-      // Best-effort and fire-and-forget: the response above has already gone
-      // out, and a notification failure must never affect it. Only the org
-      // ladder sets ceilings today (see PlanLimitError.organizationId).
-      if (err.organizationId) {
-        notify(prisma, {
-          type: 'usage_limit_reached',
-          organizationId: err.organizationId,
-          senderId: null,
-          data: { message: err.message },
-        }).catch((e) => console.error('[billing] usage_limit_reached notification failed:', e));
-      }
+      notifyUsageLimitReached(prisma, err);
       return;
     }
 
