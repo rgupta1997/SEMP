@@ -10,7 +10,7 @@ import { can } from '../../http/middleware/can.js';
 import { isCampusAdmin } from './campus-admin.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { audit, AUDIT_ACTIONS } from './audit.service.js';
-import { notify } from '@semp/notifications/server/notify.js';
+import { notifyUnitCreated, notifyUnitAdminAssigned, type UnitLike } from './org-units.notifications.js';
 
 // The institution's own shape (J1-E4): Organisation -> Campus -> Department.
 //
@@ -351,26 +351,8 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
 
     // Best-effort, and never lets a notification hiccup surface as a failed
     // creation - the unit is already committed above regardless.
-    try {
-      if (type === 'campus') {
-        await notify(prisma, {
-          type: 'campus_created',
-          organizationId: req.params.id,
-          senderId: req.user!.id,
-          data: { unitLabel: labels.campus, unitName: row.name, organizationName: org?.name ?? 'your organization' },
-        });
-      }
-      if (admin_user_id) {
-        await notify(prisma, {
-          type: 'campus_admin_assigned',
-          userId: admin_user_id,
-          senderId: req.user!.id,
-          data: { unitLabel: labels[type], unitName: row.name, organizationName: org?.name ?? 'your organization' },
-        });
-      }
-    } catch (err) {
-      console.error(`[org-units] notification failed for unit ${row.id}:`, err);
-    }
+    await notifyUnitCreated(prisma, req.params.id, row, org?.name, labels.campus, req.user!.id);
+    await notifyUnitAdminAssigned(prisma, row, admin_user_id, null, org?.name, labels[type], req.user!.id);
 
     res.status(201).json(row);
   }));
@@ -436,20 +418,11 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
 
     // Best-effort - only when a NEW admin is being set, not when one is cleared
     // (no PDF trigger for a removal yet, and "assigned" would be the wrong word).
-    if (row.admin_user_id && before.admin_user_id !== row.admin_user_id) {
-      try {
-        const org = await prisma.organizations.findUnique({ where: { id: req.params.id }, select: { name: true, settings: true } });
-        const labels = unitLabels(org?.settings);
-        await notify(prisma, {
-          type: 'campus_admin_assigned',
-          userId: row.admin_user_id,
-          senderId: req.user!.id,
-          data: { unitLabel: labels[row.type as 'campus' | 'department'], unitName: row.name, organizationName: org?.name ?? 'your organization' },
-        });
-      } catch (err) {
-        console.error(`[org-units] campus_admin_assigned notification failed for unit ${row.id}:`, err);
-      }
-    }
+    const org = await prisma.organizations.findUnique({ where: { id: req.params.id }, select: { name: true, settings: true } });
+    const labels = unitLabels(org?.settings);
+    await notifyUnitAdminAssigned(
+      prisma, row as UnitLike, row.admin_user_id, before.admin_user_id, org?.name, labels[row.type as 'campus' | 'department'], req.user!.id,
+    );
 
     res.json(row);
   }));

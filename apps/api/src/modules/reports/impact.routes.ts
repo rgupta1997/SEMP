@@ -6,7 +6,7 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { can } from '../../http/middleware/can.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
-import { notify } from '@semp/notifications/server/notify.js';
+import { notifyReportGenerated } from './impact.notifications.js';
 
 // The Annual Sports Impact Report (J5-E5).
 //
@@ -68,19 +68,7 @@ export function makeImpactRouter(prisma: Prisma, buildReport: (organizationId: s
         });
         // Best-effort - the job already finished above. The requester would
         // otherwise only find out by polling GET /report-jobs/:jobId themselves.
-        if (job.requested_by) {
-          try {
-            await notify(prisma, {
-              type: 'event_report_generated',
-              organizationId,
-              userId: job.requested_by,
-              senderId: null,
-              data: { label: 'Sports Impact', seasonLabel: seasonLabel(season, startMonth) },
-            });
-          } catch (err) {
-            console.error(`[reports] event_report_generated notification failed for job ${job.id}:`, err);
-          }
-        }
+        await notifyReportGenerated(prisma, job.id, job.requested_by, seasonLabel(season, startMonth), organizationId);
       } catch (e: any) {
         await prisma.report_jobs.update({
           where: { id: job.id },

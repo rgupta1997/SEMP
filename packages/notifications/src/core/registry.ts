@@ -445,7 +445,11 @@ ${where}` : where;
       if (!ctx.userId) throw new Error('userId is required for admin_access_revoked');
       return Rules.directUser(ctx.userId);
     },
-    titleTemplate: () => 'Your admin access changed',
+    // Fired on ANY role grant removal (org-roles.routes.ts's DELETE route is
+    // generic - Official, Organiser, POC, not just Admin), so the title must
+    // name the actual role, matching bodyTemplate below - a fixed "admin access"
+    // title on a non-admin role removal contradicted its own body.
+    titleTemplate: (data) => `Your ${String(data.roleName ?? 'role')} access changed`,
     bodyTemplate: (data) => {
       const role = String(data.roleName ?? 'role');
       const org = String(data.organizationName ?? 'your institution');

@@ -6,7 +6,7 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError, BusinessRuleError } from '../../shared/errors.js';
 import { findEntrant } from '../championships/contingent.js';
-import { notify } from '@semp/notifications/server/notify.js';
+import { notifyApplicationReceived, notifyEnrollmentApproved, notifyRegistrationRejected } from './enrollment.notifications.js';
 
 export function makeEnrollmentRouter(prisma: Prisma): Router {
   const router = Router();
@@ -66,24 +66,10 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
 
     // Best-effort - the application is already committed, and a notification
     // hiccup must never be reported back as a failed application.
-    try {
-      await notify(prisma, {
-        type: 'registration_submitted',
-        championshipId: req.params.eventId,
-        userId: req.user!.id,
-        senderId: req.user!.id,
-        data: { championshipName: championship.name },
-      });
-      const org = await prisma.organizations.findUnique({ where: { id: req.body.organization_id }, select: { name: true, short_name: true } });
-      await notify(prisma, {
-        type: 'participant_approval_pending',
-        championshipId: req.params.eventId,
-        senderId: req.user!.id,
-        data: { orgName: org?.short_name || org?.name, championshipName: championship.name },
-      });
-    } catch (err) {
-      console.error(`[enrollment] registration notifications failed for ${row.id}:`, err);
-    }
+    const org = await prisma.organizations.findUnique({ where: { id: req.body.organization_id }, select: { name: true, short_name: true } });
+    await notifyApplicationReceived(
+      prisma, req.params.eventId, championship.name, req.user!.id, org?.short_name || org?.name, req.user!.id,
+    );
 
     res.status(201).json(row);
   }));
@@ -120,40 +106,13 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
     // confirmed directly to the applicant org - the broadcast is news for the room,
     // not a decision notice for the org that was actually waiting on it.
     if (req.body.status === 'approved' && existing.status !== 'approved') {
-      const orgName = existing.organizations?.short_name || existing.organizations?.name || 'An organization';
-      await notify(prisma, {
-        type: 'enrollment_approved',
-        championshipId: existing.championship_id,
-        senderId: req.user!.id,
-        data: {
-          orgName,
-          bodyOrgName: existing.organizations?.name ?? orgName,
-          championshipName: existing.championships?.name,
-        },
-      });
-      try {
-        await notify(prisma, {
-          type: 'registration_approved',
-          organizationId: existing.organization_id,
-          senderId: req.user!.id,
-          data: { championshipName: existing.championships?.name },
-        });
-      } catch (err) {
-        console.error(`[enrollment] registration_approved notification failed for ${existing.id}:`, err);
-      }
+      await notifyEnrollmentApproved(prisma, existing, req.user!.id);
     }
 
     if (req.body.status === 'rejected' && existing.status !== 'rejected') {
-      try {
-        await notify(prisma, {
-          type: 'registration_rejected',
-          organizationId: existing.organization_id,
-          senderId: req.user!.id,
-          data: { reason: req.body.rejection_note ?? null, championshipName: existing.championships?.name },
-        });
-      } catch (err) {
-        console.error(`[enrollment] registration_rejected notification failed for ${existing.id}:`, err);
-      }
+      await notifyRegistrationRejected(
+        prisma, existing.organization_id, existing.championships?.name, req.body.rejection_note ?? null, existing.id, req.user!.id,
+      );
     }
 
     res.json(row);

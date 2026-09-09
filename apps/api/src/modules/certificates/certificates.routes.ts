@@ -13,7 +13,7 @@ import { renderCertificateHtml, sampleFacts } from './render.js';
 import { CERTIFICATE_PRESETS, presetById } from './presets.js';
 import { certificateActivity, certificateOverview, certificateTrail, statusOf } from './overview.js';
 import { env } from '../../config/env.js';
-import { notify } from '@semp/notifications/server/notify.js';
+import { notifyCertificateGenerated, notifyCertificateRevoked } from './certificates.notifications.js';
 
 // Certificates: templates (J4-E6), bulk issue (J4-E7), and the register behind them.
 // Public verification lives in the public router - it must be reachable with no account.
@@ -351,18 +351,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
         });
         issued++;
         results.push({ achievement_id: a.id, ok: true, serial: cert.serial });
-        if (a.user_id) {
-          try {
-            await notify(prisma, {
-              type: 'certificate_generated',
-              userId: a.user_id,
-              senderId: req.user!.id,
-              data: { title: a.title },
-            });
-          } catch (err) {
-            console.error(`[certificates] certificate_generated notification failed for ${cert.id}:`, err);
-          }
-        }
+        await notifyCertificateGenerated(prisma, cert.id, a.user_id, a.title, req.user!.id);
       } catch (e: any) {
         // The partial unique index catches a re-run: somebody already has this
         // certificate, which is a skip and not an error.
@@ -598,19 +587,9 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     // Best-effort - the withdrawal already committed above. Only when the
     // certificate has a linked account (some are issued to a recipient_name with
     // no platform account).
-    if (cert.user_id) {
-      try {
-        await notify(prisma, {
-          type: 'certificate_validation_issue',
-          championshipId: cert.championship_id ?? undefined,
-          userId: cert.user_id,
-          senderId: req.user!.id,
-          data: { title: (cert.payload as any)?.title, serial: cert.serial, reason: req.body.reason },
-        });
-      } catch (err) {
-        console.error(`[certificates] certificate_validation_issue notification failed for ${cert.id}:`, err);
-      }
-    }
+    await notifyCertificateRevoked(
+      prisma, cert.id, cert.user_id, cert.championship_id, (cert.payload as any)?.title, cert.serial, req.body.reason, req.user!.id,
+    );
 
     res.json(row);
   }));
