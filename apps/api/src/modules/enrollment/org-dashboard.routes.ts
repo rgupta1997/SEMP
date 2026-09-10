@@ -181,7 +181,7 @@ export function makeOrgDashboardRouter(prisma: Prisma): Router {
         key: 'invitations',
         text: `${pendingInvitations} ${pendingInvitations === 1 ? 'championship has' : 'championships have'} invited this organization`,
         sub: 'Accept to join and start entering teams, or decline',
-        cta: 'Review', to: `/organizations/${orgId}/invitations`, tone: 'amber' as const,
+        cta: 'Review', to: `/organizations/${orgId}/events?tab=invitations`, tone: 'amber' as const,
       },
       certsPending > 0 && {
         key: 'certificates',
