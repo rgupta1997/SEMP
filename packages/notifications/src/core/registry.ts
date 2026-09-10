@@ -889,6 +889,26 @@ ${where}` : where;
     },
   },
 
+  // Fired on POST /championships/:eventId/invitations, the "open championship,
+  // invite another organisation" branch - the internal "invite our own campus"
+  // branch fires contingent_added instead, since there is nobody outside the
+  // host institution to tell. Addressed to the invited org's admins: the
+  // invitation is addressed to the ORGANISATION (any of its admins may accept
+  // it - see /invitations/:id/accept), not to one named person.
+  championship_invitation_sent: {
+    key: 'championship_invitation_sent',
+    defaultAudience: (ctx) => {
+      if (!ctx.organizationId) throw new Error('organizationId is required for championship_invitation_sent');
+      return Rules.orgAdmins(ctx.organizationId);
+    },
+    titleTemplate: (data) => `You're invited to ${String(data.championshipName ?? 'a championship')}`,
+    bodyTemplate: (data) => {
+      const host = String(data.hostName ?? 'The organiser');
+      const championshipName = String(data.championshipName ?? 'their championship');
+      return `${host} has invited your organization to compete in ${championshipName}. Review it from your Invitations.`;
+    },
+  },
+
   // ---- Claims (J4-E5) ------------------------------------------------------
   //
   // Posted via createNotification() directly, not notify() - claims.routes.ts

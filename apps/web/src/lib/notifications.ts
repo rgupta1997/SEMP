@@ -39,6 +39,7 @@ export function notificationMeta(type: NotificationTypeKey): { icon: 'megaphone'
     case 'event_report_generated': return { icon: 'check-circle-2', label: 'Report' };
     case 'usage_limit_reached': return { icon: 'bell', label: 'Plan limit' };
     case 'standings_updated': return { icon: 'megaphone', label: 'Championship update' };
+    case 'championship_invitation_sent': return { icon: 'megaphone', label: 'Invitation' };
     default: return { icon: 'bell', label: 'Announcement' };
   }
 }
