@@ -16,7 +16,7 @@ import { resolveEntryRules, type EntryRules } from '../tournaments/domain/entry-
 import { assertCanAddMember, assertCanLockRoster } from './domain/roster-policy.js';
 import { assertPlayerEligible, screenSquad, squadEntryRefusal } from '../championships/contingent.js';
 import { unitLabels } from '@semp/shared';
-import { tellUser, checkRosterIncomplete, notifyRosterLocked } from './teams.notifications.js';
+import { tellUser, checkRosterIncomplete, notifyRosterLocked, notifyTeamCreated } from './teams.notifications.js';
 
 // Default password for auto-provisioned players from a bulk import. They can be
 // invited / reset later; precomputed once to keep the bulk loop cheap.
@@ -292,7 +292,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       }
       return team;
     });
-    await tellUser(prisma, creatorId, creatorId, 'team_created', { teamName: name });
+    await notifyTeamCreated(prisma, created.id, name, creatorId);
     if (entryData) await checkRosterIncomplete(prisma, created.id, creatorId, entryData.tournament_discipline_id);
     res.status(201).json(await hydrateTeam(prisma, created.id));
   }));

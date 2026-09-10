@@ -1,6 +1,6 @@
 import type { Prisma } from '../../infra/prisma.js';
 import { notify } from '@semp/notifications/server/notify.js';
-import { Rules } from '@semp/notifications/core/rules.js';
+import { Rules, type AudienceRule } from '@semp/notifications/core/rules.js';
 import type { NotificationTypeKey } from '@semp/notifications/core/registry.js';
 import { resolveEntryRules } from '../tournaments/domain/entry-rules.js';
 
@@ -22,28 +22,53 @@ export async function tellUser(
   }
 }
 
-// Coach + captain(s) + this org's admins - the people who can actually complete a
-// roster, not the whole squad (a player waiting to be added can't fix this).
-// Composed from real ids since no single Rule kind expresses that combination.
+// Coach + captain(s)/vice-captain(s) + this org's admins - the people who can
+// actually act on this team, not the whole squad (a regular player can't
+// complete a roster or speak for the team). Composed from real ids since no
+// single Rule kind expresses that combination. Returns null when the team no
+// longer exists, so callers can skip notifying without themselves knowing why.
+async function teamStakeholdersAudience(prisma: Prisma, teamId: string): Promise<AudienceRule | null> {
+  const team = await prisma.teams.findUnique({
+    where: { id: teamId },
+    select: {
+      organization_id: true, coach_user_id: true,
+      team_members: { where: { is_active: true, role: { in: ['captain', 'vice_captain'] } }, select: { user_id: true } },
+    },
+  });
+  if (!team) return null;
+  const rules: AudienceRule[] = [];
+  if (team.coach_user_id) rules.push(Rules.directUser(team.coach_user_id));
+  for (const m of team.team_members) rules.push(Rules.directUser(m.user_id));
+  rules.push(Rules.orgAdmins(team.organization_id));
+  return Rules.compose(rules);
+}
+
 export async function notifyRosterIncomplete(
   prisma: Prisma, teamId: string, actorId: string, data: Record<string, unknown>,
 ): Promise<void> {
   try {
-    const team = await prisma.teams.findUnique({
-      where: { id: teamId },
-      select: {
-        organization_id: true, coach_user_id: true,
-        team_members: { where: { is_active: true, role: { in: ['captain', 'vice_captain'] } }, select: { user_id: true } },
-      },
-    });
-    if (!team) return;
-    const rules = [];
-    if (team.coach_user_id) rules.push(Rules.directUser(team.coach_user_id));
-    for (const m of team.team_members) rules.push(Rules.directUser(m.user_id));
-    rules.push(Rules.orgAdmins(team.organization_id));
-    await notify(prisma, { type: 'roster_incomplete', audience: Rules.compose(rules), senderId: actorId, data });
+    const audience = await teamStakeholdersAudience(prisma, teamId);
+    if (!audience) return;
+    await notify(prisma, { type: 'roster_incomplete', audience, senderId: actorId, data });
   } catch (err) {
     console.error(`[teams] roster_incomplete notification failed for team ${teamId}:`, err);
+  }
+}
+
+// Coach + captain(s) + this org's admins - not just whoever clicked Create. At
+// creation there is rarely a coach yet (no field for one on the create form),
+// and a captain only exists when the creator wasn't an org admin (see
+// seedCaptain in the route) - but admins besides the creator, and a coach
+// assigned moments later by a bulk flow, still deserve to hear about it.
+export async function notifyTeamCreated(
+  prisma: Prisma, teamId: string, teamName: string, actorId: string,
+): Promise<void> {
+  try {
+    const audience = await teamStakeholdersAudience(prisma, teamId);
+    if (!audience) return;
+    await notify(prisma, { type: 'team_created', audience, senderId: actorId, data: { teamName } });
+  } catch (err) {
+    console.error(`[teams] team_created notification failed for team ${teamId}:`, err);
   }
 }
 
