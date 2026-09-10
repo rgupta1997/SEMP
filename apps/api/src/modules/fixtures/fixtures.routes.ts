@@ -728,15 +728,17 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         });
         const championshipId = td?.tournament_sports?.tournaments?.championship_id;
         if (championshipId) {
-          // Organiser + the assigned official (if any) - same composition as
-          // match_score_locked. The default audience is organiser-only and never
-          // reaches the official, who is the other person the spec names here.
+          // Organiser + the assigned official, UNLESS the official is who just
+          // submitted this (fixtureScorer lets either one record a result) - telling
+          // someone their own submission "needs review" is telling them nothing.
+          // The official is only worth notifying when an organiser recorded a
+          // result on their behalf, which they'd otherwise have no way to know about.
           await notify(prisma, {
             type: 'result_submitted',
             championshipId,
             audience: Rules.compose([
               Rules.role('organiser', championshipId),
-              ...(fixture.official_id ? [Rules.directUser(fixture.official_id)] : []),
+              ...(fixture.official_id && fixture.official_id !== req.user!.id ? [Rules.directUser(fixture.official_id)] : []),
             ]),
             senderId: req.user!.id,
             data: { body: 'A match result is ready to review.' },
