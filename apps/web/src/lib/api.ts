@@ -42,14 +42,26 @@ export async function api<T = any>(
 
   let attempt = 0;
   for (;;) {
-    const res = await fetch(BASE + path, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    let res: Response;
+    try {
+      res = await fetch(BASE + path, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+    } catch {
+      // The browser's own "Failed to fetch"/"Load failed" - thrown when the request
+      // never reached a server at all (offline, DNS failure, connection refused, a
+      // CORS rejection). Distinct from a 4xx/5xx, which at least got a response, so
+      // it needs its own message rather than falling through to res.statusText.
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      throw new ApiError(0, offline
+        ? 'You appear to be offline. Check your connection and try again.'
+        : 'Could not reach the server. Please try again in a moment.');
+    }
 
     if (shouldRetry && RETRYABLE_STATUS.has(res.status) && attempt < MAX_RETRIES) {
       attempt += 1;

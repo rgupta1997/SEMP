@@ -37,24 +37,28 @@ export function makeErrorHandler(prisma: Db) {
       return;
     }
 
-    // Map common Prisma errors to friendly responses.
+    // Map common Prisma errors to friendly responses. These are the generic CRUD
+    // routes' fallback - a route with its own pre-check (e.g. invitations) throws a
+    // specific BusinessRuleError before ever reaching the database, so these messages
+    // are necessarily generic across every model, but they still shouldn't read like
+    // a database log: no error codes, no field/table names the user never typed in.
     if (err instanceof Prisma.PrismaClientKnownRequestError) {
       if (err.code === 'P2002') {
-        res.status(409).json({ error: { code: 'CONFLICT', message: 'Unique constraint violated', details: err.meta } });
+        res.status(409).json({ error: { code: 'CONFLICT', message: 'This already exists - it may have just been added by someone else. Refresh and try again.', details: err.meta } });
         return;
       }
       if (err.code === 'P2025') {
-        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Record not found' } });
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'That could not be found - it may have already been removed. Refresh and try again.' } });
         return;
       }
       if (err.code === 'P2003') {
-        res.status(400).json({ error: { code: 'FK_VIOLATION', message: 'Related record missing', details: err.meta } });
+        res.status(400).json({ error: { code: 'FK_VIOLATION', message: 'This depends on something that no longer exists. Refresh and try again.', details: err.meta } });
         return;
       }
     }
 
     console.error('[unhandled]', err);
-    res.status(500).json({ error: { code: 'INTERNAL', message: 'Internal server error' } });
+    res.status(500).json({ error: { code: 'INTERNAL', message: 'Something went wrong on our end. Please try again.' } });
   };
 }
 
