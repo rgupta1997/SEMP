@@ -7,6 +7,7 @@ import { makeGuards } from '../../http/middleware/permissions.js';
 import { assertEntrantAllowed, eligibleEntrants, findEntrant, loadEventShape } from '../championships/contingent.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { notify } from '@semp/notifications/server/notify.js';
+import { notifyInvitationSent } from './invitations.notifications.js';
 const ORG_ADMIN = ['owner', 'admin'];
 
 export function makeInvitationsRouter(prisma: Prisma): Router {
@@ -137,6 +138,12 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
         status: 'pending',
       },
     });
+
+    // Best-effort - the invitation already committed above. Addressed to the
+    // invited org's admins, since the invitation is accepted on the
+    // organisation's behalf, not by one named person.
+    await notifyInvitationSent(prisma, req.params.eventId, org.id, req.user!.id);
+
     res.status(201).json(row);
   }));
 
