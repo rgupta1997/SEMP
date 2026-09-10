@@ -284,8 +284,21 @@ function OrganisationInvites({ eventId, path }: { eventId: string; path: string 
   const { data: invites = [], isLoading } = useApi<Invitation[]>(path);
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [inviting, setInviting] = useState(false);
+  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
 
   const cancel = useApiMutation((id: string) => api('DELETE', `${path}/${id}`), [path]);
+
+  // An invitation's own statuses (pending/accepted/declined/cancelled) don't share
+  // names with an application's (pending/approved/rejected), but they're the same
+  // three buckets from the other side - so they share the same tabs.
+  const inviteBucket = (status: string): 'pending' | 'approved' | 'rejected' =>
+    status === 'accepted' ? 'approved' : status === 'pending' ? 'pending' : 'rejected';
+  const visibleInvites = filter === 'all' ? invites : invites.filter((i) => inviteBucket(i.status) === filter);
+  const inviteCounts = {
+    pending: invites.filter((i) => inviteBucket(i.status) === 'pending').length,
+    approved: invites.filter((i) => inviteBucket(i.status) === 'approved').length,
+    rejected: invites.filter((i) => inviteBucket(i.status) === 'rejected').length,
+  };
 
   // Hide orgs that already have a live invitation so the picker only offers new ones.
   const invitedIds = useMemo(
@@ -330,15 +343,21 @@ function OrganisationInvites({ eventId, path }: { eventId: string; path: string 
           asked from the other side: who is in. They used to sit on a separate
           Entrants tab, which meant an organiser deciding the field had to work in
           two places and could see only half of it in each. */}
-      <ApplicationsQueue eventId={eventId} />
+      <ApplicationsQueue
+        eventId={eventId}
+        filter={filter}
+        onFilterChange={setFilter}
+        extraCounts={inviteCounts}
+        invitesEmpty={visibleInvites.length === 0}
+      />
 
       {isLoading ? <Spinner /> : invites.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400 dark:border-slate-800 dark:text-slate-500">
           No organizations yet. Add at least two to auto-generate fixtures - or invite them later.
         </div>
-      ) : (
+      ) : visibleInvites.length === 0 ? null : (
         <div className="space-y-2">
-          {invites.map((inv) => (
+          {visibleInvites.map((inv) => (
             <Card key={inv.id} className="flex items-center justify-between gap-3 p-3">
               <div className="min-w-0">
                 <div className="truncate font-medium text-slate-800 dark:text-slate-200">{inv.target ?? inv.organizations?.name ?? inv.org_name}</div>
