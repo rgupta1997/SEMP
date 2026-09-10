@@ -166,7 +166,7 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
                 Copy to all
                 <Select value="" onChange={(e) => { if (e.target.value) setAllFormats(e.target.value); }} className="w-44">
                   <option value="">- pick a format -</option>
-                  {formats.filter((f) => !isRankingFormat(f.name)).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
                 </Select>
               </label>
             )}
@@ -181,7 +181,7 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
               ) : (
                 <Select value={selected[id]} onChange={(e) => setFormat(id, e.target.value)} className="w-56">
                   <option value="">- select a format -</option>
-                  {formats.filter((f) => !isRankingFormat(f.name)).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
                 </Select>
               )}
             </div>
@@ -376,7 +376,7 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, d
             <Field label="Fixture format" hint="Override the draw, or inherit the sport's format.">
               <Select value={formatId} onChange={(e) => setFormatId(e.target.value)}>
                 <option value="">Same as sport{sportFormatName ? ` (${sportFormatName})` : ''}</option>
-                {formats.filter((f) => isRankingFormat(f.name) === isRankingFormat(sportFormatName)).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
               </Select>
             </Field>
           </div>
@@ -496,7 +496,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
       <Field label="Fixture format" hint={formatHint}>
         <Select value={formatId} onChange={(e) => setFormatId(e.target.value)}>
           <option value="">Same as sport{sportFormatName ? ` (${sportFormatName})` : ''}</option>
-          {formats.filter((f) => isRankingFormat(f.name) === isRankingFormat(sportFormatName)).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
         </Select>
       </Field>
       <div className="grid grid-cols-3 gap-x-3">
@@ -565,7 +565,7 @@ function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportNam
           ) : (
             <>
               <option value="">- select a format -</option>
-              {formats.filter((f) => !isRankingFormat(f.name)).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              {formats.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
             </>
           )}
         </Select>
