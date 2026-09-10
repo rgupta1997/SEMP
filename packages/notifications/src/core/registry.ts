@@ -510,12 +510,12 @@ ${where}` : where;
     bodyTemplate: (data) => `You're now captain of ${String(data.teamName ?? 'the team')}.`,
   },
 
+  // Roster + coach + org admins, composed at the call site (see
+  // teams.notifications.ts) - team_members alone reaches the roster but not the
+  // coach (a separate column, not a team_members row) or org admins.
   team_roster_locked: {
     key: 'team_roster_locked',
-    defaultAudience: (ctx) => {
-      if (!ctx.teamId) throw new Error('teamId is required for team_roster_locked');
-      return Rules.teamMembers(ctx.teamId);
-    },
+    defaultAudience: () => { throw new Error('team_roster_locked requires an explicit audience'); },
     titleTemplate: () => 'Team roster locked',
     bodyTemplate: (data) => `${String(data.teamName ?? 'Your team')}'s roster is now locked in.`,
   },

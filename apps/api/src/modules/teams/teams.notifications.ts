@@ -100,12 +100,19 @@ export async function checkRosterIncomplete(
 }
 
 // A single championship entry's roster was locked (POST /teams/:id/entries/:entryId/lock).
+// Coach + captain(s) + org admins, same stakeholder audience as team_created and
+// roster_incomplete - not the whole roster (a regular player isn't who manages
+// the team's entries).
 export async function notifyRosterLocked(prisma: Prisma, teamId: string, actorId: string): Promise<void> {
   try {
-    const team = await prisma.teams.findUnique({ where: { id: teamId }, select: { name: true } });
+    const [team, audience] = await Promise.all([
+      prisma.teams.findUnique({ where: { id: teamId }, select: { name: true } }),
+      teamStakeholdersAudience(prisma, teamId),
+    ]);
+    if (!audience) return;
     await notify(prisma, {
       type: 'team_roster_locked',
-      teamId,
+      audience,
       senderId: actorId,
       data: { teamName: team?.name },
     });

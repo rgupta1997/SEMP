@@ -183,13 +183,47 @@ describe('checkRosterIncomplete', () => {
 });
 
 describe('notifyRosterLocked', () => {
-  it('notifies the whole team that its roster is locked', async () => {
-    const prisma = { teams: { findUnique: async () => ({ name: 'IIMB' }) } } as any;
+  // Serves both of notifyRosterLocked's own lookups - its {name} query and
+  // teamStakeholdersAudience's {organization_id, coach_user_id, team_members}
+  // query - from one row, same as a real Prisma client would.
+  function fakePrisma(team: { organization_id: string; coach_user_id: string | null; captains?: string[]; name?: string } | null) {
+    return {
+      teams: {
+        findUnique: async () => team && {
+          name: team.name ?? 'IIMB',
+          organization_id: team.organization_id,
+          coach_user_id: team.coach_user_id,
+          team_members: (team.captains ?? []).map((user_id) => ({ user_id })),
+        },
+      },
+    } as any;
+  }
+
+  it('reaches coach + captains + org admins, not the whole roster', async () => {
+    const prisma = fakePrisma({ organization_id: 'org1', coach_user_id: 'coach1', captains: ['cap1'] });
     await notifyRosterLocked(prisma, 'tA', 'actor1');
 
     const sent = callOfType('team_roster_locked');
     expect(sent).toBeDefined();
-    expect(sent.teamId).toBe('tA');
     expect(sent.data.teamName).toBe('IIMB');
+    expect(sent.audience).toEqual(Rules.compose([
+      Rules.directUser('coach1'),
+      Rules.directUser('cap1'),
+      Rules.orgAdmins('org1'),
+    ]));
+  });
+
+  it('omits the coach from the audience when the team has none', async () => {
+    const prisma = fakePrisma({ organization_id: 'org1', coach_user_id: null, captains: ['cap1'] });
+    await notifyRosterLocked(prisma, 'tA', 'actor1');
+
+    const sent = callOfType('team_roster_locked');
+    expect(sent.audience).toEqual(Rules.compose([Rules.directUser('cap1'), Rules.orgAdmins('org1')]));
+  });
+
+  it('does nothing when the team no longer exists', async () => {
+    const prisma = fakePrisma(null);
+    await notifyRosterLocked(prisma, 'tA', 'actor1');
+    expect(notify).not.toHaveBeenCalled();
   });
 });
