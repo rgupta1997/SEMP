@@ -15,10 +15,25 @@ import { Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, Moda
 // Never rendered for an internal championship: nobody applies to one, so the queue
 // could only ever be empty, and an empty table reads as "nobody yet" rather than as
 // "this does not apply here".
-export function ApplicationsQueue({ eventId }: { eventId: string }) {
+type Filter = 'all' | 'pending' | 'approved' | 'rejected';
+
+// `filter` is controlled by the parent (OrganisationInvites) rather than owned here,
+// because the invitations list below shares the same tabs - a host-side "Pending"
+// application and a host-sent "Pending" invitation are the same concept from two
+// directions, and switching tabs must move both lists together.
+export function ApplicationsQueue({
+  eventId, filter, onFilterChange, extraCounts, invitesEmpty = true,
+}: {
+  eventId: string;
+  filter: Filter;
+  onFilterChange: (f: Filter) => void;
+  /** Invitation counts per bucket, folded into the tab pills so a count reflects both halves of the pair. */
+  extraCounts?: { pending: number; approved: number; rejected: number };
+  /** Whether the invitations list has nothing for the current tab - so the "Nothing here" placeholder only shows when NEITHER half of the pair has anything. */
+  invitesEmpty?: boolean;
+}) {
   const path = `/championships/${eventId}/enrollments`;
   const { data: rows = [], isLoading } = useApi<any[]>(path);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
   const [rejecting, setRejecting] = useState<any | null>(null);
   const [note, setNote] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -38,9 +53,9 @@ export function ApplicationsQueue({ eventId }: { eventId: string }) {
   );
 
   const counts = {
-    pending: rows.filter((r) => r.status === 'pending').length,
-    approved: rows.filter((r) => r.status === 'approved').length,
-    rejected: rows.filter((r) => r.status === 'rejected').length,
+    pending: rows.filter((r) => r.status === 'pending').length + (extraCounts?.pending ?? 0),
+    approved: rows.filter((r) => r.status === 'approved').length + (extraCounts?.approved ?? 0),
+    rejected: rows.filter((r) => r.status === 'rejected').length + (extraCounts?.rejected ?? 0),
   };
   const statusFiltered = filter === 'all' ? rows : rows.filter((r) => r.status === filter);
 
@@ -72,7 +87,7 @@ export function ApplicationsQueue({ eventId }: { eventId: string }) {
         <FilterChips
           className="mb-0"
           value={filter}
-          onChange={(f) => { setFilter(f); setSelected(new Set()); }}
+          onChange={(f) => { onFilterChange(f); setSelected(new Set()); }}
           options={(['pending', 'approved', 'rejected', 'all'] as const)
             .map((f) => ({ key: f, label: <span className="capitalize">{f}</span>, count: f === 'all' ? undefined : counts[f] }))}
         />
@@ -96,9 +111,9 @@ export function ApplicationsQueue({ eventId }: { eventId: string }) {
         </Button>
       </BulkBar>
 
-      {isLoading ? null : t.total === 0 ? (
+      {isLoading ? null : t.total === 0 && invitesEmpty ? (
         <EmptyState icon="✓" title="Nothing here" description={t.query ? 'No organizations match your search.' : filter === 'pending' ? 'No organizations are waiting for approval.' : `No ${filter} organizations.`} />
-      ) : (
+      ) : t.total === 0 ? null : (
         <Table>
           <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             <tr>
