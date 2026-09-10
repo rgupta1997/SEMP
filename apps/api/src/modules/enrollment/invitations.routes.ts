@@ -135,6 +135,13 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
       select: { id: true },
     });
     if (existing) throw new BusinessRuleError('That organization has already been invited');
+    // Already an entrant - approved through the applications queue, seeded as the
+    // host's own participation, or accepted an earlier invitation. Sending a fresh
+    // invitation on top left the org reading as "in" (Approved, Participating) AND
+    // "still deciding" (an unresolved pending invitation) at the same time, with
+    // nothing to ever reconcile the two once both existed.
+    const entrant = await findEntrant(prisma, req.params.eventId, { orgId: org.id, unitId: null });
+    if (entrant) throw new BusinessRuleError(`${org.name} is already ${entrant.status} for this championship.`);
     const row = await prisma.championship_invitations.create({
       data: {
         championship_id: req.params.eventId,

@@ -29,9 +29,12 @@ export function InvitationsInbox({ organizationId, className = '' }: { organizat
     // accepting fires an 'enrollment_approved' notification (audience: everyone
     // related to the championship) in the same request, and the accepting org owner
     // immediately qualifies as a POC, so the badge needs a nudge or it sits stale.
-    ['/me/invitations', '/championships/mine', '/me/enrollments', 'notifications'],
+    // '/organizations' also refreshes this org's own Events page (its All/Participating
+    // tabs) and dashboard queue - both read a now-stale enrollment otherwise, and
+    // previously only cleared on a manual refresh or a round trip to another page.
+    ['/me/invitations', '/championships/mine', '/me/enrollments', 'notifications', '/organizations'],
   );
-  const decline = useApiMutation((id: string) => api('POST', `/invitations/${id}/decline`), ['/me/invitations']);
+  const decline = useApiMutation((id: string) => api('POST', `/invitations/${id}/decline`), ['/me/invitations', '/organizations']);
 
   if (invites.length === 0) return null;
 

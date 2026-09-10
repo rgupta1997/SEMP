@@ -107,6 +107,23 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
     // not a decision notice for the org that was actually waiting on it.
     if (req.body.status === 'approved' && existing.status !== 'approved') {
       await notifyEnrollmentApproved(prisma, existing, req.user!.id);
+
+      // This org can also have been invited directly (Setup - Invite), a separate
+      // table with no link to this one - so approving it here left that invitation
+      // sitting "pending" forever: the org read as already in everywhere an
+      // organiser looks (Approved, Participating) and simultaneously still "invited,
+      // awaiting a decision" everywhere the org itself looks (its Invitations tab,
+      // My Events). Settle it here rather than leaving it to accept/decline an
+      // invitation to something it is already inside.
+      await prisma.championship_invitations.updateMany({
+        where: {
+          championship_id: existing.championship_id,
+          organization_id: existing.organization_id,
+          org_unit_id: null,
+          status: 'pending',
+        },
+        data: { status: 'accepted', accepted_by: req.user!.id, responded_at: new Date() },
+      });
     }
 
     if (req.body.status === 'rejected' && existing.status !== 'rejected') {
