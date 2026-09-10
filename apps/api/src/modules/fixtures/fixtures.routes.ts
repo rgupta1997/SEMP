@@ -728,9 +728,16 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         });
         const championshipId = td?.tournament_sports?.tournaments?.championship_id;
         if (championshipId) {
+          // Organiser + the assigned official (if any) - same composition as
+          // match_score_locked. The default audience is organiser-only and never
+          // reaches the official, who is the other person the spec names here.
           await notify(prisma, {
             type: 'result_submitted',
             championshipId,
+            audience: Rules.compose([
+              Rules.role('organiser', championshipId),
+              ...(fixture.official_id ? [Rules.directUser(fixture.official_id)] : []),
+            ]),
             senderId: req.user!.id,
             data: { body: 'A match result is ready to review.' },
           });
@@ -973,7 +980,11 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       before.home_team_id && before.away_team_id &&
       (before.home_team_id !== after.home_team_id || before.away_team_id !== after.away_team_id)
     ) {
-      await notifyMatch(prisma, 'match_opponent_changed', audience, null, { body: 'The opponent for this match has changed.' });
+      // Not the official, unlike the other field changes above: who the opponent is
+      // doesn't change their job - same time, same venue, same task of scoring
+      // whoever's there.
+      const opponentAudience = await matchAudience(prisma, after.home_team_id, after.away_team_id);
+      await notifyMatch(prisma, 'match_opponent_changed', opponentAudience, null, { body: 'The opponent for this match has changed.' });
     }
     if (before.status !== 'cancelled' && after.status === 'cancelled') {
       await notifyMatch(prisma, 'match_cancelled', audience, null, { body: 'This match has been cancelled.' });
