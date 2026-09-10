@@ -551,6 +551,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     // `created[i]` pairs 1:1 with `teams[i]` - the loop above pushes in the same
     // order it iterates `teams`, with no filtering in between.
     for (let i = 0; i < created.length; i++) {
+      await notifyTeamCreated(prisma, created[i].id, teams[i].name, creatorId);
       await checkRosterIncomplete(prisma, created[i].id, creatorId, teams[i].tournament_discipline_id);
     }
     res.status(201).json({ created: created.length, teams: created });
@@ -916,9 +917,14 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true, name: true } });
     if (!team) throw new NotFoundError('Team');
     await assertRosterEditable(prisma, team.id);
-    const member = await prisma.team_members.findUnique({ where: { id: req.params.memberId }, select: { user_id: true } });
+    // Scoped to THIS team, matching the PATCH route above - guards.teamManager only
+    // authorizes the actor against :id, not against whatever team memberId actually
+    // belongs to, so an unscoped lookup/delete here would let a manager of team A
+    // reach into team B's roster via its own member id.
+    const member = await prisma.team_members.findFirst({ where: { id: req.params.memberId, team_id: team.id }, select: { user_id: true } });
+    if (!member) throw new NotFoundError('Team member');
     await prisma.team_members.delete({ where: { id: req.params.memberId } });
-    if (member) await tellUser(prisma, req.user!.id, member.user_id, 'team_player_removed', { teamName: team.name });
+    await tellUser(prisma, req.user!.id, member.user_id, 'team_player_removed', { teamName: team.name });
     res.status(204).send();
   }));
 

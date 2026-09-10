@@ -103,20 +103,26 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
           responded_at: new Date(),
         },
       });
+      // Best-effort - the invitation is already committed above, and a
+      // notification hiccup must never be reported back as a failed invite.
       // Names the CAMPUS, not the institution. `enrollment_approved` would have
       // announced "Northfield has joined the championship" on an event contested
       // between Northfield's own campuses - true, useless, and hiding the one fact
       // the reader wants.
-      await notify(prisma, {
-        type: 'contingent_added',
-        championshipId: req.params.eventId,
-        senderId: req.user!.id,
-        data: {
-          unitName: unit?.name ?? 'A campus',
-          parentName: parentName ?? undefined,
-          championshipName: champName ?? undefined,
-        },
-      });
+      try {
+        await notify(prisma, {
+          type: 'contingent_added',
+          championshipId: req.params.eventId,
+          senderId: req.user!.id,
+          data: {
+            unitName: unit?.name ?? 'A campus',
+            parentName: parentName ?? undefined,
+            championshipName: champName ?? undefined,
+          },
+        });
+      } catch (err) {
+        console.error(`[invitations] contingent_added notification failed for invitation ${row.id}:`, err);
+      }
 
       return void res.status(201).json(row);
     }
@@ -270,17 +276,27 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
       data: { status: 'accepted', accepted_by: req.user!.id, responded_at: new Date() },
     });
 
-    const org = await prisma.organizations.findUnique({ where: { id: inv.organization_id }, select: { name: true, short_name: true } });
-    await notify(prisma, {
-      type: 'enrollment_approved',
-      championshipId: inv.championship_id,
-      senderId: req.user!.id,
-      data: {
-        orgName: org?.short_name || org?.name || 'An organization',
-        bodyOrgName: org?.name ?? 'An organization',
-        championshipName: inv.championships?.name,
-      },
-    });
+    // Best-effort - the enrollment and invitation status are already committed
+    // above, and a notification hiccup must never be reported back as a failed
+    // accept. invitationAccepted:true picks enrollment_approved's
+    // invitation-specific wording ("accepted the invitation... can now enter
+    // teams") instead of the generic direct-application copy.
+    try {
+      const org = await prisma.organizations.findUnique({ where: { id: inv.organization_id }, select: { name: true, short_name: true } });
+      await notify(prisma, {
+        type: 'enrollment_approved',
+        championshipId: inv.championship_id,
+        senderId: req.user!.id,
+        data: {
+          orgName: org?.short_name || org?.name || 'An organization',
+          bodyOrgName: org?.name ?? 'An organization',
+          championshipName: inv.championships?.name,
+          invitationAccepted: true,
+        },
+      });
+    } catch (err) {
+      console.error(`[invitations] enrollment_approved notification failed for invitation ${inv.id}:`, err);
+    }
 
     res.status(201).json(enrollment);
   }));
