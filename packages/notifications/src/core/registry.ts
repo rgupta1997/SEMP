@@ -459,12 +459,13 @@ ${where}` : where;
 
   // ---- Team (2026-08-26) --------------------------------------------------
 
+  // Coach + captain(s) + this org's admins - not just whoever clicked Create.
+  // Composed from real ids at the call site (same shape as roster_incomplete):
+  // no single Rule kind expresses "this team's coach + captains + this org's
+  // admins" together.
   team_created: {
     key: 'team_created',
-    defaultAudience: (ctx) => {
-      if (!ctx.userId) throw new Error('userId is required for team_created');
-      return Rules.directUser(ctx.userId);
-    },
+    defaultAudience: () => { throw new Error('team_created requires an explicit audience'); },
     titleTemplate: () => 'Team created successfully',
     bodyTemplate: (data) => `${String(data.teamName ?? 'Your team')} is ready.`,
   },
