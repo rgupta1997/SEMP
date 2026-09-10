@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Mail, Trophy } from 'lucide-react';
-import { Link, useLocation, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { useApi, useTableControls, fmtDateRange } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
 import { useWorkspace } from '../../lib/useWorkspace';
@@ -47,7 +47,12 @@ export function OrgEventsPage() {
   const { pathname } = useLocation();
   const ws = useWorkspace();
   const { data, isLoading } = useApi<{ rows: Row[] }>(`/organizations/${orgId}/events`);
-  const [tab, setTab] = useState<string>('all');
+  // Read from the URL (not just component state) so a link from elsewhere - the
+  // dashboard's "Needs attention" queue, most of all - can land directly on the
+  // Invitations tab rather than the default "All" one.
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') ?? 'all';
+  const setTab = (t: string) => setParams(t === 'all' ? {} : { tab: t });
 
   // Only owners and admins can act on an invitation, so only they are shown one -
   // a tab everybody can see and nobody else can use is just a locked door.
