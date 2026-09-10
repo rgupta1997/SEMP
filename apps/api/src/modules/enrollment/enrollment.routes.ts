@@ -130,6 +130,21 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
       await notifyRegistrationRejected(
         prisma, existing.organization_id, existing.championships?.name, req.body.rejection_note ?? null, existing.id, req.user!.id,
       );
+
+      // Same reconciliation as the approve branch above, the other direction: a
+      // pending invitation to an org whose application was just rejected would
+      // otherwise sit there forever, offering to let them accept their way into a
+      // championship the host just turned them down for. `cancelled`, not
+      // `declined` - this is the HOST ending it, not the org's own choice.
+      await prisma.championship_invitations.updateMany({
+        where: {
+          championship_id: existing.championship_id,
+          organization_id: existing.organization_id,
+          org_unit_id: null,
+          status: 'pending',
+        },
+        data: { status: 'cancelled', responded_at: new Date() },
+      });
     }
 
     res.json(row);
