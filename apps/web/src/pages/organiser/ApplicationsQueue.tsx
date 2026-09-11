@@ -81,6 +81,16 @@ export function ApplicationsQueue({
     return n;
   });
 
+  // Same rule the per-row buttons already follow (`r.status !== 'approved'` etc.) -
+  // a bulk action offered "Approve selected" with every selected row already
+  // approved, which processed as a real PATCH and toasted "Approved" for
+  // organisations that needed nothing done to them. Only the rows a bulk action
+  // would actually change go into it, and the button itself hides once no
+  // selected row needs that action.
+  const selectedRows = rows.filter((r) => selected.has(r.id));
+  const toApprove = selectedRows.filter((r) => r.status !== 'approved').map((r) => r.id);
+  const toReject = selectedRows.filter((r) => r.status !== 'rejected').map((r) => r.id);
+
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -101,14 +111,18 @@ export function ApplicationsQueue({
       </div>
 
       <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
-        <Button size="sm" disabled={bulkReview.isPending}
-          onClick={() => bulkReview.mutate({ ids: [...selected], status: 'approved' }, { onSuccess: () => toast.success(`${selected.size} approved`), onError: (e: any) => toast.error(e.message) })}>
-          Approve selected
-        </Button>
-        <Button size="sm" variant="outline" disabled={bulkReview.isPending}
-          onClick={() => bulkReview.mutate({ ids: [...selected], status: 'rejected' }, { onSuccess: () => toast.success(`${selected.size} rejected`), onError: (e: any) => toast.error(e.message) })}>
-          Reject selected
-        </Button>
+        {toApprove.length > 0 && (
+          <Button size="sm" disabled={bulkReview.isPending}
+            onClick={() => bulkReview.mutate({ ids: toApprove, status: 'approved' }, { onSuccess: () => toast.success(`${toApprove.length} approved`), onError: (e: any) => toast.error(e.message) })}>
+            Approve selected
+          </Button>
+        )}
+        {toReject.length > 0 && (
+          <Button size="sm" variant="outline" disabled={bulkReview.isPending}
+            onClick={() => bulkReview.mutate({ ids: toReject, status: 'rejected' }, { onSuccess: () => toast.success(`${toReject.length} rejected`), onError: (e: any) => toast.error(e.message) })}>
+            Reject selected
+          </Button>
+        )}
       </BulkBar>
 
       {isLoading ? null : t.total === 0 && invitesEmpty ? (
