@@ -2,7 +2,14 @@ import { PrismaClient } from '@prisma/client';
 
 // Single PrismaClient, created here and shared with every persistence adapter
 // via the composition root. The domain/application layers never import this.
-export const prisma = new PrismaClient();
+//
+// `timeout` is the ceiling on a `$transaction(async (tx) => …)` callback itself,
+// not a single query - Prisma's 5s default was tripping on the multi-step writes
+// in this codebase (e.g. bulk imports, cascading deletes) well before anything
+// was actually wrong, aborting a transaction that was still making progress.
+export const prisma = new PrismaClient({
+  transactionOptions: { timeout: 60_000, maxWait: 60_000 },
+});
 
 export type Prisma = typeof prisma;
 
