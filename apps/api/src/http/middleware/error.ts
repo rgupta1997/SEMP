@@ -37,6 +37,18 @@ export function makeErrorHandler(prisma: Db) {
       return;
     }
 
+    // The database itself was unreachable (connection refused, DNS failure, auth
+    // rejected, pool exhausted) - Prisma throws this at CONNECTION time, before it
+    // ever gets to run a query, so it's a different class entirely from the
+    // query-level errors below. Distinct from "something went wrong on our end":
+    // that phrasing is for a genuine bug; this is a known, nameable condition (most
+    // often the API process itself losing its route to the DB host) that deserves
+    // its own message rather than being lumped into the generic catch-all.
+    if (err instanceof Prisma.PrismaClientInitializationError) {
+      res.status(503).json({ error: { code: 'DATABASE_UNREACHABLE', message: 'Trouble connecting. Please try again.' } });
+      return;
+    }
+
     // Map common Prisma errors to friendly responses. These are the generic CRUD
     // routes' fallback - a route with its own pre-check (e.g. invitations) throws a
     // specific BusinessRuleError before ever reaching the database, so these messages
