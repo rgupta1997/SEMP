@@ -712,7 +712,18 @@ function applyCap(format: ScoringFormat, state: KernelState): { unitsWon: Finish
   const clock = format.clock;
   if (!clock) return { unitsWon: [] };
   const at = state.pointLevel;
-  const [a, b] = state.score[at];
+  // An AGGREGATE match (kho-kho, kabaddi, football...) is decided on the total
+  // across every period played SO FAR, not the period in progress alone - a
+  // team that banked 8-0 in period 1 is still ahead if period 3 is 0-2 when
+  // the whole-match clock cuts in. Comparing `state.score[at]` alone ignored
+  // every period already banked into `state.finished` and could hand the
+  // match to whichever side happened to be scoring in the live period,
+  // regardless of who actually led on real total.
+  //
+  // A units-decided format (racquet sports: sets, games) has no such banked
+  // total to add in - the level in progress IS the whole comparison, exactly
+  // as before.
+  const [a, b] = isAggregate(format) ? aggregateScore(state) : state.score[at];
 
   const settle = (): { unitsWon: FinishedUnit[] } => {
     if (a === b) {

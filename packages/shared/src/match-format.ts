@@ -43,6 +43,41 @@ export function isRallyFormat(f: MatchFormat | null | undefined): f is ScoringFo
 }
 
 /**
+ * True for an INVASION-shaped rally format: kho-kho, kabaddi, football, hockey,
+ * basketball and the like - built from the same kernel (`team-presets.ts`'s
+ * RAID/INVASION groups) as badminton or table tennis, but a fundamentally
+ * different game underneath it. A period here ends on the whistle
+ * (`terminator: 'clock'`), not at a point target, and the match is decided on
+ * TOTAL score across periods (`decide: 'aggregate'`), not on games won.
+ *
+ * Nothing about serving, a game target, deuce or a hard ceiling means anything
+ * for a format shaped like this - those are racquet-sport concepts the SAME
+ * kernel happens to also express. The knob editor (`format-knobs.ts`) uses this
+ * to hide them, rather than asking a kho-kho organiser to configure "how the
+ * serve moves" for a sport that has no serve.
+ */
+export function isPeriodShaped(f: MatchFormat | null | undefined): boolean {
+  if (!isRallyFormat(f)) return false;
+  const inner = f.levels[0];
+  const top = f.levels[f.levels.length - 1];
+  return inner?.terminator === 'clock' && top?.decide === 'aggregate';
+}
+
+/** Irregular plurals for the small, known vocabulary of period labels
+ *  (`team-presets.ts`'s `period(...)` calls) - "Half" does not pluralise by
+ *  appending an 's', and "Innings" is already plural in both forms. */
+const IRREGULAR_PERIOD_PLURALS: Record<string, string> = { half: 'halves', innings: 'innings' };
+
+/** "Turn" -> "Turns", "Half" -> "Halves", "Innings" -> "Innings", for n != 1. */
+export function pluralizePeriodLabel(label: string, count: number): string {
+  if (count === 1) return label;
+  const lower = label.toLowerCase();
+  const irregular = IRREGULAR_PERIOD_PLURALS[lower];
+  if (irregular) return label === lower ? irregular : irregular[0].toUpperCase() + irregular.slice(1);
+  return lower.endsWith('s') ? label : `${label}s`;
+}
+
+/**
  * How to read a format of one family: parse a stored config, look up a preset, and
  * name the sport default.
  *
