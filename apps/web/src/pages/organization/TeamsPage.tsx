@@ -304,13 +304,15 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
                 </span>
               )}
               {available.length > 0 && (
-                <button
+                <Button
                   type="button"
+                  size="sm"
+                  variant="subtle"
+                  className="shrink-0"
                   onClick={() => setSelected(allChecked ? new Set() : new Set(available.map((d) => d.id)))}
-                  className="shrink-0 text-xs font-semibold text-brand-600 hover:underline dark:text-brand-300"
                 >
                   {allChecked ? 'Clear all' : `Select all (${available.length})`}
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -360,8 +362,17 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
                         styled as a full form field (solid fill, heavy border), which
                         reads as a prominent button fighting the row's own text for
                         attention. This is meant to look like a quiet, optional
-                        toggle: dashed and ghost by default, only picking up real
-                        color once a team is actually chosen. */}
+                        toggle: ghost by default, only picking up real color once a
+                        team is actually chosen.
+
+                        The options are left with NO dark-mode text class, unlike
+                        every other Tailwind class in this file. The open list is a
+                        native browser popup with its own white background regardless
+                        of the app's theme - `dark:text-slate-100` (light text) is
+                        exactly right for a dark PAGE background and exactly wrong on
+                        that native white one, which is what made the unselected rows
+                        unreadable. A plain, unconditional dark colour is what every
+                        other <option> in this codebase already relies on. */}
                     {isSelected && candidates.length > 0 && (
                       <div className="relative shrink-0">
                         <select
@@ -377,11 +388,13 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
                             'w-36 appearance-none rounded-full border py-1.5 pl-3 pr-7 text-xs font-medium transition-colors focus:outline-none focus:ring-2',
                             reused
                               ? 'border-brand-300 bg-brand-50 text-brand-700 focus:ring-brand-400/30 dark:border-brand-500/40 dark:bg-brand-500/10 dark:text-brand-300'
-                              : 'border-dashed border-slate-300 bg-transparent text-slate-500 hover:border-slate-400 focus:ring-slate-400/20 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600',
+                              : 'border-slate-300 bg-transparent text-slate-500 hover:border-slate-400 focus:ring-slate-400/20 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600',
                           )}
                         >
-                          <option value="">New team</option>
-                          {candidates.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          <option value="" className="text-slate-900">New team</option>
+                          {candidates.map((t: any) => (
+                            <option key={t.id} value={t.id} className="text-slate-900">{t.name}</option>
+                          ))}
                         </select>
                         <ChevronDown
                           size={12}

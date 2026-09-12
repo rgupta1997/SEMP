@@ -56,7 +56,7 @@ export function makeErrorHandler(prisma: Db) {
     // a database log: no error codes, no field/table names the user never typed in.
     if (err instanceof Prisma.PrismaClientKnownRequestError) {
       if (err.code === 'P2002') {
-        res.status(409).json({ error: { code: 'CONFLICT', message: 'This already exists - it may have just been added by someone else. Refresh and try again.', details: err.meta } });
+        res.status(409).json({ error: { code: 'CONFLICT', message: 'This already exists. Refresh and try again.', details: err.meta } });
         return;
       }
       if (err.code === 'P2025') {
