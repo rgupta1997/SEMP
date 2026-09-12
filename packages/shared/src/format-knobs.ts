@@ -1,3 +1,4 @@
+import { isPeriodShaped, pluralizePeriodLabel } from './match-format.js';
 import type {
   CapAction, CapTieRule, ChangeEndsRule, LevelSpec, OfficiatingMode,
   ScoringFormat, ServeMovement, PointScoring,
@@ -67,6 +68,23 @@ export interface FormatKnobs {
   // ---- how it is run
   officiatingMode: OfficiatingMode;
   drawsAllowed: boolean;
+
+  /**
+   * Read-only. True for an invasion-shaped format (kho-kho, kabaddi, football,
+   * hockey, basketball...) - see `isPeriodShaped`. Never written back by
+   * `applyKnobs`; it exists purely so `applies()` predicates below can hide the
+   * racquet-only knobs (serve, game target, deuce, ends) for a sport that has
+   * none of those things, instead of asking a kho-kho organiser to configure
+   * "how the serve moves".
+   */
+  periodShaped: boolean;
+  /**
+   * Read-only, only meaningful when `periodShaped`. What the format itself
+   * calls one period - "Turn", "Innings", "Half", "Quarter" - so the "Number
+   * of periods" knob and its summary line can say "4 turns" rather than a
+   * generic "4 periods" that means nothing extra to whoever set this up.
+   */
+  periodLabel: string;
 }
 
 /** UI metadata for one knob. Rendering is generic; this is what makes it legible. */
@@ -93,51 +111,81 @@ const MOVEMENTS: Array<{ value: ServeMovement; label: string }> = [
 
 export const KNOB_SPECS: KnobSpec[] = [
   // ---- shape
+  //
+  // Every knob in this group (bar the two `periodShaped` ones right after it)
+  // describes a GAME: a target score, a winning margin, a hard ceiling, a
+  // different decider target, a handicap start. None of that exists in an
+  // invasion-shaped format (kho-kho, kabaddi, football...) - a period there
+  // ends on the clock, not at a score, so these are hidden rather than left to
+  // configure a "game" the format doesn't have.
   { key: 'target', label: 'Points to win a game', group: 'shape', type: 'int', min: 1, max: 99,
-    hint: 'The score a side plays to. 11, 21, 15 — or anything you like.' },
+    hint: 'The score a side plays to. 11, 21, 15 — or anything you like.',
+    applies: (k) => !k.periodShaped },
   { key: 'winBy', label: 'Winning margin', group: 'shape', type: 'int', min: 1, max: 5,
-    hint: '2 means deuce continues until somebody leads by two. 1 means the target wins outright.' },
+    hint: '2 means deuce continues until somebody leads by two. 1 means the target wins outright.',
+    applies: (k) => !k.periodShaped },
   { key: 'capEnabled', label: 'Hard ceiling', group: 'shape', type: 'bool',
-    hint: 'Ends the game at a fixed score no matter the margin, so deuce cannot run forever.' },
+    hint: 'Ends the game at a fixed score no matter the margin, so deuce cannot run forever.',
+    applies: (k) => !k.periodShaped },
   { key: 'cap', label: 'Ceiling score', group: 'shape', type: 'int', min: 1, max: 199,
-    applies: (k) => k.capEnabled },
+    applies: (k) => !k.periodShaped && k.capEnabled },
   { key: 'unitsToWin', label: 'Games to win the match', group: 'shape', type: 'int', min: 1, max: 7,
-    hint: '1 = a single game. 2 = best of 3. 3 = best of 5. 4 = best of 7.' },
+    hint: '1 = a single game. 2 = best of 3. 3 = best of 5. 4 = best of 7.',
+    applies: (k) => !k.periodShaped },
+  // Same underlying number (`unitsToWin` is literally how many periods the
+  // match plays), a different question: kho-kho's four turns are all played,
+  // never "best of" - the match is decided on total score, not on turns won.
+  { key: 'unitsToWin', label: 'Number of periods', group: 'shape', type: 'int', min: 1, max: 12,
+    hint: 'How many periods make up the whole match — two innings, four turns, two halves.',
+    applies: (k) => k.periodShaped },
   { key: 'deciderEnabled', label: 'Deciding game plays to a different score', group: 'shape', type: 'bool',
     hint: 'Badminton to 11 in the decider, volleyball to 15.',
-    applies: (k) => k.unitsToWin > 1 },
+    applies: (k) => !k.periodShaped && k.unitsToWin > 1 },
   { key: 'deciderTarget', label: 'Deciding game target', group: 'shape', type: 'int', min: 1, max: 99,
-    applies: (k) => k.unitsToWin > 1 && k.deciderEnabled },
+    applies: (k) => !k.periodShaped && k.unitsToWin > 1 && k.deciderEnabled },
   { key: 'handicapEnabled', label: 'Handicap start', group: 'shape', type: 'bool',
-    hint: 'One side begins every game on a head start.' },
+    hint: 'One side begins every game on a head start.',
+    applies: (k) => !k.periodShaped },
   { key: 'handicapHome', label: 'Home starts on', group: 'shape', type: 'int', min: 0, max: 98,
-    applies: (k) => k.handicapEnabled },
+    applies: (k) => !k.periodShaped && k.handicapEnabled },
   { key: 'handicapAway', label: 'Away starts on', group: 'shape', type: 'int', min: 0, max: 98,
-    applies: (k) => k.handicapEnabled },
+    applies: (k) => !k.periodShaped && k.handicapEnabled },
 
   // ---- serve
+  //
+  // The whole group is racquet-only: kho-kho, kabaddi and the other invasion
+  // sports have no serve at all (fixed to `NO_SERVE` at the preset level), so
+  // asking "how the serve moves" for one has no real answer - it was only ever
+  // showing "No serve" as an option among four that do not apply either.
   { key: 'pointScoring', label: 'Who can score', group: 'serve', type: 'enum',
     hint: 'Rally scoring gives every rally a point. Server-only is the old side-out game: winning as receiver takes the serve, not a point.',
     options: [
       { value: 'rally', label: 'Every rally scores' },
       { value: 'serverOnly', label: 'Only the server scores' },
-    ] },
+    ],
+    applies: (k) => !k.periodShaped },
   { key: 'movement', label: 'How the serve moves', group: 'serve', type: 'enum',
-    options: MOVEMENTS as Array<{ value: string; label: string }> },
+    options: MOVEMENTS as Array<{ value: string; label: string }>,
+    applies: (k) => !k.periodShaped },
   { key: 'serveEvery', label: 'Serves per turn', group: 'serve', type: 'int', min: 1, max: 10,
     hint: 'Table tennis is 2. The old 21-point game was 5.',
-    applies: (k) => k.movement === 'everyN' },
+    applies: (k) => !k.periodShaped && k.movement === 'everyN' },
   { key: 'collapseAt', label: 'One serve each from', group: 'serve', type: 'int', min: 0, max: 98,
     hint: 'Both sides at this score and the serve changes every point. 0 to never.',
-    applies: (k) => k.movement === 'everyN' },
+    applies: (k) => !k.periodShaped && k.movement === 'everyN' },
   { key: 'serversPerSide', label: 'Servers per side', group: 'serve', type: 'int', min: 1, max: 2,
     hint: 'Two means the serve only crosses after both partners have lost it.',
-    applies: (k) => k.movement === 'handOut' },
+    applies: (k) => !k.periodShaped && k.movement === 'handOut' },
   { key: 'firstTurnSingle', label: 'First turn gets one server', group: 'serve', type: 'bool',
     hint: "Pickleball's 0-0-2 opening. Without it the first side serves twice over.",
-    applies: (k) => k.movement === 'handOut' && k.serversPerSide > 1 },
+    applies: (k) => !k.periodShaped && k.movement === 'handOut' && k.serversPerSide > 1 },
 
   // ---- ends
+  //
+  // Also racquet-only: a court-side swap, a let, an official's conduct point
+  // against a named opponent - none of it is modelled for an invasion sport
+  // here (its own discipline/end-of-game rules, where they exist, live in the
+  // format's rulesSheet instead - see team-presets.ts).
   { key: 'changeEnds', label: 'Change ends', group: 'ends', type: 'enum',
     options: [
       { value: 'never', label: 'Never' },
@@ -145,14 +193,17 @@ export const KNOB_SPECS: KnobSpec[] = [
       { value: 'atDeciderMidpoint', label: 'Midway through the decider' },
       { value: 'oddCumulativeUnits', label: 'Every odd game (tennis)' },
       { value: 'everyNPoints', label: 'Every N points (tie-breaks)' },
-    ] },
+    ],
+    applies: (k) => !k.periodShaped },
   { key: 'switchEndsAt', label: 'Change ends at', group: 'ends', type: 'int', min: 1, max: 98,
     hint: 'Badminton swaps at 11 in the decider.',
-    applies: (k) => k.changeEnds === 'atDeciderMidpoint' || k.changeEnds === 'everyNPoints' },
+    applies: (k) => !k.periodShaped && (k.changeEnds === 'atDeciderMidpoint' || k.changeEnds === 'everyNPoints') },
   { key: 'letsEnabled', label: 'Allow lets', group: 'ends', type: 'bool',
-    hint: 'A replayed rally: no point, no change of serve.' },
+    hint: 'A replayed rally: no point, no change of serve.',
+    applies: (k) => !k.periodShaped },
   { key: 'penaltiesEnabled', label: 'Allow conduct points', group: 'ends', type: 'bool',
-    hint: 'An official can award a point for misconduct. Off for self-scored play — a player cannot card their opponent.' },
+    hint: 'An official can award a point for misconduct. Off for self-scored play — a player cannot card their opponent.',
+    applies: (k) => !k.periodShaped },
 
   // ---- clock
   { key: 'clockEnabled', label: 'Time cap', group: 'clock', type: 'bool',
@@ -258,6 +309,9 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
 
     officiatingMode: f.officiatingMode,
     drawsAllowed: f.endStates.drawsAllowed,
+
+    periodShaped: isPeriodShaped(f),
+    periodLabel: inner.label || 'period',
   };
 }
 
@@ -285,6 +339,7 @@ export function isEditable(f: ScoringFormat): boolean {
  */
 export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): ScoringFormat {
   const baseInner = f.levels[0];
+  const baseTop = f.levels[f.levels.length - 1];
   const baseServe = baseInner.serve ?? f.serve;
 
   const serve = {
@@ -327,9 +382,15 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
       : baseInner.deciderOverride,
   };
 
+  // Spread `baseTop` rather than writing a bare `{ key: 'match', label: 'Match',
+  // ... }` literal - a period-shaped match level also carries `decide:
+  // 'aggregate'`, which is what tells the kernel this match is won on TOTAL
+  // score, not units won. Rebuilding it from scratch silently dropped that flag
+  // on every save, turning a kho-kho format's four-turns-decided-by-aggregate
+  // into a nonsensical best-of-seven the moment anyone touched its rules.
   const levels: LevelSpec[] = k.unitsToWin > 1
-    ? [inner, { key: 'match', label: 'Match', target: k.unitsToWin, winBy: 1, cap: null }]
-    : [inner, { key: 'match', label: 'Match', target: 1, winBy: 1, cap: null }];
+    ? [inner, { ...baseTop, target: k.unitsToWin, winBy: 1, cap: null }]
+    : [inner, { ...baseTop, target: 1, winBy: 1, cap: null }];
 
   return {
     ...f,
@@ -361,13 +422,22 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
 /** One line describing what a format does, for a list row. */
 export function describeKnobs(k: FormatKnobs): string {
   const bits: string[] = [];
-  bits.push(k.unitsToWin > 1 ? `best of ${k.unitsToWin * 2 - 1} to ${k.target}` : `single game to ${k.target}`);
-  bits.push(k.winBy > 1 ? `win by ${k.winBy}` : 'sudden death');
-  if (k.capEnabled) bits.push(`cap ${k.cap}`);
-  if (k.deciderEnabled && k.unitsToWin > 1) bits.push(`decider to ${k.deciderTarget}`);
-  if (k.movement === 'everyN') bits.push(`serve every ${k.serveEvery}`);
-  if (k.pointScoring === 'serverOnly') bits.push('server scores only');
-  if (k.handicapEnabled) bits.push(`handicap ${k.handicapHome}–${k.handicapAway}`);
+  // Period-shaped (kho-kho, kabaddi...): there is no game to win and no
+  // decider, just a fixed number of periods and a clock - "best of 7 to 1"
+  // for a format that plays a fixed 4 turns decided on total score was
+  // meaningless, not merely unclear.
+  if (k.periodShaped) {
+    const label = pluralizePeriodLabel(k.periodLabel || 'period', k.unitsToWin).toLowerCase();
+    bits.push(`${k.unitsToWin} ${label}`);
+  } else {
+    bits.push(k.unitsToWin > 1 ? `best of ${k.unitsToWin * 2 - 1} to ${k.target}` : `single game to ${k.target}`);
+    bits.push(k.winBy > 1 ? `win by ${k.winBy}` : 'sudden death');
+    if (k.capEnabled) bits.push(`cap ${k.cap}`);
+    if (k.deciderEnabled && k.unitsToWin > 1) bits.push(`decider to ${k.deciderTarget}`);
+    if (k.movement === 'everyN') bits.push(`serve every ${k.serveEvery}`);
+    if (k.pointScoring === 'serverOnly') bits.push('server scores only');
+    if (k.handicapEnabled) bits.push(`handicap ${k.handicapHome}–${k.handicapAway}`);
+  }
   if (k.clockEnabled) bits.push(`${k.clockMinutes} min cap`);
   return bits.join(' · ');
 }

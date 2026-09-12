@@ -217,3 +217,48 @@ describe('describeKnobs', () => {
       .toContain('server scores only');
   });
 });
+
+describe('period-shaped formats (kho-kho, kabaddi...)', () => {
+  it('flags kho-kho as period-shaped, and a racquet preset as not', () => {
+    expect(readKnobs(fmt('kho_4turns')).periodShaped).toBe(true);
+    expect(readKnobs(fmt('bwf_official_3x21')).periodShaped).toBe(false);
+  });
+
+  it('hides every racquet-only knob (shape, serve, ends) and offers only "number of periods"', () => {
+    const k = readKnobs(fmt('kho_4turns'));
+    const shown = new Set<string>(knobsFor(k).map((s) => s.key));
+    for (const hidden of [
+      'target', 'winBy', 'capEnabled', 'cap', 'deciderEnabled', 'deciderTarget',
+      'handicapEnabled', 'handicapHome', 'handicapAway',
+      'pointScoring', 'movement', 'serveEvery', 'collapseAt', 'serversPerSide', 'firstTurnSingle',
+      'changeEnds', 'switchEndsAt', 'letsEnabled', 'penaltiesEnabled',
+    ]) expect(shown.has(hidden), hidden).toBe(false);
+    expect(shown.has('unitsToWin')).toBe(true);
+    // Time cap and "how it is run" still apply - a kho-kho turn genuinely has a
+    // clock, and someone still decides who scores and whether a draw stands.
+    for (const stillShown of ['clockEnabled', 'clockMinutes', 'clockAction', 'clockTieRule', 'officiatingMode', 'drawsAllowed']) {
+      expect(shown.has(stillShown), stillShown).toBe(true);
+    }
+  });
+
+  it('describes itself by periods, not by an invented "game"', () => {
+    expect(describeKnobs(readKnobs(fmt('kho_4turns')))).toBe('4 turns · 36 min cap');
+    expect(describeKnobs(readKnobs(fmt('kho_2x9')))).toBe('2 innings · 18 min cap');
+  });
+
+  it("round-trips the match level's decide:'aggregate' through applyKnobs", () => {
+    // This is the correctness bug, not just the UI one: rebuilding the match
+    // level from a bare literal silently dropped `decide`, which is what tells
+    // the kernel this format is won on total score rather than turns won.
+    const base = fmt('kho_4turns');
+    const roundTripped = applyKnobs(base, readKnobs(base));
+    expect(roundTripped.levels[roundTripped.levels.length - 1].decide).toBe('aggregate');
+
+    // Changing the one knob it actually offers - how many periods - still
+    // preserves it.
+    const changed = applyKnobs(base, { ...readKnobs(base), unitsToWin: 2 });
+    const top = changed.levels[changed.levels.length - 1];
+    expect(top.decide).toBe('aggregate');
+    expect(top.target).toBe(2);
+  });
+});
