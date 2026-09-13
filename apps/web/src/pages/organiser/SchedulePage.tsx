@@ -806,7 +806,8 @@ export function SchedulePage() {
   // always shows one tournament's draws - so it's registered as required (no "All").
   const tournamentOptions = tournaments.map((t: any) => ({ id: t.id, name: t.name }));
   const sportOptions = [...new Map(tsports.map((ts: any) => [ts.sport_id, sportName(ts.sport_id)])).entries()]
-    .map(([id, name]) => ({ id, name }));
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   const { sportId } = usePageFilters({
     tournaments: topView === 'manage' && tournamentOptions.length ? tournamentOptions : undefined,
     tournamentRequired: true,
