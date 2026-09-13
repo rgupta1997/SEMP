@@ -237,7 +237,7 @@ export function SportStatsPanel({ userId }: { userId?: string }) {
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>Sport</span>
           <Select value={sportId} onChange={(e) => { setSportId(e.target.value); setDisciplineId(''); }}>
             <option value="">All sports</option>
-            {data.filters.map((f) => <option key={f.sportId} value={f.sportId}>{f.sport}</option>)}
+            {[...data.filters].sort((a, b) => a.sport.localeCompare(b.sport)).map((f) => <option key={f.sportId} value={f.sportId}>{f.sport}</option>)}
           </Select>
         </label>
         <label style={{ display: 'grid', gap: 3, minWidth: 200 }}>

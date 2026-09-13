@@ -678,7 +678,7 @@ export function TeamsPage() {
       if (tournamentFilter !== 'all' && !teamTournaments(t).some((x) => x.id === tournamentFilter)) continue;
       if (t.sport_id) map.set(t.sport_id, t.sports?.name ?? 'Sport');
     }
-    return [...map.entries()].map(([id, name]) => ({ id, name }));
+    return [...map.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [teams, eventId, tournamentFilter]);
 
   // `eventId` is shared, app-wide state - with no header dropdown on this tab to
