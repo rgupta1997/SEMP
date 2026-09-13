@@ -194,8 +194,8 @@ export function SearchableSelect({
 export const Textarea = ({ className = '', ...p }: TextareaHTMLAttributes<HTMLTextAreaElement>) =>
   <textarea className={cn(fieldBase, className)} {...p} />;
 
-export const Field = ({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) => (
-  <label className="block mb-4">
+export const Field = ({ label, hint, compact, children }: { label: string; hint?: string; compact?: boolean; children: ReactNode }) => (
+  <label className={cn('block', compact ? 'mb-2.5' : 'mb-4')}>
     <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">{label}</span>
     {children}
     {hint && <span className="block text-xs text-slate-400 dark:text-slate-500 mt-1">{hint}</span>}
