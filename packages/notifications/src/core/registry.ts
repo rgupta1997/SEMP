@@ -545,7 +545,18 @@ ${where}` : where;
       return Rules.role('organiser', ctx.championshipId);
     },
     titleTemplate: () => 'Fixtures generated',
-    bodyTemplate: (data) => `Fixtures for ${String(data.disciplineName ?? 'the draw')} are ready to review.`,
+    // Discipline alone reads fine for one sport, but a championship running six of
+    // them at once turned into a wall of identical "Fixtures for Men's are ready to
+    // review" / "Fixtures for Whole sport are ready to review" rows with nothing
+    // to tell them apart until you opened each one. The sport name is what
+    // actually distinguishes them - same "sport · discipline" convention already
+    // used everywhere else a draw is labelled (see drawLabel in FormatPicker.tsx).
+    bodyTemplate: (data) => {
+      const discipline = String(data.disciplineName ?? 'the draw');
+      const sport = data.sportName ? String(data.sportName) : null;
+      const label = sport ? `${sport} · ${discipline}` : discipline;
+      return `Fixtures for ${label} are ready to review.`;
+    },
   },
 
   match_scheduled: {
