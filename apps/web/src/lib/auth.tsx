@@ -174,6 +174,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     tokenStore.clear();
     localStorage.removeItem(ACTIVE_ROLE_KEY);
+    // The workspace CHOICE (which org/event's sidebar is showing) is stored per
+    // account under "semp_context:<userId>" - see useWorkspace.ts - specifically
+    // so switching between Option B accounts mid-session doesn't inherit each
+    // other's workspace. But that also means it's account data, not session
+    // data: it survives a logout untouched, and the next sign-in (same person or
+    // not) picked it right back up - landing on My Game (the personal-space
+    // page every fresh login bounces to) while the sidebar still showed
+    // whichever org or event was active before. A real logout is a clean
+    // break, so every stored choice is forgotten here, not just the current
+    // account's.
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k?.startsWith('semp_context:')) localStorage.removeItem(k);
+    }
     qc.clear(); // wipe cached data so the next user starts clean
     setCtx(null);
     setJustLoggedIn(false);
