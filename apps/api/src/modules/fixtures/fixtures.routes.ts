@@ -148,7 +148,13 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         include: {
           tournament_formats: true,
           disciplines: { select: { name: true } },
-          tournament_sports: { include: { tournament_formats: true, tournaments: { select: { championship_id: true } } } },
+          tournament_sports: {
+            include: {
+              tournament_formats: true,
+              tournaments: { select: { championship_id: true } },
+              sports: { select: { name: true } },
+            },
+          },
         },
       });
       if (!td) throw new NotFoundError('Tournament discipline');
@@ -159,7 +165,10 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       const notifyFixturesGenerated = async (rows: Array<{ home_team_id: string | null; away_team_id: string | null }>) => {
         if (championshipId) {
           try {
-            await notify(prisma, { type: 'fixtures_generated', championshipId, senderId: req.user!.id, data: { disciplineName: td.disciplines?.name } });
+            await notify(prisma, {
+              type: 'fixtures_generated', championshipId, senderId: req.user!.id,
+              data: { disciplineName: td.disciplines?.name, sportName: td.tournament_sports.sports?.name },
+            });
           } catch (err) {
             console.error(`[fixtures] fixtures_generated notification failed for draw ${td.id}:`, err);
           }
@@ -323,7 +332,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         where: { id: req.params.id },
         include: {
           disciplines: { select: { name: true } },
-          tournament_sports: { select: { tournaments: { select: { championship_id: true } } } },
+          tournament_sports: { select: { tournaments: { select: { championship_id: true } }, sports: { select: { name: true } } } },
         },
       });
       if (!td) throw new NotFoundError('Tournament discipline');
@@ -395,7 +404,10 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       const championshipId = td.tournament_sports?.tournaments?.championship_id ?? null;
       if (championshipId) {
         try {
-          await notify(prisma, { type: 'fixtures_generated', championshipId, senderId: req.user!.id, data: { disciplineName: td.disciplines?.name } });
+          await notify(prisma, {
+            type: 'fixtures_generated', championshipId, senderId: req.user!.id,
+            data: { disciplineName: td.disciplines?.name, sportName: td.tournament_sports?.sports?.name },
+          });
         } catch (err) {
           console.error(`[fixtures] fixtures_generated notification failed for draw ${td.id}:`, err);
         }
