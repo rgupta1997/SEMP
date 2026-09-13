@@ -54,7 +54,7 @@ export const CONTACT = {
   phoneHref: 'tel:+917276088888',
   whatsapp: 'https://wa.me/917276088888',
   instagram: 'https://www.instagram.com/sportagon',
-  linkedin: 'https://www.linkedin.com/company/sportagon',
+  linkedin: 'https://www.linkedin.com/company/sportagon-india',
   hours: 'Monday to Saturday, working hours IST',
 }
 

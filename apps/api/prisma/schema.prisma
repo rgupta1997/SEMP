@@ -787,6 +787,9 @@ model demo_requests {
   sport_count       Int?
   participant_count Int?
   source            String?  @db.VarChar
+  /// Separate, explicit opt-in to marketing - never implied by the enquiry-contact
+  /// consent every submission already carries. See 20260913000000_demo_request_marketing_consent.sql.
+  marketing_consent Boolean  @default(false)
   users        users?   @relation(fields: [handled_by], references: [id], onUpdate: NoAction)
 
   @@index([created_at(sort: Desc)], map: "idx_demo_requests_created")
