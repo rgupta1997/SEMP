@@ -23,6 +23,8 @@ interface DemoRequest {
   sport_count?: number | null;
   participant_count?: number | null;
   source?: string | null;
+  // Separate from the enquiry itself - see 20260913000000_demo_request_marketing_consent.sql.
+  marketing_consent: boolean;
   status: DemoRequestStatus;
   created_at: string;
   users?: { id: string; name: string } | null;
@@ -100,7 +102,13 @@ export function PlatformDemoRequestsPage() {
                 <Fragment key={r.id}>
                   <tr className={r.message || r.source ? 'border-b-0' : undefined}>
                     <td className="px-4 py-2">
-                      <div className="font-medium text-slate-800 dark:text-slate-200">{r.name}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-slate-800 dark:text-slate-200">{r.name}</span>
+                        {/* Whether this lead may actually be emailed marketing, not
+                            just contacted back about their own enquiry - the two
+                            are separate consents, captured by separate checkboxes. */}
+                        {r.marketing_consent && <Badge tone="teal">Marketing OK</Badge>}
+                      </div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">{r.email}</div>
                       {r.phone && <div className="text-xs text-slate-400 dark:text-slate-500">{r.phone}</div>}
                     </td>

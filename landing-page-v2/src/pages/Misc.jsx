@@ -210,6 +210,7 @@ export function Demo() {
       participant_count: form.participants,
       source: form.source?.trim(),
       message: form.message?.trim(),
+      marketing_consent: !!form.marketingConsent,
     }
     for (const k of Object.keys(body)) if (body[k] === '' || body[k] == null) delete body[k]
     return body
@@ -351,6 +352,23 @@ export function Demo() {
                   <span>I agree to be contacted about this enquiry.</span>
                 </label>
                 {errors.consent && <p className="err">{errors.consent}</p>}
+              </div>
+
+              {/* Deliberately a SEPARATE checkbox from the one above, unchecked by
+                  default and never required. "Contacted about this enquiry" and
+                  "send me marketing" are two different purposes - bundling them
+                  either forces a marketing opt-in on everyone booking a demo, or
+                  leaves that opt-in unprovable as a specific, genuine choice. */}
+              <div className="field field--full">
+                <label className="consent" htmlFor="f-marketing-consent">
+                  <input
+                    id="f-marketing-consent"
+                    type="checkbox"
+                    checked={!!form.marketingConsent}
+                    onChange={set('marketingConsent')}
+                  />
+                  <span>I agree to receive marketing communication.</span>
+                </label>
               </div>
 
               <div className="field field--full">
