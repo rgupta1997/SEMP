@@ -1,6 +1,7 @@
 import type { Request } from 'express';
 import type { Db, Prisma } from '../../infra/prisma.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
+import { friendlyError } from '../../http/middleware/error.js';
 import { audit, auditSystem, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import { recomputeStandingsForFixture } from '../standings/standings.service.js';
 import { createNotification } from '../notifications/audience.js';
@@ -160,12 +161,20 @@ function fixtureLabel(fx: any): string {
  * into a 500 and NO LOCK AT ALL - which is what happened, courtside, on a squad of
  * eleven a side.
  *
+ * 30s was itself once the raised value and still wasn't enough: a real lock hit
+ * P2028 ("Transaction already closed") at 31.1s, inside writeLifetimeEntries's
+ * achievement derivation (records.service.ts) - the transaction was killed
+ * mid-write, not refused up front, so the error surfaced as an opaque 500 with
+ * nothing in the response indicating a timeout was the actual cause. Matched to
+ * the client's own global default (prisma.ts) rather than picking a new
+ * arbitrary number, so this is no longer the tighter of the two.
+ *
  * Raising it is the right trade rather than splitting the work up: every step here
  * has to commit or roll back together, and a half-published result is far worse than
- * a lock that takes four seconds. `maxWait` is how long to queue for a connection
- * before starting, which is a different failure and worth its own budget.
+ * a lock that takes several seconds longer. `maxWait` is how long to queue for a
+ * connection before starting, which is a different failure and worth its own budget.
  */
-const LOCK_TX = { timeout: 30_000, maxWait: 10_000 } as const;
+const LOCK_TX = { timeout: 60_000, maxWait: 15_000 } as const;
 
 const FIXTURE_FOR_LOCK = {
   include: {
@@ -387,7 +396,7 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
 
     // Standings recomputed above (inside the transaction) - tell the championship.
     try {
-      await notify(prisma, { type: 'standings_updated', championshipId, senderId: req.user!.id, data: { label } });
+      await notify(prisma, { type: 'standings_updated', championshipId, senderId: actorUserId, data: { label } });
     } catch (err) {
       console.error(`[lock] standings_updated notification failed for fixture ${fx.id}:`, err);
     }
@@ -401,7 +410,7 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
     const losingTeamId = fx.winner_team_id === fx.home_team_id ? fx.away_team_id : fx.home_team_id;
     if (losingTeamId) {
       try {
-        await notify(prisma, { type: 'team_eliminated', audience: Rules.teamMembers(losingTeamId), senderId: req.user!.id, data: { label } });
+        await notify(prisma, { type: 'team_eliminated', audience: Rules.teamMembers(losingTeamId), senderId: actorUserId, data: { label } });
       } catch (err) {
         console.error(`[lock] team_eliminated notification failed for fixture ${fx.id}:`, err);
       }
@@ -544,8 +553,13 @@ export async function lockScorecardsBulk(
     try {
       await lockScorecard(prisma, req, id);
       results.push({ fixture_id: id, ok: true });
-    } catch (err: any) {
-      results.push({ fixture_id: id, ok: false, error: err?.message ?? 'Could not lock this scorecard' });
+    } catch (err) {
+      // The SAME translation a single lock's HTTP response gets - errorHandler
+      // never sees this one, because it's caught right here rather than
+      // reaching Express, so without this a raw Prisma/JS exception (a P2028's
+      // "31135 ms passed since the start of the transaction" stack, say) would
+      // reach a person's toast completely untranslated.
+      results.push({ fixture_id: id, ok: false, error: friendlyError(err).message });
     }
   }
   return results;
