@@ -151,11 +151,11 @@ function IconAction({
  * third of the width - and colour is never the only signal, because the glyph
  * differs too.
  */
-function StatusGlyph({ locked, individual, status }: { locked: boolean; individual: boolean; status: string }) {
+function StatusGlyph({ locked, rankingEvent, status }: { locked: boolean; rankingEvent: boolean; status: string }) {
   const done = status === 'completed' || status === 'confirmed';
   const [Icon, text, cls] = locked
     ? [ShieldCheck, 'Official', 'text-emerald-600 dark:text-emerald-400']
-    : individual
+    : rankingEvent
       ? [Users, 'Individual', 'text-slate-500 dark:text-slate-400']
       : done
         ? [CheckCircle2, 'Played', 'text-emerald-600 dark:text-emerald-400']
@@ -682,15 +682,23 @@ export function ResultsPage() {
               </div>
 
               {g.rows.map((f) => {
-                const individual = f.entry_type === 'individual';
                 // Ranking events (powerlifting/swimming/athletics) have no head-to-head
                 // matchup - the generator emits one team-less fixture with round 'Event'.
                 // Showing "TBD vs TBD" there is wrong: there's no opponent to decide, so
                 // we show the discipline name + a Ranking event tag instead.
+                //
+                // This is NOT the same thing as `entry_type === 'individual'` - that just
+                // means one competitor per side (singles badminton, a boxing bout, a
+                // Knockout draw of individual shooters), and plenty of individual-entry
+                // disciplines are real head-to-head matches with two actual opponents and
+                // a score, exactly like a team match. Gating on entry_type alone hid a
+                // completed Knockout shooting final's real 36-46 scoreline behind a
+                // "Ranking event" badge and two empty slots - the bracket had an opponent
+                // and a winner the whole time; only THIS page refused to show either.
                 const rankingEvent = f.round === 'Event' && !f.home && !f.away;
                 const completed = f.status === 'completed' || f.status === 'confirmed';
                 const isLocked = locked(f);
-                const scored = !individual && !rankingEvent && f.home_score != null && f.away_score != null;
+                const scored = !rankingEvent && f.home_score != null && f.away_score != null;
                 const homeWon = f.winner_team_id != null && f.winner_team_id === f.home?.id;
                 const awayWon = f.winner_team_id != null && f.winner_team_id === f.away?.id;
                 return (
@@ -728,7 +736,7 @@ export function ResultsPage() {
                         <span className="t-meta min-w-0 flex-1 truncate text-[12px]">
                           {[f.round || (rankingEvent ? 'Event' : ''), whenLabel(f.scheduled_at)].filter(Boolean).join(' · ')}
                         </span>
-                        <StatusGlyph locked={isLocked} individual={individual} status={f.status} />
+                        <StatusGlyph locked={isLocked} rankingEvent={rankingEvent} status={f.status} />
                         {canManage && (
                           <span className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
                             {/* `expressive` reveals the word from sm up. This card
@@ -760,7 +768,7 @@ export function ResultsPage() {
                         )}
                       </div>
 
-                      {individual || rankingEvent ? (
+                      {rankingEvent ? (
                         <div className="flex items-center gap-2">
                           <span className="truncate text-[15px] font-semibold text-slate-800 dark:text-slate-100">
                             {f.discipline ?? f.sport ?? 'Event'}
@@ -834,7 +842,7 @@ export function ResultsPage() {
                         have no head-to-head matchup, so show the event (discipline) name
                         instead of two empty team chips. */}
                     <div className="flex items-center gap-2 sm:gap-3">
-                      {individual || rankingEvent ? (
+                      {rankingEvent ? (
                         <div className="flex w-[19rem] items-center justify-center gap-2 text-center sm:w-[27rem]">
                           <span className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200" title={f.discipline ?? f.sport ?? undefined}>
                             {f.discipline ?? f.sport ?? 'Event'}
@@ -874,7 +882,7 @@ export function ResultsPage() {
                         // "official" are different claims, and this cell can only
                         // lead with one of them.
                         <StatusBadge status="locked" label="Locked" />
-                      ) : individual ? (
+                      ) : rankingEvent ? (
                         <StatusBadge status="" label="Individual" />
                       ) : (
                         <StatusBadge status={f.status} />
