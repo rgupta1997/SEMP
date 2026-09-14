@@ -1,12 +1,70 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { BadgeCheck, Save, Trash2 } from 'lucide-react';
+import { BadgeCheck, Save, Trash2, Upload, X } from 'lucide-react';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { api } from '../../../lib/api';
 import {
   BackButton, Button, Card, Input, PageHeader, Skeleton, Textarea, confirmDialog, toast,
 } from '../../../components/ui';
 import { SheetPreview, type Template } from './shared';
+
+// A certificate template needs no upload infrastructure of its own: these are small,
+// occasional images (a logo, a signature) so they're kept as data URIs right inside
+// the design JSON, the same way the QR code already rides along in the rendered HTML.
+const MAX_IMAGE_BYTES = 800 * 1024;
+
+function readAsDataUri(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function ImageField({
+  label, hint, value, onChange,
+}: { label: string; hint: string; value: string; onChange: (v: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const onPick = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { toast.error('Please choose an image file'); return; }
+    if (file.size > MAX_IMAGE_BYTES) { toast.error('That image is too large', 'Keep it under 800KB.'); return; }
+    try { onChange(await readAsDataUri(file)); } catch { toast.error('Could not read that image'); }
+  };
+
+  return (
+    <div className="grid gap-1 text-sm">
+      <span className="font-medium text-slate-700 dark:text-slate-300">{label}</span>
+      <div className="flex items-center gap-3">
+        {value ? (
+          <img src={value} alt="" className="h-12 w-12 rounded border border-slate-200 object-contain bg-white dark:border-slate-700" />
+        ) : (
+          <div className="grid h-12 w-12 shrink-0 place-items-center rounded border border-dashed border-slate-300 text-slate-400 dark:border-slate-700">
+            <Upload size={16} aria-hidden />
+          </div>
+        )}
+        <div className="flex flex-col gap-1">
+          <div className="flex gap-2">
+            <Button type="button" variant="ghost" onClick={() => inputRef.current?.click()}>
+              <Upload size={14} aria-hidden />{value ? 'Replace' : 'Upload'}
+            </Button>
+            {value && (
+              <Button type="button" variant="ghost" onClick={() => onChange('')}>
+                <X size={14} aria-hidden />Remove
+              </Button>
+            )}
+          </div>
+          <span className="text-xs text-slate-500 dark:text-slate-400">{hint}</span>
+        </div>
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={onPick} />
+    </div>
+  );
+}
 
 // Template preview and edit.
 //
@@ -127,6 +185,11 @@ export function TemplatePreviewPage() {
                 </div>
               </fieldset>
 
+              <ImageField
+                label="Logo" hint="Shown at the top of the certificate, if your institution has one."
+                value={form.design.logo_url ?? ''} onChange={(v) => set('logo_url', v)}
+              />
+
               <label className="grid gap-1 text-sm">
                 <span className="font-medium text-slate-700 dark:text-slate-300">Accent colour</span>
                 <div className="flex items-center gap-2">
@@ -159,6 +222,11 @@ export function TemplatePreviewPage() {
                 <span className="font-medium text-slate-700 dark:text-slate-300">Signatory title</span>
                 <Input value={form.design.signatory_title ?? ''} onChange={(e) => set('signatory_title', e.target.value)} placeholder="Director of Sport" />
               </label>
+
+              <ImageField
+                label="Signature / stamp" hint="Replaces the blank signature line with your own signature or stamp image."
+                value={form.design.signature_image_url ?? ''} onChange={(v) => set('signature_image_url', v)}
+              />
             </div>
           </Card>
 

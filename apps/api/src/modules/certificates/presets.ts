@@ -21,6 +21,7 @@ export interface TemplateDesign {
   signatory_name?: string;
   signatory_title?: string;
   logo_url?: string;
+  signature_image_url?: string;
 }
 
 export interface Preset {
