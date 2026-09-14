@@ -3,7 +3,7 @@ import { CalendarClock, Download, ExternalLink, RefreshCw, Share2, ShieldOff } f
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { api } from '../../../lib/api';
 import { BackButton, Button, Card, PageHeader, Skeleton, cn, confirmDialog, toast } from '../../../components/ui';
-import { CertStatus, SheetPreview, openDoc, shortDate, whenish, type Cert } from './shared';
+import { CertStatus, SheetPreview, downloadCertificate, shortDate, whenish, type Cert } from './shared';
 
 // One certificate, end to end: what it says, what happened to it, and what can be done
 // about it. The audit trail is the reason this screen exists - "is this real?" is
@@ -69,7 +69,8 @@ export function CertificateDetailPage() {
   const dead = c.status === 'withdrawn' || c.status === 'superseded';
 
   const actions = [
-    { label: 'Download certificate', icon: Download, onClick: () => openDoc(`/certificates/${c.id}/render?download=1`, { download: `${c.serial}.html` }) },
+    { label: 'Download as PDF', icon: Download, onClick: () => downloadCertificate(`/certificates/${c.id}/render`, c.serial, 'pdf') },
+    { label: 'Download as PNG', icon: Download, onClick: () => downloadCertificate(`/certificates/${c.id}/render`, c.serial, 'png') },
     { label: 'Share certificate', icon: Share2, onClick: onShare },
     { label: 'Open verification page', icon: ExternalLink, onClick: () => window.open(`/verify/${c.token}`, '_blank', 'noopener') },
     // Re-running generation is how a corrected result gets a fresh certificate; there
