@@ -60,7 +60,7 @@ export async function api<T = any>(
       const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
       throw new ApiError(0, offline
         ? 'You appear to be offline. Check your connection and try again.'
-        : 'Could not reach the server. Please try again in a moment.');
+        : 'Something went wrong. Please try again in a moment.');
     }
 
     if (shouldRetry && RETRYABLE_STATUS.has(res.status) && attempt < MAX_RETRIES) {
