@@ -16,9 +16,10 @@ import { EVENT_ROLE_CODES, landingFor, type ContextKind, type NavFacts, type Wor
 // Only the CHOICE is persisted, and only per account - switching to your other
 // account under Option B must not drop you into the previous one's organisation.
 
-// `auth.tsx`'s logout() clears every "semp_context:*" key directly (not imported
-// from here - this module already imports useAuth from auth.tsx, and the reverse
-// import would be circular) so a stale workspace choice from before logout can't
+// `auth.tsx` clears every "semp_context:*" key directly (not imported from here -
+// this module already imports useAuth from auth.tsx, and the reverse import would
+// be circular) on every path that ends a session - an explicit logout, and a dead
+// token found on mount - so a stale workspace choice from before then can't
 // survive in localStorage and reattach itself the next time anyone signs in.
 const KEY = 'semp_context';
 

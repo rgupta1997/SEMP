@@ -127,9 +127,17 @@ export function RacquetDeck(p: RacquetDeckProps) {
             {lv.label}
           </div>
           {call && (
-            <div className="mt-0.5 font-mono text-sm font-semibold tabular-nums text-slate-700 dark:text-slate-200">
-              {call}
-            </div>
+            <>
+              <div className="mt-0.5 font-mono text-sm font-semibold tabular-nums text-slate-700 dark:text-slate-200">
+                {call}
+              </div>
+              {/* The serving side's score is always called first - explained here
+                  rather than reordered, because getting it backwards would make the
+                  console wrong for anyone actually calling the score courtside. */}
+              <div className="mt-0.5 text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                server · receiver
+              </div>
+            </>
           )}
         </div>
         <ScorePanel

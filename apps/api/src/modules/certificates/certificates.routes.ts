@@ -290,7 +290,14 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
 
     const achievements = await prisma.achievements.findMany({
       where: {
-        organization_id: organizationId, championship_id: champ.id,
+        // NOT organization_id: organizationId. That column names the WINNER's own
+        // institution (so it shows on their own achievement board), not who is
+        // generating the certificate - an inter-institution championship is the
+        // normal case, not the exception, and its host issuing a medallist's
+        // certificate does not require the medallist to belong to the host. Scoped
+        // by championship_id (via lockedIds) and by assertIssuer's permission check
+        // above instead.
+        championship_id: champ.id,
         superseded_at: null, user_id: { not: null }, kind: { in: body.kinds },
         fixture_id: { in: lockedIds },
       },

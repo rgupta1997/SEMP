@@ -7,7 +7,7 @@ import { useApi } from '../../lib/hooks';
 import { titleCase } from '../../lib/format';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { Badge, Button, Card, CardBody, Field, Input, Modal, PageHeader, Select, Spinner, Textarea, toast } from '../../components/ui';
-import { SheetPreview, openDoc } from '../organization/certificates/shared';
+import { SheetPreview, openDoc, downloadCertificate } from '../organization/certificates/shared';
 import { ParticipantDashboard } from './ParticipantDashboard';
 import { LifetimeRecordPage } from './LifetimeRecordPage';
 
@@ -203,9 +203,15 @@ function CertificateRow({ c }: { c: CertRow }) {
           </Button>
           <Button
             size="sm" variant="outline"
-            onClick={() => openDoc(`/me/certificates/${c.id}/render?download=1`, { download: `${c.serial}.html` })}
+            onClick={() => downloadCertificate(`/me/certificates/${c.id}/render`, c.serial, 'pdf')}
           >
-            <Download size={13} aria-hidden />Download
+            <Download size={13} aria-hidden />PDF
+          </Button>
+          <Button
+            size="sm" variant="outline"
+            onClick={() => downloadCertificate(`/me/certificates/${c.id}/render`, c.serial, 'png')}
+          >
+            <Download size={13} aria-hidden />PNG
           </Button>
           <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
             Details{open ? <ChevronUp size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
