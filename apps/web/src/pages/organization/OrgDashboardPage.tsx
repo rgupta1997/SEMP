@@ -146,8 +146,12 @@ export function OrgDashboardPage() {
         ))}
       </div>
 
-      {/* ---- getting started, only while it is still unfinished ---- */}
-      {canManage && !onboarding.complete && (
+      {/* GettingStarted never dismisses itself to nothing - once complete it
+          collapses to a "Done 🎉" header holding completeNote. Gating on
+          !onboarding.complete here would unmount it before that state ever
+          renders, which is exactly the "card silently disappears" bug this
+          was built to avoid. */}
+      {canManage && (
         <GettingStarted
           title="Get your organization match-ready"
           subtitle="A few steps to go from sign-up to a locked roster."
