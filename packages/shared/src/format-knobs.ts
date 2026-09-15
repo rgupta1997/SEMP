@@ -99,6 +99,16 @@ export interface KnobSpec {
   options?: Array<{ value: string; label: string }>;
   /** Only offered when this returns true for the format being edited. */
   applies?: (k: FormatKnobs) => boolean;
+  /**
+   * `type: 'int'` only. Lets a knob show a different number from the one it
+   * writes - the stored value stays the source of truth, this is purely how
+   * it is read and typed back. Used for a period-shaped match's clock: the
+   * format stores one whole-match total, but asking an organiser to type that
+   * and divide it by the period count in their head is how a 4-period match
+   * quietly ends up with a 1-minute period nobody meant to set.
+   */
+  toDisplay?: (raw: number, k: FormatKnobs) => number;
+  fromDisplay?: (display: number, k: FormatKnobs) => number;
 }
 
 const MOVEMENTS: Array<{ value: ServeMovement; label: string }> = [
@@ -209,7 +219,20 @@ export const KNOB_SPECS: KnobSpec[] = [
   { key: 'clockEnabled', label: 'Time cap', group: 'clock', type: 'bool',
     hint: 'Ends the match on the clock when the hall booking, not the score, decides.' },
   { key: 'clockMinutes', label: 'Minutes', group: 'clock', type: 'int', min: 1, max: 240,
-    applies: (k) => k.clockEnabled },
+    applies: (k) => k.clockEnabled && !k.periodShaped },
+  // Same stored number as above (the format only ever keeps ONE whole-match
+  // total - see the "whole-match time cap" comment in rally-kernel.ts), a
+  // different question for a period-shaped sport: "how long is one period"
+  // is what an organiser actually has in mind, not the match total. Typed and
+  // shown per period; multiplied back out to the total on write, and divided
+  // back down live if the period count changes - so the number on screen
+  // always reflects the pace that's actually configured, not a stale one.
+  { key: 'clockMinutes', label: 'Minutes per period', group: 'clock', type: 'int', min: 1, max: 240,
+    hint: 'The whole match shares one clock. Set per period so changing the period count does not silently change how long each one runs.',
+    applies: (k) => k.clockEnabled && k.periodShaped,
+    toDisplay: (raw, k) => Math.max(1, Math.round(raw / Math.max(1, k.unitsToWin))),
+    fromDisplay: (display, k) => Math.max(1, display) * Math.max(1, k.unitsToWin),
+  },
   { key: 'clockAction', label: 'At the buzzer', group: 'clock', type: 'enum',
     applies: (k) => k.clockEnabled,
     options: [
@@ -438,6 +461,10 @@ export function describeKnobs(k: FormatKnobs): string {
     if (k.pointScoring === 'serverOnly') bits.push('server scores only');
     if (k.handicapEnabled) bits.push(`handicap ${k.handicapHome}–${k.handicapAway}`);
   }
-  if (k.clockEnabled) bits.push(`${k.clockMinutes} min cap`);
+  if (k.clockEnabled) {
+    bits.push(k.periodShaped
+      ? `${k.clockMinutes} min cap (${Math.round(k.clockMinutes / Math.max(1, k.unitsToWin))}/period)`
+      : `${k.clockMinutes} min cap`);
+  }
   return bits.join(' · ');
 }

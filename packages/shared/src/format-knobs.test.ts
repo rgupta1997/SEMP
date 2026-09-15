@@ -242,8 +242,32 @@ describe('period-shaped formats (kho-kho, kabaddi...)', () => {
   });
 
   it('describes itself by periods, not by an invented "game"', () => {
-    expect(describeKnobs(readKnobs(fmt('kho_4turns')))).toBe('4 turns · 36 min cap');
-    expect(describeKnobs(readKnobs(fmt('kho_2x9')))).toBe('2 innings · 18 min cap');
+    // The per-period figure is shown alongside the total for exactly the reason
+    // this whole knob split exists: a period-shaped match's clock is one
+    // whole-match total, and typing that without seeing what it works out to
+    // per period is how a 4-period match quietly gets a 1-minute period.
+    expect(describeKnobs(readKnobs(fmt('kho_4turns')))).toBe('4 turns · 36 min cap (9/period)');
+    expect(describeKnobs(readKnobs(fmt('kho_2x9')))).toBe('2 innings · 18 min cap (9/period)');
+  });
+
+  it('offers "Minutes per period" instead of "Minutes" for a period-shaped format, and round-trips through the total it actually stores', () => {
+    const k = readKnobs(fmt('kho_4turns')); // 4 periods, 36 min total
+    const shown = knobsFor(k);
+    expect(shown.find((s) => s.key === 'clockMinutes' && s.label === 'Minutes per period')).toBeTruthy();
+    expect(shown.find((s) => s.key === 'clockMinutes' && s.label === 'Minutes')).toBeFalsy();
+
+    const spec = KNOB_SPECS.find((s) => s.key === 'clockMinutes' && s.label === 'Minutes per period')!;
+    // The stored total (36) reads as 9 per period, and typing 9 back writes the
+    // same total - the organiser never has to do that division themselves.
+    expect(spec.toDisplay!(k.clockMinutes, k)).toBe(9);
+    expect(spec.fromDisplay!(9, k)).toBe(36);
+
+    // Bump periods 4 -> 6 without touching minutes at all: the STORED total is
+    // untouched (nothing silently rewrote it), but the number the organiser sees
+    // recalculates on its own - so a pace that quietly got thinner is visible
+    // immediately instead of being buried in a total nobody re-divided.
+    const morePerods = { ...k, unitsToWin: 6 };
+    expect(spec.toDisplay!(morePerods.clockMinutes, morePerods)).toBe(6);
   });
 
   it("round-trips the match level's decide:'aggregate' through applyKnobs", () => {

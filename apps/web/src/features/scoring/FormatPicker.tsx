@@ -522,6 +522,10 @@ function KnobField({ spec, knobs, onSet }: {
     );
   }
 
+  // toDisplay/fromDisplay let a knob show a different number from the one it
+  // writes (see the doc comment on KnobSpec) - the stored value never changes
+  // here, only what this one field reads and types back.
+  const shown = spec.toDisplay ? spec.toDisplay(Number(value), knobs) : value;
   return (
     <Field label={spec.label} hint={spec.hint}>
       <Input
@@ -529,14 +533,15 @@ function KnobField({ spec, knobs, onSet }: {
         inputMode="numeric"
         min={spec.min}
         max={spec.max}
-        value={String(value)}
+        value={String(shown)}
         onChange={(e) => {
           const raw = e.target.value;
           // Empty is not zero: clearing the box to retype must not write 0 and
           // re-render the field as "0" mid-keystroke.
           if (raw === '') return;
           const n = Number(raw);
-          if (Number.isFinite(n)) onSet(spec.key, n);
+          if (!Number.isFinite(n)) return;
+          onSet(spec.key, spec.fromDisplay ? spec.fromDisplay(n, knobs) : n);
         }}
       />
     </Field>
