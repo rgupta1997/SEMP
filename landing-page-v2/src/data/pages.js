@@ -42,7 +42,7 @@ export const scoringPoints = [
 export const matchStates = [
   ['Scheduled', 'Fixture published with venue, slot and reporting time.'],
   ['Live', 'An official has started scoring. Visible to participants as it happens.'],
-  ['Awaiting score', 'The match finished but the result is not in yet — the state that usually goes missing.'],
+  ['Awaiting score', 'The match finished but the result is not in yet, the state that usually goes missing.'],
   ['Completed', 'Result recorded. Standings, brackets and records update from it.'],
 ]
 
