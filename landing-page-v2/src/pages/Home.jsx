@@ -59,7 +59,7 @@ export default function Home() {
         <SHead
           label="The problem"
           title="Spreadsheets and WhatsApp can't run a tournament"
-          lead="Four tools, one event, and no single record of what happened. Every stage below is where an event loses its data — and what replaces it."
+          lead="Four tools, one event, and no single record of what happened. Every stage below is where an event loses its data, and what replaces it."
           center
         />
         <ProblemGrid items={problems} />
@@ -86,7 +86,7 @@ export default function Home() {
         <SHead
           label="Inside the product"
           title="From setting your institution up to a record a player keeps"
-          lead="Sixteen real screens from EOS, in the order you meet them — the institution first, then an event run end to end inside it. Not a mockup, and nothing entered twice between the first screen and the last."
+          lead="Sixteen real screens from EOS, in the order you meet them, the institution first, then an event run end to end inside it. Not a mockup, and nothing entered twice between the first screen and the last."
           wide
           center
         />
