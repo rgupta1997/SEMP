@@ -33,7 +33,18 @@ function TournamentModal({ tournament, path, onClose }: { tournament: any; path:
   };
 
   return (
-    <Modal title={editing ? 'Edit season' : tournament.name} onClose={onClose}>
+    <Modal
+      title={editing ? 'Edit season' : tournament.name}
+      onClose={onClose}
+      banner={editing ? (
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-300">Edit season</div>
+          <div className="mt-1 truncate text-lg font-bold text-white">{tournament.name}</div>
+        </div>
+      ) : (
+        <span className="truncate text-lg font-bold text-white">{tournament.name}</span>
+      )}
+    >
       {editing ? (
         <>
           <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
@@ -108,7 +119,11 @@ export function TournamentsTab({ eventId, onCreated }: { eventId: string; onCrea
       )}
 
       {open && (
-        <Modal title="New season" onClose={() => setOpen(false)}>
+        <Modal
+          title="New season"
+          onClose={() => setOpen(false)}
+          banner={<span className="text-lg font-bold text-white">New season</span>}
+        >
           <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Season 1" /></Field>
           <Field label="Description"><Textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
           {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}

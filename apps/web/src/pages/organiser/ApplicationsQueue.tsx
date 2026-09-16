@@ -172,7 +172,16 @@ export function ApplicationsQueue({
       {t.total > 0 && <Pagination page={t.page} pageCount={t.pageCount} total={t.total} pageSize={t.pageSize} onPage={t.setPage} />}
 
       {rejecting && (
-        <Modal title={`Reject ${rejecting.organizations?.name}`} onClose={() => setRejecting(null)}>
+        <Modal
+          title={`Reject ${rejecting.organizations?.name}`}
+          onClose={() => setRejecting(null)}
+          banner={(
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-300">Reject application</div>
+              <div className="mt-1 truncate text-lg font-bold text-white">{rejecting.organizations?.name}</div>
+            </div>
+          )}
+        >
           <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Optionally tell the organization why so they can fix and reapply.</p>
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Reason (optional)…"
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500" />
