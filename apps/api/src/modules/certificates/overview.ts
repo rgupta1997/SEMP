@@ -35,18 +35,37 @@ export async function certificateOverview(prisma: Prisma, organizationId: string
     prisma.certificates.count({ where: { organization_id: organizationId, revoked_at: { not: null } } }),
   ]);
 
-  // "Pending generation" is a real number, not a queue: honours from locked results
-  // that nobody has issued a certificate for yet. That is what the tile's "needs
-  // action" is actually pointing at.
+  // "Pending generation" is a real number, not a queue: honours from locked results,
+  // across every championship THIS ORG HOSTS, that nobody has issued a certificate
+  // for yet. That is what the tile's "needs action" is actually pointing at.
+  //
+  // Scoped by championship_id (via this org's own hosted events), same as the
+  // generate route - NOT by the achievement's own organization_id, which names the
+  // WINNER's institution, not the host. A host certifies every medallist of its
+  // own championship regardless of which college they came from; filtering by
+  // organization_id here undercounted every visiting participant's honour as if
+  // it belonged to someone else's queue instead of this one.
+  const hostedIds = (await prisma.championships.findMany({
+    where: { host_organization_id: organizationId },
+    select: { id: true },
+  })).map((c) => c.id);
+  const lockedIds = hostedIds.length
+    ? (await prisma.fixtures.findMany({
+      where: {
+        locked_at: { not: null },
+        tournament_disciplines: { tournament_sports: { tournaments: { championship_id: { in: hostedIds } } } },
+      },
+      select: { id: true },
+    })).map((f) => f.id)
+    : [];
   const issuedFor = await prisma.certificates.findMany({
     where: { organization_id: organizationId, revoked_at: null, superseded_at: null },
     select: { user_id: true, fixture_id: true },
   });
   const already = new Set(issuedFor.map((c) => `${c.user_id}:${c.fixture_id}`));
-  const lockedIds = (await prisma.fixtures.findMany({ where: { locked_at: { not: null } }, select: { id: true } })).map((f) => f.id);
   const eligible = lockedIds.length
     ? await prisma.achievements.findMany({
-      where: { organization_id: organizationId, superseded_at: null, user_id: { not: null }, fixture_id: { in: lockedIds } },
+      where: { superseded_at: null, user_id: { not: null }, fixture_id: { in: lockedIds } },
       select: { user_id: true, fixture_id: true },
     })
     : [];
