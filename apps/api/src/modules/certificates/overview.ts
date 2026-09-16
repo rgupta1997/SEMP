@@ -19,6 +19,59 @@ export interface Delta { value: number; delta_pct: number | null }
 const pct = (now: number, before: number): number | null =>
   before === 0 ? null : Math.round(((now - before) / before) * 100);
 
+/**
+ * Pending-generation count, per championship this org hosts.
+ *
+ * The single source of truth for "how many honours has this host not yet
+ * certified" - `certificateOverview`'s one-number KPI just sums this, and the
+ * Generate-certificates picker uses it to put a count beside each event's
+ * name, so the two can never quietly disagree with each other.
+ *
+ * Scoped by championship_id (via the events this org actually hosts), not by
+ * an achievement's own organization_id - that field names the WINNER's
+ * institution, not the host, and a host certifies every medallist of its own
+ * championship regardless of which college they came from.
+ */
+export async function certificatePendingByEvent(prisma: Prisma, organizationId: string) {
+  const hosted = await prisma.championships.findMany({
+    where: { host_organization_id: organizationId },
+    select: { id: true, name: true },
+    orderBy: { start_date: 'desc' },
+  });
+  if (!hosted.length) return [];
+  const hostedIds = hosted.map((c) => c.id);
+
+  const lockedIds = (await prisma.fixtures.findMany({
+    where: {
+      locked_at: { not: null },
+      tournament_disciplines: { tournament_sports: { tournaments: { championship_id: { in: hostedIds } } } },
+    },
+    select: { id: true },
+  })).map((f) => f.id);
+
+  const issuedFor = await prisma.certificates.findMany({
+    where: { organization_id: organizationId, revoked_at: null, superseded_at: null },
+    select: { user_id: true, fixture_id: true },
+  });
+  const already = new Set(issuedFor.map((c) => `${c.user_id}:${c.fixture_id}`));
+
+  const eligible = lockedIds.length
+    ? await prisma.achievements.findMany({
+      where: { superseded_at: null, user_id: { not: null }, fixture_id: { in: lockedIds }, championship_id: { in: hostedIds } },
+      select: { user_id: true, fixture_id: true, championship_id: true },
+    })
+    : [];
+
+  const pendingByChamp = new Map<string, number>();
+  for (const a of eligible) {
+    if (already.has(`${a.user_id}:${a.fixture_id}`)) continue;
+    const id = a.championship_id!;
+    pendingByChamp.set(id, (pendingByChamp.get(id) ?? 0) + 1);
+  }
+
+  return hosted.map((c) => ({ id: c.id, name: c.name, pending: pendingByChamp.get(c.id) ?? 0 }));
+}
+
 /** KPI tiles, each against the previous calendar month. */
 export async function certificateOverview(prisma: Prisma, organizationId: string) {
   const now = new Date();
@@ -35,41 +88,13 @@ export async function certificateOverview(prisma: Prisma, organizationId: string
     prisma.certificates.count({ where: { organization_id: organizationId, revoked_at: { not: null } } }),
   ]);
 
-  // "Pending generation" is a real number, not a queue: honours from locked results,
-  // across every championship THIS ORG HOSTS, that nobody has issued a certificate
-  // for yet. That is what the tile's "needs action" is actually pointing at.
-  //
-  // Scoped by championship_id (via this org's own hosted events), same as the
-  // generate route - NOT by the achievement's own organization_id, which names the
-  // WINNER's institution, not the host. A host certifies every medallist of its
-  // own championship regardless of which college they came from; filtering by
-  // organization_id here undercounted every visiting participant's honour as if
-  // it belonged to someone else's queue instead of this one.
-  const hostedIds = (await prisma.championships.findMany({
-    where: { host_organization_id: organizationId },
-    select: { id: true },
-  })).map((c) => c.id);
-  const lockedIds = hostedIds.length
-    ? (await prisma.fixtures.findMany({
-      where: {
-        locked_at: { not: null },
-        tournament_disciplines: { tournament_sports: { tournaments: { championship_id: { in: hostedIds } } } },
-      },
-      select: { id: true },
-    })).map((f) => f.id)
-    : [];
-  const issuedFor = await prisma.certificates.findMany({
-    where: { organization_id: organizationId, revoked_at: null, superseded_at: null },
-    select: { user_id: true, fixture_id: true },
-  });
-  const already = new Set(issuedFor.map((c) => `${c.user_id}:${c.fixture_id}`));
-  const eligible = lockedIds.length
-    ? await prisma.achievements.findMany({
-      where: { superseded_at: null, user_id: { not: null }, fixture_id: { in: lockedIds } },
-      select: { user_id: true, fixture_id: true },
-    })
-    : [];
-  const pending = eligible.filter((a) => !already.has(`${a.user_id}:${a.fixture_id}`)).length;
+  // "Pending generation" is a real number, not a queue: honours from locked
+  // results, across every championship this org hosts, that nobody has issued
+  // a certificate for yet - summed from the same per-event breakdown the
+  // Generate-certificates picker shows, so the tile and the picker can never
+  // quietly disagree about what "pending" means.
+  const pending = (await certificatePendingByEvent(prisma, organizationId))
+    .reduce((sum, e) => sum + e.pending, 0);
 
   return {
     kpis: {

@@ -11,7 +11,7 @@ import {
 } from './certificates.service.js';
 import { renderCertificateHtml, sampleFacts } from './render.js';
 import { CERTIFICATE_PRESETS, presetById } from './presets.js';
-import { certificateActivity, certificateOverview, certificateTrail, statusOf } from './overview.js';
+import { certificateActivity, certificateOverview, certificatePendingByEvent, certificateTrail, statusOf } from './overview.js';
 import { env } from '../../config/env.js';
 import { notifyCertificateGenerated, notifyCertificateRevoked } from './certificates.notifications.js';
 
@@ -60,6 +60,13 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
       certificateActivity(prisma, req.params.id),
     ]);
     res.json({ ...stats, activity });
+  }));
+
+  /** Every event this org hosts, with its own pending-generation count - what the
+   *  Generate-certificates picker shows beside each name. */
+  router.get('/organizations/:id/certificates/pending-by-event', asyncHandler(async (req, res) => {
+    await assertIssuer(req, req.params.id);
+    res.json({ rows: await certificatePendingByEvent(prisma, req.params.id) });
   }));
 
   // ---- templates (J4-E6) -----------------------------------------------------
