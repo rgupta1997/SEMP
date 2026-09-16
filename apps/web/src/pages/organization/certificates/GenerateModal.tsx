@@ -26,9 +26,19 @@ export function GenerateModal({ orgId, championship, templates, onClose, invalid
   const [kinds, setKinds] = useState<string[]>(['medal', 'placement']);
   const [outcome, setOutcome] = useState<GenerateResult | null>(null);
 
-  // Only championships this institution actually took part in - offering the whole
-  // platform would be a picker of things that can only produce an empty batch.
-  const champs = useApi<Champ[]>(championship ? null : '/championships/mine');
+  // Only championships THIS org actually hosts - not merely entered, not merely
+  // something the signed-in person happens to play in or officiate elsewhere.
+  // `/championships/mine` used to feed this list, and it answers a different
+  // question entirely ("what is this PERSON connected to, any way, anywhere") -
+  // which meant an org with certificate.issue rights could mint a signed
+  // certificate for a championship it had no relationship to at all, off the
+  // back of one of its members happening to play for a different institution
+  // somewhere else. A certificate carries the host's signature, so the picker
+  // can only ever offer what this org actually hosts.
+  const orgEvents = useApi<{ rows: Array<{ id: string; name: string; relationship: string }> }>(
+    championship ? null : `/organizations/${orgId}/events`,
+  );
+  const champs = { data: (orgEvents.data?.rows ?? []).filter((r) => r.relationship === 'hosting') };
   const generate = useApiMutation(
     (body: any) => api('POST', `/organizations/${orgId}/certificates/generate`, body),
     invalidate,

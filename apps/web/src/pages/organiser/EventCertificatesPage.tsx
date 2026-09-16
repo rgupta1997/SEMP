@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Award, Lock, ShieldOff } from 'lucide-react';
-import { useApi } from '../../lib/hooks';
+import { api } from '../../lib/api';
+import { useApi, useApiMutation } from '../../lib/hooks';
+import { useWorkspace } from '../../lib/useWorkspace';
 import { GenerateModal } from '../organization/certificates/GenerateModal';
 import type { Template } from '../organization/certificates/shared';
-import { Badge, Button, EmptyState, PageHeader, Spinner, SURFACE} from '../../components/ui';
+import { Badge, Button, EmptyState, PageHeader, Select, Spinner, SURFACE, toast } from '../../components/ui';
 import { useEvent } from './EventLayout';
 
 // Certificates for one event.
@@ -27,6 +29,19 @@ export function EventCertificatesPage() {
   const host = (championship as any).host_organization as { id: string; name: string } | null;
   const [generating, setGenerating] = useState(false);
 
+  // Same standing the server itself requires to name a host (assertMayHost -
+  // owner or org_admin) - offering an org here that would just come back a 403
+  // is worse than sending the person to Settings empty-handed.
+  const ws = useWorkspace();
+  const hostable = ws.contexts.filter(
+    (c) => c.kind === 'org' && c.roleCodes.some((r) => r === 'owner' || r === 'org_admin'),
+  );
+  const [hostPick, setHostPick] = useState('');
+  const setHost = useApiMutation(
+    (organizationId: string) => api('PATCH', `/championships/${eventId}`, { host_organization_id: organizationId }),
+    [`/championships/${eventId}`],
+  );
+
   const listPath = host ? `/organizations/${host.id}/certificates?championship_id=${eventId}` : null;
   const { data, isLoading, error } = useApi<{ rows: Cert[] } | Cert[]>(listPath);
   // Fetched only once the generate dialog is open. Asking earlier is a request that
@@ -43,13 +58,37 @@ export function EventCertificatesPage() {
   const notIssuer = (error as any)?.status === 403;
 
   if (!host) {
+    // canManage says nothing about standing at any particular organisation, so
+    // this only offers a choice when there's a real one to make: `hostable` is
+    // exactly the set assertMayHost would accept, and picking from it here beats
+    // sending somebody to Settings with no idea which field to look for.
+    const canPickHost = canManage && hostable.length > 0;
     return (
       <div className="pb-16">
         <PageHeader title="Certificates" />
         <EmptyState
           icon={<ShieldOff size={24} />}
           title="This event has no issuing organisation"
-          description="A certificate carries an institution's signature, so one has to be behind it. Set a host organisation for this event in Settings, and certificates can be generated from its locked results."
+          description={canPickHost
+            ? "A certificate carries an institution's signature, so one has to be behind it. Choose which of your organisations is hosting this event, and certificates can be generated from its locked results."
+            : "A certificate carries an institution's signature, so one has to be behind it. Set a host organisation for this event in Settings, and certificates can be generated from its locked results."}
+          action={canPickHost ? (
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Select value={hostPick} onChange={(e) => setHostPick(e.target.value)}>
+                <option value="">- choose an organisation -</option>
+                {hostable.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </Select>
+              <Button
+                disabled={!hostPick || setHost.isPending}
+                onClick={() => setHost.mutate(hostPick, {
+                  onSuccess: () => toast.success('Host organisation set', `Certificates can now be generated from ${hostable.find((o) => o.id === hostPick)?.name ?? 'this organisation'}'s locked results.`),
+                  onError: (e: any) => toast.error(e.message),
+                })}
+              >
+                {setHost.isPending ? 'Setting…' : 'Set as host'}
+              </Button>
+            </div>
+          ) : undefined}
         />
       </div>
     );
