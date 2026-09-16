@@ -31,7 +31,20 @@ function VenueModal({ eventId, path, venue, onClose }: { eventId: string; path: 
   };
 
   return (
-    <Modal title={isNew ? 'New venue' : editing ? 'Edit venue' : venue.name} onClose={onClose}>
+    <Modal
+      title={isNew ? 'New venue' : editing ? 'Edit venue' : venue.name}
+      onClose={onClose}
+      banner={isNew ? (
+        <span className="text-lg font-bold text-white">New venue</span>
+      ) : editing ? (
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-300">Edit venue</div>
+          <div className="mt-1 truncate text-lg font-bold text-white">{venue.name}</div>
+        </div>
+      ) : (
+        <span className="truncate text-lg font-bold text-white">{venue.name}</span>
+      )}
+    >
       {editing ? (
         <>
           <Field label="Venue name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Main Sports Complex" /></Field>
