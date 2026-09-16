@@ -197,6 +197,10 @@ const LAYOUT_CSS: Record<LayoutId, (a: string, ink: string) => string> = {
     .fil.tl { top: 8mm; left: 8mm; } .fil.tr { top: 8mm; right: 8mm; transform: scaleX(-1); }
     .fil.bl { bottom: 8mm; left: 8mm; transform: scaleY(-1); }
     .fil.br { bottom: 8mm; right: 8mm; transform: scale(-1); }
+    /* Nudged up, not moved in the flow: a relative offset leaves the space
+       below it (and everything after it) exactly where it was, so this only
+       ever shifts the logo image itself, never the rest of the layout. */
+    .logo { position: relative; top: -4mm; }
     .issuer { margin-bottom: 8mm; }
     h1 { font-size: 34px; font-style: italic; }
     .div { width: 40mm; height: 4mm; margin-top: 3mm; }
