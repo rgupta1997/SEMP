@@ -108,6 +108,7 @@ export function GenerateModal({ orgId, championship, templates, onClose, invalid
     <Modal
       title="Generate certificates"
       onClose={onClose}
+      banner={<span className="text-lg font-bold text-white">Generate certificates</span>}
       // Not dismissible by backdrop: a stray click must not discard the report of a
       // run that has already issued documents.
       dismissible={false}

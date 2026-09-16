@@ -222,6 +222,7 @@ export function NotificationComposeModal({
     <Modal
       title="New notification"
       onClose={onClose}
+      banner={<span className="text-lg font-bold text-white">New notification</span>}
     >
       {isLoading ? (
         <Spinner />

@@ -1152,6 +1152,10 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         <Modal
           title={o.title ?? 'Are you sure?'}
           onClose={() => settle(false)}
+          // Same dark banner every other modal in the app now uses - a
+          // confirmation is not a lesser kind of dialog, it just has less to
+          // say, so the title alone (no breadcrumb, nothing else fits here).
+          banner={<span className="text-lg font-bold text-white">{o.title ?? 'Are you sure?'}</span>}
           footer={(
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => settle(false)}>{o.cancelLabel ?? 'Cancel'}</Button>

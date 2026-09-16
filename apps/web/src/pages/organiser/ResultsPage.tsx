@@ -238,6 +238,7 @@ function UnlockModal({ label, busy, onClose, onConfirm }: {
     <Modal
       title="Unlock this result?"
       onClose={onClose}
+      banner={<span className="text-lg font-bold text-white">Unlock this result?</span>}
       footer={(
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
