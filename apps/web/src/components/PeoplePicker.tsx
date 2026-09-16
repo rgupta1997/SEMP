@@ -98,8 +98,20 @@ export function PeoplePicker({ title, subtitle, excludeUserIds, assignedUserIds,
   };
 
   return (
-    <Modal title={title} onClose={onClose} wide>
-      {subtitle && <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}
+    <Modal
+      title={title}
+      onClose={onClose}
+      wide
+      // Same dark banner as the fixture dialogs, for the same reason: one
+      // consistent header treatment across every modal, not a plain title bar
+      // on some and a navy one on others depending on which screen you're on.
+      banner={(
+        <div className="min-w-0">
+          <div className="truncate text-lg font-bold text-white">{title}</div>
+          {subtitle && <div className="mt-1 text-xs text-blue-100/80">{subtitle}</div>}
+        </div>
+      )}
+    >
       {roleControl}
       <SearchInput value={search} onChange={setSearch} placeholder="Search by phone…" className="w-full" />
 

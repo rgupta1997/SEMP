@@ -257,6 +257,7 @@ export function FormatPicker(p: FormatPickerProps) {
       title={title}
       onClose={p.onClose}
       wide={view !== 'confirm'}
+      banner={<span className="text-lg font-bold text-white">{title}</span>}
       footer={
         <div className="flex flex-wrap items-center gap-2">
           {view !== 'confirm' && (

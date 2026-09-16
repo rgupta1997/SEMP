@@ -97,6 +97,12 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
       title="Add sports"
       onClose={onClose}
       size="4xl"
+      banner={(
+        <div className="min-w-0">
+          <div className="truncate text-lg font-bold text-white">Add sports</div>
+          <div className="mt-1 text-xs text-blue-100/80">Tap the sports this season will run, then choose a fixture format for each.</div>
+        </div>
+      )}
       footer={(
         <>
           {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
@@ -110,8 +116,6 @@ function AddSportModal({ tournamentId, existingSportIds, onClose }: { tournament
         </>
       )}
     >
-      <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Tap the sports this season will run, then choose a fixture format for each.</p>
-
       {sportsLoading ? (
         <div className="grid place-items-center py-8"><Spinner label="Loading sports…" /></div>
       ) : available.length === 0 ? (
@@ -210,7 +214,7 @@ const SQUAD_BY_ENTRY: Record<string, { min: number; max: number; fixed: boolean 
 // once and applied to all selected ("copy for all"). Master disciplines keep their
 // own entry type + squad; the "Whole sport" tile (always available, so individual
 // or single-discipline sports work too) takes its own entry type + squad.
-function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, drawsPath, onClose }: { tournamentSport: any; existing?: any[]; venues: any[]; formats: any[]; drawsPath: string; onClose: () => void }) {
+function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues, formats, drawsPath, onClose }: { tournamentSport: any; sportName?: string; existing?: any[]; venues: any[]; formats: any[]; drawsPath: string; onClose: () => void }) {
   const qc = useQueryClient();
   const disciplinesPath = `/disciplines?sport_id=${tournamentSport.sport_id}`;
   const { data: disciplines = [], isLoading: disciplinesLoading } = useApi<any[]>(disciplinesPath);
@@ -316,9 +320,23 @@ function AddDisciplineModal({ tournamentSport, existing = [], venues, formats, d
   };
 
   return (
-    <Modal title="Add disciplines" onClose={onClose} wide>
-      <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">Tap the disciplines to add. Venue &amp; fixture format apply to all selected.</p>
-
+    <Modal
+      title="Add disciplines"
+      onClose={onClose}
+      wide
+      // Same dark banner as the fixture and people-picker modals - a breadcrumb
+      // naming the sport this is scoped to, the bold title, then the
+      // instruction that used to sit as its own paragraph in the body.
+      banner={(
+        <div className="min-w-0">
+          {sportName && (
+            <div className="truncate text-[11px] font-semibold uppercase tracking-wide text-blue-300">{sportName}</div>
+          )}
+          <div className="mt-1 truncate text-lg font-bold text-white">Add disciplines</div>
+          <div className="mt-1 text-xs text-blue-100/80">Tap the disciplines to add. Venue &amp; fixture format apply to all selected.</div>
+        </div>
+      )}
+    >
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         <Tile id={WHOLE} title="Whole sport" subtitle="no sub-discipline" />
         {!disciplinesLoading && disciplines.map((d) => (
@@ -486,7 +504,16 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
       ? 'This format needs pool configuration - saving opens the stage-config wizard next.'
       : 'Changing this affects the next draw - regenerate on the Schedule tab to apply.';
   return (
-    <Modal title={`Edit discipline · ${name}`} onClose={onClose}>
+    <Modal
+      title={`Edit discipline · ${name}`}
+      onClose={onClose}
+      banner={(
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-300">Edit discipline</div>
+          <div className="mt-1 truncate text-lg font-bold text-white">{name}</div>
+        </div>
+      )}
+    >
       <Field label="Venue">
         <Select value={venueId} onChange={(e) => setVenueId(e.target.value)}>
           <option value="">- unassigned -</option>
@@ -557,7 +584,16 @@ function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportNam
   };
 
   return (
-    <Modal title={`Edit sport · ${sportName}`} onClose={onClose}>
+    <Modal
+      title={`Edit sport · ${sportName}`}
+      onClose={onClose}
+      banner={(
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-300">Edit sport</div>
+          <div className="mt-1 truncate text-lg font-bold text-white">{sportName}</div>
+        </div>
+      )}
+    >
       <Field label="Fixture format" hint="Changing this affects the next draw - regenerate on the Schedule tab to apply. Disciplines with their own format override are unaffected.">
         <Select value={formatId} disabled={lockedToRanking} onChange={(e) => setFormatId(e.target.value)} title={lockedToRanking ? 'Ranking sports have no head-to-head matches' : undefined}>
           {lockedToRanking ? (
@@ -674,7 +710,7 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
               })}
             </div>
           )}
-          {adding && <AddDisciplineModal tournamentSport={ts} existing={disciplines} venues={venues} formats={formats} drawsPath={drawsPath} onClose={() => setAdding(false)} />}
+          {adding && <AddDisciplineModal tournamentSport={ts} sportName={sportName} existing={disciplines} venues={venues} formats={formats} drawsPath={drawsPath} onClose={() => setAdding(false)} />}
           {editing && (
             <EditDisciplineModal
               discipline={editing} sportName={sportName} sportFormatId={ts.format_id} venues={venues} formats={formats}
@@ -689,7 +725,17 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
             />
           )}
           {configuringStages && (
-            <Modal title="Configure stages" onClose={() => setConfiguringStages(null)} wide>
+            <Modal
+              title="Configure stages"
+              onClose={() => setConfiguringStages(null)}
+              wide
+              banner={(
+                <div className="min-w-0">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-300">Configure stages</div>
+                  <div className="mt-1 truncate text-lg font-bold text-white">{configuringStages.disciplines?.name ?? sportName}</div>
+                </div>
+              )}
+            >
               <StageConfigWizard tournamentDisciplineId={configuringStages.id} onGenerated={() => { qc.invalidateQueries({ queryKey: [fixturesPath] }); setConfiguringStages(null); }} />
             </Modal>
           )}
