@@ -222,7 +222,19 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
   const venueName = venues.find((v) => v.id === venueId)?.name;
   const groundName = grounds.find((g) => g.id === groundId)?.name;
   const venueLabel = venueName ? (groundName ? `${venueName} · ${groundName}` : venueName) : 'Venue unassigned';
-  const metaLine = [sportName, round.trim(), when ? fmtDateTime(when) : null, venueLabel].filter(Boolean).join(' · ');
+  // A local 12-hour formatter, not the shared fmtDateTime - that one follows the
+  // browser's own locale default (24-hour for en-GB, which is what showed here),
+  // and it's used in enough other places that changing its default wasn't asked
+  // for and isn't this banner's call to make.
+  const fmtBannerTime = (d: string) => {
+    const date = new Date(d);
+    if (Number.isNaN(date.getTime())) return null;
+    const s = date.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+    // Some locales render the am/pm marker lowercase - force it up rather than
+    // gamble on which locale the browser reports.
+    return s.replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
+  };
+  const metaLine = [sportName, round.trim(), when ? fmtBannerTime(when) : null, venueLabel].filter(Boolean).join(' · ');
   const banner = isEdit ? (
     <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
       <div className="min-w-0">
@@ -242,7 +254,12 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
         {titleCase(status)}
       </span>
     </div>
-  ) : undefined;
+  ) : (
+    // Nothing to describe yet (no teams, no schedule) - just the same dark
+    // header the edit dialog uses, so the two don't look like different
+    // screens depending on whether a fixture already exists.
+    <span className="text-lg font-bold text-white">Add fixture</span>
+  );
   // Disambiguate same-named teams (e.g. several "Badminton (Mixed)" draws) by
   // appending who each squad plays FOR - its campus or batch when it has one, its
   // organisation otherwise. Appending the organisation unconditionally
