@@ -14,6 +14,7 @@ import { CERTIFICATE_PRESETS, presetById } from './presets.js';
 import { certificateActivity, certificateOverview, certificatePendingByEvent, certificateTrail, statusOf } from './overview.js';
 import { env } from '../../config/env.js';
 import { notifyCertificateGenerated, notifyCertificateRevoked } from './certificates.notifications.js';
+import { alreadyIssued, candidateKey, candidatesFor, isFixtureScoped, RECIPIENT_CATEGORIES, type RecipientCategory } from './recipients.js';
 
 // Certificates: templates (J4-E6), bulk issue (J4-E7), and the register behind them.
 // Public verification lives in the public router - it must be reachable with no account.
@@ -25,13 +26,31 @@ const templateSchema = z.object({
   is_default: z.boolean().optional(),
 });
 
+const recipientFiltersSchema = z.object({
+  sport_id: z.string().uuid().nullish(),
+  tournament_discipline_id: z.string().uuid().nullish(),
+  team_id: z.string().uuid().nullish(),
+}).default({});
+
+const candidatesQuerySchema = z.object({
+  championship_id: z.string().uuid(),
+  category: z.enum(RECIPIENT_CATEGORIES as [RecipientCategory, ...RecipientCategory[]]),
+  sport_id: z.string().uuid().optional(),
+  tournament_discipline_id: z.string().uuid().optional(),
+  team_id: z.string().uuid().optional(),
+});
+
 const generateSchema = z.object({
   championship_id: z.string().uuid(),
+  // The Recipients-step category this run certifies. One category per call - the
+  // wizard's Templates step configures each category separately (its own template,
+  // its own issuing rule), so a mixed-category batch would have nowhere to carry that.
+  category: z.enum(RECIPIENT_CATEGORIES as [RecipientCategory, ...RecipientCategory[]]),
   template_id: z.string().uuid().nullish(),
-  // Which honours to certify. Left open rather than "everyone who took part": a
-  // certificate for turning up devalues the one for winning, and an institution that
-  // wants participation certificates can say so.
-  kinds: z.array(z.enum(['medal', 'placement', 'award'])).min(1).default(['medal']),
+  filters: recipientFiltersSchema,
+  // The Review step's per-recipient toggle: candidates the caller has switched off,
+  // even though the scope+category above would otherwise include them.
+  excluded_user_ids: z.array(z.string().uuid()).default([]),
   // Capped at one championship's worth. The 15s Lambda ceiling is the reason this is
   // chunked by the caller rather than run as one unbounded job (see DEPLOYMENT.md).
   limit: z.number().int().min(1).max(500).optional(),
@@ -260,6 +279,37 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     res.status(204).send();
   }));
 
+  // ---- Recipients step: live counts and the Review-step list -----------------
+  router.get('/organizations/:id/certificates/candidates', asyncHandler(async (req, res) => {
+    const organizationId = req.params.id;
+    await assertIssuer(req, organizationId);
+    const q = candidatesQuerySchema.parse({
+      championship_id: req.query.championship_id, category: req.query.category,
+      sport_id: req.query.sport_id, tournament_discipline_id: req.query.tournament_discipline_id, team_id: req.query.team_id,
+    });
+    const champ = await prisma.championships.findUnique({ where: { id: q.championship_id }, select: { id: true } });
+    if (!champ) throw new NotFoundError('Championship');
+
+    const filters = {
+      sportId: q.sport_id, tournamentDisciplineId: q.tournament_discipline_id,
+      // Organising team and Officials have no sport/discipline/team column to match
+      // against - Team only makes sense for the four roster/achievement categories.
+      teamId: isFixtureScoped(q.category) || q.category === 'participation' || q.category === 'coaches' ? q.team_id : undefined,
+    };
+    const [candidates, already] = await Promise.all([
+      candidatesFor(prisma, q.championship_id, q.category, filters),
+      alreadyIssued(prisma, organizationId, q.championship_id, q.category),
+    ]);
+
+    res.json({
+      rows: candidates.map((c) => ({
+        user_id: c.userId, name: c.name, title: c.title, sport: c.sportName,
+        already_issued: already.has(candidateKey(c)),
+      })),
+      count: candidates.length,
+    });
+  }));
+
   // ---- bulk issue (J4-E7) ----------------------------------------------------
   router.post('/organizations/:id/certificates/generate', validateBody(generateSchema), asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
@@ -278,55 +328,21 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     if (!template) throw new BusinessRuleError('Create a certificate template before generating - there is nothing to issue from.');
     if (template.organization_id !== organizationId) throw new ForbiddenError('That template belongs to another institution.');
 
-    // ONLY from locked results. An achievement whose scorecard can still change is not
-    // something to print and hand over, and this is the same rule the reports use.
-    // `achievements.fixture_id` is a plain column with no relation, so the locked set
-    // is resolved first rather than joined - which also keeps the honour rows that
-    // carry no fixture at all (an org placement) out of the batch.
-    const lockedFixtures = await prisma.fixtures.findMany({
-      where: {
-        locked_at: { not: null },
-        tournament_disciplines: { tournament_sports: { tournaments: { championship_id: champ.id } } },
-      },
-      select: { id: true },
-    });
-    const lockedIds = lockedFixtures.map((f) => f.id);
-    if (!lockedIds.length) {
-      return void res.json({ issued: 0, skipped: 0, results: [], note: 'Nothing is locked in this championship yet, so there is nothing to certify.' });
+    const filters = {
+      sportId: body.filters.sport_id ?? undefined,
+      tournamentDisciplineId: body.filters.tournament_discipline_id ?? undefined,
+      teamId: isFixtureScoped(body.category) || body.category === 'participation' || body.category === 'coaches'
+        ? body.filters.team_id ?? undefined : undefined,
+    };
+    const excluded = new Set(body.excluded_user_ids);
+    const candidates = (await candidatesFor(prisma, champ.id, body.category, filters, body.limit ?? 500))
+      .filter((c) => !excluded.has(c.userId));
+    if (!candidates.length) {
+      return void res.json({ issued: 0, skipped: 0, results: [], note: 'Nothing in scope to certify for this category and filter set.' });
     }
-
-    const achievements = await prisma.achievements.findMany({
-      where: {
-        // NOT organization_id: organizationId. That column names the WINNER's own
-        // institution (so it shows on their own achievement board), not who is
-        // generating the certificate - an inter-institution championship is the
-        // normal case, not the exception, and its host issuing a medallist's
-        // certificate does not require the medallist to belong to the host. Scoped
-        // by championship_id (via lockedIds) and by assertIssuer's permission check
-        // above instead.
-        championship_id: champ.id,
-        superseded_at: null, user_id: { not: null }, kind: { in: body.kinds },
-        fixture_id: { in: lockedIds },
-      },
-      select: { id: true, user_id: true, fixture_id: true, title: true, medal: true, sport_id: true, occurred_on: true, lock_version: true },
-      orderBy: { occurred_on: 'asc' },
-      take: body.limit ?? 500,
-    });
-    if (!achievements.length) {
-      return void res.json({ issued: 0, skipped: 0, results: [], note: 'No locked, unsuperseded honours to certify for this championship.' });
-    }
-
-    const userIds = [...new Set(achievements.map((a) => a.user_id!))];
-    const sportIds = [...new Set(achievements.map((a) => a.sport_id).filter((s): s is string => !!s))];
-    const [users, sports] = await Promise.all([
-      prisma.users.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }),
-      sportIds.length ? prisma.sports.findMany({ where: { id: { in: sportIds } }, select: { id: true, name: true } }) : [],
-    ]);
-    const userName = new Map(users.map((u) => [u.id, u.name]));
-    const sportName = new Map(sports.map((s) => [s.id, s.name]));
 
     const year = new Date().getUTCFullYear();
-    const results: Array<{ achievement_id: string; ok: boolean; serial?: string; reason?: string }> = [];
+    const results: Array<{ user_id: string; ok: boolean; serial?: string; reason?: string }> = [];
     let issued = 0;
     let skipped = 0;
 
@@ -335,43 +351,44 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     // Lambda ceiling; and a failure at row 299 would throw away 298 good certificates.
     // Per-row means a bad row is reported and the rest still issue - the same shape as
     // bulk lock (J4-E1-S2).
-    for (const a of achievements) {
-      const code = (template.code || codeFor(sportName.get(a.sport_id ?? '') ?? null)).toUpperCase().slice(0, 8);
+    for (const c of candidates) {
+      const code = (template.code || codeFor(c.sportName)).toUpperCase().slice(0, 8);
       try {
         const cert = await prisma.$transaction(async (tx) => {
           const seq = await allocateNumber(tx, organizationId, year, code);
           const serial = formatSerial(year, code, seq);
           const facts: CertificateFacts = {
             serial,
-            recipient_name: userName.get(a.user_id!) ?? 'Unknown',
+            recipient_name: c.name,
             organization_name: org.name,
             championship_name: champ.name,
-            sport: a.sport_id ? (sportName.get(a.sport_id) ?? null) : null,
-            title: a.title,
+            sport: c.sportName,
+            title: c.title,
             issued_on: new Date().toISOString().slice(0, 10),
           };
           return tx.certificates.create({
             data: {
               organization_id: organizationId, template_id: template.id, championship_id: champ.id,
-              fixture_id: a.fixture_id, user_id: a.user_id, recipient_name: facts.recipient_name,
+              fixture_id: c.fixtureId, user_id: c.userId, recipient_name: facts.recipient_name,
+              recipient_category: body.category,
               serial, seq, year, code,
               payload: facts as unknown as object,
               signature: signCertificate(facts),
               token: newToken(),
               issued_by: req.user!.id,
-              lock_version: a.lock_version ?? null,
+              lock_version: c.lockVersion ?? null,
             },
           });
         });
         issued++;
-        results.push({ achievement_id: a.id, ok: true, serial: cert.serial });
-        await notifyCertificateGenerated(prisma, cert.id, a.user_id, a.title, req.user!.id);
+        results.push({ user_id: c.userId, ok: true, serial: cert.serial });
+        await notifyCertificateGenerated(prisma, cert.id, c.userId, c.title, req.user!.id);
       } catch (e: any) {
         // The partial unique index catches a re-run: somebody already has this
         // certificate, which is a skip and not an error.
         const dupe = e?.code === 'P2002';
         skipped++;
-        results.push({ achievement_id: a.id, ok: false, reason: dupe ? 'already issued' : (e?.message ?? 'failed').slice(0, 120) });
+        results.push({ user_id: c.userId, ok: false, reason: dupe ? 'already issued' : (e?.message ?? 'failed').slice(0, 120) });
       }
     }
 
@@ -379,7 +396,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
       action: AUDIT_ACTIONS.certificatesGenerated,
       target: { type: 'championships', id: champ.id, label: champ.name },
       organizationId, championshipId: champ.id,
-      summary: `Generated ${issued} certificate${issued === 1 ? '' : 's'} for ${champ.name}`,
+      summary: `Generated ${issued} ${body.category} certificate${issued === 1 ? '' : 's'} for ${champ.name}`,
       diff: { issued: { from: 0, to: issued }, skipped: { from: 0, to: skipped } },
     });
 

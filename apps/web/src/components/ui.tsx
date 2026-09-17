@@ -269,7 +269,7 @@ export const CardBody = ({ className = '', children }: { className?: string; chi
   <div className={cn('px-4 pt-4 pb-4 sm:px-5 sm:pt-5 sm:pb-5', className)}>{children}</div>;
 
 /* ----------------------------- Badge ----------------------------- */
-type BadgeTone = 'brand' | 'green' | 'teal' | 'amber' | 'rose' | 'slate' | 'violet' | 'info' | 'live';
+export type BadgeTone = 'brand' | 'green' | 'teal' | 'amber' | 'rose' | 'slate' | 'violet' | 'info' | 'live';
 export function Badge({ tone = 'slate', className = '', children }: { tone?: BadgeTone; className?: string; children: ReactNode }) {
   const tones: Record<BadgeTone, string> = {
     brand: 'bg-brand-50 text-brand-700 ring-brand-200 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/30',

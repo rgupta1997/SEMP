@@ -1096,6 +1096,7 @@ model certificates {
   revoked_reason                       String?
   lock_version                         Int?
   superseded_at                        DateTime?                   @db.Timestamptz(6)
+  recipient_category                   String                      @default("winners") @db.VarChar(24)
   certificate_verifications            certificate_verifications[]
   championships                        championships?              @relation(fields: [championship_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   fixtures                             fixtures?                   @relation(fields: [fixture_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
