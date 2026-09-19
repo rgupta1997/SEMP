@@ -26,6 +26,14 @@ function takenElsewhereInBatch(reuseTeam: Record<string, string>, selected: Set<
     Object.entries(reuseTeam).filter(([drawId, teamId]) => teamId && selected.has(drawId)).map(([, teamId]) => teamId),
   );
 }
+// Enter an existing team into one discipline of this championship, reusing its
+// roster instead of creating a fresh team for it.
+function enterExistingTeam(teamId: string, championshipOrganizationId: string, tournamentDisciplineId: string) {
+  return api('POST', `/teams/${teamId}/entries`, {
+    entries: [{ championship_organization_id: championshipOrganizationId, tournament_discipline_id: tournamentDisciplineId }],
+  });
+}
+
 function teamTournaments(team: any): { id: string; name: string }[] {
   const map = new Map<string, string>();
   for (const e of teamEntries(team)) {
@@ -202,9 +210,7 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
         ? (await api<{ created: number; teams: any[] }>('POST', '/teams/bulk', { teams })).teams ?? []
         : [];
 
-      const entered = await Promise.allSettled(reuseRows.map((d) => api('POST', `/teams/${reuseTeam[d.id]}/entries`, {
-        entries: [{ championship_organization_id: enrollment.id, tournament_discipline_id: d.id }],
-      })));
+      const entered = await Promise.allSettled(reuseRows.map((d) => enterExistingTeam(reuseTeam[d.id], enrollment.id, d.id)));
       const failed = entered
         .map((r, i) => ({ r, d: reuseRows[i] }))
         .filter((x) => x.r.status === 'rejected') as { r: PromiseRejectedResult; d: any }[];
