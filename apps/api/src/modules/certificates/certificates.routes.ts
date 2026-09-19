@@ -11,7 +11,7 @@ import {
 } from './certificates.service.js';
 import { renderCertificateHtml, sampleFacts } from './render.js';
 import { CERTIFICATE_PRESETS, presetById } from './presets.js';
-import { certificateActivity, certificateOverview, certificateTrail, statusOf } from './overview.js';
+import { certificateActivity, certificateOverview, certificatePendingByEvent, certificateTrail, statusOf } from './overview.js';
 import { env } from '../../config/env.js';
 import { notifyCertificateGenerated, notifyCertificateRevoked } from './certificates.notifications.js';
 
@@ -60,6 +60,13 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
       certificateActivity(prisma, req.params.id),
     ]);
     res.json({ ...stats, activity });
+  }));
+
+  /** Every event this org hosts, with its own pending-generation count - what the
+   *  Generate-certificates picker shows beside each name. */
+  router.get('/organizations/:id/certificates/pending-by-event', asyncHandler(async (req, res) => {
+    await assertIssuer(req, req.params.id);
+    res.json({ rows: await certificatePendingByEvent(prisma, req.params.id) });
   }));
 
   // ---- templates (J4-E6) -----------------------------------------------------
@@ -290,7 +297,14 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
 
     const achievements = await prisma.achievements.findMany({
       where: {
-        organization_id: organizationId, championship_id: champ.id,
+        // NOT organization_id: organizationId. That column names the WINNER's own
+        // institution (so it shows on their own achievement board), not who is
+        // generating the certificate - an inter-institution championship is the
+        // normal case, not the exception, and its host issuing a medallist's
+        // certificate does not require the medallist to belong to the host. Scoped
+        // by championship_id (via lockedIds) and by assertIssuer's permission check
+        // above instead.
+        championship_id: champ.id,
         superseded_at: null, user_id: { not: null }, kind: { in: body.kinds },
         fixture_id: { in: lockedIds },
       },

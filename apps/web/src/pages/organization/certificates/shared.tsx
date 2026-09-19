@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { BadgeCheck, ShieldOff, TrendingDown, TrendingUp } from 'lucide-react';
 import { cn, toast } from '../../../components/ui';
+import { authHeader } from '../../../lib/browserStorage';
 
 // Shared plumbing for the four certificate screens.
 
 export const API = (import.meta.env.VITE_API_URL ?? 'http://localhost:4000') + '/api';
-const bearer = () => ({ Authorization: `Bearer ${localStorage.getItem('semp_token') ?? ''}` });
+const bearer = authHeader;
 
 export interface Cert {
   id: string; serial: string; recipient_name: string; issued_at: string;
@@ -79,6 +80,71 @@ export async function openDoc(path: string, opts: { download?: string } = {}) {
     // Revoked on a delay so the new tab has actually loaded it first.
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   } catch (e: any) { toast.error('Could not open the document', e?.message); }
+}
+
+/**
+ * Download a render as a real PDF or PNG, not the raw HTML.
+ *
+ * There is no server-side PDF here (see render.ts's own header comment on why:
+ * a Lambda request budget and a Chromium cold start are a bad trade for the
+ * "Print → Save as PDF" a browser already does for free). This rasterises the
+ * SAME rendered HTML client-side instead - html2canvas and jsPDF are dynamically
+ * imported so their ~300KB only ever loads for someone who actually clicks
+ * download, not on every visit to a certificate page.
+ *
+ * The iframe is held at the certificate's real CSS size (SHEET_W × SHEET_H,
+ * i.e. 297×210mm at 96dpi - the same constants SheetPreview scales down) and
+ * rasterised at 3x that, so the export is sharp rather than a blown-up preview.
+ */
+export async function downloadCertificate(path: string, filenameBase: string, format: 'pdf' | 'png') {
+  let frame: HTMLIFrameElement | null = null;
+  try {
+    const res = await fetch(`${API}${path}`, { headers: bearer() });
+    if (!res.ok) throw new Error(`${res.status}`);
+    const html = await res.text();
+
+    frame = document.createElement('iframe');
+    frame.style.cssText = `position:fixed; left:-10000px; top:0; width:${SHEET_W}px; height:${SHEET_H}px; border:0;`;
+    document.body.appendChild(frame);
+    const loaded = new Promise<void>((resolve, reject) => {
+      frame!.onload = () => resolve();
+      frame!.onerror = () => reject(new Error('render failed'));
+    });
+    frame.srcdoc = html;
+    await loaded;
+    const body = frame.contentDocument?.body;
+    if (!body) throw new Error('render failed');
+
+    const { default: html2canvas } = await import('html2canvas');
+    const canvas = await html2canvas(body, {
+      scale: 3, useCORS: true, backgroundColor: '#fff',
+      // Default mode re-implements layout and painting itself rather than using
+      // the browser's real engine, and gets both text metrics AND inline SVG
+      // wrong as a result (the recipient name's line sat too high, and the
+      // ornate divider's SVG rendered as a single dot). foreignObjectRendering
+      // routes the actual paint through the browser via an SVG <foreignObject>
+      // instead, which is what fixes both at once. Safe here specifically
+      // because the certificate HTML is fully self-contained (inline styles,
+      // data-URI images) - nothing cross-origin to taint the canvas.
+      foreignObjectRendering: true,
+    });
+
+    if (format === 'png') {
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/png');
+      a.download = `${filenameBase}.png`;
+      a.click();
+    } else {
+      const { jsPDF } = await import('jspdf');
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [297, 210] });
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 297, 210);
+      pdf.save(`${filenameBase}.pdf`);
+    }
+  } catch (e: any) {
+    toast.error('Could not download the certificate', e?.message);
+  } finally {
+    frame?.remove();
+  }
 }
 
 /**

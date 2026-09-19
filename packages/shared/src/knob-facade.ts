@@ -44,6 +44,9 @@ export interface AnyKnobSpec {
   min?: number;
   max?: number;
   options?: Array<{ value: string; label: string }>;
+  /** `type: 'int'` only - see the same fields on the rally-side `KnobSpec`. */
+  toDisplay?: (raw: number, knobs: AnyKnobs) => number;
+  fromDisplay?: (display: number, knobs: AnyKnobs) => number;
 }
 
 export interface KnobModel {
@@ -75,6 +78,9 @@ const widen = (s: KnobSpec | CricketKnobSpec): AnyKnobSpec => ({
   min: s.min,
   max: s.max,
   options: s.options,
+  // Only the rally side's KnobSpec carries these; cricket's has no equivalent.
+  toDisplay: (s as KnobSpec).toDisplay as AnyKnobSpec['toDisplay'],
+  fromDisplay: (s as KnobSpec).fromDisplay as AnyKnobSpec['fromDisplay'],
 });
 
 const RALLY_MODEL: KnobModel = {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Rules } from '@semp/notifications/core/rules.js';
+import { BusinessRuleError } from '../../shared/errors.js';
 
 // The downstream seams and the standings engine are stubbed so a test can make any
 // one of them fail on demand - which is the only way to prove the lock is actually
@@ -575,6 +576,25 @@ describe('lockScorecardsBulk', () => {
     // Same id de-duplicates to one attempt - the guarantee under test is the shape.
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ fixture_id: 'fx1', ok: false });
-    expect(results[0].error).toMatch(/boom/);
+    // NOT the raw exception message. A bare `Error('boom')` is exactly the
+    // unrecognized-internal-failure case friendlyError() (error.ts) maps to its
+    // generic message - the same translation a single lock's HTTP response
+    // gets. Echoing the raw message here is the bug this test used to lock in:
+    // a person running a bulk lock got a Prisma stack trace in their toast
+    // because this path never reached Express's error middleware to be
+    // translated.
+    expect(results[0].error).toBe('Something went wrong on our end. Please try again.');
+  });
+
+  it('translates a recognized failure (e.g. a business rule) the same way a single lock would', async () => {
+    const prisma = fakePrisma();
+    recompute.mockRejectedValueOnce(new BusinessRuleError('This scorecard has no score yet, so there is nothing to make official.') as never);
+
+    const results = await lockScorecardsBulk(prisma, REQ, ['fx1']);
+    expect(results[0]).toMatchObject({
+      fixture_id: 'fx1',
+      ok: false,
+      error: 'This scorecard has no score yet, so there is nothing to make official.',
+    });
   });
 });

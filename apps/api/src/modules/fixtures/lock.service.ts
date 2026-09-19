@@ -1,6 +1,7 @@
 import type { Request } from 'express';
 import type { Db, Prisma } from '../../infra/prisma.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
+import { friendlyError } from '../../http/middleware/error.js';
 import { audit, auditSystem, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import { recomputeStandingsForFixture } from '../standings/standings.service.js';
 import { createNotification } from '../notifications/audience.js';
@@ -149,23 +150,6 @@ function fixtureLabel(fx: any): string {
   const where = [sport, discipline].filter(Boolean).join(' · ');
   return where ? `${home} vs ${away}, ${where}` : `${home} vs ${away}`;
 }
-
-/**
- * How long the lock transaction may take.
- *
- * Prisma's default is five seconds, and the lock genuinely does a lot inside one
- * atomic step: publish the result, advance the bracket, recompute standings, resolve
- * participants, write the timeline, derive achievements, and write a stat line per
- * player. A cricket match is twenty-two people; a slow pooled connection turns that
- * into a 500 and NO LOCK AT ALL - which is what happened, courtside, on a squad of
- * eleven a side.
- *
- * Raising it is the right trade rather than splitting the work up: every step here
- * has to commit or roll back together, and a half-published result is far worse than
- * a lock that takes four seconds. `maxWait` is how long to queue for a connection
- * before starting, which is a different failure and worth its own budget.
- */
-const LOCK_TX = { timeout: 30_000, maxWait: 10_000 } as const;
 
 const FIXTURE_FOR_LOCK = {
   include: {
@@ -334,7 +318,7 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
       participants,
       newAchievements,
     };
-  }, LOCK_TX);
+  });
 
   const lockSummary = req
     ? `Locked the scorecard for ${label} - the result is now official`
@@ -387,7 +371,7 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
 
     // Standings recomputed above (inside the transaction) - tell the championship.
     try {
-      await notify(prisma, { type: 'standings_updated', championshipId, senderId: req.user!.id, data: { label } });
+      await notify(prisma, { type: 'standings_updated', championshipId, senderId: actorUserId, data: { label } });
     } catch (err) {
       console.error(`[lock] standings_updated notification failed for fixture ${fx.id}:`, err);
     }
@@ -401,7 +385,7 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
     const losingTeamId = fx.winner_team_id === fx.home_team_id ? fx.away_team_id : fx.home_team_id;
     if (losingTeamId) {
       try {
-        await notify(prisma, { type: 'team_eliminated', audience: Rules.teamMembers(losingTeamId), senderId: req.user!.id, data: { label } });
+        await notify(prisma, { type: 'team_eliminated', audience: Rules.teamMembers(losingTeamId), senderId: actorUserId, data: { label } });
       } catch (err) {
         console.error(`[lock] team_eliminated notification failed for fixture ${fx.id}:`, err);
       }
@@ -501,7 +485,7 @@ export async function unlockScorecard(prisma: Prisma, req: Request, fixtureId: s
       championshipId: championshipOf(current),
       fromVersion: current.lock_version,
     };
-  }, LOCK_TX);
+  });
 
   await audit(prisma, req, {
     action: AUDIT_ACTIONS.fixtureUnlocked,
@@ -544,8 +528,13 @@ export async function lockScorecardsBulk(
     try {
       await lockScorecard(prisma, req, id);
       results.push({ fixture_id: id, ok: true });
-    } catch (err: any) {
-      results.push({ fixture_id: id, ok: false, error: err?.message ?? 'Could not lock this scorecard' });
+    } catch (err) {
+      // The SAME translation a single lock's HTTP response gets - errorHandler
+      // never sees this one, because it's caught right here rather than
+      // reaching Express, so without this a raw Prisma/JS exception (a P2028's
+      // "31135 ms passed since the start of the transaction" stack, say) would
+      // reach a person's toast completely untranslated.
+      results.push({ fixture_id: id, ok: false, error: friendlyError(err).message });
     }
   }
   return results;

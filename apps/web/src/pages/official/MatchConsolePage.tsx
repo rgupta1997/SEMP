@@ -2100,8 +2100,24 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone }: { f
     def.archetype === 'sets' || def.archetype === 'rally' ? `Enter the number of ${def.segLabel.toLowerCase()}s each side won, then confirm the winner.`
     : 'Enter the final score for each side, then confirm the winner.');
 
+  // Digits only - a games/points tally is never negative and never fractional, so
+  // there is nothing to parse later: whatever survives typing is already valid shape.
+  const onlyDigits = (v: string) => v.replace(/[^0-9]/g, '');
+
   const hs = home === '' ? null : Number(home);
   const as = away === '' ? null : Number(away);
+
+  // Best-of-N sports (sets/rally archetypes) can only end on a real games-won
+  // scoreline: one side at the win threshold, the other strictly below it. "2-3" in a
+  // best-of-3 is not a sports result, it is a typo that was never caught (EOS-164).
+  const winsNeeded = def.archetype === 'sets' || def.archetype === 'rally' ? Math.ceil(def.segMax / 2) : null;
+  const gamesValid = winsNeeded == null || hs == null || as == null
+    ? true
+    : (hs === winsNeeded && as < winsNeeded) || (as === winsNeeded && hs < winsNeeded);
+  const gamesError = winsNeeded != null && hs != null && as != null && !gamesValid
+    ? `A best-of-${def.segMax} match must end with one side on ${winsNeeded} ${def.segLabel.toLowerCase()}s and the other on fewer - e.g. ${winsNeeded}-0 or ${winsNeeded}-${winsNeeded - 1}.`
+    : null;
+
   const autoWinnerId = hs != null && as != null && hs !== as ? (hs > as ? fixture.home_team_id : fixture.away_team_id) : null;
   const winnerId =
     winner === 'home' ? fixture.home_team_id :
@@ -2126,15 +2142,20 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone }: { f
           <label className="block">
             <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</span>
             <span className="mb-1.5 block h-3.5 text-[11px] font-normal text-slate-400 dark:text-slate-500">{homeOrg}</span>
-            <Input type="number" value={home} onChange={(e) => setHome(e.target.value)} className="text-center text-lg font-bold" />
+            <Input type="number" min={0} value={home} onChange={(e) => setHome(onlyDigits(e.target.value))} className="text-center text-lg font-bold" />
           </label>
           <span className="pb-2 text-lg font-black text-slate-400 dark:text-slate-500">:</span>
           <label className="block">
             <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</span>
             <span className="mb-1.5 block h-3.5 text-[11px] font-normal text-slate-400 dark:text-slate-500">{awayOrg}</span>
-            <Input type="number" value={away} onChange={(e) => setAway(e.target.value)} className="text-center text-lg font-bold" />
+            <Input type="number" min={0} value={away} onChange={(e) => setAway(onlyDigits(e.target.value))} className="text-center text-lg font-bold" />
           </label>
         </div>
+        {gamesError && (
+          <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
+            {gamesError}
+          </p>
+        )}
         <div className="mt-3">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Winner</span>
           <Select value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
@@ -2149,8 +2170,11 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone }: { f
           <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="MoM, remarks, walkover reason…" />
         </div>
         <div className="mt-4 flex justify-end gap-2">
-          <Button variant="outline" disabled={saveResult.isPending} onClick={() => submit('live')}>Save (keep live)</Button>
-          <Button disabled={saveResult.isPending} onClick={() => submit('completed')}>{saveResult.isPending ? 'Saving…' : 'Save & complete'}</Button>
+          {/* Both buttons, not just complete: an impossible games tally (2-3 in a
+              best-of-3) is never a valid state to save, live or final - the match
+              would already be over the moment either side reached the threshold. */}
+          <Button variant="outline" disabled={saveResult.isPending || !gamesValid} onClick={() => submit('live')}>Save (keep live)</Button>
+          <Button disabled={saveResult.isPending || !gamesValid} onClick={() => submit('completed')}>{saveResult.isPending ? 'Saving…' : 'Save & complete'}</Button>
         </div>
       </CardBody>
     </Card>

@@ -67,7 +67,11 @@ export function buildApp(prisma: Prisma) {
       else cb(new Error('Not allowed by CORS'));
     },
   }));
-  app.use(express.json());
+  // Default 100kb is too tight for the few endpoints that carry a base64 image
+  // (certificate template logo/signature, claim evidence) - raised globally because
+  // a per-route override can't help: this parser runs before any router is mounted,
+  // so it has already rejected an oversized body before a route-level one ever sees it.
+  app.use(express.json({ limit: '5mb' }));
   app.use(parseAuth);
 
   app.get('/health', (_req, res) => res.json({ ok: true }));

@@ -3,3 +3,8 @@ dist
 .shots
 .audit.json
 .audit.log
+
+# This project sits deliberately outside the npm workspaces (see netlify.toml),
+# so its lockfile is a per-machine install artefact, not something to commit -
+# npm install regenerates it fine at build time with no lockfile present.
+package-lock.json

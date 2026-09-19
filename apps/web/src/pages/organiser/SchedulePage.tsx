@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Pencil, Trash2 } from 'lucide-react';
@@ -94,6 +94,7 @@ function MatchFormatField({ fixture, tdId, value, onChange }: {
   return (
     <div className="mt-1 grid gap-1.5">
       <Field
+        compact
         label="Format for this match only"
         hint={locked
           ? 'This scorecard is locked. Unlock it first - changing the rules of an official result has to leave a record.'
@@ -104,6 +105,7 @@ function MatchFormatField({ fixture, tdId, value, onChange }: {
             : 'No saved formats yet - save one from the draw’s Format dialog and it can be pinned to a single match.'}
       >
         <Select
+          className="w-full"
           value={value}
           disabled={!saved.length || locked}
           onChange={(e) => onChange(e.target.value)}
@@ -133,6 +135,18 @@ function toLocalInput(d?: string | null): string {
   if (Number.isNaN(date.getTime())) return '';
   const off = date.getTimezoneOffset();
   return new Date(date.getTime() - off * 60000).toISOString().slice(0, 16);
+}
+
+/** A section header inside FixtureModal: the label, then a hairline rule filling
+ *  the rest of the row - not a full-width border above the section, which is
+ *  what this replaced. */
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="mb-3 flex items-center gap-3">
+      <span className="shrink-0 text-xs font-bold uppercase tracking-wide text-slate-800 dark:text-slate-100">{children}</span>
+      <span className="h-px flex-1 bg-slate-200 dark:bg-slate-700" aria-hidden />
+    </div>
+  );
 }
 
 // Create or edit a single fixture by hand. `fixture === null` ⇒ create mode for the
@@ -201,6 +215,51 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
 
   const title = isEdit ? `Edit · ${teamName(fixture.home_team_id)} vs ${teamName(fixture.away_team_id)}` : 'Add fixture';
   const teamHint = teams.length === 0 ? 'No teams registered to this draw yet.' : undefined;
+
+  // The banner reads the fields being edited (venue, ground, status, time), not
+  // the fixture as it was when the dialog opened - so it stays true as somebody
+  // works through the form instead of describing a state they've already changed.
+  const venueName = venues.find((v) => v.id === venueId)?.name;
+  const groundName = grounds.find((g) => g.id === groundId)?.name;
+  const venueLabel = venueName ? (groundName ? `${venueName} · ${groundName}` : venueName) : 'Venue unassigned';
+  // A local 12-hour formatter, not the shared fmtDateTime - that one follows the
+  // browser's own locale default (24-hour for en-GB, which is what showed here),
+  // and it's used in enough other places that changing its default wasn't asked
+  // for and isn't this banner's call to make.
+  const fmtBannerTime = (d: string) => {
+    const date = new Date(d);
+    if (Number.isNaN(date.getTime())) return null;
+    const s = date.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+    // Some locales render the am/pm marker lowercase - force it up rather than
+    // gamble on which locale the browser reports.
+    return s.replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
+  };
+  const metaLine = [sportName, round.trim(), when ? fmtBannerTime(when) : null, venueLabel].filter(Boolean).join(' · ');
+  const banner = isEdit ? (
+    <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-blue-300">
+          <span>Edit match</span>
+          {fixture.match_no != null && <span className="text-blue-400/80">· MATCH-{fixture.match_no}</span>}
+        </div>
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+          <span className="truncate text-lg font-bold text-white">{teamName(homeId) || 'TBD'}</span>
+          <span className="shrink-0 rounded-full border border-white/25 px-2 py-0.5 text-[10px] font-bold text-white/80">VS</span>
+          <span className="truncate text-lg font-bold text-white">{teamName(awayId) || 'TBD'}</span>
+        </div>
+        {metaLine && <div className="mt-0.5 truncate text-xs text-blue-100/80">{metaLine}</div>}
+      </div>
+      <span className="mt-0.5 flex shrink-0 items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
+        <span className="h-1.5 w-1.5 rounded-full bg-white/80" aria-hidden />
+        {titleCase(status)}
+      </span>
+    </div>
+  ) : (
+    // Nothing to describe yet (no teams, no schedule) - just the same dark
+    // header the edit dialog uses, so the two don't look like different
+    // screens depending on whether a fixture already exists.
+    <span className="text-lg font-bold text-white">Add fixture</span>
+  );
   // Disambiguate same-named teams (e.g. several "Badminton (Mixed)" draws) by
   // appending who each squad plays FOR - its campus or batch when it has one, its
   // organisation otherwise. Appending the organisation unconditionally
@@ -215,79 +274,104 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
   const venueGrounds = grounds.filter((g) => (g.venue_id ?? '') === venueId);
 
   return (
-    <Modal title={title} onClose={onClose}>
-      <div className="grid grid-cols-2 gap-x-3">
-        <Field label="Home team" hint={teamHint}>
-          <Select value={homeId} onChange={(e) => setHomeId(e.target.value)}>
-            <option value="">- TBD -</option>
-            {/* Hide the team already picked as Away - a team can't play itself. */}
-            {teams.filter((t) => t.id !== awayId).map((t) => <option key={t.id} value={t.id}>{optLabel(t)}</option>)}
-          </Select>
-        </Field>
-        <Field label="Away team">
-          <Select value={awayId} onChange={(e) => setAwayId(e.target.value)}>
-            <option value="">- TBD / bye -</option>
-            {/* Hide the team already picked as Home - a team can't play itself. */}
-            {teams.filter((t) => t.id !== homeId).map((t) => <option key={t.id} value={t.id}>{optLabel(t)}</option>)}
-          </Select>
-        </Field>
+    <Modal title={title} onClose={onClose} size="5xl" banner={banner}>
+      {/* Wide enough for four fields to sit in one row (the reference this was
+          built against), not just two - `5xl` (1024px). Field labels are
+          forced uppercase here only (not a change to the shared Field
+          component, which dozens of other screens use as-is) via the
+          arbitrary-variant selector below. `[&>*]:min-w-0` on each grid is
+          the actual equal-width fix: a grid item defaults to
+          `min-width: auto`, so the native date/time input's intrinsic content
+          width was overriding the `1fr` track and making that one column
+          wider than its siblings even though the grid asked for four equal
+          shares. */}
+      <div className="[&_label>span:first-child]:uppercase [&_label>span:first-child]:tracking-wide">
+        <SectionLabel>Teams</SectionLabel>
+        <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2 [&>*]:min-w-0">
+          <Field compact label="Home team" hint={teamHint}>
+            <Select className="w-full" value={homeId} onChange={(e) => setHomeId(e.target.value)}>
+              <option value="">- TBD -</option>
+              {/* Hide the team already picked as Away - a team can't play itself. */}
+              {teams.filter((t) => t.id !== awayId).map((t) => <option key={t.id} value={t.id}>{optLabel(t)}</option>)}
+            </Select>
+          </Field>
+          <Field compact label="Away team">
+            <Select className="w-full" value={awayId} onChange={(e) => setAwayId(e.target.value)}>
+              <option value="">- TBD / bye -</option>
+              {/* Hide the team already picked as Home - a team can't play itself. */}
+              {teams.filter((t) => t.id !== homeId).map((t) => <option key={t.id} value={t.id}>{optLabel(t)}</option>)}
+            </Select>
+          </Field>
+        </div>
+
+        <div className="mt-4">
+          <SectionLabel>Schedule</SectionLabel>
+          <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
+            <Field compact label="Date & time">
+              <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-400" />
+            </Field>
+            <Field compact label="Duration" hint="Defaults to the draw's match length">
+              <Select className="w-full" value={duration} onChange={(e) => setDuration(e.target.value)}>
+                <option value="">- default -</option>
+                {[15, 20, 30, 45, 60, 75, 90, 120].map((m) => <option key={m} value={m}>{m} min</option>)}
+              </Select>
+            </Field>
+            <Field compact label="Venue" hint={venues.length === 0 ? 'No venues set up for this championship yet.' : undefined}>
+              <Select className="w-full" value={venueId} onChange={(e) => {
+                const v = e.target.value;
+                setVenueId(v);
+                // Reset the ground when the venue changes; auto-pick if the venue has just one.
+                const inVenue = grounds.filter((g) => (g.venue_id ?? '') === v);
+                setGroundId(v && inVenue.length === 1 ? inVenue[0].id : '');
+              }}>
+                <option value="">- unassigned -</option>
+                {venues.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </Select>
+            </Field>
+            <Field compact label="Ground / court" hint={!venueId ? 'Unlocks once a venue is set' : venueGrounds.length === 0 ? 'This venue has no courts - assign at the venue level.' : undefined}>
+              <Select className="w-full" value={groundId} disabled={!venueId || venueGrounds.length === 0} onChange={(e) => setGroundId(e.target.value)}>
+                <option value="">{venueId ? '- any court -' : '- pick a venue first -'}</option>
+                {venueGrounds.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </Select>
+            </Field>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <SectionLabel>Stage & officiating</SectionLabel>
+          <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
+            <Field compact label="Round" hint="e.g. Final, SF, Group A, Match 1">
+              <Input value={round} onChange={(e) => setRound(e.target.value)} placeholder="Match" />
+            </Field>
+            <Field compact label="Status">
+              <Select className="w-full" value={status} onChange={(e) => setStatus(e.target.value)}>
+                {FIXTURE_STATUS.map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
+              </Select>
+            </Field>
+            <Field compact label="Match official" hint={officials.length === 0 ? 'No officials assigned yet - add them on the Organising team tab.' : undefined}>
+              <Select className="w-full" value={officialId} onChange={(e) => setOfficialId(e.target.value)}>
+                <option value="">- unassigned -</option>
+                {officials.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </Select>
+          </Field>
+          {/* THIS MATCH ONLY - rung 6 of the ladder.
+              A round can play its own format, and so can a single match: a
+              rain-shortened final, or a re-scheduled tie squeezed into a
+              20-minute slot. Left blank the match inherits its round, then
+              the draw, then the sport default. */}
+          {isEdit && isScoredSport(sportName) && (
+            <MatchFormatField fixture={fixture} tdId={tdId} value={formatId} onChange={setFormatId} />
+          )}
+          </div>
+        </div>
       </div>
-      <div className="grid grid-cols-2 gap-x-3">
-        <Field label="Round" hint="e.g. Final, SF, Group A, Match 1">
-          <Input value={round} onChange={(e) => setRound(e.target.value)} placeholder="Match" />
-        </Field>
-        <Field label="Status">
-          <Select value={status} onChange={(e) => setStatus(e.target.value)}>
-            {FIXTURE_STATUS.map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
-          </Select>
-        </Field>
-      </div>
-      <div className="grid grid-cols-2 gap-x-3">
-        <Field label="Venue" hint={venues.length === 0 ? 'No venues set up for this championship yet.' : undefined}>
-          <Select value={venueId} onChange={(e) => {
-            const v = e.target.value;
-            setVenueId(v);
-            // Reset the ground when the venue changes; auto-pick if the venue has just one.
-            const inVenue = grounds.filter((g) => (g.venue_id ?? '') === v);
-            setGroundId(v && inVenue.length === 1 ? inVenue[0].id : '');
-          }}>
-            <option value="">- unassigned -</option>
-            {venues.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </Select>
-        </Field>
-        <Field label="Ground / court" hint={venueId && venueGrounds.length === 0 ? 'This venue has no courts - assign at the venue level.' : undefined}>
-          <Select value={groundId} disabled={!venueId || venueGrounds.length === 0} onChange={(e) => setGroundId(e.target.value)}>
-            <option value="">{venueId ? '- any court -' : '- pick a venue first -'}</option>
-            {venueGrounds.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </Select>
-        </Field>
-      </div>
-      <div className="grid grid-cols-2 gap-x-3">
-        <Field label="Date & time">
-          <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-400" />
-        </Field>
-        <Field label="Duration" hint="How long the match runs">
-          <Select value={duration} onChange={(e) => setDuration(e.target.value)}>
-            <option value="">- default -</option>
-            {[15, 20, 30, 45, 60, 75, 90, 120].map((m) => <option key={m} value={m}>{m} min</option>)}
-          </Select>
-        </Field>
-      </div>
-      <Field label="Match official" hint={officials.length === 0 ? 'No officials assigned to this championship yet - add them on the Organising team tab.' : undefined}>
-        <Select value={officialId} onChange={(e) => setOfficialId(e.target.value)}>
-          <option value="">- unassigned -</option>
-          {officials.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </Select>
-      </Field>
-      {error && <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
-      {/* THIS MATCH ONLY - rung 6 of the ladder.
-          A round can play its own format, and so can a single match: a rain-shortened
-          final, or a re-scheduled tie squeezed into a 20-minute slot. The API has
-          accepted this since the migration; there was no way to set it. Left blank
-          the match inherits its round, then the draw, then the sport default. */}
+      {error && <p className="mt-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+
       {isEdit && isScoredSport(sportName) && (
-        <MatchFormatField fixture={fixture} tdId={tdId} value={formatId} onChange={setFormatId} />
+        <div className="mt-3 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+          This match inherits its format from the round, then the draw. Save a format in the draw's Format dialog to pin one to a single match.
+        </div>
       )}
 
       <div className="mt-2 flex items-center justify-between">
@@ -785,7 +869,8 @@ export function SchedulePage() {
   // always shows one tournament's draws - so it's registered as required (no "All").
   const tournamentOptions = tournaments.map((t: any) => ({ id: t.id, name: t.name }));
   const sportOptions = [...new Map(tsports.map((ts: any) => [ts.sport_id, sportName(ts.sport_id)])).entries()]
-    .map(([id, name]) => ({ id, name }));
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   const { sportId } = usePageFilters({
     tournaments: topView === 'manage' && tournamentOptions.length ? tournamentOptions : undefined,
     tournamentRequired: true,

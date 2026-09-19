@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  foldRally, headline, initKernel, resultEnvelope, step, undo, unitWinner,
+  aggregateScore, foldRally, headline, initKernel, resultEnvelope, step, undo, unitWinner,
   type KernelState, type RallyEvent, type RallyLog,
 } from './rally-kernel.js';
 import { defaultFormatFor, presetByKey, presetsFor, RACQUET_PRESETS } from './racquet-presets.js';
@@ -484,6 +484,44 @@ describe('the buzzer', () => {
     expect(r.state.ended).toBe(false);
     const settled = foldRally(f, [...level, { t: 'point', side: 'B' }]);
     expect(settled.state.score[0]).toEqual([4, 5]);
+  });
+
+  // Kho-kho, kabaddi and the other invasion sports (`decide: 'aggregate'`) are
+  // won on the TOTAL across every period played, not on the period in
+  // progress. `applyCap` used to compare only `state.score[at]` - the live
+  // period's own score - so a side leading 8-0 overall could still lose the
+  // match to the buzzer over a 0-2 blip in the period that happened to be
+  // running when the whole-match safety clock fired.
+  it('gives the whole-match cap to whoever leads the TRUE aggregate, not the live period alone', () => {
+    const f = fmtOf('kho_4turns');
+    const log: RallyEvent[] = [
+      ...Array.from({ length: 8 }, () => ({ t: 'point', side: 'A' }) as RallyEvent),
+      { t: 'endPeriod' },
+      ...Array.from({ length: 5 }, () => ({ t: 'point', side: 'B' }) as RallyEvent),
+      { t: 'endPeriod' },
+      // Aggregate so far: A 8, B 5 - A well ahead. This period alone is B's.
+      ...Array.from({ length: 2 }, () => ({ t: 'point', side: 'B' }) as RallyEvent),
+      { t: 'capFired' },
+    ];
+    const r = foldRally(f, log);
+    expect(aggregateScore(r.state)).toEqual([8, 7]);
+    expect(r.state.ended).toBe(true);
+    expect(r.state.winner).toBe('A');
+    expect(r.state.reason).toBe('cap');
+  });
+
+  it('still draws a level aggregate at the cap when the format allows one', () => {
+    const f = fmtOf('kho_4turns');
+    const log: RallyEvent[] = [
+      ...Array.from({ length: 8 }, () => ({ t: 'point', side: 'A' }) as RallyEvent),
+      { t: 'endPeriod' },
+      ...Array.from({ length: 8 }, () => ({ t: 'point', side: 'B' }) as RallyEvent),
+      { t: 'endPeriod' },
+      { t: 'capFired' },
+    ];
+    const r = foldRally(f, log);
+    expect(r.state.outcome).toBe('draw');
+    expect(r.state.winner).toBeNull();
   });
 });
 

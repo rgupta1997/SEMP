@@ -52,7 +52,10 @@ export function OrgAchievementsPage() {
           className="mb-0"
           value={sportId}
           onChange={setSportId}
-          options={[{ key: '', label: 'All sports' }, ...data!.sports.map((s) => ({ key: s.id, label: s.name }))]}
+          options={[
+            { key: '', label: 'All sports' },
+            ...[...data!.sports].sort((a, b) => a.name.localeCompare(b.name)).map((s) => ({ key: s.id, label: s.name })),
+          ]}
         />
       )}
 

@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Building2 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Building2, ChevronDown } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import { suggestShort, titleCase } from '../../lib/format';
 import { usePermissions } from '../../lib/permissions';
@@ -9,12 +10,30 @@ import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { pluralise } from '@semp/shared';
 import { useOrgUnits, unitPath } from '../../lib/units';
-import { Button, Card, Checkbox, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchableSelect, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge, Tabs, INSET} from '../../components/ui';
+import { newTeamIds as newTeamIdsStorage } from '../../lib/browserStorage';
+import { Badge, Button, Card, Checkbox, cn, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchableSelect, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge, Tabs, INSET} from '../../components/ui';
+
 
 // A roster can be entered into several championships; these read its team_entries.
 function teamEntries(team: any): any[] { return team.team_entries ?? []; }
 function teamChampIds(team: any): string[] { return teamEntries(team).map((e: any) => e.championship_id); }
 function teamChampNames(team: any): string { return teamEntries(team).map((e: any) => e.championships?.name).filter(Boolean).join(' '); }
+
+// Which existing teams `reuseTeam` already picked for another SELECTED discipline
+// in this same batch - so the same team can't be reused twice in one bulk entry.
+function takenElsewhereInBatch(reuseTeam: Record<string, string>, selected: Set<string>): Set<string> {
+  return new Set(
+    Object.entries(reuseTeam).filter(([drawId, teamId]) => teamId && selected.has(drawId)).map(([, teamId]) => teamId),
+  );
+}
+// Enter an existing team into one discipline of this championship, reusing its
+// roster instead of creating a fresh team for it.
+function enterExistingTeam(teamId: string, championshipOrganizationId: string, tournamentDisciplineId: string) {
+  return api('POST', `/teams/${teamId}/entries`, {
+    entries: [{ championship_organization_id: championshipOrganizationId, tournament_discipline_id: tournamentDisciplineId }],
+  });
+}
+
 function teamTournaments(team: any): { id: string; name: string }[] {
   const map = new Map<string, string>();
   for (const e of teamEntries(team)) {
@@ -44,7 +63,7 @@ function drawFormatName(d: any, formats: any[]): string | null {
 }
 
 // Enter one team for every selected discipline in a single action.
-function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentId, onClose }:
+function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentId, onClose, markNewTeams }:
   {
     approved: any[];
     organization: any;
@@ -52,8 +71,9 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
     kind: 'organization' | 'campus' | 'department';
     defaultEnrollmentId?: string;
     onClose: () => void;
+    /** Flags freshly-created team ids so the list can badge them "New". */
+    markNewTeams?: (ids: string[]) => void;
   }) {
-  const navigate = useNavigate();
   const [enrollmentId, setEnrollmentId] = useState(defaultEnrollmentId ?? approved[0]?.id ?? '');
   const enrollment = approved.find((e) => e.id === enrollmentId);
   const eventId = enrollment?.championship_id;
@@ -100,7 +120,30 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
     [draws],
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // discipline id -> id of an existing team to enter instead of creating a new one.
+  // Absent (or '') means "create a new team", same as before this feature existed.
+  const [reuseTeam, setReuseTeam] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+
+  // A pre-existing roster this discipline COULD reuse instead of a fresh team:
+  // right sport, right unit (a campus squad can't suddenly play for another
+  // campus), and not already carrying an entry into THIS championship - a team
+  // enters a championship once, never twice under two disciplines.
+  const reuseCandidates = useMemo(() => {
+    const taken = takenElsewhereInBatch(reuseTeam, selected);
+    const byDraw = new Map<string, any[]>();
+    for (const d of available) {
+      const sportId = d.tournament_sports?.sport_id;
+      const picked = reuseTeam[d.id];
+      const options = existing.filter((t: any) =>
+        t.sport_id === sportId
+        && (t.org_unit_id ?? null) === entryUnitId
+        && !teamChampIds(t).includes(eventId)
+        && (t.id === picked || !taken.has(t.id)));
+      byDraw.set(d.id, options);
+    }
+    return byDraw;
+  }, [available, existing, entryUnitId, eventId, reuseTeam, selected]);
   // A campus team is named after the CAMPUS, not the institution. Every campus in an
   // intra championship shares one organisation, so "NIT Cricket" twice tells nobody
   // which side is which - on the team list, the fixture card or the scoreboard.
@@ -123,19 +166,27 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
     return `${short} ${base}`.replace(/\s+/g, ' ').trim();
   };
 
-  const create = useApiMutation<{ teams: any[] }, { created: number; teams: any[] }>(
-    (body) => api('POST', '/teams/bulk', body),
-    ['/me/teams', `/teams?organization_id=${organization?.id}`],
-  );
+  const qc = useQueryClient();
+  const [submitting, setSubmitting] = useState(false);
 
   const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const allChecked = available.length > 0 && selected.size === available.length;
+  const reuseCount = [...selected].filter((id) => reuseTeam[id]).length;
 
-  const submit = () => {
+  // Two different requests, one per discipline: a fresh team is a single batched
+  // POST (as before), but entering an EXISTING team is the same one-team-at-a-time
+  // route its own page uses to enter a championship - it already carries all the
+  // "may this team actually play here" rules (sport, unit, one entry per
+  // championship), and this wizard has no reason to duplicate them.
+  const submit = async () => {
     setError(null);
     if (!enrollment || selected.size === 0) { setError('Select at least one discipline'); return; }
     if (kind !== 'organization' && !bulkUnitId) { setError(`Pick which ${unitNoun.toLowerCase()} these squads play for`); return; }
-    const teams = available.filter((d) => selected.has(d.id)).map((d) => {
+    const rows = available.filter((d) => selected.has(d.id));
+    const freshRows = rows.filter((d) => !reuseTeam[d.id]);
+    const reuseRows = rows.filter((d) => reuseTeam[d.id]);
+
+    const teams = freshRows.map((d) => {
       const name = autoName(d);
       return {
         championship_id: enrollment.championship_id,
@@ -152,75 +203,218 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
         short_name: suggestShort(name),
       };
     });
-    create.mutate({ teams }, {
-      onSuccess: (r) => { if (r.teams?.[0]) navigate(`/organizations/${organization.id}/teams/${r.teams[0].id}`); else onClose(); },
-      onError: (e: any) => setError(e.message),
-    });
+
+    setSubmitting(true);
+    try {
+      const created: any[] = teams.length
+        ? (await api<{ created: number; teams: any[] }>('POST', '/teams/bulk', { teams })).teams ?? []
+        : [];
+
+      const entered = await Promise.allSettled(reuseRows.map((d) => enterExistingTeam(reuseTeam[d.id], enrollment.id, d.id)));
+      const failed = entered
+        .map((r, i) => ({ r, d: reuseRows[i] }))
+        .filter((x) => x.r.status === 'rejected') as { r: PromiseRejectedResult; d: any }[];
+
+      await qc.invalidateQueries({
+        predicate: (q) => typeof q.queryKey[0] === 'string'
+          && (q.queryKey[0] === '/me/teams' || q.queryKey[0].startsWith('/teams')),
+      });
+
+      if (created.length) markNewTeams?.(created.map((t) => t.id));
+
+      if (failed.length) {
+        setError(`${failed.length} existing team${failed.length === 1 ? '' : 's'} could not be entered: `
+          + failed.map((f) => (f.r.reason as any)?.message ?? autoName(f.d)).join('; '));
+        // Only the failed rows stay selected/pending - the rest of the batch went
+        // through and shouldn't have to be redone.
+        setSelected(new Set(failed.map((f) => f.d.id)));
+        return;
+      }
+
+      // Always back to the list, never to one team's page - a wizard whose whole
+      // point is entering several teams at once has no single "the" result to jump
+      // to, even when this particular run only acted on one. The list is also
+      // where the "New" badge actually shows what this action just made.
+      onClose();
+    } catch (e: any) {
+      setError(e.message ?? 'Could not enter these teams');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
-    <Modal title="Enter multiple teams" onClose={onClose} wide>
-      <Field label="Championship">
-        <Select value={enrollmentId} onChange={(e) => { setEnrollmentId(e.target.value); setSelected(new Set()); }}>
-          {/* `label` is the server's own "Championship · Campus", so an
-              organisation holding one entry per campus does not render the same
-              championship name three times with nothing to choose between them. */}
-          {approved.map((e) => <option key={e.id} value={e.id}>{e.championships?.name ?? 'Championship'}</option>)}
-        </Select>
-      </Field>
-
-      {/* WHICH one - never which kind. Hidden entirely when there is one possible
-          answer, which is preselected above. */}
-      {kind !== 'organization' && pickable.length > 1 && (
-        <Field label={unitNoun} hint={`These squads all play for the ${unitNoun.toLowerCase()} you choose.`}>
-          <Select value={bulkUnitId} onChange={(e) => setBulkUnitId(e.target.value)}>
-            <option value="">- select a {unitNoun.toLowerCase()} -</option>
-            {kind === 'campus'
-              ? pickable.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)
-              : campusTree.map((c) => (
-                <optgroup key={c.id} label={c.name}>
-                  {(c.children ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </optgroup>
-              ))}
-          </Select>
-        </Field>
+    <Modal
+      title="Enter multiple teams"
+      onClose={onClose}
+      wide
+      footer={(
+        <>
+          {error && <p className="mb-2.5 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+          <div className="flex items-center justify-between gap-3">
+            <span className="t-meta">
+              {selected.size} selected{reuseCount > 0 ? ` · ${reuseCount} existing, ${selected.size - reuseCount} new` : ''}
+            </span>
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={onClose}>Cancel</Button>
+              <Button disabled={selected.size === 0 || submitting} onClick={submit}>
+                {submitting ? 'Saving…'
+                  : reuseCount === 0 ? `Create ${selected.size || ''} team${selected.size === 1 ? '' : 's'}`
+                    : reuseCount === selected.size ? `Enter ${selected.size} team${selected.size === 1 ? '' : 's'}`
+                      : `Create ${selected.size - reuseCount} & enter ${reuseCount}`}
+              </Button>
+            </div>
+          </div>
+        </>
       )}
+    >
+      <div className="space-y-5">
+        <div className="grid gap-3.5 sm:grid-cols-2">
+          <Field label="Championship">
+            <Select value={enrollmentId} onChange={(e) => { setEnrollmentId(e.target.value); setSelected(new Set()); setReuseTeam({}); }}>
+              {/* `label` is the server's own "Championship · Campus", so an
+                  organisation holding one entry per campus does not render the same
+                  championship name three times with nothing to choose between them. */}
+              {approved.map((e) => <option key={e.id} value={e.id}>{e.championships?.name ?? 'Championship'}</option>)}
+            </Select>
+          </Field>
 
-      {eventId && tournamentNames.length > 0 && (
-        <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
-          Season{tournamentNames.length > 1 ? 's' : ''}:{' '}
-          <span className="font-semibold text-slate-700 dark:text-slate-200">{tournamentNames.join(', ')}</span>
-        </p>
-      )}
-      <div className="mb-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Disciplines</div>
-      {isLoading ? <Spinner /> : available.length === 0 ? (
-        <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">
-          {draws.length === 0 ? 'No disciplines configured for this championship yet. The organiser must add draws in Setup before teams can be entered.' : 'You have already entered every available discipline.'}
-        </p>
-      ) : (
-        <div className={`max-h-72 overflow-auto ${INSET}`}>
-          <label className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 px-4 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
-            <Checkbox checked={allChecked} indeterminate={selected.size > 0 && !allChecked}
-              onChange={(v) => setSelected(v ? new Set(available.map((d) => d.id)) : new Set())} />
-            Select all ({available.length})
-          </label>
-          {available.map((d) => (
-            <label key={d.id} className="flex cursor-pointer items-center gap-3 border-b border-slate-100 dark:border-slate-800 px-4 py-2.5 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/60">
-              <Checkbox checked={selected.has(d.id)} onChange={() => toggle(d.id)} />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">{drawLabel(d)}</div>
-                <div className="truncate text-xs text-slate-400 dark:text-slate-500">{d.entry_type} · {squadText(d)}{drawFormatName(d, formats) ? ` · ${drawFormatName(d, formats)}` : ''} · {autoName(d)}</div>
-              </div>
-            </label>
-          ))}
+          {/* WHICH one - never which kind. Hidden entirely when there is one possible
+              answer, which is preselected above. */}
+          {kind !== 'organization' && pickable.length > 1 && (
+            <Field label={unitNoun} hint={`These squads all play for the ${unitNoun.toLowerCase()} you choose.`}>
+              <Select value={bulkUnitId} onChange={(e) => { setBulkUnitId(e.target.value); setReuseTeam({}); }}>
+                <option value="">- select a {unitNoun.toLowerCase()} -</option>
+                {kind === 'campus'
+                  ? pickable.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)
+                  : campusTree.map((c) => (
+                    <optgroup key={c.id} label={c.name}>
+                      {(c.children ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </optgroup>
+                  ))}
+              </Select>
+            </Field>
+          )}
         </div>
-      )}
-      {error && <p className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
-      <div className="mt-5 flex items-center justify-between">
-        <span className="text-sm text-slate-500 dark:text-slate-400">{selected.size} selected</span>
-        <div className="flex gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={selected.size === 0 || create.isPending} onClick={submit}>{create.isPending ? 'Creating…' : `Create ${selected.size || ''} team${selected.size === 1 ? '' : 's'}`}</Button>
+
+        <div>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <span className="t-eyebrow">Disciplines</span>
+            <div className="flex items-center gap-3">
+              {eventId && tournamentNames.length > 0 && (
+                <span className="t-meta truncate">
+                  Season{tournamentNames.length > 1 ? 's' : ''}:{' '}
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">{tournamentNames.join(', ')}</span>
+                </span>
+              )}
+              {available.length > 0 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="subtle"
+                  className="shrink-0"
+                  onClick={() => setSelected(allChecked ? new Set() : new Set(available.map((d) => d.id)))}
+                >
+                  {allChecked ? 'Clear all' : `Select all (${available.length})`}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {isLoading ? (
+            <div className="grid place-items-center py-8"><Spinner /></div>
+          ) : available.length === 0 ? (
+            <p className={`${INSET} bg-slate-50 px-4 py-6 text-center text-sm text-slate-400 dark:bg-slate-800/60 dark:text-slate-500`}>
+              {draws.length === 0 ? 'No disciplines configured for this championship yet. The organiser must add draws in Setup before teams can be entered.' : 'You have already entered every available discipline.'}
+            </p>
+          ) : (
+            <div className={`max-h-80 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800 ${INSET}`}>
+              {available.map((d) => {
+                const candidates = reuseCandidates.get(d.id) ?? [];
+                const isSelected = selected.has(d.id);
+                const reused = reuseTeam[d.id];
+                const reusedName = reused ? candidates.find((t: any) => t.id === reused)?.name : null;
+                return (
+                  <div
+                    key={d.id}
+                    className={`flex items-center gap-3 px-3.5 py-3 transition-colors ${isSelected ? 'bg-brand-50/60 dark:bg-brand-500/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}`}
+                  >
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+                      <Checkbox checked={isSelected} onChange={() => toggle(d.id)} />
+                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand-50 text-base dark:bg-brand-500/10">
+                        {d.tournament_sports?.sports?.icon ?? '◇'}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">{drawLabel(d)}</div>
+                        <div className="truncate t-meta">
+                          {d.entry_type} · {squadText(d)}{drawFormatName(d, formats) ? ` · ${drawFormatName(d, formats)}` : ''}
+                          {reusedName ? (
+                            <>
+                              {' · '}
+                              <span className="font-semibold text-brand-600 dark:text-brand-300">Existing:</span> {reusedName}
+                            </>
+                          ) : ` · ${autoName(d)}`}
+                        </div>
+                      </div>
+                    </label>
+                    {/* Only when this discipline is actually in the batch, and only
+                        when there's a pre-existing roster of the right sport and unit
+                        to reuse - most disciplines have none, and the row stays
+                        exactly as it was before this existed.
+
+                        A bespoke control, not the shared `Select` - that one is
+                        styled as a full form field (solid fill, heavy border), which
+                        reads as a prominent button fighting the row's own text for
+                        attention. This is meant to look like a quiet, optional
+                        toggle: ghost by default, only picking up real color once a
+                        team is actually chosen.
+
+                        The options are left with NO dark-mode text class, unlike
+                        every other Tailwind class in this file. The open list is a
+                        native browser popup with its own white background regardless
+                        of the app's theme - `dark:text-slate-100` (light text) is
+                        exactly right for a dark PAGE background and exactly wrong on
+                        that native white one, which is what made the unselected rows
+                        unreadable. A plain, unconditional dark colour is what every
+                        other <option> in this codebase already relies on. */}
+                    {isSelected && candidates.length > 0 && (
+                      <div className="relative shrink-0">
+                        <select
+                          value={reused ?? ''}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => setReuseTeam((m) => {
+                            const n = { ...m };
+                            if (e.target.value) n[d.id] = e.target.value; else delete n[d.id];
+                            return n;
+                          })}
+                          title="Enter an existing team instead of creating a new one"
+                          className={cn(
+                            'w-36 appearance-none rounded-full border py-1.5 pl-3 pr-7 text-xs font-medium transition-colors focus:outline-none focus:ring-2',
+                            reused
+                              ? 'border-brand-300 bg-brand-50 text-brand-700 focus:ring-brand-400/30 dark:border-brand-500/40 dark:bg-brand-500/10 dark:text-brand-300'
+                              : 'border-slate-300 bg-transparent text-slate-500 hover:border-slate-400 focus:ring-slate-400/20 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600',
+                          )}
+                        >
+                          <option value="" className="text-slate-900">New team</option>
+                          {candidates.map((t: any) => (
+                            <option key={t.id} value={t.id} className="text-slate-900">{t.name}</option>
+                          ))}
+                        </select>
+                        <ChevronDown
+                          size={12}
+                          aria-hidden
+                          className={cn(
+                            'pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2',
+                            reused ? 'text-brand-500 dark:text-brand-300' : 'text-slate-400 dark:text-slate-500',
+                          )}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </Modal>
@@ -416,6 +610,21 @@ export function TeamsPage() {
     ? instTeams
     : myTeams.filter((t) => t.membership_role === 'captain' || t.membership_role === 'vice_captain');
   const isLoading = institutionId ? instLoading : myLoading;
+
+  // Teams the "Enter multiple" wizard just created THIS session, so its card can
+  // say "New" - the only way, short of opening it, to tell a roster the wizard
+  // made from one it reused. Session-only and client-side: it's a viewing aid for
+  // whoever just ran the wizard, not a fact worth persisting about the team.
+  const [newTeamIds, setNewTeamIds] = useState<Set<string>>(() => newTeamIdsStorage.read(institutionId));
+  const markNewTeams = (ids: string[]) => {
+    if (ids.length === 0) return;
+    setNewTeamIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.add(id));
+      newTeamIdsStorage.save(institutionId, next);
+      return next;
+    });
+  };
   // Enrollments scoped to THIS org (a user may run several) so "Enter" uses the right
   // approved enrollment - otherwise entering a team can pick another org's enrollment.
   // WHICH TAB. Declared here, above everything derived from it.
@@ -473,7 +682,7 @@ export function TeamsPage() {
       if (tournamentFilter !== 'all' && !teamTournaments(t).some((x) => x.id === tournamentFilter)) continue;
       if (t.sport_id) map.set(t.sport_id, t.sports?.name ?? 'Sport');
     }
-    return [...map.entries()].map(([id, name]) => ({ id, name }));
+    return [...map.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [teams, eventId, tournamentFilter]);
 
   // `eventId` is shared, app-wide state - with no header dropdown on this tab to
@@ -562,7 +771,9 @@ export function TeamsPage() {
     return rows;
   }, [teams, eventId, tournamentFilter, sportId, status, playsFor]);
   const tc = useTableControls(filtered, {
-    search: (t) => `${t.name} ${t.sports?.name ?? ''} ${teamChampNames(t)}`,
+    // Name and sport only - matching on a team's championships too caused
+    // unrelated teams to surface via shared words in championship names.
+    search: (t) => `${t.name} ${t.sports?.name ?? ''}`,
     sorts: {
       name: (a, b) => String(a.name).localeCompare(String(b.name)),
       championship: (a, b) => teamChampNames(a).localeCompare(teamChampNames(b)),
@@ -730,7 +941,10 @@ export function TeamsPage() {
                   <Card key={t.id} className="cursor-pointer p-4 transition hover:border-brand-300 dark:hover:border-brand-500/50 hover:shadow-md" onClick={() => navigate(`/organizations/${institutionId}/teams/${t.id}`)}>
                     <div className="flex items-start justify-between">
                       <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-50 dark:bg-brand-500/10 text-lg">{t.sports?.icon ?? '◇'}</span>
-                      <StatusBadge status={t.status} />
+                      <div className="flex items-center gap-1.5">
+                        {newTeamIds.has(t.id) && <Badge tone="green">New</Badge>}
+                        <StatusBadge status={t.status} />
+                      </div>
                     </div>
                     <h3 className="mt-3 font-semibold text-slate-900 dark:text-slate-100">{t.name}</h3>
                     <p className="text-sm text-slate-500 dark:text-slate-400">{t.sports?.name}</p>
@@ -771,6 +985,7 @@ export function TeamsPage() {
           kind={playsFor as 'organization' | 'campus' | 'department'}
           defaultEnrollmentId={defaultEnrollmentId}
           onClose={() => setBulkCreating(false)}
+          markNewTeams={markNewTeams}
         />
       )}
     </div>

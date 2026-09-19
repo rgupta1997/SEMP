@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
 import { Avatar, Badge, Button, Card, Input, Spinner, StatusBadge, toast } from './ui';
 import { ApplicationsQueue } from '../pages/organiser/ApplicationsQueue';
+import { INVITATION_STATUS, INVITE_BUCKET, invitationBucket, type InviteFilter } from '../lib/inviteStatus';
 
 interface Invitation {
   id: string;
@@ -31,6 +32,16 @@ interface InvitableUnit {
 }
 
 interface Org { id: string; name: string; short_name?: string | null; city?: string | null }
+
+// The two calls CampusInvites' invite/inviteAll/withdraw all make, pulled out so
+// the endpoint shape (org_unit_id in the body, the invitation id in the DELETE
+// path) is written once instead of three times.
+function inviteUnit(path: string, unitId: string | null) {
+  return api('POST', path, { org_unit_id: unitId });
+}
+function withdrawUnit(path: string, invitationId: string) {
+  return api('DELETE', `${path}/${invitationId}`);
+}
 
 // Searchable multi-select picker over the master organization list (GET /organizations).
 // Server-side typeahead: the first 10 orgs load by default, then the DB is queried as
@@ -159,7 +170,7 @@ function CampusInvites({ eventId, path }: { eventId: string; path: string }) {
   const invite = async (u: InvitableUnit) => {
     setBusy(u.key);
     try {
-      await api('POST', path, { org_unit_id: u.unitId });
+      await inviteUnit(path, u.unitId);
       toast.success(`${u.name} is in`);
       refresh();
     } catch (e: any) { toast.error(e?.message ?? `Could not add ${u.name}`); }
@@ -170,7 +181,7 @@ function CampusInvites({ eventId, path }: { eventId: string; path: string }) {
     if (!u.invitation_id) return;
     setBusy(u.key);
     try {
-      await api('DELETE', `${path}/${u.invitation_id}`);
+      await withdrawUnit(path, u.invitation_id);
       toast.success(`${u.name} withdrawn`);
       refresh();
     } catch (e: any) {
@@ -186,7 +197,7 @@ function CampusInvites({ eventId, path }: { eventId: string; path: string }) {
     let sent = 0;
     const failed: string[] = [];
     for (const u of todo) {
-      try { await api('POST', path, { org_unit_id: u.unitId }); sent++; } catch { failed.push(u.name); }
+      try { await inviteUnit(path, u.unitId); sent++; } catch { failed.push(u.name); }
     }
     setBusy(null);
     refresh();
@@ -284,13 +295,25 @@ function OrganisationInvites({ eventId, path }: { eventId: string; path: string 
   const { data: invites = [], isLoading } = useApi<Invitation[]>(path);
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [inviting, setInviting] = useState(false);
+  const [filter, setFilter] = useState<InviteFilter>(INVITE_BUCKET.PENDING);
 
   const cancel = useApiMutation((id: string) => api('DELETE', `${path}/${id}`), [path]);
+
+  // An invitation's own statuses (pending/accepted/declined/cancelled) don't share
+  // names with an application's (pending/approved/rejected), but they're the same
+  // three buckets from the other side - so they share the same tabs. See
+  // invitationBucket() in ../lib/inviteStatus.
+  const visibleInvites = filter === 'all' ? invites : invites.filter((i) => invitationBucket(i.status) === filter);
+  const inviteCounts = {
+    [INVITE_BUCKET.PENDING]: invites.filter((i) => invitationBucket(i.status) === INVITE_BUCKET.PENDING).length,
+    [INVITE_BUCKET.APPROVED]: invites.filter((i) => invitationBucket(i.status) === INVITE_BUCKET.APPROVED).length,
+    [INVITE_BUCKET.REJECTED]: invites.filter((i) => invitationBucket(i.status) === INVITE_BUCKET.REJECTED).length,
+  };
 
   // Hide orgs that already have a live invitation so the picker only offers new ones.
   const invitedIds = useMemo(
     () => new Set(invites
-      .filter((i) => i.status === 'pending' || i.status === 'accepted')
+      .filter((i) => i.status === INVITATION_STATUS.PENDING || i.status === INVITATION_STATUS.ACCEPTED)
       .map((i) => i.organizations?.id)
       .filter(Boolean) as string[]),
     [invites],
@@ -330,23 +353,29 @@ function OrganisationInvites({ eventId, path }: { eventId: string; path: string 
           asked from the other side: who is in. They used to sit on a separate
           Entrants tab, which meant an organiser deciding the field had to work in
           two places and could see only half of it in each. */}
-      <ApplicationsQueue eventId={eventId} />
+      <ApplicationsQueue
+        eventId={eventId}
+        filter={filter}
+        onFilterChange={setFilter}
+        extraCounts={inviteCounts}
+        invitesEmpty={visibleInvites.length === 0}
+      />
 
       {isLoading ? <Spinner /> : invites.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400 dark:border-slate-800 dark:text-slate-500">
           No organizations yet. Add at least two to auto-generate fixtures - or invite them later.
         </div>
-      ) : (
+      ) : visibleInvites.length === 0 ? null : (
         <div className="space-y-2">
-          {invites.map((inv) => (
+          {visibleInvites.map((inv) => (
             <Card key={inv.id} className="flex items-center justify-between gap-3 p-3">
               <div className="min-w-0">
                 <div className="truncate font-medium text-slate-800 dark:text-slate-200">{inv.target ?? inv.organizations?.name ?? inv.org_name}</div>
                 {inv.organizations?.city && <div className="text-xs text-slate-500 dark:text-slate-400">{inv.organizations.city}</div>}
               </div>
               <div className="flex items-center gap-2">
-                <StatusBadge status={inv.status} label={inv.status === 'accepted' ? 'Accepted' : undefined} />
-                {inv.status === 'pending' && (
+                <StatusBadge status={inv.status} label={inv.status === INVITATION_STATUS.ACCEPTED ? 'Accepted' : undefined} />
+                {inv.status === INVITATION_STATUS.PENDING && (
                   <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
                     onClick={() => cancel.mutate(inv.id, { onSuccess: () => toast.success('Invitation cancelled'), onError: (e: any) => toast.error(e.message) })}
                     disabled={cancel.isPending}>

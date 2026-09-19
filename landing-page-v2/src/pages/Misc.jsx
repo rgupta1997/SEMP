@@ -34,7 +34,7 @@ export function Players() {
         icon="medal"
         label="For players"
         title="One sporting record that follows you for life"
-        lead="Every event, match, result and medal in one profile — from school meets to club tournaments, across every sport you play."
+        lead="Every event, match, result and medal in one profile, from school meets to club tournaments, across every sport you play."
       />
 
       <Section alt>
@@ -44,7 +44,7 @@ export function Players() {
           h3="A career file, not a pile of certificates"
           lead="Championships, matches, win-loss record and verified achievements, all computed from results officials actually recorded and locked."
           points={[
-            'Verified records cannot be edited or hidden — not by you, not by the institution',
+            'Verified records cannot be edited or hidden, not by you, not by the institution',
             'A public profile link you choose to turn on',
             'Sport-by-sport statistics as your record grows',
             'QR-verifiable certificates, downloadable years later',
@@ -113,7 +113,7 @@ export function Pricing() {
         icon="ruler"
         label="Pricing"
         title="Pricing that follows the size of your event"
-        lead="Start free and set up a real event before any conversation. Participants never pay, on any plan — the organizing institution holds it."
+        lead="Start free and set up a real event before any conversation. Participants never pay, on any plan, the organizing institution holds it."
       />
 
       <Section alt>
@@ -210,6 +210,7 @@ export function Demo() {
       participant_count: form.participants,
       source: form.source?.trim(),
       message: form.message?.trim(),
+      marketing_consent: !!form.marketingConsent,
     }
     for (const k of Object.keys(body)) if (body[k] === '' || body[k] == null) delete body[k]
     return body
@@ -258,7 +259,7 @@ export function Demo() {
   if (done) {
     return (
       <>
-        <Opener icon="check" label="Book a demo" title="Thanks — that's with us" />
+        <Opener icon="check" label="Book a demo" title="Thanks, that's with us" />
         <Section alt>
           <div style={{ maxWidth: '52ch' }}>
             <h3 className="card-t">An EOS specialist will be in touch</h3>
@@ -339,7 +340,7 @@ export function Demo() {
                 <label htmlFor="f-message">Anything else about the event</label>
                 <textarea
                   id="f-message"
-                  placeholder="Sports, categories, venues, dates — whatever is useful"
+                  placeholder="Sports, categories, venues, dates, whatever is useful"
                   value={form.message || ''}
                   onChange={set('message')}
                 />
@@ -351,6 +352,23 @@ export function Demo() {
                   <span>I agree to be contacted about this enquiry.</span>
                 </label>
                 {errors.consent && <p className="err">{errors.consent}</p>}
+              </div>
+
+              {/* Deliberately a SEPARATE checkbox from the one above, unchecked by
+                  default and never required. "Contacted about this enquiry" and
+                  "send me marketing" are two different purposes - bundling them
+                  either forces a marketing opt-in on everyone booking a demo, or
+                  leaves that opt-in unprovable as a specific, genuine choice. */}
+              <div className="field field--full">
+                <label className="consent" htmlFor="f-marketing-consent">
+                  <input
+                    id="f-marketing-consent"
+                    type="checkbox"
+                    checked={!!form.marketingConsent}
+                    onChange={set('marketingConsent')}
+                  />
+                  <span>I agree to receive marketing communication.</span>
+                </label>
               </div>
 
               <div className="field field--full">

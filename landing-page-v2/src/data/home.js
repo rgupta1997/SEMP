@@ -82,7 +82,7 @@ export const journey = [
     phase: 'org',
     shot: 'dashboard',
     title: 'The institution workspace',
-    line: 'EOS starts with the institution, not with an event. Players, teams, championships running, entries awaiting approval, certificates pending, matches live right now — with the queue of things that actually need a decision at the top rather than buried in a list.',
+    line: 'EOS starts with the institution, not with an event. Players, teams, championships running, entries awaiting approval, certificates pending, matches live right now, with the queue of things that actually need a decision at the top rather than buried in a list.',
     meta: [
       { label: 'Approvals', value: 'surfaced, not buried' },
       { label: 'Live matches', value: 'every sport at once' },
@@ -93,7 +93,7 @@ export const journey = [
     phase: 'org',
     shot: 'structure',
     title: 'Your structure, in your words',
-    line: 'Campuses, schools, offices, houses, programmes, batches — named the way your institution names them. This is what a scoped role is granted against, and what competes against what in an internal championship.',
+    line: 'Campuses, schools, offices, houses, programmes, batches, named the way your institution names them. This is what a scoped role is granted against, and what competes against what in an internal championship.',
     meta: [
       { label: 'Your labels', value: 'campus, house, office, batch' },
       { label: 'Two levels', value: 'and who sits in each' },
@@ -115,7 +115,7 @@ export const journey = [
     phase: 'org',
     shot: 'roles',
     title: 'Who can do what, exactly',
-    line: 'A sports admin, a reporting admin, a captain, an official, a point of contact. Every role is a named set of permissions, granted over the whole institution, one campus, or a single event — so delegating work does not mean handing over the keys.',
+    line: 'A sports admin, a reporting admin, a captain, an official, a point of contact. Every role is a named set of permissions, granted over the whole institution, one campus, or a single event, so delegating work does not mean handing over the keys.',
     meta: [
       { label: 'Three scopes', value: 'institution, unit, event' },
       { label: 'Per permission', value: 'not one admin switch' },
@@ -137,7 +137,7 @@ export const journey = [
     phase: 'set-up',
     shot: 'create',
     title: 'Start from a template',
-    line: 'Pick the shape of the event — a knockout, a league, heats, a mixed multi-sport meet — and the sports, disciplines, formats and scoring rules come filled in. Everything stays editable right up until registration opens.',
+    line: 'Pick the shape of the event, a knockout, a league, heats, a mixed multi-sport meet, and the sports, disciplines, formats and scoring rules come filled in. Everything stays editable right up until registration opens.',
     meta: [
       { label: 'Five steps', value: 'shape to open registration' },
       { label: 'Templates', value: 'yours, or the catalogue' },
@@ -148,7 +148,7 @@ export const journey = [
     phase: 'set-up',
     shot: 'setup',
     title: 'Sports, disciplines and formats',
-    line: 'Every sport in the event carries its own disciplines, categories, format and venue. Configured once, in one place, and read by every screen after it — the schedule, the scoring console, the points table, the certificate.',
+    line: 'Every sport in the event carries its own disciplines, categories, format and venue. Configured once, in one place, and read by every screen after it, the schedule, the scoring console, the points table, the certificate.',
     meta: [
       { label: 'Per discipline', value: 'format and scoring rule' },
       { label: '27 sports', value: 'each with its own scoring' },
@@ -192,7 +192,7 @@ export const journey = [
     phase: 'run',
     shot: 'results',
     title: 'Reviewed, then locked',
-    line: 'Finished matches queue for review. Locking is the moment a result becomes official — it publishes the standings, feeds the certificates and writes to the player record — and it takes a deliberate action, in bulk or one match at a time.',
+    line: 'Finished matches queue for review. Locking is the moment a result becomes official, publishing the standings, feeding the certificates and writing to the player record, and it takes a deliberate action, in bulk or one match at a time.',
     meta: [
       { label: 'Queue', value: 'awaiting review, being played' },
       { label: 'Lock in bulk', value: 'or match by match' },
@@ -214,7 +214,7 @@ export const journey = [
     phase: 'publish',
     shot: 'announcements',
     title: 'Everyone hears it at once',
-    line: 'Announcements go to the audience you choose — everyone, or only captains, officials or points of contact — and land in one feed per person, across every championship they belong to. No parallel chat group to keep in sync.',
+    line: 'Announcements go to the audience you choose, everyone, or only captains, officials or points of contact, and land in one feed per person, across every championship they belong to. No parallel chat group to keep in sync.',
     meta: [
       { label: 'Targeted', value: 'by role, not by group chat' },
       { label: 'One feed', value: 'every event a person is in' },
@@ -225,7 +225,7 @@ export const journey = [
     phase: 'publish',
     shot: 'certificates',
     title: 'Certificates from locked results',
-    line: 'Certificates are generated from results rather than typed from them — the name, the placing, the event and the date come off the locked scorecard. Every one carries a QR code that still verifies years later.',
+    line: 'Certificates are generated from results rather than typed from them, the name, the placing, the event and the date come off the locked scorecard. Every one carries a QR code that still verifies years later.',
     meta: [
       { label: 'Templates', value: 'every tile a real render' },
       { label: 'From results', value: 'no re-entry, no typos' },
@@ -236,7 +236,7 @@ export const journey = [
     phase: 'record',
     shot: 'reports',
     title: 'The report the board asks for',
-    line: 'Participation, performance, peer benchmark and impact, all derived from locked results — so the figures are the ones officials actually recorded. Broken down by sport, programme and campus, with a six-season trend to sit against.',
+    line: 'Participation, performance, peer benchmark and impact, all derived from locked results, so the figures are the ones officials actually recorded. Broken down by sport, programme and campus, with a six-season trend to sit against.',
     meta: [
       { label: 'Breakdowns', value: 'by sport and programme' },
       { label: 'History', value: 'six-season trend' },
@@ -247,7 +247,7 @@ export const journey = [
     phase: 'record',
     shot: 'profile',
     title: 'The player keeps the record',
-    line: 'Championships, matches, a win-loss record and verified achievements, computed from locked scorecards. A result written by a locked scorecard cannot be edited or hidden — not by the player, and not by the institution that issued it.',
+    line: 'Championships, matches, a win-loss record and verified achievements, computed from locked scorecards. A result written by a locked scorecard cannot be edited or hidden, not by the player, and not by the institution that issued it.',
     meta: [
       { label: 'Verified', value: 'cannot be edited or hidden' },
       { label: 'Certificates', value: 'QR-verifiable, years later' },

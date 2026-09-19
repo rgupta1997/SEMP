@@ -126,6 +126,7 @@ const BASE = (accent: string, ink: string, bare: boolean) => `
   .meta { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12.5px; opacity: .62; }
   .sig { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12.5px; }
   .sig .line { width: 62mm; border-top: 1px solid ${ink}44; margin-bottom: 5px; }
+  .sig .stamp { height: 46px; width: auto; max-width: 62mm; object-fit: contain; margin-bottom: 5px; }
   .serial { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 11.5px; opacity: .62; }
   .verify { text-align: center; font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
             font-size: 9.5px; letter-spacing: .06em; opacity: .7; }
@@ -196,6 +197,10 @@ const LAYOUT_CSS: Record<LayoutId, (a: string, ink: string) => string> = {
     .fil.tl { top: 8mm; left: 8mm; } .fil.tr { top: 8mm; right: 8mm; transform: scaleX(-1); }
     .fil.bl { bottom: 8mm; left: 8mm; transform: scaleY(-1); }
     .fil.br { bottom: 8mm; right: 8mm; transform: scale(-1); }
+    /* Nudged up, not moved in the flow: a relative offset leaves the space
+       below it (and everything after it) exactly where it was, so this only
+       ever shifts the logo image itself, never the rest of the layout. */
+    .logo { position: relative; top: -4mm; }
     .issuer { margin-bottom: 8mm; }
     h1 { font-size: 34px; font-style: italic; }
     .div { width: 40mm; height: 4mm; margin-top: 3mm; }
@@ -245,11 +250,11 @@ const LAYOUT_CSS: Record<LayoutId, (a: string, ink: string) => string> = {
 interface Parts {
   issuer: string; heading: string; recipient: string; body: string; title: string;
   meta: string; signatory: string; signatoryTitle: string; serial: string;
-  logo: string; qr: string; accent: string; facts: CertificateFacts;
+  logo: string; signatureImage: string; qr: string; accent: string; facts: CertificateFacts;
 }
 
 const verifyBlock = (p: Parts) => `<div class="verify"><img src="${p.qr}" alt="Scan to verify this certificate">Scan to verify</div>`;
-const sigBlock = (p: Parts) => `<div class="sig"><div class="line"></div>
+const sigBlock = (p: Parts) => `<div class="sig">${p.signatureImage || '<div class="line"></div>'}
   <div><strong>${p.signatory}</strong></div><div>${p.signatoryTitle}</div>
   <div class="serial" style="margin-top:6px">${p.serial}</div></div>`;
 
@@ -341,6 +346,8 @@ export async function renderCertificateHtml(input: RenderInput): Promise<string>
     signatoryTitle: esc(design?.signatory_title || 'Issuing authority'),
     serial: esc(facts.serial),
     logo: design?.logo_url ? `<img class="logo" src="${esc(design.logo_url)}" alt="">` : '',
+    signatureImage: design?.signature_image_url
+      ? `<img class="stamp" src="${esc(design.signature_image_url)}" alt="">` : '',
     qr, accent, facts,
   };
 

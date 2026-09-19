@@ -38,7 +38,7 @@ export function makeOrgDashboardRouter(prisma: Prisma): Router {
 
     const [
       players, pendingPeople, pendingVerification, teams, upcoming, live,
-      pendingEntries, certsPending, achievements, scope,
+      pendingEntries, pendingInvitations, certsPending, achievements, scope,
     ] = await Promise.all([
       prisma.organization_members.count({ where: { organization_id: orgId, status: 'active' } }),
       prisma.organization_members.count({ where: { organization_id: orgId, status: 'pending' } }),
@@ -98,6 +98,14 @@ export function makeOrgDashboardRouter(prisma: Prisma): Router {
       // because it is the org's own queue - somebody else has to act, but the
       // organisation is the one being kept waiting.
       prisma.championship_organizations.count({ where: { organization_id: orgId, status: 'pending' } }),
+
+      // Invitations a HOST has sent this organisation directly, still unanswered.
+      // A different queue from `pendingEntries` above: there, this org applied and
+      // is waiting on the host; here, the host asked first and this org is the one
+      // sitting on the decision. Previously the only way to see one of these was to
+      // open the specific championship's Setup → Invite tab - there was no signal
+      // anywhere an admin would actually look first.
+      prisma.championship_invitations.count({ where: { organization_id: orgId, org_unit_id: null, status: 'pending' } }),
 
       // Certificates generated but not yet issued to anybody.
       prisma.certificates.count({ where: { organization_id: orgId, revoked_at: null, user_id: null } }),
@@ -169,6 +177,12 @@ export function makeOrgDashboardRouter(prisma: Prisma): Router {
         sub: 'Events you have applied to and not yet heard back from',
         cta: 'View', to: `/organizations/${orgId}/events`, tone: 'brand' as const,
       },
+      pendingInvitations > 0 && {
+        key: 'invitations',
+        text: `${pendingInvitations} ${pendingInvitations === 1 ? 'championship has' : 'championships have'} invited this organization`,
+        sub: 'Accept to join and start entering teams, or decline',
+        cta: 'Review', to: `/organizations/${orgId}/events?tab=invitations`, tone: 'amber' as const,
+      },
       certsPending > 0 && {
         key: 'certificates',
         text: `${certsPending} ${certsPending === 1 ? 'certificate is' : 'certificates are'} generated but unissued`,
@@ -189,8 +203,9 @@ export function makeOrgDashboardRouter(prisma: Prisma): Router {
         ongoing_events: upcoming.filter((c) => c.status === 'ongoing').length,
         upcoming_events: upcoming.filter((c) => c.status !== 'ongoing').length,
         // Everything that needs a decision from somebody here: join requests, people
-        // awaiting verification, and entries this organisation is waiting on.
-        awaiting_approval: pendingPeople + pendingVerification + pendingEntries,
+        // awaiting verification, entries this organisation is waiting on, and
+        // invitations sitting unanswered.
+        awaiting_approval: pendingPeople + pendingVerification + pendingEntries + pendingInvitations,
         certificates_pending: certsPending,
         // Matches in progress right now, which is a different question from how many
         // championships are running.

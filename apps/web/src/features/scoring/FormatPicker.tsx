@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  describeCricketFormat, formatLength, isCricketFormat, knobModelFor, parseRoundFormats, resolveRounds,
-  whyNotEditable,
+  describeCricketFormat, formatLength, isCricketFormat, isPeriodShaped, knobModelFor, parseRoundFormats,
+  pluralizePeriodLabel, resolveRounds, whyNotEditable,
   type AnyKnobSpec, type AnyKnobs, type MatchFormat, type RoundFormatRule,
 } from '@semp/shared';
 import { api } from '../../lib/api';
@@ -61,12 +61,21 @@ export function describeFormat(f: MatchFormat): string {
   const inner = f.levels[0];
   const top = f.levels[f.levels.length - 1];
   const bits: string[] = [];
-  if (top !== inner && top.target > 1) bits.push(`best of ${top.target * 2 - 1}`);
-  bits.push(`${inner.label.toLowerCase()}s to ${inner.target}`);
-  bits.push(inner.winBy > 1 ? `win by ${inner.winBy}` : 'sudden death');
-  if (inner.cap != null) bits.push(`cap ${inner.cap}`);
-  if (f.serve.movement === 'everyN' && f.serve.every) bits.push(`serve every ${f.serve.every}`);
-  if (f.serve.pointScoring === 'serverOnly') bits.push('server scores only');
+  // Period-shaped (kho-kho, kabaddi, football...): a period ends on the clock,
+  // not at a score, and the match is won on total score, not games. Reading it
+  // through the "best of N, target M, sudden death" phrasing below produced
+  // "best of 7 · turns to 1 · sudden death" for a fixed four-turn kho-kho
+  // format - every clause technically computed, none of them true.
+  if (isPeriodShaped(f)) {
+    bits.push(`${top.target} ${pluralizePeriodLabel(inner.label, top.target).toLowerCase()}`);
+  } else {
+    if (top !== inner && top.target > 1) bits.push(`best of ${top.target * 2 - 1}`);
+    bits.push(`${inner.label.toLowerCase()}s to ${inner.target}`);
+    bits.push(inner.winBy > 1 ? `win by ${inner.winBy}` : 'sudden death');
+    if (inner.cap != null) bits.push(`cap ${inner.cap}`);
+    if (f.serve.movement === 'everyN' && f.serve.every) bits.push(`serve every ${f.serve.every}`);
+    if (f.serve.pointScoring === 'serverOnly') bits.push('server scores only');
+  }
   if (f.clock) bits.push(`${f.clock.minutes} min cap`);
   return bits.join(' · ');
 }
@@ -248,6 +257,7 @@ export function FormatPicker(p: FormatPickerProps) {
       title={title}
       onClose={p.onClose}
       wide={view !== 'confirm'}
+      banner={<span className="text-lg font-bold text-white">{title}</span>}
       footer={
         <div className="flex flex-wrap items-center gap-2">
           {view !== 'confirm' && (
@@ -513,6 +523,10 @@ function KnobField({ spec, knobs, onSet }: {
     );
   }
 
+  // toDisplay/fromDisplay let a knob show a different number from the one it
+  // writes (see the doc comment on KnobSpec) - the stored value never changes
+  // here, only what this one field reads and types back.
+  const shown = spec.toDisplay ? spec.toDisplay(Number(value), knobs) : value;
   return (
     <Field label={spec.label} hint={spec.hint}>
       <Input
@@ -520,14 +534,15 @@ function KnobField({ spec, knobs, onSet }: {
         inputMode="numeric"
         min={spec.min}
         max={spec.max}
-        value={String(value)}
+        value={String(shown)}
         onChange={(e) => {
           const raw = e.target.value;
           // Empty is not zero: clearing the box to retype must not write 0 and
           // re-render the field as "0" mid-keystroke.
           if (raw === '') return;
           const n = Number(raw);
-          if (Number.isFinite(n)) onSet(spec.key, n);
+          if (!Number.isFinite(n)) return;
+          onSet(spec.key, spec.fromDisplay ? spec.fromDisplay(n, knobs) : n);
         }}
       />
     </Field>

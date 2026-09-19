@@ -194,8 +194,8 @@ export function SearchableSelect({
 export const Textarea = ({ className = '', ...p }: TextareaHTMLAttributes<HTMLTextAreaElement>) =>
   <textarea className={cn(fieldBase, className)} {...p} />;
 
-export const Field = ({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) => (
-  <label className="block mb-4">
+export const Field = ({ label, hint, compact, children }: { label: string; hint?: string; compact?: boolean; children: ReactNode }) => (
+  <label className={cn('block', compact ? 'mb-2.5' : 'mb-4')}>
     <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">{label}</span>
     {children}
     {hint && <span className="block text-xs text-slate-400 dark:text-slate-500 mt-1">{hint}</span>}
@@ -380,9 +380,19 @@ export function StatusLegend({ statuses = MATCH_LEGEND_STATUSES, value, onSelect
 // never scroll out of view. `size` overrides the default/`wide` width.
 // Widths apply from sm up. Below that a modal is a full-width sheet, so a
 // `max-w-lg` here would leave a 78px gutter on a 390px phone for no reason.
-const MODAL_WIDTHS = { lg: 'sm:max-w-lg', xl: 'sm:max-w-xl', '2xl': 'sm:max-w-2xl', '3xl': 'sm:max-w-3xl', '4xl': 'sm:max-w-4xl' } as const;
-export function Modal({ title, onClose, children, footer, wide, size, dismissible = true }:
-  { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; size?: keyof typeof MODAL_WIDTHS; dismissible?: boolean }) {
+const MODAL_WIDTHS = { lg: 'sm:max-w-lg', xl: 'sm:max-w-xl', '2xl': 'sm:max-w-2xl', '3xl': 'sm:max-w-3xl', '4xl': 'sm:max-w-4xl', '5xl': 'sm:max-w-5xl' } as const;
+export function Modal({ title, onClose, children, footer, wide, size, dismissible = true, banner }:
+  {
+    title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean;
+    size?: keyof typeof MODAL_WIDTHS; dismissible?: boolean;
+    /**
+     * Replaces the plain title row with a richer header (a dark banner with a
+     * breadcrumb, the two sides of a match, a status pill - whatever the
+     * caller needs). `title` is still required and still drives `aria-label`,
+     * so the dialog has an accessible name even though it is not rendered.
+     */
+    banner?: ReactNode;
+  }) {
   const maxW = size ? MODAL_WIDTHS[size] : wide ? 'sm:max-w-2xl' : 'sm:max-w-lg';
 
   // A BOTTOM SHEET ON A PHONE, A DIALOG ON A DESKTOP.
@@ -427,12 +437,22 @@ export function Modal({ title, onClose, children, footer, wide, size, dismissibl
         <div className="flex justify-center pt-2.5 sm:hidden" aria-hidden>
           <span className="h-1 w-9 rounded-full bg-slate-300 dark:bg-slate-700" />
         </div>
-        <div className="flex shrink-0 items-center justify-between gap-3 px-5 py-3 sm:border-b sm:border-slate-200 sm:py-4 dark:sm:border-slate-800">
-          <h3 className="t-section min-w-0 dark:text-slate-100">{title}</h3>
+        <div className={cn(
+          'flex shrink-0 justify-between gap-3 px-5 py-3 sm:py-4',
+          // A fixed navy, not `brand-900` - that token is the org's own brand
+          // hue pushed dark, which for a lot of tenants desaturates almost to
+          // black. This banner is meant to read as blue regardless of whose
+          // theme is active.
+          banner ? 'items-start bg-blue-950' : 'items-center sm:border-b sm:border-slate-200 dark:sm:border-slate-800',
+        )}>
+          {banner ?? <h3 className="t-section min-w-0 dark:text-slate-100">{title}</h3>}
           <button
             onClick={onClose}
             aria-label="Close"
-            className="tap -m-1 shrink-0 rounded-lg p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            className={cn(
+              'tap -m-1 shrink-0 rounded-lg p-1 transition-colors',
+              banner ? 'text-white/60 hover:bg-white/10 hover:text-white' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200',
+            )}
           >
             <X size={20} />
           </button>
@@ -1132,6 +1152,10 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         <Modal
           title={o.title ?? 'Are you sure?'}
           onClose={() => settle(false)}
+          // Same dark banner every other modal in the app now uses - a
+          // confirmation is not a lesser kind of dialog, it just has less to
+          // say, so the title alone (no breadcrumb, nothing else fits here).
+          banner={<span className="text-lg font-bold text-white">{o.title ?? 'Are you sure?'}</span>}
           footer={(
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => settle(false)}>{o.cancelLabel ?? 'Cancel'}</Button>

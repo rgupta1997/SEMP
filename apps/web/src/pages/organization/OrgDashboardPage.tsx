@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Award, CalendarDays, ClipboardList, Radio, Shield, Users } from 'lucide-react';
+import { Award, CalendarDays, ClipboardList, Mail, Radio, Shield, Users } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import { useApi } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
@@ -146,8 +146,12 @@ export function OrgDashboardPage() {
         ))}
       </div>
 
-      {/* ---- getting started, only while it is still unfinished ---- */}
-      {canManage && !onboarding.complete && (
+      {/* GettingStarted never dismisses itself to nothing - once complete it
+          collapses to a "Done 🎉" header holding completeNote. Gating on
+          !onboarding.complete here would unmount it before that state ever
+          renders, which is exactly the "card silently disappears" bug this
+          was built to avoid. */}
+      {canManage && (
         <GettingStarted
           title="Get your organization match-ready"
           subtitle="A few steps to go from sign-up to a locked roster."
@@ -176,7 +180,7 @@ export function OrgDashboardPage() {
                 background: q.tone === 'amber' ? C.amberSoft : C.brandSoft,
                 color: q.tone === 'amber' ? C.amber : C.brand,
               }}>
-                {q.key === 'people' ? <Users size={15} /> : q.key === 'certificates' ? <Award size={15} /> : <ClipboardList size={15} />}
+                {q.key === 'people' ? <Users size={15} /> : q.key === 'certificates' ? <Award size={15} /> : q.key === 'invitations' ? <Mail size={15} /> : <ClipboardList size={15} />}
               </span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-2)' }}>{q.text}</div>

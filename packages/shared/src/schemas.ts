@@ -969,6 +969,10 @@ export const createDemoRequestSchema = z.object({
   sport_count: blankish(z.coerce.number().int().min(0).max(1000)),
   participant_count: blankish(z.coerce.number().int().min(0).max(1_000_000)),
   source: z.string().max(160).optional(),
+  // A second, unbundled opt-in - see 20260913000000_demo_request_marketing_consent.sql.
+  // Defaults false rather than being required: the enquiry itself is answered
+  // regardless, and marketing consent must stay a genuine, ungated choice.
+  marketing_consent: z.boolean().optional().default(false),
 });
 
 // Admin-only triage update - move a lead through its lifecycle and/or annotate it.

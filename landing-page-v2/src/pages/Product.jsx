@@ -96,7 +96,7 @@ export function Features() {
         <SHead
           label="The workflow"
           title="One configuration, every screen reads from it"
-          lead="The order matters — each step consumes what the one before it produced, which is why the same data never needs entering twice."
+          lead="The order matters, each step consumes what the one before it produced, which is why the same data never needs entering twice."
           wide
         />
         <Steps items={workflow} />
@@ -106,7 +106,7 @@ export function Features() {
         <SHead
           label="Competition structures"
           title="Six structures cover the field"
-          lead="Sport-specific rules — a super-over tie-break, home-and-away, a direct final — are overrides on these six rather than separate formats."
+          lead="Sport-specific rules, a super-over tie-break, home-and-away, a direct final, are overrides on these six rather than separate formats."
           wide
         />
         <FormatDeck items={structures} />
@@ -153,7 +153,7 @@ export function LiveScoring() {
           shot="event"
           eyebrow="The event workspace"
           h3="Officials, schedule and standings in one place"
-          lead="An event carries its own organising team, participants, schedule, results and standings — scoped so each official sees only what they operate."
+          lead="An event carries its own organising team, participants, schedule, results and standings, scoped so each official sees only what they operate."
           points={[
             'Fixtures with venue, slot and assigned official',
             'Results entered at the venue, on any device',
@@ -177,7 +177,7 @@ export function LiveScoring() {
         <SHead
           label="Honest limits"
           title="What EOS does not claim"
-          lead="Scoring structure follows the sport and the format configured for it. EOS does not claim automated scoring for every sport — an official records the result, and the system carries it everywhere it needs to go."
+          lead="Scoring structure follows the sport and the format configured for it. EOS does not claim automated scoring for every sport, an official records the result, and the system carries it everywhere it needs to go."
           wide
         />
       </Section>
@@ -202,7 +202,7 @@ export function Reports() {
           shot="reports"
           eyebrow="Participation reporting"
           h3="Derived from locked results only"
-          lead="Unique participants, events, matches played and medals — with participation broken down by sport and by programme, and a six-season trend so this year has something to sit against."
+          lead="Unique participants, events, matches played and medals, with participation broken down by sport and by programme, and a six-season trend so this year has something to sit against."
           points={[
             'Participation, performance, peer benchmark and impact views',
             'Season selector, so each year is reportable on its own',

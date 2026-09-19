@@ -9,6 +9,10 @@ import type { Template } from './shared';
 interface Champ { id: string; name: string }
 interface GenerateResult { issued: number; skipped: number; note?: string; results?: Array<{ ok: boolean; serial?: string; reason?: string }> }
 
+/** Picked instead of one championship's id - "run it for everything this org
+ *  hosts", not a real id, so it can never collide with one. */
+const ALL = '__all__';
+
 const KINDS: Array<{ key: 'medal' | 'placement' | 'award'; label: string; blurb: string }> = [
   { key: 'medal', label: 'Medals', blurb: 'Gold, silver and bronze' },
   { key: 'placement', label: 'Placements', blurb: 'Semi-finalist, quarter-finalist' },
@@ -25,10 +29,24 @@ export function GenerateModal({ orgId, championship, templates, onClose, invalid
   const [templateId, setTemplateId] = useState('');
   const [kinds, setKinds] = useState<string[]>(['medal', 'placement']);
   const [outcome, setOutcome] = useState<GenerateResult | null>(null);
+  // ALL runs several sequential mutations; `generate.isPending` alone would flicker
+  // false in the gap between them, letting a second click start a second batch.
+  const [batching, setBatching] = useState(false);
 
-  // Only championships this institution actually took part in - offering the whole
-  // platform would be a picker of things that can only produce an empty batch.
-  const champs = useApi<Champ[]>(championship ? null : '/championships/mine');
+  // Only championships THIS org actually hosts - not merely entered, not merely
+  // something the signed-in person happens to play in or officiate elsewhere.
+  // `/championships/mine` used to feed this list, and it answers a different
+  // question entirely ("what is this PERSON connected to, any way, anywhere") -
+  // which meant an org with certificate.issue rights could mint a signed
+  // certificate for a championship it had no relationship to at all, off the
+  // back of one of its members happening to play for a different institution
+  // somewhere else. A certificate carries the host's signature, so the picker
+  // can only ever offer what this org actually hosts - and each one carries its
+  // own pending count, the same number the dashboard tile sums, so picking
+  // blind is never necessary.
+  const champs = useApi<{ rows: Array<{ id: string; name: string; pending: number }> }>(
+    championship ? null : `/organizations/${orgId}/certificates/pending-by-event`,
+  );
   const generate = useApiMutation(
     (body: any) => api('POST', `/organizations/${orgId}/certificates/generate`, body),
     invalidate,
@@ -36,29 +54,69 @@ export function GenerateModal({ orgId, championship, templates, onClose, invalid
 
   const onGenerate = async () => {
     if (!champId) return;
+    if (champId !== ALL) {
+      try {
+        const r = await generate.mutateAsync({
+          championship_id: champId,
+          ...(templateId ? { template_id: templateId } : {}),
+          kinds,
+        }) as GenerateResult;
+        setOutcome(r);
+        if (r.issued > 0) toast.success(`${r.issued} issued`);
+      } catch (e: any) { toast.error('Could not generate', e?.message); }
+      return;
+    }
+
+    // ALL: the same call this makes for one championship, once per championship
+    // this org hosts - there is no bulk endpoint to add, the per-certificate
+    // transaction design already made each of those calls cheap on its own.
+    // Skips ones with nothing pending rather than making a call that can only
+    // come back empty. Continues past a championship that fails outright (a
+    // template it can't resolve, a dropped connection) rather than losing every
+    // other event's run over one bad one - the same "a bad row does not sink the
+    // batch" the per-certificate loop already promises, one level up.
+    const rows = (champs.data?.rows ?? []).filter((c) => c.pending > 0);
+    if (!rows.length) return;
+    setBatching(true);
     try {
-      const r = await generate.mutateAsync({
-        championship_id: champId,
-        ...(templateId ? { template_id: templateId } : {}),
-        kinds,
-      }) as GenerateResult;
-      setOutcome(r);
-      if (r.issued > 0) toast.success(`${r.issued} issued`);
-    } catch (e: any) { toast.error('Could not generate', e?.message); }
+      const combined: Required<GenerateResult> = { issued: 0, skipped: 0, note: '', results: [] };
+      let failed = 0;
+      for (const c of rows) {
+        try {
+          const r = await generate.mutateAsync({
+            championship_id: c.id,
+            ...(templateId ? { template_id: templateId } : {}),
+            kinds,
+          }) as GenerateResult;
+          combined.issued += r.issued;
+          combined.skipped += r.skipped;
+          combined.results.push(...(r.results ?? []));
+        } catch {
+          failed += 1;
+        }
+      }
+      combined.note = `Across ${rows.length} championship${rows.length === 1 ? '' : 's'}`
+        + (failed ? ` - ${failed} could not be reached and were skipped entirely` : '.');
+      setOutcome(combined);
+      if (combined.issued > 0) toast.success(`${combined.issued} issued`);
+    } finally {
+      setBatching(false);
+    }
   };
 
   return (
     <Modal
       title="Generate certificates"
       onClose={onClose}
+      banner={<span className="text-lg font-bold text-white">Generate certificates</span>}
       // Not dismissible by backdrop: a stray click must not discard the report of a
       // run that has already issued documents.
       dismissible={false}
       footer={
         <div className="flex items-center justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>{outcome ? 'Done' : 'Cancel'}</Button>
-          <Button onClick={onGenerate} disabled={!champId || kinds.length === 0 || generate.isPending}>
-            {generate.isPending ? 'Generating…' : outcome ? 'Run again' : 'Generate'}
+          <Button onClick={onGenerate} disabled={!champId || kinds.length === 0 || generate.isPending || batching}>
+            {generate.isPending || batching ? 'Generating…' : outcome ? 'Run again' : 'Generate'}
           </Button>
         </div>
       }
@@ -79,7 +137,12 @@ export function GenerateModal({ orgId, championship, templates, onClose, invalid
             <span className="font-medium text-slate-700 dark:text-slate-300">Championship</span>
             <Select value={champId} onChange={(e) => setChampId(e.target.value)}>
               <option value="">Choose a championship…</option>
-              {(champs.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {(() => {
+                const rows = champs.data?.rows ?? [];
+                const total = rows.reduce((sum, c) => sum + c.pending, 0);
+                return rows.length > 1 && <option value={ALL}>All championships ({total})</option>;
+              })()}
+              {(champs.data?.rows ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.pending})</option>)}
             </Select>
           </label>
         )}
