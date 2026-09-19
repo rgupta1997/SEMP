@@ -767,13 +767,8 @@ export function TeamsPage() {
     return rows;
   }, [teams, eventId, tournamentFilter, sportId, status, playsFor]);
   const tc = useTableControls(filtered, {
-    // Name and sport only - both are printed on the card. Matching on the
-    // championships a team is entered into (not shown here at all) made a search
-    // match teams for reasons nothing on screen explained, and any championship
-    // whose name shared a common word with the query silently pulled in every
-    // team entered in it. Filtering to a specific championship already has its
-    // own control (the season/event dropdown above), so search doesn't need to
-    // double as one too.
+    // Name and sport only - matching on a team's championships too caused
+    // unrelated teams to surface via shared words in championship names.
     search: (t) => `${t.name} ${t.sports?.name ?? ''}`,
     sorts: {
       name: (a, b) => String(a.name).localeCompare(String(b.name)),
