@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
 import { Avatar, Badge, Button, Card, Input, Spinner, StatusBadge, toast } from './ui';
 import { ApplicationsQueue } from '../pages/organiser/ApplicationsQueue';
+import { INVITATION_STATUS, INVITE_BUCKET, invitationBucket, type InviteFilter } from '../lib/inviteStatus';
 
 interface Invitation {
   id: string;
@@ -284,26 +285,25 @@ function OrganisationInvites({ eventId, path }: { eventId: string; path: string 
   const { data: invites = [], isLoading } = useApi<Invitation[]>(path);
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [inviting, setInviting] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [filter, setFilter] = useState<InviteFilter>(INVITE_BUCKET.PENDING);
 
   const cancel = useApiMutation((id: string) => api('DELETE', `${path}/${id}`), [path]);
 
   // An invitation's own statuses (pending/accepted/declined/cancelled) don't share
   // names with an application's (pending/approved/rejected), but they're the same
-  // three buckets from the other side - so they share the same tabs.
-  const inviteBucket = (status: string): 'pending' | 'approved' | 'rejected' =>
-    status === 'accepted' ? 'approved' : status === 'pending' ? 'pending' : 'rejected';
-  const visibleInvites = filter === 'all' ? invites : invites.filter((i) => inviteBucket(i.status) === filter);
+  // three buckets from the other side - so they share the same tabs. See
+  // invitationBucket() in ../lib/inviteStatus.
+  const visibleInvites = filter === 'all' ? invites : invites.filter((i) => invitationBucket(i.status) === filter);
   const inviteCounts = {
-    pending: invites.filter((i) => inviteBucket(i.status) === 'pending').length,
-    approved: invites.filter((i) => inviteBucket(i.status) === 'approved').length,
-    rejected: invites.filter((i) => inviteBucket(i.status) === 'rejected').length,
+    [INVITE_BUCKET.PENDING]: invites.filter((i) => invitationBucket(i.status) === INVITE_BUCKET.PENDING).length,
+    [INVITE_BUCKET.APPROVED]: invites.filter((i) => invitationBucket(i.status) === INVITE_BUCKET.APPROVED).length,
+    [INVITE_BUCKET.REJECTED]: invites.filter((i) => invitationBucket(i.status) === INVITE_BUCKET.REJECTED).length,
   };
 
   // Hide orgs that already have a live invitation so the picker only offers new ones.
   const invitedIds = useMemo(
     () => new Set(invites
-      .filter((i) => i.status === 'pending' || i.status === 'accepted')
+      .filter((i) => i.status === INVITATION_STATUS.PENDING || i.status === INVITATION_STATUS.ACCEPTED)
       .map((i) => i.organizations?.id)
       .filter(Boolean) as string[]),
     [invites],
@@ -364,8 +364,8 @@ function OrganisationInvites({ eventId, path }: { eventId: string; path: string 
                 {inv.organizations?.city && <div className="text-xs text-slate-500 dark:text-slate-400">{inv.organizations.city}</div>}
               </div>
               <div className="flex items-center gap-2">
-                <StatusBadge status={inv.status} label={inv.status === 'accepted' ? 'Accepted' : undefined} />
-                {inv.status === 'pending' && (
+                <StatusBadge status={inv.status} label={inv.status === INVITATION_STATUS.ACCEPTED ? 'Accepted' : undefined} />
+                {inv.status === INVITATION_STATUS.PENDING && (
                   <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
                     onClick={() => cancel.mutate(inv.id, { onSuccess: () => toast.success('Invitation cancelled'), onError: (e: any) => toast.error(e.message) })}
                     disabled={cancel.isPending}>
