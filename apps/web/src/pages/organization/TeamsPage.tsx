@@ -18,6 +18,14 @@ import { Badge, Button, Card, Checkbox, cn, EmptyState, Field, Input, ListToolba
 function teamEntries(team: any): any[] { return team.team_entries ?? []; }
 function teamChampIds(team: any): string[] { return teamEntries(team).map((e: any) => e.championship_id); }
 function teamChampNames(team: any): string { return teamEntries(team).map((e: any) => e.championships?.name).filter(Boolean).join(' '); }
+
+// Which existing teams `reuseTeam` already picked for another SELECTED discipline
+// in this same batch - so the same team can't be reused twice in one bulk entry.
+function takenElsewhereInBatch(reuseTeam: Record<string, string>, selected: Set<string>): Set<string> {
+  return new Set(
+    Object.entries(reuseTeam).filter(([drawId, teamId]) => teamId && selected.has(drawId)).map(([, teamId]) => teamId),
+  );
+}
 function teamTournaments(team: any): { id: string; name: string }[] {
   const map = new Map<string, string>();
   for (const e of teamEntries(team)) {
@@ -114,9 +122,7 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
   // campus), and not already carrying an entry into THIS championship - a team
   // enters a championship once, never twice under two disciplines.
   const reuseCandidates = useMemo(() => {
-    const takenElsewhereInBatch = new Set(
-      Object.entries(reuseTeam).filter(([drawId, teamId]) => teamId && selected.has(drawId)).map(([, teamId]) => teamId),
-    );
+    const taken = takenElsewhereInBatch(reuseTeam, selected);
     const byDraw = new Map<string, any[]>();
     for (const d of available) {
       const sportId = d.tournament_sports?.sport_id;
@@ -125,7 +131,7 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
         t.sport_id === sportId
         && (t.org_unit_id ?? null) === entryUnitId
         && !teamChampIds(t).includes(eventId)
-        && (t.id === picked || !takenElsewhereInBatch.has(t.id)));
+        && (t.id === picked || !taken.has(t.id)));
       byDraw.set(d.id, options);
     }
     return byDraw;
