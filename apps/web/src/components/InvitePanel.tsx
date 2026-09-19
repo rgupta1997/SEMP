@@ -33,6 +33,16 @@ interface InvitableUnit {
 
 interface Org { id: string; name: string; short_name?: string | null; city?: string | null }
 
+// The two calls CampusInvites' invite/inviteAll/withdraw all make, pulled out so
+// the endpoint shape (org_unit_id in the body, the invitation id in the DELETE
+// path) is written once instead of three times.
+function inviteUnit(path: string, unitId: string | null) {
+  return api('POST', path, { org_unit_id: unitId });
+}
+function withdrawUnit(path: string, invitationId: string) {
+  return api('DELETE', `${path}/${invitationId}`);
+}
+
 // Searchable multi-select picker over the master organization list (GET /organizations).
 // Server-side typeahead: the first 10 orgs load by default, then the DB is queried as
 // the user types (debounced). Already-invited orgs can be hidden via `excludeIds`.
@@ -160,7 +170,7 @@ function CampusInvites({ eventId, path }: { eventId: string; path: string }) {
   const invite = async (u: InvitableUnit) => {
     setBusy(u.key);
     try {
-      await api('POST', path, { org_unit_id: u.unitId });
+      await inviteUnit(path, u.unitId);
       toast.success(`${u.name} is in`);
       refresh();
     } catch (e: any) { toast.error(e?.message ?? `Could not add ${u.name}`); }
@@ -171,7 +181,7 @@ function CampusInvites({ eventId, path }: { eventId: string; path: string }) {
     if (!u.invitation_id) return;
     setBusy(u.key);
     try {
-      await api('DELETE', `${path}/${u.invitation_id}`);
+      await withdrawUnit(path, u.invitation_id);
       toast.success(`${u.name} withdrawn`);
       refresh();
     } catch (e: any) {
@@ -187,7 +197,7 @@ function CampusInvites({ eventId, path }: { eventId: string; path: string }) {
     let sent = 0;
     const failed: string[] = [];
     for (const u of todo) {
-      try { await api('POST', path, { org_unit_id: u.unitId }); sent++; } catch { failed.push(u.name); }
+      try { await inviteUnit(path, u.unitId); sent++; } catch { failed.push(u.name); }
     }
     setBusy(null);
     refresh();
