@@ -30,6 +30,13 @@ export type EntryType = (typeof ENTRY_TYPE)[number];
 export const ENROLLMENT_STATUS = ['pending', 'approved', 'rejected'] as const;
 export type EnrollmentStatus = (typeof ENROLLMENT_STATUS)[number];
 
+// A host's own invitation to an organisation/campus - a DIFFERENT vocabulary from
+// ENROLLMENT_STATUS above even though both collapse to the same three UI buckets
+// from the other side (see apps/web/src/lib/inviteStatus.ts). Mirrors the check
+// constraint on championship_invitations.status.
+export const INVITATION_STATUS = ['pending', 'accepted', 'declined', 'cancelled'] as const;
+export type InvitationStatus = (typeof INVITATION_STATUS)[number];
+
 // A user's role within an organization (membership is many-to-many). owner/admin
 // administer the org (teams, members, enrollment); captain leads a team; member /
 // alumni are participants. Replaces the old global `account_type`.

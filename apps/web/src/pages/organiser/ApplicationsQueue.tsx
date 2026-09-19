@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls, fmtDateTime } from '../../lib/hooks';
 import { Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, Modal, Pagination, SearchInput, SortDirButton, StatusBadge, Table, toast , FilterChips} from '../../components/ui';
+import { APPLICATION_STATUS, INVITE_BUCKET, INVITE_FILTER_OPTIONS, type InviteFilter } from '../../lib/inviteStatus';
 
 // Organisations that APPLIED to an open championship, and the approve/reject queue
 // for them.
@@ -15,7 +16,6 @@ import { Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, Moda
 // Never rendered for an internal championship: nobody applies to one, so the queue
 // could only ever be empty, and an empty table reads as "nobody yet" rather than as
 // "this does not apply here".
-type Filter = 'all' | 'pending' | 'approved' | 'rejected';
 
 // `filter` is controlled by the parent (OrganisationInvites) rather than owned here,
 // because the invitations list below shares the same tabs - a host-side "Pending"
@@ -25,8 +25,8 @@ export function ApplicationsQueue({
   eventId, filter, onFilterChange, extraCounts, invitesEmpty = true,
 }: {
   eventId: string;
-  filter: Filter;
-  onFilterChange: (f: Filter) => void;
+  filter: InviteFilter;
+  onFilterChange: (f: InviteFilter) => void;
   /** Invitation counts per bucket, folded into the tab pills so a count reflects both halves of the pair. */
   extraCounts?: { pending: number; approved: number; rejected: number };
   /** Whether the invitations list has nothing for the current tab - so the "Nothing here" placeholder only shows when NEITHER half of the pair has anything. */
@@ -53,9 +53,9 @@ export function ApplicationsQueue({
   );
 
   const counts = {
-    pending: rows.filter((r) => r.status === 'pending').length + (extraCounts?.pending ?? 0),
-    approved: rows.filter((r) => r.status === 'approved').length + (extraCounts?.approved ?? 0),
-    rejected: rows.filter((r) => r.status === 'rejected').length + (extraCounts?.rejected ?? 0),
+    [INVITE_BUCKET.PENDING]: rows.filter((r) => r.status === APPLICATION_STATUS.PENDING).length + (extraCounts?.pending ?? 0),
+    [INVITE_BUCKET.APPROVED]: rows.filter((r) => r.status === APPLICATION_STATUS.APPROVED).length + (extraCounts?.approved ?? 0),
+    [INVITE_BUCKET.REJECTED]: rows.filter((r) => r.status === APPLICATION_STATUS.REJECTED).length + (extraCounts?.rejected ?? 0),
   };
   const statusFiltered = filter === 'all' ? rows : rows.filter((r) => r.status === filter);
 
@@ -88,8 +88,8 @@ export function ApplicationsQueue({
   // would actually change go into it, and the button itself hides once no
   // selected row needs that action.
   const selectedRows = rows.filter((r) => selected.has(r.id));
-  const toApprove = selectedRows.filter((r) => r.status !== 'approved').map((r) => r.id);
-  const toReject = selectedRows.filter((r) => r.status !== 'rejected').map((r) => r.id);
+  const toApprove = selectedRows.filter((r) => r.status !== APPLICATION_STATUS.APPROVED).map((r) => r.id);
+  const toReject = selectedRows.filter((r) => r.status !== APPLICATION_STATUS.REJECTED).map((r) => r.id);
 
   return (
     <div>
@@ -98,7 +98,7 @@ export function ApplicationsQueue({
           className="mb-0"
           value={filter}
           onChange={(f) => { onFilterChange(f); setSelected(new Set()); }}
-          options={(['pending', 'approved', 'rejected', 'all'] as const)
+          options={INVITE_FILTER_OPTIONS
             .map((f) => ({ key: f, label: <span className="capitalize">{f}</span>, count: f === 'all' ? undefined : counts[f] }))}
         />
         <ListToolbar inline className="ml-auto flex-1 justify-end">
@@ -113,20 +113,20 @@ export function ApplicationsQueue({
       <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
         {toApprove.length > 0 && (
           <Button size="sm" disabled={bulkReview.isPending}
-            onClick={() => bulkReview.mutate({ ids: toApprove, status: 'approved' }, { onSuccess: () => toast.success(`${toApprove.length} approved`), onError: (e: any) => toast.error(e.message) })}>
+            onClick={() => bulkReview.mutate({ ids: toApprove, status: APPLICATION_STATUS.APPROVED }, { onSuccess: () => toast.success(`${toApprove.length} approved`), onError: (e: any) => toast.error(e.message) })}>
             Approve selected
           </Button>
         )}
         {toReject.length > 0 && (
           <Button size="sm" variant="outline" disabled={bulkReview.isPending}
-            onClick={() => bulkReview.mutate({ ids: toReject, status: 'rejected' }, { onSuccess: () => toast.success(`${toReject.length} rejected`), onError: (e: any) => toast.error(e.message) })}>
+            onClick={() => bulkReview.mutate({ ids: toReject, status: APPLICATION_STATUS.REJECTED }, { onSuccess: () => toast.success(`${toReject.length} rejected`), onError: (e: any) => toast.error(e.message) })}>
             Reject selected
           </Button>
         )}
       </BulkBar>
 
       {isLoading ? null : t.total === 0 && invitesEmpty ? (
-        <EmptyState icon="✓" title="Nothing here" description={t.query ? 'No organizations match your search.' : filter === 'pending' ? 'No organizations are waiting for approval.' : `No ${filter} organizations.`} />
+        <EmptyState icon="✓" title="Nothing here" description={t.query ? 'No organizations match your search.' : filter === INVITE_BUCKET.PENDING ? 'No organizations are waiting for approval.' : `No ${filter} organizations.`} />
       ) : t.total === 0 ? null : (
         <Table>
           <thead className="bg-slate-50 dark:bg-slate-800/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -155,13 +155,13 @@ export function ApplicationsQueue({
                 <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-2">
-                    {r.status !== 'approved' && (
-                      <Button size="sm" onClick={() => review.mutate({ id: r.id, status: 'approved' })} disabled={review.isPending}>Approve</Button>
+                    {r.status !== APPLICATION_STATUS.APPROVED && (
+                      <Button size="sm" onClick={() => review.mutate({ id: r.id, status: APPLICATION_STATUS.APPROVED })} disabled={review.isPending}>Approve</Button>
                     )}
-                    {r.status !== 'rejected' && (
+                    {r.status !== APPLICATION_STATUS.REJECTED && (
                       <Button size="sm" variant="outline" onClick={() => setRejecting(r)}>Reject</Button>
                     )}
-                    {r.status === 'rejected' && r.rejection_note && <Badge tone="rose">{r.rejection_note}</Badge>}
+                    {r.status === APPLICATION_STATUS.REJECTED && r.rejection_note && <Badge tone="rose">{r.rejection_note}</Badge>}
                   </div>
                 </td>
               </tr>
@@ -188,7 +188,7 @@ export function ApplicationsQueue({
           <div className="mt-3 flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setRejecting(null)}>Cancel</Button>
             <Button variant="danger" disabled={review.isPending}
-              onClick={() => review.mutate({ id: rejecting.id, status: 'rejected', rejection_note: note || undefined })}>Reject</Button>
+              onClick={() => review.mutate({ id: rejecting.id, status: APPLICATION_STATUS.REJECTED, rejection_note: note || undefined })}>Reject</Button>
           </div>
         </Modal>
       )}
