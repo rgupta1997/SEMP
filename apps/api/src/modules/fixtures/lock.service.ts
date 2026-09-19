@@ -151,31 +151,6 @@ function fixtureLabel(fx: any): string {
   return where ? `${home} vs ${away}, ${where}` : `${home} vs ${away}`;
 }
 
-/**
- * How long the lock transaction may take.
- *
- * Prisma's default is five seconds, and the lock genuinely does a lot inside one
- * atomic step: publish the result, advance the bracket, recompute standings, resolve
- * participants, write the timeline, derive achievements, and write a stat line per
- * player. A cricket match is twenty-two people; a slow pooled connection turns that
- * into a 500 and NO LOCK AT ALL - which is what happened, courtside, on a squad of
- * eleven a side.
- *
- * 30s was itself once the raised value and still wasn't enough: a real lock hit
- * P2028 ("Transaction already closed") at 31.1s, inside writeLifetimeEntries's
- * achievement derivation (records.service.ts) - the transaction was killed
- * mid-write, not refused up front, so the error surfaced as an opaque 500 with
- * nothing in the response indicating a timeout was the actual cause. Matched to
- * the client's own global default (prisma.ts) rather than picking a new
- * arbitrary number, so this is no longer the tighter of the two.
- *
- * Raising it is the right trade rather than splitting the work up: every step here
- * has to commit or roll back together, and a half-published result is far worse than
- * a lock that takes several seconds longer. `maxWait` is how long to queue for a
- * connection before starting, which is a different failure and worth its own budget.
- */
-const LOCK_TX = { timeout: 60_000, maxWait: 15_000 } as const;
-
 const FIXTURE_FOR_LOCK = {
   include: {
     teams_fixtures_home_team_idToteams: { select: { id: true, name: true, organization_id: true } },
@@ -343,7 +318,7 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
       participants,
       newAchievements,
     };
-  }, LOCK_TX);
+  });
 
   const lockSummary = req
     ? `Locked the scorecard for ${label} - the result is now official`
@@ -510,7 +485,7 @@ export async function unlockScorecard(prisma: Prisma, req: Request, fixtureId: s
       championshipId: championshipOf(current),
       fromVersion: current.lock_version,
     };
-  }, LOCK_TX);
+  });
 
   await audit(prisma, req, {
     action: AUDIT_ACTIONS.fixtureUnlocked,
