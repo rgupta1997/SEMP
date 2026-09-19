@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { BadgeCheck, ShieldOff, TrendingDown, TrendingUp } from 'lucide-react';
 import { cn, toast } from '../../../components/ui';
+import { authHeader } from '../../../lib/browserStorage';
 
 // Shared plumbing for the four certificate screens.
 
 export const API = (import.meta.env.VITE_API_URL ?? 'http://localhost:4000') + '/api';
-const bearer = () => ({ Authorization: `Bearer ${localStorage.getItem('semp_token') ?? ''}` });
+const bearer = authHeader;
 
 export interface Cert {
   id: string; serial: string; recipient_name: string; issued_at: string;

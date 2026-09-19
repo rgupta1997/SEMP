@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { type OnboardingState } from '../../lib/onboarding';
+import { collapsedFlag } from '../../lib/browserStorage';
 import { Button, Card } from '../ui';
 
 // Dashboard "Getting started" card. Renders a role's onboarding steps as a live
@@ -19,7 +20,7 @@ export function GettingStarted({ title, subtitle, state, storageKey, completeNot
   // Shown once every step is done - e.g. "this covered one team; repeat for more".
   completeNote?: ReactNode;
 }) {
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(storageKey) === '1');
+  const [collapsed, setCollapsed] = useState(() => collapsedFlag.get(storageKey));
 
   if (state.loading) return null;
 
@@ -35,7 +36,7 @@ export function GettingStarted({ title, subtitle, state, storageKey, completeNot
   const toggle = () => {
     const next = !collapsed;
     setCollapsed(next);
-    localStorage.setItem(storageKey, next ? '1' : '0');
+    collapsedFlag.set(storageKey, next);
   };
   const pct = state.total ? Math.round((state.doneCount / state.total) * 100) : 0;
 
