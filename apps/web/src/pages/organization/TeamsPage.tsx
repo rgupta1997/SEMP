@@ -10,16 +10,8 @@ import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { pluralise } from '@semp/shared';
 import { useOrgUnits, unitPath } from '../../lib/units';
+import { newTeamIds as newTeamIdsStorage } from '../../lib/browserStorage';
 import { Badge, Button, Card, Checkbox, cn, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchableSelect, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge, Tabs, INSET} from '../../components/ui';
-
-// Teams created by a bulk wizard action, kept only for this browser session so a
-// "New" badge can tell them apart from teams the wizard reused (see
-// BulkCreateTeamsModal) - not persisted server-side, since it's a viewing aid for
-// whoever just ran the wizard, not a fact about the team.
-function newTeamIdsKey(orgId: string) { return `bulk-new-team-ids:${orgId}`; }
-function readNewTeamIds(orgId: string): Set<string> {
-  try { return new Set(JSON.parse(sessionStorage.getItem(newTeamIdsKey(orgId)) ?? '[]')); } catch { return new Set(); }
-}
 
 
 // A roster can be entered into several championships; these read its team_entries.
@@ -611,13 +603,13 @@ export function TeamsPage() {
   // say "New" - the only way, short of opening it, to tell a roster the wizard
   // made from one it reused. Session-only and client-side: it's a viewing aid for
   // whoever just ran the wizard, not a fact worth persisting about the team.
-  const [newTeamIds, setNewTeamIds] = useState<Set<string>>(() => readNewTeamIds(institutionId));
+  const [newTeamIds, setNewTeamIds] = useState<Set<string>>(() => newTeamIdsStorage.read(institutionId));
   const markNewTeams = (ids: string[]) => {
     if (ids.length === 0) return;
     setNewTeamIds((prev) => {
       const next = new Set(prev);
       ids.forEach((id) => next.add(id));
-      try { sessionStorage.setItem(newTeamIdsKey(institutionId), JSON.stringify([...next])); } catch { /* private mode etc. */ }
+      newTeamIdsStorage.save(institutionId, next);
       return next;
     });
   };

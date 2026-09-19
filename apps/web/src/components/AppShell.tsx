@@ -20,6 +20,7 @@ import { Sheet } from './primitives';
 import { useFilterBar, FilterProvider } from '../lib/filters';
 import { useApi } from '../lib/hooks';
 import { useTheme } from '../lib/theme';
+import { sidebarRailed } from '../lib/browserStorage';
 import { Avatar, Button, cn } from './ui';
 import { BrandMark } from './BrandMark';
 import { NotificationBell } from './NotificationBell';
@@ -181,12 +182,10 @@ export function AppShell() {
   // Desktop rail. Persisted because it is a workspace preference, not a per-page
   // one - collapsing it on Fixtures and finding it expanded again on Standings
   // would read as the app forgetting.
-  const [railed, setRailed] = useState(() => {
-    try { return localStorage.getItem('semp_sidebar_railed') === '1'; } catch { return false; }
-  });
+  const [railed, setRailed] = useState(sidebarRailed.get);
   const toggleRail = () => setRailed((v) => {
     const next = !v;
-    try { localStorage.setItem('semp_sidebar_railed', next ? '1' : '0'); } catch { /* private mode */ }
+    sidebarRailed.set(next);
     return next;
   });
 

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
+import { themeStorage } from './browserStorage';
 
-const KEY = 'semp_theme';
 export type Theme = 'light' | 'dark';
 
 export function getInitialTheme(): Theme {
+  const stored = themeStorage.get();
+  if (stored === 'light' || stored === 'dark') return stored;
   try {
-    const stored = localStorage.getItem(KEY) as Theme | null;
-    if (stored === 'light' || stored === 'dark') return stored;
     return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   } catch {
     return 'light';
@@ -18,7 +18,7 @@ export function useTheme() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
-    try { localStorage.setItem(KEY, theme); } catch { /* ignore */ }
+    themeStorage.set(theme);
   }, [theme]);
   return { theme, setTheme, toggle: () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')) };
 }

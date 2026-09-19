@@ -1,11 +1,8 @@
-const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:4000') + '/api';
-const TOKEN_KEY = 'semp_token';
+import { authToken } from './browserStorage';
 
-export const tokenStore = {
-  get: () => localStorage.getItem(TOKEN_KEY),
-  set: (t: string) => localStorage.setItem(TOKEN_KEY, t),
-  clear: () => localStorage.removeItem(TOKEN_KEY),
-};
+const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:4000') + '/api';
+
+export const tokenStore = authToken;
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public details?: unknown) {
