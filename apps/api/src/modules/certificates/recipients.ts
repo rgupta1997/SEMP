@@ -100,25 +100,40 @@ async function winnersAndAwards(
   }));
 }
 
+// A medallist, placement-holder or award recipient (Player of the Match, etc.)
+// outranks a plain participant - a Player of the Match honour already implies
+// they took part, so certifying both would tell the same person twice that they
+// merely showed up.
+async function honouredUserIds(prisma: Db, championshipId: string): Promise<Set<string>> {
+  const rows = await prisma.achievements.findMany({
+    where: { championship_id: championshipId, superseded_at: null, user_id: { not: null }, kind: { in: [...WINNER_KINDS, 'award'] } },
+    select: { user_id: true },
+  });
+  return new Set(rows.map((r) => r.user_id!));
+}
+
 async function participation(prisma: Db, championshipId: string, filters: RecipientFilters, limit: number): Promise<Candidate[]> {
-  const entries = await prisma.team_entries.findMany({
-    where: {
-      championship_id: championshipId,
-      status: 'roster_locked',
-      ...(filters.tournamentDisciplineId ? { tournament_discipline_id: filters.tournamentDisciplineId } : {}),
-      ...(filters.teamId ? { team_id: filters.teamId } : {}),
-      ...(filters.sportId ? { teams: { sport_id: filters.sportId } } : {}),
-    },
-    select: {
-      teams: {
-        select: {
-          sport_id: true,
-          team_members: { where: { is_active: true }, select: { user_id: true, users: { select: { id: true, name: true } } } },
+  const [entries, honoured] = await Promise.all([
+    prisma.team_entries.findMany({
+      where: {
+        championship_id: championshipId,
+        status: 'roster_locked',
+        ...(filters.tournamentDisciplineId ? { tournament_discipline_id: filters.tournamentDisciplineId } : {}),
+        ...(filters.teamId ? { team_id: filters.teamId } : {}),
+        ...(filters.sportId ? { teams: { sport_id: filters.sportId } } : {}),
+      },
+      select: {
+        teams: {
+          select: {
+            sport_id: true,
+            team_members: { where: { is_active: true }, select: { user_id: true, users: { select: { id: true, name: true } } } },
+          },
         },
       },
-    },
-    take: limit,
-  });
+      take: limit,
+    }),
+    honouredUserIds(prisma, championshipId),
+  ]);
 
   const sportIds = [...new Set(entries.map((e) => e.teams.sport_id))];
   const sports = sportIds.length ? await prisma.sports.findMany({ where: { id: { in: sportIds } }, select: { id: true, name: true } }) : [];
@@ -133,6 +148,9 @@ async function participation(prisma: Db, championshipId: string, filters: Recipi
       // in the same sport) - one certificate per person per event, so only the first.
       if (seen.has(m.user_id)) continue;
       seen.add(m.user_id);
+      // A medal, placement or award already implies they took part - no
+      // participation certificate on top of a higher honour.
+      if (honoured.has(m.user_id)) continue;
       out.push({ userId: m.user_id, name: m.users.name, title: `Participation in ${sName ?? 'the event'}`, fixtureId: null, sportName: sName });
     }
   }
