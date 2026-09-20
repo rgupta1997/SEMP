@@ -1,4 +1,5 @@
 import type { Prisma } from '../../infra/prisma.js';
+import { alreadyIssued, candidateKey, candidatesFor, RECIPIENT_CATEGORIES } from './recipients.js';
 
 // What the Certificates Manager dashboard and register need (the Figma screens).
 //
@@ -27,10 +28,11 @@ const pct = (now: number, before: number): number | null =>
  * Generate-certificates picker uses it to put a count beside each event's
  * name, so the two can never quietly disagree with each other.
  *
- * Scoped by championship_id (via the events this org actually hosts), not by
- * an achievement's own organization_id - that field names the WINNER's
- * institution, not the host, and a host certifies every medallist of its own
- * championship regardless of which college they came from.
+ * Summed across every recipient category (winners, awards, participation,
+ * organising, officials, coaches) via the exact same `candidatesFor` +
+ * `alreadyIssued` pair the Recipients step's per-category pills use - not just
+ * achievements from locked results - so this number always matches what a run
+ * covering every category would actually issue.
  */
 export async function certificatePendingByEvent(prisma: Prisma, organizationId: string) {
   const hosted = await prisma.championships.findMany({
@@ -39,37 +41,21 @@ export async function certificatePendingByEvent(prisma: Prisma, organizationId: 
     orderBy: { start_date: 'desc' },
   });
   if (!hosted.length) return [];
-  const hostedIds = hosted.map((c) => c.id);
 
-  const lockedIds = (await prisma.fixtures.findMany({
-    where: {
-      locked_at: { not: null },
-      tournament_disciplines: { tournament_sports: { tournaments: { championship_id: { in: hostedIds } } } },
-    },
-    select: { id: true },
-  })).map((f) => f.id);
-
-  const issuedFor = await prisma.certificates.findMany({
-    where: { organization_id: organizationId, revoked_at: null, superseded_at: null },
-    select: { user_id: true, fixture_id: true },
-  });
-  const already = new Set(issuedFor.map((c) => `${c.user_id}:${c.fixture_id}`));
-
-  const eligible = lockedIds.length
-    ? await prisma.achievements.findMany({
-      where: { superseded_at: null, user_id: { not: null }, fixture_id: { in: lockedIds }, championship_id: { in: hostedIds } },
-      select: { user_id: true, fixture_id: true, championship_id: true },
-    })
-    : [];
-
-  const pendingByChamp = new Map<string, number>();
-  for (const a of eligible) {
-    if (already.has(`${a.user_id}:${a.fixture_id}`)) continue;
-    const id = a.championship_id!;
-    pendingByChamp.set(id, (pendingByChamp.get(id) ?? 0) + 1);
-  }
-
-  return hosted.map((c) => ({ id: c.id, name: c.name, pending: pendingByChamp.get(c.id) ?? 0 }));
+  // Championships run in parallel, but each one's six categories run one at a time -
+  // 6 championships x 6 categories x 2 queries at once blew through Supabase's
+  // pooled connection limit (9) and the whole dashboard load timed out (P2024).
+  return Promise.all(hosted.map(async (c) => {
+    let pending = 0;
+    for (const category of RECIPIENT_CATEGORIES) {
+      const [candidates, already] = await Promise.all([
+        candidatesFor(prisma, c.id, category, {}),
+        alreadyIssued(prisma, organizationId, c.id, category),
+      ]);
+      pending += candidates.filter((cand) => !already.has(candidateKey(cand))).length;
+    }
+    return { id: c.id, name: c.name, pending };
+  }));
 }
 
 /** KPI tiles, each against the previous calendar month. */
