@@ -63,25 +63,30 @@ const STEP_LABELS = [
 
 function WizardStepper({ current }: { current: number }) {
   return (
-    <ol className="flex items-center">
+    <ol className="relative flex justify-between">
+      {/* One continuous line behind the circles, instead of a separate divider per gap. */}
+      <div className="absolute left-4 right-4 top-4 -z-10 h-px bg-slate-200 dark:bg-slate-700" />
       {STEP_LABELS.map((s, i) => {
         const done = i < current, active = i === current;
+        // The last step's circle needs to sit at ITS column's right edge, not left -
+        // that edge is what justify-between pins to the line's right end, so this is
+        // what keeps the last circle the same distance from the edge as the first.
+        const isLast = i === STEP_LABELS.length - 1;
+        const isFirst = i === 0;
+        const align = isFirst ? 'items-start' : isLast ? 'items-end text-right' : 'items-center text-center';
         return (
-          <li key={s.label} className="contents">
-            {i > 0 && <span className="mx-3 h-px flex-1 bg-slate-200 dark:bg-slate-700" />}
-            <div className="flex flex-none flex-col items-start gap-1">
-              {/* A fixed navy for "current", not a tenant's derived brand colour - some
-                  tenants' brand hue lands close to the teal used for "done", and the two
-                  states have to read as different at a glance regardless of theme. */}
-              <span className={cn(
-                'grid h-8 w-8 place-items-center rounded-full text-xs font-bold',
-                done ? 'bg-teal-400 text-white' : active ? 'bg-blue-950 text-white' : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500',
-              )}>
-                {done ? '' : String(i + 1).padStart(2, '0')}
-              </span>
-              <span className={cn('whitespace-nowrap text-sm font-bold', active || done ? 'text-slate-900 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500')}>{s.label}</span>
-              <span className="whitespace-nowrap text-xs text-slate-400 dark:text-slate-500">{s.desc}</span>
-            </div>
+          <li key={s.label} className={cn('flex flex-none flex-col gap-1', align)}>
+            {/* A fixed navy for "current", not a tenant's derived brand colour - some
+                tenants' brand hue lands close to the teal used for "done", and the two
+                states have to read as different at a glance regardless of theme. */}
+            <span className={cn(
+              'grid h-8 w-8 place-items-center rounded-full text-xs font-bold',
+              done ? 'bg-teal-400 text-white' : active ? 'bg-blue-950 text-white' : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500',
+            )}>
+              {done ? <Check className="h-4 w-4" strokeWidth={3} /> : String(i + 1).padStart(2, '0')}
+            </span>
+            <span className={cn('whitespace-nowrap text-sm font-bold', active || done ? 'text-slate-900 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500')}>{s.label}</span>
+            <span className="whitespace-nowrap text-xs text-slate-400 dark:text-slate-500">{s.desc}</span>
           </li>
         );
       })}
