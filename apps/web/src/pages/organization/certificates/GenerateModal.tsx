@@ -516,7 +516,10 @@ export function GenerateModal({ orgId, championship, templates, onClose, invalid
   // known. Opened from the org-wide Certificates Manager, ask which event first -
   // every category and filter downstream is scoped to one event at a time.
   if (!championship) {
-    const picked = (champs.data?.rows ?? []).find((c) => c.id === champId);
+    // Nothing pending across all six categories means nothing this picker can start -
+    // an event with a flat 0 is noise, not a choice.
+    const withPending = (champs.data?.rows ?? []).filter((c) => c.pending > 0);
+    const picked = withPending.find((c) => c.id === champId);
     if (picked) return <Wizard orgId={orgId} championship={picked} templates={templates} onClose={onClose} invalidate={invalidate} />;
     return (
       <Modal title="Generate certificates" onClose={onClose} footer={<Button variant="ghost" onClick={onClose}>Cancel</Button>}>
@@ -524,7 +527,7 @@ export function GenerateModal({ orgId, championship, templates, onClose, invalid
           <span className="font-medium text-slate-700 dark:text-slate-300">Championship</span>
           <Select value={champId} onChange={(e) => setChampId(e.target.value)}>
             <option value="">Choose a championship…</option>
-            {(champs.data?.rows ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.pending})</option>)}
+            {withPending.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.pending})</option>)}
           </Select>
         </label>
       </Modal>
