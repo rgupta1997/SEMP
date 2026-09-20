@@ -37,10 +37,12 @@ const CATEGORIES = Object.keys(CATEGORY_META) as RecipientCategory[];
  *  team column at all - they are event-wide by construction, not by choice. */
 const isEventWide = (c: RecipientCategory) => c === 'organising' || c === 'officials';
 
+// on_lock and on_complete aren't wired to anything yet - queueCertificates
+// (fixtures/downstream.ts) is a TODO stub and there is no championship-completion
+// hook either, so picking either one would silently drop that category from every
+// run with no automatic issuance ever happening. Manual only until that lands.
 const TRIGGER_OPTIONS: Array<{ value: Trigger; label: string }> = [
   { value: 'manual', label: 'Manual run only' },
-  { value: 'on_lock', label: 'When results lock' },
-  { value: 'on_complete', label: 'When event completes' },
 ];
 
 interface Filters { sportId: string; tournamentDisciplineId: string; teamId: string }
