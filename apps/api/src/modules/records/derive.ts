@@ -268,7 +268,7 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
   };
 
   const context = contextLabel(fx);
-  const eventLabel = [fx.championship_name, context].filter(Boolean).join(' — ');
+  const eventLabel = [fx.championship_name, context].filter(Boolean).join(' - ');
 
   const byTeam = new Map<string, DerivableParticipant[]>();
   for (const p of participants) {
@@ -285,8 +285,8 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
   for (const v of verdictsOf(fx)) {
     const medal = v.kind === 'medal' ? v.medal : null;
     const title = medal
-      ? `${MEDAL_LABEL[medal]} — ${eventLabel}`
-      : `${PLACEMENT_LABEL[v.placement]} — ${eventLabel}`;
+      ? `${MEDAL_LABEL[medal]} - ${eventLabel}`
+      : `${PLACEMENT_LABEL[v.placement]} - ${eventLabel}`;
     const detail = {
       placement: v.placement,
       round: fx.round,
@@ -338,7 +338,7 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
     // already recorded on the fixture as unmatched, which is an organiser's cue to
     // link them rather than a number quietly going missing.
     if (!p) continue;
-    const title = `${MEDAL_LABEL[m.medal]} — ${m.sub_event}${fx.championship_name ? `, ${fx.championship_name}` : ''}`;
+    const title = `${MEDAL_LABEL[m.medal]} - ${m.sub_event}${fx.championship_name ? `, ${fx.championship_name}` : ''}`;
     achievements.push({
       user_id: p.user_id,
       team_id: null,
@@ -371,7 +371,7 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
       organization_id: p?.organization_id ?? null,
       kind: 'award',
       medal: null,
-      title: `${label} — ${eventLabel}`,
+      title: `${label} - ${eventLabel}`,
       detail: {
         award_type_code: a.award_type_code,
         award_name: a.award_name,
