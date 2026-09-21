@@ -1,6 +1,7 @@
 import {
-  BOWLER_WICKETS, ILLEGAL_EXTRAS, type CricketFormat, type Dismissal, type Extra,
-  type InningsEnd,
+  BOWLER_WICKETS, DISMISSALS_OFF_NO_BALL, DISMISSALS_OFF_WIDE, DISMISSALS_ON_FREE_HIT,
+  DISMISSALS_WITH_RUNS, ILLEGAL_EXTRAS,
+  type CricketFormat, type Dismissal, type Extra, type InningsEnd,
 } from './cricket-rules.js';
 
 // ============================================================================
@@ -121,6 +122,12 @@ export interface InningsState {
   strikerId?: string;
   nonStrikerId?: string;
   bowlerId?: string;
+  /**
+   * Who bowled the over just completed, so the same person cannot bowl the next.
+   * Kept on the innings rather than worked out from the log, because "the previous
+   * over" is not a thing a bowling line records - two spells look identical to it.
+   */
+  lastOverBowlerId?: string;
   /** Runs conceded in the over in progress, for the maiden test. */
   overRuns: number;
   overBalls: number;
@@ -142,6 +149,17 @@ export interface CricketState {
   reason: string | null;
   /** "won by 34 runs" / "won by 5 wickets" - how a cricket result is actually said. */
   margin: string | null;
+  /**
+   * Penalty runs awarded to a side that was NOT batting at the time.
+   *
+   * Five runs against the fielding side belong to the batting side's total and go
+   * straight into the innings. Five against the BATTING side belong to the other
+   * team, who have no innings open to put them in - so they are held here and drained
+   * into that side's innings when it starts, or counted straight into the aggregate
+   * if the match ends first. The alternative, which this replaces, was dropping them
+   * on the floor; five runs decides a box-cricket match.
+   */
+  penaltiesFor: { A: number; B: number };
 }
 
 const emptyInnings = (innings: number, battingSide: CricketSide): InningsState => ({
@@ -163,6 +181,7 @@ export function initCricket(format: CricketFormat, firstBatting: CricketSide = '
     outcome: null,
     reason: null,
     margin: null,
+    penaltiesFor: { A: 0, B: 0 },
   };
 }
 
@@ -213,6 +232,9 @@ export interface CricketStep {
 
 const clone = (s: CricketState): CricketState => ({
   ...s,
+  // Copied, not shared: a penalty written into the clone must not reach back into
+  // the state the caller still holds, or undo stops being a truncate.
+  penaltiesFor: { ...(s.penaltiesFor ?? { A: 0, B: 0 }) },
   innings: s.innings.map((i) => ({
     ...i,
     batting: i.batting.map((b) => ({ ...b })),
@@ -234,6 +256,10 @@ export function stepCricket(prev: CricketState, ev: CricketEvent): { state: Cric
 
   switch (ev.t) {
     case 'setBowler':
+      // A BOWLER MAY NOT BOWL CONSECUTIVE OVERS. Refused rather than corrected,
+      // because silently substituting somebody else would put the next six balls
+      // against the wrong name.
+      if (inn.lastOverBowlerId && ev.bowlerId === inn.lastOverBowlerId) return { state: prev, step };
       inn.bowlerId = ev.bowlerId;
       bowl(inn, ev.bowlerId);
       break;
@@ -261,9 +287,11 @@ export function stepCricket(prev: CricketState, ev: CricketEvent): { state: Cric
         inn.penaltyRuns += ev.runs;
         step.runsScored = ev.runs;
       } else {
-        // Awarded against the batting side: they go to the other innings' total,
-        // which for a limited-overs match means the chasing target moves.
-        inn.penaltyRuns += 0;
+        // Awarded against the batting side, so they are the OTHER side's runs. That
+        // side has no innings open to hold them, so they wait in the match-level
+        // bucket and are drained into their innings when it starts.
+        state.penaltiesFor[ev.side] += ev.runs;
+        step.runsScored = ev.runs;
       }
       break;
 
@@ -280,6 +308,12 @@ export function stepCricket(prev: CricketState, ev: CricketEvent): { state: Cric
 
     case 'ball': {
       if (inn.ended) return { state: prev, step };
+      // EVERY BALL MUST BE ATTRIBUTABLE. Once an innings has named a bowler, a
+      // delivery with nobody bowling it is refused - otherwise the ball lands in the
+      // over count but in no bowling figure, and the two counts drift apart with
+      // nothing on screen saying so. The common way in is a scorer who keeps tapping
+      // after an over ends without naming who bowls the next.
+      if (!ev.bowlerId && !inn.bowlerId && inn.bowling.length > 0) return { state: prev, step };
       // Who is involved. The event may state it (a corrected scorecard) or inherit
       // the state, which is what a live scorer does.
       if (ev.strikerId) inn.strikerId = ev.strikerId;
@@ -293,7 +327,27 @@ export function stepCricket(prev: CricketState, ev: CricketEvent): { state: Cric
       const illegal = !!extra && ILLEGAL_EXTRAS.includes(extra);
       const penalty = extra === 'wide' ? f.wideRuns : extra === 'noball' ? f.noBallRuns : 0;
       const extraRuns = ev.extraRuns ?? 0;
-      const offBat = Math.max(0, ev.runs ?? 0);
+
+      // IS THIS DISMISSAL EVEN POSSIBLE OFF THIS DELIVERY? A batter cannot be bowled
+      // off a no-ball or caught off a wide, and a free hit protects them from
+      // everything a no-ball does. An impossible one is DROPPED and the delivery
+      // stands as an ordinary ball, rather than being recorded as a wicket the side
+      // never actually lost.
+      const wasFreeHit = inn.freeHit;
+      let wicket = ev.wicket;
+      if (wicket) {
+        const allowed = extra === 'noball' ? DISMISSALS_OFF_NO_BALL
+          : extra === 'wide' ? DISMISSALS_OFF_WIDE
+            : wasFreeHit ? DISMISSALS_ON_FREE_HIT
+              : null;
+        if (allowed && !allowed.includes(wicket.how)) wicket = undefined;
+      }
+
+      // Runs can only have been COMPLETED if the batters were running. A catch means
+      // they were not, however many the scorer left in the box.
+      const offBat = wicket && !DISMISSALS_WITH_RUNS.includes(wicket.how)
+        ? 0
+        : Math.max(0, ev.runs ?? 0);
 
       // A wide is never the batter's run; runs off a no-ball are.
       const batterRuns = extra === 'wide' ? 0 : offBat;
@@ -302,8 +356,11 @@ export function stepCricket(prev: CricketState, ev: CricketEvent): { state: Cric
       inn.runs += total;
       step.runsScored = total;
 
+      // Everything not off the bat is itemised, INCLUDING what was run or overthrown
+      // afterwards - byes off a no-ball are no-balls, not byes, and counting only the
+      // one-run penalty loses them from the card while leaving them in the total.
       if (extra === 'wide') { inn.wides += penalty + extraRuns; if (bowler) bowler.wides += 1; }
-      else if (extra === 'noball') { inn.noBalls += penalty; if (bowler) bowler.noBalls += 1; }
+      else if (extra === 'noball') { inn.noBalls += penalty + extraRuns; if (bowler) bowler.noBalls += 1; }
       else if (extra === 'bye') inn.byes += extraRuns;
       else if (extra === 'legbye') inn.legByes += extraRuns;
 
@@ -340,20 +397,20 @@ export function stepCricket(prev: CricketState, ev: CricketEvent): { state: Cric
       else if (!illegal) inn.freeHit = false;
 
       // The wicket.
-      if (ev.wicket) {
-        const outEnd = ev.wicket.end ?? 'striker';
+      if (wicket) {
+        const outEnd = wicket.end ?? 'striker';
         const outId = outEnd === 'nonStriker' ? inn.nonStrikerId : inn.strikerId;
         const line = bat(inn, outId);
         if (line) {
           line.out = true;
-          line.dismissal = ev.wicket.how;
+          line.dismissal = wicket.how;
           line.bowlerId = inn.bowlerId;
-          if (ev.wicket.fielderId) line.fielderId = ev.wicket.fielderId;
+          if (wicket.fielderId) line.fielderId = wicket.fielderId;
         }
         inn.wickets += 1;
         step.wicketFell = true;
         // A RUN-OUT IS NOT THE BOWLER'S WICKET.
-        if (bowler && BOWLER_WICKETS.includes(ev.wicket.how)) bowler.wickets += 1;
+        if (bowler && BOWLER_WICKETS.includes(wicket.how)) bowler.wickets += 1;
 
         if (ev.nextBatterId) {
           if (outEnd === 'nonStriker') inn.nonStrikerId = ev.nextBatterId;
@@ -364,12 +421,23 @@ export function stepCricket(prev: CricketState, ev: CricketEvent): { state: Cric
         } else {
           inn.nonStrikerId = undefined;
         }
+
+        // LAST MAN STANDS. With nobody left to come in, the survivor carries on
+        // alone - and must be the one FACING, or the console has nobody to give the
+        // next ball to and the innings is stranded: neither scoreable nor closeable.
+        if (f.lastManStands && !inn.strikerId && inn.nonStrikerId) {
+          inn.strikerId = inn.nonStrikerId;
+          inn.nonStrikerId = undefined;
+        }
       }
 
       // Strike rotation: odd runs off the bat cross the batters. Byes and leg-byes
       // are run too, so they rotate as well; a wide's penalty does not.
+      //
+      // Only when there are two of them. A lone batter has nobody to cross with, and
+      // swapping would move them to an end nobody is standing at.
       const ran = extra === 'wide' ? extraRuns : (offBat + (extra === 'bye' || extra === 'legbye' ? extraRuns : 0));
-      if (ran % 2 === 1) {
+      if (ran % 2 === 1 && inn.strikerId && inn.nonStrikerId) {
         const s = inn.strikerId;
         inn.strikerId = inn.nonStrikerId;
         inn.nonStrikerId = s;
@@ -381,9 +449,13 @@ export function stepCricket(prev: CricketState, ev: CricketEvent): { state: Cric
         if (bowler && inn.overRuns === 0) bowler.maidens += 1;
         inn.overBalls = 0;
         inn.overRuns = 0;
-        const s = inn.strikerId;
-        inn.strikerId = inn.nonStrikerId;
-        inn.nonStrikerId = s;
+        if (inn.strikerId && inn.nonStrikerId) {
+          const s = inn.strikerId;
+          inn.strikerId = inn.nonStrikerId;
+          inn.nonStrikerId = s;
+        }
+        // Remembered so the same person cannot be named for the over that follows.
+        inn.lastOverBowlerId = inn.bowlerId;
         inn.bowlerId = undefined;
       }
 
@@ -438,6 +510,14 @@ function advance(state: CricketState, step: CricketStep): void {
   if (played < totalInnings) {
     const prev = state.innings[state.current];
     const next = emptyInnings(played + 1, other(prev.battingSide));
+    // Penalty runs awarded to this side while the other was batting have been
+    // waiting for an innings to belong to. They open the account.
+    const held = state.penaltiesFor[next.battingSide];
+    if (held) {
+      next.runs += held;
+      next.penaltyRuns += held;
+      state.penaltiesFor[next.battingSide] = 0;
+    }
     // The chasing side needs one more than the runs already made against them.
     // For a Test this is only meaningful in the last innings, which is why it is
     // set from the aggregate rather than from the previous innings alone.
@@ -457,9 +537,12 @@ function advance(state: CricketState, step: CricketStep): void {
 
 /** Runs a side has scored across all its innings. */
 export function aggregateFor(state: CricketState, side: CricketSide): number {
+  // Plus anything still held: a penalty awarded against the side batting last has
+  // no innings left to drain into, and must still count towards the result.
+  const held = state.penaltiesFor?.[side] ?? 0;
   return state.innings
     .filter((i) => i.battingSide === side)
-    .reduce((n, i) => n + i.runs, 0);
+    .reduce((n, i) => n + i.runs, held);
 }
 
 /**

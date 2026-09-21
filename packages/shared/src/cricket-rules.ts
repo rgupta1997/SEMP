@@ -32,6 +32,31 @@ export const BOWLER_WICKETS: readonly Dismissal[] = [
   'bowled', 'caught', 'lbw', 'stumped', 'hit_wicket', 'caught_and_bowled',
 ];
 
+/**
+ * Dismissals that can still stand off an ILLEGAL delivery, or off a free hit.
+ *
+ * A batter cannot be bowled, caught or leg-before off a no-ball: the delivery was
+ * never a fair one, so the only ways out are the ones that do not depend on it
+ * being fair. Off a wide the bat never touched the ball, so a catch is impossible
+ * but a stumping is not - which is why these are three lists and not one.
+ *
+ * Scoring a catch off a no-ball is the commonest illegal entry a hand-kept book
+ * contains, and it costs a side a wicket it never lost.
+ */
+export const DISMISSALS_OFF_NO_BALL: readonly Dismissal[] = ['run_out', 'obstructing'];
+export const DISMISSALS_OFF_WIDE: readonly Dismissal[] = ['run_out', 'stumped', 'hit_wicket', 'obstructing'];
+/** Law 21.19: a free hit protects the batter from everything a no-ball does. */
+export const DISMISSALS_ON_FREE_HIT: readonly Dismissal[] = ['run_out', 'obstructing'];
+
+/**
+ * Dismissals the batters can have completed runs before.
+ *
+ * A catch or a bowling means the runs were never made, however many the scorer
+ * typed. Only a run-out - where they were running when it happened - can carry
+ * completed runs.
+ */
+export const DISMISSALS_WITH_RUNS: readonly Dismissal[] = ['run_out', 'obstructing'];
+
 /** Extras. Wides and no-balls are the bowler's fault; byes are not. */
 export const EXTRAS = ['wide', 'noball', 'bye', 'legbye'] as const;
 export type Extra = (typeof EXTRAS)[number];

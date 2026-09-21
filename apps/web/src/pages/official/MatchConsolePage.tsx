@@ -47,6 +47,23 @@ export function MatchConsolePage() {
   const { data: fixture, isLoading } = useApi<any>(fixtureId ? `/fixtures/${fixtureId}/scoring` : null);
   const { data: live } = useApi<{ live_state: any; live_log: any[] }>(fixtureId ? `/fixtures/${fixtureId}/live` : null);
 
+  /**
+   * SCORING FOCUS: the console gets the whole screen, and nothing follows it.
+   *
+   * Cricket's ball-by-ball deck sizes itself to fill what is left of the scroll
+   * container, which only means "no scrolling" if nothing is rendered after it. The
+   * awards form and the manual scorecard are post-match admin - an official mid-over
+   * is not filling either in - so while the deck is live they are put behind a
+   * button rather than stacked underneath, where they were pushing the run pad off
+   * the bottom of a phone.
+   *
+   * Only the ball-by-ball cricket deck asks for this; every other console keeps the
+   * page exactly as it was.
+   */
+  const [focus, setFocus] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const scoringFocus = focus && !adminOpen;
+
   if (isLoading) return <Spinner />;
   if (!fixture) return <EmptyState icon="⚑" title="Match not found" description="This fixture isn't available to you." action={<Button onClick={() => navigate(back)}>Back</Button>} />;
 
@@ -77,15 +94,30 @@ export function MatchConsolePage() {
   const missingTeams = !canBeEvent && (!fixture.home_team_id || !fixture.away_team_id);
 
   return (
-    <div>
-      <BackButton onClick={done}>{backLabel}</BackButton>
-      <div className="mb-1 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-400">
-        <span>{disciplineLabel(fixture)} {fixture.round ? `· ${fixture.round}` : ''}</span>
-        <StatusBadge status={fixture.status} />
-      </div>
-      <div className="mb-4 text-sm text-slate-500 dark:text-slate-400">{eventLabel(fixture)} · {venueLabel(fixture)} · {fmtDateTime(fixture.scheduled_at)}</div>
+    <div className={scoringFocus ? 'flex h-full min-h-0 flex-col' : undefined}>
+      {!scoringFocus && <BackButton onClick={done}>{backLabel}</BackButton>}
+      {scoringFocus ? (
+        // One line, so the console keeps the screen. Everything the fuller header
+        // says is a tap away on the way back out.
+        <div className="mb-2 flex shrink-0 items-center gap-2 text-xs">
+          <button type="button" onClick={done}
+            className="font-semibold text-brand-600 hover:underline">← {backLabel}</button>
+          <span className="min-w-0 flex-1 truncate text-slate-500 dark:text-slate-400">
+            {disciplineLabel(fixture)}{fixture.round ? ` · ${fixture.round}` : ''}
+          </span>
+          <StatusBadge status={fixture.status} />
+        </div>
+      ) : (
+        <>
+          <div className="mb-1 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <span>{disciplineLabel(fixture)} {fixture.round ? `· ${fixture.round}` : ''}</span>
+            <StatusBadge status={fixture.status} />
+          </div>
+          <div className="mb-4 text-sm text-slate-500 dark:text-slate-400">{eventLabel(fixture)} · {venueLabel(fixture)} · {fmtDateTime(fixture.scheduled_at)}</div>
+        </>
+      )}
 
-      {['completed', 'walkover', 'bye'].includes(fixture.status) && (
+      {!scoringFocus && ['completed', 'walkover', 'bye'].includes(fixture.status) && (
         <LockScorecardPanel fixtureId={fixtureId!} scorecardStatus={fixture.scorecard_status} invalidate={invalidate} />
       )}
 
@@ -118,25 +150,38 @@ export function MatchConsolePage() {
           </CardBody>
         </Card>
       ) : (
-        <>
-          <ScoringTabs fixture={fixture} fixtureId={fixtureId!} live={live} invalidate={invalidate} onDone={done} />
+        <div className={scoringFocus ? 'flex min-h-0 flex-1 flex-col' : undefined}>
+          <ScoringTabs fixture={fixture} fixtureId={fixtureId!} live={live} invalidate={invalidate} onDone={done}
+            focus={scoringFocus}
+            onFocusable={setFocus}
+            onOpenAdmin={() => setAdminOpen(true)} />
 
-          {fixture.point_scheme === 'custom' && (
+          {adminOpen && (
+            <div className="mt-3">
+              <Button variant="subtle" size="sm" onClick={() => setAdminOpen(false)}>
+                ← Back to the scoring console
+              </Button>
+            </div>
+          )}
+
+          {!scoringFocus && fixture.point_scheme === 'custom' && (
             <div className="mt-5">
               <CustomPointsPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
             </div>
           )}
 
-          {sportDef(sportNameOf(fixture)).archetype === 'cricket' && (
+          {!scoringFocus && sportDef(sportNameOf(fixture)).archetype === 'cricket' && (
             <div className="mt-5">
               <ScorecardPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
             </div>
           )}
 
-          <div className="mt-5">
-            <AwardsPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
-          </div>
-        </>
+          {!scoringFocus && (
+            <div className="mt-5">
+              <AwardsPanel fixture={fixture} fixtureId={fixtureId!} invalidate={invalidate} />
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -146,18 +191,27 @@ export function MatchConsolePage() {
 type Structure = 'single' | 'tie' | 'event';
 
 // A pill toggle for picking among a few options (structure / scoring depth).
-function TabBar<T extends string>({ value, onChange, options, label }:
-  { value: T; onChange: (v: T) => void; options: { value: T; label: string }[]; label: string }) {
+function TabBar<T extends string>({ value, onChange, options, label, compact, compactLabels }:
+  { value: T; onChange: (v: T) => void; options: { value: T; label: string }[]; label: string;
+    compact?: boolean; compactLabels?: Record<string, string> }) {
   if (options.length < 2) return null;
+  // COMPACT is for the cricket deck, which is sized to whatever vertical space is
+  // left over. The stacked caption and the full labels cost about 110px - which is
+  // two rows of the wicket form, or the difference between the run pad being
+  // comfortable and being cramped.
   return (
     <div>
-      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</div>
-      <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-800/60">
+      {!compact && (
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</div>
+      )}
+      <div className={cn('inline-flex rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/60',
+        compact ? 'p-0.5' : 'p-1')}>
         {options.map((o) => (
           <button key={o.value} type="button" onClick={() => onChange(o.value)}
-            className={cn('rounded-lg px-3 py-1.5 text-sm font-medium transition',
+            className={cn('rounded-lg font-medium transition',
+              compact ? 'px-2.5 py-1 text-xs' : 'px-3 py-1.5 text-sm',
               o.value === value ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-100' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200')}>
-            {o.label}
+            {(compact && compactLabels?.[o.value]) || o.label}
           </button>
         ))}
       </div>
@@ -170,8 +224,10 @@ function TabBar<T extends string>({ value, onChange, options, label }:
 // depth (live point-by-point vs final score). Defaults to the sport's natural format
 // (and to whatever has already been scored on reload); switching tabs is non-destructive
 // since each structure keeps its own slice of live_state.
-function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
-  { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFocusable, onOpenAdmin }:
+  { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[];
+    onDone: () => void;
+    focus?: boolean; onFocusable?: (v: boolean) => void; onOpenAdmin?: () => void }) {
   const sportName = sportNameOf(fixture);
   const template = resolveTemplate(fixture);
   const singleDef: SportDef = template.single ?? sportDef(sportName);
@@ -329,21 +385,29 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
     setMode(next);
   };
 
+  // Only cricket's ball-by-ball deck fills the screen; every other console is a
+  // normal page section and must not have the header collapsed out from under it.
+  const cricketDeckLive = structure === 'single'
+    && effectiveMode === 'detailed'
+    && isCricketSport(sportName);
+  useEffect(() => { onFocusable?.(cricketDeckLive); }, [cricketDeckLive]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <>
+    <div className={focus ? 'flex min-h-0 flex-1 flex-col' : undefined}>
       {(structures.length > 1 || showDepth) && (
-        <div className="mb-5 flex flex-wrap items-end gap-x-6 gap-y-3">
+        <div className={cn('flex flex-wrap items-end gap-x-6 gap-y-3', focus ? 'mb-2 shrink-0' : 'mb-5')}>
           {/* Only offer the structure switch when there's a real choice - event-only
               sports have a single structure, so the lone tab is hidden. */}
           {structures.length > 1 && (
-            <TabBar label="Match structure" value={structure} onChange={switchStructure}
+            <TabBar label="Match structure" value={structure} onChange={switchStructure} compact={focus}
               options={structures.map((s) => ({ value: s, label: structureLabel(s) }))} />
           )}
           {/* Event/ranking sports (swimming, powerlifting, athletics) only ever use the
               Ranking entry - the detailed per-athlete console is intentionally hidden, so
               officials just set finishing places. Other sports keep the depth toggle. */}
           {structure !== 'event' && showDepth ? (
-            <TabBar label="Scoring" value={mode} onChange={switchMode}
+            <TabBar label="Scoring" value={mode} onChange={switchMode} compact={focus}
+              compactLabels={{ detailed: 'Ball by ball', manual: 'Totals' }}
               options={[{ value: 'detailed', label: 'Detailed · live' }, { value: 'manual', label: 'Manual · final score' }]} />
           ) : null}
         </div>
@@ -375,10 +439,10 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone }:
                 // is six LEGAL balls. It reaches that engine through the same
                 // format ladder as everything else.
                 : isCricketSport(sportName)
-                  ? <CricketConsole key={`cri-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} live={live} invalidate={invalidate} onDone={onDone} />
+                  ? <CricketConsole key={`cri-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} live={live} invalidate={invalidate} onDone={onDone} onOpenAdmin={onOpenAdmin} />
                   // The measured sports keep their own console by design.
                   : <LiveConsole key={`live-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} live={live} invalidate={invalidate} onDone={onDone} />}
-    </>
+    </div>
   );
 }
 
@@ -654,8 +718,9 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
  * twenty overs but the group games are tens" is set exactly where "the Final is best
  * of five" is set, and behaves identically.
  */
-function CricketConsole({ fixture, fixtureId, live, invalidate, onDone }:
-  { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAdmin }:
+  { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[];
+    onDone: () => void; onOpenAdmin?: () => void }) {
   const sport = sportNameOf(fixture);
   const td = fixture?.tournament_disciplines ?? {};
 
@@ -742,6 +807,7 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone }:
       awaySquad={rosterPeople(awayTeam(fixture))}
       log={log}
       busy={busy}
+      onOpenAdmin={onOpenAdmin}
       onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
       onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
     />

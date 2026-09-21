@@ -31,3 +31,5 @@ apps/api/scripts/.seed-*-manifest.json
 apps/web/scripts/qa-shots/
 apps/web/scripts/qa-console-shots/
 apps/web/scripts/qa-consoles.json
+apps/web/scripts/qa-cricket-shots/
+apps/web/scripts/qa-cricket.json
