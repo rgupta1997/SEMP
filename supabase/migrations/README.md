@@ -132,19 +132,38 @@ afterwards, for the same reason.
 The whole database was introspected into a throwaway schema and diffed against
 `prisma/schema.prisma`. Everything differed only in field ORDER (introspection
 emits ordinal order; the committed file is hand-ordered) except one real
-difference, which is recorded here because it is still outstanding:
-
-| | committed `schema.prisma` | live database |
-|---|---|---|
-| `users.personal_plan` default | `max` | `free` |
-
-That is `20260903000000_personal_plan_elite_default.sql`, **still unapplied**.
-It sets the column default to `max` and moves every existing row there. At the
-time of the audit the live distribution was `free=1695  max=2  pro=1`, so
-applying it rewrites 1,696 rows and there is no record afterwards of which
-account held `pro`. Left alone pending a decision — see that file's header for
-the product reasoning.
+difference, which turned out to be a second unapplied migration — see below.
 
 The diff is definitive only for what Prisma models: columns, types, defaults and
 non-partial indexes. Partial indexes, check constraints, RLS policies, functions
 and triggers are invisible to it and were not audited.
+
+---
+
+## Applied 2026-09-21 — `20260903000000_personal_plan_elite_default`
+
+Found by that drift audit rather than by the pull: `users.personal_plan`
+defaulted to `free` in the database and `max` in the committed schema, which is
+exactly this migration having never run.
+
+Applied with the same runner after confirming the intent. Both statements
+succeeded. Before / after:
+
+| | default | distribution |
+|---|---|---|
+| before | `free` | `free=1695  max=2  pro=1` |
+| after | `max` | `max=1698` |
+
+`organizations.plan` was re-checked afterwards and is still `free`, which the
+migration header requires — institutions ARE charged, only the personal ladder
+moves.
+
+The UPDATE overwrites the column in place and nothing else remembers what was
+there, so the prior state is recorded here: one account held `pro`, two were
+already on `max`, and the remaining 1,695 were `free`. If personal plans are
+ever sold for real, there was exactly one account already paying for something.
+
+Re-running the introspection diff afterwards leaves ONLY field-ordering
+differences, so `schema.prisma` and the database now agree on every column,
+type, default and non-partial index. No `db pull` and no `prisma generate` were
+needed: the committed schema already described the post-migration state.
