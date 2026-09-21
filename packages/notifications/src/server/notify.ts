@@ -2,6 +2,7 @@ import {
   NOTIFICATION_TYPES,
   type NotificationTypeDef,
   type NotificationTypeKey,
+  type NotificationEmailContent,
   type RuleContext,
 } from '../core/registry.js';
 import type { AudienceRule } from '../core/rules.js';
@@ -10,7 +11,51 @@ import {
   type NotificationPrisma as RecipientResolverPrisma,
 } from './resolve-user-ids.js';
 
+/**
+ * How a notification reaches an inbox.
+ *
+ * An interface rather than a direct call, because this package must not know that a
+ * mail service exists - it renders the message and hands it over, exactly as the API
+ * layer does. `setNotificationMailPort` wires the real one at boot.
+ */
+export interface NotificationMailPort {
+  send(input: {
+    /**
+     * One entry per recipient, and the transport must send one MESSAGE per entry.
+     * Putting them all on a single `to` would show every recipient the full list -
+     * which for a championship-wide notification is a roster of email addresses
+     * handed to everybody on it.
+     */
+    recipients: Array<{ userId: string; email: string }>;
+    content: NotificationEmailContent;
+    /** Per-recipient keys are derived from this and the user id. */
+    idempotencyPrefix: string;
+    priority: number;
+    type: string;
+  }): Promise<void>;
+}
+
+let mailPort: NotificationMailPort | null = null;
+
+/**
+ * Registered once at server boot.
+ *
+ * A module-level port rather than an argument on notify() on purpose: there are a
+ * dozen call sites, none of which have any business knowing about email, and
+ * threading a mailer through all of them to serve five notification types would put
+ * the transport back in the places this package exists to keep it out of.
+ */
+export function setNotificationMailPort(port: NotificationMailPort | null): void {
+  mailPort = port;
+}
+
 export interface NotificationPrisma extends RecipientResolverPrisma {
+  users: {
+    findMany(args: {
+      where: { id: { in: string[] }; is_active?: boolean };
+      select: { id: true; email: true; email_verified_at: true };
+    }): Promise<Array<{ id: string; email: string | null; email_verified_at: Date | null }>>;
+  };
   notifications: {
     create(args: {
       data: {
@@ -110,5 +155,60 @@ export async function notify(
     });
   }
 
+  await emailRecipients(prisma, input.type, notification.id, recipientIds, data, context);
+
   return notification;
+}
+
+/**
+ * The email half, for the types that opt in.
+ *
+ * Never throws. The feed row is already written and is the primary channel; a mail
+ * service having a bad afternoon must not turn "your plan changed" into a failed
+ * request for whoever triggered it.
+ */
+async function emailRecipients(
+  prisma: NotificationPrisma,
+  // NotificationTypeKey, not string: NOTIFICATION_TYPES is a literal object, so a
+  // bare string has no index signature to look it up by. Taking the key union also
+  // makes an unregistered type a compile error here, matching notify() above.
+  type: NotificationTypeKey,
+  notificationId: string,
+  recipientIds: Set<string>,
+  data: Record<string, unknown>,
+  context: RuleContext,
+): Promise<void> {
+  const definition: NotificationTypeDef = NOTIFICATION_TYPES[type];
+  if (!definition?.email || !mailPort || recipientIds.size === 0) return;
+
+  try {
+    const content = definition.email.build(data, context);
+    if (!content) return; // this instance is not worth an email
+
+    const users = await prisma.users.findMany({
+      where: { id: { in: [...recipientIds] }, is_active: true },
+      select: { id: true, email: true, email_verified_at: true },
+    });
+
+    // Verified addresses only. None of these are transactional in the sense that the
+    // recipient asked for this specific mail, so an unverified claim to an address
+    // must not be enough to start sending things to it.
+    const recipients = users
+      .filter((u) => u.email && u.email_verified_at)
+      .map((u) => ({ userId: u.id, email: u.email as string }));
+
+    if (recipients.length === 0) return;
+
+    await mailPort.send({
+      recipients,
+      content,
+      // Keyed on the notification, so re-running the same notification cannot fan out
+      // a second copy; the transport adds the user id per message.
+      idempotencyPrefix: `notif-${notificationId}`,
+      priority: definition.email.priority ?? 5,
+      type,
+    });
+  } catch (err) {
+    console.error(`[notifications] email fan-out failed for ${type} (${notificationId}):`, err);
+  }
 }

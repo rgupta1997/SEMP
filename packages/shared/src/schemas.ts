@@ -592,11 +592,20 @@ export const createInvitationSchema = z.object({
 // Add an org member / co-organiser / official by mobile number. If no user has
 // that number yet, the invite is auto-applied when they sign in with it.
 export const USER_INVITATION_TARGET = ['org_member', 'championship_organiser', 'championship_official'] as const;
+// Addressed by email OR mobile, at least one - mirroring the DB's
+// user_invitations_addressed_check. The two are not interchangeable: a mobile invite
+// is applied silently the next time that number signs in, whereas an email invite
+// carries a link and a single-use token, so it can reach somebody who has never
+// heard of us.
 export const createUserInvitationSchema = z.object({
-  mobile: z.string().min(5),
+  mobile: z.string().min(5).optional(),
+  email: z.string().email().optional(),
   target_type: z.enum(USER_INVITATION_TARGET),
   target_id: uuid,
   role: z.enum(ORGANIZATION_MEMBER_ROLE).optional(),
+}).refine((v) => !!v.mobile || !!v.email, {
+  path: ['email'],
+  message: 'Give a mobile number or an email address to invite',
 });
 
 // ---------- Phase 4: teams ----------

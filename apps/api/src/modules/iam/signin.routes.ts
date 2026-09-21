@@ -7,18 +7,18 @@ import {
   type OtpPurpose,
 } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
-import { env } from '../../config/env.js';
+import { env, isProduction } from '../../config/env.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { signToken } from '../../http/middleware/auth.js';
 import { ConflictError, UnauthorizedError, ValidationError } from '../../shared/errors.js';
 import {
-  consumeById, issueToken, normalizeEmail, normalizePhone,
+  consumeById, discardToken, issueToken, normalizeEmail, normalizePhone,
   recentTokenCount, verifyToken, type TokenSubject,
 } from './auth-tokens.service.js';
 import { accountsForSubject, accountsMatchingPassword, phoneHasCapacity, type AccountChoice } from './accounts.service.js';
 import { readVerificationTicket, signVerificationTicket } from './verification-ticket.js';
-import { sendEmail, otpEmail } from '../comms/email.js';
+import { sendOtpEmail, sendWelcomeEmail } from '../comms/email.js';
 import { sendSms, otpSms } from '../comms/sms.js';
 import { notify } from '@semp/notifications/server/notify.js';
 
@@ -141,24 +141,59 @@ export function makeSignInRouter(prisma: Prisma): Router {
     // A phone token carries no user_id even when it resolves to exactly one account:
     // it proves the NUMBER, and binding it to a user here would pre-empt the chooser.
     const userId = !isPhone(subject) && accounts.length === 1 ? accounts[0].id : null;
-    const { code, expires_at } = await issueToken(prisma, { ...subject, kind, userId } as never);
+    const { id: tokenId, code, expires_at } = await issueToken(prisma, { ...subject, kind, userId } as never);
 
-    if (isPhone(subject)) {
-      await sendSms({ to: normalizePhone(subject.phone), ...otpSms(code, env.OTP_TTL_MIN) });
-    } else {
-      const addr = normalizeEmail((subject as { email: string }).email);
-      const mailPurpose = purpose === 'password_reset' ? 'password_reset' : 'signup';
-      await sendEmail({ to: addr, ...otpEmail(code, env.OTP_TTL_MIN, mailPurpose) });
+    // Delivery must not be able to fail the request.
+    //
+    // The token is already written by this point, so a throw here would 500 the
+    // sign-in AND leave the row counting against the five-per-fifteen-minutes limit.
+    // Do that five times during a mail outage and the address is locked out for the
+    // rest of the window - silently, because the throttle branch above returns the
+    // ordinary success shape. Discarding the token instead means a failed send costs
+    // the user nothing but the retry.
+    let delivered = true;
+    try {
+      if (isPhone(subject)) {
+        await sendSms({ to: normalizePhone(subject.phone), ...otpSms(code, env.OTP_TTL_MIN) });
+      } else {
+        const addr = normalizeEmail((subject as { email: string }).email);
+        await sendOtpEmail(addr, code, env.OTP_TTL_MIN, purpose, {
+          tokenId,
+          // One account resolves to a name; a number reaching several, or an address
+          // with no account yet, does not. The template renders "Hi," without it.
+          name: accounts.length === 1 ? accounts[0].name : null,
+        });
+      }
+    } catch (err) {
+      delivered = false;
+      console.error(`[otp] delivery failed for ${kind}/${purpose}:`, err);
+      await discardToken(prisma, tokenId);
     }
 
+    // Two different bargains, deliberately not the same flag as MAIL_TRANSPORT:
+    // this one hands the code back to whoever asked for it, which is a sign-in as
+    // any address they like, and env.ts refuses to boot in production with it on.
     const bypassed = isPhone(subject) ? env.OTP_SMS_BYPASS : env.AUTH_EMAIL_BYPASS;
+
+    // `&& !isProduction` is redundant against a correctly-configured process - the
+    // boot guard in env.schema.ts already refuses production with either bypass on.
+    // It is repeated HERE, at the point of emission, because the two conditions have
+    // independent failure modes and neither is the other's proof: the boot guard is
+    // only as good as NODE_ENV being right, and this route is mounted BEFORE
+    // requireAuth (http/server.ts), so the cost of getting it wrong once is an
+    // unauthenticated sign-in as any address in the system. That is not a
+    // hypothetical - it is what a deploy path that passed three env vars and no
+    // NODE_ENV actually shipped.
+    const emitCode = bypassed && delivered && !isProduction;
+
     res.json({
+      // Unchanged even when delivery failed. The caller is anonymous, and an error
+      // here would report on the health of the mail service to anybody who asked.
       sent: true,
-      expires_at,
-      // No delivery service is wired yet. Until one is, the code comes back in-band
-      // so the flow works end to end; env.ts refuses to boot in production with
-      // either bypass on. Wiring a provider removes this field and nothing else.
-      ...(bypassed ? { dev_code: code, bypass: true } : {}),
+      // Only meaningful if something was actually sent - a discarded token has no
+      // expiry worth showing.
+      ...(delivered ? { expires_at } : {}),
+      ...(emitCode ? { dev_code: code, bypass: true } : {}),
     });
   }));
 
@@ -298,10 +333,15 @@ export function makeSignInRouter(prisma: Prisma): Router {
       select: { id: true, name: true, email: true, is_super_admin: true, organization_id: true },
     });
 
+    // The account exists and the session is about to be handed over, so a mail
+    // failure here must not turn a successful sign-up into an error. Not retried
+    // either: the idempotency key is the user id, so if the service did receive it
+    // the retry is a no-op, and if it did not, a missing welcome is not worth a
+    // second round-trip on the response path.
     try {
-      await notify(prisma, { type: 'account_created', userId: created.id, senderId: created.id, data: {} });
+      await sendWelcomeEmail(email, created.name, env.WEB_APP_URL, created.id);
     } catch (err) {
-      console.error(`[signup] account_created notification failed for ${created.id}:`, err);
+      console.error(`[signup] welcome email failed for ${created.id}:`, err);
     }
 
     res.status(201).json({ token: sessionFor(created), user: { id: created.id, name: created.name, email: created.email } });

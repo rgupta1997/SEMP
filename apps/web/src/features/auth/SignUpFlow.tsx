@@ -5,9 +5,18 @@ import { checkCode, completeSignup, identify, sendCode } from '../../lib/signin'
 // Screen 4: sign up.
 //
 // All four fields are required, and BOTH addresses are proved before the account
-// row exists. The order is deliberate - details, then phone, then email - so the
-// number is settled before anything else, because it is the thing that decides
-// whether this is even allowed (a number has a cap on how many accounts it holds).
+// row exists. The order is details, then EMAIL, then phone.
+//
+// Email first because it is the channel that actually delivers: an emailed code is
+// sent for real, whereas SMS has no gateway wired and falls back to printing the code
+// on screen. Leading with the phone made the first thing a new user ever saw a code
+// the product had handed itself, which reads like a broken product rather than a
+// deferred integration.
+//
+// The number still has a cap on how many accounts it may hold, and that is still
+// checked at the DETAILS step - before any code is spent - so somebody at the cap is
+// told immediately rather than after verifying an address for an account they cannot
+// have.
 //
 // The API takes the verified address from each ticket and never from the form, so a
 // caller cannot prove one address and register another. That means the fields are
@@ -15,7 +24,7 @@ import { checkCode, completeSignup, identify, sendCode } from '../../lib/signin'
 // would put the form and the ticket out of step, and the server would silently use
 // the ticket.
 
-type Step = 'details' | 'phone' | 'email';
+type Step = 'details' | 'email' | 'phone';
 
 const C = { blue: 'var(--brand)', blue50: 'var(--brand-tint)', line: 'var(--line)', ok: '#1E9E5A', okSoft: '#E4F6EC' };
 const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
@@ -49,9 +58,9 @@ export function SignUpFlow({ dark, inputStyle, labelStyle, t, onHeading }: SignU
 
   useEffect(() => {
     const H: Record<Step, { title: string; sub: string }> = {
-      details: { title: 'Create your account', sub: 'We verify both your phone and your email, so this takes two codes.' },
-      phone: { title: 'Verify your phone', sub: `Enter the 6-digit code we sent to ${phone}.` },
+      details: { title: 'Create your account', sub: 'We verify both your email and your phone, so this takes two codes.' },
       email: { title: 'Verify your email', sub: `Enter the 6-digit code we sent to ${email}.` },
+      phone: { title: 'Verify your phone', sub: `Enter the 6-digit code we sent to ${phone}.` },
     };
     onHeading(H[step]);
   }, [step, phone, email, onHeading]);
@@ -60,26 +69,17 @@ export function SignUpFlow({ dark, inputStyle, labelStyle, t, onHeading }: SignU
 
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : 'Something went wrong. Try again.');
 
-  async function startPhone(e: React.FormEvent) {
+  async function startSignup(e: React.FormEvent) {
     e.preventDefault(); setError(null); setBusy(true);
     try {
-      // Checked before a code is spent, so someone at the cap is told now rather
-      // than after two rounds of verification.
+      // The phone cap is still checked HERE, before a single code is spent, even
+      // though the number is now verified last. Someone at the cap should be told
+      // before they go and find a code, not after.
       const info = await identify({ phone });
       if (!info.can_sign_up) { setError('This number already has the maximum number of accounts.'); return; }
 
-      const r = await sendCode({ phone }, 'verify_phone');
-      setDevCode(r.dev_code ?? null); setCode(''); setStep('phone');
-    } catch (e) { fail(e); } finally { setBusy(false); }
-  }
-
-  async function confirmPhone(e: React.FormEvent) {
-    e.preventDefault(); setError(null); setBusy(true);
-    try {
-      const r = await checkCode({ phone }, code, 'verify_phone');
-      setPhoneToken(r.verification_token);
-      const sent = await sendCode({ email }, 'verify_email');
-      setDevCode(sent.dev_code ?? null); setCode(''); setStep('email');
+      const r = await sendCode({ email }, 'verify_email');
+      setDevCode(r.dev_code ?? null); setCode(''); setStep('email');
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
 
@@ -88,8 +88,20 @@ export function SignUpFlow({ dark, inputStyle, labelStyle, t, onHeading }: SignU
     try {
       const r = await checkCode({ email }, code, 'verify_email');
       setEmailToken(r.verification_token);
+      const sent = await sendCode({ phone }, 'verify_phone');
+      setDevCode(sent.dev_code ?? null); setCode(''); setStep('phone');
+    } catch (e) { fail(e); } finally { setBusy(false); }
+  }
+
+  async function confirmPhone(e: React.FormEvent) {
+    e.preventDefault(); setError(null); setBusy(true);
+    try {
+      const r = await checkCode({ phone }, code, 'verify_phone');
+      setPhoneToken(r.verification_token);
+      // r.verification_token rather than the state we just set: setState is async,
+      // and phoneToken is still the previous render's value on this line.
       const session = await completeSignup({
-        phone_token: phoneToken, email_token: r.verification_token, name, password,
+        phone_token: r.verification_token, email_token: emailToken, name, password,
       });
       await adoptSession(session.token);
     } catch (e) { fail(e); setBusy(false); }
@@ -98,9 +110,9 @@ export function SignUpFlow({ dark, inputStyle, labelStyle, t, onHeading }: SignU
   async function resend() {
     setError(null); setBusy(true);
     try {
-      const r = step === 'phone'
-        ? await sendCode({ phone }, 'verify_phone')
-        : await sendCode({ email }, 'verify_email');
+      const r = step === 'email'
+        ? await sendCode({ email }, 'verify_email')
+        : await sendCode({ phone }, 'verify_phone');
       setDevCode(r.dev_code ?? null);
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
@@ -129,14 +141,14 @@ export function SignUpFlow({ dark, inputStyle, labelStyle, t, onHeading }: SignU
       margin: 0, borderRadius: 6, border: `1px dashed ${C.line}`,
       background: dark ? 'color-mix(in srgb, var(--brand) 10%, transparent)' : C.blue50, padding: '9px 12px', fontSize: 13, color: t.body,
     }}>
-      Delivery isn't wired yet, so here is the code: <b style={{ fontFamily: MONO, color: C.blue }}>{devCode}</b>
+      No SMS gateway is wired yet, so here is the code: <b style={{ fontFamily: MONO, color: C.blue }}>{devCode}</b>
     </p>
   ) : null;
 
   // Two ticks, so it is obvious which half is done and which is still owed.
   const Progress = () => (
     <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
-      {([['Phone', !!phoneToken], ['Email', !!emailToken]] as const).map(([label, done]) => (
+      {([['Email', !!emailToken], ['Phone', !!phoneToken]] as const).map(([label, done]) => (
         <span key={label} style={{
           fontFamily: MONO, fontSize: 9.5, letterSpacing: '.12em', textTransform: 'uppercase',
           padding: '4px 9px', borderRadius: 999, fontWeight: 700,
@@ -160,21 +172,21 @@ export function SignUpFlow({ dark, inputStyle, labelStyle, t, onHeading }: SignU
   );
 
   if (step === 'details') return (
-    <form onSubmit={startPhone} style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 28 }}>
+    <form onSubmit={startSignup} style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 28 }}>
       <div>
         <label htmlFor="su-name" style={labelStyle}>Full name</label>
         <input id="su-name" className="field" style={inputStyle} value={name} autoFocus
           onChange={(e) => setName(e.target.value)} placeholder="Your name" autoComplete="name" required />
       </div>
       <div>
-        <label htmlFor="su-phone" style={labelStyle}>Phone number</label>
-        <input id="su-phone" className="field" style={inputStyle} type="tel" value={phone}
-          onChange={(e) => setPhone(e.target.value)} placeholder="+91 98000 00000" autoComplete="tel" required />
-      </div>
-      <div>
         <label htmlFor="su-email" style={labelStyle}>Email</label>
         <input id="su-email" className="field" style={inputStyle} type="email" value={email}
           onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" required />
+      </div>
+      <div>
+        <label htmlFor="su-phone" style={labelStyle}>Phone number</label>
+        <input id="su-phone" className="field" style={inputStyle} type="tel" value={phone}
+          onChange={(e) => setPhone(e.target.value)} placeholder="+91 98000 00000" autoComplete="tel" required />
       </div>
       <div>
         <label htmlFor="su-password" style={labelStyle}>Password</label>
@@ -189,14 +201,19 @@ export function SignUpFlow({ dark, inputStyle, labelStyle, t, onHeading }: SignU
     </form>
   );
 
-  if (step === 'phone') return (
-    <form onSubmit={confirmPhone} style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 28 }}>
+  if (step === 'email') return (
+    <form onSubmit={confirmEmail} style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 28 }}>
       <Progress />
       {codeField}
+      {/* Real mail takes a few seconds to arrive, so say so rather than letting an
+          empty inbox read as a failure. */}
+      <p style={{ margin: 0, fontSize: 13, color: t.body }}>
+        The code can take a few seconds to arrive. Check your spam folder if it doesn’t.
+      </p>
       <DevCode />
       <Err />
       <button type="submit" disabled={busy || code.length !== 6} className="cta" style={cta}>
-        {busy ? 'Checking…' : 'Verify phone'}
+        {busy ? 'Checking…' : 'Verify email'}
       </button>
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <button type="button" onClick={() => { setStep('details'); setError(null); }} style={{ ...ghost, fontWeight: 600, color: t.body }}>← Back</button>
@@ -206,13 +223,13 @@ export function SignUpFlow({ dark, inputStyle, labelStyle, t, onHeading }: SignU
   );
 
   return (
-    <form onSubmit={confirmEmail} style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 28 }}>
+    <form onSubmit={confirmPhone} style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 28 }}>
       <Progress />
       {codeField}
       <DevCode />
       <Err />
       <button type="submit" disabled={busy || code.length !== 6} className="cta" style={cta}>
-        {busy ? 'Creating your account…' : 'Verify email and finish'}
+        {busy ? 'Creating your account…' : 'Verify phone and finish'}
       </button>
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button type="button" onClick={resend} disabled={busy} style={ghost}>Resend code</button>

@@ -32,7 +32,9 @@ import { makeChampionshipTemplatesRouter } from '../modules/championships/templa
 import { makeStandingsRouter } from '../modules/standings/standings.routes.js';
 import { makeEnrollmentRouter } from '../modules/enrollment/enrollment.routes.js';
 import { makeInvitationsRouter } from '../modules/enrollment/invitations.routes.js';
-import { makeUserInvitationsRouter } from '../modules/iam/user-invitations.routes.js';
+import { makeUserInvitationsRouter, makePublicInviteRouter, makeInviteAcceptRouter } from '../modules/iam/user-invitations.routes.js';
+import { setNotificationMailPort } from '@semp/notifications/server/notify.js';
+import { notificationMailPort } from '../modules/comms/notification-mail.js';
 import { makeTeamsRouter } from '../modules/teams/teams.routes.js';
 import { makeMatrixImportRouter } from '../modules/import/matrix-import.routes.js';
 import { makePublicRouter } from '../modules/public/public.routes.js';
@@ -97,6 +99,12 @@ export function buildApp(prisma: Prisma) {
   // Public, view-only championship pages via a share token (Overview + Standings).
   // Mounted before requireAuth so anyone with the link can view without signing in.
   api.use('/public', makePublicRouter(prisma));
+
+  // Reading an emailed invitation. Mounted before requireAuth because the recipient
+  // has, by definition, not signed in yet - a link that demanded a session before it
+  // would say what it was for would be indistinguishable from a phishing page.
+  // Accepting is a different matter and sits below the gate (see makeInviteAcceptRouter).
+  api.use('/public', makePublicInviteRouter(prisma));
 
   // Everything below requires authentication.
   api.use(requireAuth);
@@ -200,6 +208,8 @@ export function buildApp(prisma: Prisma) {
   api.use('/', makeEnrollmentRouter(prisma));
   api.use('/', makeInvitationsRouter(prisma));
   api.use('/', makeUserInvitationsRouter(prisma));
+  // Accepting an emailed invitation: the signed-in user is who joins.
+  api.use('/', makeInviteAcceptRouter(prisma));
 
   // ----- Phase 4: teams & rosters -----
   api.use('/', makeTeamsRouter(prisma));

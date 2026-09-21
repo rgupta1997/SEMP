@@ -8,6 +8,11 @@ services:
     plan: free
     rootDir: .
     # --include=dev so tsx + prisma (devDependencies) are available for generate/runtime.
+    #
+    # This flag is LOAD-BEARING, and more so now that NODE_ENV=production is set below:
+    # npm skips devDependencies in production by default, and startCommand is
+    # `tsx src/main.ts` (there is no compile step - apps/api's `build` is
+    # `tsc --noEmit`). Drop it and the service will not start at all.
     buildCommand: npm install --include=dev && npm run prisma:generate --workspace @semp/api
     startCommand: npm run start --workspace @semp/api
     healthCheckPath: /health
@@ -20,5 +25,28 @@ services:
         generateValue: true    # Render generates a strong secret
       - key: WEB_ORIGIN
         sync: false            # your Netlify URL, e.g. https://your-app.netlify.app (comma-separate for multiple)
+      # REQUIRED and has no default (apps/api/src/config/env.schema.ts). Everything
+      # below it in this list exists BECAUSE of it: setting NODE_ENV=production
+      # activates guards that refuse to boot without a real mail transport and with
+      # the OTP bypasses on. Setting NODE_ENV alone would crash the service at boot,
+      # so these land together or not at all.
+      - key: NODE_ENV
+        value: production
+      # 'console' silently discards every email; env.ts refuses it in production.
+      - key: MAIL_TRANSPORT
+        value: http
+      - key: MAIL_API_URL
+        sync: false            # the mail service's BASE ORIGIN, no path
+      - key: MAIL_API_KEY
+        sync: false            # the SECRET only - sending `callerName:secret` is a 401
+      - key: WEB_APP_URL
+        sync: false            # ONE origin; every link in an outgoing email is built from it
+      # Both hand sign-in codes back to the caller. /auth/otp/send is mounted before
+      # requireAuth, so leaving either on in production is an unauthenticated sign-in
+      # as any address in the system.
+      - key: AUTH_EMAIL_BYPASS
+        value: "false"
+      - key: OTP_SMS_BYPASS
+        value: "false"
       - key: NODE_VERSION
         value: "20"

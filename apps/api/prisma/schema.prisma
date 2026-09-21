@@ -14,8 +14,13 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Used by the Prisma CLI only (`db pull`, `migrate`), never at runtime - which is
+  // why Render has always worked without it. DIRECT_URL is currently set in NO .env
+  // file in this repo, so `prisma db pull` runs against an undefined value; set it
+  // to a non-pooled connection string before introspecting.
+  directUrl = env("DIRECT_URL")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.

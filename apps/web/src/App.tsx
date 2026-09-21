@@ -45,6 +45,7 @@ import { TemplateGalleryPage } from './pages/organization/certificates/TemplateG
 import { TemplatePreviewPage } from './pages/organization/certificates/TemplatePreviewPage';
 import { VerifyCertificatePage } from './pages/public/VerifyCertificatePage';
 import { PublicProfilePage } from './pages/public/PublicProfilePage';
+import { InviteAcceptPage, PENDING_INVITE_KEY } from './pages/InviteAcceptPage';
 import { AdminPage } from './pages/organization/AdminPage';
 import { MembersPage } from './pages/organization/MembersPage';
 import { InvitationsPage } from './pages/organization/InvitationsPage';
@@ -198,6 +199,13 @@ function AppRoutes() {
   const publicProfileMatch = useMatch('/p/:handle');
   if (publicProfileMatch) return <PublicProfilePage handle={publicProfileMatch.params.handle} />;
 
+  // An emailed invitation. Also matched ahead of the signed-out redirect, and for the
+  // same reason as the two above: the recipient usually has no account yet, and a
+  // login wall reached from an email - with no statement of what it is for - is
+  // indistinguishable from a phishing page.
+  const inviteMatch = useMatch('/invites/:token');
+  if (inviteMatch?.params.token) return <InviteAcceptPage token={inviteMatch.params.token} />;
+
   if (loading) return <div className="grid h-screen place-items-center"><Spinner /></div>;
   // Logged out: a public marketing landing page at the root, with the sign-in
   // screen at /login. Any other path falls through to the landing page.
@@ -210,6 +218,14 @@ function AppRoutes() {
   );
   // Provisioned logins must set their own password before they can use the app.
   if (ctx.user.must_change_password) return <ChangePasswordPage />;
+  // Somebody who followed an invitation link had to sign in first, which cost them
+  // the URL. Put them back on it rather than on their dashboard, where the invitation
+  // they came to accept would be nowhere in sight.
+  const pendingInvite = sessionStorage.getItem(PENDING_INVITE_KEY);
+  if (pendingInvite) {
+    sessionStorage.removeItem(PENDING_INVITE_KEY);
+    return <Navigate to={`/invites/${pendingInvite}`} replace />;
+  }
   // After an explicit login/signup, bounce to the role's home so the previous
   // session's last-visited URL never renders. Initial token refresh skips this.
   if (justLoggedIn) return <Navigate to={roleHome(activeRole)} replace />;

@@ -33,3 +33,23 @@ apps/web/scripts/qa-console-shots/
 apps/web/scripts/qa-consoles.json
 apps/web/scripts/qa-cricket-shots/
 apps/web/scripts/qa-cricket.json
+
+
+# AWS SAM build output and packaged templates. The bare `dist/` and `build/`
+# patterns above do NOT match .aws-sam/build.
+# NOTE: infra/samconfig.toml is deliberately NOT ignored - stack names, region, tags
+# and the VPC/subnet ids are what make a deploy reproducible, and none of it is
+# secret. AdminCidr is passed on the command line instead, because it is somebody's
+# home IP address.
+.aws-sam/
+packaged.yaml
+packaged-*.yaml
+
+# Generated Supabase->RDS migration dumps (schema DDL + data). Build artifacts of
+# a one-time migration, not source - see infra/RUNBOOK-rds.md step 9.
+semp-schema*.sql
+semp-data*.sql
+semp-full*.sql
+
+# Local Supabase connection string for migration work (contains a password).
+infra/.supa.local

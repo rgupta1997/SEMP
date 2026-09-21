@@ -40,6 +40,9 @@ const hashCode = (code: string) => createHash('sha256').update(code).digest('hex
 const generateCode = () => String(randomInt(0, 1_000_000)).padStart(6, '0');
 
 export interface IssuedToken {
+  /** The auth_tokens row. Callers need it to key an idempotent delivery, and to
+   *  discard the token again if that delivery never left the building. */
+  id: string;
   /** The plaintext code. Returned to the caller once and never stored. */
   code: string;
   expires_at: Date;
@@ -61,11 +64,34 @@ export async function issueToken(
     data: { consumed_at: now },
   });
 
-  await prisma.auth_tokens.create({
+  const row = await prisma.auth_tokens.create({
     data: { ...addr, kind, token_hash: hashCode(code), expires_at, user_id: userId ?? null },
+    select: { id: true },
   });
 
-  return { code, expires_at };
+  return { id: row.id, code, expires_at };
+}
+
+/**
+ * Undo an issue whose code never reached anybody.
+ *
+ * DELETES rather than consumes, and the difference is the whole point:
+ * recentTokenCount() counts rows by created_at and does not care whether they were
+ * consumed, so a consumed row still spends one of the five sends an address gets in
+ * fifteen minutes. A mail outage would otherwise cost the user their entire budget
+ * for a code they never received - and once the budget is gone the send route
+ * returns its usual `{sent:true}` and says nothing, so they would sit watching an
+ * inbox with no way to tell that the door had quietly shut.
+ *
+ * Best-effort: the caller is already handling a delivery failure and must not be
+ * given a second one to handle.
+ */
+export async function discardToken(prisma: Prisma, id: string): Promise<void> {
+  try {
+    await prisma.auth_tokens.delete({ where: { id } });
+  } catch (err) {
+    console.error('[auth-tokens] could not discard undelivered token', id, err);
+  }
 }
 
 export type ConsumeResult =

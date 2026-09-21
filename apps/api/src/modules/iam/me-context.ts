@@ -13,9 +13,9 @@ import { managedChampionshipIds } from '../championships/manage-access.js';
 export async function buildAuthContext(prisma: Prisma, user: any) {
   const { password_hash, ...publicUser } = user;
 
-  // Resolve any invitations addressed to this user's mobile before reading their
-  // memberships/roles, so a freshly-applied invite shows up immediately. Never
-  // throws (see the service) - sign-in must not depend on it succeeding.
+  // Resolve any invitations addressed to this user's mobile or verified email before
+  // reading their memberships/roles, so a freshly-applied invite shows up
+  // immediately. Never throws (see the service) - sign-in must not depend on it.
   await applyUserInvitations(prisma, user);
 
   // These reads are independent - run them together rather than serially, since

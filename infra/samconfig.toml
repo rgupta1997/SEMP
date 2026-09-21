@@ -1,0 +1,112 @@
+version = 0.1
+
+# There is deliberately NO [default] section.
+#
+# samconfig.toml resolves relative to the CURRENT WORKING DIRECTORY, and one of the
+# two stacks here owns the production database. A bare `sam deploy` should fail with
+# "Missing option --stack-name" rather than guess which stack was meant, so every
+# command names its target explicitly:
+#
+#   sam deploy --config-env infra --parameter-overrides AdminCidr=<your-ip>/32
+#   sam build  --config-env api && sam deploy --config-env api
+#
+# Run both from the infra/ directory.
+
+# ---------------------------------------------------------------------------
+# semp-infra - RDS + secrets. Deployed rarely, always with a human in the loop.
+# ---------------------------------------------------------------------------
+# `sam validate` resolves its own config section, so template_file has to be
+# repeated here - otherwise it looks for ./template.yml and reports "not found".
+[infra.validate.parameters]
+template_file = "semp-infra.yaml"
+region        = "ap-south-1"
+lint          = true
+
+[infra.deploy.parameters]
+template_file     = "semp-infra.yaml"
+stack_name        = "semp-infra"
+region            = "ap-south-1"
+capabilities      = "CAPABILITY_IAM"
+resolve_s3        = true
+# This stack holds the data. Read every changeset, and treat any line saying
+# "Replacement: True" on DbInstance as a stop-and-think.
+confirm_changeset = true
+tags              = "app=semp stack=infra managed-by=sam"
+# VpcId and SubnetIds are pinned here so the deploy is reproducible. They are not
+# secret. AdminCidr is NOT here on purpose - it is somebody's home IP address.
+#
+# CAVEAT: a CLI --parameter-overrides REPLACES this whole list rather than merging
+# into it, so any deploy that overrides AdminCidr must re-pass VpcId and SubnetIds
+# too, or CloudFormation rejects the changeset with "must have values". The commands
+# in README.md and RUNBOOK-rds.md pass all three.
+#
+# SubnetIds must be >=2 subnets in DIFFERENT availability zones or the DBSubnetGroup
+# is rejected. To re-derive these, or to target another account, work through step 1
+# of RUNBOOK-rds.md - it checks six things, and picking subnets by name alone misses
+# four of them.
+#
+# Verified 2026-09-04 against account 506491559903, region ap-south-1:
+#   - default VPC, stock 172.31.0.0/16
+#   - enableDnsSupport = enableDnsHostnames = True (required by PubliclyAccessible)
+#   - both subnets resolve through the VPC main route table rtb-019b468b8c535f5f1,
+#     which has 0.0.0.0/0 -> igw-012579f52069f2b1a, so both are genuinely public
+#   - db.t4g.small / postgres 17.7 orderable in 1a, 1b and 1c
+#   - no semp-prod instance and no semp/ secrets existed beforehand
+parameter_overrides = [
+  "VpcId=vpc-0295723a4b343412c",
+  "SubnetIds=subnet-0ac9c6a2778f3c7ce,subnet-0fc4c1b851b823704",
+]
+
+# ---------------------------------------------------------------------------
+# semp-api - Lambda + HTTP API. Deployed on every push.
+# ---------------------------------------------------------------------------
+[api.validate.parameters]
+template_file = "semp-api.yaml"
+region        = "ap-south-1"
+lint          = true
+
+[api.build.parameters]
+template_file = "semp-api.yaml"
+# REQUIRED, not an optimisation.
+#
+# By default `sam build` runs CustomMakeBuilder:CopySource first - it copies CodeUri
+# to a scratch directory under .aws-sam/ and runs the Makefile THERE. That breaks
+# this build in two ways at once: the bundle resolves packages/*/src/*.ts by
+# relative path (those workspace packages have no compiled output - their
+# package.json "main" points at a .ts file), and @prisma/client is hoisted to the
+# monorepo root. Neither exists in a copy of apps/api alone.
+#
+# build_in_source runs the Makefile in the real apps/api instead, so both resolve.
+# Verified: without it the build fails on `../../node_modules/.bin/prisma: No such
+# file or directory`.
+build_in_source = true
+# NO use_container - a container mounts even less than the scratch copy does.
+cached          = false
+
+[api.deploy.parameters]
+template_file     = "semp-api.yaml"
+stack_name        = "semp-api"
+region            = "ap-south-1"
+capabilities      = "CAPABILITY_IAM"
+resolve_s3        = true
+# Runs on every push, so no prompt. Safe because this stack cannot reach the
+# database's resources - it imports two secret ARNs and nothing else.
+confirm_changeset = false
+tags              = "app=semp stack=api managed-by=sam"
+# SecretsExtensionLayerArn MUST be filled in - it is per-region AND per-architecture
+# (arm64 here, not x86_64) and version-bumped, so there is no safe default to
+# hardcode. Look up the current ap-south-1 ARM64 ARN for the AWS Parameters and
+# Secrets Lambda Extension in the AWS docs.
+#
+# WebOrigin/WebAppUrl/MailApiUrl: fill in the real origins. WebOrigin is a
+# comma-separated CORS list; WebAppUrl is ONE origin with no trailing slash.
+parameter_overrides = [
+  "InfraStackName=semp-infra",
+  "SecretsExtensionLayerArn=arn:aws:lambda:ap-south-1:REPLACE_ME:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:REPLACE_ME",
+  "WebOrigin=https://REPLACE_ME",
+  "WebAppUrl=https://REPLACE_ME",
+  "MailApiUrl=https://REPLACE_ME",
+  # 0 means omit. Raise to 10 only after the account's Lambda concurrency quota is
+  # above 20 - see the ReservedConcurrency parameter description.
+  "ReservedConcurrency=0",
+]
