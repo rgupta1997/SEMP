@@ -356,6 +356,46 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
     addChip(p.user_id, { kind: 'medal', title: `${MEDAL_LABEL[m.medal]} · ${m.sub_event}`, medal: m.medal });
   }
 
+  // ---- 2b · the default "Team ranking" console: medals for the org's one
+  //       entrant (J4-E4-S1) ------------------------------------------------
+  // EventRankingConsole ranks orgs, not individual competitors, so there is no
+  // competitor_id to match on - resolveFixtureParticipants already turned each
+  // placed org's team_entries roster (always exactly one person, squad_max is
+  // pinned to 1 for an individual discipline) into a participant carrying that
+  // org's id, so matching on organization_id is enough.
+  const rankingRows = (fx.live_state as any)?.eventRanking?.rows;
+  if (Array.isArray(rankingRows)) {
+    const byOrg = new Map<string, DerivableParticipant>();
+    for (const p of participants) if (p.organization_id && !byOrg.has(p.organization_id)) byOrg.set(p.organization_id, p);
+
+    for (const row of rankingRows) {
+      const place = typeof row?.place === 'number' ? row.place : null;
+      const medal = place != null ? MEDAL_BY_RANK[place] : undefined;
+      if (!medal) continue;
+      const orgId = typeof row?.orgId === 'string' ? row.orgId : null;
+      const p = orgId ? byOrg.get(orgId) : undefined;
+      // The org's entrant never resolved to an account - already recorded as
+      // unmatched, nothing here to attach a medal to.
+      if (!p) continue;
+      const title = `${MEDAL_LABEL[medal]} - ${eventLabel}`;
+      achievements.push({
+        user_id: p.user_id,
+        team_id: p.team_id,
+        organization_id: p.organization_id,
+        kind: 'medal',
+        medal,
+        title,
+        detail: {
+          placement: place === 1 ? 'winner' : place === 2 ? 'runner_up' : 'third_place',
+          sport: fx.sport_name,
+          discipline: fx.discipline_name,
+          championship_name: fx.championship_name,
+        },
+      });
+      addChip(p.user_id, { kind: 'medal', title: MEDAL_LABEL[medal], medal });
+    }
+  }
+
   // ---- 3 · awards (J4-E4-S2) ----------------------------------------------
   const participantById = new Map(participants.map((p) => [p.user_id, p]));
   for (const a of awards) {
