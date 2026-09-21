@@ -71,6 +71,7 @@ const FIXTURE = {
   bracket_position: null as number | null,
   stage_sequence: 1 as number | null,
   official_id: null as string | null,
+  live_state: null as unknown,
   lock_version: 0,
   locked_at: null as Date | null,
   locked_by: null as string | null,
@@ -231,6 +232,26 @@ describe('lockScorecard', () => {
   it('refuses a card with a team missing', async () => {
     const prisma = fakePrisma({ away_team_id: null });
     await expect(lockScorecard(prisma, REQ, 'fx1')).rejects.toThrow(/both teams/i);
+  });
+
+  // The default "Team ranking" console (org place, no individual marks) writes to
+  // live_state.eventRanking.rows - a fixture with no teams and that shape used to
+  // fall through to the "both teams" check above and could never be locked.
+  it('locks a ranking event scored via the Team ranking console', async () => {
+    const prisma = fakePrisma({
+      home_team_id: null, away_team_id: null,
+      live_state: { eventRanking: { rows: [{ orgId: 'o1', place: 1 }, { orgId: 'o2', place: null }] } },
+    });
+    const out = await lockScorecard(prisma, REQ, 'fx1');
+    expect(out.scorecard_status).toBe('locked');
+  });
+
+  it('refuses a Team ranking card with no place recorded yet', async () => {
+    const prisma = fakePrisma({
+      home_team_id: null, away_team_id: null,
+      live_state: { eventRanking: { rows: [{ orgId: 'o1', place: null }] } },
+    });
+    await expect(lockScorecard(prisma, REQ, 'fx1')).rejects.toThrow(/no team has a recorded placing/i);
   });
 
   it('refuses to lock twice', async () => {

@@ -430,16 +430,16 @@ function Wizard({ orgId, championship, templates, onClose, invalidate }: {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {!outcome && step > 0 && (
-              <Button variant="ghost" size="lg" className="uppercase tracking-wide" onClick={() => setStep((s) => s - 1)}>Back</Button>
+              <Button variant="ghost" size="lg" onClick={() => setStep((s) => s - 1)}>Back</Button>
             )}
             {outcome ? (
-              <Button size="lg" className="uppercase tracking-wide" onClick={onClose}>Done</Button>
+              <Button size="lg" onClick={onClose}>Done</Button>
             ) : step === 0 ? (
-              <Button size="lg" className="uppercase tracking-wide" onClick={() => setStep(1)} disabled={!enabledCategories.length}>Continue</Button>
+              <Button size="lg" onClick={() => setStep(1)} disabled={!enabledCategories.length}>Continue</Button>
             ) : step === 1 ? (
-              <Button size="lg" className="uppercase tracking-wide" onClick={() => setStep(2)}>Continue</Button>
+              <Button size="lg" onClick={() => setStep(2)}>Continue</Button>
             ) : (
-              <Button size="lg" className="uppercase tracking-wide" onClick={onGenerate} disabled={running || !enabledManualCategories.length}>
+              <Button size="lg" onClick={onGenerate} disabled={running || !enabledManualCategories.length}>
                 {running ? 'Generating…' : `Generate ${Math.max(scopeTotal, 0)}`}
               </Button>
             )}
