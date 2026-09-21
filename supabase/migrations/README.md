@@ -103,3 +103,48 @@ and both counts as integers.
 Note `event_date` is **text, not date**, on purpose: the form accepts prose. And
 `idx_demo_requests_participants` is a partial index, which Prisma cannot express,
 so it is deliberately absent from `schema.prisma` — see the comment there.
+
+---
+
+## Applied 2026-09-21 — `20260913000000_demo_request_marketing_consent`
+
+Adds `marketing_consent boolean not null default false` to `demo_requests`, the
+separate marketing opt-in that must not be bundled into the enquiry-contact
+consent every submission already carries.
+
+Arrived on `main` with the marketing-consent checkbox commit and was applied by
+hand after the pull:
+
+```
+npx tsx scripts/apply-migration.ts ../../supabase/migrations/20260913000000_demo_request_marketing_consent.sql
+```
+
+Both statements succeeded; verified against `information_schema` (`boolean`,
+`not null`, default `false`) and by a typed read through the generated client.
+
+**This was blocking the deployed API.** `schema.prisma` already carried the
+field from the same commit, so the Lambda bundle shipped a Prisma client that
+knew about a column the database did not have. No `prisma db pull` was needed
+afterwards, for the same reason.
+
+### Drift audit run at the same time
+
+The whole database was introspected into a throwaway schema and diffed against
+`prisma/schema.prisma`. Everything differed only in field ORDER (introspection
+emits ordinal order; the committed file is hand-ordered) except one real
+difference, which is recorded here because it is still outstanding:
+
+| | committed `schema.prisma` | live database |
+|---|---|---|
+| `users.personal_plan` default | `max` | `free` |
+
+That is `20260903000000_personal_plan_elite_default.sql`, **still unapplied**.
+It sets the column default to `max` and moves every existing row there. At the
+time of the audit the live distribution was `free=1695  max=2  pro=1`, so
+applying it rewrites 1,696 rows and there is no record afterwards of which
+account held `pro`. Left alone pending a decision — see that file's header for
+the product reasoning.
+
+The diff is definitive only for what Prisma models: columns, types, defaults and
+non-partial indexes. Partial indexes, check constraints, RLS policies, functions
+and triggers are invisible to it and were not audited.
