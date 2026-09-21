@@ -16,8 +16,14 @@ export interface TemplateDesign {
   layout?: LayoutId;
   accent?: string;
   ink?: string;
+  /** Winners & medals / Special awards wording - the original heading/body. */
   heading?: string;
   body?: string;
+  /** Participation, Organising, Officials, Coaches. Falls back to heading/body
+   *  when absent, so an existing template renders exactly as it always has
+   *  until someone deliberately sets a generic variant for it. */
+  generic_heading?: string;
+  generic_body?: string;
   signatory_name?: string;
   signatory_title?: string;
   logo_url?: string;
@@ -67,6 +73,8 @@ export const CERTIFICATE_PRESETS: Preset[] = [
       layout: 'athletic', accent: '#C2410C', ink: '#0B1220',
       heading: 'Champion',
       body: 'finished the event below at the placing shown, against a result that is locked and verifiable.',
+      generic_heading: 'Certificate of Recognition',
+      generic_body: 'is recognised for their contribution to the event below, verified against a locked result.',
       signatory_title: 'Meet Referee',
     },
   },

@@ -166,11 +166,14 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
   /** What a design actually looks like, on sample facts. Powers the gallery tiles
    *  and the full-size preview screen - the thumbnail IS the template, so it can
    *  never drift from what gets printed. */
-  const previewHtml = async (res: any, organizationName: string, design: any, bare: boolean) => {
+  const previewHtml = async (res: any, organizationName: string, design: any, bare: boolean, category?: string) => {
     const html = await renderCertificateHtml({
       facts: sampleFacts(organizationName),
       verifyUrl: `${env.WEB_ORIGIN}/verify/sample`,
       design, bare,
+      // Lets the editor show "Preview as: Winner / Participation" - unrecognised or
+      // missing values fall back to the achievement wording, same as before this existed.
+      category: (RECIPIENT_CATEGORIES as string[]).includes(category ?? '') ? (category as RecipientCategory) : undefined,
     });
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
@@ -181,7 +184,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     const preset = presetById(req.params.presetId);
     if (!preset) throw new NotFoundError('Certificate design');
     const org = await prisma.organizations.findUnique({ where: { id: req.params.id }, select: { name: true } });
-    await previewHtml(res, org?.name ?? 'Your institution', preset.design, req.query.bare === '1');
+    await previewHtml(res, org?.name ?? 'Your institution', preset.design, req.query.bare === '1', req.query.category as string);
   }));
 
   router.get('/certificate-templates/:templateId/preview', asyncHandler(async (req, res) => {
@@ -191,7 +194,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     });
     if (!tpl) throw new NotFoundError('Certificate template');
     await assertIssuer(req, tpl.organization_id);
-    await previewHtml(res, tpl.organizations?.name ?? 'Your institution', tpl.design, req.query.bare === '1');
+    await previewHtml(res, tpl.organizations?.name ?? 'Your institution', tpl.design, req.query.bare === '1', req.query.category as string);
   }));
 
   router.post('/organizations/:id/certificate-templates', validateBody(templateSchema), asyncHandler(async (req, res) => {
@@ -562,6 +565,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
       facts: cert.payload as unknown as CertificateFacts,
       verifyUrl: `${env.WEB_ORIGIN}/verify/${cert.token}`,
       design: (cert.certificate_templates?.design ?? null) as any,
+      category: cert.recipient_category as RecipientCategory,
       // A withdrawn certificate still renders - so the holder can see what happened -
       // but it is stamped, because handing back a clean copy of a revoked document is
       // exactly how a revoked document keeps circulating.
