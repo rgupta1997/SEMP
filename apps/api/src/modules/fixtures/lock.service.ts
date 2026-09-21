@@ -338,7 +338,7 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
       participants,
       newAchievements,
     };
-  });
+  }, { timeout: 120_000, maxWait: 120_000 });
 
   const lockSummary = req
     ? `Locked the scorecard for ${label} - the result is now official`

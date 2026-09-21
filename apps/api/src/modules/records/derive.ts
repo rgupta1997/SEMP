@@ -380,7 +380,10 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
       const title = `${MEDAL_LABEL[medal]} - ${eventLabel}`;
       achievements.push({
         user_id: p.user_id,
-        team_id: p.team_id,
+        // An achievement belongs to a person OR a squad, never both
+        // (achievements_subject_check) - this one is the person's, same as an
+        // individual competitor's medal above.
+        team_id: null,
         organization_id: p.organization_id,
         kind: 'medal',
         medal,

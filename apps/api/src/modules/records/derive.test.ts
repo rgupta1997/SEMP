@@ -335,6 +335,15 @@ describe('the default "Team ranking" console · medals per org (J4-E4-S1)', () =
     ]);
   });
 
+  // achievements_subject_check: a row must have exactly one of user_id/team_id,
+  // never both - the DB constraint that caught this in production when it wasn't.
+  it('never sets team_id alongside user_id - a person\'s medal, not a squad\'s', () => {
+    const { achievements } = deriveRecords(input(RANKING_FIXTURE, { participants: ENTRANTS }));
+    for (const a of achievements) {
+      expect((a.user_id != null) !== (a.team_id != null)).toBe(true);
+    }
+  });
+
   it('does not invent a medal for an org whose entrant never resolved to an account', () => {
     const { achievements } = deriveRecords(input(RANKING_FIXTURE, { participants: ENTRANTS }));
     expect(achievements.some((a) => a.organization_id === 'o3')).toBe(false);
