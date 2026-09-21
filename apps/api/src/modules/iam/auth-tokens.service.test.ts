@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
-import { consumeById, issueToken, normalizeEmail, normalizePhone, recentTokenCount, verifyToken } from './auth-tokens.service.js';
+import { consumeById, discardToken, issueToken, normalizeEmail, normalizePhone, recentTokenCount, verifyToken } from './auth-tokens.service.js';
 
 // ---- test double --------------------------------------------------------
 // An in-memory stand-in for prisma.auth_tokens covering exactly the four calls
@@ -56,6 +56,11 @@ function fakePrisma(seed: Partial<Row>[] = []) {
         let count = 0;
         for (const r of rows) if (match(where, r)) { r.consumed_at = data.consumed_at; count += 1; }
         return { count };
+      },
+      delete: async ({ where }: any) => {
+        const i = rows.findIndex((r) => r.id === where.id);
+        if (i === -1) throw new Error('Record to delete does not exist.');
+        return rows.splice(i, 1)[0];
       },
       count: async ({ where }: any) => rows.filter((r) => match(where, r)).length,
     },
@@ -224,5 +229,59 @@ describe('phone-keyed tokens', () => {
     await issueToken(p as any, { phone: '9876543210', kind: 'otp' });
     expect(await recentTokenCount(p as any, { phone: '+91 98765 43210', kind: 'otp', windowMin: 60 })).toBe(2);
     expect(await recentTokenCount(p as any, { phone: '9999999999', kind: 'otp', windowMin: 60 })).toBe(0);
+  });
+});
+
+// ---- delivery failure ---------------------------------------------------
+//
+// The send happens after the row is written, so a mail outage leaves a code nobody
+// received still occupying one of the five sends an address gets in fifteen minutes.
+// Five of those and the caller is throttled out - silently, because the throttle
+// branch returns the ordinary success shape.
+
+describe('issueToken returns the row id', () => {
+  it('hands back the id, so a delivery can be keyed to this exact token', async () => {
+    const prisma = fakePrisma();
+    const { id } = await issueToken(prisma, { email: 'a@iimb.ac.in', kind: 'otp' });
+
+    expect(id).toBeTruthy();
+    expect(prisma.rows.find((r: any) => r.id === id)).toBeDefined();
+  });
+
+  it('gives a resend a different id, so its mail is not deduplicated as a replay', async () => {
+    const prisma = fakePrisma();
+    const first = await issueToken(prisma, { email: 'a@iimb.ac.in', kind: 'otp' });
+    const second = await issueToken(prisma, { email: 'a@iimb.ac.in', kind: 'otp' });
+
+    expect(second.id).not.toBe(first.id);
+  });
+});
+
+describe('discardToken', () => {
+  it('frees the rate-limit budget, which consuming would not', async () => {
+    const prisma = fakePrisma();
+    const { id } = await issueToken(prisma, { email: 'a@iimb.ac.in', kind: 'otp' });
+
+    const window = { email: 'a@iimb.ac.in', kind: 'otp', windowMin: 15 } as const;
+    expect(await recentTokenCount(prisma, window)).toBe(1);
+
+    await discardToken(prisma, id);
+
+    // The row is gone, not merely consumed: recentTokenCount counts by created_at and
+    // does not look at consumed_at, so consuming it would still have spent the send.
+    expect(await recentTokenCount(prisma, window)).toBe(0);
+  });
+
+  it('leaves a consumed token counting against the window - the reason delete is used', async () => {
+    const prisma = fakePrisma();
+    const { id } = await issueToken(prisma, { email: 'a@iimb.ac.in', kind: 'otp' });
+    await consumeById(prisma, id);
+
+    expect(await recentTokenCount(prisma, { email: 'a@iimb.ac.in', kind: 'otp', windowMin: 15 })).toBe(1);
+  });
+
+  it('never throws when the row has already gone', async () => {
+    const prisma = fakePrisma();
+    await expect(discardToken(prisma, 'no-such-row')).resolves.toBeUndefined();
   });
 });

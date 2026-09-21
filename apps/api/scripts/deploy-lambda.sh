@@ -57,10 +57,17 @@ else
   ZIP_PATH_FOR_AWS="$ZIP_PATH"
 fi
 
-# Pull DATABASE_URL / JWT_SECRET / WEB_ORIGIN from apps/api/.env if not already
-# exported in this shell. Only these three matter to env.ts at runtime; PORT is
-# ignored on Lambda (API Gateway owns the socket) and the SEED_ADMIN_* vars have
-# safe defaults.
+# Pull the runtime configuration from apps/api/.env if not already exported in this
+# shell. PORT is ignored on Lambda (API Gateway owns the socket) and the SEED_ADMIN_*
+# vars have safe defaults, but everything in the preflight below is load-bearing:
+# config/env.ts parses process.env at MODULE LOAD, so a missing or wrong value is a
+# cold-start crash on every invocation rather than an error on one route.
+#
+# This used to say "only these three matter" and pass exactly DATABASE_URL,
+# JWT_SECRET and WEB_ORIGIN. It was wrong in the worst possible direction: with
+# NODE_ENV unset, env.ts defaulted it to 'development', every production refinement
+# went inert, AUTH_EMAIL_BYPASS/OTP_SMS_BYPASS defaulted ON, and /auth/otp/send -
+# which is mounted before requireAuth - handed sign-in codes back to any caller.
 # Bash `source` unconditionally overwrites already-set variables, which
 # contradicts "prefers already-exported values" above - save any pre-exported
 # overrides first and restore them after sourcing .env, so e.g.
@@ -117,6 +124,74 @@ elif [[ "$DATABASE_URL" == *"?"* ]]; then
 else
   LAMBDA_DATABASE_URL="${DATABASE_URL}?connection_limit=${LAMBDA_DB_CONNECTION_LIMIT}"
 fi
+
+# HARD-CODED, never interpolated from the environment. apps/api/.env is sourced
+# above with `set -a`, and it now carries NODE_ENV=development for local dev - so
+# `"${NODE_ENV:-production}"` here would deploy a Lambda with NODE_ENV=development,
+# which re-opens every bypass while looking exactly like a successful fix. Same
+# reasoning for the two bypass flags: .env has OTP_SMS_BYPASS=true.
+LAMBDA_NODE_ENV=production
+LAMBDA_AUTH_EMAIL_BYPASS=false
+LAMBDA_OTP_SMS_BYPASS=false
+
+# env.ts's own guards fire at cold start - i.e. AFTER this script has already
+# replaced the running function's code. Check the same conditions here so a
+# misconfiguration fails in this terminal instead of as a 502 on every request
+# until somebody notices.
+[[ "${MAIL_TRANSPORT:-}" == "http" ]] || {
+  echo "error: MAIL_TRANSPORT must be 'http' for a production deploy (got '${MAIL_TRANSPORT:-unset}') - 'console' silently discards every email" >&2
+  exit 1
+}
+: "${MAIL_API_URL:?MAIL_API_URL not set - required when MAIL_TRANSPORT=http}"
+: "${MAIL_API_KEY:?MAIL_API_KEY not set - required when MAIL_TRANSPORT=http}"
+: "${WEB_APP_URL:?WEB_APP_URL not set - every link in an outgoing email is built from it}"
+
+# JWT_SECRET signs sessions, verification tickets, certificate signatures and public
+# share links, so a known value is a forged super-admin token on demand. These are
+# the two strings that actually ship in the repo (apps/api/.env and .env.example).
+if [[ ${#JWT_SECRET} -lt 32 || "$JWT_SECRET" == "dev-secret-change-me" || "$JWT_SECRET" == "change-me-in-production" ]]; then
+  echo "error: JWT_SECRET is a dev/example value or shorter than 32 chars - refusing to deploy it as the production signing key" >&2
+  exit 1
+fi
+
+# Built with jq rather than a heredoc: these values are secrets and go through JSON.
+# A single double-quote or backslash in MAIL_API_KEY or the DB password would produce
+# invalid JSON and a completely unrelated-looking AWS CLI error.
+#
+# Note the secrets still appear in this process's argv (`aws ... --environment`),
+# visible to `ps` on this machine for the life of the call. Pre-existing, and the
+# reason the SAM stacks put them in Secrets Manager instead.
+ENV_JSON=$(jq -n \
+  --arg database_url      "$LAMBDA_DATABASE_URL" \
+  --arg jwt_secret        "$JWT_SECRET" \
+  --arg web_origin        "$WEB_ORIGIN" \
+  --arg web_app_url       "$WEB_APP_URL" \
+  --arg node_env          "$LAMBDA_NODE_ENV" \
+  --arg mail_transport    "$MAIL_TRANSPORT" \
+  --arg mail_api_url      "$MAIL_API_URL" \
+  --arg mail_api_key      "$MAIL_API_KEY" \
+  --arg mail_timeout_ms   "${MAIL_TIMEOUT_MS:-5000}" \
+  --arg auth_email_bypass "$LAMBDA_AUTH_EMAIL_BYPASS" \
+  --arg otp_sms_bypass    "$LAMBDA_OTP_SMS_BYPASS" \
+  --arg supabase_jwt      "${SUPABASE_JWT_SECRET:-}" \
+  '{Variables: ({
+      NODE_ENV:          $node_env,
+      DATABASE_URL:      $database_url,
+      JWT_SECRET:        $jwt_secret,
+      WEB_ORIGIN:        $web_origin,
+      WEB_APP_URL:       $web_app_url,
+      MAIL_TRANSPORT:    $mail_transport,
+      MAIL_API_URL:      $mail_api_url,
+      MAIL_API_KEY:      $mail_api_key,
+      MAIL_TIMEOUT_MS:   $mail_timeout_ms,
+      AUTH_EMAIL_BYPASS: $auth_email_bypass,
+      OTP_SMS_BYPASS:    $otp_sms_bypass,
+    }
+    # Only while notifications still run on Supabase Realtime. Omitted rather than
+    # sent empty: modules/notifications/realtime-token.ts reads it via raw
+    # process.env and throws a clear error when absent, which beats signing
+    # Realtime tokens with "".
+    + (if $supabase_jwt == "" then {} else { SUPABASE_JWT_SECRET: $supabase_jwt } end))}')
 
 # ---------- 2. Lambda function ----------
 #

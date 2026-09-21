@@ -1,0 +1,345 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+# semp-infra: the things that outlive a deploy.
+#
+# Deployed RARELY and with a human reading the changeset:
+#   sam deploy --config-env infra --parameter-overrides AdminCidr=<your-ip>/32
+#
+# Deliberately NOT in the same stack as the API (see semp-api.yaml). The database
+# must not be something a code push can replace, and CloudFormation decides
+# replacement from property diffs - so the only durable guarantee is that app
+# deploys target a different stack. Note that the retain policies below are
+# seatbelts, not the wall: the wall is an IAM boundary on the CI deploy role,
+# scoped to stack/semp-api/* only.
+#
+# There is no SAM Transform here - this template has no serverless resources, and
+# `sam deploy` handles plain CloudFormation unchanged.
+Description: SEMP shared infrastructure - RDS PostgreSQL (public, TLS-only) and secrets
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: >-
+      The default VPC. PubliclyAccessible below requires it to have
+      enableDnsSupport and enableDnsHostnames, which the default VPC has and a
+      hand-built one often does not.
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: >-
+      Two or more PUBLIC subnets in DIFFERENT availability zones. A DBSubnetGroup
+      requires at least two AZs even for a Single-AZ instance - this is the most
+      common first-deploy failure.
+
+  DbPort:
+    Type: Number
+    Default: 5462
+    MinValue: 1150
+    MaxValue: 65535
+    Description: >-
+      Deliberately NOT 5432. With a publicly reachable database this is the one
+      cheap, real narrowing available: essentially all commodity internet-wide
+      scanning targets 5432 exclusively. It costs one line in the runbook and
+      one query parameter in the connection string.
+
+  AdminCidr:
+    Type: String
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/(3[0-2]|[12]?\d)$'
+    Description: >-
+      A single /32 for psql and `prisma db pull`. Pass with --parameter-overrides;
+      never commit it to samconfig.toml - it is somebody's home IP address.
+
+  AllowLambdaIngress:
+    Type: String
+    AllowedValues: ['yes', 'no']
+    Default: 'yes'
+    Description: >-
+      Set to 'no' the day the API moves inside the VPC, which deletes the
+      0.0.0.0/0 rule and takes the database off the internet entirely.
+
+  EngineVersion:
+    Type: String
+    Default: '17.7'
+    Description: >-
+      PostgreSQL 17.x. The MAJOR must stay 17 to match supabase/config.toml's
+      major_version = 17, or a dump taken from Supabase will not restore.
+      Pinned to a minor rather than a bare '17': a bare major is valid to RDS but
+      cfn-lint rejects it, and 17.4 and below are genuinely deprecated.
+      Confirm the default still exists before the first deploy -
+        aws rds describe-db-engine-versions --engine postgres
+          --query 'DBEngineVersions[].EngineVersion' --region ap-south-1
+      AutoMinorVersionUpgrade then keeps it current within the major.
+
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.small
+    Description: >-
+      Graviton, and burstable - this class runs on CPU CREDITS, so a
+      CPUCreditBalance alarm matters more than a CPUUtilization one (credit
+      exhaustion presents as a mysterious global slowdown, not a spike).
+      FREE TIER is db.t4g.micro (1 GiB) for 12 months from account creation.
+      micro allows ~112 connections vs small's ~225 - both far above this app's
+      bound of ReservedConcurrency x connection_limit=1 - so the real difference
+      is CPU baseline (10% vs 20% of a vCPU) and cache (256MB vs 512MB
+      shared_buffers). Modifiable in place with a reboot, unlike AllocatedStorage.
+
+  MaxAllocatedStorage:
+    Type: Number
+    Default: 0
+    Description: >-
+      Storage autoscaling ceiling in GiB. 0 DISABLES autoscaling, which is the
+      default here on purpose: autoscaling grows AllocatedStorage silently as the
+      database fills, and on free tier (20 GiB allowance) that means billing starts
+      with nothing failing and no notification.
+      The cost of disabling it is that a full disk is an OUTAGE rather than an
+      invoice, so a FreeStorageSpace alarm is not optional - see step 10 of
+      RUNBOOK-rds.md. Set this above AllocatedStorage to re-enable autoscaling;
+      RDS rejects a value equal to or below it.
+
+  AllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    Description: >-
+      GiB. Defaults to the FREE TIER allowance of 20. A parameter rather than a
+      literal because of an
+      asymmetry worth knowing BEFORE the first deploy: RDS storage can only ever
+      GROW. Raising this is an in-place modify; LOWERING it requires destroying and
+      recreating the instance, which is trivial while the database is empty and a
+      data migration once it is not.
+      MaxAllocatedStorage below autoscales up from here, so starting small is the
+      cheap direction to be wrong in.
+
+Conditions:
+  OpenToLambda: !Equals [!Ref AllowLambdaIngress, 'yes']
+  HasStorageAutoscaling: !Not [!Equals [!Ref MaxAllocatedStorage, 0]]
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Network reachability
+  # ---------------------------------------------------------------------------
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SEMP RDS PostgreSQL - publicly reachable, TLS-only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: Operator psql / prisma db pull
+          IpProtocol: tcp
+          FromPort: !Ref DbPort
+          ToPort: !Ref DbPort
+          CidrIp: !Ref AdminCidr
+      Tags:
+        - { Key: Name, Value: semp-db }
+
+  # A SEPARATE resource rather than a second entry in SecurityGroupIngress above,
+  # so it can be removed on its own with a one-parameter change.
+  #
+  # Why it has to be 0.0.0.0/0: a Lambda outside a VPC has no security group and
+  # no stable egress address - its traffic leaves through NAT in an AWS
+  # service-owned account, inside the region's general ranges. There is no CIDR
+  # and no AWS-managed prefix list that means "only my function".
+  #
+  # Considered and rejected: a customer-managed prefix list seeded from
+  # ip-ranges.json filtered to region=ap-south-1. That is 100+ prefixes (over both
+  # the 60-rules-per-SG and 60-entries-per-prefix-list default quotas, so it needs
+  # two quota increases), needs a scheduled refresh job to stay correct, and only
+  # narrows "the internet" to "anything running in AWS Mumbai".
+  #
+  # So the compensating controls are the ones that do work, in order of value:
+  #   1. rds.force_ssl=1 below, plus sslmode in the client connection string
+  #   2. DbPort != 5432, which removes untargeted scanning
+  #   3. a 40-character generated password that never leaves Secrets Manager
+  DbLambdaIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: OpenToLambda
+    Properties:
+      GroupId: !Ref DbSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref DbPort
+      ToPort: !Ref DbPort
+      CidrIp: 0.0.0.0/0
+      Description: Non-VPC Lambda egress - no narrower expression exists
+
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: SEMP - public subnets
+      SubnetIds: !Ref SubnetIds
+
+  # ---------------------------------------------------------------------------
+  # Secrets
+  # ---------------------------------------------------------------------------
+  DbSecret:
+    Type: AWS::SecretsManager::Secret
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      Name: semp/infra/db-master
+      Description: SEMP RDS master credentials. host/port/dbname are added by DbSecretAttachment.
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"semp_admin"}'
+        GenerateStringKey: password
+        PasswordLength: 40
+        # TWO overlapping constraint sets, both mandatory:
+        #   - RDS MasterUserPassword forbids  / " @  and space
+        #   - anything embedded in a postgresql:// URL must avoid : ? # & % = +
+        #     and quotes, or the URL silently truncates or reparses. One '#' turns
+        #     the remainder of the connection string into a fragment, and Prisma
+        #     then reports something entirely unrelated.
+        # apps/api/src/lambda.ts also encodeURIComponent()s the password, so this
+        # list is belt-and-braces rather than the only thing standing between a
+        # generated character and a broken connection.
+        ExcludeCharacters: '"@/\ :?#&%=+`<>[]{}|^~,;''$!*()'
+
+  # Folds host, port, dbname, engine and dbInstanceIdentifier into DbSecret's JSON.
+  # This is what lets semp-api import exactly ONE value: the whole connection
+  # string becomes derivable from the secret alone, so the endpoint address never
+  # has to become a CloudFormation Export.
+  DbSecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref DbSecret
+      TargetId: !Ref DbInstance
+      TargetType: AWS::RDS::DBInstance
+
+  # JWT_SECRET, MAIL_API_KEY, SUPABASE_JWT_SECRET.
+  #
+  # In semp-infra rather than semp-api for the same reason the database is:
+  # rotating an app secret must not be something a push can do by accident, and an
+  # app-stack rollback must not roll a secret backwards.
+  #
+  # CloudFormation only creates the CONTAINER and generates JWT_SECRET. The other
+  # two are set out of band:
+  #   aws secretsmanager put-secret-value --secret-id semp/api/app-secrets \
+  #     --secret-string "$(jq -n --arg j "$JWT" --arg m "$MAIL" --arg s "$SUPA" \
+  #        '{JWT_SECRET:$j, MAIL_API_KEY:$m, SUPABASE_JWT_SECRET:$s}')"
+  # so no value is ever in git, in samconfig.toml, or in a changeset.
+  AppSecret:
+    Type: AWS::SecretsManager::Secret
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      Name: semp/api/app-secrets
+      Description: SEMP application secrets. MAIL_API_KEY and SUPABASE_JWT_SECRET are set out of band.
+      GenerateSecretString:
+        SecretStringTemplate: '{"MAIL_API_KEY":"","SUPABASE_JWT_SECRET":""}'
+        GenerateStringKey: JWT_SECRET
+        # 64 chars, comfortably over the 32-character floor that
+        # apps/api/src/config/env.schema.ts enforces in production. That guard
+        # exists because this key signs sessions, verification tickets,
+        # certificate signatures AND public share links - see the rotation
+        # warning in infra/README.md before ever changing it.
+        PasswordLength: 64
+        ExcludeCharacters: '"@/\'
+
+  # ---------------------------------------------------------------------------
+  # Database
+  # ---------------------------------------------------------------------------
+  DbParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Family: postgres17
+      Description: SEMP postgres17 - TLS mandatory
+      Parameters:
+        # STATIC parameter: applied at first boot because the instance is created
+        # with this group already attached. If you ever CHANGE this value,
+        # CloudFormation reports UPDATE_COMPLETE while the running instance keeps
+        # the old setting until it is rebooted by hand. Do not trust a green stack.
+        rds.force_ssl: '1'
+        # Slow-query visibility without paying for Performance Insights (which is
+        # not reliably available on t4g.small anyway).
+        log_min_duration_statement: '1000'
+        log_connections: '1'
+        log_disconnections: '1'
+
+  DbInstance:
+    Type: AWS::RDS::DBInstance
+    # Retain, NOT Snapshot: with DeletionProtection true, a Snapshot policy makes
+    # `stack delete` fail MID-DELETE and leaves the stack in DELETE_FAILED. Retain
+    # means an accidental delete detaches the instance cleanly and it keeps running
+    # - loud and recoverable beats clever.
+    DeletionPolicy: Retain
+    # Several properties here trigger REPLACEMENT (DBInstanceIdentifier,
+    # DBSubnetGroupName, MasterUsername, Engine). Retain keeps the old instance and
+    # its data, which also means you are billed for two until you clean up. ALWAYS
+    # read the infra changeset for "Replacement: True".
+    UpdateReplacePolicy: Retain
+    Properties:
+      DBInstanceIdentifier: semp-prod
+      Engine: postgres
+      EngineVersion: !Ref EngineVersion
+      AutoMinorVersionUpgrade: true
+      # Scaling this later: change the parameter, re-deploy. RDS modifies in place -
+      # no data movement, no replacement, and the endpoint DNS name is unchanged, so
+      # nothing downstream needs reconfiguring. Costs one reboot (~2-5 min on
+      # Single-AZ), and is reversible the same way. Contrast AllocatedStorage, which
+      # can only ever grow.
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: !Ref AllocatedStorage
+      StorageType: gp3
+      # Do NOT add Iops or StorageThroughput. Under 400 GiB, RDS gp3 is fixed at
+      # 3000 IOPS / 125 MiBps and passing either property is a validation error.
+      # Omitted entirely when MaxAllocatedStorage is 0 - that is how autoscaling is
+      # switched off. RDS rejects a ceiling equal to or below AllocatedStorage, so
+      # "equal values" is not a way to express "disabled".
+      MaxAllocatedStorage: !If [HasStorageAutoscaling, !Ref MaxAllocatedStorage, !Ref 'AWS::NoValue']
+      StorageEncrypted: true
+      MultiAZ: false
+      PubliclyAccessible: true
+      Port: !Ref DbPort
+      DBName: semp
+      MasterUsername: semp_admin
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DbSecret}:SecretString:password}}'
+      DBParameterGroupName: !Ref DbParameterGroup
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DbSecurityGroup
+      # Any value > 0 is what actually enables point-in-time recovery.
+      BackupRetentionPeriod: 14
+      PreferredBackupWindow: '19:00-19:30'               # 00:30-01:00 IST
+      PreferredMaintenanceWindow: 'sun:20:00-sun:21:00'  # Mon 01:30 IST
+      CopyTagsToSnapshot: true
+      DeletionProtection: true
+      # Creates /aws/rds/instance/semp-prod/postgresql OUTSIDE CloudFormation with
+      # "Never expire" retention - set a retention period on it by hand, or it
+      # accrues cost forever.
+      EnableCloudwatchLogsExports:
+        - postgresql
+        - upgrade
+      Tags:
+        - { Key: Name, Value: semp-prod }
+
+Outputs:
+  DbSecretArn:
+    Description: >-
+      One of only two values semp-api imports. Post-attachment this secret carries
+      username, password, host, port, dbname and engine, so the app stack never
+      imports the endpoint address - which matters, because CloudFormation refuses
+      to change or delete an exported value while another stack imports it. Every
+      export is a resource you have pinned; exporting the endpoint would mean any
+      future instance rename required tearing down semp-api first.
+    Value: !Ref DbSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-DbSecretArn'
+
+  AppSecretArn:
+    Value: !Ref AppSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-AppSecretArn'
+
+  DbSecurityGroupId:
+    Description: Not used yet. Exported for the eventual Lambda-in-VPC migration.
+    Value: !Ref DbSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-DbSecurityGroupId'
+
+  DbEndpointAddress:
+    Description: >-
+      Emitted but deliberately NOT exported - visible to `sam list stack-outputs`
+      for psql without pinning the instance against future changes.
+    Value: !GetAtt DbInstance.Endpoint.Address
+
+  DbPortOut:
+    Description: Non-default on purpose - see the DbPort parameter.
+    Value: !GetAtt DbInstance.Endpoint.Port

@@ -1,0 +1,285 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+# semp-api: the Express app on Lambda, behind an API Gateway HTTP API.
+#
+# Deployed on EVERY push:
+#   sam build --config-env api && sam deploy --config-env api
+#
+# Imports two secret ARNs from semp-infra and nothing else. It cannot reach the
+# database's own resources, which is the point of the split.
+Description: SEMP API - Express on Lambda (no VPC) behind an HTTP API
+
+Parameters:
+  InfraStackName:
+    Type: String
+    Default: semp-infra
+    Description: Parameterised so a semp-infra-staging is a one-flag deploy.
+
+  FunctionName:
+    Type: String
+    Default: semp-api
+    Description: >-
+      Explicit so ApiLogGroup's name is predictable. Trade-off accepted: this stack
+      can exist only once per region and the function cannot be renamed without
+      replacement. NOTE the old scripts/deploy-lambda.sh created an UNMANAGED
+      function with this exact name - see the teardown checklist in README.md, or
+      the first deploy fails with "already exists".
+
+  WebOrigin:
+    Type: String
+    Description: >-
+      CORS allow-list, comma-separated. Consumed by the `cors` middleware in
+      apps/api/src/http/server.ts - NOT by API Gateway (see the HttpApi comment).
+
+  WebAppUrl:
+    Type: String
+    Description: >-
+      ONE origin, no trailing slash. Every absolute link in an outgoing email is
+      built from it. Deliberately separate from WebOrigin, which is a list and so
+      cannot have a URL built out of it.
+
+  MailApiUrl:
+    Type: String
+    Description: The mail service's BASE ORIGIN, no path. The client appends /mail.
+
+  SecretsExtensionLayerArn:
+    Type: String
+    Description: >-
+      AWS Parameters and Secrets Lambda Extension. This ARN is per-REGION and
+      per-ARCHITECTURE (separate arm64 and x86_64 layers) and is version-bumped,
+      so it is a parameter rather than a literal - look up the current ap-south-1
+      ARM64 ARN in the AWS docs and pin it in samconfig.toml. Getting the
+      architecture wrong here fails at cold start with an extension that never
+      starts listening on port 2773.
+
+  Runtime:
+    Type: String
+    Default: nodejs22.x
+    AllowedValues: [nodejs22.x, nodejs24.x]
+    Description: >-
+      nodejs20.x (what the old bash deploy used) was DEPRECATED on 2026-04-30 -
+      creation of new functions on it is disabled from 2027-02-01, so it is not a
+      viable target for a new stack. 22.x matches the Node actually installed on
+      the dev machine (v22.17.1) and is LTS.
+      Note .node-version in the repo root still says 20, as do render.yaml and
+      netlify.toml - that drift predates this stack and is worth reconciling
+      separately. Whatever is chosen here must match the esbuild `target` in
+      apps/api/scripts/build-lambda.mjs.
+
+  MemorySize:
+    Type: Number
+    Default: 1024
+    Description: >-
+      Was 512 under the bash deploy. 1024 because cold start is Prisma engine spawn
+      plus building ~40 routers, both CPU-bound, and Lambda scales vCPU with memory
+      - so doubling this often more than halves duration and the bill goes DOWN.
+      Worth one measurement against 512 before settling.
+
+  ReservedConcurrency:
+    Type: Number
+    Default: 0
+    Description: >-
+      0 means OMIT, i.e. this function may scale to the whole account concurrency
+      limit. That is NOT a safe production setting against the current database.
+      This value times connection_limit=1 (set in apps/api/src/lambda.ts) IS the
+      worst-case connection load, and db.t4g.micro reports max_connections = 79,
+      of which superuser_reserved_connections takes 3 - so ~76 are usable, and
+      psql, migrations and monitoring need some of those too.
+      MEASURED, not derived from the class's nominal 1 GiB: RDS computes
+      max_connections from DBInstanceClassMemory, which excludes what the OS and
+      RDS processes reserve (79 x 9531392 bytes ~= 718 MiB usable of 1 GiB).
+      Cap it around 50 before this stack serves real traffic, and re-check the
+      figure with `select current_setting('max_connections')` if the instance class
+      changes - it roughly doubles on db.t4g.small.
+      Caveat when raising it: a literal value HARD-FAILS the stack on an account
+      whose total quota is 10, because AWS requires 10 left unreserved. The old
+      bash script detected that and skipped gracefully; CloudFormation cannot.
+
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+
+Conditions:
+  HasReservedConcurrency: !Not [!Equals [!Ref ReservedConcurrency, 0]]
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Front door
+  # ---------------------------------------------------------------------------
+  # EXPLICIT rather than implicit. SAM's implicit HttpApi would also give a
+  # $default auto-deploy stage, so that is not the reason - the reasons are that
+  # the implicit one is a synthesized logical id configurable only through
+  # Globals (splitting the API's configuration across two places, with nothing to
+  # Ref in Outputs), that DefaultRouteSettings throttling is not optional here,
+  # and that a custom domain is coming and is a one-block diff on a real resource.
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      # NO CorsConfiguration, deliberately. apps/api/src/http/server.ts already runs
+      # the `cors` middleware over a comma-split WEB_ORIGIN allow-list. Configuring
+      # CORS here as well means API Gateway answers OPTIONS itself under a DIFFERENT
+      # policy than the app enforces on the real request, and responses can carry
+      # two Access-Control-Allow-Origin headers - which every browser rejects.
+      # One owner for CORS: Express.
+      DefaultRouteSettings:
+        # A db.t4g.small behind a small concurrency ceiling has a narrow failure
+        # envelope, so the front door needs a limit. A clean 429 from here is much
+        # better than connection exhaustion at the database.
+        ThrottlingBurstLimit: 50
+        ThrottlingRateLimit: 25
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId","ip":"$context.identity.sourceIp","method":"$context.httpMethod","path":"$context.path","status":"$context.status","latency":"$context.responseLatency","integrationStatus":"$context.integrationStatus","integrationError":"$context.integrationErrorMessage"}
+
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/http-api/${FunctionName}'
+      RetentionInDays: !Ref LogRetentionDays
+
+  # Declared rather than left to Lambda's implicit creation, which produces a group
+  # CloudFormation does not own, with "Never expire" retention, that nothing cleans up.
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FunctionName}'
+      RetentionInDays: !Ref LogRetentionDays
+
+  # ---------------------------------------------------------------------------
+  # Execution role
+  # ---------------------------------------------------------------------------
+  # Written out rather than letting SAM synthesize one, because SAM always attaches
+  # AWSLambdaBasicExecutionRole to a role it creates - and that managed policy
+  # grants logs:CreateLogGroup on "*", which is exactly how a second, unmanaged,
+  # never-expiring log group appears the first time a name drifts.
+  FunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: logs-to-owned-group-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # No CreateLogGroup: the group is declared above, so the function
+              # never needs to make one, and cannot make one somewhere else.
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub '${ApiLogGroup.Arn}:*'
+        - PolicyName: read-own-secrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !ImportValue
+                      'Fn::Sub': '${InfraStackName}-DbSecretArn'
+                  - !ImportValue
+                      'Fn::Sub': '${InfraStackName}-AppSecretArn'
+
+  # ---------------------------------------------------------------------------
+  # The function
+  # ---------------------------------------------------------------------------
+  SempApiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      # Runs `build-SempApiFunction` in apps/api/Makefile. NOT BuildMethod: esbuild
+      # - SAM's native esbuild builder has no post-build hook, and this artifact is
+      # incomplete without one: @prisma/client is external and has to be copied in,
+      # then pruned to a single engine binary. Also never --use-container; the
+      # Makefile header explains why.
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Ref FunctionName
+      CodeUri: ../apps/api
+      Handler: index.handler
+      Runtime: !Ref Runtime
+      # Must match PRISMA_ENGINE_TARGET in apps/api/Makefile and the binaryTargets
+      # entry in apps/api/prisma/schema.prisma. All three move together.
+      Architectures:
+        - arm64
+      MemorySize: !Ref MemorySize
+      # API Gateway HTTP API caps the integration at 30s, so anything above 29 is
+      # unreachable. Note this is ALSO why the two fire-and-forget background jobs
+      # (modules/demos, modules/reports) cannot work here - Lambda freezes the
+      # container when the response returns. They are a separate workstream and a
+      # hard gate before this stack serves production traffic.
+      Timeout: 15
+      Role: !GetAtt FunctionRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref ApiLogGroup
+      ReservedConcurrentExecutions: !If
+        - HasReservedConcurrency
+        - !Ref ReservedConcurrency
+        - !Ref 'AWS::NoValue'
+      Layers:
+        - !Ref SecretsExtensionLayerArn
+      Environment:
+        Variables:
+          # apps/api/src/config/env.ts parses process.env at MODULE LOAD, so every
+          # value below is load-bearing: a missing or wrong one is a cold-start
+          # crash on every invocation, not an error on one route.
+          #
+          # DATABASE_URL, JWT_SECRET, MAIL_API_KEY and SUPABASE_JWT_SECRET are
+          # deliberately ABSENT - apps/api/src/lambda.ts fetches them from the two
+          # secrets below and assigns them before importing the app, so no secret
+          # is ever readable via lambda:GetFunctionConfiguration.
+          NODE_ENV: production
+          DB_SECRET_ARN: !ImportValue
+            'Fn::Sub': '${InfraStackName}-DbSecretArn'
+          APP_SECRET_ARN: !ImportValue
+            'Fn::Sub': '${InfraStackName}-AppSecretArn'
+          WEB_ORIGIN: !Ref WebOrigin
+          WEB_APP_URL: !Ref WebAppUrl
+          # env.schema.ts refuses to boot in production on 'console', which
+          # silently discards every email.
+          MAIL_TRANSPORT: http
+          MAIL_API_URL: !Ref MailApiUrl
+          MAIL_TIMEOUT_MS: '5000'
+          # Both hand sign-in codes back to the caller, and /auth/otp/send is
+          # mounted before requireAuth. env.schema.ts refuses to boot in production
+          # with either on; these are set explicitly so that guard is never the only
+          # thing standing in the way.
+          AUTH_EMAIL_BYPASS: 'false'
+          OTP_SMS_BYPASS: 'false'
+          OTP_TTL_MIN: '10'
+          OTP_MAX_ATTEMPTS: '5'
+          MAX_ACCOUNTS_PER_PHONE: '3'
+          # Extension tuning: cache each secret for the container's life so the
+          # fetch in lambda.ts is one loopback call per cold start, not per request.
+          SECRETS_MANAGER_TTL: '300'
+          PARAMETERS_SECRETS_EXTENSION_HTTP_PORT: '2773'
+      Events:
+        # Path and Method omitted ON PURPOSE: SAM then creates a single $default
+        # route with ANY method, which is what the old `create-api --target`
+        # quick-create produced and what lets Express keep owning all routing.
+        Proxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+
+Outputs:
+  ApiEndpoint:
+    Description: >-
+      Set Netlify/Amplify's VITE_API_URL to this - no trailing slash, no /api, the
+      client appends /api itself. It is BUILD-TIME inlined by Vite, so changing it
+      needs a frontend rebuild, not just a saved variable.
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'
+
+  HealthCheck:
+    Description: Exercises no database, so it isolates cold-start problems from connection problems.
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/health'
+
+  FunctionArn:
+    Value: !GetAtt SempApiFunction.Arn

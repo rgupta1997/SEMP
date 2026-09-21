@@ -27,6 +27,59 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
 
   // ----- Host side -----
 
+  // Tell the invited organisation, by email.
+  //
+  // Deliberately generic-notification rather than the `invitation` template. That one
+  // models a PERSON being invited to an ORGANISATION - it closes with "no account is
+  // created until you accept", and its subject reads "invited you to join {org}".
+  // Both are wrong here: this is an organisation being invited to an event, and it is
+  // addressed to people who already have accounts. A `championship-invitation`
+  // template has been requested; when it lands only the body of this function changes.
+  //
+  // TODO(outbox): unlike an OTP, nothing about this is self-healing. Nobody is
+  // watching a screen and nobody hits resend, so a failed POST means the invitation
+  // silently never arrives and the row sits pending. This is the first call site that
+  // should move behind a durable outbox.
+  async function emailInvitedOrg(input: {
+    invitationId: string;
+    organizationId: string;
+    organizationName: string;
+    championshipName: string;
+    inviterName: string | null;
+  }): Promise<void> {
+    try {
+      const admins = await prisma.organization_members.findMany({
+        where: { organization_id: input.organizationId, role: { in: ORG_ADMIN }, status: 'active' },
+        select: { users: { select: { email: true } } },
+      });
+      const to = admins.map((m) => m.users?.email).filter((e): e is string => !!e);
+      if (to.length === 0) return; // nobody to tell; the in-app surface still shows it
+
+      const who = input.inviterName ?? 'A championship organiser';
+      await sendNotificationEmail(to, {
+        subject: `${input.organizationName} has been invited to ${input.championshipName}`,
+        paragraphs: [
+          `${who} has invited ${input.organizationName} to take part in ${input.championshipName} on Sportagon.`,
+          'Accepting enrols your institution straight away - there is no second approval step - and you can then enter teams.',
+        ],
+        // Values must be STRINGS; a number here is a 422.
+        details: [
+          { label: 'Championship', value: input.championshipName },
+          { label: 'Institution', value: input.organizationName },
+          { label: 'Invited by', value: who },
+        ],
+        ctaUrl: `${env.WEB_APP_URL}/organizations/${input.organizationId}/invitations`,
+        ctaLabel: 'View the invitation',
+      }, {
+        idempotencyKey: `champ-invite-${input.invitationId}`,
+        priority: 3,
+        metadata: { kind: 'championship_invitation', invitationId: input.invitationId },
+      });
+    } catch (err) {
+      console.error(`[invitations] could not email invitation ${input.invitationId}:`, err);
+    }
+  }
+
   // Who may be invited, for the picker.
   //
   // An OPEN championship invites organisations, and any of them may be asked - so

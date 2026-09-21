@@ -20,7 +20,14 @@ export interface SmsMessage {
 
 export async function sendSms(message: SmsMessage): Promise<{ delivered: boolean }> {
   if (env.OTP_SMS_BYPASS) {
-    console.info(`[sms:bypass] to=${message.to} ${JSON.stringify(message.text)}`);
+    // The recipient and the size, never the body: otpSms() renders the code as the
+    // FIRST token of `text`, so logging it puts every phone sign-in code wherever
+    // stdout goes. OTP_SMS_BYPASS defaults on, so this was the noisiest of the three
+    // leak paths on any deploy that had not set NODE_ENV.
+    //
+    // The developer affordance is unaffected - the bypass still returns the code in
+    // /auth/otp/send's own response, which is gated on !isProduction there.
+    console.info(`[sms:bypass] to=${message.to} (${message.text.length} chars, not sent)`);
     return { delivered: false };
   }
 
