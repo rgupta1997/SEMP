@@ -5,7 +5,7 @@ import { Pencil, Trash2 } from 'lucide-react';
 import { FIXTURE_STATUS } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
-import { isScoredSport } from '@semp/shared';
+import { isRankingSport, isScoredSport } from '@semp/shared';
 import { FormatPicker } from '../../features/scoring/FormatPicker';
 import { usePageFilters, useFilterBar } from '../../lib/filters';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
@@ -31,12 +31,14 @@ import { isPoolShapedFormat, titleCase } from '../../lib/format';
  * The console handles the transition itself - the first scoring action moves a
  * `scheduled` fixture to `live` - so this only has to open it.
  */
-function ScoreButton({ fixture, onNavigate }: { fixture: any; onNavigate?: () => void }) {
+function ScoreButton({ fixture, sportName, onNavigate }: { fixture: any; sportName?: string; onNavigate?: () => void }) {
   const navigate = useNavigate();
   const { eventId } = useParams();
   // A match with an unresolved bracket slot has nothing to score yet, and a
-  // cancelled one never will - offering the button there is a dead click.
-  const scorable = !!fixture.home_team_id && !!fixture.away_team_id
+  // cancelled one never will - offering the button there is a dead click. A
+  // ranking event never has a home/away team at all (it has no two sides), so
+  // that check doesn't apply to it - without this it could never be scored.
+  const scorable = (!!fixture.home_team_id && !!fixture.away_team_id || isRankingSport(sportName))
     && !['cancelled', 'postponed', 'bye'].includes(fixture.status);
   if (!scorable) return null;
   const played = ['completed', 'walkover'].includes(fixture.status);
@@ -392,7 +394,7 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
               action here reaches all three at once. A cell in a bracket has room for
               two team names and a score and nothing else; a second button per cell
               would not fit on a phone. */}
-          {isEdit && <ScoreButton fixture={fixture} onNavigate={onClose} />}
+          {isEdit && <ScoreButton fixture={fixture} sportName={sportName} onNavigate={onClose} />}
           <Button disabled={save.isPending} onClick={submit}>
             {save.isPending ? 'Saving…' : isEdit ? 'Save changes' : 'Add fixture'}
           </Button>
@@ -623,7 +625,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
                     from sm up they fall back to the inline end-of-row layout. */}
                 <div className="grid w-full grid-cols-2 items-center justify-items-center gap-2 sm:flex sm:w-auto sm:gap-3">
                   <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
-                  {canManage && <ScoreButton fixture={f} />}
+                  {canManage && <ScoreButton fixture={f} sportName={sportName} />}
                   {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)} aria-label="Edit fixture" title="Edit fixture"><Pencil size={14} /></Button>}
                 </div>
               </div>
@@ -692,7 +694,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
                     from sm up they fall back to the inline end-of-row layout. */}
                 <div className="grid w-full grid-cols-2 items-center justify-items-center gap-2 sm:flex sm:w-auto sm:gap-3">
                   <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
-                  {canManage && <ScoreButton fixture={f} />}
+                  {canManage && <ScoreButton fixture={f} sportName={sportName} />}
                   {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)} aria-label="Edit fixture" title="Edit fixture"><Pencil size={14} /></Button>}
                 </div>
               </div>

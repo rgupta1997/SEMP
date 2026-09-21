@@ -60,18 +60,41 @@ const maskPhoneHint = (phone?: string | null): string | null => {
 export async function resolveFixtureParticipants(db: Db, fixtureId: string): Promise<FixtureParticipants> {
   const fixture = await db.fixtures.findUnique({
     where: { id: fixtureId },
-    select: { home_team_id: true, away_team_id: true, live_state: true },
+    select: { home_team_id: true, away_team_id: true, live_state: true, tournament_discipline_id: true },
   });
   if (!fixture) return { resolved: [], unmatched: [] };
 
   const resolved = new Map<string, ResolvedParticipant>();
   const unmatched: UnmatchedCompetitor[] = [];
 
-  // ---- team matches -------------------------------------------------------
-  const teamIds = [fixture.home_team_id, fixture.away_team_id].filter((id): id is string => !!id);
-  if (teamIds.length) {
+  // ---- team matches ---------------------------------------------------------
+  const teamIds = new Set<string>();
+  for (const id of [fixture.home_team_id, fixture.away_team_id]) if (id) teamIds.add(id);
+
+  // ---- the default "Team ranking" console: orgs, not teams -----------------
+  // EventRankingConsole ranks organisations (live_state.eventRanking.rows), so a
+  // placed org has to be turned into the team_entries row it has for THIS
+  // discipline before it can be expanded into a roster the same way a match's
+  // home/away team is. Individual disciplines cap squad_max at 1 (enforced by
+  // roster-policy.ts), so that roster is always exactly the one athlete who
+  // competed - never a teammate who didn't.
+  const rankingRows = (fixture.live_state as any)?.eventRanking?.rows;
+  if (Array.isArray(rankingRows) && rankingRows.length && fixture.tournament_discipline_id) {
+    const orgIds = [...new Set(
+      rankingRows.map((r: any) => r?.orgId).filter((id: unknown): id is string => typeof id === 'string'),
+    )];
+    if (orgIds.length) {
+      const entries = await db.team_entries.findMany({
+        where: { organization_id: { in: orgIds }, tournament_discipline_id: fixture.tournament_discipline_id },
+        select: { team_id: true },
+      });
+      for (const e of entries) teamIds.add(e.team_id);
+    }
+  }
+
+  if (teamIds.size) {
     const members = await db.team_members.findMany({
-      where: { team_id: { in: teamIds }, is_active: true },
+      where: { team_id: { in: [...teamIds] }, is_active: true },
       select: {
         user_id: true, team_id: true,
         users: { select: { name: true } },

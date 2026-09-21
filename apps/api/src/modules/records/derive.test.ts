@@ -305,3 +305,50 @@ describe('ranking events · medals per competitor (J4-E1-S3 + J4-E4-S1)', () => 
     expect(medals.filter((m) => m.medal === 'bronze')).toHaveLength(1);
   });
 });
+
+describe('the default "Team ranking" console · medals per org (J4-E4-S1)', () => {
+  // EventRankingConsole ranks orgs, not competitors - live_state.eventRanking.rows,
+  // no marks, no competitor id. resolveFixtureParticipants turns each placed org's
+  // one entrant (squad_max is 1 for an individual discipline) into a participant
+  // carrying that org's id, so deriveRecords matches on organization_id instead.
+  const RANKING_FIXTURE: Partial<DerivableFixture> = {
+    round: 'Event', home_team_id: null, away_team_id: null,
+    home_team_name: null, away_team_name: null, home_score: null, away_score: null,
+    winner_team_id: null, sport_name: 'Athletics', discipline_name: '400m',
+    live_state: { eventRanking: { rows: [
+      { orgId: 'o1', place: 1 }, { orgId: 'o2', place: 2 }, { orgId: 'o3', place: 3 }, { orgId: 'o4', place: null },
+    ] } },
+  };
+
+  const ENTRANTS: DerivableParticipant[] = [
+    { user_id: 'a1', team_id: 'tA', organization_id: 'o1', competitor_id: null, name: 'First Runner' },
+    { user_id: 'a2', team_id: 'tB', organization_id: 'o2', competitor_id: null, name: 'Second Runner' },
+    // o3's entrant never matched an account - nothing to award.
+    { user_id: 'a4', team_id: 'tD', organization_id: 'o4', competitor_id: null, name: 'Unplaced Runner' },
+  ];
+
+  it('awards gold/silver/bronze to the placed orgs\' resolved entrants', () => {
+    const { achievements } = deriveRecords(input(RANKING_FIXTURE, { participants: ENTRANTS }));
+    expect(achievements.map((a) => ({ u: a.user_id, m: a.medal }))).toEqual([
+      { u: 'a1', m: 'gold' },
+      { u: 'a2', m: 'silver' },
+    ]);
+  });
+
+  it('does not invent a medal for an org whose entrant never resolved to an account', () => {
+    const { achievements } = deriveRecords(input(RANKING_FIXTURE, { participants: ENTRANTS }));
+    expect(achievements.some((a) => a.organization_id === 'o3')).toBe(false);
+  });
+
+  it('awards nothing to an org with no place recorded', () => {
+    const { achievements } = deriveRecords(input(RANKING_FIXTURE, { participants: ENTRANTS }));
+    expect(achievements.some((a) => a.user_id === 'a4')).toBe(false);
+  });
+
+  it('is inert on an ordinary knockout fixture with no eventRanking data', () => {
+    // The default FIXTURE/SQUAD already produce a gold+silver pair via verdictsOf -
+    // this section must add nothing on top of that when live_state carries no
+    // eventRanking rows at all.
+    expect(deriveRecords(input()).achievements.filter((a) => a.medal)).toHaveLength(5);
+  });
+});
