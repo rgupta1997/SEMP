@@ -461,7 +461,13 @@ export function Modal({ title, onClose, children, footer, wide, size, dismissibl
         {/* Pinned, and clear of the home indicator. A footer that scrolls with the
             body is the reason people could not find Save on a phone. */}
         {footer && (
-          <div className="shrink-0 border-t border-slate-200 px-5 py-3.5 pb-safe dark:border-slate-800">{footer}</div>
+          // pb-safe overrides padding-bottom instead of adding to it, zeroing it on desktop.
+          <div
+            className="shrink-0 border-t border-slate-200 px-5 pt-3.5 dark:border-slate-800"
+            style={{ paddingBottom: 'max(0.875rem, env(safe-area-inset-bottom, 0px))' }}
+          >
+            {footer}
+          </div>
         )}
       </div>
     </div>,
