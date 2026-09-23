@@ -101,6 +101,31 @@ export async function buildPlayerStatRows(
   const sportId = fx.tournament_disciplines?.tournament_sports?.sport_id ?? null;
   const occurred = fx.scheduled_at ?? new Date();
 
+  // A ranking event (athletics, swimming, powerlifting...) has no home side and
+  // no away side, so none of the two-team machinery below - side sorting,
+  // pairing, a rally log, a scoreline - has anything to attach to. Every
+  // resolved competitor still gets a bare appearance row (it is what makes
+  // "matches played" answerable); their mark (a time, a lift) has no stat
+  // family yet, so `stats` stays empty until one is built.
+  if (!fx.home_team_id && !fx.away_team_id) {
+    return participants.resolved.map((p) => ({
+      fixture_id: fx.id,
+      user_id: p.user_id,
+      team_id: p.team_id,
+      organization_id: p.organization_id,
+      sport_id: sportId,
+      rubber_key: null,
+      partner_user_id: null,
+      position: null,
+      role: 'player',
+      played: true,
+      outcome: null,
+      stats: {},
+      occurred_on: occurred,
+      lock_version: fx.lock_version,
+    }));
+  }
+
   // Only racquet sports derive stats from a rally log. Everything else gets its
   // appearance row (which is still worth having - it is what makes "matches played"
   // answerable) and an empty stat bag until its own family lands.

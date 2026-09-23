@@ -135,6 +135,23 @@ export async function resolveFixtureParticipants(db: Db, fixtureId: string): Pro
       : [];
 
     const found = new Map(users.map((u) => [phoneLast10(u.phone), u]));
+
+    // An individual competitor is still registered through a real team record
+    // behind the scenes (capped at one person for an individual discipline) -
+    // resolved here rather than trusted from live_state's own `orgId`, which is
+    // only ever as fresh as whatever was typed in at scoring time.
+    const matchedUserIds = [...found.values()].map((u) => u.id);
+    const soloTeams = matchedUserIds.length
+      ? await db.team_members.findMany({
+        where: {
+          user_id: { in: matchedUserIds }, is_active: true,
+          teams: { team_entries: { some: { tournament_discipline_id: fixture.tournament_discipline_id } } },
+        },
+        select: { user_id: true, team_id: true, teams: { select: { organization_id: true } } },
+      })
+      : [];
+    const teamOf = new Map(soloTeams.map((m) => [m.user_id, { teamId: m.team_id, orgId: m.teams?.organization_id ?? null }]));
+
     for (const c of competitors) {
       const key = phoneLast10(c?.phone);
       const user = key.length === 10 ? found.get(key) : undefined;
@@ -147,10 +164,11 @@ export async function resolveFixtureParticipants(db: Db, fixtureId: string): Pro
         if (already) {
           already.competitor_id ??= c?.id ?? null;
         } else {
+          const solo = teamOf.get(user.id);
           resolved.set(user.id, {
             user_id: user.id,
-            team_id: null,
-            organization_id: typeof c?.orgId === 'string' ? c.orgId : null,
+            team_id: solo?.teamId ?? null,
+            organization_id: solo?.orgId ?? (typeof c?.orgId === 'string' ? c.orgId : null),
             competitor_id: c?.id ?? null,
             name: user.name,
           });
