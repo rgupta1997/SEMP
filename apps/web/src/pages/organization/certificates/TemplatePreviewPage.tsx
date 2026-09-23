@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { BadgeCheck, Save, Trash2, Upload, X } from 'lucide-react';
+import { CERTIFICATE_LAYOUT, CERTIFICATE_LAYOUT_LABEL, type RecipientCategory } from '@semp/shared';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { api } from '../../../lib/api';
 import {
@@ -72,14 +73,9 @@ function ImageField({
 // keystroke: an institution is approving a document, and a preview that flickers as
 // you type is a worse basis for approval than one that settles.
 
-const LAYOUTS = [
-  { id: 'classic', name: 'Classic Laurel' },
-  { id: 'minimal', name: 'Modern Minimal' },
-  { id: 'athletic', name: 'Athletic Banner' },
-  { id: 'ornate', name: 'Ornate Frame' },
-  { id: 'institutional', name: 'Institutional Letterhead' },
-  { id: 'ribbon', name: 'Participation Ribbon' },
-];
+// Ids/names come from @semp/shared - same list presets.ts builds CERTIFICATE_PRESETS
+// from, so a layout added there shows up here too.
+const LAYOUTS = CERTIFICATE_LAYOUT.map((id) => ({ id, name: CERTIFICATE_LAYOUT_LABEL[id] }));
 
 export function TemplatePreviewPage() {
   const { orgId, templateId } = useParams();
@@ -95,7 +91,7 @@ export function TemplatePreviewPage() {
   // Winners/awards render heading/body; every other category renders
   // generic_heading/generic_body - this is the only way to see the second wording
   // before trusting it on a real certificate.
-  const [previewCategory, setPreviewCategory] = useState<'winners' | 'participation'>('winners');
+  const [previewCategory, setPreviewCategory] = useState<Extract<RecipientCategory, 'winners' | 'participation'>>('winners');
 
   useEffect(() => {
     if (tpl && !form) setForm({ name: tpl.name, design: { ...tpl.design } });

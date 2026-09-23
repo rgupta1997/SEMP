@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
+import {
+  CERTIFICATE_ISSUE_TRIGGER_LABEL, DEFAULT_TEMPLATE_LABEL, isEventWideCategory, RECIPIENT_CATEGORY,
+  type CertificateIssueTrigger, type RecipientCategory,
+} from '@semp/shared';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { api } from '../../../lib/api';
 import { Badge, Button, Checkbox, Modal, Select, Spinner, cn, toast } from '../../../components/ui';
@@ -15,9 +19,11 @@ import type { Template } from './shared';
 // tables the rest of the product already has. Each category is its own generate
 // call, because each has its own template and its own issuing rule - there is no
 // single "kinds" array any more, per-category is the unit of everything here.
+//
+// RecipientCategory and isEventWide come from @semp/shared - same source recipients.ts
+// reads - instead of this file retyping its own copy.
 
-type RecipientCategory = 'winners' | 'awards' | 'participation' | 'organising' | 'officials' | 'coaches';
-type Trigger = 'manual' | 'on_lock' | 'on_complete';
+type Trigger = CertificateIssueTrigger;
 
 interface Champ { id: string; name: string }
 interface GenerateResult { issued: number; skipped: number; note?: string; results?: Array<{ ok: boolean; serial?: string; reason?: string }> }
@@ -31,18 +37,18 @@ const CATEGORY_META: Record<RecipientCategory, { label: string; desc: string; so
   coaches: { label: 'Coaches & mentors', desc: 'One certificate per coach, however many teams they coach', source: 'From team rosters', tone: 'teal' },
 };
 
-const CATEGORIES = Object.keys(CATEGORY_META) as RecipientCategory[];
+const CATEGORIES = [...RECIPIENT_CATEGORY];
 
 /** Organising team & volunteers and Officials & referees have no sport, discipline or
  *  team column at all - they are event-wide by construction, not by choice. */
-const isEventWide = (c: RecipientCategory) => c === 'organising' || c === 'officials';
+const isEventWide = isEventWideCategory;
 
 // on_lock and on_complete aren't wired to anything yet - queueCertificates
 // (fixtures/downstream.ts) is a TODO stub and there is no championship-completion
 // hook either, so picking either one would silently drop that category from every
 // run with no automatic issuance ever happening. Manual only until that lands.
 const TRIGGER_OPTIONS: Array<{ value: Trigger; label: string }> = [
-  { value: 'manual', label: 'Manual run only' },
+  { value: 'manual', label: CERTIFICATE_ISSUE_TRIGGER_LABEL.manual },
 ];
 
 interface Filters { sportId: string; tournamentDisciplineId: string; teamId: string }
@@ -233,7 +239,7 @@ function TemplatesStep({ enabledCategories, templates, templateId, setTemplateId
                 <label className="grid gap-1 text-xs">
                   <span className="font-medium text-slate-600 dark:text-slate-400">Template</span>
                   <Select value={templateId[c] ?? ''} onChange={(e) => setTemplateId(c, e.target.value)}>
-                    <option value="">Default template</option>
+                    <option value="">{DEFAULT_TEMPLATE_LABEL}</option>
                     {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </Select>
                 </label>
@@ -494,7 +500,7 @@ function Wizard({ orgId, championship, templates, onClose, invalidate }: {
             {enabledManualCategories.map((c) => (
               <CategoryReview
                 key={c} category={c} orgId={orgId} championshipId={championship.id} filters={filters}
-                templateName={templates.find((t) => t.id === templateId[c])?.name ?? 'Default template'}
+                templateName={templates.find((t) => t.id === templateId[c])?.name ?? DEFAULT_TEMPLATE_LABEL}
                 triggerLabel={TRIGGER_OPTIONS.find((o) => o.value === trigger[c])!.label}
                 excluded={excludedFor(c)}
                 onToggle={(userId) => onToggleRecipient(c, userId)}

@@ -14,7 +14,7 @@ import { CERTIFICATE_PRESETS, presetById } from './presets.js';
 import { certificateActivity, certificateOverview, certificatePendingByEvent, certificateTrail, statusOf } from './overview.js';
 import { env } from '../../config/env.js';
 import { notifyCertificateGenerated, notifyCertificateRevoked } from './certificates.notifications.js';
-import { alreadyIssued, candidateKey, candidatesFor, isFixtureScoped, RECIPIENT_CATEGORIES, type RecipientCategory } from './recipients.js';
+import { alreadyIssued, candidateKey, candidatesFor, needsTeamFilter, RECIPIENT_CATEGORIES, type RecipientCategory } from './recipients.js';
 
 // Certificates: templates (J4-E6), bulk issue (J4-E7), and the register behind them.
 // Public verification lives in the public router - it must be reachable with no account.
@@ -297,7 +297,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
       sportId: q.sport_id, tournamentDisciplineId: q.tournament_discipline_id,
       // Organising team and Officials have no sport/discipline/team column to match
       // against - Team only makes sense for the four roster/achievement categories.
-      teamId: isFixtureScoped(q.category) || q.category === 'participation' || q.category === 'coaches' ? q.team_id : undefined,
+      teamId: needsTeamFilter(q.category) ? q.team_id : undefined,
     };
     const [candidates, already] = await Promise.all([
       candidatesFor(prisma, q.championship_id, q.category, filters),
@@ -334,8 +334,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     const filters = {
       sportId: body.filters.sport_id ?? undefined,
       tournamentDisciplineId: body.filters.tournament_discipline_id ?? undefined,
-      teamId: isFixtureScoped(body.category) || body.category === 'participation' || body.category === 'coaches'
-        ? body.filters.team_id ?? undefined : undefined,
+      teamId: needsTeamFilter(body.category) ? body.filters.team_id ?? undefined : undefined,
     };
     const excluded = new Set(body.excluded_user_ids);
     const candidates = (await candidatesFor(prisma, champ.id, body.category, filters, body.limit ?? 500))
