@@ -1,3 +1,4 @@
+import { ACHIEVEMENT_KIND, isFixtureScopedCategory, needsTeamFilter, RECIPIENT_CATEGORY, WINNER_ACHIEVEMENT_KINDS, type RecipientCategory } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
 
 // Recipients step (Games, Disciplines, Teams -> six categories).
@@ -12,16 +13,17 @@ import type { Db } from '../../infra/prisma.js';
 //
 // Organising team and Officials are genuinely event-wide - neither table has a sport,
 // discipline or team column - so Game/Discipline/Team filters never apply to them.
+//
+// Category union + rules now live in @semp/shared so the web wizard reads the same source.
 
-export type RecipientCategory = 'winners' | 'awards' | 'participation' | 'organising' | 'officials' | 'coaches';
-
-export const RECIPIENT_CATEGORIES: RecipientCategory[] = [
-  'winners', 'awards', 'participation', 'organising', 'officials', 'coaches',
-];
+export type { RecipientCategory };
+export const RECIPIENT_CATEGORIES: RecipientCategory[] = [...RECIPIENT_CATEGORY];
 
 /** Categories scoped by fixture (one certificate per match a person won).
  *  Everything else is scoped by championship (one per person per event). */
-export const isFixtureScoped = (c: RecipientCategory) => c === 'winners' || c === 'awards';
+export const isFixtureScoped = isFixtureScopedCategory;
+
+export { needsTeamFilter };
 
 export interface RecipientFilters {
   sportId?: string;
@@ -41,7 +43,6 @@ export interface Candidate {
   lockVersion?: number | null;
 }
 
-const WINNER_KINDS = ['medal', 'placement', 'record', 'selection', 'honour'];
 
 async function lockedFixtureIds(prisma: Db, championshipId: string, filters: RecipientFilters) {
   const rows = await prisma.fixtures.findMany({
@@ -70,7 +71,7 @@ async function winnersAndAwards(
     where: {
       championship_id: championshipId,
       superseded_at: null, user_id: { not: null },
-      kind: { in: category === 'awards' ? ['award'] : WINNER_KINDS },
+      kind: { in: category === 'awards' ? ['award'] : [...WINNER_ACHIEVEMENT_KINDS] },
       fixture_id: { in: lockedIds },
       ...(filters.teamId ? { team_id: filters.teamId } : {}),
     },
@@ -106,7 +107,7 @@ async function winnersAndAwards(
 // merely showed up.
 async function honouredUserIds(prisma: Db, championshipId: string): Promise<Set<string>> {
   const rows = await prisma.achievements.findMany({
-    where: { championship_id: championshipId, superseded_at: null, user_id: { not: null }, kind: { in: [...WINNER_KINDS, 'award'] } },
+    where: { championship_id: championshipId, superseded_at: null, user_id: { not: null }, kind: { in: [...ACHIEVEMENT_KIND] } },
     select: { user_id: true },
   });
   return new Set(rows.map((r) => r.user_id!));
