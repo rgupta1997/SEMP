@@ -279,6 +279,19 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     else if (live.live_state?.event && eventSpec) setStructure('event');
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
 
+  // An event has two entries, stored under different live_state keys so scoring
+  // one never clobbers the other: the default org-level "Team ranking", and the
+  // detailed per-athlete one. Defaults to team ranking - the same default the
+  // structure itself has always had - and snaps to whichever one this fixture was
+  // last scored with, the same one-shot pattern as the structure seed above.
+  const [eventMode, setEventMode] = useState<'team' | 'detailed'>('team');
+  const eventModeSeeded = useRef(false);
+  useEffect(() => {
+    if (eventModeSeeded.current || touched.current || !live) return;
+    eventModeSeeded.current = true;
+    if (live.live_state?.event) setEventMode('detailed');
+  }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
+
   // Measured/time single sports have no per-tick scoring, so they're manual-only.
   //
   // CRICKET IS NO LONGER ONE OF THEM. It used to be listed here because the only
@@ -349,6 +362,14 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     !!ls?.tie?.rubbers?.some((r: any) => r?.winner) ||
     !!(ls?.event && Object.keys(ls.event).length > 0);
 
+  // Scoped to whichever event entry is live right now, rather than `hasProgress`
+  // above (which would also fire on a stray home/away score an event fixture never
+  // has) - switching FROM team ranking only matters if places were actually set,
+  // and switching FROM detailed only matters if a mark was actually entered.
+  const eventHasProgress = eventMode === 'team'
+    ? (ls?.eventRanking?.rows?.length ?? 0) > 0
+    : (ls?.event?.participants?.length ?? 0) > 0;
+
   // Each structure signs off its own result, so moving to another one abandons whatever
   // was scored under the current one. Confirm the switch once the match has any scoring
   // recorded so the official can't lose a part-scored tie/match by tapping the wrong tab.
@@ -385,6 +406,24 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     setMode(next);
   };
 
+  // Team ranking <-> Detailed keeps neither side's data (they're stored under
+  // different live_state keys entirely - eventRanking vs event - so there's
+  // nothing to carry over), which is exactly why a confirm guards it whenever
+  // the side being left has anything recorded.
+  const switchEventMode = async (next: 'team' | 'detailed') => {
+    if (next === eventMode) return;
+    touched.current = true;
+    if (eventHasProgress) {
+      const ok = await confirmDialog({
+        title: 'Switch scoring entry?',
+        confirmLabel: 'Switch & discard',
+        message: `The ${eventMode === 'team' ? 'team ranking' : 'per-athlete'} data recorded here will be lost if you switch to ${next === 'team' ? 'team ranking' : 'per-athlete entry'}. This can't be undone.`,
+      });
+      if (!ok) return;
+    }
+    setEventMode(next);
+  };
+
   // Only cricket's ball-by-ball deck fills the screen; every other console is a
   // normal page section and must not have the header collapsed out from under it.
   const cricketDeckLive = structure === 'single'
@@ -394,7 +433,7 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
 
   return (
     <div className={focus ? 'flex min-h-0 flex-1 flex-col' : undefined}>
-      {(structures.length > 1 || showDepth) && (
+      {(structures.length > 1 || showDepth || structure === 'event') && (
         <div className={cn('flex flex-wrap items-end gap-x-6 gap-y-3', focus ? 'mb-2 shrink-0' : 'mb-5')}>
           {/* Only offer the structure switch when there's a real choice - event-only
               sports have a single structure, so the lone tab is hidden. */}
@@ -402,10 +441,14 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
             <TabBar label="Match structure" value={structure} onChange={switchStructure} compact={focus}
               options={structures.map((s) => ({ value: s, label: structureLabel(s) }))} />
           )}
-          {/* Event/ranking sports (swimming, powerlifting, athletics) only ever use the
-              Ranking entry - the detailed per-athlete console is intentionally hidden, so
-              officials just set finishing places. Other sports keep the depth toggle. */}
-          {structure !== 'event' && showDepth ? (
+          {/* Event/ranking sports (swimming, powerlifting, athletics) default to the
+              org-level Team ranking; the detailed per-athlete entry is a named toggle
+              of its own, not the depth toggle other sports use below. */}
+          {structure === 'event' ? (
+            <TabBar label="Scoring" value={eventMode} onChange={switchEventMode} compact={focus}
+              compactLabels={{ team: 'Team ranking', detailed: 'Per-athlete' }}
+              options={[{ value: 'team', label: 'Team ranking' }, { value: 'detailed', label: 'Per-athlete · detailed' }]} />
+          ) : showDepth ? (
             <TabBar label="Scoring" value={mode} onChange={switchMode} compact={focus}
               compactLabels={{ detailed: 'Ball by ball', manual: 'Totals' }}
               options={[{ value: 'detailed', label: 'Detailed · live' }, { value: 'manual', label: 'Manual · final score' }]} />
@@ -414,7 +457,9 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
       )}
 
       {structure === 'event' && eventSpec
-        ? <EventRankingConsole key={`evr-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />
+        ? (eventMode === 'detailed'
+          ? <EventConsole key={`evd-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />
+          : <EventRankingConsole key={`evr-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />)
         : structure === 'tie' && tieSpec
           ? <TieConsole key={`tie-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={tieSpec} mode={effectiveMode} live={live} invalidate={invalidate} onDone={onDone} />
           : effectiveMode === 'manual'
@@ -1644,9 +1689,9 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
 
 /* ----------------------------- Event console (multi-competitor) ----------------------------- */
 // Swimming heats / powerlifting categories: many participants, each recording a mark per
-// sub-event, aggregated into team (org) points. Stores EventState in live_state.event.
-// NOTE: final completion + feeding points into standings is the remaining backend track
-// for events (see plan); results save and aggregate live here.
+// sub-event, aggregated into team (org) points. Stores EventState in live_state.event -
+// the shape resolveFixtureParticipants and derive.ts's eventMedals() read at lock time,
+// which is what turns a mark into a person's own medal and appearance record.
 function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   { fixture: any; fixtureId: string; spec: EventSpec; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[] }) {
   const [state, setState] = useState<EventState>(() => hydrateEvent(live?.live_state?.event));
