@@ -33,8 +33,9 @@ import { makeStandingsRouter } from '../modules/standings/standings.routes.js';
 import { makeEnrollmentRouter } from '../modules/enrollment/enrollment.routes.js';
 import { makeInvitationsRouter } from '../modules/enrollment/invitations.routes.js';
 import { makeUserInvitationsRouter, makePublicInviteRouter, makeInviteAcceptRouter } from '../modules/iam/user-invitations.routes.js';
-import { setNotificationMailPort } from '@semp/notifications/server/notify.js';
+import { setNotificationPorts } from '@semp/notifications/server/notify.js';
 import { notificationMailPort } from '../modules/comms/notification-mail.js';
+import { notificationRealtimePort } from '../modules/realtime/notification-realtime.js';
 import { makeTeamsRouter } from '../modules/teams/teams.routes.js';
 import { makeMatrixImportRouter } from '../modules/import/matrix-import.routes.js';
 import { makePublicRouter } from '../modules/public/public.routes.js';
@@ -58,6 +59,25 @@ import { applyDuePlanChanges } from '../modules/billing/subscription.service.js'
 import { BusinessRuleError } from '../shared/errors.js';
 
 export function buildApp(prisma: Prisma) {
+  // Register the notification transport.
+  //
+  // This call was missing for the whole life of the feature: the two imports
+  // above were present and never used, so `mailPort` in @semp/notifications
+  // stayed null and every notification email was silently dropped. That failure
+  // is invisible by design - notify() treats an unregistered port as a no-op so a
+  // mail outage cannot fail the request that triggered it - which is exactly why
+  // nothing surfaced it, and why buildApp-registers-its-ports is now asserted in
+  // server.ports.test.ts rather than left to review.
+  //
+  // buildApp() is the single composition root: main.ts (Render) and lambda-app.ts
+  // (Lambda) both do nothing but call it, so registering here covers both. It has
+  // to be inside the function rather than at module scope because lambda.ts
+  // populates process.env from Secrets Manager and only THEN imports the app.
+  setNotificationPorts({
+    mail: notificationMailPort,
+    realtime: notificationRealtimePort,
+  });
+
   const app = express();
   // Allow any localhost origin in dev (Vite may pick 5173/5174/...), plus an
   // explicit production allowlist. WEB_ORIGIN may be a comma-separated list so the

@@ -31,8 +31,29 @@
 # not. (`npx prisma` makes it worse: with no local copy to find it silently installs
 # prisma@7 from the registry, which rejects `url` in the datasource block, so the
 # error names this repo's schema rather than the missing directory.)
+#
+# ---------------------------------------------------------------------------
+# Three functions, three targets, one Makefile
+# ---------------------------------------------------------------------------
+# SAM invokes `build-<LogicalId>` per function resource, so the two small realtime
+# Lambdas live here beside the API rather than in a separate package. They share
+# apps/api's CodeUri (and so its build_in_source requirement and its workspace
+# resolution) but NOT its build script: scripts/build-fn.mjs bundles a single file
+# with no Prisma at all, because neither of them touches a database.
+#
+# The MAX_BUNDLE_KB values are load-bearing, not cosmetic, and each was calibrated by
+# experiment rather than guessed - a budget too loose to fire is no budget at all:
+#
+#   authorizer  140 KB clean, 279 KB with one `import { env } from config/env.js`
+#               -> budget 200 KB
+#   publisher   335 KB clean (SigV4 + sha256), 474 KB with the same bad import
+#               -> budget 400 KB
+#
+# They turn "someone imported half the application into a function on AppSync's
+# connect path" from an invisible latency regression into a failed build. Raise them
+# only for growth you actually intended, and re-measure when you do.
 SHELL := /bin/bash
-.PHONY: build-SempApiFunction
+.PHONY: build-SempApiFunction build-RealtimeAuthorizerFunction build-RealtimePublisherFunction
 
 build-SempApiFunction:
 	# The HOISTED, PINNED binary - explicitly, NOT `npx prisma`.
@@ -58,3 +79,16 @@ build-SempApiFunction:
 	# error, and re-applied here because SAM's zip step is what has historically
 	# dropped mode bits.
 	chmod 755 "$(ARTIFACTS_DIR)"/node_modules/.prisma/client/libquery_engine-*.node
+
+build-RealtimeAuthorizerFunction:
+	# No Prisma, no env schema, no routers - see the budget note above.
+	ENTRY=src/realtime-authorizer.ts MAX_BUNDLE_KB=200 \
+	ARTIFACTS_DIR="$(ARTIFACTS_DIR)" \
+	  node scripts/build-fn.mjs
+
+build-RealtimePublisherFunction:
+	# No Prisma and no Secrets extension - this function authorizes with its IAM
+	# role, so it has no token to fetch and nothing to read from the database.
+	ENTRY=src/realtime-publisher.ts MAX_BUNDLE_KB=400 \
+	ARTIFACTS_DIR="$(ARTIFACTS_DIR)" \
+	  node scripts/build-fn.mjs

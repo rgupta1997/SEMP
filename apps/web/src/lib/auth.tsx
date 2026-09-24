@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, tokenStore } from './api';
-import { supabase } from './supabase';
+import { realtimeAuthChanged, clearRealtimeToken } from './realtime';
 
 // Every login is a `user`; `system` is the platform super-admin shell. There are
 // no per-account-type shells any more - what a user can do is derived per
@@ -94,13 +94,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const c = await api<AuthContext>('GET', '/auth/me');
     // Same priming login()/signup() do below, and for the same reason: this runs
     // on every normal page load that restores a session from an already-stored
-    // token (not just an explicit login click), and Supabase's Realtime client
+    // token (not just an explicit login click), and the AppSync events client
     // still has no valid token until this resolves. Without it, applyContext(c)
     // sets ctx.user, which immediately triggers the notification channel's first
     // join (main.tsx) racing against this token fetch - any event that fires in
     // that window is silently missed until something else (e.g. a page refresh)
     // gives the fetch enough time to land first.
-    await supabase?.realtime.setAuth();
+    await realtimeAuthChanged();
     applyContext(c);
   };
 
@@ -121,7 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    *
    * That flow's endpoints return a token and nothing else - unlike the legacy
    * /auth/login, which returns the whole context inline. So the order matters and
-   * lives here rather than in each screen: store the token, re-auth Realtime,
+   * lives here rather than in each screen: store the token, re-auth realtime,
    * drop the previous user's cached queries, then fetch the context. Fetching
    * before storing would go out unauthenticated; not clearing would leak the
    * previous account's data into this one, which under Option B is the same
@@ -129,7 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    */
   const adoptSession = async (token: string) => {
     tokenStore.set(token);
-    await supabase?.realtime.setAuth();
+    await realtimeAuthChanged();
     localStorage.removeItem(ACTIVE_ROLE_KEY);
     qc.clear();
     await refresh();
@@ -139,10 +139,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     const res = await api<{ token: string } & AuthContext>('POST', '/auth/login', { email, password });
     tokenStore.set(res.token);
-    // Supabase is created before login, when its custom access-token callback
-    // cannot authenticate. Refresh it now so the first Realtime channel join
-    // carries this user's token rather than the anon key.
-    await supabase?.realtime.setAuth();
+    // The transport exists before login, when it cannot get a token at all.
+    // Refresh now so the first channel join carries this user's token.
+    await realtimeAuthChanged();
     localStorage.removeItem(ACTIVE_ROLE_KEY);
     qc.clear(); // drop the previous user's cached queries so nothing leaks across sessions
     applyContext(res);
@@ -152,7 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signup = async (body: SignupBody) => {
     const res = await api<{ token: string } & AuthContext>('POST', '/auth/signup', body);
     tokenStore.set(res.token);
-    await supabase?.realtime.setAuth();
+    await realtimeAuthChanged();
     localStorage.removeItem(ACTIVE_ROLE_KEY);
     qc.clear();
     applyContext(res);
@@ -201,6 +200,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     tokenStore.clear();
+    // Latent bug fixed in passing: this was never cleared. setCtx(null) tears the
+    // subscription down and fetchRealtimeGrant early-exits once tokenStore is empty,
+    // so it was harmless - but the previous user's realtime token sat in module
+    // memory for up to fifteen minutes after they signed out. Now "a signed-out
+    // session holds no token" is true rather than true by accident.
+    clearRealtimeToken();
     localStorage.removeItem(ACTIVE_ROLE_KEY);
     forgetWorkspaceChoices();
     qc.clear(); // wipe cached data so the next user starts clean

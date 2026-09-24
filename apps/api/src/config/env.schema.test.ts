@@ -21,6 +21,10 @@ const prodOk = {
   MAIL_TRANSPORT: 'http',
   MAIL_API_URL: 'https://mail.test',
   MAIL_API_KEY: 'k',
+  REALTIME_TRANSPORT: 'appsync',
+  APPSYNC_NOTIFICATIONS_QUEUE_URL: 'https://sqs.ap-south-1.amazonaws.com/1/semp-api-realtime',
+  APPSYNC_EVENTS_HTTP_ENDPOINT: 'abcdefghijklmnopqrstuvwxyz.appsync-api.ap-south-1.amazonaws.com',
+  APPSYNC_EVENTS_REGION: 'ap-south-1',
 };
 
 /** The `path` each reported issue was tagged with. */
@@ -132,6 +136,41 @@ describe('production guards', () => {
     expect(paths).toContain('AUTH_EMAIL_BYPASS');
     expect(paths).toContain('OTP_SMS_BYPASS');
     expect(paths).toContain('MAIL_TRANSPORT');
+    expect(paths).toContain('REALTIME_TRANSPORT');
+  });
+});
+
+describe('realtime transport in production', () => {
+  // The same shape as the MAIL_TRANSPORT guard, and for the same reason. 'off' is
+  // not a broken product - the bell falls back to a 2-minute poll and everything
+  // still works - which is exactly why nobody would report it. A silent degradation
+  // has to fail at boot or it ships.
+  it('refuses to boot in production with the transport off', () => {
+    expect(failedPaths({ ...prodOk, REALTIME_TRANSPORT: 'off' })).toContain('REALTIME_TRANSPORT');
+  });
+
+  it('allows the transport off outside production, so a fresh clone runs with no AWS', () => {
+    const env = parsed({ ...base, NODE_ENV: 'development', WEB_ORIGIN: 'http://localhost:5173' });
+    expect(env.REALTIME_TRANSPORT).toBe('off');
+  });
+
+  // Turning the real transport on without its endpoints would otherwise mean every
+  // notify() logs an enqueue failure all day.
+  it.each([
+    ['queue url', 'APPSYNC_NOTIFICATIONS_QUEUE_URL'],
+    ['http endpoint', 'APPSYNC_EVENTS_HTTP_ENDPOINT'],
+    ['region', 'APPSYNC_EVENTS_REGION'],
+  ])('rejects appsync with no %s', (_label, key) => {
+    const input: Record<string, unknown> = { ...prodOk };
+    delete input[key];
+    expect(failedPaths(input)).toContain('APPSYNC_NOTIFICATIONS_QUEUE_URL');
+  });
+
+  // Defaults that three separately-deployed things depend on agreeing about.
+  it('defaults the namespace and TTL to the values the template and client assume', () => {
+    const env = parsed(prodOk);
+    expect(env.REALTIME_CHANNEL_NAMESPACE).toBe('notifications');
+    expect(env.REALTIME_TOKEN_TTL_SECONDS).toBe(900);
   });
 });
 

@@ -7,7 +7,16 @@
 > rollback path for as long as `DATABASE_URL` points at Supabase; delete this file in
 > the same change that shuts Render down.
 >
-> Two things below are now wrong rather than merely dated:
+> **Render can no longer boot in production.** The AppSync Events migration added a
+> guard that refuses `NODE_ENV=production` unless `REALTIME_TRANSPORT=appsync` with a
+> queue URL, an endpoint and a region — all `semp-api` stack outputs — and Render has
+> no instance role, so even with those values it would need static IAM credentials to
+> reach SQS. That guard is deliberate: the alternative is a bell that silently stops
+> delivering live notifications and falls back to polling, which is a perfectly usable
+> product and therefore something nobody reports. The intended resolution is the move
+> to Lambda, not a workaround. See `render.yaml`.
+>
+> Three things below are now wrong rather than merely dated:
 > - The env-var list in step 2 stops at three. `NODE_ENV` is **required** and has no
 >   default (`apps/api/src/config/env.schema.ts`), and setting it to `production`
 >   activates guards that refuse to boot without `MAIL_TRANSPORT=http`, `MAIL_API_URL`,

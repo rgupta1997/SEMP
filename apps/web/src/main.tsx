@@ -8,7 +8,7 @@ import {
 
 import { AuthProvider } from './lib/auth';
 import { useAuth } from './lib/auth';
-import { supabase } from './lib/supabase';
+import { notificationTransport } from './lib/realtime';
 import { notificationHooks } from './lib/notification';
 import { App } from './App';
 import './index.css';
@@ -56,14 +56,15 @@ function NotificationRealtimeProvider({
 }: {
   children: ReactNode;
 }) {
-  console.log(
-    '[notifications] realtime provider mounted',
-  );
-
   const { ctx } = useAuth();
 
+  // Must sit inside AuthProvider (it reads ctx) and above App, so exactly one
+  // subscription exists per signed-in tab rather than one per screen that happens
+  // to show the bell. `notificationTransport` is a module singleton - the hook's
+  // effect depends on that reference, so anything less stable would rebuild a
+  // WebSocket on every render.
   notificationHooks.useNotificationRealtime(
-    supabase,
+    notificationTransport,
     ctx?.user.id,
   );
 

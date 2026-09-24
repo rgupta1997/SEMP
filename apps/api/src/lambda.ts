@@ -73,13 +73,6 @@ process.env.DATABASE_URL =
 process.env.JWT_SECRET = app.JWT_SECRET;
 process.env.MAIL_API_KEY = app.MAIL_API_KEY;
 
-// Read via raw process.env at modules/notifications/realtime-token.ts, so assigning
-// it here is sufficient - there is no import to update. Only meaningful while
-// notifications still run on Supabase Realtime; it stops that route throwing, but
-// it does NOT make the feature work once the database is RDS, because Supabase
-// Realtime reads Supabase's own WAL.
-if (app.SUPABASE_JWT_SECRET) process.env.SUPABASE_JWT_SECRET = app.SUPABASE_JWT_SECRET;
-
 const { handler: inner } = await import('./lambda-app.js');
 
 export const handler = inner;

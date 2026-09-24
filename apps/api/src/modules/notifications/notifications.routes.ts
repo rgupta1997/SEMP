@@ -89,10 +89,15 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
     res.status(204).send();
   }));
 
-  // ----- Mint a short-lived Supabase-compatible token for the Realtime
-  // connection only. Unrelated to this app's own auth - see realtime-token.ts.
-  // The frontend refetches this before it expires (lib/supabase.ts), so a
-  // long-open tab keeps its live connection without any user-visible gap.
+  // ----- Mint a short-lived token for the AppSync Events connection only.
+  //
+  // Unrelated to this app's own session auth, and deliberately incapable of acting
+  // as one: it is signed with an HKDF-derived key and carries aud:'appsync-events',
+  // either of which is enough for parseAuth to refuse it. See realtime-token.ts.
+  //
+  // The response also carries the endpoint and the channel, so the browser never
+  // builds a channel path or learns an AppSync hostname at build time. The frontend
+  // refetches before expiry, so a long-open tab keeps its connection with no gap.
   router.post('/notifications/realtime-token', asyncHandler(async (req, res) => {
     const user = req.user!;
     const result = mintRealtimeToken(user.id);

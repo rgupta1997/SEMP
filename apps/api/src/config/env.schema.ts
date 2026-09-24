@@ -95,6 +95,58 @@ const schema = z.object({
   // cold start. Node's fetch has no default timeout; this is it.
   MAIL_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
 
+  // ---- realtime notifications ----------------------------------------------
+  //
+  // Live delivery of the notification bell, via AppSync Events. Replaces Supabase
+  // Realtime, which read Supabase's own Postgres WAL and so cannot survive the move
+  // to RDS at all.
+  //
+  // Exactly the same bargain as MAIL_TRANSPORT above, for the same reason: 'off'
+  // makes every notify() a feed-only write, which is what keeps a fresh clone
+  // runnable with no AWS account. Production must be 'appsync' - see the refinement
+  // below, and note that the mail port shipping unregistered for months is precisely
+  // the failure that guard exists to prevent.
+  REALTIME_TRANSPORT: z.enum(['off', 'appsync']).default('off'),
+
+  // The fan-out queue. The API only ever enqueues; a separate Lambda publishes, and
+  // the API's IAM role deliberately has no appsync:EventPublish permission at all.
+  APPSYNC_NOTIFICATIONS_QUEUE_URL: z.string().url().optional(),
+
+  // Handed to the browser in the response to POST /notifications/realtime-token,
+  // NOT baked into the frontend bundle as a VITE_ constant. That is deliberate:
+  // VITE_API_URL's own stack output comments at length on needing a frontend rebuild
+  // whenever it changes, and this value changes whenever the stack is replaced.
+  // The HTTP endpoint HOSTNAME (the Dns.Http stack output), not the realtime one.
+  //
+  // Counter-intuitive but load-bearing. The browser connects over WebSockets, yet
+  // Amplify's events client wants the HTTP endpoint and derives the WebSocket URL
+  // itself: getRealtimeEndpointUrl() in @aws-amplify/api-graphql matches
+  //   ^https://\w{26}\.\w+-api\.<region>\.amazonaws\.com/event$
+  // and only then rewrites `appsync-api` to `appsync-realtime-api` and appends
+  // `/realtime`. Hand it the realtime hostname instead and that pattern does not
+  // match, so it falls through to the CUSTOM DOMAIN branch, appends `/realtime` to
+  // something that is not a URL, and the connection fails with nothing explaining
+  // why. The mint endpoint assembles `https://<this>/event` from it.
+  APPSYNC_EVENTS_HTTP_ENDPOINT: z.string().min(1).optional(),
+
+  // Returned alongside the endpoint, so the browser needs NO build-time AppSync
+  // configuration whatsoever. The alternative - a VITE_ var, or deriving the region
+  // by regex from the endpoint hostname - is either a rebuild every time the stack
+  // changes or a parse that breaks the day a custom domain appears.
+  APPSYNC_EVENTS_REGION: z.string().min(1).optional(),
+
+  // Must match NOTIFICATION_CHANNEL_NAMESPACE in
+  // packages/notifications/src/core/channels.ts and the AppSync ChannelNamespace in
+  // infra/semp-api.yaml. All three deploy together; a mismatch is silent - the
+  // publisher succeeds against a namespace nobody is subscribed to.
+  REALTIME_CHANNEL_NAMESPACE: z.string().min(1).default('notifications'),
+
+  // Three numbers derive from this and must stay consistent: the browser
+  // re-subscribes at roughly TTL minus two minutes, and the AppSync authorizer caps
+  // its cached answer at the token's own remaining life. Too long and a connection
+  // outlives the token behind it; too short and every user gets a gap every cycle.
+  REALTIME_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+
   // Returns the OTP in /auth/otp/send's own response so the flow is usable without a
   // mailbox. NOT the same thing as MAIL_TRANSPORT: this one hands out sign-in codes
   // to whoever asked, which is why the refinement below refuses it in production.
@@ -148,11 +200,42 @@ export const envSchema = schema
     // Failing at boot beats failing on the first password reset of the day.
     message: 'MAIL_TRANSPORT=http needs MAIL_API_URL and MAIL_API_KEY',
   })
-  // JWT_SECRET signs FOUR different things, and only the first is a session:
+  // Mirrors the MAIL_TRANSPORT pair above exactly. 'off' in production means the
+  // bell silently stops updating live and degrades to its 2-minute poll - which is
+  // a perfectly usable product and therefore something nobody would report for
+  // weeks. Refusing to boot is the only failure mode that gets noticed.
+  //
+  // NOTE for the Render deployment: render.yaml sets NODE_ENV=production, so this
+  // guard stops that service booting until it either gets the two values below plus
+  // AWS credentials, or is retired in favour of Lambda (which is the plan).
+  .refine((e) => !(e.NODE_ENV === 'production' && e.REALTIME_TRANSPORT !== 'appsync'), {
+    path: ['REALTIME_TRANSPORT'],
+    message:
+      'REALTIME_TRANSPORT must be "appsync" in production - "off" silently drops every live ' +
+      'notification, and the bell degrades to polling with nothing anywhere reporting it.',
+  })
+  .refine(
+    (e) =>
+      e.REALTIME_TRANSPORT !== 'appsync' ||
+      (!!e.APPSYNC_NOTIFICATIONS_QUEUE_URL &&
+        !!e.APPSYNC_EVENTS_HTTP_ENDPOINT &&
+        !!e.APPSYNC_EVENTS_REGION),
+    {
+      path: ['APPSYNC_NOTIFICATIONS_QUEUE_URL'],
+      // Failing at boot beats every notify() logging an enqueue error all day.
+      message:
+        'REALTIME_TRANSPORT=appsync needs APPSYNC_NOTIFICATIONS_QUEUE_URL, ' +
+        'APPSYNC_EVENTS_HTTP_ENDPOINT and APPSYNC_EVENTS_REGION',
+    },
+  )
+  // JWT_SECRET signs FIVE different things, and only the first is a session:
   //   - session tokens          (http/middleware/auth.ts)
   //   - verification tickets    (modules/iam/verification-ticket.ts)
   //   - certificate signatures  (modules/certificates/certificates.service.ts)
   //   - public share links      (modules/public/share-token.ts)
+  //   - realtime tokens, via an HKDF-DERIVED key (modules/realtime/token-key.ts) -
+  //     derived rather than used directly precisely so a realtime token cannot also
+  //     be presented as a session token
   // So a guessable value here is not "sessions are weak", it is a forged super-admin
   // JWT on demand, with no OTP and no password involved - strictly worse than the
   // bypass leak the rest of this file is about. `.min(1)` on the field was the only
