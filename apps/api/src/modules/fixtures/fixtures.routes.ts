@@ -601,9 +601,33 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       // default, which is a real published format rather than a generic counter.
     }
 
+    // A ranking event has no home/away roster to read a competitor list off, so the
+    // detailed console had nobody to show and made officials look every athlete up
+    // by phone one at a time. They're already on file, though: whoever's org placed
+    // a team_entries row for this exact discipline has one entrant on it (an
+    // individual discipline caps squad_max at 1) - resolved here the same way
+    // resolveFixtureParticipants resolves it at lock time, so the console can just
+    // show that roster instead of asking the official to reconstruct it by hand.
+    let event_entrants: unknown[] = [];
+    if (!fixture.home_team_id && !fixture.away_team_id) {
+      const entries = await prisma.team_entries.findMany({
+        where: { tournament_discipline_id: fixture.tournament_discipline_id },
+        select: {
+          organizations: { select: { id: true, name: true, short_name: true } },
+          teams: { select: { team_members: { where: { is_active: true }, select: { users: { select: { id: true, name: true, phone: true } } } } } },
+        },
+      });
+      event_entrants = entries.flatMap((e) => (e.teams?.team_members ?? [])
+        .filter((m) => m.users)
+        .map((m) => ({
+          user_id: m.users!.id, name: m.users!.name, phone: m.users!.phone,
+          org_id: e.organizations?.id ?? null, org: e.organizations?.short_name ?? e.organizations?.name ?? null,
+        })));
+    }
+
     res.json({
       ...fixture, point_scheme: rule?.scheme ?? null, ranking_points, ranking_participation,
-      scoring_formats,
+      scoring_formats, event_entrants,
     });
   }));
 

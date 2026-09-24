@@ -1694,9 +1694,46 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
 // which is what turns a mark into a person's own medal and appearance record.
 function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   { fixture: any; fixtureId: string; spec: EventSpec; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[] }) {
-  const [state, setState] = useState<EventState>(() => hydrateEvent(live?.live_state?.event));
+  // Whoever's org has a team_entries row for this exact discipline has one
+  // registered entrant on it (individual disciplines cap squad_max at 1) - the
+  // roster the console can show up front instead of asking the official to look
+  // every competitor up by phone, one at a time.
+  const entrants: Array<{ user_id: string; name: string; phone: string | null; org_id: string | null; org: string | null }> =
+    (fixture as any)?.event_entrants ?? [];
+  const entrantRow = (e: (typeof entrants)[number]): ParticipantResult =>
+    ({ id: `e${e.user_id}`, name: e.name, phone: e.phone, org: e.org, orgId: e.org_id, category: null, marks: {} });
+
+  // The roster is the registration record, not something scoring edits: once a
+  // discipline's team_entries are locked there is no concept of swapping a
+  // competitor out, so this console never offers a way to add, remove, or look
+  // one up by hand - only to score whoever is actually entered.
+  const [state, setState] = useState<EventState>(() => {
+    const hydrated = hydrateEvent(live?.live_state?.event);
+    return hydrated.participants.length === 0 && entrants.length > 0
+      ? { participants: entrants.map(entrantRow) }
+      : hydrated;
+  });
   const seeded = useRef(false);
-  useEffect(() => { if (!seeded.current && live) { setState(hydrateEvent(live.live_state?.event)); seeded.current = true; } }, [live]);
+  useEffect(() => {
+    if (seeded.current || !live) return;
+    seeded.current = true;
+    const hydrated = hydrateEvent(live.live_state?.event);
+    setState(hydrated.participants.length === 0 && entrants.length > 0
+      ? { participants: entrants.map(entrantRow) }
+      : hydrated);
+  }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
+
+  // Somebody registered for this discipline after scoring already started - folded
+  // in automatically (matched by phone, the same handle resolveFixtureParticipants
+  // matches on at lock time), never through anything the scorer clicks.
+  useEffect(() => {
+    if (!entrants.length) return;
+    setState((s) => {
+      const known = new Set(s.participants.map((p) => (p.phone ?? '').replace(/\D/g, '')));
+      const missing = entrants.filter((e) => !known.has((e.phone ?? '').replace(/\D/g, '')));
+      return missing.length ? { participants: [...s.participants, ...missing.map(entrantRow)] } : s;
+    });
+  }, [entrants]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Orgs entered in this championship drive the "counts towards" picker (standings
   // aggregate by org). Free of a champ id we simply offer no orgs (the field still
@@ -1719,32 +1756,8 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const nounLower = noun.toLowerCase();
   const firstKey = spec.subEvents[0]?.key;
 
-  const addP = () => setState((s) => ({ participants: [...s.participants, { id: `p${Date.now()}`, name: '', phone: null, org: null, orgId: null, category: pickOne ? firstKey : null, marks: {} }] }));
-  const removeP = (id: string) => setState((s) => ({ participants: s.participants.filter((p) => p.id !== id) }));
   const patchP = (id: string, patch: Partial<ParticipantResult>) => setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
   const setOrg = (id: string, orgId: string) => patchP(id, { orgId: orgId || null, org: orgs.find((o) => o.id === orgId)?.name ?? null });
-
-  // Look a competitor up by phone and auto-fill their name + the org they're rostered
-  // under in this championship - faster (and less error-prone) than typing both by hand.
-  const [lookingUp, setLookingUp] = useState<string | null>(null);
-  const lookupPhone = async (id: string, phone: string) => {
-    if (!champId) return;
-    if (phone.replace(/\D/g, '').length < 10) { toast.error('Enter the competitor’s 10-digit phone number'); return; }
-    setLookingUp(id);
-    try {
-      const r: any = await api('GET', `/championships/${champId}/competitors/lookup?phone=${encodeURIComponent(phone)}`);
-      if (r?.found) {
-        patchP(id, { name: r.name ?? '', orgId: r.orgId ?? null, org: r.org ?? null });
-        toast.success(r.org ? `${r.name} · ${r.org}` : `${r.name} — no org in this championship, set it manually`);
-      } else {
-        toast.error('No competitor found for that number');
-      }
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Lookup failed');
-    } finally {
-      setLookingUp(null);
-    }
-  };
   const setMark = (id: string, key: string, n: number | null) => setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, marks: { ...p.marks, [key]: n } } : p)) }));
   // Switching weight class carries the mark over to the new key (and drops the old).
   const setCategory = (id: string, cat: string) => setState((s) => ({ participants: s.participants.map((p) => {
@@ -1787,65 +1800,62 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
         <CardHeader title="Participants & results" subtitle={subtitle} />
         <CardBody className="space-y-3">
           <p className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-slate-600 dark:bg-brand-500/10 dark:text-slate-300">{scoringText}</p>
-          {state.participants.length === 0 && <p className="text-sm text-slate-400 dark:text-slate-500">No participants yet - add one below.</p>}
+          {state.participants.length === 0 && (
+            <p className="text-sm text-slate-400 dark:text-slate-500">No registered entrants for this discipline yet.</p>
+          )}
           {state.participants.map((p) => {
             const cat = p.category ?? firstKey;
             return (
               <div key={p.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
-                <Field label="Find by phone" hint="Auto-fills the competitor’s name and org from this championship.">
-                  <div className="flex gap-2">
-                    <Input
-                      value={p.phone ?? ''} inputMode="tel" placeholder="10-digit phone"
-                      onChange={(e) => patchP(p.id, { phone: e.target.value })}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); lookupPhone(p.id, p.phone ?? ''); } }}
-                    />
-                    <Button type="button" variant="outline" disabled={lookingUp === p.id} onClick={() => lookupPhone(p.id, p.phone ?? '')}>
-                      {lookingUp === p.id ? 'Finding…' : 'Find'}
-                    </Button>
-                  </div>
-                </Field>
-                <div className="mt-2 grid grid-cols-[1fr_1fr_auto] items-end gap-2">
-                  <Field label="Name"><Input value={p.name} onChange={(e) => patchP(p.id, { name: e.target.value })} placeholder="Competitor" /></Field>
-                  <Field label="Counts towards">
-                    <Select value={orgValue(p)} onChange={(e) => setOrg(p.id, e.target.value)}>
-                      <option value="">— Individual —</option>
-                      {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                    </Select>
-                  </Field>
-                  <Button variant="ghost" size="sm" className="mb-1" onClick={() => removeP(p.id)} aria-label="Remove participant" title="Remove">
-                    <Trash2 size={14} />
-                  </Button>
-                </div>
                 {pickOne ? (
-                  <div className="mt-2 grid grid-cols-[1fr_140px] items-end gap-2">
-                    <Field label={noun}>
+                  <div className="grid grid-cols-4 items-start gap-3">
+                    <Field label="Competitor" compact>
+                      <p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</p>
+                    </Field>
+                    <Field label="Counts towards" compact>
+                      <Select value={orgValue(p)} onChange={(e) => setOrg(p.id, e.target.value)}>
+                        <option value="">— Individual —</option>
+                        {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                      </Select>
+                    </Field>
+                    <Field label={noun} compact>
                       <Select value={cat} onChange={(e) => setCategory(p.id, e.target.value)}>
                         {spec.subEvents.map((se) => <option key={se.key} value={se.key}>{se.label}</option>)}
                       </Select>
                     </Field>
-                    <Field label={markLabel}>
+                    <Field label={markLabel} compact>
                       <MarkInput value={p.marks[cat] ?? null} isTime={isTime} onChange={(n) => setMark(p.id, cat, n)} ariaLabel={`${p.name || 'competitor'} ${markLabel}`} />
                     </Field>
                   </div>
                 ) : (
-                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {spec.subEvents.map((se) => (
-                      <label key={se.key} className="block">
-                        <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
-                        <MarkInput value={p.marks[se.key] ?? null} isTime={isTime} onChange={(n) => setMark(p.id, se.key, n)} ariaLabel={`${p.name || 'competitor'} ${se.label}`} />
-                      </label>
-                    ))}
-                  </div>
+                  <>
+                    <div className="grid grid-cols-[1fr_1fr] items-start gap-2">
+                      <Field label="Competitor" compact>
+                        <p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</p>
+                      </Field>
+                      <Field label="Counts towards" compact>
+                        <Select value={orgValue(p)} onChange={(e) => setOrg(p.id, e.target.value)}>
+                          <option value="">— Individual —</option>
+                          {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                        </Select>
+                      </Field>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {spec.subEvents.map((se) => (
+                        <label key={se.key} className="block">
+                          <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
+                          <MarkInput value={p.marks[se.key] ?? null} isTime={isTime} onChange={(n) => setMark(p.id, se.key, n)} ariaLabel={`${p.name || 'competitor'} ${se.label}`} />
+                        </label>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             );
           })}
-          <div className="flex items-center justify-between gap-2">
-            <Button variant="outline" size="sm" onClick={addP}>+ Add participant</Button>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" disabled={persist.isPending} onClick={() => persistEvent(false)}>{persist.isPending ? 'Saving…' : 'Save results'}</Button>
-              <Button size="sm" disabled={persist.isPending} onClick={() => persistEvent(true)}>Save &amp; sign off</Button>
-            </div>
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="outline" disabled={persist.isPending} onClick={() => persistEvent(false)}>{persist.isPending ? 'Saving…' : 'Save results'}</Button>
+            <Button size="sm" disabled={persist.isPending} onClick={() => persistEvent(true)}>Save &amp; sign off</Button>
           </div>
         </CardBody>
       </Card>
