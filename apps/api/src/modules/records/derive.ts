@@ -1,5 +1,5 @@
 import {
-  PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent,
+  PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor,
   type AchievementKind, type EventSpec, type EventState, type FormatTemplate,
   type LifetimeEntryKind, type Medal, type StandingsPlacement,
 } from '@semp/shared';
@@ -75,6 +75,8 @@ export interface DerivableFixture {
   championship_name: string | null;
   sport_id: string | null;
   sport_name: string | null;
+  /** null for "Whole sport" - a named discipline ("66kg") already fixes its category. */
+  discipline_id: string | null;
   discipline_name: string | null;
   /** `tournament_disciplines.format_config` - carries the EventSpec for a ranking event. */
   format_config: unknown;
@@ -176,9 +178,12 @@ export function verdictsOf(fx: Pick<DerivableFixture, 'round' | 'status' | 'winn
 
 const MEDAL_BY_RANK: Record<number, Medal> = { 1: 'gold', 2: 'silver', 3: 'bronze' };
 
-function eventSpecOf(formatConfig: unknown): EventSpec | null {
+// A discipline never has its own stored template - creating one never writes
+// format_config.scoring - so the sport's seeded template (the same one the console
+// falls back to) is the only spec that has ever actually existed for these fixtures.
+function eventSpecOf(formatConfig: unknown, sportName: string | null): EventSpec | null {
   const scoring = (formatConfig as { scoring?: FormatTemplate } | null)?.scoring;
-  return scoring?.event ?? null;
+  return scoring?.event ?? eventTemplateFor(sportName)?.event ?? null;
 }
 
 function eventStateOf(liveState: unknown): EventState | null {
@@ -197,10 +202,13 @@ function eventStateOf(liveState: unknown): EventState | null {
  * Returns competitor-row ids, because that is the only handle a `live_state`
  * competitor has; the caller maps them back to accounts.
  */
-export function eventMedals(fx: Pick<DerivableFixture, 'format_config' | 'live_state'>): Array<{ competitor_id: string; medal: Medal; sub_event: string }> {
-  const spec = eventSpecOf(fx.format_config);
+export function eventMedals(
+  fx: Pick<DerivableFixture, 'format_config' | 'live_state' | 'sport_name' | 'discipline_id' | 'discipline_name'>,
+): Array<{ competitor_id: string; medal: Medal; sub_event: string }> {
+  const raw = eventSpecOf(fx.format_config, fx.sport_name);
   const state = eventStateOf(fx.live_state);
-  if (!spec || !state || state.participants.length === 0) return [];
+  if (!raw || !state || state.participants.length === 0) return [];
+  const spec = effectiveEventSpec(raw, { id: fx.discipline_id, name: fx.discipline_name });
   // 'sumBest' totals marks into a team score - there is no per-athlete placing to
   // award a medal from. `detailedContributions` skips medals for the same reason.
   if (spec.result.aggregate === 'sumBest') return [];

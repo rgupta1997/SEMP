@@ -15,7 +15,7 @@ import {
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { rankingContributions, detailedContributions, foldCricket, foldRally, isCricketSport, isKernelSport, isRacquetSport, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, type CricketLog, type CricketState } from '@semp/shared';
+import { rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, isCricketSport, isKernelSport, isRacquetSport, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, type CricketLog, type CricketState } from '@semp/shared';
 import type { TieSpec, EventSpec, ScoringMode, KernelState, Pairing, RallyLog, Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer } from '../../features/scoring/RacquetDeck';
 import { CricketDeck } from '../../features/scoring/CricketDeck';
@@ -252,7 +252,13 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
   const tieSpec = (template.fixtureType === 'tie' && template.tie)
     ? template.tie
     : tieAllowed ? tieTemplateFor(sportName)?.tie : undefined;
-  const eventSpec = (template.fixtureType === 'event' && template.event) ? template.event : eventTemplateFor(sportName)?.event;
+  const rawEventSpec = (template.fixtureType === 'event' && template.event) ? template.event : eventTemplateFor(sportName)?.event;
+  // null discipline_id = "Whole sport" - the only shape that actually mixes
+  // categories in one fixture. A named discipline ("66kg") already fixes the
+  // category by what it is, so it collapses to the one category that is.
+  const disciplineId: string | null = fixture?.tournament_disciplines?.discipline_id ?? null;
+  const disciplineName: string | null = fixture?.tournament_disciplines?.disciplines?.name ?? null;
+  const eventSpec = rawEventSpec ? effectiveEventSpec(rawEventSpec, { id: disciplineId, name: disciplineName }) : undefined;
 
   // Ranking/event sports (powerlifting/swimming/athletics) have no head-to-head match,
   // so they're event-only - the "Single match" structure doesn't apply and is omitted.
@@ -1694,6 +1700,17 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
 // which is what turns a mark into a person's own medal and appearance record.
 function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   { fixture: any; fixtureId: string; spec: EventSpec; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[] }) {
+  const isTime = spec.result.resultType === 'time';
+  const pickOne = !!spec.pickOne;
+  const noun = spec.subEventNoun ?? 'sub-event';
+  const nounLower = noun.toLowerCase();
+  // A named discipline ("66kg") already fixes the one category every entrant here
+  // is in - effectiveEventSpec has already narrowed spec.subEvents to just it, so
+  // there is nothing left to pick, per row or otherwise. Only "Whole sport" (no
+  // discipline) still mixes more than one category in this fixture.
+  const isNamedDiscipline = !!fixture?.tournament_disciplines?.discipline_id;
+  const fixedCategory = isNamedDiscipline ? spec.subEvents[0]?.key ?? null : null;
+
   // Whoever's org has a team_entries row for this exact discipline has one
   // registered entrant on it (individual disciplines cap squad_max at 1) - the
   // roster the console can show up front instead of asking the official to look
@@ -1701,7 +1718,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const entrants: Array<{ user_id: string; name: string; phone: string | null; org_id: string | null; org: string | null }> =
     (fixture as any)?.event_entrants ?? [];
   const entrantRow = (e: (typeof entrants)[number]): ParticipantResult =>
-    ({ id: `e${e.user_id}`, name: e.name, phone: e.phone, org: e.org, orgId: e.org_id, category: null, marks: {} });
+    ({ id: `e${e.user_id}`, name: e.name, phone: e.phone, org: e.org, orgId: e.org_id, category: pickOne ? fixedCategory : null, marks: {} });
 
   // The roster is the registration record, not something scoring edits: once a
   // discipline's team_entries are locked there is no concept of swapping a
@@ -1735,36 +1752,42 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     });
   }, [entrants]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Orgs entered in this championship drive the "counts towards" picker (standings
-  // aggregate by org). Free of a champ id we simply offer no orgs (the field still
-  // allows an individual entry).
+  // "Whole sport" still mixes categories in one fixture, but nobody's real weight
+  // class is known in advance the way a named discipline's is - so ONE category is
+  // chosen here, for the whole session, before anything can be scored, rather than
+  // guessed per row (a blank row silently defaulting to the first category was
+  // exactly the bug this replaces).
+  const [globalCategory, setGlobalCategoryState] = useState<string | null>(
+    () => state.participants.find((p) => p.category)?.category ?? null,
+  );
+  const setGlobalCategory = (cat: string) => {
+    setGlobalCategoryState(cat);
+    setState((s) => ({
+      participants: s.participants.map((p) => {
+        const prev = p.category ?? cat;
+        return { ...p, category: cat, marks: { [cat]: p.marks[prev] ?? null } };
+      }),
+    }));
+  };
+  const category = isNamedDiscipline ? fixedCategory : globalCategory;
+
+  // "Counts towards" is deliberately not offered any more: it always came from the
+  // same registration this console's roster already reads, so an editable copy of
+  // it could only ever go stale against, or quietly disagree with, the org
+  // resolveFixtureParticipants and the standings table both actually trust. Kept
+  // defined rather than deleted, in case a real "unattached entry" need reappears.
   const champId = eventInfo(fixture)?.id;
   const { data: parts } = useApi<{ organizations: { orgId: string; org: { id: string; name: string } | null }[] }>(
     champId ? `/championships/${champId}/participants` : null);
   const orgs = (parts?.organizations ?? [])
     .map((o) => ({ id: o.org?.id ?? o.orgId, name: o.org?.name ?? 'Unaffiliated' }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  // Map a stored row to its dropdown value: prefer the stored orgId, else match the
-  // legacy free-text name to an org so older rows still show their selection.
-  const orgValue = (p: ParticipantResult) => p.orgId ?? orgs.find((o) => o.name === (p.org ?? ''))?.id ?? '';
-
-  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
-
-  const isTime = spec.result.resultType === 'time';
-  const pickOne = !!spec.pickOne;
-  const noun = spec.subEventNoun ?? 'sub-event';
-  const nounLower = noun.toLowerCase();
-  const firstKey = spec.subEvents[0]?.key;
-
   const patchP = (id: string, patch: Partial<ParticipantResult>) => setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
   const setOrg = (id: string, orgId: string) => patchP(id, { orgId: orgId || null, org: orgs.find((o) => o.id === orgId)?.name ?? null });
+  void setOrg; // dead code - see comment above
+
+  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
   const setMark = (id: string, key: string, n: number | null) => setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, marks: { ...p.marks, [key]: n } } : p)) }));
-  // Switching weight class carries the mark over to the new key (and drops the old).
-  const setCategory = (id: string, cat: string) => setState((s) => ({ participants: s.participants.map((p) => {
-    if (p.id !== id) return p;
-    const prev = p.category ?? firstKey;
-    return { ...p, category: cat, marks: { [cat]: p.marks[prev] ?? null } };
-  }) }));
 
   // `eventStandings` is the per-org contribution (points + medals from each sub-event's
   // top three) the standings service reads, so detailed event results feed the
@@ -1790,9 +1813,22 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
       ? `Each ${nounLower} is ranked (${best} wins) — the top finishers earn ${pts} points for their org. An org's total is the sum across every ${nounLower}.`
       : `Each ${nounLower} awards placement points down the order to each finisher's org; an org's total is the sum across every ${nounLower}.`;
   const subtitle = pickOne
-    ? `Pick each competitor's ${nounLower} and enter their total${unit}.`
-    : `Enter each competitor's mark per ${nounLower}${unit}.`;
+    ? isNamedDiscipline
+      ? `Enter each competitor's total${unit} for ${spec.subEvents[0]?.label ?? noun}.`
+      : `Choose the ${nounLower} this session is scoring, then enter each competitor's total${unit}.`
+    : isNamedDiscipline
+      ? `Enter each competitor's mark${unit} for ${spec.subEvents[0]?.label ?? noun}.`
+      : `Enter each competitor's mark per ${nounLower}${unit}.`;
   const markLabel = `Total${unit}`;
+  // Whole sport, nothing chosen yet: this IS the fix for a row silently scoring
+  // under the wrong default category - there is no default any more, and nothing
+  // can be scored until an explicit choice is made for the whole session.
+  const blockedOnCategory = pickOne && !isNamedDiscipline && !category;
+  // Exactly one mark per row - any pickOne sport (a competitor is only ever in
+  // one category, chosen or not yet), or a named discipline on a grid sport.
+  // Only a genuinely multi-category whole-sport grid sport still needs its
+  // per-race columns.
+  const singleMark = pickOne || isNamedDiscipline;
 
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
@@ -1800,62 +1836,65 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
         <CardHeader title="Participants & results" subtitle={subtitle} />
         <CardBody className="space-y-3">
           <p className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-slate-600 dark:bg-brand-500/10 dark:text-slate-300">{scoringText}</p>
+          {pickOne && !isNamedDiscipline && (
+            <Field label={noun} hint={!category ? `Choose a ${nounLower} before scoring anyone in this session.` : undefined}>
+              <Select value={category ?? ''} onChange={(e) => setGlobalCategory(e.target.value)}>
+                <option value="" disabled>— Choose {nounLower} —</option>
+                {spec.subEvents.map((se) => <option key={se.key} value={se.key}>{se.label}</option>)}
+              </Select>
+            </Field>
+          )}
           {state.participants.length === 0 && (
             <p className="text-sm text-slate-400 dark:text-slate-500">No registered entrants for this discipline yet.</p>
           )}
-          {state.participants.map((p) => {
-            const cat = p.category ?? firstKey;
-            return (
+          {/* One category applies to every row here - a named discipline, or a
+              chosen global category - so the race/class name belongs once, in the
+              subtitle above, not repeated on every single row. A genuinely
+              multi-category "Whole sport" grid sport is the only shape that still
+              needs its own column per race. */}
+          {state.participants.length > 0 && (singleMark ? (
+            <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+              {state.participants.map((p) => (
+                <div key={p.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</span>
+                  {category && (
+                    <span className="hidden flex-1 truncate text-center text-xs text-slate-400 dark:text-slate-500 sm:block">
+                      {spec.subEvents.find((se) => se.key === category)?.label ?? noun}
+                    </span>
+                  )}
+                  {category ? (
+                    <div className="w-32 shrink-0">
+                      <MarkInput value={p.marks[category] ?? null} isTime={isTime} onChange={(n) => setMark(p.id, category, n)} ariaLabel={`${p.name || 'competitor'} ${markLabel}`} />
+                    </div>
+                  ) : (
+                    <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">Choose a {nounLower} above</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            state.participants.map((p) => (
               <div key={p.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
-                {pickOne ? (
-                  <div className="grid grid-cols-4 items-start gap-3">
-                    <Field label="Competitor" compact>
-                      <p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</p>
-                    </Field>
-                    <Field label="Counts towards" compact>
-                      <Select value={orgValue(p)} onChange={(e) => setOrg(p.id, e.target.value)}>
-                        <option value="">— Individual —</option>
-                        {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                      </Select>
-                    </Field>
-                    <Field label={noun} compact>
-                      <Select value={cat} onChange={(e) => setCategory(p.id, e.target.value)}>
-                        {spec.subEvents.map((se) => <option key={se.key} value={se.key}>{se.label}</option>)}
-                      </Select>
-                    </Field>
-                    <Field label={markLabel} compact>
-                      <MarkInput value={p.marks[cat] ?? null} isTime={isTime} onChange={(n) => setMark(p.id, cat, n)} ariaLabel={`${p.name || 'competitor'} ${markLabel}`} />
-                    </Field>
-                  </div>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-[1fr_1fr] items-start gap-2">
-                      <Field label="Competitor" compact>
-                        <p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</p>
-                      </Field>
-                      <Field label="Counts towards" compact>
-                        <Select value={orgValue(p)} onChange={(e) => setOrg(p.id, e.target.value)}>
-                          <option value="">— Individual —</option>
-                          {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                        </Select>
-                      </Field>
-                    </div>
-                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                      {spec.subEvents.map((se) => (
-                        <label key={se.key} className="block">
-                          <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
-                          <MarkInput value={p.marks[se.key] ?? null} isTime={isTime} onChange={(n) => setMark(p.id, se.key, n)} ariaLabel={`${p.name || 'competitor'} ${se.label}`} />
-                        </label>
-                      ))}
-                    </div>
-                  </>
-                )}
+                <Field label="Competitor" compact>
+                  <p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</p>
+                </Field>
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {spec.subEvents.map((se) => (
+                    <label key={se.key} className="block">
+                      <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
+                      <MarkInput value={p.marks[se.key] ?? null} isTime={isTime} onChange={(n) => setMark(p.id, se.key, n)} ariaLabel={`${p.name || 'competitor'} ${se.label}`} />
+                    </label>
+                  ))}
+                </div>
               </div>
-            );
-          })}
+            ))
+          ))}
+          {blockedOnCategory && (
+            <p className="text-sm text-rose-600 dark:text-rose-400">Choose a {nounLower} above before saving.</p>
+          )}
           <div className="flex justify-end gap-2">
-            <Button size="sm" variant="outline" disabled={persist.isPending} onClick={() => persistEvent(false)}>{persist.isPending ? 'Saving…' : 'Save results'}</Button>
-            <Button size="sm" disabled={persist.isPending} onClick={() => persistEvent(true)}>Save &amp; sign off</Button>
+            <Button size="sm" variant="outline" disabled={persist.isPending || blockedOnCategory} onClick={() => persistEvent(false)}>{persist.isPending ? 'Saving…' : 'Save results'}</Button>
+            <Button size="sm" disabled={persist.isPending || blockedOnCategory} onClick={() => persistEvent(true)}>Save &amp; sign off</Button>
           </div>
         </CardBody>
       </Card>

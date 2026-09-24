@@ -16,6 +16,20 @@ export interface ParticipantResult {
 
 export interface EventState { participants: ParticipantResult[] }
 
+export interface DisciplineRef { id: string | null; name: string | null }
+
+// A "Whole sport" discipline (id null) genuinely mixes categories in one fixture -
+// that's what pickOne's per-competitor picker, or a grid sport's per-race columns,
+// are FOR. A NAMED discipline ("66kg", "100m Backstroke") already fixes the one
+// category by what it IS, whether the sport is normally scored with a picker
+// (powerlifting) or a grid (swimming) - there is nothing left to choose between
+// either way. Web console and API derivation both call this, on the same fixture
+// data, so neither can rank against a category the other doesn't know about.
+export function effectiveEventSpec(spec: EventSpec, discipline: DisciplineRef): EventSpec {
+  if (!discipline.id) return spec;
+  return { ...spec, subEvents: [{ key: discipline.id, label: discipline.name ?? spec.subEventNoun ?? 'Category' }] };
+}
+
 // One row of the simple team-ranking model (the default for events): an org's place.
 export interface EventRankingRow { orgId: string | null; org: string; place: number | null; points?: number }
 

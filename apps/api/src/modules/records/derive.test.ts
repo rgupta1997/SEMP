@@ -16,7 +16,7 @@ const FIXTURE: DerivableFixture = {
   occurred_on: new Date('2026-08-16T00:00:00Z'),
   lock_version: 0,
   championship_id: 'champ1', championship_name: 'Inter-College 2026',
-  sport_id: 'sp1', sport_name: 'Football', discipline_name: 'Mens',
+  sport_id: 'sp1', sport_name: 'Football', discipline_id: null, discipline_name: 'Mens',
   format_config: null,
   live_state: null,
 };
@@ -303,6 +303,82 @@ describe('ranking events · medals per competitor (J4-E1-S3 + J4-E4-S1)', () => 
     expect(medals.filter((m) => m.medal === 'gold')).toHaveLength(2);
     expect(medals.some((m) => m.medal === 'silver')).toBe(false);
     expect(medals.filter((m) => m.medal === 'bronze')).toHaveLength(1);
+  });
+
+  it("falls back to the sport's seeded template when a discipline never stored one", () => {
+    // Creating a discipline never writes format_config.scoring - this is the only
+    // spec that has ever actually existed for these fixtures in real use.
+    const fx: DerivableFixture = {
+      ...FIXTURE, ...EVENT_FIXTURE,
+      sport_name: 'Athletics', discipline_id: null, discipline_name: null,
+      format_config: null,
+      live_state: { event: { participants: [
+        { id: 'c1', name: 'A', orgId: 'o1', marks: { m400: 400 } },
+        { id: 'c2', name: 'B', orgId: 'o1', marks: { m400: 350 } },
+      ] } },
+    };
+    expect(eventMedals(fx)).toEqual([
+      { competitor_id: 'c1', medal: 'gold', sub_event: "Men's 400m" },
+      { competitor_id: 'c2', medal: 'silver', sub_event: "Men's 400m" },
+    ]);
+  });
+
+  it('locks every competitor to a named discipline\'s own category, not the sport\'s full list', () => {
+    const fx: DerivableFixture = {
+      ...FIXTURE, ...EVENT_FIXTURE,
+      sport_name: 'Powerlifting', discipline_id: 'disc-66kg', discipline_name: '66kg',
+      format_config: null,
+      live_state: { event: { participants: [
+        { id: 'c1', name: 'Lifter A', orgId: 'o1', marks: { 'disc-66kg': 120 } },
+        { id: 'c2', name: 'Lifter B', orgId: 'o2', marks: { 'disc-66kg': 110 } },
+        // Filed under the sport's own category key rather than the discipline's -
+        // stale or mis-saved data - and correctly invisible to this ranking.
+        { id: 'c3', name: 'Lifter C', orgId: 'o3', marks: { m63: 999 } },
+      ] } },
+    };
+    expect(eventMedals(fx)).toEqual([
+      { competitor_id: 'c1', medal: 'gold', sub_event: '66kg' },
+      { competitor_id: 'c2', medal: 'silver', sub_event: '66kg' },
+    ]);
+  });
+
+  it('leaves the full category list untouched for "Whole sport" (no named discipline)', () => {
+    const fx: DerivableFixture = {
+      ...FIXTURE, ...EVENT_FIXTURE,
+      sport_name: 'Powerlifting', discipline_id: null, discipline_name: null,
+      format_config: null,
+      live_state: { event: { participants: [
+        { id: 'c1', name: 'Lifter A', orgId: 'o1', marks: { m63: 120 } },
+        { id: 'c2', name: 'Lifter B', orgId: 'o2', marks: { m74: 140 } },
+      ] } },
+    };
+    // Each alone in their own class - both take gold, ranked separately per class.
+    expect(eventMedals(fx)).toEqual([
+      { competitor_id: 'c1', medal: 'gold', sub_event: 'Men ≤63kg' },
+      { competitor_id: 'c2', medal: 'gold', sub_event: 'Men ≤74kg' },
+    ]);
+  });
+
+  it('collapses to one category for a named discipline even on a grid sport (no pickOne)', () => {
+    // Swimming has no pickOne - a swimmer can enter several races in one sitting -
+    // but "100m Backstroke" as its own discipline still means there is only one
+    // race here, the same as a named weight class on a pickOne sport.
+    const fx: DerivableFixture = {
+      ...FIXTURE, ...EVENT_FIXTURE,
+      sport_name: 'Swimming', discipline_id: 'disc-100bk', discipline_name: '100m Backstroke',
+      format_config: null,
+      live_state: { event: { participants: [
+        { id: 'c1', name: 'Swimmer A', orgId: 'o1', marks: { 'disc-100bk': 60.1 } },
+        { id: 'c2', name: 'Swimmer B', orgId: 'o2', marks: { 'disc-100bk': 62.4 } },
+        // Filed under one of the sport's generic race keys rather than the
+        // discipline's own - correctly invisible to this ranking.
+        { id: 'c3', name: 'Swimmer C', orgId: 'o3', marks: { m25bk: 0.1 } },
+      ] } },
+    };
+    expect(eventMedals(fx)).toEqual([
+      { competitor_id: 'c1', medal: 'gold', sub_event: '100m Backstroke' },
+      { competitor_id: 'c2', medal: 'silver', sub_event: '100m Backstroke' },
+    ]);
   });
 });
 
