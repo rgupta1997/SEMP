@@ -84,7 +84,20 @@ build_in_source = true
 cached          = false
 
 [api.deploy.parameters]
-template_file     = "semp-api.yaml"
+# template_file deliberately points at the BUILT template, not semp-api.yaml.
+#
+# `sam deploy` defaults to .aws-sam/build/template.yaml when a build exists, and that
+# is the template whose CodeUri points at each function's own artifact directory.
+# Naming the source template here overrides that default: SAM then packages
+# `CodeUri: ../apps/api` verbatim, so all three functions receive the same ~24 MB zip
+# of the source tree with no index.mjs at its root, and every one of them fails at
+# init with `Runtime.ImportModuleError: Cannot find module 'index'`.
+#
+# It looks harmless because `sam build` still succeeds and the artifacts under
+# .aws-sam/build are correct - they are simply never used. Verified on the first real
+# deploy of semp-uat, where all three functions came back with an identical
+# CodeSha256.
+template_file     = ".aws-sam/build/template.yaml"
 stack_name        = "semp-api"
 region            = "ap-south-1"
 capabilities      = "CAPABILITY_IAM"
@@ -93,20 +106,117 @@ resolve_s3        = true
 # database's resources - it imports two secret ARNs and nothing else.
 confirm_changeset = false
 tags              = "app=semp stack=api managed-by=sam"
-# SecretsExtensionLayerArn MUST be filled in - it is per-region AND per-architecture
-# (arm64 here, not x86_64) and version-bumped, so there is no safe default to
-# hardcode. Look up the current ap-south-1 ARM64 ARN for the AWS Parameters and
-# Secrets Lambda Extension in the AWS docs.
+# SecretsExtensionLayerArn is deliberately ABSENT. It used to be a REPLACE_ME on the
+# reasoning that the ARN is per-region, per-architecture and version-bumped, so no
+# default could be safe. That was wrong in one specific way: AWS publishes the current
+# ARN as a PUBLIC SSM parameter per architecture, correct in every region, and
+# semp-api.yaml now resolves it at deploy time. Hardcoding was in fact the unsafe
+# option - the AWS docs table lists ap-south-1 arm64 at version 111 while the account
+# serves 137, so anyone pasting from the docs would pin a stale layer.
+#
+# Pass it explicitly only to reproduce a past build byte-for-byte.
 #
 # WebOrigin/WebAppUrl/MailApiUrl: fill in the real origins. WebOrigin is a
 # comma-separated CORS list; WebAppUrl is ONE origin with no trailing slash.
 parameter_overrides = [
   "InfraStackName=semp-infra",
-  "SecretsExtensionLayerArn=arn:aws:lambda:ap-south-1:REPLACE_ME:layer:AWS-Parameters-and-Secrets-Lambda-Extension-Arm64:REPLACE_ME",
   "WebOrigin=https://REPLACE_ME",
   "WebAppUrl=https://REPLACE_ME",
   "MailApiUrl=https://REPLACE_ME",
   # 0 means omit. Raise to 10 only after the account's Lambda concurrency quota is
   # above 20 - see the ReservedConcurrency parameter description.
+  "ReservedConcurrency=0",
+]
+
+# ---------------------------------------------------------------------------
+# semp-uat - the UAT stack. Deploys ALONGSIDE everything already running.
+# ---------------------------------------------------------------------------
+# Why a separate config env rather than editing [api] above: two other deployments
+# already exist in this account and neither may be disturbed.
+#
+#   PRODUCTION  serves https://events.sportagon.in, whose frontend calls
+#               https://www.events-api.sportagon.in. Not this stack, not the Lambda
+#               below, and nothing here touches it.
+#   BETA        the UNMANAGED `semp-api` Lambda + `semp-api-gateway` HTTP API created
+#               by scripts/deploy-lambda.sh. Still live (~21.8k invocations / 14 days
+#               when checked on 2026-09-22) and still on Supabase - its DATABASE_URL
+#               points at the pooler for project iwxgd..., and its WEB_ORIGIN is the
+#               sportagon-eos.netlify.app previews, which is how you can tell it is
+#               not production: events.sportagon.in is not in its CORS list, so the
+#               production frontend could not call it even if DNS pointed there.
+#
+# README.md blocker 8 describes those beta resources as abandoned leftovers to tear
+# down before this stack can deploy. That was true when it was written and is NOT
+# true now - they carry traffic. FunctionName below is what avoids the collision
+# instead: every name this stack claims is derived from it, so nothing overlaps.
+#
+# FunctionName=semp-uat therefore yields semp-uat, semp-uat-events,
+# semp-uat-realtime{,-dlq}, semp-uat-realtime-{authorizer,publisher} and the matching
+# log groups. All verified free in ap-south-1 before first deploy.
+[uat.validate.parameters]
+template_file = "semp-api.yaml"
+region        = "ap-south-1"
+lint          = true
+
+[uat.build.parameters]
+template_file   = "semp-api.yaml"
+# Same requirement as [api.build] - see the long note there and apps/api/Makefile.
+build_in_source = true
+cached          = false
+
+[uat.deploy.parameters]
+# template_file deliberately points at the BUILT template, not semp-api.yaml.
+#
+# `sam deploy` defaults to .aws-sam/build/template.yaml when a build exists, and that
+# is the template whose CodeUri points at each function's own artifact directory.
+# Naming the source template here overrides that default: SAM then packages
+# `CodeUri: ../apps/api` verbatim, so all three functions receive the same ~24 MB zip
+# of the source tree with no index.mjs at its root, and every one of them fails at
+# init with `Runtime.ImportModuleError: Cannot find module 'index'`.
+#
+# It looks harmless because `sam build` still succeeds and the artifacts under
+# .aws-sam/build are correct - they are simply never used. Verified on the first real
+# deploy of semp-uat, where all three functions came back with an identical
+# CodeSha256.
+template_file     = ".aws-sam/build/template.yaml"
+stack_name        = "semp-uat"
+region            = "ap-south-1"
+capabilities      = "CAPABILITY_IAM"
+resolve_s3        = true
+# TRUE, unlike [api]. This stack shares semp-infra's database - which holds real
+# production data migrated off Supabase - so every changeset gets read by a human.
+confirm_changeset = true
+tags              = "app=semp stack=uat managed-by=sam"
+parameter_overrides = [
+  "FunctionName=semp-uat",
+  "InfraStackName=semp-infra",
+  # Points at the SAME RDS as any future production stack, because that is where the
+  # migrated data lives. Additive writes only: no stack runs migrations (see
+  # README.md blocker 1), and exercising notifications inserts rows rather than
+  # changing schema. A snapshot exists as the restore point.
+  "WebOrigin=https://events.sportagon.in",
+  "WebAppUrl=https://events.sportagon.in",
+  # DELIBERATELY NOT the real mail service.
+  #
+  # `.invalid` is reserved by RFC 2606 and is guaranteed never to resolve, so this
+  # cannot accidentally reach anyone's server. The reason is that UAT points at the
+  # database holding migrated PRODUCTION data: every notification resolves real
+  # recipients from real rows, and a snapshot can undo a write but cannot unsend an
+  # email.
+  #
+  # Nothing breaks. sendMailBatch's DNS failure is caught by emailRecipients in
+  # notify.ts, which logs and continues - the feed row is already written and is the
+  # primary channel. The AppSync realtime path, which is what UAT exists to exercise,
+  # is unaffected.
+  #
+  # What DOES stop working is OTP sign-in: signin.routes.ts discards the token when
+  # delivery fails, so the code never arrives. Use POST /auth/login instead - it is
+  # email + bcrypt with no mail involved. MAIL_API_KEY in AppSecret still has to be
+  # non-empty for the schema to boot, but its value is irrelevant while this URL
+  # never resolves.
+  #
+  # To send real mail from UAT, swap this for the real origin:
+  #   https://fjj2qymohk2fy6cpyzfihn6ud40lkhwg.lambda-url.ap-south-1.on.aws
+  "MailApiUrl=https://mail.invalid",
   "ReservedConcurrency=0",
 ]

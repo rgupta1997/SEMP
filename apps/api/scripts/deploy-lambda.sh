@@ -173,7 +173,6 @@ ENV_JSON=$(jq -n \
   --arg mail_timeout_ms   "${MAIL_TIMEOUT_MS:-5000}" \
   --arg auth_email_bypass "$LAMBDA_AUTH_EMAIL_BYPASS" \
   --arg otp_sms_bypass    "$LAMBDA_OTP_SMS_BYPASS" \
-  --arg supabase_jwt      "${SUPABASE_JWT_SECRET:-}" \
   '{Variables: ({
       NODE_ENV:          $node_env,
       DATABASE_URL:      $database_url,
@@ -186,12 +185,38 @@ ENV_JSON=$(jq -n \
       MAIL_TIMEOUT_MS:   $mail_timeout_ms,
       AUTH_EMAIL_BYPASS: $auth_email_bypass,
       OTP_SMS_BYPASS:    $otp_sms_bypass,
-    }
-    # Only while notifications still run on Supabase Realtime. Omitted rather than
-    # sent empty: modules/notifications/realtime-token.ts reads it via raw
-    # process.env and throws a clear error when absent, which beats signing
-    # Realtime tokens with "".
-    + (if $supabase_jwt == "" then {} else { SUPABASE_JWT_SECRET: $supabase_jwt } end))}')
+    })}')
+
+# ---------------------------------------------------------------------------
+# ⚠️  DEPLOYING THIS BRANCH TO BETA WILL CRASH BETA. Read before running.
+# ---------------------------------------------------------------------------
+# This script is how the live BETA environment is deployed (the semp-api function in
+# ap-south-1, ~21.8k invocations / 14 days as of 2026-09-22). It is not legacy and
+# its resources must not be torn down - see infra/README.md blocker 8.
+#
+# The hazard is the interaction between two things that are each individually fine:
+#
+#   1. An EXISTING function KEEPS ITS ENVIRONMENT (see the long note below). Beta's
+#      function carries exactly three variables: DATABASE_URL, JWT_SECRET, WEB_ORIGIN.
+#      No NODE_ENV, no mail settings.
+#   2. This branch made NODE_ENV MANDATORY with no default (config/env.schema.ts), and
+#      added a realtime guard on top. `envSchema.parse` runs at module load, so a
+#      missing variable is a cold-start crash on EVERY invocation, not an error on one
+#      route.
+#
+# So `update-function-code` alone ships code that cannot boot against beta's existing
+# environment. Nothing warns you; the function simply starts failing.
+#
+# Before deploying this branch to beta, set on the function (console or
+# update-function-configuration):
+#   NODE_ENV               development   <- keeps beta OUT of the production guards
+#   MAIL_TRANSPORT         console       <- or http plus MAIL_API_URL + MAIL_API_KEY
+#   REALTIME_TRANSPORT     off           <- beta has no AppSync stack; off is correct
+#
+# NODE_ENV=production instead would additionally demand MAIL_TRANSPORT=http with a
+# real key, and REALTIME_TRANSPORT=appsync with a queue URL, HTTP endpoint and region
+# that only a deployed semp-* stack produces. Beta has none of those, which is exactly
+# why `development` is the right answer for it.
 
 # ---------- 2. Lambda function ----------
 #

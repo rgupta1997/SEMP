@@ -16,7 +16,7 @@ import {
  *
  * An interface rather than a direct call, because this package must not know that a
  * mail service exists - it renders the message and hands it over, exactly as the API
- * layer does. `setNotificationMailPort` wires the real one at boot.
+ * layer does. `setNotificationPorts` wires the real one at boot.
  */
 export interface NotificationMailPort {
   send(input: {
@@ -35,18 +35,78 @@ export interface NotificationMailPort {
   }): Promise<void>;
 }
 
-let mailPort: NotificationMailPort | null = null;
 
 /**
- * Registered once at server boot.
+ * How a notification reaches an already-open browser tab.
  *
- * A module-level port rather than an argument on notify() on purpose: there are a
- * dozen call sites, none of which have any business knowing about email, and
- * threading a mailer through all of them to serve five notification types would put
- * the transport back in the places this package exists to keep it out of.
+ * The second transport, and an interface for the same reason as the mail port: this
+ * package must not know whether live delivery is a database's replication stream, a
+ * hosted pub/sub service or nothing at all. It hands over a set of user ids and
+ * stops.
+ *
+ * The payload is deliberately nothing but the recipient list. Clients treat the
+ * event as a PING and re-fetch, so the feed's own visibility check stays the single
+ * place audience rules are enforced - putting notification content on the wire would
+ * mean re-deriving that rule inside a transport that has no business knowing it.
  */
-export function setNotificationMailPort(port: NotificationMailPort | null): void {
-  mailPort = port;
+export interface NotificationRealtimePort {
+  /**
+   * Fan out one notification to its recipients.
+   *
+   * Must not throw - see the call site in notify() for why - and must not block on
+   * the fan-out itself: a championship-wide notification can resolve to thousands of
+   * recipients, which is a queue's problem, not a request's.
+   */
+  publish(input: {
+    notificationId: string;
+    userIds: string[];
+    type: string;
+  }): Promise<void>;
+}
+
+/**
+ * Every channel a notification can travel down.
+ *
+ * ONE object with REQUIRED keys, rather than a setter per transport, and that is the
+ * whole point. The mail port shipped unregistered for the entire life of the feature
+ * - server.ts imported it and never called it - and nothing caught it because an
+ * unregistered port is a deliberate silent no-op. Two independent optional setters
+ * are a design that makes that mistake once per transport.
+ *
+ * With required keys, adding a third channel is a COMPILE ERROR at the single
+ * registration site instead of an omission nobody notices for months. The values
+ * stay nullable because "no live transport" is legitimate - local dev and the test
+ * suite both run that way, and the bell falls back to its poll.
+ */
+export interface NotificationPorts {
+  mail: NotificationMailPort | null;
+  realtime: NotificationRealtimePort | null;
+}
+
+let ports: NotificationPorts = { mail: null, realtime: null };
+
+/**
+ * Registered once at server boot - see buildApp() in apps/api/src/http/server.ts,
+ * the single composition root both the Render and Lambda entry points go through.
+ *
+ * Module-level rather than an argument on notify() on purpose: there are ~60 call
+ * sites, none of which have any business knowing that email or a websocket exists,
+ * and threading transports through all of them would put them back in exactly the
+ * places this package exists to keep them out of.
+ */
+export function setNotificationPorts(next: NotificationPorts | null): void {
+  ports = next ?? { mail: null, realtime: null };
+}
+
+/**
+ * Reads back what boot registered.
+ *
+ * Exists so the registration is OBSERVABLE, which is the one property the mail-port
+ * bug proved it needs: a port you cannot read back is a port no test can prove was
+ * wired. server.ports.test.ts is the only consumer.
+ */
+export function getNotificationPorts(): Readonly<NotificationPorts> {
+  return ports;
 }
 
 export interface NotificationPrisma extends RecipientResolverPrisma {
@@ -155,9 +215,42 @@ export async function notify(
     });
   }
 
+  await publishRealtime(input.type, notification.id, recipientIds);
+
   await emailRecipients(prisma, input.type, notification.id, recipientIds, data, context);
 
   return notification;
+}
+
+/**
+ * The live-delivery half.
+ *
+ * Never throws, for exactly the reason emailRecipients() never throws: the feed row
+ * is already written and is the primary channel. A transport having a bad afternoon
+ * must not turn "your fixture moved" into a failed request for the organiser who
+ * moved it - they would see an error, retry, and produce a second notification.
+ *
+ * Reuses the recipient set notify() already resolved rather than re-deriving it. The
+ * audience rule is evaluated once per notification, here and for the delivery rows,
+ * so the two can never disagree about who was meant to receive this.
+ */
+async function publishRealtime(
+  type: string,
+  notificationId: string,
+  recipientIds: Set<string>,
+): Promise<void> {
+  const port = ports.realtime;
+  if (!port || recipientIds.size === 0) return;
+
+  try {
+    await port.publish({
+      notificationId,
+      userIds: [...recipientIds],
+      type,
+    });
+  } catch (err) {
+    console.error(`[notifications] realtime fan-out failed for ${type} (${notificationId}):`, err);
+  }
 }
 
 /**
@@ -179,7 +272,10 @@ async function emailRecipients(
   context: RuleContext,
 ): Promise<void> {
   const definition: NotificationTypeDef = NOTIFICATION_TYPES[type];
-  if (!definition?.email || !mailPort || recipientIds.size === 0) return;
+  // Captured into a local: `ports` is a mutable module binding, so narrowing it with
+  // the guard below would not survive the awaits further down.
+  const mail = ports.mail;
+  if (!definition?.email || !mail || recipientIds.size === 0) return;
 
   try {
     const content = definition.email.build(data, context);
@@ -199,7 +295,7 @@ async function emailRecipients(
 
     if (recipients.length === 0) return;
 
-    await mailPort.send({
+    await mail.send({
       recipients,
       content,
       // Keyed on the notification, so re-running the same notification cannot fan out

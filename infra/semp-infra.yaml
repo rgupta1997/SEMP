@@ -203,7 +203,7 @@ Resources:
       TargetId: !Ref DbInstance
       TargetType: AWS::RDS::DBInstance
 
-  # JWT_SECRET, MAIL_API_KEY, SUPABASE_JWT_SECRET.
+  # JWT_SECRET and MAIL_API_KEY.
   #
   # In semp-infra rather than semp-api for the same reason the database is:
   # rotating an app secret must not be something a push can do by accident, and an
@@ -213,7 +213,7 @@ Resources:
   # two are set out of band:
   #   aws secretsmanager put-secret-value --secret-id semp/api/app-secrets \
   #     --secret-string "$(jq -n --arg j "$JWT" --arg m "$MAIL" --arg s "$SUPA" \
-  #        '{JWT_SECRET:$j, MAIL_API_KEY:$m, SUPABASE_JWT_SECRET:$s}')"
+  #        '{JWT_SECRET:$j, MAIL_API_KEY:$m}')"
   # so no value is ever in git, in samconfig.toml, or in a changeset.
   AppSecret:
     Type: AWS::SecretsManager::Secret
@@ -221,9 +221,9 @@ Resources:
     DeletionPolicy: Retain
     Properties:
       Name: semp/api/app-secrets
-      Description: SEMP application secrets. MAIL_API_KEY and SUPABASE_JWT_SECRET are set out of band.
+      Description: SEMP application secrets. MAIL_API_KEY is set out of band.
       GenerateSecretString:
-        SecretStringTemplate: '{"MAIL_API_KEY":"","SUPABASE_JWT_SECRET":""}'
+        SecretStringTemplate: '{"MAIL_API_KEY":""}'
         GenerateStringKey: JWT_SECRET
         # 64 chars, comfortably over the 32-character floor that
         # apps/api/src/config/env.schema.ts enforces in production. That guard

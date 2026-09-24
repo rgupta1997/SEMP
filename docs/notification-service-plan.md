@@ -150,7 +150,36 @@ An index-range scan instead of an anti-join against `notification_reads` — che
 
 `markSeen(userId)` upserts `notification_cursors` and is called when the bell opens (replacing today's `read-all` bulk write as the primary badge-clearing action; `read-all` can stay for per-item list state).
 
-## 5. Real-time delivery via Supabase Realtime
+## 5. Real-time delivery via Supabase Realtime — SUPERSEDED
+
+> **This section is history, kept because its reasoning still holds.** Live delivery now
+> runs on **AWS AppSync Events**, not Supabase Realtime: Supabase Realtime reads
+> Supabase's own Postgres WAL, so it could not survive the move to RDS at all.
+>
+> What survived the change, exactly as written below:
+> - the ping-not-payload decision, and re-fetching rather than streaming rows — now
+>   also a disclosure boundary, since the publisher has no database and cannot re-check
+>   visibility (`apps/api/src/modules/realtime/message.ts`);
+> - the short-lived minted token from `POST /notifications/realtime-token`, still at
+>   that path;
+> - the prediction in the last paragraph that only this section would change. It did:
+>   `notify()`, the type registry and the audience rules were untouched.
+>
+> What changed:
+> - **Step 4's poll fallback was implemented, then removed, and is now back at 120s.**
+>   It is not a nicety. After the RDS cutover it is the only rollback there is.
+> - The token is signed with an HKDF-**derived** key rather than the Supabase project
+>   secret. Signing it with `JWT_SECRET` directly would have made every realtime token
+>   a working API session, because `parseAuth` checks no audience.
+> - Per-user isolation moved from an RLS policy to a Lambda authorizer doing exact
+>   channel matching (`apps/api/src/modules/realtime/authorize.ts`). AppSync permits
+>   **wildcard** subscribes, so anything looser than equality leaks every user's
+>   notifications to any signed-in caller.
+> - Fan-out is asynchronous via SQS. AppSync Events allows one channel per publish
+>   request, so N recipients is N HTTP requests — far too many to do inline.
+>
+> The open question at the end of §7 ("confirm Supabase Realtime Authorization support
+> for externally-signed JWTs before building §5") was answered by not needing it.
 
 Goal: replace `NotificationBell`'s `refetchInterval: 30_000` poll with live push, using infrastructure we already pay for.
 

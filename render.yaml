@@ -1,4 +1,18 @@
 # Render Blueprint - SEMP backend (Express + Prisma, run with tsx).
+#
+# ---------------------------------------------------------------------------
+# SUPERSEDED BY infra/ (AWS SAM: Lambda + API Gateway + RDS). Will not boot.
+# ---------------------------------------------------------------------------
+# This service sets NODE_ENV=production below, and env.schema.ts now refuses to boot
+# in production unless REALTIME_TRANSPORT=appsync with a queue URL and a WebSocket
+# endpoint - both of which are semp-api stack outputs. That guard is deliberate: the
+# alternative is a bell that silently stops delivering live notifications and falls
+# back to polling, which is a usable product and therefore something nobody reports.
+#
+# Render also has no instance role, so even with those values it would need static
+# IAM credentials to reach SQS. Since the plan is to move off Render entirely, this
+# file is kept for reference rather than updated.
+#
 # Usage: push this repo to GitHub, then in Render → New + → Blueprint → pick the repo.
 # Set DATABASE_URL and WEB_ORIGIN in the dashboard (JWT_SECRET is generated for you).
 services:

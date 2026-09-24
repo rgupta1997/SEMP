@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { notify, setNotificationMailPort, type NotificationMailPort } from '@semp/notifications/server/notify.js';
+import { notify, setNotificationPorts, type NotificationMailPort } from '@semp/notifications/server/notify.js';
 
 // Lives here rather than in packages/notifications because that package has no test
 // runner of its own - apps/api's vitest is where this monorepo's tests actually run.
@@ -41,7 +41,7 @@ function capturePort(): NotificationMailPort {
 
 beforeEach(() => {
   sent = [];
-  setNotificationMailPort(capturePort());
+  setNotificationPorts({ mail: capturePort(), realtime: null });
 });
 
 describe('notify() email fan-out', () => {
@@ -121,7 +121,7 @@ describe('notify() email fan-out', () => {
 
   // The feed row is the primary channel and is already written by this point.
   it('never lets a mail failure fail the notification', async () => {
-    setNotificationMailPort({ send: async () => { throw new Error('mail service down'); } });
+    setNotificationPorts({ mail: { send: async () => { throw new Error('mail service down'); } }, realtime: null });
     const prisma = fakePrisma([verified('u1', 'a@x.com')]);
 
     await expect(
@@ -132,7 +132,7 @@ describe('notify() email fan-out', () => {
   });
 
   it('works with no port registered at all', async () => {
-    setNotificationMailPort(null);
+    setNotificationPorts(null);
     const prisma = fakePrisma([verified('u1', 'a@x.com')]);
 
     await expect(

@@ -9,6 +9,9 @@ build/
 apps/api/src/infra/prisma/generated/
 apps/api/dist-lambda/
 apps/api/dist-lambda.zip
+# scripts/build-fn.mjs's local output when ARTIFACTS_DIR is unset (the small
+# realtime Lambdas). Under `sam build` these go to .aws-sam instead.
+apps/api/dist-fn/
 supabase/.temp/
 LIVE_SIMULATION_TEST.md
 TESTING_GUIDE.md

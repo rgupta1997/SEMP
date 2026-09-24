@@ -406,9 +406,9 @@ deliberate (it removes essentially all commodity internet scanning, which only t
 > Verify the current connect first (step 8), because a wrong `AdminCidr` looks like a
 > hang and is much easier to diagnose before anything else is in flight.
 
-CloudFormation generated a 64-character `JWT_SECRET` and created `MAIL_API_KEY` and
-`SUPABASE_JWT_SECRET` **empty**. `put-secret-value` replaces the whole JSON document, so
-read the generated value back first or you will destroy it:
+CloudFormation generated a 64-character `JWT_SECRET` and created `MAIL_API_KEY`
+**empty**. `put-secret-value` replaces the whole JSON document, so read the generated
+value back first or you will destroy it:
 
 ```bash
 GEN=$(aws secretsmanager get-secret-value --secret-id semp/api/app-secrets \
@@ -418,8 +418,7 @@ aws secretsmanager put-secret-value --secret-id semp/api/app-secrets --region ap
   --secret-string "$(jq -n \
       --arg j "$GEN" \
       --arg m "<MAIL_API_KEY from apps/api/.env>" \
-      --arg s "<SUPABASE_JWT_SECRET from the Supabase dashboard>" \
-      '{JWT_SECRET:$j, MAIL_API_KEY:$m, SUPABASE_JWT_SECRET:$s}')"
+      '{JWT_SECRET:$j, MAIL_API_KEY:$m}')"
 ```
 
 > **This generated `JWT_SECRET` is a rotation, and rotation is destructive beyond
@@ -475,6 +474,13 @@ calls `auth.uid()`, the other does `alter publication supabase_realtime add tabl
 Neither the role, the function, nor the publication exists here.
 
 Take the current state as a baseline instead.
+
+> **First, apply `20260922000000_retire_supabase_realtime.sql` to Supabase.** It drops
+> the Realtime policy and publication membership that the Supabase-only artifacts come
+> from, so the dump below simply does not contain them and step 9b has one less thing
+> to strip. Both are dead code either way — live notifications run on AppSync Events
+> now — but doing it here means the *schema* is clean rather than the *dump* being
+> cleaned, which is one fewer step to forget at 2am. If you skip it, 9b still works.
 
 **First, isolate the Supabase commands from your RDS environment.** By step 8 this shell
 has `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE`/`PGSSLMODE` all pointing at
@@ -568,7 +574,10 @@ pg_dump --schema-only --no-owner --no-privileges \
         --schema=public "$SUPA" > semp-schema.sql
 ```
 
-**9b. Strip the Supabase-only artifacts.** The RLS policy survives a dump because it is
+**9b. Strip the Supabase-only artifacts.** If you applied
+`20260922000000_retire_supabase_realtime.sql` first (see the note under step 9), the RLS
+policy is already gone and only the two schema statements below remain — expect a
+**2-line** difference rather than 3. Otherwise the policy survives a dump because it is
 real state, so find and delete it by hand:
 
 ```bash
@@ -756,8 +765,9 @@ holds the engine DLL and `prisma generate` fails with `EPERM`.
 
 ## What this runbook deliberately does not do
 
-- **Deploy `semp-api`.** Schema provisioning is now done, but the Realtime replacement
-  and the two fire-and-forget background jobs are still open. See README.md.
+- **Deploy `semp-api`.** Schema provisioning is now done and the Realtime replacement
+  has landed (AppSync Events); the two fire-and-forget background jobs are still open.
+  See README.md.
 - **Run migrations from a stack.** A CloudFormation custom-resource migration Lambda is
   the tempting wrong answer: it makes every app deploy able to touch schema, which is
   exactly the coupling the two-stack split exists to prevent.
