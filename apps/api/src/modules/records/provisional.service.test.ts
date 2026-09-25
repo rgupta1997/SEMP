@@ -79,7 +79,7 @@ describe('provisionalEntriesFor', () => {
     const out = await provisionalEntriesFor(db, 'u1');
     // Same derivation as the lock uses, so locking flips the badge and nothing
     // else - the sentence describing the match never changes under the player.
-    expect(out[0].title).toBe('IIMB vs IIMA — Won 3-1');
+    expect(out[0].title).toBe('IIMB vs IIMA — Won');
     expect(out[0].detail).toMatchObject({ outcome: 'won', championship_name: 'Inter-College 2026' });
   });
 
@@ -101,7 +101,7 @@ describe('provisionalEntriesFor', () => {
   it('shows the match from the away side when that is the player\'s team', async () => {
     const { db } = fakeDb({ teams: ['tB'] });
     const out = await provisionalEntriesFor(db, 'u1');
-    expect(out[0].title).toBe('IIMA vs IIMB — Lost 1-3');
+    expect(out[0].title).toBe('IIMA vs IIMB — Lost');
   });
 
   it('is empty for someone on no team at all', async () => {

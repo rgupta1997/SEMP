@@ -292,12 +292,13 @@ function entryTitle(fx: DerivableFixture, teamId: string | null): string {
   if (fx.status === 'walkover') return `${versus} — Walkover`;
   if (fx.status === 'bye') return `${versus} — Bye`;
 
+  // The score is deliberately left off the headline - it's readily available on
+  // the fixture itself for whoever wants it, and stamping the final score into a
+  // permanent timeline title reads as a stat, not a story, for every sport that
+  // isn't scored as a simple two-number tally (a tie's rubber count, say).
   const outcome = outcomeFor(fx, teamId);
-  const myScore = teamId && teamId === fx.away_team_id ? fx.away_score : fx.home_score;
-  const theirScore = teamId && teamId === fx.away_team_id ? fx.home_score : fx.away_score;
-  const score = myScore != null && theirScore != null ? ` ${myScore}-${theirScore}` : '';
   const verb = outcome === 'won' ? 'Won' : outcome === 'lost' ? 'Lost' : outcome === 'drew' ? 'Drew' : null;
-  return verb ? `${versus} — ${verb}${score}` : versus;
+  return verb ? `${versus} — ${verb}` : versus;
 }
 
 /**

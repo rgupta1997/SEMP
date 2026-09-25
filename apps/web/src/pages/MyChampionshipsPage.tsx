@@ -22,10 +22,12 @@ const ROLE_TONE: Record<string, 'brand' | 'green' | 'amber' | 'slate'> = {
 // The breakdown splits My Events by RELATIONSHIP, not by status: Playing, Hosting,
 // Completed. That is the question a person actually arrives with - "what am I in?"
 // rather than "what is currently running?" - and it is why an event can appear under
-// both Playing and Completed without the tabs contradicting each other.
-type TabKey = 'playing' | 'hosting' | 'completed';
+// both Playing and Completed without the tabs contradicting each other. "All" is the
+// one tab that asks neither question - just "every event I'm involved in, however".
+type TabKey = 'all' | 'playing' | 'hosting' | 'completed';
 
 const TABS: Array<{ key: TabKey; label: string }> = [
+  { key: 'all', label: 'All' },
   { key: 'playing', label: 'Playing' },
   { key: 'hosting', label: 'Hosting' },
   { key: 'completed', label: 'Completed' },
@@ -34,6 +36,7 @@ const TABS: Array<{ key: TabKey; label: string }> = [
 const HOSTING_ROLES = ['organiser', 'organizer', 'poc'];
 
 function inTab(c: MyChampionship, tab: TabKey): boolean {
+  if (tab === 'all') return true;
   if (tab === 'completed') return c.status === 'completed';
   const hosting = c.my_roles.some((r) => HOSTING_ROLES.includes(r));
   // Hosting and playing are not exclusive - an organiser who also turns out for a
@@ -74,6 +77,7 @@ export function MyChampionshipsPage() {
   // Counts come from the unfiltered list, so a sport filter narrows what you see
   // without making the other tabs look empty.
   const counts = useMemo(() => ({
+    all: rows.length,
     playing: rows.filter((c) => inTab(c, 'playing')).length,
     hosting: rows.filter((c) => inTab(c, 'hosting')).length,
     completed: rows.filter((c) => inTab(c, 'completed')).length,

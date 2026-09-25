@@ -146,10 +146,10 @@ describe('deriveRecords · the timeline (J4-E2-S1)', () => {
     const winner = entries.find((e) => e.user_id === 'u1')!;
     const loser = entries.find((e) => e.user_id === 'u3')!;
 
-    expect(winner.title).toBe('IIMB vs IIMA — Won 3-1');
+    expect(winner.title).toBe('IIMB vs IIMA — Won');
     expect(winner.detail.outcome).toBe('won');
     // The same fixture, read from the other dressing room.
-    expect(loser.title).toBe('IIMA vs IIMB — Lost 1-3');
+    expect(loser.title).toBe('IIMA vs IIMB — Lost');
     expect(loser.detail.outcome).toBe('lost');
     expect(loser.detail.opponent_name).toBe('IIMB');
   });

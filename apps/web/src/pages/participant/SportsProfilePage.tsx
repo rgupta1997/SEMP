@@ -56,7 +56,9 @@ const TABS: Array<{ key: TabKey; label: string; needs?: 'advanced_stats' }> = [
   // figures were produced by results you played, and a profile that will not show
   // them is a profile that cannot answer the first question anybody asks of it.
   // The plan-gated thing was always the exportable sports CV, not the statistics.
-  { key: 'statistics', label: 'Statistics' },
+  // Flagged Beta so a stats bug reported by a player can be explained as one,
+  // rather than read as the platform's permanent record being wrong.
+  { key: 'statistics', label: 'Statistics (Beta)' },
   { key: 'achievements', label: 'Achievements' },
   { key: 'certificates', label: 'Certificates' },
 ];
