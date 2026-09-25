@@ -194,7 +194,7 @@ parameter_overrides = [
   # migrated data lives. Additive writes only: no stack runs migrations (see
   # README.md blocker 1), and exercising notifications inserts rows rather than
   # changing schema. A snapshot exists as the restore point.
-  "WebOrigin=https://events.sportagon.in",
+  "WebOrigin=https://events.sportagon.in,https://semp-uat.netlify.app",
   "WebAppUrl=https://events.sportagon.in",
   # DELIBERATELY NOT the real mail service.
   #
