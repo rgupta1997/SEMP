@@ -21,15 +21,31 @@ Sportagon_EOS_Product_Breakdown_v1.0.xlsx
 # Screenshot harness output (apps/web/tools/shoot.mjs)
 .shots/
 
-# Test-bench state, per machine. The manifest records the exact row ids a seed
+# Test-bench state, per machine. A manifest records the exact row ids a seed
 # inserted so cleanup can delete those and only those - committing it would let one
-# machine's cleanup try to delete another machine's rows.
+# machine's cleanup try to delete another machine's rows. The results files are the
+# same thing in the other direction: what one bench happened to produce.
 apps/api/scripts/.seed-*-manifest.json
+apps/api/scripts/.seed-*-results.json
+apps/api/.qa-*-manifest.json
+apps/api/scripts/.qa-*-manifest.json
 
-# QA harness output: screenshots and the fixture list the console sweep walks. Both
-# are regenerated on every run and describe one machine's bench.
+# QA harness OUTPUT - never the harnesses themselves, which are source and are
+# committed. Globbed rather than listed per harness: every sweep writes a
+# `qa-<name>-shots/` directory of screenshots plus a `verdict.json`, and the three
+# that already existed had each been added by hand after the fact, which is how
+# 8MB of PNGs reached a staging area twice.
 apps/web/scripts/qa-shots/
-apps/web/scripts/qa-console-shots/
+apps/web/scripts/qa-*-shots/
+
+# The fixture lists a sweep walks: regenerated on every run, and they name the row
+# ids of ONE machine's bench, so they are meaningless anywhere else.
 apps/web/scripts/qa-consoles.json
-apps/web/scripts/qa-cricket-shots/
 apps/web/scripts/qa-cricket.json
+apps/web/scripts/qa-sports.json
+
+# Throwaway scratch scripts. Leading underscore is the convention for "written to
+# answer one question, in one session" - they point at temp scratchpad paths that
+# exist on no other machine.
+_*.mjs
+**/_*.mjs
