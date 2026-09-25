@@ -1,9 +1,9 @@
-import { Clock, Medal, Trophy, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, Clock, Medal, Trophy, RotateCw, ShieldCheck } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { useApi, fmtDate } from '../../lib/hooks';
 import { titleCase } from '../../lib/format';
 import {
-  Badge, Card, CardBody, CardHeader, EmptyState, Spinner, StatCard, cn,
+  Badge, Button, Card, CardBody, CardHeader, EmptyState, Spinner, StatCard, cn,
 } from '../../components/ui';
 
 // The lifetime record (J4-E2) - a player's permanent, verified sporting history.
@@ -83,15 +83,27 @@ function ChipRow({ chips }: { chips: Chip[] }) {
 export function LifetimeRecordPage({ hideHonours }: { hideHonours?: boolean } = {}) {
   // No :userId → the signed-in player's own record.
   const { userId } = useParams();
-  const { data, isLoading, error } = useApi<Profile>(userId ? `/people/${userId}/profile` : '/me/profile');
+  const { data, isLoading, error, refetch } = useApi<Profile>(userId ? `/people/${userId}/profile` : '/me/profile');
 
   if (isLoading) return <Spinner />;
   if (error) {
-    return (
+    // A 403 from authorizeRecordView() means the access-control copy below; any
+    // other status (500, a dropped connection) is a server hiccup, not a
+    // rejection - telling someone their OWN profile "isn't theirs" during an
+    // outage is actively misleading, and hides the outage from bug reports.
+    const forbidden = (error as { status?: number }).status === 403;
+    return forbidden ? (
       <EmptyState
         icon={<ShieldCheck size={24} />}
         title="This record is not yours to open"
         description="You can only view the record of someone in an institution you belong to."
+      />
+    ) : (
+      <EmptyState
+        icon={<AlertTriangle size={24} className="text-amber-500" />}
+        title="Couldn't load this record"
+        description="Something went wrong on our end. Please try again."
+        action={<Button variant="outline" onClick={() => refetch()}><RotateCw size={14} /> Try again</Button>}
       />
     );
   }
