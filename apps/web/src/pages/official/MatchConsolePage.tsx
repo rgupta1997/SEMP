@@ -1618,13 +1618,20 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   // without the server needing the event spec. `complete` signs the event off.
   const persistRanking = (complete: boolean) => {
     const rows = orgs.map((o) => ({ orgId: o.id, org: o.name, place: places[o.id] ?? null, points: pointsFor(o.id) }));
+    // Drops any detailed per-athlete data this fixture was PREVIOUSLY scored
+    // with - the two consoles are mutually exclusive scoring shapes for one
+    // fixture, same as switching structure (single/tie/event) abandons
+    // whatever the last one wrote. Left in place, a stale `event` key here is
+    // what let derive.ts's two medal-derivation paths both fire and hand out
+    // two medals for one result.
+    const { event: _staleDetailed, ...restLiveState } = (live?.live_state ?? {}) as Record<string, unknown>;
     // "Save ranking" only stores the draft places - it must NOT move the standings. Only
     // "Save & sign off" writes `eventStandings` (what the standings service reads) and
     // completes the event, so the championship table changes only on sign-off. A plain
     // save keeps the fixture's current status + any previously signed-off contribution.
     const live_state = complete
-      ? { ...(live?.live_state ?? {}), eventRanking: { rows }, eventStandings: rankingContributions(rows, medalPoints) }
-      : { ...(live?.live_state ?? {}), eventRanking: { rows } };
+      ? { ...restLiveState, eventRanking: { rows }, eventStandings: rankingContributions(rows, medalPoints) }
+      : { ...restLiveState, eventRanking: { rows } };
     persist.mutate(
       {
         live_state,
@@ -1792,13 +1799,20 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   // `eventStandings` is the per-org contribution (points + medals from each sub-event's
   // top three) the standings service reads, so detailed event results feed the
   // championship table + medal tally too. `complete` signs the event off.
-  const persistEvent = (complete: boolean) => persist.mutate(
-    {
-      live_state: { ...(live?.live_state ?? {}), event: state, eventStandings: detailedContributions(spec, state) },
-      status: complete ? 'completed' : (fixture.status === 'scheduled' ? 'live' : fixture.status),
-    },
-    { onSuccess: () => toast.success(complete ? 'Event signed off' : 'Results saved'), onError: (e: any) => toast.error(e.message) },
-  );
+  const persistEvent = (complete: boolean) => {
+    // Drops any "Team ranking" org-placement data this fixture was previously
+    // scored with - see the matching comment in persistRanking. Without this,
+    // derive.ts's two medal-derivation paths (per-athlete and per-org) could
+    // both fire from the same fixture and hand out two medals for one result.
+    const { eventRanking: _staleSimple, ...restLiveState } = (live?.live_state ?? {}) as Record<string, unknown>;
+    return persist.mutate(
+      {
+        live_state: { ...restLiveState, event: state, eventStandings: detailedContributions(spec, state) },
+        status: complete ? 'completed' : (fixture.status === 'scheduled' ? 'live' : fixture.status),
+      },
+      { onSuccess: () => toast.success(complete ? 'Event signed off' : 'Results saved'), onError: (e: any) => toast.error(e.message) },
+    );
+  };
   const save = () => persistEvent(false);
 
   const agg = aggregateEvent(spec, state);

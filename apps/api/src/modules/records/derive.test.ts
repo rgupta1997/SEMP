@@ -436,4 +436,46 @@ describe('the default "Team ranking" console · medals per org (J4-E4-S1)', () =
     // eventRanking rows at all.
     expect(deriveRecords(input()).achievements.filter((a) => a.medal)).toHaveLength(5);
   });
+
+  it('never awards both an org medal and a per-athlete medal for the same result', () => {
+    // A fixture scored through BOTH consoles at different points (the bug this
+    // guards against): the org-level rows from an earlier "Team ranking" save
+    // are still sitting in live_state alongside a later detailed per-athlete
+    // save. The per-athlete data must win outright - not just take priority
+    // per person, but suppress block 2b entirely for this fixture.
+    const both: Partial<DerivableFixture> = {
+      ...RANKING_FIXTURE,
+      sport_name: 'Swimming',
+      format_config: {
+        scoring: {
+          fixtureType: 'event', scoringMode: 'detailed',
+          event: {
+            subEvents: [{ key: 'r50', label: '50m Freestyle' }],
+            result: { resultType: 'time', winnerIs: 'min', unit: 's', aggregate: 'medals', medalPoints: [5, 3, 1] },
+          },
+        },
+      },
+      live_state: {
+        eventRanking: (RANKING_FIXTURE.live_state as any).eventRanking, // stale, from an earlier save
+        event: { participants: [
+          { id: 'c1', name: 'First Runner', orgId: 'o2', marks: { r50: 24.1 } },
+          { id: 'c2', name: 'Second Runner', orgId: 'o1', marks: { r50: 25.0 } },
+        ] },
+      },
+    };
+    const swimmers: DerivableParticipant[] = [
+      { user_id: 'a1', team_id: 'tA', organization_id: 'o1', competitor_id: 'c2', name: 'First Runner' },
+      { user_id: 'a2', team_id: 'tB', organization_id: 'o2', competitor_id: 'c1', name: 'Second Runner' },
+    ];
+    const { achievements } = deriveRecords(input(both, { participants: swimmers }));
+    const medals = achievements.filter((a) => a.medal);
+    // Exactly one medal per swimmer - never two - and ranked by their actual
+    // time (a1's org placed 1st in the stale org rows, but a1 the SWIMMER was
+    // slower, so the per-athlete result correctly gives them silver, not gold.
+    expect(medals).toHaveLength(2);
+    expect(medals.map((a) => ({ u: a.user_id, m: a.medal }))).toEqual([
+      { u: 'a2', m: 'gold' },
+      { u: 'a1', m: 'silver' },
+    ]);
+  });
 });

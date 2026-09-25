@@ -1,9 +1,9 @@
 import {
   canonicalRacquetSport, competitionTier, cricketCareerBag, deriveRacquetStats,
-  deriveTeamStats, foldCricketCareer, isCricketSport, parseStoredFormat, resolveFormat,
-  statSpecFor,
-  type BattingRow, type BowlingRow, type FieldingRow,
-  type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
+  deriveTeamStats, effectiveEventSpec, eventTemplateFor, foldCricketCareer, isCricketSport,
+  parseStoredFormat, rankSubEvent, resolveFormat, statSpecFor,
+  type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
+  type FormatTemplate, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
 import { writeCategoryLines, type CategoryLineInput } from './category-lines.service.js';
@@ -45,6 +45,9 @@ interface StatFixture {
   tournament_disciplines: {
     scoring_format_id?: string | null;
     round_formats?: unknown;
+    format_config?: unknown;
+    discipline_id?: string | null;
+    disciplines?: { name: string } | null;
     tournament_sports: { sport_id: string; sports: { name: string } | null } | null;
   } | null;
 }
@@ -90,6 +93,8 @@ export async function buildPlayerStatRows(
       home_score: true, away_score: true,
       tournament_disciplines: {
         select: {
+          format_config: true, discipline_id: true,
+          disciplines: { select: { name: true } },
           tournament_sports: { select: { sport_id: true, sports: { select: { name: true } } } },
         },
       },
@@ -105,25 +110,80 @@ export async function buildPlayerStatRows(
   // no away side, so none of the two-team machinery below - side sorting,
   // pairing, a rally log, a scoreline - has anything to attach to. Every
   // resolved competitor still gets a bare appearance row (it is what makes
-  // "matches played" answerable); their mark (a time, a lift) has no stat
-  // family yet, so `stats` stays empty until one is built.
+  // "matches played" answerable).
   if (!fx.home_team_id && !fx.away_team_id) {
-    return participants.resolved.map((p) => ({
-      fixture_id: fx.id,
-      user_id: p.user_id,
-      team_id: p.team_id,
-      organization_id: p.organization_id,
-      sport_id: sportId,
-      rubber_key: null,
-      partner_user_id: null,
-      position: null,
-      role: 'player',
-      played: true,
-      outcome: null,
-      stats: {},
-      occurred_on: occurred,
-      lock_version: fx.lock_version,
-    }));
+    // The detailed console's own marks, keyed by competitor row id - the same
+    // handle resolveFixtureParticipants matched them by. The simple "Team
+    // ranking" console never writes a per-athlete mark at all (only an org's
+    // placement), so this is empty for it, same as before.
+    const eventParticipants = (
+      (fx.live_state as { event?: { participants?: unknown } } | null)?.event?.participants
+      ?? (fx.live_state as { participants?: unknown } | null)?.participants
+      ?? []
+    ) as Array<{ id: string; marks?: Record<string, number | null> }>;
+    const marksOf = new Map(eventParticipants.map((c) => [c.id, c.marks ?? {}]));
+    const state: EventState = { participants: eventParticipants.map((c) => ({ id: c.id, name: '', marks: c.marks ?? {} })) };
+
+    // Same resolution as derive.ts's eventMedals(): a stored template wins,
+    // falling back to the sport's seeded one (creating a discipline never
+    // writes a stored template, so this is the only spec that has ever
+    // actually existed for these fixtures) - then narrowed to the discipline's
+    // own single category, on a grid sport or a picker sport alike.
+    const storedSpec = (fx.tournament_disciplines?.format_config as { scoring?: FormatTemplate } | null)?.scoring?.event;
+    const rawSpec: EventSpec | null = storedSpec ?? eventTemplateFor(sportName)?.event ?? null;
+    const spec = rawSpec
+      ? effectiveEventSpec(rawSpec, {
+        id: fx.tournament_disciplines?.discipline_id ?? null,
+        name: fx.tournament_disciplines?.disciplines?.name ?? null,
+      })
+      : null;
+    // Ties "best" to whichever direction this event actually rewards - a
+    // fastest time or a heaviest lift. A named discipline leaves exactly one
+    // mark; a whole-sport session where one person entered several races
+    // leaves several, and the best of them (and its OWN category's placing)
+    // stands in for "what this appearance produced" until per-race detail has
+    // its own place to live.
+    const winnerIs = spec?.result.winnerIs ?? 'max';
+    const rankCache = new Map<string, Map<string, number>>();
+    const rankOf = (competitorId: string | null, category: string | null): number | null => {
+      if (!spec || !competitorId || !category) return null;
+      let ranks = rankCache.get(category);
+      if (!ranks) { ranks = rankSubEvent(spec, state, category); rankCache.set(category, ranks); }
+      return ranks.get(competitorId) ?? null;
+    };
+
+    return participants.resolved.map((p) => {
+      const marks = p.competitor_id ? marksOf.get(p.competitor_id) ?? {} : {};
+      const entries = Object.entries(marks).filter((e): e is [string, number] => typeof e[1] === 'number');
+      let stats: Record<string, number> = {};
+      if (entries.length) {
+        const best = entries.reduce((a, b) => (winnerIs === 'min' ? (b[1] < a[1] ? b : a) : (b[1] > a[1] ? b : a)));
+        const [bestCategory, bestMark] = best;
+        // `measured` and `podium` are unit-free counts (1 per appearance, 1 per
+        // top-3 finish) - unlike `mark`, they stay meaningful summed across
+        // categories that don't share a unit, which is exactly what Athletics
+        // needs until marks fold per discipline instead of per sport.
+        stats = { mark: bestMark, measured: 1 };
+        const rank = rankOf(p.competitor_id, bestCategory);
+        if (rank != null) { stats.rank = rank; if (rank <= 3) stats.podium = 1; }
+      }
+      return {
+        fixture_id: fx.id,
+        user_id: p.user_id,
+        team_id: p.team_id,
+        organization_id: p.organization_id,
+        sport_id: sportId,
+        rubber_key: null,
+        partner_user_id: null,
+        position: null,
+        role: 'player',
+        played: true,
+        outcome: null,
+        stats,
+        occurred_on: occurred,
+        lock_version: fx.lock_version,
+      };
+    });
   }
 
   // Only racquet sports derive stats from a rally log. Everything else gets its

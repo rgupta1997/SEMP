@@ -340,7 +340,8 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
   const byCompetitor = new Map<string, DerivableParticipant>();
   for (const p of participants) if (p.competitor_id) byCompetitor.set(p.competitor_id, p);
 
-  for (const m of eventMedals(fx)) {
+  const individualMedals = eventMedals(fx);
+  for (const m of individualMedals) {
     const p = byCompetitor.get(m.competitor_id);
     // A competitor whose phone matched no account earns no achievement - they are
     // already recorded on the fixture as unmatched, which is an organiser's cue to
@@ -371,7 +372,15 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
   // placed org's team_entries roster (always exactly one person, squad_max is
   // pinned to 1 for an individual discipline) into a participant carrying that
   // org's id, so matching on organization_id is enough.
-  const rankingRows = (fx.live_state as any)?.eventRanking?.rows;
+  //
+  // MUTUALLY EXCLUSIVE with block 2. The two consoles are meant to be two ways
+  // of scoring the SAME fixture, never both at once - but neither console's
+  // save clears the other's key from live_state, so a fixture scored through
+  // both at different points can carry both `event` and `eventRanking`
+  // simultaneously. Without this guard, both blocks would fire and hand out
+  // two medals - one per athlete, one per org - for a single result. The
+  // per-athlete data wins because it's strictly more specific.
+  const rankingRows = individualMedals.length === 0 ? (fx.live_state as any)?.eventRanking?.rows : undefined;
   if (Array.isArray(rankingRows)) {
     const byOrg = new Map<string, DerivableParticipant>();
     for (const p of participants) if (p.organization_id && !byOrg.has(p.organization_id)) byOrg.set(p.organization_id, p);
