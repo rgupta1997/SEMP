@@ -40,12 +40,68 @@ alter table certificates
   alter column recipient_category set not null,
   alter column recipient_category set default 'winners';
 
+-- Dropped first so the file can be re-run. Every other statement here is already
+-- guarded; this one was not, so a run that failed further down could not be resumed -
+-- it stopped here on "constraint already exists" instead of reaching the failure.
+alter table certificates
+  drop constraint if exists chk_certificates_recipient_category;
+
 alter table certificates
   add constraint chk_certificates_recipient_category
   check (recipient_category in ('winners', 'awards', 'participation', 'organising', 'officials', 'coaches'));
 
 -- Replace the old template-keyed constraint with the category-keyed one, fixture-scoped.
 drop index if exists uq_certificates_one_per_recipient;
+
+-- THE DUPLICATES THE OLD KEY ALLOWED HAVE TO GO FIRST.
+--
+-- This is the step the migration was missing, and without it the index below cannot be
+-- built on any database that has actually issued certificates: dropping template_id from
+-- the key is precisely what makes two rows collide that did not collide before. Found on
+-- a bench where nine people held eight certificates each for one honour - one per design
+-- the organisation had tried - which is the exact bug described at the top of this file,
+-- sitting in the data. A migration that fixes a bug forward but cannot pass over the rows
+-- the bug produced is a migration that only runs on an empty table.
+--
+-- Superseded, not deleted and not revoked. `revoked_at` means somebody withdrew a
+-- certificate - a real act, on the record, with a reason - and none of these were
+-- withdrawn by anyone. `superseded_at` is the register's own word for "replaced by a
+-- later issue of the same thing", which is what these are. The rows stay, the serials
+-- stay verifiable, and only the newest issue per person per honour stays live.
+--
+-- Idempotent: a second run finds nothing left unsuperseded to supersede.
+update certificates c
+   set superseded_at = now()
+ where c.revoked_at is null
+   and c.superseded_at is null
+   and c.fixture_id is not null
+   and exists (
+     select 1 from certificates newer
+      where newer.fixture_id = c.fixture_id
+        and newer.user_id = c.user_id
+        and newer.recipient_category = c.recipient_category
+        and newer.revoked_at is null
+        and newer.superseded_at is null
+        and (newer.issued_at, newer.id) > (c.issued_at, c.id)
+   );
+
+-- The same, for the event-scoped rows the second index below covers.
+update certificates c
+   set superseded_at = now()
+ where c.revoked_at is null
+   and c.superseded_at is null
+   and c.fixture_id is null
+   and c.championship_id is not null
+   and exists (
+     select 1 from certificates newer
+      where newer.championship_id = c.championship_id
+        and newer.user_id = c.user_id
+        and newer.recipient_category = c.recipient_category
+        and newer.fixture_id is null
+        and newer.revoked_at is null
+        and newer.superseded_at is null
+        and (newer.issued_at, newer.id) > (c.issued_at, c.id)
+   );
 create unique index if not exists uq_certificates_fixture_recipient
   on certificates(fixture_id, user_id, recipient_category)
   where revoked_at is null and superseded_at is null and fixture_id is not null;
