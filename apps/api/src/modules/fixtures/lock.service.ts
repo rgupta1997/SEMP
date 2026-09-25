@@ -269,9 +269,6 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
   // Everything that must be all-or-nothing happens in here. The audit entry and any
   // notification are deliberately OUTSIDE: an audit row describing a rolled-back lock
   // would be a lie, and an email cannot be un-sent.
-  // Explicit rather than relying on the client default - locking resolves
-  // participants, derives every record, and refreshes standings/career stats
-  // for everyone touched, in one transaction (see prisma.ts).
   const { fx, label, championshipId, fromStatus, participants, newAchievements } = await prisma.$transaction(async (tx) => {
     const current = await tx.fixtures.findUnique({ where: { id: fixtureId }, ...FIXTURE_FOR_LOCK });
     if (!current) throw new NotFoundError('Fixture');
@@ -341,7 +338,7 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
       participants,
       newAchievements,
     };
-  }, { timeout: 120000 });
+  });
 
   const lockSummary = req
     ? `Locked the scorecard for ${label} - the result is now official`
@@ -470,8 +467,6 @@ export async function unlockScorecard(prisma: Prisma, req: Request, fixtureId: s
     throw new BusinessRuleError('Give a reason for the correction - it is recorded against the result.');
   }
 
-  // Same reasoning as lockScorecard's transaction: this also recomputes
-  // standings + derives records from scratch, in one all-or-nothing unlock.
   const { fx, label, championshipId, fromVersion } = await prisma.$transaction(async (tx) => {
     const current = await tx.fixtures.findUnique({ where: { id: fixtureId }, ...FIXTURE_FOR_LOCK });
     if (!current) throw new NotFoundError('Fixture');
@@ -510,7 +505,7 @@ export async function unlockScorecard(prisma: Prisma, req: Request, fixtureId: s
       championshipId: championshipOf(current),
       fromVersion: current.lock_version,
     };
-  }, { timeout: 120000 });
+  });
 
   await audit(prisma, req, {
     action: AUDIT_ACTIONS.fixtureUnlocked,

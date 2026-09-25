@@ -2,14 +2,7 @@ import { PrismaClient } from '@prisma/client';
 
 // Single PrismaClient, created here and shared with every persistence adapter
 // via the composition root. The domain/application layers never import this.
-//
-// `transactionOptions.timeout` raised from Prisma's 5000ms default - a full
-// standings recompute across a real championship legitimately runs past 5s,
-// and hitting that limit silently killed the transaction mid-read rather than
-// failing loudly.
-export const prisma = new PrismaClient({
-  transactionOptions: { timeout: 120000 },
-});
+export const prisma = new PrismaClient();
 
 export type Prisma = typeof prisma;
 
