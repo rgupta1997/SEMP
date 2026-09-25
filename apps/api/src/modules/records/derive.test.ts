@@ -273,15 +273,30 @@ describe('ranking events · medals per competitor (J4-E1-S3 + J4-E4-S1)', () => 
     ]);
   });
 
-  it('files a competitor with no head-to-head as participation, with the medal as a chip', () => {
+  it('files a medal-winning competitor as a result even with no head-to-head outcome', () => {
     const { entries } = deriveRecords(input(EVENT_FIXTURE, { participants: COMPETITORS }));
     const gold = entries.find((e) => e.user_id === 'su1')!;
-    expect(gold.kind).toBe('participation');
+    // A race has no home/away pair for outcomeFor() to read, but a gold medal
+    // still settled something for this swimmer - filing it as 'participation'
+    // would make it indistinguishable from a heat nobody placed in.
+    expect(gold.kind).toBe('result');
     expect(gold.detail.role).toBe('competitor');
     expect(gold.title).toBe('Swimming · 50m Freestyle');
     expect(gold.detail.chips).toEqual([
       expect.objectContaining({ medal: 'gold', title: 'Gold · 50m Freestyle' }),
     ]);
+  });
+
+  it('still files a competitor with no medal or placement chip as participation', () => {
+    // A 9-swimmer field: c9 finishes 9th, outside the top-8 placement window
+    // (see the placement-chip cap tests above), so gets no chip at all.
+    const bigField: any = structuredClone(EVENT_FIXTURE);
+    bigField.live_state.event.participants = Array.from({ length: 9 }, (_, i) => ({
+      id: `c${i + 1}`, name: `Swimmer ${i + 1}`, orgId: 'o1', marks: { r50: 24 + i },
+    }));
+    const last = { user_id: 'su9', team_id: null, organization_id: 'o1', competitor_id: 'c9', name: 'Swimmer 9' };
+    const { entries } = deriveRecords(input(bigField, { participants: [last] }));
+    expect(entries.find((e) => e.user_id === 'su9')!.kind).toBe('participation');
   });
 
   it('awards no per-athlete medal when the event totals marks into a team score', () => {
@@ -380,6 +395,33 @@ describe('ranking events · medals per competitor (J4-E1-S3 + J4-E4-S1)', () => 
       { competitor_id: 'c2', medal: 'silver', sub_event: '100m Backstroke' },
     ]);
   });
+
+  it('gives an off-podium finisher a placement chip instead of nothing', () => {
+    const withFourth: DerivableParticipant[] = [
+      ...COMPETITORS,
+      { user_id: 'su4', team_id: null, organization_id: 'o2', competitor_id: 'c4', name: 'Fourth Swimmer' },
+    ];
+    const { achievements, entries } = deriveRecords(input(EVENT_FIXTURE, { participants: withFourth }));
+    const fourth = achievements.find((a) => a.user_id === 'su4')!;
+    expect(fourth.kind).toBe('placement');
+    expect(fourth.medal).toBeNull();
+    expect(fourth.title).toBe('4th place - 50m Freestyle, Inter-College 2026');
+
+    const entry = entries.find((e) => e.user_id === 'su4')!;
+    expect(entry.detail.chips).toEqual([
+      expect.objectContaining({ kind: 'placement', title: '4th place · 50m Freestyle' }),
+    ]);
+  });
+
+  it('says nothing for a finish outside the top 8 - nobody wants "37th place" on their timeline', () => {
+    const bigField: any = structuredClone(EVENT_FIXTURE);
+    bigField.live_state.event.participants = Array.from({ length: 9 }, (_, i) => ({
+      id: `c${i + 1}`, name: `Swimmer ${i + 1}`, orgId: 'o1', marks: { r50: 24 + i },
+    }));
+    const last = { user_id: 'su9', team_id: null, organization_id: 'o1', competitor_id: 'c9', name: 'Swimmer 9' };
+    const { achievements } = deriveRecords(input(bigField, { participants: [last] }));
+    expect(achievements).toHaveLength(0);
+  });
 });
 
 describe('the default "Team ranking" console · medals per org (J4-E4-S1)', () => {
@@ -427,6 +469,29 @@ describe('the default "Team ranking" console · medals per org (J4-E4-S1)', () =
 
   it('awards nothing to an org with no place recorded', () => {
     const { achievements } = deriveRecords(input(RANKING_FIXTURE, { participants: ENTRANTS }));
+    expect(achievements.some((a) => a.user_id === 'a4')).toBe(false);
+  });
+
+  it('gives an off-podium org a placement chip too', () => {
+    const fourthPlaced: Partial<DerivableFixture> = {
+      ...RANKING_FIXTURE,
+      live_state: { eventRanking: { rows: [
+        { orgId: 'o1', place: 1 }, { orgId: 'o2', place: 2 }, { orgId: 'o3', place: 3 }, { orgId: 'o4', place: 4 },
+      ] } },
+    };
+    const { achievements } = deriveRecords(input(fourthPlaced, { participants: ENTRANTS }));
+    const fourth = achievements.find((a) => a.user_id === 'a4')!;
+    expect(fourth.kind).toBe('placement');
+    expect(fourth.medal).toBeNull();
+    expect(fourth.title).toContain('4th place');
+  });
+
+  it('says nothing for an org finishing outside the top 8', () => {
+    const farBack: Partial<DerivableFixture> = {
+      ...RANKING_FIXTURE,
+      live_state: { eventRanking: { rows: [{ orgId: 'o4', place: 9 }] } },
+    };
+    const { achievements } = deriveRecords(input(farBack, { participants: ENTRANTS }));
     expect(achievements.some((a) => a.user_id === 'a4')).toBe(false);
   });
 
