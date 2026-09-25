@@ -286,3 +286,88 @@ describe('period-shaped formats (kho-kho, kabaddi...)', () => {
     expect(top.target).toBe(2);
   });
 });
+
+/**
+ * THE SETTLEMENT CHAIN, THROUGH THE EDITOR.
+ *
+ * `tieBreak` has now been dropped silently in two separate places on its way to a
+ * fixture - the preset builder, which listed its fields by hand, and the zod schema,
+ * which drops unknown keys. Both failed with green tests and no error; the second
+ * one only surfaced as a knockout stuck on "Half 2 of 2". These are the guards, so
+ * the third place does not get to do it too.
+ */
+describe('extra time and the shoot-out are editable, and survive the editor', () => {
+  const ko = fmt('fest_2x10_ko');
+
+  it('reads the chain off the format', () => {
+    const k = readKnobs(ko);
+    expect(k.extraTimeEnabled).toBe(true);
+    expect(k.extraTimePeriods).toBe(2);
+    expect(k.extraTimeMinutes).toBe(5);
+    expect(k.shootoutEnabled).toBe(true);
+    expect(k.shootoutKicks).toBe(5);
+  });
+
+  it('defaults to two halves of five and five kicks when a format declares none', () => {
+    const league = fmt('fifa_2x45');
+    const k = readKnobs({ ...league, tieBreak: null });
+    expect(k.extraTimeEnabled).toBe(false);
+    expect(k.shootoutEnabled).toBe(false);
+    // Off, but pre-filled - turning it on must not also require deciding how long.
+    expect(k.extraTimePeriods).toBe(2);
+    expect(k.extraTimeMinutes).toBe(5);
+    expect(k.shootoutKicks).toBe(5);
+  });
+
+  it('round-trips the chain unchanged through the editor', () => {
+    const again = applyKnobs(ko, readKnobs(ko));
+    expect(again.tieBreak).toEqual(ko.tieBreak);
+  });
+
+  it('SURVIVES THE ZOD SCHEMA, which strips what it does not declare', () => {
+    const parsed = scoringFormatSchema.parse(ko);
+    expect(parsed.tieBreak).toEqual({
+      extraTime: { periods: 2, minutes: 5 },
+      penalties: { kicks: 5 },
+    });
+  });
+
+  it('writes an organiser edit back', () => {
+    const k = readKnobs(ko);
+    const longer = applyKnobs(ko, { ...k, extraTimeMinutes: 7, shootoutKicks: 3 });
+    expect(longer.tieBreak?.extraTime).toEqual({ periods: 2, minutes: 7 });
+    expect(longer.tieBreak?.penalties).toEqual({ kicks: 3 });
+    // And the edit is still there after a save/load through zod.
+    expect(scoringFormatSchema.parse(longer).tieBreak?.extraTime?.minutes).toBe(7);
+  });
+
+  it('turns each half of the chain off independently', () => {
+    const k = readKnobs(ko);
+    const kicksOnly = applyKnobs(ko, { ...k, extraTimeEnabled: false });
+    expect(kicksOnly.tieBreak?.extraTime).toBeNull();
+    expect(kicksOnly.tieBreak?.penalties).toEqual({ kicks: 5 });
+
+    const etOnly = applyKnobs(ko, { ...k, shootoutEnabled: false });
+    expect(etOnly.tieBreak?.penalties).toBeNull();
+
+    const neither = applyKnobs(ko, { ...k, extraTimeEnabled: false, shootoutEnabled: false });
+    expect(neither.tieBreak).toBeNull();
+  });
+
+  // A drawable match never reaches any of it, so asking an organiser to configure
+  // it would be asking about something that cannot happen.
+  it('hides the whole group while draws are allowed', () => {
+    const keysFor = (drawsAllowed: boolean) =>
+      knobsFor({ ...readKnobs(ko), drawsAllowed }).map((x) => x.key);
+    expect(keysFor(true)).not.toContain('extraTimeEnabled');
+    expect(keysFor(true)).not.toContain('shootoutKicks');
+    expect(keysFor(false)).toContain('extraTimeEnabled');
+    expect(keysFor(false)).toContain('shootoutEnabled');
+  });
+
+  it('hides the lengths until the thing they describe is switched on', () => {
+    const k = { ...readKnobs(ko), drawsAllowed: false, extraTimeEnabled: false };
+    expect(knobsFor(k).map((x) => x.key)).not.toContain('extraTimeMinutes');
+    expect(knobsFor({ ...k, extraTimeEnabled: true }).map((x) => x.key)).toContain('extraTimeMinutes');
+  });
+});

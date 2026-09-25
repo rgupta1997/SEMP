@@ -1,5 +1,5 @@
 import type {
-  ClockSpec, EndStatePolicy, LevelSpec, OfficiatingMode, ScoringFormat, ServeSpec,
+  ClockSpec, EndStatePolicy, LevelSpec, OfficiatingMode, ScoringFormat, ServeSpec, TieBreakSpec,
 } from './scoring-rules.js';
 
 // ============================================================================
@@ -83,6 +83,7 @@ interface Opts {
   serve?: ServeSpec;
   mode?: OfficiatingMode;
   clock?: ClockSpec | null;
+  tieBreak?: TieBreakSpec | null;
   changeEnds?: ScoringFormat['changeEnds'];
   endStates?: EndStatePolicy;
   rulesSheet?: Record<string, unknown>;
@@ -103,6 +104,7 @@ function fmt(o: Opts): ScoringFormat {
     penaltyEvents: selfScored ? 'off' : 'pointGameMatch',
     letsEnabled: false,
     clock: o.clock ?? null,
+    tieBreak: o.tieBreak ?? null,
     endStates: o.endStates ?? (selfScored ? LEAGUE : STRICT),
     ...(o.rulesSheet ? { rulesSheet: o.rulesSheet } : {}),
   };
@@ -172,7 +174,44 @@ const NET: ScoringFormat[] = [
 // `end` event as a retirement.
 // ============================================================================
 
+// A shoot-out of five kicks each, then sudden death - the only shape a football
+// shoot-out has ever had.
+const SHOOTOUT = { kicks: 5 };
+
+// Short halves want short extra time: five minutes each, both played out.
+const FEST_TIEBREAK = { extraTime: { periods: 2, minutes: 5 }, penalties: SHOOTOUT };
+
 const INVASION: ScoringFormat[] = [
+  // FIRST IN THE LIST IS THE SPORT DEFAULT (`defaultFormatFor` takes list[0]), and
+  // this is the one a fest actually plays: short halves, because twenty pitches have
+  // to get through a bracket in a day, and a full settlement chain, because a
+  // knockout cannot go home level.
+  fmt({
+    sport: 'football', key: 'fest_2x10', name: 'Fest — two halves of 10 minutes',
+    levels: [period('Half', 'half'), aggregateMatch(2)],
+    clock: cap(20, 'leaderWins'),
+    // The settlement chain rides along even here, and stays INERT: draws are
+    // allowed, so the kernel closes a level match as a draw and never reaches it.
+    // It is carried so that flipping this format to a knockout needs one field
+    // changed rather than the tie-break configured from scratch.
+    tieBreak: FEST_TIEBREAK,
+    endStates: LEAGUE,
+    rulesSheet: { offside: 'not adjudicated' },
+  }),
+  // The same match, in a bracket. A knockout cannot go home level, so this is the
+  // one that actually runs extra time and kicks.
+  fmt({
+    sport: 'football', key: 'fest_2x10_ko', name: 'Fest knockout — two halves of 10 minutes',
+    levels: [period('Half', 'half'), aggregateMatch(2)],
+    clock: cap(20, 'leaderWins', 'organiserDecides'),
+    tieBreak: FEST_TIEBREAK,
+    endStates: STRICT,
+    rulesSheet: {
+      offside: 'not adjudicated',
+      extraTime: 'two halves of 5 minutes, both played out',
+      shootOut: 'five kicks each, then sudden death',
+    },
+  }),
   fmt({
     sport: 'football', key: 'fifa_2x45', name: 'Two halves of 45 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(90, 'leaderWins'),
@@ -187,6 +226,8 @@ const INVASION: ScoringFormat[] = [
   fmt({
     sport: 'football', key: 'knockout_2x45_no_draw', name: 'Knockout — two halves, no draw',
     levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(90, 'leaderWins', 'organiserDecides'),
+    // Full-length extra time is the real thing: two halves of fifteen.
+    tieBreak: { extraTime: { periods: 2, minutes: 15 }, penalties: SHOOTOUT },
     endStates: STRICT,
   }),
 

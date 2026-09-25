@@ -9,6 +9,8 @@ export {
   hydrateTie,
   rubbersWon,
   tieWinner,
+  tieOutcome,
+  playableRubbers,
   applyDead,
   decideRubber,
   reopenRubber,

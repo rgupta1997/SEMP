@@ -129,7 +129,11 @@ export function deriveTeamStats(
     const declared = ev.kind ? byKey.get(ev.kind) : undefined;
 
     if (ev.playerId) {
-      sideFound.set(ev.playerId, ev.side);
+      // An own goal is credited to the side that BENEFITS, so the scorer plays for
+      // the other one. Filing them by the event's side would put a defender on the
+      // opposition team sheet on their own profile.
+      const other: Side = ev.side === 'A' ? 'B' : 'A';
+      sideFound.set(ev.playerId, declared?.forOpponent ? other : ev.side);
       const bag = bagFor(ev.playerId);
       if (declared) {
         applyMetrics(bag, declared.metrics, ev);

@@ -10,6 +10,27 @@ import { Rules } from '@semp/notifications/core/rules.js';
 import { advanceWinnerStrict, computeParentPosition } from './bracket.js';
 import { deriveAchievements, queueCertificates, writeLifetimeEntries, writeStatLines } from './downstream.js';
 import { resolveFixtureParticipants, type FixtureParticipants } from './participants.js';
+
+/**
+ * HOW LONG A LOCK IS ALLOWED TO TAKE.
+ *
+ * Prisma's default interactive-transaction budget is 5 seconds, and a lock is not a
+ * small piece of work: it publishes the result, recomputes standings, advances the
+ * bracket, writes the fact log, an appearance row per player, a typed detail row per
+ * player, cricket's three tables, lifetime entries and achievements - every one a
+ * round trip to a pooled connection.
+ *
+ * An eleven-a-side football match lost that race intermittently and rolled the whole
+ * lock back: the official saw "That took too long and was not saved", and the result
+ * was NOT locked - no standings, no statistics, nothing. Intermittently, and only on
+ * the bigger squads, which is the worst way for it to fail.
+ *
+ * The statement count is the real fix (see writeCategoryLines, which now writes one
+ * statement per table instead of two per player). This is the honest budget beside
+ * it: a lock legitimately does a lot, and it must not be cut off part-way on a slow
+ * connection. Still well inside the API's own request ceiling.
+ */
+const LOCK_TX = { timeout: 25_000, maxWait: 10_000 } as const;
 import { refreshCareerStatsForFixture } from '../records/career-stats.service.js';
 
 // The scorecard state machine - the spine of every "verified" claim in the product.
@@ -306,9 +327,8 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
     await writeLifetimeEntries(tx, locked.id, { participants });
     const newAchievements = await deriveAchievements(tx, locked.id, { participants });
     await queueCertificates(tx, locked.id, { participants });
-    // Per-player stat lines, derived from the rally log. Best-effort by design -
-    // see writeStatLines: a stale statistic beats a scorecard that will not lock.
-    await writeStatLines(tx, locked.id, { participants });
+    // The per-player stat lines are NOT written here - see below. They used to be,
+    // and "best-effort" did not mean what it said.
 
     return {
       fx: locked,
@@ -318,7 +338,29 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
       participants,
       newAchievements,
     };
-  });
+  }, LOCK_TX);
+
+  /**
+   * PER-PLAYER STATISTICS, AFTER THE COMMIT - and this position is the whole point.
+   *
+   * `writeStatLines` is best-effort by design: it catches its own errors, because a
+   * statistics table that is briefly stale is a better product than a scorecard that
+   * will not lock. Running it on the lock's own transaction client made that
+   * intention false. Postgres aborts a transaction on the first failed statement, so
+   * a constraint violation inside the stats write poisoned the transaction, the
+   * catch swallowed the JavaScript error, and the COMMIT then discarded EVERYTHING -
+   * the published result, the bracket advance, the standings.
+   *
+   * The API still answered 200 with a fixture object that said "locked", because
+   * that object came from the update that was about to be thrown away. The scorecard
+   * was not locked, no statistics were written, and nothing anywhere said so. It is
+   * the worst failure mode in this file: a success message over a silent rollback.
+   *
+   * Out here it is genuinely best-effort. The result is already committed and
+   * published; if this throws, the statistics are stale until the next lock repairs
+   * them, which is exactly the trade the comment always claimed to be making.
+   */
+  await writeStatLines(prisma, fx.id, { participants });
 
   const lockSummary = req
     ? `Locked the scorecard for ${label} - the result is now official`
@@ -485,7 +527,7 @@ export async function unlockScorecard(prisma: Prisma, req: Request, fixtureId: s
       championshipId: championshipOf(current),
       fromVersion: current.lock_version,
     };
-  });
+  }, LOCK_TX);
 
   await audit(prisma, req, {
     action: AUDIT_ACTIONS.fixtureUnlocked,

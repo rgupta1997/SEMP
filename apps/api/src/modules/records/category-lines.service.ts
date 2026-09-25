@@ -106,17 +106,84 @@ export async function writeCategoryLine(db: Db, input: CategoryLineInput): Promi
 }
 
 /**
- * Write every detail row for a fixture. Sequential rather than concurrent: these
- * run inside the lock transaction, and a transaction client is not safe to use
- * from parallel promises.
+ * Write every detail row for a fixture, in ONE STATEMENT PER TABLE.
+ *
+ * It used to be one delete and one insert PER PERSON, sequentially, inside the lock
+ * transaction. That transaction has a 5-second budget, and every statement is a
+ * round trip to a pooled connection - so an eleven-a-side football match spent two
+ * statements on each of twenty-two players on top of everything else the lock does,
+ * blew the budget, and the whole lock rolled back with "That took too long and was
+ * not saved". The official taps Lock, waits, and the result is not locked: no
+ * standings, no statistics, nothing. It failed intermittently on the bigger squads,
+ * which is the worst way for it to fail.
+ *
+ * Grouped by table and written as a single multi-row insert, twenty-two players cost
+ * two statements instead of forty-four. Rows in one table are normalised to the
+ * union of their columns so they share one statement; a column a given row has no
+ * value for is written NULL, which is what "did not record that" means anyway.
+ *
+ * Still sequential across tables, and still inside the caller's transaction: a
+ * transaction client is not safe to use from parallel promises.
  */
 export async function writeCategoryLines(db: Db, inputs: CategoryLineInput[]): Promise<CategoryWriteResult> {
   const out: CategoryWriteResult = { written: 0, unmapped: [] };
+  if (!inputs.length) return out;
+
+  // table -> the rows going into it, with the spine row each belongs to.
+  const byTable = new Map<string, Array<{ lineId: string; row: CategoryRow }>>();
   for (const input of inputs) {
-    const r = await writeCategoryLine(db, input);
-    out.written += r.written;
-    for (const k of r.unmapped) if (!out.unmapped.includes(k)) out.unmapped.push(k);
+    const mapped = toCategoryRow(input.sport, input.stats, input.extra);
+    if (!mapped) continue;                 // a sport with no detail table is not an error
+    for (const k of mapped.unmapped) if (!out.unmapped.includes(k)) out.unmapped.push(k);
+    if (!byTable.has(mapped.table)) byTable.set(mapped.table, []);
+    byTable.get(mapped.table)!.push({ lineId: input.lineId, row: mapped.row });
   }
+
+  for (const [table, rows] of byTable) {
+    // The union of every column any row in this table wants, so one statement
+    // carries them all. Unknown columns are still refused loudly - that is a code
+    // bug, and writing it blindly would be worse than failing.
+    const columns: string[] = [];
+    for (const { row } of rows) {
+      for (const c of Object.keys(row)) {
+        if (!ALLOWED.has(c)) {
+          throw new Error(`category-lines: refusing unknown column ${c} for ${table}`);
+        }
+        if (!columns.includes(c)) columns.push(c);
+      }
+    }
+
+    const lineIds = rows.map((r) => r.lineId);
+    // Delete-then-insert, matching the spine's own strategy: after a correction that
+    // drops a player, an upsert would leave their detail behind.
+    await db.$executeRaw(Prisma.sql`
+      delete from ${Prisma.raw(table)} where line_id = any(${lineIds}::uuid[])`);
+
+    const tuples = rows.map(({ lineId, row }) => {
+      const values: Prisma.Sql[] = [Prisma.sql`${lineId}::uuid`];
+      for (const c of columns) {
+        // DEFAULT, not NULL, for a column this row has no value for.
+        //
+        // One statement per table needs one column list, so a row that did not
+        // produce every column has to say something for the rest. NULL is the wrong
+        // thing to say: most of these columns are NOT NULL with a zero default, and
+        // the per-row insert this replaced simply omitted them and let the default
+        // apply. Writing NULL instead made every insert with a ragged column set
+        // fail the not-null constraint - which the caller swallows, so the lock
+        // still succeeded and the statistics silently did not appear.
+        if (!(c in row) || row[c] === undefined) { values.push(Prisma.raw('DEFAULT')); continue; }
+        const v = row[c];
+        values.push(UUID_COLUMNS.has(c) ? Prisma.sql`${v}::uuid` : Prisma.sql`${v}`);
+      }
+      return Prisma.sql`(${Prisma.join(values)})`;
+    });
+
+    await db.$executeRaw(Prisma.sql`
+      insert into ${Prisma.raw(table)} (${Prisma.raw(['line_id', ...columns].join(', '))})
+      values ${Prisma.join(tuples)}`);
+    out.written += rows.length;
+  }
+
   if (out.unmapped.length) {
     console.warn('[category-lines] metrics with no column, not stored:', out.unmapped.join(', '));
   }

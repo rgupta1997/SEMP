@@ -208,12 +208,14 @@ export function RacquetDeck(p: RacquetDeckProps) {
       ) : (
         <div className="grid grid-cols-2 gap-3">
           <RallyButton
+            qa="rally-A"
             label={p.homeName}
             hint={state.ended ? 'undo a point first' : serve.pointScoring === 'serverOnly' && state.serve.side !== 'A' ? 'wins the serve' : 'won the rally'}
             disabled={p.disabled || p.busy || state.ended}
             onClick={() => push({ t: 'point', side: 'A' })}
           />
           <RallyButton
+            qa="rally-B"
             label={p.awayName}
             hint={state.ended ? 'undo a point first' : serve.pointScoring === 'serverOnly' && state.serve.side !== 'B' ? 'wins the serve' : 'won the rally'}
             disabled={p.disabled || p.busy || state.ended}
@@ -346,11 +348,12 @@ const ServeDot = () => (
  * phone, one-handed - and deliberately labelled "won the rally", because under
  * serverOnly scoring a receiver's rally win is a side-out and scores nothing.
  */
-function RallyButton({ label, hint, disabled, onClick }:
-  { label: string; hint: string; disabled?: boolean; onClick: () => void }) {
+function RallyButton({ label, hint, disabled, onClick, qa }:
+  { label: string; hint: string; disabled?: boolean; onClick: () => void; qa?: string }) {
   return (
     <button
       type="button"
+      data-qa={qa}
       disabled={disabled}
       onClick={onClick}
       className={cn(

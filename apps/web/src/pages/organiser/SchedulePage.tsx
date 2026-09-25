@@ -1,8 +1,8 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Pencil, Trash2 } from 'lucide-react';
-import { FIXTURE_STATUS } from '@semp/shared';
+import { FIXTURE_STATUS, inheritedOverrides, resolveFormat } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { isScoredSport } from '@semp/shared';
@@ -56,6 +56,95 @@ function ScoreButton({ fixture, onNavigate }: { fixture: any; onNavigate?: () =>
     >
       {fixture.status === 'live' ? 'Resume' : played ? 'Scorecard' : 'Score'}
     </Button>
+  );
+}
+
+/**
+ * THE THREE RULES AN ORGANISER ACTUALLY CHANGES PER MATCH.
+ *
+ * Not a format - a PATCH on one. Picking a whole saved format (the field below)
+ * severs inheritance: re-point the draw afterwards and this match no longer follows
+ * it. These carry only what was changed, so a 12-minute half still inherits its
+ * shape, its shoot-out and everything else, and still moves when the draw moves.
+ *
+ * Each blank option prints what it would inherit. An override set without the
+ * inherited answer in view is a guess, and the commonest thing it gets set to is the
+ * value it already had.
+ */
+function MatchRulesFields({
+  fixture, tdId, sportName, periodMin, onPeriodMin, extraMin, onExtraMin, draws, onDraws,
+}: {
+  fixture: any; tdId: string; sportName?: string;
+  periodMin: string; onPeriodMin: (v: string) => void;
+  extraMin: string; onExtraMin: (v: string) => void;
+  draws: string; onDraws: (v: string) => void;
+}) {
+  const { data } = useApi<{
+    saved: Array<{ id: string; name: string; config: any }>;
+    current?: { formatId: string | null; roundFormats: unknown };
+    supported?: boolean;
+  }>(`/tournament-disciplines/${tdId}/scoring-formats`);
+
+  // What this match plays under with NOTHING overridden - resolved through the same
+  // ladder the console uses, so the hints cannot drift from the real answer.
+  const inherited = useMemo(() => {
+    if (!data?.supported) return null;
+    const rows = (data.saved ?? []).map((f) => ({ id: f.id, config: f.config }));
+    const resolved = resolveFormat(
+      { ...(fixture ?? {}), format_overrides: null },
+      {
+        scoring_format_id: data.current?.formatId ?? null,
+        round_formats: data.current?.roundFormats,
+        sport: sportName ?? null,
+      },
+      rows,
+    );
+    return inheritedOverrides(resolved.format);
+  }, [data, fixture, sportName]);
+
+  if (!data?.supported) return null;
+
+  const locked = fixture?.scorecard_status === 'locked';
+  const inheritLabel = (v: number | undefined, unit = 'min') =>
+    v === undefined ? '- inherit -' : v === 0 ? '- inherit (none) -' : `- inherit (${v} ${unit}) -`;
+
+  return (
+    <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
+      <Field compact label="Half / period length"
+        hint={locked ? 'Unlock the scorecard to change the rules.' : 'Per period, not the match total.'}>
+        <Select className="w-full" value={periodMin} disabled={locked}
+          onChange={(e) => onPeriodMin(e.target.value)}>
+          <option value="">{inheritLabel(inherited?.periodMinutes)}</option>
+          {[5, 7, 8, 10, 12, 15, 20, 25, 30, 35, 40, 45].map((m) => (
+            <option key={m} value={m}>{m} min</option>
+          ))}
+        </Select>
+      </Field>
+
+      <Field compact label="Extra time"
+        hint={draws === 'yes' ? 'Not used while a draw is allowed.' : 'Each extra period.'}>
+        {/* Greyed while draws are allowed, because then it can never run - the kernel
+            closes a level match as a draw and never asks. */}
+        <Select className="w-full" value={extraMin} disabled={locked || draws === 'yes'}
+          onChange={(e) => onExtraMin(e.target.value)}>
+          <option value="">{inheritLabel(inherited?.extraTimeMinutes)}</option>
+          {[3, 5, 7, 10, 15].map((m) => <option key={m} value={m}>{m} min</option>)}
+        </Select>
+      </Field>
+
+      <Field compact label="Draw allowed"
+        hint={draws === 'no' ? 'Level at full time goes to extra time, then penalties.' : undefined}>
+        <Select className="w-full" value={draws} disabled={locked}
+          onChange={(e) => onDraws(e.target.value)}>
+          <option value="">
+            {inherited === null ? '- inherit -'
+              : `- inherit (${inherited.drawsAllowed ? 'yes' : 'no'}) -`}
+          </option>
+          <option value="yes">Yes — record a draw</option>
+          <option value="no">No — must produce a winner</option>
+        </Select>
+      </Field>
+    </div>
   );
 }
 
@@ -169,6 +258,18 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
   const [status, setStatus] = useState(fixture?.status ?? 'scheduled');
   // The per-match scoring format, saved by this dialog along with everything else.
   const [formatId, setFormatId] = useState<string>(fixture?.scoring_format_id ?? '');
+  /**
+   * PER-MATCH RULES. '' means inherit, and that is the whole point of these three -
+   * they carry only what was changed, so the match keeps following its draw for
+   * everything else. Seeded from the column, which holds exactly the same shape.
+   */
+  const ov = (fixture?.format_overrides ?? null) as
+    { periodMinutes?: number; extraTimeMinutes?: number; drawsAllowed?: boolean } | null;
+  const [periodMin, setPeriodMin] = useState(ov?.periodMinutes ? String(ov.periodMinutes) : '');
+  const [extraMin, setExtraMin] = useState(ov?.extraTimeMinutes ? String(ov.extraTimeMinutes) : '');
+  const [drawsOv, setDrawsOv] = useState(
+    ov?.drawsAllowed === undefined ? '' : ov.drawsAllowed ? 'yes' : 'no',
+  );
   const [error, setError] = useState<string | null>(null);
 
   const save = useApiMutation(
@@ -189,6 +290,15 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
       duration_minutes: duration ? Number(duration) : null,
       official_id: officialId || null,
       status,
+      format_overrides: (() => {
+        const o: Record<string, unknown> = {};
+        if (periodMin) o.periodMinutes = Number(periodMin);
+        if (extraMin) o.extraTimeMinutes = Number(extraMin);
+        if (drawsOv) o.drawsAllowed = drawsOv === 'yes';
+        // Null, not {}, so clearing every field really clears the column rather
+        // than leaving an empty object that reads as "configured".
+        return Object.keys(o).length ? o : null;
+      })(),
     };
     if (!isEdit) body.tournament_discipline_id = tdId;
     save.mutate(body, {
@@ -336,6 +446,16 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
               </Select>
             </Field>
           </div>
+        </div>
+
+        <div className="mt-4">
+          <SectionLabel>Match rules</SectionLabel>
+          <MatchRulesFields
+            fixture={fixture} tdId={tdId} sportName={sportName}
+            periodMin={periodMin} onPeriodMin={setPeriodMin}
+            extraMin={extraMin} onExtraMin={setExtraMin}
+            draws={drawsOv} onDraws={setDrawsOv}
+          />
         </div>
 
         <div className="mt-4">

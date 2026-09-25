@@ -57,7 +57,31 @@ export interface StatMetric {
  * existing event decks keep working untouched. `metrics` is what makes it a stat
  * rather than just a timeline entry.
  */
+/**
+ * WHAT COLOUR AN ACTION READS AS.
+ *
+ * A console where every button is the same blue makes the official read the label
+ * before every tap, and a red card and a save are not things anyone should have to
+ * read twice. The tone is declared here, with the action, rather than matched on key
+ * inside the deck - a card is a card in football, hockey, handball and futsal, and
+ * all four share this one event set.
+ *
+ * These are MEANINGS, not colours: the deck owns the palette, so a tenant's brand
+ * ramp can move without this file knowing. The one place meaning and colour really
+ * do coincide is the cards, because a yellow card that renders green is wrong in a
+ * way no amount of consistency excuses.
+ */
+export type EventTone =
+  | 'score'      // puts points on this side's board
+  | 'ownGoal'    // puts points on the OTHER side's board
+  | 'good'       // a positive act that scores nothing (a save, a dig, a rebound)
+  | 'caution'    // a yellow card, a foul
+  | 'dismissal'  // a red card, a send-off
+  | 'error';     // a miss, a turnover, a service error
+
 export interface StatEventSpec extends EventTypeSpec {
+  /** How the button reads at a glance. Defaults to score/error on the points alone. */
+  tone?: EventTone;
   /**
    * The second person, because most interesting events involve two - goal + assist,
    * wicket + fielder, block + set. Recorded on the SAME row as the primary: an assist
@@ -68,6 +92,14 @@ export interface StatEventSpec extends EventTypeSpec {
   value?: { label: string; unit?: string; min?: number; max?: number };
   metrics: Record<string, number | 'value'>;
   secondPlayerMetrics?: Record<string, number>;
+  /**
+   * The POINT goes to the other side, the RECORD stays with this player.
+   *
+   * An own goal is the only action where those two come apart, and treating it as
+   * an ordinary event left the scoreboard a goal short of the match that was
+   * played: the player's own-goal tally went up and nobody's score moved.
+   */
+  forOpponent?: boolean;
 }
 
 export type StatFamily = 'racquet' | 'invasion' | 'raid' | 'net' | 'board' | 'measured' | 'combat' | 'cricket';
@@ -132,12 +164,20 @@ const RACQUET_CORE: StatMetric[] = [
   rally('lets', 'Lets', 'Let', { higherIsBetter: false }),
   rally('retirements', 'Retirements', 'RET', { higherIsBetter: false }),
   rally('walkovers_received', 'Walkovers received', 'W/O'),
+
+  // AN ACE IS A REAL THING IN ALL FIVE RACQUET SPORTS, not only tennis.
+  //
+  // `RACQUET_EVENTS` below offers the Ace and Double fault taps to every one of
+  // them, but these two metrics used to live in TENNIS_EXTRA - so in table tennis,
+  // badminton, pickleball and squash the console offered a button that credited a
+  // metric which did not exist. The tap reached the timeline and the player's stat
+  // line never showed it, silently and permanently.
+  rally('aces', 'Aces', 'Ace', { source: 'event', fromEvents: ['ace'], per: 1, headline: true }),
+  rally('double_faults', 'Double faults', 'DF', { source: 'event', fromEvents: ['double_fault'], per: 1, higherIsBetter: false }),
 ];
 
 /** Tennis alone tracks serve outcomes as first-class events - it has two serves. */
 const TENNIS_EXTRA: StatMetric[] = [
-  rally('aces', 'Aces', 'Ace', { source: 'event', fromEvents: ['ace'], per: 1, headline: true }),
-  rally('double_faults', 'Double faults', 'DF', { source: 'event', fromEvents: ['double_fault'], per: 1, higherIsBetter: false }),
   rally('first_serves_in', 'First serves in', '1stIn'),
   rally('break_points_won', 'Break points won', 'BPW', { headline: true }),
   rally('break_points_played', 'Break points', 'BP'),
@@ -215,16 +255,20 @@ const UNIVERSAL: StatMetric[] = [
 const GOAL_EVENTS: StatEventSpec[] = [
   ev('goal', 'Goal', { goals: 1 }, {
     points: 1,
+    tone: 'score',
     // An assist recorded as a SEPARATE tap is an assist that never gets recorded.
     secondPlayer: { key: 'assist', label: 'Assisted by', optional: true },
     secondPlayerMetrics: { assists: 1 },
   }),
-  ev('own_goal', 'Own goal', { own_goals: 1 }),
-  ev('save', 'Save', { saves: 1 }),
-  ev('yellow', 'Yellow card', { yellows: 1 }),
-  ev('red', 'Red card', { reds: 1 }),
-  ev('pen_scored', 'Penalty scored', { pens_scored: 1, goals: 1 }, { points: 1 }),
-  ev('pen_missed', 'Penalty missed', { pens_missed: 1 }),
+  // Worth a goal - to the OTHER side. `forOpponent` is what keeps the scoreboard
+  // and the player's record pointing in opposite directions, which is exactly what
+  // an own goal is.
+  ev('own_goal', 'Own goal', { own_goals: 1 }, { points: 1, forOpponent: true, tone: 'ownGoal' }),
+  ev('save', 'Save', { saves: 1 }, { tone: 'good' }),
+  ev('yellow', 'Yellow card', { yellows: 1 }, { tone: 'caution' }),
+  ev('red', 'Red card', { reds: 1 }, { tone: 'dismissal' }),
+  ev('pen_scored', 'Penalty scored', { pens_scored: 1, goals: 1 }, { points: 1, tone: 'score' }),
+  ev('pen_missed', 'Penalty missed', { pens_missed: 1 }, { tone: 'error' }),
 ];
 
 const GOAL_METRICS: StatMetric[] = [
@@ -246,12 +290,12 @@ const BASKET_EVENTS: StatEventSpec[] = [
   ev('fg1', 'Free throw', { points_scored: 1, fg_1: 1 }, { points: 1 }),
   ev('fg2', 'Two-pointer', { points_scored: 2, fg_2: 1 }, { points: 2 }),
   ev('fg3', 'Three-pointer', { points_scored: 3, fg_3: 1 }, { points: 3 }),
-  ev('rebound', 'Rebound', { rebounds: 1 }),
-  ev('assist_bb', 'Assist', { assists: 1 }),
-  ev('steal', 'Steal', { steals: 1 }),
-  ev('block', 'Block', { blocks: 1 }),
-  ev('turnover', 'Turnover', { turnovers: 1 }),
-  ev('foul', 'Foul', { fouls: 1 }),
+  ev('rebound', 'Rebound', { rebounds: 1 }, { tone: 'good' }),
+  ev('assist_bb', 'Assist', { assists: 1 }, { tone: 'good' }),
+  ev('steal', 'Steal', { steals: 1 }, { tone: 'good' }),
+  ev('block', 'Block', { blocks: 1 }, { tone: 'good' }),
+  ev('turnover', 'Turnover', { turnovers: 1 }, { tone: 'error' }),
+  ev('foul', 'Foul', { fouls: 1 }, { tone: 'caution' }),
 ];
 
 const BASKET_METRICS: StatMetric[] = [
@@ -275,7 +319,7 @@ const RAID_EVENTS: StatEventSpec[] = [
   ev('raid', 'Raid', { raid_points: 'value', raids: 1, successful_raids: 1 }, {
     value: { label: 'Points', min: 0, max: 7 },
   }),
-  ev('empty_raid', 'Empty raid', { raids: 1 }),
+  ev('empty_raid', 'Empty raid', { raids: 1 }, { tone: 'error' }),
   ev('tackle', 'Tackle', { tackle_points: 1, tackles: 1 }, { points: 1 }),
   ev('super_tackle', 'Super tackle', { tackle_points: 2, tackles: 1, super_tackles: 1 }, { points: 2 }),
   ev('bonus', 'Bonus point', { bonus_points: 1 }, { points: 1 }),
@@ -301,9 +345,9 @@ const NET_EVENTS: StatEventSpec[] = [
   ev('ace', 'Ace', { aces: 1, points_scored: 1 }, { points: 1 }),
   ev('kill', 'Attack kill', { kills: 1, points_scored: 1 }, { points: 1 }),
   ev('block_vb', 'Block', { blocks: 1, points_scored: 1 }, { points: 1 }),
-  ev('serve_error', 'Service error', { service_errors: 1 }),
-  ev('attack_error', 'Attack error', { attack_errors: 1 }),
-  ev('dig', 'Dig', { digs: 1 }),
+  ev('serve_error', 'Service error', { service_errors: 1 }, { tone: 'error' }),
+  ev('attack_error', 'Attack error', { attack_errors: 1 }, { tone: 'error' }),
+  ev('dig', 'Dig', { digs: 1 }, { tone: 'good' }),
 ];
 
 const NET_METRICS: StatMetric[] = [
@@ -311,6 +355,9 @@ const NET_METRICS: StatMetric[] = [
   rally('points_won', 'Points won', 'Pts', { headline: true }),
   rally('sets_won', 'Sets won', 'SW'),
   rally('sets_lost', 'Sets lost', 'SL', { higherIsBetter: false }),
+  // Declared, because ace/kill/block all credit it. Without it, three of the six
+  // taps a volleyball official has scored nothing at all.
+  count('points_scored', 'Points scored', 'PtsS', { fromEvents: ['ace', 'kill', 'block_vb'], headline: true }),
   count('aces', 'Aces', 'Ace', { fromEvents: ['ace'], headline: true }),
   count('kills', 'Attack kills', 'K', { fromEvents: ['kill'], headline: true }),
   count('blocks', 'Blocks', 'Blk', { fromEvents: ['block_vb'] }),
@@ -547,14 +594,23 @@ export function deriveRacquetStats(
       if (streak[w] > (sides[w].longest_streak ?? 0)) sides[w].longest_streak = streak[w];
     }
 
+    // A DECIDER IS THE DECIDING UNIT OF THE MATCH, whatever that unit is called.
+    //
+    // In a two-level sport (table tennis, badminton, pickleball, squash) that is the
+    // fifth game at two-all. In tennis it is the deciding SET at one set all - not,
+    // as this used to count, any game played at five-all inside an ordinary set,
+    // which put a "Deciders won" figure on a tennis profile that meant something
+    // else entirely from the same column on every other racquet profile.
+    const deciderLevel = format.levels.length - 2;
     for (const u of eff.unitsWon) {
       const w = u.winner;
       const l: Side = w === 'A' ? 'B' : 'A';
+      const decidedTheMatch = u.level === deciderLevel && isDecider(format, before, u.level);
+      if (decidedTheMatch) { bump(sides[w], 'deciders_won'); bump(sides[l], 'deciders_lost'); }
       if (u.level === 0) {
         if (isTiebreak) { bump(sides[w], 'tiebreaks_won'); bump(sides[l], 'tiebreaks_lost'); }
         bump(sides[w], 'games_won');
         bump(sides[l], 'games_lost');
-        if (wasDecider) { bump(sides[w], 'deciders_won'); bump(sides[l], 'deciders_lost'); }
         if (firstUnitWinner === null) firstUnitWinner = w;
         streak = { A: 0, B: 0 };
       } else if (format.levels[u.level]?.key === 'set') {
@@ -562,6 +618,7 @@ export function deriveRacquetStats(
         bump(sides[l], 'sets_lost');
       }
     }
+    void wasDecider;
   }
 
   // Match-level outcome.
@@ -664,6 +721,9 @@ export function foldCareerStats(spec: SportStatSpec, lines: StatBag[]): StatBag 
       if (den > 0) out[m.key] = Math.round(((out[n] ?? 0) / den) * 1000) / 10;
     } else if (m.source === 'derived' && m.formula) {
       const [x, y] = m.formula.of;
+      // Nothing to derive from means nothing to show. Computing 0 - 0 put a
+      // "Point difference: 0" on the profile of somebody who has never played.
+      if (out[x] === undefined && out[y] === undefined) continue;
       const a = out[x] ?? 0;
       const b = out[y] ?? 0;
       if (m.formula.op === 'diff') out[m.key] = a - b;

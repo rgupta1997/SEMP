@@ -27,6 +27,16 @@ interface CrudOptions {
   createGuards?: RequestHandler[]; // applied only to create; falls back to writeGuards when omitted
   beforeDelete?: (id: string) => Promise<void>; // run before delete: clean up children or block (throw)
   afterUpdate?: (id: string, before: any, after: any) => Promise<void>; // run after update: side effects like notifications
+  /**
+   * Last chance to reshape the validated body before it reaches Prisma.
+   *
+   * Exists because a NULLABLE JSON COLUMN cannot be cleared with a plain `null` -
+   * Prisma treats that as ambiguous and wants `Prisma.DbNull`, which the shared zod
+   * schemas cannot name without importing Prisma into the browser bundle. Routers
+   * that own such a column translate it here; everyone else passes nothing and this
+   * never runs.
+   */
+  beforeWrite?: (data: Record<string, unknown>) => Record<string, unknown>;
 }
 
 // Builds a REST CRUD router (list/get/create/update/delete) over a Prisma delegate.
@@ -55,7 +65,7 @@ export function makeCrudRouter(delegate: Delegate, opts: CrudOptions): Router {
   }));
 
   router.post('/', ...createGuards, validateBody(opts.createSchema), asyncHandler(async (req, res) => {
-    const row = await delegate.create({ data: req.body });
+    const row = await delegate.create({ data: opts.beforeWrite ? opts.beforeWrite(req.body) : req.body });
     res.status(201).json(row);
   }));
 
@@ -63,7 +73,10 @@ export function makeCrudRouter(delegate: Delegate, opts: CrudOptions): Router {
     // Only fetched when a caller actually opts into afterUpdate - every other
     // consumer of this router keeps its exact prior behavior (no extra query).
     const before = opts.afterUpdate ? await delegate.findUnique({ where: { id: req.params.id } }) : null;
-    const row = await delegate.update({ where: { id: req.params.id }, data: req.body });
+    const row = await delegate.update({
+      where: { id: req.params.id },
+      data: opts.beforeWrite ? opts.beforeWrite(req.body) : req.body,
+    });
     if (opts.afterUpdate) await opts.afterUpdate(req.params.id, before, row);
     res.json(row);
   }));

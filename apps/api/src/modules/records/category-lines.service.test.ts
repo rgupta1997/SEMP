@@ -113,8 +113,83 @@ describe('writing a whole fixture', () => {
       { lineId: 'l3', sport: 'cricket', stats: { runs: 10 } },
     ]);
     expect(r.written).toBe(2);
-    expect(inserts(seen)).toHaveLength(2);
+    // Both football rows, ONE statement. Cricket has no table here - its three live
+    // in cricket-lines.service - so it contributes nothing, which is not an error.
+    expect(inserts(seen)).toHaveLength(1);
+    expect(inserts(seen)[0].params).toContain('l1');
+    expect(inserts(seen)[0].params).toContain('l2');
     // Deduplicated: one warning per unknown metric, not one per player.
     expect(r.unmapped).toEqual(['hat_tricks']);
+  });
+
+  /**
+   * THE REASON THIS IS BATCHED AT ALL.
+   *
+   * One delete and one insert per player, inside the lock's transaction, is two
+   * round trips each. At eleven a side that is forty-four on top of everything else
+   * a lock does, and it blew Prisma's transaction budget - so the lock rolled back
+   * and the official was told the result was not saved.
+   */
+  it('costs TWO STATEMENTS for a whole eleven-a-side team sheet, not forty-four', async () => {
+    const { db, seen } = fakeDb();
+    const squad = Array.from({ length: 22 }, (_, i) => ({
+      lineId: `l${i}`, sport: 'football', stats: { goals: i % 3, minutes: 90 },
+    }));
+    const r = await writeCategoryLines(db, squad);
+    expect(r.written).toBe(22);
+    expect(deletes(seen)).toHaveLength(1);
+    expect(inserts(seen)).toHaveLength(1);
+  });
+
+  it('still binds every value, however many rows share the statement', async () => {
+    const { db, seen } = fakeDb();
+    await writeCategoryLines(db, [
+      { lineId: 'l1', sport: 'football', stats: { goals: 1 } },
+      { lineId: 'l2', sport: 'football', stats: { goals: 2 } },
+    ]);
+    const ins = inserts(seen)[0];
+    expect(ins.sql).not.toMatch(/l1|l2/);
+    expect(ins.params).toEqual(expect.arrayContaining(['l1', 'l2']));
+  });
+
+  /**
+   * A ragged column set is the normal case, not an edge case: one player has saves
+   * and no goals, the next has goals and no saves. Sharing a statement means saying
+   * something for the columns a row did not produce, and NULL is the wrong thing to
+   * say - most of these columns are NOT NULL with a zero default, so the insert is
+   * rejected, the caller swallows it, and the statistics silently never appear.
+   */
+  it('a column only one player has takes the DB DEFAULT for the others, never NULL', async () => {
+    const { db, seen } = fakeDb();
+    const r = await writeCategoryLines(db, [
+      { lineId: 'l1', sport: 'football', stats: { goals: 1 } },
+      { lineId: 'l2', sport: 'football', stats: { saves: 4 } },
+    ]);
+    expect(r.written).toBe(2);
+    expect(inserts(seen)).toHaveLength(1);
+    const ins = inserts(seen)[0];
+    expect(ins.sql).toContain('goals');
+    expect(ins.sql).toContain('saves');
+    expect(ins.sql).toContain('DEFAULT');
+    expect(ins.params, 'a missing column was bound as NULL instead of DEFAULT')
+      .not.toContain(null);
+  });
+
+  it('writes nothing, and no statement, for an empty team sheet', async () => {
+    const { db, seen } = fakeDb();
+    const r = await writeCategoryLines(db, []);
+    expect(r.written).toBe(0);
+    expect(seen).toHaveLength(0);
+  });
+
+  it('keeps two different sports in their own tables', async () => {
+    const { db, seen } = fakeDb();
+    await writeCategoryLines(db, [
+      { lineId: 'l1', sport: 'football', stats: { goals: 1 } },
+      { lineId: 'l2', sport: 'tennis', stats: { points_won: 30 } },
+    ]);
+    expect(inserts(seen)).toHaveLength(2);
+    const tables = inserts(seen).map((s) => s.sql.match(/insert into (\w+)/)?.[1]);
+    expect(new Set(tables).size).toBe(2);
   });
 });

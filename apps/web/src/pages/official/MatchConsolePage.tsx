@@ -11,11 +11,11 @@ import {
 } from '../../features/scoring/engine';
 import { resolveTemplate, tieTemplateFor, eventTemplateFor } from '../../features/scoring/templates';
 import {
-  hydrateTie, rubbersWon, tieWinner, tieTarget, rubberDef, decideRubber as decideRubberFn, reopenRubber as reopenRubberFn,
+  hydrateTie, rubbersWon, tieWinner, tieOutcome, tieTarget, rubberDef, decideRubber as decideRubberFn, reopenRubber as reopenRubberFn,
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { rankingContributions, detailedContributions, foldCricket, foldRally, isCricketSport, isKernelSport, isRacquetSport, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, type CricketLog, type CricketState } from '@semp/shared';
+import { rankingContributions, detailedContributions, foldCricket, foldRally, formatClock, isCricketSport, isKernelSport, isRacquetSport, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, type CricketLog, type CricketState } from '@semp/shared';
 import type { TieSpec, EventSpec, ScoringMode, KernelState, Pairing, RallyLog, Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer } from '../../features/scoring/RacquetDeck';
 import { CricketDeck } from '../../features/scoring/CricketDeck';
@@ -35,6 +35,16 @@ const NOT_STARTED_STATUS: Record<string, string> = {
   registration_open: 'open for registration but hasn’t started yet',
 };
 
+/** Where the console was opened from, and what that page is called. First match wins. */
+const BACK_LABELS: Array<[RegExp, string]> = [
+  [/^\/officiating\b/, 'My matches'],
+  [/\/results\b/, 'Results'],
+  [/\/schedule\b/, 'Schedule'],
+];
+
+/** A match with a result in it. Nothing is left to score, whatever the deck shows. */
+const OVER = ['completed', 'walkover', 'bye'];
+
 export function MatchConsolePage() {
   const { fixtureId } = useParams();
   const navigate = useNavigate();
@@ -42,7 +52,12 @@ export function MatchConsolePage() {
   // Where to return when done - set by whoever opened the console (host Results
   // tab passes its path); officials fall back to their matches list.
   const back = (location.state as { from?: string } | null)?.from ?? '/officiating';
-  const backLabel = back === '/officiating' ? 'My matches' : 'Results';
+  // What to CALL the page we came from. Read off the path rather than assumed:
+  // "anything that is not /officiating is Results" was true only while Results was
+  // the one host tab that opened a console. The Schedule tab opens one too, so the
+  // link said Results and landed on the schedule - the label promising one
+  // destination and the link taking another.
+  const backLabel = BACK_LABELS.find(([re]) => re.test(back))?.[1] ?? 'Back';
   // Single fixture, authorized for the assigned official OR the championship host.
   const { data: fixture, isLoading } = useApi<any>(fixtureId ? `/fixtures/${fixtureId}/scoring` : null);
   const { data: live } = useApi<{ live_state: any; live_log: any[] }>(fixtureId ? `/fixtures/${fixtureId}/live` : null);
@@ -62,10 +77,26 @@ export function MatchConsolePage() {
    */
   const [focus, setFocus] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
-  const scoringFocus = focus && !adminOpen;
 
   if (isLoading) return <Spinner />;
   if (!fixture) return <EmptyState icon="⚑" title="Match not found" description="This fixture isn't available to you." action={<Button onClick={() => navigate(back)}>Back</Button>} />;
+
+  /**
+   * ONCE THE MATCH IS OVER, THE CONSOLE GOES BACK TO BEING A PAGE.
+   *
+   * Focus mode gives the deck the whole screen so a tap-per-action console is not
+   * pushed off the bottom of a phone by the admin sections after it. That is worth
+   * the collapsed header only while there is something left to tap. When the result
+   * is in, the deck shrinks to a single result card - and the header region focus
+   * mode removes is where the one remaining action lives: LOCKING the scorecard,
+   * which is what makes the result official.
+   *
+   * So a completed match was the single state in which the console hid the only
+   * thing still outstanding, and it hid it for every sport that scores on the team
+   * deck - football included. Entering the score got the match to "completed" and
+   * there was no way onward from the console at all.
+   */
+  const scoringFocus = focus && !adminOpen && !OVER.includes(fixture.status);
 
   // The fixture's structure (single / tie / event) and scoring depth (detailed /
   // manual) are now chosen by the official on the console (see ScoringTabs) rather than
@@ -117,7 +148,9 @@ export function MatchConsolePage() {
         </>
       )}
 
-      {!scoringFocus && ['completed', 'walkover', 'bye'].includes(fixture.status) && (
+      {/* A result exists, so the sign-off that makes it official is the next thing
+          to do - no longer also conditioned on the layout, which is what hid it. */}
+      {OVER.includes(fixture.status) && (
         <LockScorecardPanel fixtureId={fixtureId!} scorecardStatus={fixture.scorecard_status} invalidate={invalidate} />
       )}
 
@@ -219,6 +252,18 @@ function TabBar<T extends string>({ value, onChange, options, label, compact, co
   );
 }
 
+// The compact labels for the depth toggle, which has to say in two or three words
+// what "detailed" MEANS for the sport in hand. It used to say "Ball by ball" for
+// everything, because cricket is where the compact toggle was built - so a football
+// official was offered a ball-by-ball tab above a console with no balls in it.
+// Each family gets the term its own officials use.
+function depthLabels(sport: string | null): Record<string, string> {
+  const detailed = isCricketSport(sport) ? 'Ball by ball'
+    : isRacquetSport(sport) ? 'Point by point'
+    : 'Play by play';
+  return { detailed, manual: 'Totals' };
+}
+
 // Officials pick how to score this match here, not the organiser: the structure
 // (single / team tie / multi-competitor event - only those the sport supports) and the
 // depth (live point-by-point vs final score). Defaults to the sport's natural format
@@ -301,6 +346,8 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
         round: fixture?.round ?? null,
         stage_sequence: fixture?.stage_sequence ?? null,
         frozen_format: (live?.live_state as any)?.format ?? null,
+        // The organiser's per-match rules, patched on top of whatever rung wins.
+        format_overrides: fixture?.format_overrides ?? null,
       },
       { scoring_format_id: td.scoring_format_id ?? null, round_formats: td.round_formats, sport: sportName },
       (fixture?.scoring_formats ?? []) as any[],
@@ -385,12 +432,21 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     setMode(next);
   };
 
-  // Only cricket's ball-by-ball deck fills the screen; every other console is a
-  // normal page section and must not have the header collapsed out from under it.
-  const cricketDeckLive = structure === 'single'
+  // WHICH CONSOLES FILL THE SCREEN.
+  //
+  // A deck that sizes itself to what is left of the scroll container only means
+  // "no scrolling" if nothing is rendered after it - so the page has to know. Two
+  // do: cricket's ball-by-ball deck, and the team deck that every invasion, raid,
+  // net and board sport scores through. Both are tap-per-action consoles an
+  // official holds in one hand, and both were pushing their own buttons off the
+  // bottom of a phone behind the awards form.
+  //
+  // Everything else is an ordinary page section and must not have the header
+  // collapsed out from under it.
+  const fullHeightDeck = structure === 'single'
     && effectiveMode === 'detailed'
-    && isCricketSport(sportName);
-  useEffect(() => { onFocusable?.(cricketDeckLive); }, [cricketDeckLive]); // eslint-disable-line react-hooks/exhaustive-deps
+    && (isCricketSport(sportName) || (isKernelSport(sportName) && !isRacquetSport(sportName)));
+  useEffect(() => { onFocusable?.(fullHeightDeck); }, [fullHeightDeck]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className={focus ? 'flex min-h-0 flex-1 flex-col' : undefined}>
@@ -407,7 +463,7 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
               officials just set finishing places. Other sports keep the depth toggle. */}
           {structure !== 'event' && showDepth ? (
             <TabBar label="Scoring" value={mode} onChange={switchMode} compact={focus}
-              compactLabels={{ detailed: 'Ball by ball', manual: 'Totals' }}
+              compactLabels={depthLabels(sportName)}
               options={[{ value: 'detailed', label: 'Detailed · live' }, { value: 'manual', label: 'Manual · final score' }]} />
           ) : null}
         </div>
@@ -588,6 +644,117 @@ function AwardsPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixture
   );
 }
 
+/* ------------------- What follows a result, where the result is ------------------- */
+/**
+ * THE TWO THINGS THAT COME AFTER A SCORELINE.
+ *
+ * Confirming the score writes it and stops. It does not make the result official,
+ * and it does not record who won the match for their side. Both of those already
+ * existed on this page - the lock in a banner above the console, the awards in a
+ * form well below it - but neither is where an official is looking at the moment
+ * they finish a match, and for every sport on the team deck the banner was not
+ * rendered at all. So this repeats those two actions inside the end-of-match card.
+ *
+ * THE ORDER IS NOT COSMETIC. `PATCH /fixtures/:id/awards` runs `assertNotLocked`,
+ * so an award given after the lock is refused: locking is genuinely last, and the
+ * button says so rather than letting somebody find out from a toast.
+ *
+ * Deliberately just "Player of the match", not the whole awards form - it is the
+ * one award nearly every match gives, and the full form is still downstairs for a
+ * second one. A replace-all save would drop those, so any award that is NOT the
+ * player of the match is carried through untouched.
+ */
+function PostMatchActions({ fixture, fixtureId, invalidate }:
+  { fixture: any; fixtureId: string; invalidate: (string | null)[] }) {
+  const POTM = 'Player of the Match';
+  const people = [...rosterPeople(homeTeam(fixture)), ...rosterPeople(awayTeam(fixture))];
+  const { data: existing } = useApi<AwardRow[]>(`/fixtures/${fixtureId}/awards`);
+  const locked = fixture.scorecard_status === 'locked';
+  const potm = existing?.find((a) => a.award_name.trim().toLowerCase() === POTM.toLowerCase());
+  const [picking, setPicking] = useState(false);
+  const [choice, setChoice] = useState('');
+
+  const saveAwards = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/awards`, body),
+    [`/fixtures/${fixtureId}/awards`, ...invalidate]);
+  const lock = useApiMutation(() => api('POST', `/fixtures/${fixtureId}/lock`, {}), invalidate);
+
+  const giveAward = (recipient: string) => {
+    const others = (existing ?? [])
+      .filter((a) => a.award_name.trim().toLowerCase() !== POTM.toLowerCase())
+      .map((a) => ({ award_name: a.award_name, recipient_user_id: a.recipient_user_id }));
+    const awards = recipient ? [...others, { award_name: POTM, recipient_user_id: recipient }] : others;
+    saveAwards.mutate({ awards }, {
+      onSuccess: () => { setPicking(false); toast.success(recipient ? 'Player of the match recorded' : 'Award removed'); },
+      onError: (e: any) => toast.error(e.message),
+    });
+  };
+
+  const doLock = async () => {
+    if (!potm && !locked) {
+      const ok = await confirmDialog({
+        title: 'Lock without a player of the match?',
+        message: 'A locked scorecard cannot be changed, and that includes its awards — this match would keep no player of the match unless it is unlocked again.',
+        confirmLabel: 'Lock anyway',
+      });
+      if (!ok) return;
+    }
+    lock.mutate(undefined, {
+      onSuccess: () => toast.success('Scorecard locked', 'This result is now official.'),
+      onError: (e: any) => toast.error(e.message),
+    });
+  };
+
+  return (
+    <div data-qa="post-match" className="w-full max-w-sm space-y-2">
+      {/* ---- the award ---- */}
+      {people.length > 0 && (
+        <div className="rounded-xl border border-line bg-white p-2.5 dark:bg-slate-800/60">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Player of the match</p>
+          {potm && !picking ? (
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <span className="truncate text-sm font-semibold">🏅 {potm.recipient_name ?? 'Recorded'}</span>
+              {!locked && (
+                <Button variant="subtle" size="sm" data-qa="potm-change"
+                  onClick={() => { setChoice(potm.recipient_user_id); setPicking(true); }}>Change</Button>
+              )}
+            </div>
+          ) : locked ? (
+            <p className="mt-1 text-sm text-muted">Not recorded. The scorecard is locked, so it can no longer be added.</p>
+          ) : (
+            <div className="mt-1 flex items-center gap-2">
+              <Select className="min-w-0 flex-1" value={choice} data-qa="potm-select"
+                onChange={(e) => setChoice(e.target.value)}>
+                <option value="">Nobody</option>
+                {people.map((x) => <option key={x.id} value={x.id}>{x.name} · {x.team}</option>)}
+              </Select>
+              <Button size="sm" data-qa="potm-save" disabled={saveAwards.isPending} onClick={() => giveAward(choice)}>
+                {saveAwards.isPending ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---- the lock ---- */}
+      {locked ? (
+        <div className="rounded-xl border border-line bg-slate-50 px-3 py-2 text-center text-sm dark:bg-slate-800/60">
+          <span className="font-semibold">🔒 Scorecard locked</span>
+          <span className="text-muted"> — official and permanent.</span>
+        </div>
+      ) : (
+        <>
+          <Button size="lg" className="w-full" data-qa="post-match-lock" disabled={lock.isPending} onClick={doLock}>
+            {lock.isPending ? 'Locking…' : 'Lock scorecard'}
+          </Button>
+          <p className="text-center text-[11px] text-muted">
+            Locking makes the result official and permanent, and is the last step — awards cannot be changed afterwards. Organiser only.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* --------------------------- Racquet console ---------------------------- */
 /**
  * The five racquet sports score through the rally kernel. This wrapper does three
@@ -611,6 +778,8 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
       round: fixture?.round ?? null,
       stage_sequence: fixture?.stage_sequence ?? null,
       frozen_format: (live?.live_state as any)?.format ?? null,
+      // The organiser's per-match rules, patched on top of whatever rung wins.
+      format_overrides: fixture?.format_overrides ?? null,
     },
     { scoring_format_id: td.scoring_format_id ?? null, round_formats: td.round_formats, sport },
     // Formats referenced by id are supplied by the API alongside the fixture; until
@@ -730,6 +899,8 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
       round: fixture?.round ?? null,
       stage_sequence: fixture?.stage_sequence ?? null,
       frozen_format: (live?.live_state as any)?.format ?? null,
+      // The organiser's per-match rules, patched on top of whatever rung wins.
+      format_overrides: fixture?.format_overrides ?? null,
     },
     { scoring_format_id: td.scoring_format_id ?? null, round_formats: td.round_formats, sport },
     (fixture?.scoring_formats ?? []) as any[],
@@ -879,6 +1050,8 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       round: fixture?.round ?? null,
       stage_sequence: fixture?.stage_sequence ?? null,
       frozen_format: (live?.live_state as any)?.format ?? null,
+      // The organiser's per-match rules, patched on top of whatever rung wins.
+      format_overrides: fixture?.format_overrides ?? null,
     },
     { scoring_format_id: td.scoring_format_id ?? null, round_formats: td.round_formats, sport },
     (fixture?.scoring_formats ?? []) as any[],
@@ -928,7 +1101,8 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
         },
         // The attributed actions ARE the timeline here, and what the fact writer
         // reads to fill fixture_events.
-        live_log: teamTimeline(nextLog, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
+        live_log: teamTimeline(nextLog, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture)),
+          (format.clock?.minutes ?? 0) * 60_000),
         home_score: env.headline[0],
         away_score: env.headline[1],
         status: st,
@@ -953,8 +1127,20 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       roster={roster}
       log={log}
       busy={busy}
+      // A LOCKED RESULT IS READ-ONLY, and the console has to say so by being it.
+      // Every write path behind this deck runs assertNotLocked, so while the deck
+      // stayed live on a locked match each tap was a 409 dressed as a button - and
+      // the card now sits directly under "official and permanent", which made an
+      // enabled Undo beneath it a straight contradiction.
+      disabled={fixture.scorecard_status === 'locked'}
+      recorded={status === 'completed'}
+      afterResult={<PostMatchActions fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} />}
       onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
-      onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
+      // NO onDone HERE. Confirming used to navigate straight back to the results
+      // list, which is what made the award and the lock unreachable from the match
+      // that had just finished: the console was gone before either was offered.
+      // The card below now carries both, and leaving is the official's own choice.
+      onSignOff={(nextLog, state) => save(nextLog, state, true)}
     />
   );
 }
@@ -966,7 +1152,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
  * is the whole reason a kabaddi raid or a football goal can now reach somebody's
  * career record.
  */
-function teamTimeline(log: RallyLog, homeName: string, awayName: string): LogEntry[] {
+function teamTimeline(log: RallyLog, homeName: string, awayName: string, fullMs = 0): LogEntry[] {
   const nameOf = (s: Side) => (s === 'A' ? homeName : awayName);
   const out: LogEntry[] = [];
   log.forEach((ev, i) => {
@@ -975,9 +1161,15 @@ function teamTimeline(log: RallyLog, homeName: string, awayName: string): LogEnt
     const txt = ev.t === 'point'
       ? `${any.label ?? 'Point'}${any.pts > 1 ? ` (+${any.pts})` : ''}${who}`
       : ev.t === 'endPeriod' ? 'Period ended'
-        : ev.t;
+        : ev.t === 'clockStart' ? 'Clock started'
+          : ev.t === 'clockPause' ? 'Clock paused'
+            : ev.t === 'clockAdjust' ? `Clock corrected to ${formatClock(any.toMs ?? 0)}`
+              : ev.t;
     out.unshift({
-      t: `#${i + 1}`,
+      // THE MINUTE, not the entry number, once the match has a clock running. This
+      // is what is persisted and what every read-only view renders, so a goal shows
+      // as 23' on the public page and not as "#7".
+      t: typeof any.clockMs === 'number' ? minuteLabel(any.clockMs, fullMs) : `#${i + 1}`,
       team: (any.side as Side) ?? undefined,
       txt,
       ...(any.playerName ? { player: any.playerName } : {}),
@@ -1351,13 +1543,23 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
 
   const goLive = () => { setSubmitting(true); setStatus('live'); save(state, 'live', false, () => setSubmitting(false), () => setSubmitting(false)); };
 
-  const w = tieWinner(spec, state);
-  const decided = w !== null;
+  // A tie is finished when somebody reaches the target OR every rubber has been
+  // played and nobody did. The second case is an ordinary chess result - the shipped
+  // template is four boards with a majority of three, so 2-2 happens - and asking
+  // only `tieWinner` left the official told to "record rubber results until one side
+  // reaches 3" with no rubbers left to record, and no way to complete the fixture.
+  const { winner: w, drawn, decided } = tieOutcome(spec, state);
   const target = tieTarget(spec);
   const signOff = async () => {
     if (!decided) { toast.error(`The tie isn’t decided yet - record rubber results until one side reaches ${target}.`); return; }
     const { a, b } = rubbersWon(state);
-    const ok = await confirmDialog({ title: 'Confirm final result', confirmLabel: 'Sign off', message: `${homeName} ${a} - ${b} ${awayName}. This completes the tie and updates standings.` });
+    const ok = await confirmDialog({
+      title: drawn ? 'Confirm a drawn tie' : 'Confirm final result',
+      confirmLabel: drawn ? 'Sign off as a draw' : 'Sign off',
+      message: drawn
+        ? `${homeName} ${a} - ${b} ${awayName}. Every rubber has been played and neither side reached ${target}, so this tie is drawn. Standings will record it as a draw for both sides.`
+        : `${homeName} ${a} - ${b} ${awayName}. This completes the tie and updates standings.`,
+    });
     if (!ok) return;
     setSubmitting(true);
     save(state, 'completed', true, () => { setStatus('completed'); setSubmitting(false); onDone(); }, () => setSubmitting(false));

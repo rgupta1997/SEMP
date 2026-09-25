@@ -253,6 +253,34 @@ export type ChangeEndsRule = (typeof CHANGE_ENDS_RULES)[number];
 export const PENALTY_MODES = ['off', 'point', 'pointGameMatch'] as const;
 export type PenaltyMode = (typeof PENALTY_MODES)[number];
 
+/**
+ * SETTLING A MATCH THAT CANNOT BE DRAWN.
+ *
+ * When the aggregate is level after the last period and `endStates.drawsAllowed` is
+ * false, the kernel deliberately leaves the match OPEN rather than inventing a
+ * winner. This is what fills that gap, in the order football actually uses it:
+ * extra time first, a shoot-out only if that is still level.
+ *
+ * Absent (or null) means the old behaviour - the match stays open and an organiser
+ * settles it by hand.
+ */
+export interface TieBreakSpec {
+  /**
+   * Periods of extra time, and how long EACH one runs. Both halves are always
+   * played out; there is no golden goal, so a side that goes ahead in the first
+   * still has to survive the second.
+   */
+  extraTime?: { periods: number; minutes: number } | null;
+  /**
+   * The shoot-out. `kicks` each in the first round; level after that goes to
+   * sudden death, one pair of kicks at a time, until a pair is split.
+   *
+   * A shoot-out does NOT touch the scoreline - a 2-2 settled on penalties is still
+   * recorded 2-2, won on penalties, which is how every record of it reads.
+   */
+  penalties?: { kicks: number } | null;
+}
+
 export interface ScoringFormat {
   /** Lowercased sport name, matching the sports catalogue. */
   sport: string;
@@ -271,6 +299,8 @@ export interface ScoringFormat {
   letsEnabled: boolean;
   doubles?: boolean;
   clock?: ClockSpec | null;
+  /** How a level match that cannot be drawn gets settled. */
+  tieBreak?: TieBreakSpec | null;
   endStates: EndStatePolicy;
   /** Sport-owned plugins (table tennis `expedite`). Namespaced, never flattened. */
   plugins?: Record<string, unknown>;
@@ -289,6 +319,10 @@ export type Outcome = (typeof OUTCOMES)[number];
 export const END_REASONS = [
   'normal', 'cap', 'retired', 'walkover', 'default', 'disqualified',
   'abandoned', 'conceded', 'override',
+  // Settled after the whistle: the scoreline stayed level and something else
+  // decided it. Kept distinct from 'normal' so a record can say "won on penalties"
+  // rather than quietly presenting a shoot-out win as a win in normal time.
+  'extra_time', 'penalties',
 ] as const;
 export type EndReason = (typeof END_REASONS)[number];
 
@@ -356,6 +390,16 @@ export const endStatePolicySchema: z.ZodType<EndStatePolicy> = z.object({
   countWalkoverInDifference: z.boolean(),
 });
 
+export const tieBreakSpecSchema: z.ZodType<TieBreakSpec> = z.object({
+  extraTime: z.object({
+    periods: z.number().int().min(1).max(4),
+    minutes: z.number().int().min(1).max(60),
+  }).nullable().optional(),
+  penalties: z.object({
+    kicks: z.number().int().min(1).max(20),
+  }).nullable().optional(),
+});
+
 export const scoringFormatSchema = z.object({
   sport: z.string().min(1),
   presetKey: z.string().optional(),
@@ -370,6 +414,10 @@ export const scoringFormatSchema = z.object({
   letsEnabled: z.boolean(),
   doubles: z.boolean().optional(),
   clock: clockSpecSchema.nullable().optional(),
+  // Without this the whole settlement chain was STRIPPED on the round trip: zod
+  // drops unknown keys, so a format saved with extra time and a shoot-out came back
+  // with neither, and a level knockout sat on "Half 2 of 2" forever.
+  tieBreak: tieBreakSpecSchema.nullable().optional(),
   endStates: endStatePolicySchema,
   plugins: z.record(z.unknown()).optional(),
   rulesSheet: z.record(z.unknown()).optional(),

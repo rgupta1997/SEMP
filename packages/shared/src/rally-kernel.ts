@@ -39,6 +39,16 @@ export type RallyEvent =
    */
   | {
     t: 'point'; side: Side; pts?: number; at?: string;
+    /**
+     * WHERE IN THE MATCH THIS HAPPENED - milliseconds elapsed on the match clock of
+     * the period it was recorded in, stamped once at the moment of the tap.
+     *
+     * Stored rather than derived because the clock can be CORRECTED afterwards, and
+     * a goal that went in on 23 minutes stays a 23rd-minute goal however the clock
+     * is fixed later. Milliseconds rather than whole minutes so the console can
+     * decide how to round; the log prints it as 23'.
+     */
+    clockMs?: number;
     /** The acting person, as a real user id. */
     playerId?: string; playerName?: string;
     /** The second person, where the action has one (an assist, a fielder). */
@@ -72,9 +82,32 @@ export type RallyEvent =
    * policy. This is the ordinary end of a half or a quarter, and the kernel cannot
    * infer it because it owns no clock.
    */
-  | { t: 'endPeriod'; reason?: string; by?: string; at?: string }
+  | { t: 'endPeriod'; reason?: string; by?: string; at?: string; clockMs?: number }
   /** Terminal, out-of-band: retirement, walkover, override. */
-  | { t: 'end'; outcome: Outcome; reason: EndReason; winner?: Side | null; by?: string; at?: string };
+  | { t: 'end'; outcome: Outcome; reason: EndReason; winner?: Side | null; by?: string; at?: string }
+  /**
+   * THE MATCH CLOCK, as events rather than as a field.
+   *
+   * The clock is DERIVED from these three, which is what makes it survive a reload,
+   * agree between two officials on two devices, and stay auditable: an official who
+   * pushes the clock back two minutes leaves a record of having done it. Nothing
+   * here scores, so the kernel's switch has no case for them and steps straight
+   * past - the same way the stat fold does, which only ever reads 'point'.
+   */
+  /**
+   * ONE PENALTY IN A SHOOT-OUT.
+   *
+   * Deliberately NOT a `point`: a shoot-out does not change the scoreline. A 2-2
+   * settled on penalties is recorded 2-2, won on penalties - so these carry no
+   * `pts`, the kernel has no case for them, and the aggregate never moves. The
+   * console tallies them and, when the shoot-out is decided, closes the match with
+   * a single `end` carrying reason 'penalties'.
+   */
+  | { t: 'penaltyKick'; side: Side; scored: boolean; playerId?: string; playerName?: string; at?: string; by?: string }
+  | { t: 'clockStart'; at?: string; by?: string }
+  | { t: 'clockPause'; at?: string; by?: string }
+  /** An official's correction. `toMs` is the elapsed time the clock now reads. */
+  | { t: 'clockAdjust'; toMs: number; fromMs?: number; reason?: string; by?: string; at?: string };
 
 export type RallyLog = RallyEvent[];
 
@@ -534,16 +567,37 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
 
     case 'point': {
       const rallyWinner = ev.side;
-      const scores = spec.pointScoring === 'rally' || rallyWinner === state.serve.side;
+      /**
+       * A MAGNITUDE OF ZERO IS A REAL THING, and it is not one.
+       *
+       * Outside the racquet family a tap is an ACTION, and most actions score
+       * nothing: a yellow card, a save, a missed penalty, an empty raid, a dig. The
+       * console says so explicitly - it sends `pts: 0` and its own comment calls it
+       * "a fact worth keeping that changes no score".
+       *
+       * Clamping to a minimum of one overruled that and turned every one of them
+       * into a goal. A football match with five saves and three cards read 8-0, and
+       * the scoreboard was wrong in the direction nobody checks - upwards, on the
+       * screen the official is watching.
+       *
+       * Absent still means one, because that is what a plain point is.
+       */
+      const magnitude = Math.max(0, ev.pts ?? 1);
+      const scores = magnitude > 0
+        && (spec.pointScoring === 'rally' || rallyWinner === state.serve.side);
       if (scores) {
-        // A magnitude, not always one: a three-pointer is one action worth three.
-        state.score[state.pointLevel][idx(rallyWinner)] += Math.max(1, ev.pts ?? 1);
+        state.score[state.pointLevel][idx(rallyWinner)] += magnitude;
         state.unitPoints += 1;
         state.totalPoints += 1;
         base.scored = rallyWinner;
       }
-      moveServe(spec, state, rallyWinner, scores);
-      state.serve.courtHalf = courtHalfFor(spec, state, state.score[state.pointLevel]);
+      // A nil-magnitude ACTION does not move the serve either. A dig, a block that
+      // did not win the rally, a card - none of them ends a rally, so none of them
+      // hands the serve over.
+      if (magnitude > 0) {
+        moveServe(spec, state, rallyWinner, scores);
+        state.serve.courtHalf = courtHalfFor(spec, state, state.score[state.pointLevel]);
+      }
       if (scores) {
         base.switchEnds = shouldSwitchEnds(format, state, lv, before, base.inDecider);
         state.switchEnds = base.switchEnds;
@@ -792,10 +846,25 @@ export function headline(format: ScoringFormat, state: KernelState): Pair {
   // won would say "1-1" for a match somebody clearly won, and standings read this
   // pair - so getting it wrong here would publish the wrong result.
   if (format.levels[top]?.decide === 'aggregate') return aggregateScore(state);
-  // A single-unit match ("one game to 21") has no meaningful unit count - the points
-  // ARE the headline. Anything longer reports units won.
-  if (format.levels[top].target <= 1 && top > 0) return [...state.score[0]] as Pair;
   if (top === 0) return [...state.score[0]] as Pair;
+
+  // A SINGLE-UNIT match ("one game to 21", a 10-point shootout, one judo bout) has
+  // no meaningful unit count - the score of that one unit IS the headline.
+  //
+  // It has to be read from the BANKED unit, not from the live level. Winning the
+  // only unit cascades, and the cascade resets every level below the one it just
+  // filled - so by the time the match is over, the live score is 0-0. Reading it
+  // there published `0-0` as home_score/away_score for a completed match, with a
+  // winner beside it, across a third of the shelf: every corporate single-game
+  // format and every one-bout combat and board sport.
+  if (format.levels[top].target <= 1) {
+    const lvl = top - 1;
+    const banked = state.finished.filter((u) => u.level === lvl);
+    const last = banked[banked.length - 1];
+    if (last) return [last.score[0], last.score[1]] as Pair;
+    return [...state.score[lvl]] as Pair;
+  }
+
   return [...state.score[top]] as Pair;
 }
 

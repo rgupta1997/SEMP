@@ -65,6 +65,19 @@ export interface FormatKnobs {
   clockAction: CapAction;
   clockTieRule: CapTieRule;
 
+  // ---- settling a match that cannot be drawn
+  //
+  // Only ever consulted when draws are off: a level match that IS allowed to be a
+  // draw is closed as one and never reaches any of this.
+  extraTimeEnabled: boolean;
+  /** How many periods of extra time. Both are played out; there is no golden goal. */
+  extraTimePeriods: number;
+  /** Minutes in EACH period of extra time, not the total. */
+  extraTimeMinutes: number;
+  shootoutEnabled: boolean;
+  /** Kicks each in the opening round. Level after that goes to sudden death. */
+  shootoutKicks: number;
+
   // ---- how it is run
   officiatingMode: OfficiatingMode;
   drawsAllowed: boolean;
@@ -92,7 +105,7 @@ export interface KnobSpec {
   key: keyof FormatKnobs;
   label: string;
   hint?: string;
-  group: 'shape' | 'serve' | 'ends' | 'clock' | 'run';
+  group: 'shape' | 'serve' | 'ends' | 'clock' | 'tieBreak' | 'run';
   type: 'int' | 'bool' | 'enum';
   min?: number;
   max?: number;
@@ -250,6 +263,27 @@ export const KNOB_SPECS: KnobSpec[] = [
       { value: 'organiserDecides', label: 'Leave it to the organiser' },
     ] },
 
+  // ---- if it is still level
+  //
+  // Hidden while draws are allowed, because then none of it can ever run: the
+  // kernel closes a level match as a draw and never asks. Turning draws off is what
+  // makes a knockout a knockout, and these are the questions that follow from it.
+  { key: 'extraTimeEnabled', label: 'Play extra time', group: 'tieBreak', type: 'bool',
+    hint: 'Extra periods when the scores are level at full time.',
+    applies: (k) => k.periodShaped && !k.drawsAllowed },
+  { key: 'extraTimePeriods', label: 'Periods of extra time', group: 'tieBreak', type: 'int', min: 1, max: 4,
+    hint: 'Both are always played out — a side that goes ahead in the first still has to survive the second.',
+    applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled },
+  { key: 'extraTimeMinutes', label: 'Minutes per extra period', group: 'tieBreak', type: 'int', min: 1, max: 60,
+    hint: 'Each period, not the total. Two periods of 5 adds ten minutes.',
+    applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled },
+  { key: 'shootoutEnabled', label: 'Penalty shoot-out', group: 'tieBreak', type: 'bool',
+    hint: 'Settles it when the scores are still level after extra time. The scoreline is not changed — a 1-1 won on kicks is recorded 1-1.',
+    applies: (k) => k.periodShaped && !k.drawsAllowed },
+  { key: 'shootoutKicks', label: 'Kicks each', group: 'tieBreak', type: 'int', min: 1, max: 20,
+    hint: 'The opening round. Still level after that goes to sudden death, a pair at a time.',
+    applies: (k) => k.periodShaped && !k.drawsAllowed && k.shootoutEnabled },
+
   // ---- run
   { key: 'officiatingMode', label: 'Who scores', group: 'run', type: 'enum',
     hint: 'Self-scored changes the console: unlimited undo, no challenge UI, conduct points off, and both sides confirm the result.',
@@ -266,6 +300,7 @@ export const KNOB_GROUPS: Array<{ key: KnobSpec['group']; label: string }> = [
   { key: 'serve', label: 'Serving' },
   { key: 'ends', label: 'Ends & conduct' },
   { key: 'clock', label: 'Time cap' },
+  { key: 'tieBreak', label: 'If it is still level' },
   { key: 'run', label: 'How it is run' },
 ];
 
@@ -329,6 +364,15 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
     clockMinutes: f.clock?.minutes ?? 20,
     clockAction: f.clock?.action ?? 'finishPointThenLeader',
     clockTieRule: f.clock?.tieRule ?? 'suddenDeathPoint',
+
+    // The defaults a fest actually wants: two halves of five, then five kicks each.
+    // They are what the knob shows before anyone touches it, so turning extra time
+    // on does not also require deciding how long it is.
+    extraTimeEnabled: !!f.tieBreak?.extraTime,
+    extraTimePeriods: f.tieBreak?.extraTime?.periods ?? 2,
+    extraTimeMinutes: f.tieBreak?.extraTime?.minutes ?? 5,
+    shootoutEnabled: !!f.tieBreak?.penalties,
+    shootoutKicks: f.tieBreak?.penalties?.kicks ?? 5,
 
     officiatingMode: f.officiatingMode,
     drawsAllowed: f.endStates.drawsAllowed,
@@ -438,6 +482,17 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
         pauseOnStoppage: f.clock?.pauseOnStoppage ?? false,
       }
       : null,
+    tieBreak: k.extraTimeEnabled || k.shootoutEnabled
+      ? {
+        extraTime: k.extraTimeEnabled
+          ? {
+            periods: Math.max(1, k.extraTimePeriods),
+            minutes: Math.max(1, k.extraTimeMinutes),
+          }
+          : null,
+        penalties: k.shootoutEnabled ? { kicks: Math.max(1, k.shootoutKicks) } : null,
+      }
+      : null,
     endStates: { ...f.endStates, drawsAllowed: k.drawsAllowed },
   };
 }
@@ -465,6 +520,14 @@ export function describeKnobs(k: FormatKnobs): string {
     bits.push(k.periodShaped
       ? `${k.clockMinutes} min cap (${Math.round(k.clockMinutes / Math.max(1, k.unitsToWin))}/period)`
       : `${k.clockMinutes} min cap`);
+  }
+  // What settles it, on the row itself - so an organiser scanning a shelf of
+  // formats can see which one goes to kicks without opening it.
+  if (!k.drawsAllowed && (k.extraTimeEnabled || k.shootoutEnabled)) {
+    const chain: string[] = [];
+    if (k.extraTimeEnabled) chain.push(`ET ${k.extraTimePeriods}x${k.extraTimeMinutes} min`);
+    if (k.shootoutEnabled) chain.push(`${k.shootoutKicks} kicks`);
+    bits.push(chain.join(' then '));
   }
   return bits.join(' · ');
 }

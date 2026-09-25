@@ -8,6 +8,7 @@ import {
 } from './enums.js';
 import { disciplineFormatConfigSchema } from './scoring.js';
 import { stageConfigSchema } from './stage-config.js';
+import { formatOverridesSchema } from './format-overrides.js';
 import { ENTRY_LEVELS } from './org-structure.js';
 
 const uuid = z.string().uuid();
@@ -748,6 +749,9 @@ const fixtureFields = z.object({
   bracket_position: z.number().int().optional(),
   scheduled_at: z.coerce.date().nullable().optional(),
   duration_minutes: z.number().int().min(1).nullable().optional(),
+  // Per-match rules, patched on top of whatever the format ladder resolves. Null
+  // clears them and the match goes back to inheriting everything.
+  format_overrides: formatOverridesSchema.nullable().optional(),
   status: z.enum(FIXTURE_STATUS).default('scheduled'),
   official_id: uuid.nullable().optional(),
   notes: z.string().optional(),

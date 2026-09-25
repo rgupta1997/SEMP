@@ -85,6 +85,16 @@ export function hydrateTie(raw: any, spec: TieSpec): TieState {
     });
     if (typeof raw.activeRubber === 'number') base.activeRubber = Math.min(Math.max(0, raw.activeRubber), spec.rubbers.length - 1);
   }
+  // Land on something PLAYABLE. A persisted pointer can name a rubber that has since
+  // been completed or skipped - a stale snapshot, a hand-edited live_state, a tie
+  // reopened from another device - and a console pointed at a finished contest shows
+  // a dead screen with no way forward. Only moved when the tie still has rubbers to
+  // play; a decided tie legitimately points at its last one.
+  const at = base.rubbers[base.activeRubber];
+  if (at && at.status !== 'pending' && at.status !== 'live') {
+    const next = base.rubbers.findIndex((r) => r.status === 'pending' || r.status === 'live');
+    if (next >= 0) base.activeRubber = next;
+  }
   return base;
 }
 
@@ -103,6 +113,34 @@ export function tieWinner(spec: TieSpec, state: TieState): 'A' | 'B' | null {
   if (a >= t) return 'A';
   if (b >= t) return 'B';
   return null;
+}
+
+/** Rubbers that can still be played - pending or live, not completed or skipped. */
+export function playableRubbers(state: TieState): number {
+  return state.rubbers.filter((r) => r.status === 'pending' || r.status === 'live').length;
+}
+
+/**
+ * The tie's real standing: won, DRAWN, or still in progress.
+ *
+ * `tieWinner` alone cannot tell "nobody has reached the target yet" from "nobody
+ * ever will". An EVEN tie can finish level - the shipped chess template is four
+ * boards with a majority of three, and 2-2 is an ordinary chess result - and at
+ * that point every board has been played, no side has the target, and a console
+ * that only asks `tieWinner` refuses to sign the fixture off while telling the
+ * official to "record rubber results until one side reaches 3". There are none
+ * left to record. The fixture can never be completed.
+ *
+ * So the level-and-finished case gets a name of its own, and the console can offer
+ * the draw that chess has always allowed.
+ */
+export function tieOutcome(spec: TieSpec, state: TieState): {
+  winner: 'A' | 'B' | null; drawn: boolean; playable: number; decided: boolean;
+} {
+  const winner = tieWinner(spec, state);
+  const playable = playableRubbers(state);
+  const drawn = winner === null && playable === 0;
+  return { winner, drawn, playable, decided: winner !== null || drawn };
 }
 
 // Once the tie is decided, mark any unplayed rubbers dead (skipped) when the format

@@ -3,6 +3,7 @@ import {
   RALLY_FAMILY, familyForSport, type FormatFamily, type MatchFormat,
 } from './match-format.js';
 import { scoringFormatSchema, type ScoringFormat } from './scoring-rules.js';
+import { applyOverrides, parseOverrides } from './format-overrides.js';
 
 // ============================================================================
 // Which format does THIS fixture play under?
@@ -75,6 +76,15 @@ export interface LadderFixture {
    * rather than resolving to something malformed.
    */
   frozen_format?: MatchFormat | null;
+  /**
+   * PER-MATCH RULES, patched on top of whatever rung wins.
+   *
+   * Not a rung of its own: it carries only the fields somebody changed, so a match
+   * with a 12-minute half still inherits everything else and still follows the draw
+   * when the draw's format is re-pointed. Raw, because it comes straight off a jsonb
+   * column - `parseOverrides` decides what is usable.
+   */
+  format_overrides?: unknown;
 }
 
 export interface LadderDraw {
@@ -226,7 +236,24 @@ export function resolveFormat(
   draw: LadderDraw,
   formats: Map<string, LadderFormatRow> | LadderFormatRow[] = [],
 ): ResolvedFormat {
-  return walkLadder(fixture, draw, formats, RALLY_FAMILY);
+  const resolved = walkLadder(fixture, draw, formats, RALLY_FAMILY);
+  return withOverrides(resolved, fixture);
+}
+
+/**
+ * Patch the resolved format with the fixture's own overrides.
+ *
+ * Applied AFTER the whole ladder, including the frozen rung - the override is the
+ * organiser's most recent and most specific instruction about this one match, and a
+ * control that silently does nothing once scoring has started is worse than one that
+ * takes effect. The layer label is left alone: the format still CAME from wherever
+ * it came from, and saying otherwise would hide which rung to edit.
+ */
+function withOverrides<T extends { format: ScoringFormat | null }>(resolved: T, fixture: LadderFixture): T {
+  if (!resolved.format) return resolved;
+  const overrides = parseOverrides(fixture.format_overrides);
+  if (!overrides) return resolved;
+  return { ...resolved, format: applyOverrides(resolved.format, overrides) };
 }
 
 export interface ResolvedMatchFormat {
@@ -251,7 +278,12 @@ export function resolveMatchFormat(
   formats: Map<string, LadderFormatRow> | LadderFormatRow[] = [],
 ): ResolvedMatchFormat {
   const family = familyForSport(draw.sport);
-  return { ...walkLadder(fixture, draw, formats, family), family: family.key };
+  const resolved = { ...walkLadder(fixture, draw, formats, family), family: family.key };
+  // Cricket has its own engine and its own shape; these overrides describe periods,
+  // extra time and draws, none of which a cricket innings has.
+  return resolved.family === 'rally'
+    ? withOverrides(resolved as typeof resolved & { format: ScoringFormat | null }, fixture)
+    : resolved;
 }
 
 /**

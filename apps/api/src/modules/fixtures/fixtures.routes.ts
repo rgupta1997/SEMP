@@ -5,6 +5,7 @@ import {
   fixtureResultSchema, generateAllStagesSchema, generateDrawSchema, generateFixturesSchema,
   updateFixtureSchema,
 } from '@semp/shared';
+import { Prisma as PrismaNS } from '@prisma/client';
 import type { Prisma } from '../../infra/prisma.js';
 import { makeCrudRouter } from '../../http/crud.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -1014,6 +1015,12 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     createGuards: [crudGuard],
     writeGuards: [crudGuard, notLocked],
     afterUpdate: notifyFixtureFieldChanges,
+    // Clearing the per-match rules means SQL NULL, and Prisma will not take a plain
+    // `null` for a nullable Json column - it wants DbNull, which the shared schema
+    // cannot name. Translate it on the way past.
+    beforeWrite: (data) => (data.format_overrides === null
+      ? { ...data, format_overrides: PrismaNS.DbNull }
+      : data),
   }));
 
   return router;

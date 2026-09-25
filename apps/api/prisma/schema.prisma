@@ -124,9 +124,6 @@ model fixtures {
   winner_team_id                       String?                @db.Uuid
   live_state                           Json                   @default("{}")
   live_log                             Json                   @default("[]")
-  stage_sequence                       Int                    @default(1) @db.SmallInt
-  home_slot_label                      String?                @db.VarChar
-  away_slot_label                      String?                @db.VarChar
   scorecard_status                     String                 @default("draft") @db.VarChar
   submitted_at                         DateTime?              @db.Timestamptz(6)
   submitted_by                         String?                @db.Uuid
@@ -134,11 +131,15 @@ model fixtures {
   locked_by                            String?                @db.Uuid
   lock_version                         Int                    @default(0)
   live_started_at                      DateTime?              @db.Timestamptz(6)
+  stage_sequence                       Int                    @default(1) @db.SmallInt
+  home_slot_label                      String?                @db.VarChar
+  away_slot_label                      String?                @db.VarChar
   /// Sequential within the championship, in scheduled order. Assigned at creation.
   match_no                             Int?
+  scoring_format_id                    String?                @db.Uuid
   /// Stamped when status becomes 'completed' (cleared if it moves away). Drives the 30-minute auto-lock sweep in fixtures/lock.service.ts.
   completed_at                         DateTime?              @db.Timestamptz(6)
-  scoring_format_id                    String?                @db.Uuid
+  format_overrides                     Json?
   certificates                         certificates[]
   cricket_innings                      cricket_innings[]
   fixture_awards                       fixture_awards[]
@@ -790,9 +791,6 @@ model demo_requests {
   handled_by        String?  @db.Uuid
   created_at        DateTime @default(now()) @db.Timestamptz(6)
   updated_at        DateTime @default(now()) @db.Timestamptz(6)
-  /// Separate, explicit opt-in to marketing - never implied by the enquiry-contact
-  /// consent every submission already carries. See 20260913000000_demo_request_marketing_consent.sql.
-  marketing_consent Boolean  @default(false)
   /// The marketing form's remaining five answers - see
   /// supabase/migrations/20260908000000_demo_request_details.sql. `event_date` is text
   /// on purpose: the form accepts "mid-January" as readily as a date.
@@ -801,6 +799,9 @@ model demo_requests {
   sport_count       Int?
   participant_count Int?
   source            String?  @db.VarChar
+  /// Separate, explicit opt-in to marketing - never implied by the enquiry-contact
+  /// consent every submission already carries. See 20260913000000_demo_request_marketing_consent.sql.
+  marketing_consent Boolean  @default(false)
   users             users?   @relation(fields: [handled_by], references: [id], onUpdate: NoAction)
 
   @@index([created_at(sort: Desc)], map: "idx_demo_requests_created")
