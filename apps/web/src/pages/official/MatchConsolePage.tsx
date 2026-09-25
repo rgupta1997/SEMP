@@ -1705,9 +1705,22 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
 // sub-event, aggregated into team (org) points. Stores EventState in live_state.event -
 // the shape resolveFixtureParticipants and derive.ts's eventMedals() read at lock time,
 // which is what turns a mark into a person's own medal and appearance record.
+// A sub-event's own resultType/winnerIs/unit wins when set (athletics: a sprint is
+// a time, a jump is a distance) - only falls back to the spec-level default for
+// sports where every sub-event genuinely shares one (swimming, powerlifting).
+const markMetaFor = (spec: EventSpec, se?: { resultType?: string; unit?: string }) => ({
+  isTime: (se?.resultType ?? spec.result.resultType) === 'time',
+  unit: se?.unit ?? spec.result.unit,
+});
+
+// A scorer typing a bare number has no way to know what it means - "40" could be
+// seconds, metres or a lift in kg. Spelled out in full rather than the short unit
+// code, since "m" alone reads as "minutes" as easily as "metres".
+const UNIT_PLACEHOLDER: Record<string, string> = { s: 'seconds', m: 'metres', kg: 'kilograms', pts: 'points' };
+const placeholderFor = (unit?: string) => (unit ? UNIT_PLACEHOLDER[unit] ?? unit : 'value');
+
 function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   { fixture: any; fixtureId: string; spec: EventSpec; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[] }) {
-  const isTime = spec.result.resultType === 'time';
   const pickOne = !!spec.pickOne;
   const noun = spec.subEventNoun ?? 'sub-event';
   const nounLower = noun.toLowerCase();
@@ -1817,9 +1830,15 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
 
   const agg = aggregateEvent(spec, state);
   const blocks = subEventResults(spec, state);
-  const unit = spec.result.unit ? ` (${spec.result.unit})` : '';
+  // The one active category (a named discipline, or whichever one is picked for a
+  // pickOne "Whole sport" session) carries its OWN unit/direction - a "400m" must
+  // read as seconds and fastest-wins even though the sport's other events (a jump,
+  // a throw) don't share that unit at all.
+  const activeSubEvent = category ? spec.subEvents.find((se) => se.key === category) : undefined;
+  const activeMeta = markMetaFor(spec, activeSubEvent);
+  const unit = activeMeta.unit ? ` (${activeMeta.unit})` : '';
   const pts = (spec.result.medalPoints ?? [5, 3, 1]).join(' / ');
-  const best = spec.result.winnerIs === 'min' ? 'fastest' : 'best';
+  const best = (activeSubEvent?.winnerIs ?? spec.result.winnerIs) === 'min' ? 'fastest' : 'best';
   // Plain-English explanation of how marks become org points, by aggregate rule.
   const scoringText = spec.result.aggregate === 'sumBest'
     ? `Each org's points are the sum of its athletes' marks.`
@@ -1878,7 +1897,11 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
                   )}
                   {category ? (
                     <div className="w-32 shrink-0">
-                      <MarkInput value={p.marks[category] ?? null} isTime={isTime} onChange={(n) => setMark(p.id, category, n)} ariaLabel={`${p.name || 'competitor'} ${markLabel}`} />
+                      <MarkInput
+                        value={p.marks[category] ?? null} isTime={activeMeta.isTime}
+                        placeholder={activeMeta.isTime ? undefined : placeholderFor(activeMeta.unit)}
+                        onChange={(n) => setMark(p.id, category, n)} ariaLabel={`${p.name || 'competitor'} ${markLabel}`}
+                      />
                     </div>
                   ) : (
                     <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">Choose a {nounLower} above</span>
@@ -1893,12 +1916,19 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
                   <p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</p>
                 </Field>
                 <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {spec.subEvents.map((se) => (
-                    <label key={se.key} className="block">
-                      <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
-                      <MarkInput value={p.marks[se.key] ?? null} isTime={isTime} onChange={(n) => setMark(p.id, se.key, n)} ariaLabel={`${p.name || 'competitor'} ${se.label}`} />
-                    </label>
-                  ))}
+                  {spec.subEvents.map((se) => {
+                    const seMeta = markMetaFor(spec, se);
+                    return (
+                      <label key={se.key} className="block">
+                        <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
+                        <MarkInput
+                          value={p.marks[se.key] ?? null} isTime={seMeta.isTime}
+                          placeholder={seMeta.isTime ? undefined : placeholderFor(seMeta.unit)}
+                          onChange={(n) => setMark(p.id, se.key, n)} ariaLabel={`${p.name || 'competitor'} ${se.label}`}
+                        />
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             ))
@@ -1934,19 +1964,22 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
           <Card>
             <CardHeader title={`Results by ${nounLower}`} subtitle="Who placed where, and the points it earned." />
             <CardBody className="space-y-3">
-              {blocks.map((b) => (
+              {blocks.map((b) => {
+                const bMeta = markMetaFor(spec, spec.subEvents.find((se) => se.key === b.key));
+                return (
                 <div key={b.key}>
                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{b.label}</div>
                   <ul className="space-y-1">
                     {b.rows.map((r) => (
                       <li key={r.rank} className="flex items-center justify-between gap-2 text-sm">
                         <span className="truncate text-slate-600 dark:text-slate-300">{r.rank}. {r.name}{r.org ? <span className="text-slate-400 dark:text-slate-500"> · {r.org}</span> : null}</span>
-                        <span className="shrink-0 tabular-nums text-slate-500 dark:text-slate-400">{isTime ? formatTime(r.mark) : r.mark}{!isTime && spec.result.unit ? ` ${spec.result.unit}` : ''} · +{r.points}</span>
+                        <span className="shrink-0 tabular-nums text-slate-500 dark:text-slate-400">{bMeta.isTime ? formatTime(r.mark) : r.mark}{!bMeta.isTime && bMeta.unit ? ` ${bMeta.unit}` : ''} · +{r.points}</span>
                       </li>
                     ))}
                   </ul>
                 </div>
-              ))}
+                );
+              })}
             </CardBody>
           </Card>
         )}
@@ -1964,7 +1997,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
 // Numeric/time mark cell. Keeps the raw string the official typed (so mid-entry values
 // like "1:0" aren't reformatted under the cursor) and emits the parsed number upward;
 // only re-seeds from props when the stored value changes externally (e.g. live reload).
-function MarkInput({ value, isTime, onChange, ariaLabel }: { value: number | null; isTime: boolean; onChange: (n: number | null) => void; ariaLabel?: string }) {
+function MarkInput({ value, isTime, placeholder, onChange, ariaLabel }: { value: number | null; isTime: boolean; placeholder?: string; onChange: (n: number | null) => void; ariaLabel?: string }) {
   const fmt = (v: number | null) => (v == null ? '' : isTime ? formatTime(v) : String(v));
   const [raw, setRaw] = useState(() => fmt(value));
   const emitted = useRef(value);
@@ -1979,7 +2012,7 @@ function MarkInput({ value, isTime, onChange, ariaLabel }: { value: number | nul
     <Input
       type={isTime ? 'text' : 'number'} inputMode={isTime ? 'decimal' : 'numeric'}
       value={raw} onChange={(e) => handle(e.target.value)} onBlur={() => setRaw(fmt(emitted.current))}
-      className="text-center" aria-label={ariaLabel} placeholder={isTime ? 'mm:ss.s' : ''}
+      className="text-center" aria-label={ariaLabel} placeholder={isTime ? 'mm:ss.s' : (placeholder ?? '')}
     />
   );
 }

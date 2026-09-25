@@ -115,6 +115,35 @@ describe('buildPlayerStatRows · ranking events', () => {
     expect(by('c')).toEqual({ mark: 999, rank: 1, measured: 1, podium: 1 });
   });
 
+  it("picks the entry with the BETTER RANK to represent a whole-sport appearance, not the bigger/smaller raw number across incompatible units", async () => {
+    // A whole-sport athletics session: this competitor entered a sprint (a TIME,
+    // where they won outright) and a field event (a DISTANCE, where they trailed
+    // a longer jump) - two numbers on unrelated scales. Comparing them as raw
+    // numbers (the bug) picked whichever satisfied "min wins" regardless of what
+    // was actually measured; rank fixes that because 1st is 1st either way.
+    const db = fakeDb({
+      id: 'fx1', round: 'Final', stage_sequence: null,
+      home_team_id: null, away_team_id: null,
+      lock_version: 1, scheduled_at: new Date('2026-09-13'),
+      winner_team_id: null, home_score: null, away_score: null,
+      tournament_disciplines: {
+        tournament_sports: { sport_id: 'sport-ath', sports: { name: 'Athletics' } },
+      },
+      live_state: { event: { participants: [
+        { id: 'c1', name: 'A', marks: { m100: 12.0, mlj: 3.0 } },
+        { id: 'c2', name: 'B', marks: { mlj: 6.0 } },
+      ] } },
+    });
+    const participants: FixtureParticipants = {
+      resolved: [{ user_id: 'a', team_id: 'ta', organization_id: 'org1', competitor_id: 'c1', name: 'A' }],
+      unmatched: [],
+    };
+    const rows = await buildPlayerStatRows(db, 'fx1', participants);
+    // Sole entrant in the 100m (rank 1) beats 2nd-of-2 in the long jump (rank 2) -
+    // the sprint mark is what should represent this appearance, not the jump.
+    expect(rows[0].stats).toEqual({ mark: 12.0, rank: 1, measured: 1, podium: 1 });
+  });
+
   it('does not count a 4th-place finish as a podium', async () => {
     const db = fakeDb({
       id: 'fx1', round: 'Final', stage_sequence: null,

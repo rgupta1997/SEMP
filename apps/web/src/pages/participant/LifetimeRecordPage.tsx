@@ -282,7 +282,7 @@ export function LifetimeRecordPage({ hideHonours, hideTimeline }: { hideHonours?
               <div className="space-y-4">
                 {groupByDate(timeline.slice(page * TIMELINE_PAGE_SIZE, (page + 1) * TIMELINE_PAGE_SIZE)).map((g) => (
                   <div key={g.date}>
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{g.date}</div>
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">{g.date}</div>
                     <ol className="relative ml-1 border-l-2 border-slate-200 pl-8 dark:border-slate-800">
                       {g.entries.map((e) => <TimelineRow key={e.id} e={e} />)}
                     </ol>

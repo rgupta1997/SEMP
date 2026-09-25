@@ -137,13 +137,6 @@ export async function buildPlayerStatRows(
         name: fx.tournament_disciplines?.disciplines?.name ?? null,
       })
       : null;
-    // Ties "best" to whichever direction this event actually rewards - a
-    // fastest time or a heaviest lift. A named discipline leaves exactly one
-    // mark; a whole-sport session where one person entered several races
-    // leaves several, and the best of them (and its OWN category's placing)
-    // stands in for "what this appearance produced" until per-race detail has
-    // its own place to live.
-    const winnerIs = spec?.result.winnerIs ?? 'max';
     const rankCache = new Map<string, Map<string, number>>();
     const rankOf = (competitorId: string | null, category: string | null): number | null => {
       if (!spec || !competitorId || !category) return null;
@@ -151,21 +144,41 @@ export async function buildPlayerStatRows(
       if (!ranks) { ranks = rankSubEvent(spec, state, category); rankCache.set(category, ranks); }
       return ranks.get(competitorId) ?? null;
     };
+    // A named discipline leaves exactly one mark. A whole-sport session where one
+    // person entered several disciplines leaves several - possibly a time AND a
+    // distance, which are not comparable as raw numbers the way two weight
+    // classes are. RANK is the one thing that IS comparable regardless of what
+    // was measured (1st is 1st), so the entry that represents "what this
+    // appearance produced" is chosen by best rank, not by the biggest/smallest
+    // raw mark. Ties (same rank in two categories) fall back to that category's
+    // OWN winnerIs, which only ever actually disambiguates same-unit categories
+    // (two weight classes, say) - a cross-unit tie has no principled answer
+    // either way, so it keeps whichever came first.
+    const winnerIsOf = (category: string): 'min' | 'max' =>
+      spec?.subEvents.find((se) => se.key === category)?.winnerIs ?? spec?.result.winnerIs ?? 'max';
+    const betterOf = (
+      a: { category: string; mark: number; rank: number | null },
+      b: { category: string; mark: number; rank: number | null },
+    ) => {
+      if (a.rank == null) return b;
+      if (b.rank == null) return a;
+      if (a.rank !== b.rank) return a.rank < b.rank ? a : b;
+      return winnerIsOf(a.category) === 'min' ? (b.mark < a.mark ? b : a) : (b.mark > a.mark ? b : a);
+    };
 
     return participants.resolved.map((p) => {
       const marks = p.competitor_id ? marksOf.get(p.competitor_id) ?? {} : {};
       const entries = Object.entries(marks).filter((e): e is [string, number] => typeof e[1] === 'number');
       let stats: Record<string, number> = {};
       if (entries.length) {
-        const best = entries.reduce((a, b) => (winnerIs === 'min' ? (b[1] < a[1] ? b : a) : (b[1] > a[1] ? b : a)));
-        const [bestCategory, bestMark] = best;
+        const ranked = entries.map(([category, mark]) => ({ category, mark, rank: rankOf(p.competitor_id, category) }));
+        const best = ranked.reduce(betterOf);
         // `measured` and `podium` are unit-free counts (1 per appearance, 1 per
         // top-3 finish) - unlike `mark`, they stay meaningful summed across
         // categories that don't share a unit, which is exactly what Athletics
         // needs until marks fold per discipline instead of per sport.
-        stats = { mark: bestMark, measured: 1 };
-        const rank = rankOf(p.competitor_id, bestCategory);
-        if (rank != null) { stats.rank = rank; if (rank <= 3) stats.podium = 1; }
+        stats = { mark: best.mark, measured: 1 };
+        if (best.rank != null) { stats.rank = best.rank; if (best.rank <= 3) stats.podium = 1; }
       }
       return {
         fixture_id: fx.id,

@@ -45,6 +45,14 @@ export interface SubEventSpec {
   // sub-event only - e.g. swimming relays pay 10/7/3 while the individual events pay 5/3/1.
   medalPoints?: number[];
   kind?: 'individual' | 'relay';   // labelling / visuals only; does not affect scoring
+  // Overrides EventResultSpec's resultType/winnerIs/unit for THIS sub-event only - a
+  // sport whose events genuinely don't share a unit (athletics: sprints are a time,
+  // jumps/throws are a distance) has no single correct spec-level value to fall back
+  // on. Omitted for sports where every sub-event already shares one (swimming,
+  // powerlifting), so those keep reading the spec-level value as before.
+  resultType?: EventResultType;
+  winnerIs?: 'min' | 'max';
+  unit?: string;
 }
 
 export interface EventResultSpec {

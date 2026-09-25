@@ -18,6 +18,10 @@ export interface EventState { participants: ParticipantResult[] }
 
 export interface DisciplineRef { id: string | null; name: string | null }
 
+// "Men's 400m" -> "400m": strips the gender/mixed prefix a discipline's own short
+// name never carries, so "400m" still finds the template sub-event it came from.
+const normalizeLabel = (s: string): string => s.trim().toLowerCase().replace(/^(men's|women's|mixed)\s+/, '');
+
 // A "Whole sport" discipline (id null) genuinely mixes categories in one fixture -
 // that's what pickOne's per-competitor picker, or a grid sport's per-race columns,
 // are FOR. A NAMED discipline ("66kg", "100m Backstroke") already fixes the one
@@ -25,9 +29,28 @@ export interface DisciplineRef { id: string | null; name: string | null }
 // (powerlifting) or a grid (swimming) - there is nothing left to choose between
 // either way. Web console and API derivation both call this, on the same fixture
 // data, so neither can rank against a category the other doesn't know about.
+//
+// The synthetic sub-event this collapses to carries over its matching original's
+// resultType/winnerIs/unit (matched by name, since a discipline is its own record
+// with no link back to the template sub-event it was created from) - without this,
+// a named athletics discipline like "400m" would lose the fact that it's a TIME
+// and fall back to the spec-level default, which is exactly what ranked sprints
+// backwards (higher "mark" reading as the winner).
 export function effectiveEventSpec(spec: EventSpec, discipline: DisciplineRef): EventSpec {
   if (!discipline.id) return spec;
-  return { ...spec, subEvents: [{ key: discipline.id, label: discipline.name ?? spec.subEventNoun ?? 'Category' }] };
+  const label = discipline.name ?? spec.subEventNoun ?? 'Category';
+  const original = discipline.name
+    ? spec.subEvents.find((se) => normalizeLabel(se.label) === normalizeLabel(discipline.name!))
+    : undefined;
+  return {
+    ...spec,
+    subEvents: [{
+      key: discipline.id, label,
+      ...(original?.resultType ? { resultType: original.resultType } : {}),
+      ...(original?.winnerIs ? { winnerIs: original.winnerIs } : {}),
+      ...(original?.unit ? { unit: original.unit } : {}),
+    }],
+  };
 }
 
 // One row of the simple team-ranking model (the default for events): an org's place.
@@ -54,10 +77,11 @@ export function placementPoints(place: number | null | undefined, medalPoints: n
 // so two equal firsts both score gold and there is no silver (rulebook: equal results
 // both take the points). Organiser overrides happen upstream by editing the marks.
 export function rankSubEvent(spec: EventSpec, state: EventState, subKey: string): Map<string, number> {
+  const winnerIs = spec.subEvents.find((se) => se.key === subKey)?.winnerIs ?? spec.result.winnerIs;
   const entries = state.participants
     .map((p) => ({ id: p.id, mark: p.marks[subKey] }))
     .filter((e): e is { id: string; mark: number } => typeof e.mark === 'number');
-  entries.sort((a, b) => (spec.result.winnerIs === 'min' ? a.mark - b.mark : b.mark - a.mark));
+  entries.sort((a, b) => (winnerIs === 'min' ? a.mark - b.mark : b.mark - a.mark));
   const ranks = new Map<string, number>();
   let prevMark: number | null = null;
   let prevRank = 0;

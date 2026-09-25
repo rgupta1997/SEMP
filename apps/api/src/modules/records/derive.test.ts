@@ -323,6 +323,8 @@ describe('ranking events · medals per competitor (J4-E1-S3 + J4-E4-S1)', () => 
   it("falls back to the sport's seeded template when a discipline never stored one", () => {
     // Creating a discipline never writes format_config.scoring - this is the only
     // spec that has ever actually existed for these fixtures in real use.
+    // m400 is a TIME (seconds) - the seeded template's per-sub-event winnerIs is
+    // what makes the FASTER (lower) mark win, not the higher one.
     const fx: DerivableFixture = {
       ...FIXTURE, ...EVENT_FIXTURE,
       sport_name: 'Athletics', discipline_id: null, discipline_name: null,
@@ -333,8 +335,45 @@ describe('ranking events · medals per competitor (J4-E1-S3 + J4-E4-S1)', () => 
       ] } },
     };
     expect(eventMedals(fx)).toEqual([
-      { competitor_id: 'c1', medal: 'gold', sub_event: "Men's 400m" },
-      { competitor_id: 'c2', medal: 'silver', sub_event: "Men's 400m" },
+      { competitor_id: 'c2', medal: 'gold', sub_event: "Men's 400m" },
+      { competitor_id: 'c1', medal: 'silver', sub_event: "Men's 400m" },
+    ]);
+  });
+
+  it('ranks a named athletics track discipline by the FASTER time, not the higher number', () => {
+    // The exact bug reported live: a "400m" discipline (matched back to the
+    // template's "Men's 400m" sub-event by name) was ranking on the raw number,
+    // so a slower 46s beat a faster 40s. Athletics' sub-events each carry their
+    // own resultType/winnerIs precisely because the sport mixes a time (this)
+    // with a distance (long jump/shot put below) in one template.
+    const fx: DerivableFixture = {
+      ...FIXTURE, ...EVENT_FIXTURE,
+      sport_name: 'Athletics', discipline_id: 'disc-400m', discipline_name: '400m',
+      format_config: null,
+      live_state: { event: { participants: [
+        { id: 'c1', name: 'Slower', orgId: 'o1', marks: { 'disc-400m': 46 } },
+        { id: 'c2', name: 'Faster', orgId: 'o2', marks: { 'disc-400m': 40 } },
+      ] } },
+    };
+    expect(eventMedals(fx)).toEqual([
+      { competitor_id: 'c2', medal: 'gold', sub_event: '400m' },
+      { competitor_id: 'c1', medal: 'silver', sub_event: '400m' },
+    ]);
+  });
+
+  it('ranks a named athletics field discipline by the LONGER distance', () => {
+    const fx: DerivableFixture = {
+      ...FIXTURE, ...EVENT_FIXTURE,
+      sport_name: 'Athletics', discipline_id: 'disc-lj', discipline_name: 'Long Jump',
+      format_config: null,
+      live_state: { event: { participants: [
+        { id: 'c1', name: 'Shorter', orgId: 'o1', marks: { 'disc-lj': 5.2 } },
+        { id: 'c2', name: 'Longer', orgId: 'o2', marks: { 'disc-lj': 6.1 } },
+      ] } },
+    };
+    expect(eventMedals(fx)).toEqual([
+      { competitor_id: 'c2', medal: 'gold', sub_event: 'Long Jump' },
+      { competitor_id: 'c1', medal: 'silver', sub_event: 'Long Jump' },
     ]);
   });
 
