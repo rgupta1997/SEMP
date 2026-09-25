@@ -306,6 +306,19 @@ export const DEFAULT_CERTIFICATE_HEADING = 'Certificate of Achievement';
 export const DEFAULT_CERTIFICATE_BODY = 'is hereby recognised for the achievement recorded below, verified against an official locked result.';
 export const DEFAULT_SIGNATORY_TITLE = 'Issuing authority';
 
+// ---------- Ranking-event units ----------
+// The units a ranking event's sub-event mark is measured in (a race is a time,
+// a jump/throw a distance, a lift a weight). Not DB-backed - the value lives in
+// tournament_disciplines.format_config jsonb - but shared so a sub-event's unit
+// code (event-templates.ts) and its scorer-facing placeholder (the console)
+// can never drift apart.
+export const EVENT_UNIT = ['s', 'm', 'kg', 'pts'] as const;
+export type EventUnit = (typeof EVENT_UNIT)[number];
+
+export const EVENT_UNIT_LABEL: Record<EventUnit, string> = {
+  s: 'seconds', m: 'metres', kg: 'kilograms', pts: 'points',
+};
+
 // Legal championship status transitions (enforced by the ChampionshipLifecycle domain service).
 export const CHAMPIONSHIP_STATUS_TRANSITIONS: Record<ChampionshipStatus, ChampionshipStatus[]> = {
   draft: ['registration_open'],

@@ -15,7 +15,7 @@ import {
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, isCricketSport, isKernelSport, isRacquetSport, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, type CricketLog, type CricketState } from '@semp/shared';
+import { rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, isCricketSport, isKernelSport, isRacquetSport, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
 import type { TieSpec, EventSpec, ScoringMode, KernelState, Pairing, RallyLog, Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer } from '../../features/scoring/RacquetDeck';
 import { CricketDeck } from '../../features/scoring/CricketDeck';
@@ -1702,8 +1702,7 @@ const markMetaFor = (spec: EventSpec, se?: { resultType?: string; unit?: string 
 });
 
 // Spelled out in full so "40" reads as an actual unit, not a guess.
-const UNIT_PLACEHOLDER: Record<string, string> = { s: 'seconds', m: 'metres', kg: 'kilograms', pts: 'points' };
-const placeholderFor = (unit?: string) => (unit ? UNIT_PLACEHOLDER[unit] ?? unit : 'value');
+const placeholderFor = (unit?: string) => (unit ? EVENT_UNIT_LABEL[unit as keyof typeof EVENT_UNIT_LABEL] ?? unit : 'value');
 
 function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   { fixture: any; fixtureId: string; spec: EventSpec; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[] }) {
