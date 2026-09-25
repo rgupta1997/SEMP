@@ -56,26 +56,14 @@ interface Payload {
 const fmt = (m: Metric) =>
   m.text ?? (m.percent ? `${m.value}%` : `${m.value}${m.notOut ? '*' : ''}`);
 
-/**
- * How often a career of this many appearances actually medalled. Null with
- * nothing played yet - a 0% podium rate reads as "always loses", which is not
- * the same fact as "hasn't competed".
- *
- * Capped at 100: `played` is one row per FIXTURE (one meet, however many races
- * happened inside it - deliberately, so a swimmer's timeline shows one entry
- * per meet, not one per race), while a medal count is per RACE - a multi-race
- * meet can genuinely produce more medals than fixtures played. "Podium rate"
- * means "how often did I medal at all", which cannot exceed "every time".
- */
+// Null (not 0%) with nothing played yet - "always loses" and "hasn't
+// competed" aren't the same fact. Capped at 100: `played` is per FIXTURE but
+// medals are per RACE, so a multi-race meet can out-medal its fixture count.
 const podiumPct = (r: TierRecord): number | null =>
   r.played > 0 ? Math.min(100, Math.round(((r.gold + r.silver + r.bronze) / r.played) * 1000) / 10) : null;
 
-/**
- * W-L-D, the way a record is written down - except a ranking event has no
- * opponent to beat, so "0W 0L" is not a fact about them, it's a question that
- * doesn't apply. Podium rate - how often they medal when they compete - is the
- * question a ranking event actually answers.
- */
+// A ranking event has no opponent to beat, so W-L-D doesn't describe it -
+// podium rate (how often they medal) is the question it actually answers.
 function Record({ r, ranking }: { r: TierRecord; ranking?: boolean }) {
   const pct = ranking ? podiumPct(r) : null;
   return (
@@ -142,9 +130,7 @@ function TierRow({ r, ranking }: { r: TierRecord; ranking?: boolean }) {
 
 function SportCard({ s }: { s: SportRecord }) {
   const [open, setOpen] = useState(false);
-  // A ranking event has no opponent - "won/lost" doesn't describe it, "how
-  // often did this podium" does. Keyed by sport name, same as everywhere else
-  // that already tells a ranking event apart from a head-to-head one.
+  // A ranking event has no opponent, so "won/lost" doesn't describe it.
   const ranking = isRankingSport(s.sport);
   return (
     <Card>

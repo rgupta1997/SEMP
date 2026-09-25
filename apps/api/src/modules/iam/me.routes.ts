@@ -172,9 +172,8 @@ export function makeMeRouter(prisma: Prisma): Router {
   // Membership load shared by the dashboard + achievements: the user's teams with
   // their sport, organization, and the championships each roster is entered into.
   //
-  // `activeOnly` (default true) is for "what can this person act on right now".
-  // The dashboard's career totals ask a different question - what have they ever
-  // played - and `is_active` is just a roster flag, not a verdict on history.
+  // `activeOnly` (default true) means "what can act right now"; the dashboard's
+  // career totals ask a different question - what have they ever played.
   async function loadMembershipMeta(userId: string, { activeOnly = true }: { activeOnly?: boolean } = {}) {
     const memberships = await prisma.team_members.findMany({
       where: { user_id: userId, ...(activeOnly ? { is_active: true } : {}) },

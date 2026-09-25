@@ -22,20 +22,19 @@ export interface DisciplineRef { id: string | null; name: string | null }
 // name never carries, so "400m" still finds the template sub-event it came from.
 const normalizeLabel = (s: string): string => s.trim().toLowerCase().replace(/^(men's|women's|mixed)\s+/, '');
 
-// A "Whole sport" discipline (id null) genuinely mixes categories in one fixture -
-// that's what pickOne's per-competitor picker, or a grid sport's per-race columns,
-// are FOR. A NAMED discipline ("66kg", "100m Backstroke") already fixes the one
-// category by what it IS, whether the sport is normally scored with a picker
-// (powerlifting) or a grid (swimming) - there is nothing left to choose between
-// either way. Web console and API derivation both call this, on the same fixture
-// data, so neither can rank against a category the other doesn't know about.
+// A "Whole sport" discipline (id null) genuinely mixes categories - that's what
+// pickOne's picker, or a grid sport's per-race columns, are FOR. A NAMED
+// discipline ("66kg", "100m Backstroke") already fixes the one category, so
+// there's nothing left to choose. Web console and API derivation both call
+// this on the same fixture, so neither ranks against a category the other
+// doesn't know about.
 //
-// The synthetic sub-event this collapses to carries over its matching original's
-// resultType/winnerIs/unit (matched by name, since a discipline is its own record
-// with no link back to the template sub-event it was created from) - without this,
-// a named athletics discipline like "400m" would lose the fact that it's a TIME
-// and fall back to the spec-level default, which is exactly what ranked sprints
-// backwards (higher "mark" reading as the winner).
+// The synthetic sub-event carries over its matching original's
+// resultType/winnerIs/unit (matched by name - a discipline has no stored link
+// back to the template sub-event it came from). Without this, a named
+// athletics discipline like "400m" would lose the fact that it's a TIME and
+// fall back to the spec-level default - which is exactly what ranked sprints
+// backwards.
 export function effectiveEventSpec(spec: EventSpec, discipline: DisciplineRef): EventSpec {
   if (!discipline.id) return spec;
   const label = discipline.name ?? spec.subEventNoun ?? 'Category';

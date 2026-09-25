@@ -50,11 +50,10 @@ const EVENT_TEMPLATES: Record<string, FormatTemplate> = {
     ],
     { pickOne: true, subEventNoun: 'Weight category' },
   ),
-  // Athletics: unlike swimming or powerlifting, its events genuinely don't share a
-  // unit - a sprint is a TIME (lower wins) and a jump/throw is a DISTANCE (higher
-  // wins). The spec-level result below is only the aggregate/medalPoints default;
-  // each sub-event carries its own resultType/winnerIs/unit so a race is never
-  // ranked by the same rule as a throw.
+  // Athletics doesn't share one unit like swimming/powerlifting do - a sprint is
+  // a TIME (lower wins), a jump/throw is a DISTANCE (higher wins) - so each
+  // sub-event carries its own resultType/winnerIs/unit; the result below is
+  // just the aggregate/medalPoints default.
   athletics: event(
     { resultType: 'time', winnerIs: 'min', aggregate: 'medals', medalPoints: [5, 3, 1] },
     [

@@ -210,17 +210,14 @@ export function LifetimeRecordPage({ hideHonours, hideTimeline }: { hideHonours?
   const { userId } = useParams();
   const { data, isLoading, error, refetch } = useApi<Profile>(userId ? `/people/${userId}/profile` : '/me/profile');
   const [page, setPage] = useState(0);
-  // A coordinator can open one player's record after another without this
-  // component remounting - stuck on page 3 of somebody else's timeline is a
-  // bug the moment it happens.
+  // A coordinator switching between players' records shouldn't stay on page 3
+  // of somebody else's timeline.
   useEffect(() => { setPage(0); }, [userId]);
 
   if (isLoading) return <Spinner />;
   if (error) {
-    // A 403 from authorizeRecordView() means the access-control copy below; any
-    // other status (500, a dropped connection) is a server hiccup, not a
-    // rejection - telling someone their OWN profile "isn't theirs" during an
-    // outage is actively misleading, and hides the outage from bug reports.
+    // Only a real 403 gets the access-denied copy - a 500/timeout on your OWN
+    // profile shouldn't read as "this isn't yours."
     const forbidden = (error as { status?: number }).status === 403;
     return forbidden ? (
       <EmptyState
@@ -274,11 +271,9 @@ export function LifetimeRecordPage({ hideHonours, hideTimeline }: { hideHonours?
                 description="Matches appear as soon as they are scored, and become permanent once the organiser locks the scorecard."
               />
             ) : (
-              // A provisional row is dimmed rather than hidden: the player played
-              // the match and knows it, so the honest thing is to show it and say
-              // what is still missing. Paginated over the flat list, then grouped
-              // by date within the page, so a date heading never gets split
-              // across two pages.
+              // A provisional row is dimmed, not hidden - the player knows they
+              // played it. Paginated over the flat list, then grouped by date
+              // within the page, so a heading never splits across pages.
               <div className="space-y-4">
                 {groupByDate(timeline.slice(page * TIMELINE_PAGE_SIZE, (page + 1) * TIMELINE_PAGE_SIZE)).map((g) => (
                   <div key={g.date}>

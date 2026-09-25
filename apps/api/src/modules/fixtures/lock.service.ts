@@ -269,11 +269,9 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
   // Everything that must be all-or-nothing happens in here. The audit entry and any
   // notification are deliberately OUTSIDE: an audit row describing a rolled-back lock
   // would be a lie, and an email cannot be un-sent.
-  // Explicit rather than relying on the client default: locking resolves
-  // participants, derives every achievement/lifetime entry, and refreshes
-  // standings + career stats for everyone the fixture touches, in one
-  // all-or-nothing transaction - the same shape of work that outgrew Prisma's
-  // 5s default for a standings recompute alone.
+  // Explicit rather than relying on the client default - locking resolves
+  // participants, derives every record, and refreshes standings/career stats
+  // for everyone touched, in one transaction (see prisma.ts).
   const { fx, label, championshipId, fromStatus, participants, newAchievements } = await prisma.$transaction(async (tx) => {
     const current = await tx.fixtures.findUnique({ where: { id: fixtureId }, ...FIXTURE_FOR_LOCK });
     if (!current) throw new NotFoundError('Fixture');

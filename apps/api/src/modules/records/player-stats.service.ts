@@ -106,16 +106,12 @@ export async function buildPlayerStatRows(
   const sportId = fx.tournament_disciplines?.tournament_sports?.sport_id ?? null;
   const occurred = fx.scheduled_at ?? new Date();
 
-  // A ranking event (athletics, swimming, powerlifting...) has no home side and
-  // no away side, so none of the two-team machinery below - side sorting,
-  // pairing, a rally log, a scoreline - has anything to attach to. Every
-  // resolved competitor still gets a bare appearance row (it is what makes
-  // "matches played" answerable).
+  // A ranking event has no home/away side, so the two-team machinery below has
+  // nothing to attach to - every resolved competitor still gets a bare
+  // appearance row (it's what makes "matches played" answerable).
   if (!fx.home_team_id && !fx.away_team_id) {
-    // The detailed console's own marks, keyed by competitor row id - the same
-    // handle resolveFixtureParticipants matched them by. The simple "Team
-    // ranking" console never writes a per-athlete mark at all (only an org's
-    // placement), so this is empty for it, same as before.
+    // The detailed console's marks, keyed by competitor row id. Empty for the
+    // simple "Team ranking" console, which never writes a per-athlete mark.
     const eventParticipants = (
       (fx.live_state as { event?: { participants?: unknown } } | null)?.event?.participants
       ?? (fx.live_state as { participants?: unknown } | null)?.participants
@@ -124,11 +120,8 @@ export async function buildPlayerStatRows(
     const marksOf = new Map(eventParticipants.map((c) => [c.id, c.marks ?? {}]));
     const state: EventState = { participants: eventParticipants.map((c) => ({ id: c.id, name: '', marks: c.marks ?? {} })) };
 
-    // Same resolution as derive.ts's eventMedals(): a stored template wins,
-    // falling back to the sport's seeded one (creating a discipline never
-    // writes a stored template, so this is the only spec that has ever
-    // actually existed for these fixtures) - then narrowed to the discipline's
-    // own single category, on a grid sport or a picker sport alike.
+    // Same resolution as derive.ts's eventMedals(): stored template wins,
+    // else the sport's seeded one, narrowed to the discipline's own category.
     const storedSpec = (fx.tournament_disciplines?.format_config as { scoring?: FormatTemplate } | null)?.scoring?.event;
     const rawSpec: EventSpec | null = storedSpec ?? eventTemplateFor(sportName)?.event ?? null;
     const spec = rawSpec
@@ -144,16 +137,12 @@ export async function buildPlayerStatRows(
       if (!ranks) { ranks = rankSubEvent(spec, state, category); rankCache.set(category, ranks); }
       return ranks.get(competitorId) ?? null;
     };
-    // A named discipline leaves exactly one mark. A whole-sport session where one
-    // person entered several disciplines leaves several - possibly a time AND a
-    // distance, which are not comparable as raw numbers the way two weight
-    // classes are. RANK is the one thing that IS comparable regardless of what
-    // was measured (1st is 1st), so the entry that represents "what this
-    // appearance produced" is chosen by best rank, not by the biggest/smallest
-    // raw mark. Ties (same rank in two categories) fall back to that category's
-    // OWN winnerIs, which only ever actually disambiguates same-unit categories
-    // (two weight classes, say) - a cross-unit tie has no principled answer
-    // either way, so it keeps whichever came first.
+    // A whole-sport session can leave one person with marks in several
+    // disciplines - a time AND a distance, not comparable as raw numbers the
+    // way two weight classes are. RANK is comparable regardless of what was
+    // measured (1st is 1st), so the entry representing this appearance is
+    // chosen by best rank, not by raw mark. A tied rank falls back to that
+    // category's own winnerIs, which only meaningfully resolves a same-unit tie.
     const winnerIsOf = (category: string): 'min' | 'max' =>
       spec?.subEvents.find((se) => se.key === category)?.winnerIs ?? spec?.result.winnerIs ?? 'max';
     const betterOf = (
@@ -173,10 +162,8 @@ export async function buildPlayerStatRows(
       if (entries.length) {
         const ranked = entries.map(([category, mark]) => ({ category, mark, rank: rankOf(p.competitor_id, category) }));
         const best = ranked.reduce(betterOf);
-        // `measured` and `podium` are unit-free counts (1 per appearance, 1 per
-        // top-3 finish) - unlike `mark`, they stay meaningful summed across
-        // categories that don't share a unit, which is exactly what Athletics
-        // needs until marks fold per discipline instead of per sport.
+        // `measured`/`podium` are unit-free counts, so unlike `mark` they stay
+        // meaningful summed across categories that don't share a unit.
         stats = { mark: best.mark, measured: 1 };
         if (best.rank != null) { stats.rank = best.rank; if (best.rank <= 3) stats.podium = 1; }
       }

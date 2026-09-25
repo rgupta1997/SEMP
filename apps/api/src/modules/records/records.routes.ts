@@ -361,10 +361,8 @@ export function makeRecordsRouter(prisma: Prisma): Router {
     const scope = req.query.scope === 'individuals' ? 'individuals' : 'teams';
     const sportId = typeof req.query.sport_id === 'string' ? req.query.sport_id : null;
 
-    // Scoped to org + scope (teams/individuals) same as the rows below, but
-    // deliberately NOT to sportId - the filter chips have to list every sport
-    // this scope has ever won something in, not just whichever one is currently
-    // selected, or picking a chip would make every other chip vanish.
+    // Same scope as the rows below, but deliberately NOT sportId - the chips
+    // must list every sport ever won, or picking one makes the rest vanish.
     const scopeWhere = {
       organization_id: organizationId,
       ...(scope === 'teams' ? { team_id: { not: null } } : { user_id: { not: null } }),

@@ -601,13 +601,10 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       // default, which is a real published format rather than a generic counter.
     }
 
-    // A ranking event has no home/away roster to read a competitor list off, so the
-    // detailed console had nobody to show and made officials look every athlete up
-    // by phone one at a time. They're already on file, though: whoever's org placed
-    // a team_entries row for this exact discipline has one entrant on it (an
-    // individual discipline caps squad_max at 1) - resolved here the same way
-    // resolveFixtureParticipants resolves it at lock time, so the console can just
-    // show that roster instead of asking the official to reconstruct it by hand.
+    // A ranking event has no home/away roster to read a competitor list off, so
+    // the console had nobody to show but a phone lookup. They're already on file
+    // though: whoever's org placed a team_entries row for this discipline has one
+    // entrant on it (squad_max 1) - resolved the same way as lock time.
     let event_entrants: unknown[] = [];
     if (!fixture.home_team_id && !fixture.away_team_id) {
       const entries = await prisma.team_entries.findMany({

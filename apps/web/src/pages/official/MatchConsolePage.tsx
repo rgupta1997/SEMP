@@ -253,9 +253,8 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     ? template.tie
     : tieAllowed ? tieTemplateFor(sportName)?.tie : undefined;
   const rawEventSpec = (template.fixtureType === 'event' && template.event) ? template.event : eventTemplateFor(sportName)?.event;
-  // null discipline_id = "Whole sport" - the only shape that actually mixes
-  // categories in one fixture. A named discipline ("66kg") already fixes the
-  // category by what it is, so it collapses to the one category that is.
+  // null discipline_id = "Whole sport", the only shape that mixes categories -
+  // a named discipline ("66kg") collapses to just that one.
   const disciplineId: string | null = fixture?.tournament_disciplines?.discipline_id ?? null;
   const disciplineName: string | null = fixture?.tournament_disciplines?.disciplines?.name ?? null;
   const eventSpec = rawEventSpec ? effectiveEventSpec(rawEventSpec, { id: disciplineId, name: disciplineName }) : undefined;
@@ -285,11 +284,9 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     else if (live.live_state?.event && eventSpec) setStructure('event');
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
 
-  // An event has two entries, stored under different live_state keys so scoring
-  // one never clobbers the other: the default org-level "Team ranking", and the
-  // detailed per-athlete one. Defaults to team ranking - the same default the
-  // structure itself has always had - and snaps to whichever one this fixture was
-  // last scored with, the same one-shot pattern as the structure seed above.
+  // An event has two entries under separate live_state keys - org-level "Team
+  // ranking" (default) and detailed per-athlete - so scoring one never
+  // clobbers the other. Snaps to whichever this fixture was last scored with.
   const [eventMode, setEventMode] = useState<'team' | 'detailed'>('team');
   const eventModeSeeded = useRef(false);
   useEffect(() => {
@@ -368,10 +365,8 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     !!ls?.tie?.rubbers?.some((r: any) => r?.winner) ||
     !!(ls?.event && Object.keys(ls.event).length > 0);
 
-  // Scoped to whichever event entry is live right now, rather than `hasProgress`
-  // above (which would also fire on a stray home/away score an event fixture never
-  // has) - switching FROM team ranking only matters if places were actually set,
-  // and switching FROM detailed only matters if a mark was actually entered.
+  // Scoped to the live entry mode, not `hasProgress` above - switching away only
+  // matters if THAT mode's own data (places, or a mark) was actually entered.
   const eventHasProgress = eventMode === 'team'
     ? (ls?.eventRanking?.rows?.length ?? 0) > 0
     : (ls?.event?.participants?.length ?? 0) > 0;
@@ -412,10 +407,8 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     setMode(next);
   };
 
-  // Team ranking <-> Detailed keeps neither side's data (they're stored under
-  // different live_state keys entirely - eventRanking vs event - so there's
-  // nothing to carry over), which is exactly why a confirm guards it whenever
-  // the side being left has anything recorded.
+  // Team ranking <-> Detailed carries nothing over (separate live_state keys),
+  // so confirm before switching whenever the side being left has data.
   const switchEventMode = async (next: 'team' | 'detailed') => {
     if (next === eventMode) return;
     touched.current = true;
@@ -1619,11 +1612,8 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   const persistRanking = (complete: boolean) => {
     const rows = orgs.map((o) => ({ orgId: o.id, org: o.name, place: places[o.id] ?? null, points: pointsFor(o.id) }));
     // Drops any detailed per-athlete data this fixture was PREVIOUSLY scored
-    // with - the two consoles are mutually exclusive scoring shapes for one
-    // fixture, same as switching structure (single/tie/event) abandons
-    // whatever the last one wrote. Left in place, a stale `event` key here is
-    // what let derive.ts's two medal-derivation paths both fire and hand out
-    // two medals for one result.
+    // with - a stale `event` key here is what let derive.ts's two medal paths
+    // both fire and hand out two medals for one result.
     const { event: _staleDetailed, ...restLiveState } = (live?.live_state ?? {}) as Record<string, unknown>;
     // "Save ranking" only stores the draft places - it must NOT move the standings. Only
     // "Save & sign off" writes `eventStandings` (what the standings service reads) and
@@ -1702,20 +1692,16 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
 
 /* ----------------------------- Event console (multi-competitor) ----------------------------- */
 // Swimming heats / powerlifting categories: many participants, each recording a mark per
-// sub-event, aggregated into team (org) points. Stores EventState in live_state.event -
-// the shape resolveFixtureParticipants and derive.ts's eventMedals() read at lock time,
-// which is what turns a mark into a person's own medal and appearance record.
-// A sub-event's own resultType/winnerIs/unit wins when set (athletics: a sprint is
-// a time, a jump is a distance) - only falls back to the spec-level default for
-// sports where every sub-event genuinely shares one (swimming, powerlifting).
+// sub-event, aggregated into team (org) points. Stores EventState in live_state.event,
+// which derive.ts's eventMedals() reads at lock time to award medals per person.
+// A sub-event's own resultType/winnerIs/unit wins when set (athletics mixes a time
+// and a distance); falls back to the spec-level default otherwise.
 const markMetaFor = (spec: EventSpec, se?: { resultType?: string; unit?: string }) => ({
   isTime: (se?.resultType ?? spec.result.resultType) === 'time',
   unit: se?.unit ?? spec.result.unit,
 });
 
-// A scorer typing a bare number has no way to know what it means - "40" could be
-// seconds, metres or a lift in kg. Spelled out in full rather than the short unit
-// code, since "m" alone reads as "minutes" as easily as "metres".
+// Spelled out in full so "40" reads as an actual unit, not a guess.
 const UNIT_PLACEHOLDER: Record<string, string> = { s: 'seconds', m: 'metres', kg: 'kilograms', pts: 'points' };
 const placeholderFor = (unit?: string) => (unit ? UNIT_PLACEHOLDER[unit] ?? unit : 'value');
 
@@ -1724,26 +1710,21 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const pickOne = !!spec.pickOne;
   const noun = spec.subEventNoun ?? 'sub-event';
   const nounLower = noun.toLowerCase();
-  // A named discipline ("66kg") already fixes the one category every entrant here
-  // is in - effectiveEventSpec has already narrowed spec.subEvents to just it, so
-  // there is nothing left to pick, per row or otherwise. Only "Whole sport" (no
-  // discipline) still mixes more than one category in this fixture.
+  // A named discipline ("66kg") already fixes the one category every entrant is
+  // in (effectiveEventSpec narrowed spec.subEvents to just it) - nothing left to
+  // pick. Only "Whole sport" still mixes more than one category.
   const isNamedDiscipline = !!fixture?.tournament_disciplines?.discipline_id;
   const fixedCategory = isNamedDiscipline ? spec.subEvents[0]?.key ?? null : null;
 
-  // Whoever's org has a team_entries row for this exact discipline has one
-  // registered entrant on it (individual disciplines cap squad_max at 1) - the
-  // roster the console can show up front instead of asking the official to look
-  // every competitor up by phone, one at a time.
+  // Whoever's org has a team_entries row for this discipline has one registered
+  // entrant on it (squad_max is 1) - shown up front instead of a phone lookup.
   const entrants: Array<{ user_id: string; name: string; phone: string | null; org_id: string | null; org: string | null }> =
     (fixture as any)?.event_entrants ?? [];
   const entrantRow = (e: (typeof entrants)[number]): ParticipantResult =>
     ({ id: `e${e.user_id}`, name: e.name, phone: e.phone, org: e.org, orgId: e.org_id, category: pickOne ? fixedCategory : null, marks: {} });
 
-  // The roster is the registration record, not something scoring edits: once a
-  // discipline's team_entries are locked there is no concept of swapping a
-  // competitor out, so this console never offers a way to add, remove, or look
-  // one up by hand - only to score whoever is actually entered.
+  // The roster is the registration record, not something scoring edits - no add,
+  // remove or phone lookup here, only scoring whoever is actually entered.
   const [state, setState] = useState<EventState>(() => {
     const hydrated = hydrateEvent(live?.live_state?.event);
     return hydrated.participants.length === 0 && entrants.length > 0
@@ -1760,9 +1741,8 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
       : hydrated);
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
 
-  // Somebody registered for this discipline after scoring already started - folded
-  // in automatically (matched by phone, the same handle resolveFixtureParticipants
-  // matches on at lock time), never through anything the scorer clicks.
+  // A late registration folds in automatically, matched by phone (the same
+  // handle resolveFixtureParticipants uses at lock time) - never by hand.
   useEffect(() => {
     if (!entrants.length) return;
     setState((s) => {
@@ -1772,11 +1752,10 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     });
   }, [entrants]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // "Whole sport" still mixes categories in one fixture, but nobody's real weight
-  // class is known in advance the way a named discipline's is - so ONE category is
-  // chosen here, for the whole session, before anything can be scored, rather than
-  // guessed per row (a blank row silently defaulting to the first category was
-  // exactly the bug this replaces).
+  // "Whole sport" still mixes categories, but nobody's weight class is known in
+  // advance - so ONE is chosen for the whole session before scoring starts,
+  // rather than guessed per row (a blank row defaulting to the first category
+  // was the bug this replaces).
   const [globalCategory, setGlobalCategoryState] = useState<string | null>(
     () => state.participants.find((p) => p.category)?.category ?? null,
   );
@@ -1791,11 +1770,9 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   };
   const category = isNamedDiscipline ? fixedCategory : globalCategory;
 
-  // "Counts towards" is deliberately not offered any more: it always came from the
-  // same registration this console's roster already reads, so an editable copy of
-  // it could only ever go stale against, or quietly disagree with, the org
-  // resolveFixtureParticipants and the standings table both actually trust. Kept
-  // defined rather than deleted, in case a real "unattached entry" need reappears.
+  // "Counts towards" isn't offered any more - it came from the same registration
+  // the roster already reads, so an editable copy could only go stale against it.
+  // Kept defined (unused) in case a real "unattached entry" need reappears.
   const champId = eventInfo(fixture)?.id;
   const { data: parts } = useApi<{ organizations: { orgId: string; org: { id: string; name: string } | null }[] }>(
     champId ? `/championships/${champId}/participants` : null);
@@ -1813,10 +1790,8 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   // top three) the standings service reads, so detailed event results feed the
   // championship table + medal tally too. `complete` signs the event off.
   const persistEvent = (complete: boolean) => {
-    // Drops any "Team ranking" org-placement data this fixture was previously
-    // scored with - see the matching comment in persistRanking. Without this,
-    // derive.ts's two medal-derivation paths (per-athlete and per-org) could
-    // both fire from the same fixture and hand out two medals for one result.
+    // Drops any "Team ranking" org-placement data - see persistRanking's matching
+    // comment on why a stale key here would double up on medals.
     const { eventRanking: _staleSimple, ...restLiveState } = (live?.live_state ?? {}) as Record<string, unknown>;
     return persist.mutate(
       {
@@ -1830,10 +1805,8 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
 
   const agg = aggregateEvent(spec, state);
   const blocks = subEventResults(spec, state);
-  // The one active category (a named discipline, or whichever one is picked for a
-  // pickOne "Whole sport" session) carries its OWN unit/direction - a "400m" must
-  // read as seconds and fastest-wins even though the sport's other events (a jump,
-  // a throw) don't share that unit at all.
+  // The one active category carries its OWN unit/direction - a "400m" reads as
+  // seconds/fastest-wins even though the sport's other events don't share that unit.
   const activeSubEvent = category ? spec.subEvents.find((se) => se.key === category) : undefined;
   const activeMeta = markMetaFor(spec, activeSubEvent);
   const unit = activeMeta.unit ? ` (${activeMeta.unit})` : '';
@@ -1853,14 +1826,11 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
       ? `Enter each competitor's mark${unit} for ${spec.subEvents[0]?.label ?? noun}.`
       : `Enter each competitor's mark per ${nounLower}${unit}.`;
   const markLabel = `Total${unit}`;
-  // Whole sport, nothing chosen yet: this IS the fix for a row silently scoring
-  // under the wrong default category - there is no default any more, and nothing
-  // can be scored until an explicit choice is made for the whole session.
+  // Whole sport, nothing chosen: no default any more, blocks scoring until an
+  // explicit choice is made (was the "silently defaults to first category" bug).
   const blockedOnCategory = pickOne && !isNamedDiscipline && !category;
-  // Exactly one mark per row - any pickOne sport (a competitor is only ever in
-  // one category, chosen or not yet), or a named discipline on a grid sport.
-  // Only a genuinely multi-category whole-sport grid sport still needs its
-  // per-race columns.
+  // Exactly one mark per row for pickOne or a named discipline; only a
+  // genuinely multi-category whole-sport grid sport needs per-race columns.
   const singleMark = pickOne || isNamedDiscipline;
 
   return (
