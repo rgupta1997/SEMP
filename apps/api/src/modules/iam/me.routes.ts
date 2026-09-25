@@ -738,6 +738,9 @@ export function makeMeRouter(prisma: Prisma): Router {
 
     const matches = fixtures.map((f) => summariseLean(f, teamIds));
     const { wins, losses, draws } = tally(fixtures, teamIds);
+    // "Matches" on the Overview card means matches actually PLAYED - a
+    // freshly-drawn fixture isn't a match yet, just a schedule slot.
+    const played = fixtures.filter((f) => f.status === 'completed').length;
 
     // Championship-wide standings (read-only) - read the materialized championship-
     // scope table maintained by the standings engine.
@@ -745,7 +748,7 @@ export function makeMeRouter(prisma: Prisma): Router {
 
     res.json({
       championship,
-      stats: { matches: fixtures.length, wins, losses, draws },
+      stats: { matches: played, wins, losses, draws },
       teams,
       matches,
       standings,
