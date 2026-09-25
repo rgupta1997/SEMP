@@ -1,5 +1,5 @@
 import {
-  PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent,
+  PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor,
   type AchievementKind, type EventSpec, type EventState, type FormatTemplate,
   type LifetimeEntryKind, type Medal, type StandingsPlacement,
 } from '@semp/shared';
@@ -75,6 +75,8 @@ export interface DerivableFixture {
   championship_name: string | null;
   sport_id: string | null;
   sport_name: string | null;
+  /** null for "Whole sport" - a named discipline ("66kg") already fixes its category. */
+  discipline_id: string | null;
   discipline_name: string | null;
   /** `tournament_disciplines.format_config` - carries the EventSpec for a ranking event. */
   format_config: unknown;
@@ -176,9 +178,11 @@ export function verdictsOf(fx: Pick<DerivableFixture, 'round' | 'status' | 'winn
 
 const MEDAL_BY_RANK: Record<number, Medal> = { 1: 'gold', 2: 'silver', 3: 'bronze' };
 
-function eventSpecOf(formatConfig: unknown): EventSpec | null {
+// Creating a discipline never writes format_config.scoring, so the sport's
+// seeded template is the only spec that has ever actually existed here.
+function eventSpecOf(formatConfig: unknown, sportName: string | null): EventSpec | null {
   const scoring = (formatConfig as { scoring?: FormatTemplate } | null)?.scoring;
-  return scoring?.event ?? null;
+  return scoring?.event ?? eventTemplateFor(sportName)?.event ?? null;
 }
 
 function eventStateOf(liveState: unknown): EventState | null {
@@ -188,31 +192,65 @@ function eventStateOf(liveState: unknown): EventState | null {
 }
 
 /**
- * Per-competitor medals for a ranking event (swimming, athletics, powerlifting).
- *
- * Ranks each sub-event with the SAME function the console and the standings
- * service use (`rankSubEvent`), so a swimmer's profile and the medal tally can
- * never disagree about who came first - including on the shared-place tie rule.
- *
- * Returns competitor-row ids, because that is the only handle a `live_state`
- * competitor has; the caller maps them back to accounts.
+ * Every competitor's finishing rank per sub-event, via the SAME `rankSubEvent`
+ * the console and standings use - so a profile and the medal tally never
+ * disagree. Returns competitor-row ids; the caller maps them to accounts.
  */
-export function eventMedals(fx: Pick<DerivableFixture, 'format_config' | 'live_state'>): Array<{ competitor_id: string; medal: Medal; sub_event: string }> {
-  const spec = eventSpecOf(fx.format_config);
+function eventRanksOf(
+  fx: Pick<DerivableFixture, 'format_config' | 'live_state' | 'sport_name' | 'discipline_id' | 'discipline_name'>,
+): Array<{ competitor_id: string; rank: number; sub_event: string }> {
+  const raw = eventSpecOf(fx.format_config, fx.sport_name);
   const state = eventStateOf(fx.live_state);
-  if (!spec || !state || state.participants.length === 0) return [];
+  if (!raw || !state || state.participants.length === 0) return [];
+  const spec = effectiveEventSpec(raw, { id: fx.discipline_id, name: fx.discipline_name });
   // 'sumBest' totals marks into a team score - there is no per-athlete placing to
   // award a medal from. `detailedContributions` skips medals for the same reason.
   if (spec.result.aggregate === 'sumBest') return [];
 
-  const out: Array<{ competitor_id: string; medal: Medal; sub_event: string }> = [];
+  const out: Array<{ competitor_id: string; rank: number; sub_event: string }> = [];
   for (const se of spec.subEvents) {
     for (const [competitorId, rank] of rankSubEvent(spec, state, se.key)) {
-      const medal = MEDAL_BY_RANK[rank];
-      if (medal) out.push({ competitor_id: competitorId, medal, sub_event: se.label || se.key });
+      out.push({ competitor_id: competitorId, rank, sub_event: se.label || se.key });
     }
   }
   return out;
+}
+
+export function eventMedals(
+  fx: Pick<DerivableFixture, 'format_config' | 'live_state' | 'sport_name' | 'discipline_id' | 'discipline_name'>,
+): Array<{ competitor_id: string; medal: Medal; sub_event: string }> {
+  const out: Array<{ competitor_id: string; medal: Medal; sub_event: string }> = [];
+  for (const r of eventRanksOf(fx)) {
+    const medal = MEDAL_BY_RANK[r.rank];
+    if (medal) out.push({ competitor_id: r.competitor_id, medal, sub_event: r.sub_event });
+  }
+  return out;
+}
+
+// "5th" is a result; "37th out of 40" is noise nobody asked for.
+const PLACEMENT_CHIP_LIMIT = 8;
+
+/**
+ * Everyone in the top {@link PLACEMENT_CHIP_LIMIT} who missed the podium still
+ * gets a placement chip - the same idea as a bracket's semi/quarter-finalist,
+ * just with no fixed vocabulary for "5th" the way `StandingsPlacement` has.
+ */
+export function eventPlacements(
+  fx: Pick<DerivableFixture, 'format_config' | 'live_state' | 'sport_name' | 'discipline_id' | 'discipline_name'>,
+): Array<{ competitor_id: string; rank: number; sub_event: string }> {
+  return eventRanksOf(fx).filter((r) => !MEDAL_BY_RANK[r.rank] && r.rank <= PLACEMENT_CHIP_LIMIT);
+}
+
+/** "1st", "2nd", "3rd", "4th", "11th", "21st", … */
+function ordinal(n: number): string {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -242,12 +280,11 @@ function entryTitle(fx: DerivableFixture, teamId: string | null): string {
   if (fx.status === 'walkover') return `${versus} — Walkover`;
   if (fx.status === 'bye') return `${versus} — Bye`;
 
+  // No score in the headline - it doesn't fit every sport (a tie's rubber
+  // count, say), and it's already on the fixture for anyone who wants it.
   const outcome = outcomeFor(fx, teamId);
-  const myScore = teamId && teamId === fx.away_team_id ? fx.away_score : fx.home_score;
-  const theirScore = teamId && teamId === fx.away_team_id ? fx.home_score : fx.away_score;
-  const score = myScore != null && theirScore != null ? ` ${myScore}-${theirScore}` : '';
   const verb = outcome === 'won' ? 'Won' : outcome === 'lost' ? 'Lost' : outcome === 'drew' ? 'Drew' : null;
-  return verb ? `${versus} — ${verb}${score}` : versus;
+  return verb ? `${versus} — ${verb}` : versus;
 }
 
 /**
@@ -268,7 +305,7 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
   };
 
   const context = contextLabel(fx);
-  const eventLabel = [fx.championship_name, context].filter(Boolean).join(' — ');
+  const eventLabel = [fx.championship_name, context].filter(Boolean).join(' - ');
 
   const byTeam = new Map<string, DerivableParticipant[]>();
   for (const p of participants) {
@@ -285,8 +322,8 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
   for (const v of verdictsOf(fx)) {
     const medal = v.kind === 'medal' ? v.medal : null;
     const title = medal
-      ? `${MEDAL_LABEL[medal]} — ${eventLabel}`
-      : `${PLACEMENT_LABEL[v.placement]} — ${eventLabel}`;
+      ? `${MEDAL_LABEL[medal]} - ${eventLabel}`
+      : `${PLACEMENT_LABEL[v.placement]} - ${eventLabel}`;
     const detail = {
       placement: v.placement,
       round: fx.round,
@@ -332,13 +369,14 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
   const byCompetitor = new Map<string, DerivableParticipant>();
   for (const p of participants) if (p.competitor_id) byCompetitor.set(p.competitor_id, p);
 
-  for (const m of eventMedals(fx)) {
+  const individualMedals = eventMedals(fx);
+  for (const m of individualMedals) {
     const p = byCompetitor.get(m.competitor_id);
     // A competitor whose phone matched no account earns no achievement - they are
     // already recorded on the fixture as unmatched, which is an organiser's cue to
     // link them rather than a number quietly going missing.
     if (!p) continue;
-    const title = `${MEDAL_LABEL[m.medal]} — ${m.sub_event}${fx.championship_name ? `, ${fx.championship_name}` : ''}`;
+    const title = `${MEDAL_LABEL[m.medal]} - ${m.sub_event}${fx.championship_name ? `, ${fx.championship_name}` : ''}`;
     achievements.push({
       user_id: p.user_id,
       team_id: null,
@@ -356,6 +394,104 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
     addChip(p.user_id, { kind: 'medal', title: `${MEDAL_LABEL[m.medal]} · ${m.sub_event}`, medal: m.medal });
   }
 
+  // Off the podium still finished the event - the same "record what was
+  // decided" rule that gives a bracket's beaten semi-finalist a chip.
+  for (const pl of eventPlacements(fx)) {
+    const p = byCompetitor.get(pl.competitor_id);
+    if (!p) continue;
+    const label = `${ordinal(pl.rank)} place`;
+    const title = `${label} - ${pl.sub_event}${fx.championship_name ? `, ${fx.championship_name}` : ''}`;
+    achievements.push({
+      user_id: p.user_id,
+      team_id: null,
+      organization_id: p.organization_id,
+      kind: 'placement',
+      medal: null,
+      title,
+      detail: {
+        placement: label,
+        rank: pl.rank,
+        sub_event: pl.sub_event,
+        sport: fx.sport_name,
+        discipline: fx.discipline_name,
+        championship_name: fx.championship_name,
+      },
+    });
+    addChip(p.user_id, { kind: 'placement', title: `${label} · ${pl.sub_event}` });
+  }
+
+  // ---- 2b · the default "Team ranking" console: medals for the org's one
+  //       entrant (J4-E4-S1) ------------------------------------------------
+  // EventRankingConsole ranks orgs, not individual competitors, so there is no
+  // competitor_id to match on - resolveFixtureParticipants already turned each
+  // placed org's team_entries roster (always exactly one person, squad_max is
+  // pinned to 1 for an individual discipline) into a participant carrying that
+  // org's id, so matching on organization_id is enough.
+  //
+  // MUTUALLY EXCLUSIVE with block 2. The two consoles are meant to be two ways
+  // of scoring the SAME fixture, never both at once - but neither console's
+  // save clears the other's key from live_state, so a fixture scored through
+  // both at different points can carry both `event` and `eventRanking`
+  // simultaneously. Without this guard, both blocks would fire and hand out
+  // two medals - one per athlete, one per org - for a single result. The
+  // per-athlete data wins because it's strictly more specific.
+  const rankingRows = individualMedals.length === 0 ? (fx.live_state as any)?.eventRanking?.rows : undefined;
+  if (Array.isArray(rankingRows)) {
+    const byOrg = new Map<string, DerivableParticipant>();
+    for (const p of participants) if (p.organization_id && !byOrg.has(p.organization_id)) byOrg.set(p.organization_id, p);
+
+    for (const row of rankingRows) {
+      const place = typeof row?.place === 'number' ? row.place : null;
+      if (place == null) continue;
+      const orgId = typeof row?.orgId === 'string' ? row.orgId : null;
+      const p = orgId ? byOrg.get(orgId) : undefined;
+      // The org's entrant never resolved to an account - already recorded as
+      // unmatched, nothing here to attach a medal to.
+      if (!p) continue;
+
+      const medal = MEDAL_BY_RANK[place];
+      if (medal) {
+        const title = `${MEDAL_LABEL[medal]} - ${eventLabel}`;
+        achievements.push({
+          user_id: p.user_id,
+          // Person's medal, not a squad's (achievements_subject_check: never both).
+          team_id: null,
+          organization_id: p.organization_id,
+          kind: 'medal',
+          medal,
+          title,
+          detail: {
+            placement: place === 1 ? 'winner' : place === 2 ? 'runner_up' : 'third_place',
+            sport: fx.sport_name,
+            discipline: fx.discipline_name,
+            championship_name: fx.championship_name,
+          },
+        });
+        addChip(p.user_id, { kind: 'medal', title: MEDAL_LABEL[medal], medal });
+      } else if (place <= PLACEMENT_CHIP_LIMIT) {
+        // Off the podium but still worth telling them: same "record what was
+        // decided" rule as the per-athlete console's placement chips above.
+        const label = `${ordinal(place)} place`;
+        achievements.push({
+          user_id: p.user_id,
+          team_id: null,
+          organization_id: p.organization_id,
+          kind: 'placement',
+          medal: null,
+          title: `${label} - ${eventLabel}`,
+          detail: {
+            placement: label,
+            rank: place,
+            sport: fx.sport_name,
+            discipline: fx.discipline_name,
+            championship_name: fx.championship_name,
+          },
+        });
+        addChip(p.user_id, { kind: 'placement', title: label });
+      }
+    }
+  }
+
   // ---- 3 · awards (J4-E4-S2) ----------------------------------------------
   const participantById = new Map(participants.map((p) => [p.user_id, p]));
   for (const a of awards) {
@@ -371,7 +507,7 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
       organization_id: p?.organization_id ?? null,
       kind: 'award',
       medal: null,
-      title: `${label} — ${eventLabel}`,
+      title: `${label} - ${eventLabel}`,
       detail: {
         award_type_code: a.award_type_code,
         award_name: a.award_name,
@@ -386,14 +522,14 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
   // ---- 4 · the timeline: one entry per person (J4-E2-S1) -------------------
   const entries: LifetimeEntryDraft[] = participants.map((p) => {
     const outcome = outcomeFor(fx, p.team_id);
-    const decided = outcome != null || fx.status === 'walkover' || fx.status === 'bye';
     const chips = chipsByUser.get(p.user_id) ?? [];
+    // A ranking event has no head-to-head outcome to check, so a medal/placement
+    // chip also counts as "decided" - otherwise a gold-winning race would file
+    // the same as a heat nobody placed in.
+    const decided = outcome != null || fx.status === 'walkover' || fx.status === 'bye' || chips.length > 0;
     return {
       user_id: p.user_id,
       organization_id: p.organization_id,
-      // 'result' when the fixture settled something for them; a heat swum with no
-      // head-to-head outcome is participation, and saying otherwise would put a
-      // result on a record that has none.
       kind: decided ? 'result' : 'participation',
       title: entryTitle(fx, p.team_id),
       detail: {

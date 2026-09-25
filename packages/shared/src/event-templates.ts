@@ -50,17 +50,23 @@ const EVENT_TEMPLATES: Record<string, FormatTemplate> = {
     ],
     { pickOne: true, subEventNoun: 'Weight category' },
   ),
-  // Athletics: many track/field events, each ranked; the top finishers earn 5/3/1 for
-  // their org. The default ranking console only needs the placement points; the detailed
-  // per-athlete console treats higher marks as better (suits field events).
+  // Athletics doesn't share one unit like swimming/powerlifting do - a sprint is
+  // a TIME (lower wins), a jump/throw is a DISTANCE (higher wins) - so each
+  // sub-event carries its own resultType/winnerIs/unit; the result below is
+  // just the aggregate/medalPoints default.
   athletics: event(
-    { resultType: 'points', winnerIs: 'max', unit: 'pts', aggregate: 'medals', medalPoints: [5, 3, 1] },
+    { resultType: 'time', winnerIs: 'min', aggregate: 'medals', medalPoints: [5, 3, 1] },
     [
-      { key: 'm100', label: "Men's 100m" }, { key: 'm200', label: "Men's 200m" }, { key: 'm400', label: "Men's 400m" },
-      { key: 'mlj', label: "Men's Long Jump" }, { key: 'msp', label: "Men's Shot Put" },
-      { key: 'w100', label: "Women's 100m" }, { key: 'w200', label: "Women's 200m" },
-      { key: 'wlj', label: "Women's Long Jump" }, { key: 'wsp', label: "Women's Shot Put" },
-      { key: 'relay', label: 'Mixed 4x100m Relay' },
+      { key: 'm100', label: "Men's 100m", resultType: 'time', winnerIs: 'min', unit: 's' },
+      { key: 'm200', label: "Men's 200m", resultType: 'time', winnerIs: 'min', unit: 's' },
+      { key: 'm400', label: "Men's 400m", resultType: 'time', winnerIs: 'min', unit: 's' },
+      { key: 'mlj', label: "Men's Long Jump", resultType: 'distance', winnerIs: 'max', unit: 'm' },
+      { key: 'msp', label: "Men's Shot Put", resultType: 'distance', winnerIs: 'max', unit: 'm' },
+      { key: 'w100', label: "Women's 100m", resultType: 'time', winnerIs: 'min', unit: 's' },
+      { key: 'w200', label: "Women's 200m", resultType: 'time', winnerIs: 'min', unit: 's' },
+      { key: 'wlj', label: "Women's Long Jump", resultType: 'distance', winnerIs: 'max', unit: 'm' },
+      { key: 'wsp', label: "Women's Shot Put", resultType: 'distance', winnerIs: 'max', unit: 'm' },
+      { key: 'relay', label: 'Mixed 4x100m Relay', resultType: 'time', winnerIs: 'min', unit: 's' },
     ],
     { subEventNoun: 'Event' },
   ),

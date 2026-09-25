@@ -361,21 +361,31 @@ export function makeRecordsRouter(prisma: Prisma): Router {
     const scope = req.query.scope === 'individuals' ? 'individuals' : 'teams';
     const sportId = typeof req.query.sport_id === 'string' ? req.query.sport_id : null;
 
-    const rows = await prisma.achievements.findMany({
-      where: {
-        organization_id: organizationId,
-        ...(scope === 'teams' ? { team_id: { not: null } } : { user_id: { not: null } }),
-        ...(sportId ? { sport_id: sportId } : {}),
-        ...LIVE,
-      },
-      orderBy: [{ occurred_on: 'desc' }, { created_at: 'desc' }],
-      take: 500,
-    });
+    // Same scope as the rows below, but deliberately NOT sportId - the chips
+    // must list every sport ever won, or picking one makes the rest vanish.
+    const scopeWhere = {
+      organization_id: organizationId,
+      ...(scope === 'teams' ? { team_id: { not: null } } : { user_id: { not: null } }),
+      ...LIVE,
+    };
+
+    const [rows, sportIdRows] = await Promise.all([
+      prisma.achievements.findMany({
+        where: { ...scopeWhere, ...(sportId ? { sport_id: sportId } : {}) },
+        orderBy: [{ occurred_on: 'desc' }, { created_at: 'desc' }],
+        take: 500,
+      }),
+      prisma.achievements.findMany({
+        where: { ...scopeWhere, sport_id: { not: null } },
+        select: { sport_id: true },
+        distinct: ['sport_id'],
+      }),
+    ]);
 
     // Names, so the board reads as people and squads rather than uuids.
     const userIds = [...new Set(rows.map((r) => r.user_id).filter((v): v is string => !!v))];
     const teamIds = [...new Set(rows.map((r) => r.team_id).filter((v): v is string => !!v))];
-    const sportIds = [...new Set(rows.map((r) => r.sport_id).filter((v): v is string => !!v))];
+    const sportIds = [...new Set(sportIdRows.map((r) => r.sport_id).filter((v): v is string => !!v))];
     const [users, teams, sports] = await Promise.all([
       userIds.length ? prisma.users.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [],
       teamIds.length ? prisma.teams.findMany({ where: { id: { in: teamIds } }, select: { id: true, name: true } }) : [],

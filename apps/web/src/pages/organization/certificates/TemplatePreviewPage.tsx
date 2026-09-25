@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { BadgeCheck, Save, Trash2, Upload, X } from 'lucide-react';
+import { CERTIFICATE_LAYOUT, CERTIFICATE_LAYOUT_LABEL, type RecipientCategory } from '@semp/shared';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { api } from '../../../lib/api';
 import {
-  BackButton, Button, Card, Input, PageHeader, Skeleton, Textarea, confirmDialog, toast,
+  BackButton, Button, Card, Input, PageHeader, Select, Skeleton, Textarea, confirmDialog, toast,
 } from '../../../components/ui';
 import { SheetPreview, type Template } from './shared';
 
@@ -72,14 +73,9 @@ function ImageField({
 // keystroke: an institution is approving a document, and a preview that flickers as
 // you type is a worse basis for approval than one that settles.
 
-const LAYOUTS = [
-  { id: 'classic', name: 'Classic Laurel' },
-  { id: 'minimal', name: 'Modern Minimal' },
-  { id: 'athletic', name: 'Athletic Banner' },
-  { id: 'ornate', name: 'Ornate Frame' },
-  { id: 'institutional', name: 'Institutional Letterhead' },
-  { id: 'ribbon', name: 'Participation Ribbon' },
-];
+// Ids/names come from @semp/shared - same list presets.ts builds CERTIFICATE_PRESETS
+// from, so a layout added there shows up here too.
+const LAYOUTS = CERTIFICATE_LAYOUT.map((id) => ({ id, name: CERTIFICATE_LAYOUT_LABEL[id] }));
 
 export function TemplatePreviewPage() {
   const { orgId, templateId } = useParams();
@@ -92,6 +88,10 @@ export function TemplatePreviewPage() {
   // Bumped on save so the iframe refetches; without it the browser serves the render
   // it already has and the preview silently lies about what was just saved.
   const [version, setVersion] = useState(0);
+  // Winners/awards render heading/body; every other category renders
+  // generic_heading/generic_body - this is the only way to see the second wording
+  // before trusting it on a real certificate.
+  const [previewCategory, setPreviewCategory] = useState<Extract<RecipientCategory, 'winners' | 'participation'>>('winners');
 
   useEffect(() => {
     if (tpl && !form) setForm({ name: tpl.name, design: { ...tpl.design } });
@@ -154,8 +154,15 @@ export function TemplatePreviewPage() {
       </PageHeader>
 
       <div className="grid gap-5 lg:grid-cols-[1fr_22rem]">
-        <Card className="grid place-items-center overflow-x-auto p-4">
-          <SheetPreview key={version} path={`/certificate-templates/${templateId}/preview?v=${version}`} width={720} />
+        <Card className="relative grid place-items-center overflow-x-auto p-4">
+          <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-md bg-white/90 px-2 py-1 text-xs shadow-sm backdrop-blur dark:bg-slate-900/90">
+            <span className="font-medium text-slate-500 dark:text-slate-400">Preview as</span>
+            <Select value={previewCategory} onChange={(e) => setPreviewCategory(e.target.value as typeof previewCategory)} className="text-xs">
+              <option value="winners">Winner / medal</option>
+              <option value="participation">Participation, officiating, etc.</option>
+            </Select>
+          </div>
+          <SheetPreview key={`${version}-${previewCategory}`} path={`/certificate-templates/${templateId}/preview?v=${version}&category=${previewCategory}`} width={720} />
         </Card>
 
         <div className="grid h-fit gap-5">
@@ -212,6 +219,23 @@ export function TemplatePreviewPage() {
                 <Textarea rows={3} value={form.design.body ?? ''} onChange={(e) => set('body', e.target.value)}
                   placeholder="is hereby recognised for the achievement below…" />
               </label>
+
+              <div className="mt-1 border-t border-slate-200 pt-3 dark:border-slate-800">
+                <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+                  Used for Participation, Organising, Officials &amp; Coaches. Leave blank to reuse the
+                  wording above — a medal claims a result, so a participation or officiating certificate
+                  should not say "Champion".
+                </p>
+                <label className="grid gap-1 text-sm">
+                  <span className="font-medium text-slate-700 dark:text-slate-300">Generic heading</span>
+                  <Input value={form.design.generic_heading ?? ''} onChange={(e) => set('generic_heading', e.target.value)} placeholder="Same as Heading above" />
+                </label>
+                <label className="mt-3 grid gap-1 text-sm">
+                  <span className="font-medium text-slate-700 dark:text-slate-300">Generic body</span>
+                  <Textarea rows={3} value={form.design.generic_body ?? ''} onChange={(e) => set('generic_body', e.target.value)}
+                    placeholder="Same as Body above" />
+                </label>
+              </div>
 
               <label className="grid gap-1 text-sm">
                 <span className="font-medium text-slate-700 dark:text-slate-300">Signatory</span>

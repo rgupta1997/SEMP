@@ -164,6 +164,11 @@ export const ACHIEVEMENT_KIND = [
 ] as const;
 export type AchievementKind = (typeof ACHIEVEMENT_KIND)[number];
 
+/** ACHIEVEMENT_KIND minus 'award' - the "winner" honours for certificates
+ *  (award = Player of the Match etc., handled separately). Derived so a new
+ *  kind is included by default instead of needing a second, hand-kept list. */
+export const WINNER_ACHIEVEMENT_KINDS = ACHIEVEMENT_KIND.filter((k) => k !== 'award');
+
 export const MEDALS = ['gold', 'silver', 'bronze'] as const;
 export type Medal = (typeof MEDALS)[number];
 
@@ -251,6 +256,68 @@ export const DEMO_DEFAULT_SPORTS = [
 // different lifecycle stage for the demo narrative.
 export const DEMO_CHAMP_KINDS = ['college', 'school', 'corporate', 'public'] as const;
 export type DemoChampKind = (typeof DEMO_CHAMP_KINDS)[number];
+
+// ---------- Certificates (J4-E6/E7) ----------
+// The six recipient categories a certificate run can target: winners and special
+// awards come from locked achievements, the rest from roster/role tables. Shared here
+// so the API (recipients.ts) and the web wizard (GenerateModal, TemplatePreviewPage)
+// read one list instead of each retyping its own copy of the six keys.
+export const RECIPIENT_CATEGORY = ['winners', 'awards', 'participation', 'organising', 'officials', 'coaches'] as const;
+export type RecipientCategory = (typeof RECIPIENT_CATEGORY)[number];
+
+/** Fixture-scoped (one cert per match won) vs championship-scoped (one per event). */
+export const isFixtureScopedCategory = (c: RecipientCategory) => c === 'winners' || c === 'awards';
+
+/** No sport/discipline/team column at all - event-wide by construction. */
+export const isEventWideCategory = (c: RecipientCategory) => c === 'organising' || c === 'officials';
+
+/** Whether a Team filter applies to this category. */
+export const needsTeamFilter = (c: RecipientCategory) =>
+  isFixtureScopedCategory(c) || c === 'participation' || c === 'coaches';
+
+// The six certificate layout ids/names (full design per layout lives in
+// apps/api/.../presets.ts) - shared so the web layout picker can't drift from it.
+export const CERTIFICATE_LAYOUT = ['classic', 'minimal', 'athletic', 'ornate', 'institutional', 'ribbon'] as const;
+export type CertificateLayout = (typeof CERTIFICATE_LAYOUT)[number];
+export const CERTIFICATE_LAYOUT_LABEL: Record<CertificateLayout, string> = {
+  classic: 'Classic Laurel',
+  minimal: 'Modern Minimal',
+  athletic: 'Athletic Banner',
+  ornate: 'Ornate Frame',
+  institutional: 'Institutional Letterhead',
+  ribbon: 'Participation Ribbon',
+};
+
+// The issuing rule a certificate category runs under. Only 'manual' is wired up today
+// (on_lock/on_complete have no backend hook yet) - listed here so the API and web share
+// one source once the other two are ready.
+export const CERTIFICATE_ISSUE_TRIGGER = ['manual', 'on_lock', 'on_complete'] as const;
+export type CertificateIssueTrigger = (typeof CERTIFICATE_ISSUE_TRIGGER)[number];
+export const CERTIFICATE_ISSUE_TRIGGER_LABEL: Record<CertificateIssueTrigger, string> = {
+  manual: 'Manual run only',
+  on_lock: 'On lock',
+  on_complete: 'On event complete',
+};
+
+// Fallback wording when a template/design leaves a field unset - used both when
+// rendering a certificate (render.ts) and in the UI's own template picker.
+export const DEFAULT_TEMPLATE_LABEL = 'Default template';
+export const DEFAULT_CERTIFICATE_HEADING = 'Certificate of Achievement';
+export const DEFAULT_CERTIFICATE_BODY = 'is hereby recognised for the achievement recorded below, verified against an official locked result.';
+export const DEFAULT_SIGNATORY_TITLE = 'Issuing authority';
+
+// ---------- Ranking-event units ----------
+// The units a ranking event's sub-event mark is measured in (a race is a time,
+// a jump/throw a distance, a lift a weight). Not DB-backed - the value lives in
+// tournament_disciplines.format_config jsonb - but shared so a sub-event's unit
+// code (event-templates.ts) and its scorer-facing placeholder (the console)
+// can never drift apart.
+export const EVENT_UNIT = ['s', 'm', 'kg', 'pts'] as const;
+export type EventUnit = (typeof EVENT_UNIT)[number];
+
+export const EVENT_UNIT_LABEL: Record<EventUnit, string> = {
+  s: 'seconds', m: 'metres', kg: 'kilograms', pts: 'points',
+};
 
 // Legal championship status transitions (enforced by the ChampionshipLifecycle domain service).
 export const CHAMPIONSHIP_STATUS_TRANSITIONS: Record<ChampionshipStatus, ChampionshipStatus[]> = {

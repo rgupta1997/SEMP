@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { EVENT_UNIT, type EventUnit } from './enums.js';
 
 // ============================================================================
 // Config-driven scoring templates.
@@ -45,12 +46,19 @@ export interface SubEventSpec {
   // sub-event only - e.g. swimming relays pay 10/7/3 while the individual events pay 5/3/1.
   medalPoints?: number[];
   kind?: 'individual' | 'relay';   // labelling / visuals only; does not affect scoring
+  // Overrides EventResultSpec's resultType/winnerIs/unit for THIS sub-event only -
+  // for a sport whose events don't share one (athletics: a sprint is a time, a
+  // throw is a distance). Omitted where every sub-event already shares one
+  // (swimming, powerlifting), which keeps reading the spec-level value.
+  resultType?: EventResultType;
+  winnerIs?: 'min' | 'max';
+  unit?: EventUnit;
 }
 
 export interface EventResultSpec {
   resultType: EventResultType;
   winnerIs: 'min' | 'max';   // time -> min (fastest); distance/weight/points -> max
-  unit?: string;             // 's' | 'm' | 'kg' | 'pts'
+  unit?: EventUnit;
   aggregate: EventAggregate; // medals = gold/silver/bronze pts; sumBest = team total; placePoints
   medalPoints?: number[];    // [gold, silver, bronze, …] for 'medals'/'placePoints'
 }
@@ -147,7 +155,7 @@ export const tieSpecSchema: z.ZodType<TieSpec> = z.object({
 export const eventResultSpecSchema: z.ZodType<EventResultSpec> = z.object({
   resultType: z.enum(EVENT_RESULT_TYPES),
   winnerIs: z.enum(['min', 'max']),
-  unit: z.string().optional(),
+  unit: z.enum(EVENT_UNIT).optional(),
   aggregate: z.enum(EVENT_AGGREGATES),
   medalPoints: z.array(z.number()).optional(),
 });
@@ -158,6 +166,11 @@ export const eventSpecSchema: z.ZodType<EventSpec> = z.object({
     label: z.string().min(1),
     medalPoints: z.array(z.number().int()).optional(),
     kind: z.enum(['individual', 'relay']).optional(),
+    // Per-sub-event override of the result-level resultType/winnerIs/unit -
+    // see SubEventSpec's own comment for why (athletics mixes units).
+    resultType: z.enum(EVENT_RESULT_TYPES).optional(),
+    winnerIs: z.enum(['min', 'max']).optional(),
+    unit: z.enum(EVENT_UNIT).optional(),
   })).min(1),
   result: eventResultSpecSchema,
   pickOne: z.boolean().optional(),

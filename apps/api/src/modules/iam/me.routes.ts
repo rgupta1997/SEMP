@@ -171,9 +171,12 @@ export function makeMeRouter(prisma: Prisma): Router {
 
   // Membership load shared by the dashboard + achievements: the user's teams with
   // their sport, organization, and the championships each roster is entered into.
-  async function loadMembershipMeta(userId: string) {
+  //
+  // `activeOnly` (default true) means "what can act right now"; the dashboard's
+  // career totals ask a different question - what have they ever played.
+  async function loadMembershipMeta(userId: string, { activeOnly = true }: { activeOnly?: boolean } = {}) {
     const memberships = await prisma.team_members.findMany({
-      where: { user_id: userId, is_active: true },
+      where: { user_id: userId, ...(activeOnly ? { is_active: true } : {}) },
       select: {
         team_id: true,
         teams: {
@@ -390,7 +393,10 @@ export function makeMeRouter(prisma: Prisma): Router {
   // is taken from its own discipline draw (matchSelect walks that chain); the
   // championship cards come from the team_entries the user's rosters hold.
   router.get('/me/dashboard', asyncHandler(async (req, res) => {
-    const { memberships, teamIds } = await loadMembershipMeta(req.user!.id);
+    // Every team ever played for, not just the ones still on the current roster -
+    // this is a career summary, and leaving a team must not erase matches already
+    // locked while you were on it.
+    const { memberships, teamIds } = await loadMembershipMeta(req.user!.id, { activeOnly: false });
 
     if (teamIds.size === 0) {
       res.json({ stats: { total_events: 0, total_matches: 0, wins: 0, losses: 0, draws: 0 }, championships: [], recent_matches: [], achievements: [] });
@@ -731,6 +737,9 @@ export function makeMeRouter(prisma: Prisma): Router {
 
     const matches = fixtures.map((f) => summariseLean(f, teamIds));
     const { wins, losses, draws } = tally(fixtures, teamIds);
+    // "Matches" on the Overview card means matches actually PLAYED - a
+    // freshly-drawn fixture isn't a match yet, just a schedule slot.
+    const played = fixtures.filter((f) => f.status === 'completed').length;
 
     // Championship-wide standings (read-only) - read the materialized championship-
     // scope table maintained by the standings engine.
@@ -738,7 +747,7 @@ export function makeMeRouter(prisma: Prisma): Router {
 
     res.json({
       championship,
-      stats: { matches: fixtures.length, wins, losses, draws },
+      stats: { matches: played, wins, losses, draws },
       teams,
       matches,
       standings,

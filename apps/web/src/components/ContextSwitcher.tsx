@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, ChevronsUpDown } from 'lucide-react';
 import { KIND_META, landingFor, type NavFacts, type WorkspaceContext } from '../lib/workspace';
+import { titleCase } from '../lib/format';
 import type { CapabilityKey } from '@semp/entitlements';
 
 // The context switcher (F-012).
@@ -107,7 +108,7 @@ export function ContextSwitcher({
             {active.name}
           </span>
           <span style={{ display: 'block', fontFamily: MONO, fontSize: 9, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--faint)', marginTop: 2 }}>
-            {active.sub ?? KIND_META[active.kind].group}
+            {active.sub ? titleCase(active.sub) : KIND_META[active.kind].group}
           </span>
         </span>
         <ChevronsUpDown size={14} style={{ color: 'var(--faint)', flex: '0 0 auto' }} />
@@ -165,7 +166,7 @@ export function ContextSwitcher({
                       <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', marginTop: 1 }}>
                         {c.roleCodes.length
                           ? [...new Set(c.roleCodes)].map((r) => r.replace(/_/g, ' ')).join(' · ')
-                          : c.sub ?? 'My Space'}
+                          : c.sub ? titleCase(c.sub) : 'My Space'}
                       </span>
                     </span>
                   </button>

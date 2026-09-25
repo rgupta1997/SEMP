@@ -96,6 +96,18 @@ function assertLockable(fx: {
     return;
   }
 
+  // The default "Team ranking" console (org-level place, no individual marks) writes
+  // to a different key than eventCompetitorsOf checks, so it fell through to the
+  // head-to-head checks below and could never be locked at all.
+  const rankingRows = eventRankingRows(fx.live_state);
+  if (rankingRows !== null) {
+    const withPlace = rankingRows.filter((r) => r?.place != null);
+    if (withPlace.length === 0) {
+      throw new BusinessRuleError('No team has a recorded placing yet, so there is nothing to make official.');
+    }
+    return;
+  }
+
   if (!fx.home_team_id || !fx.away_team_id) {
     throw new BusinessRuleError('Both teams must be set before this scorecard can be locked.');
   }
@@ -160,6 +172,14 @@ function eventCompetitorsOf(live: unknown): Array<{ marks?: Record<string, unkno
   const state = live as { event?: { participants?: unknown }; participants?: unknown } | null;
   const rows = state?.event?.participants ?? state?.participants;
   return Array.isArray(rows) ? rows as Array<{ marks?: Record<string, unknown> }> : null;
+}
+
+/** The org-level rows of the default "Team ranking" console, or null when this
+ *  fixture never used it. See MatchConsolePage's EventRankingConsole. */
+function eventRankingRows(live: unknown): Array<{ place?: number | null }> | null {
+  const state = live as { eventRanking?: { rows?: unknown } } | null;
+  const rows = state?.eventRanking?.rows;
+  return Array.isArray(rows) ? rows as Array<{ place?: number | null }> : null;
 }
 
 // A label the audit trail can keep after the teams are gone: "IIMB vs IIMA, Football".

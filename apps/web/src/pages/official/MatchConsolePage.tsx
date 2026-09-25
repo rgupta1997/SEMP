@@ -15,7 +15,7 @@ import {
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { rankingContributions, detailedContributions, foldCricket, foldRally, formatClock, isCricketSport, isKernelSport, isRacquetSport, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, type CricketLog, type CricketState } from '@semp/shared';
+import { rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, formatClock, isCricketSport, isKernelSport, isRacquetSport, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
 import type { TieSpec, EventSpec, ScoringMode, KernelState, Pairing, RallyLog, Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer } from '../../features/scoring/RacquetDeck';
 import { CricketDeck } from '../../features/scoring/CricketDeck';
@@ -297,7 +297,12 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
   const tieSpec = (template.fixtureType === 'tie' && template.tie)
     ? template.tie
     : tieAllowed ? tieTemplateFor(sportName)?.tie : undefined;
-  const eventSpec = (template.fixtureType === 'event' && template.event) ? template.event : eventTemplateFor(sportName)?.event;
+  const rawEventSpec = (template.fixtureType === 'event' && template.event) ? template.event : eventTemplateFor(sportName)?.event;
+  // null discipline_id = "Whole sport", the only shape that mixes categories -
+  // a named discipline ("66kg") collapses to just that one.
+  const disciplineId: string | null = fixture?.tournament_disciplines?.discipline_id ?? null;
+  const disciplineName: string | null = fixture?.tournament_disciplines?.disciplines?.name ?? null;
+  const eventSpec = rawEventSpec ? effectiveEventSpec(rawEventSpec, { id: disciplineId, name: disciplineName }) : undefined;
 
   // Ranking/event sports (powerlifting/swimming/athletics) have no head-to-head match,
   // so they're event-only - the "Single match" structure doesn't apply and is omitted.
@@ -322,6 +327,17 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     seeded.current = true;
     if (live.live_state?.tie && tieSpec) setStructure('tie');
     else if (live.live_state?.event && eventSpec) setStructure('event');
+  }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
+
+  // An event has two entries under separate live_state keys - org-level "Team
+  // ranking" (default) and detailed per-athlete - so scoring one never
+  // clobbers the other. Snaps to whichever this fixture was last scored with.
+  const [eventMode, setEventMode] = useState<'team' | 'detailed'>('team');
+  const eventModeSeeded = useRef(false);
+  useEffect(() => {
+    if (eventModeSeeded.current || touched.current || !live) return;
+    eventModeSeeded.current = true;
+    if (live.live_state?.event) setEventMode('detailed');
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
 
   // Measured/time single sports have no per-tick scoring, so they're manual-only.
@@ -396,6 +412,12 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     !!ls?.tie?.rubbers?.some((r: any) => r?.winner) ||
     !!(ls?.event && Object.keys(ls.event).length > 0);
 
+  // Scoped to the live entry mode, not `hasProgress` above - switching away only
+  // matters if THAT mode's own data (places, or a mark) was actually entered.
+  const eventHasProgress = eventMode === 'team'
+    ? (ls?.eventRanking?.rows?.length ?? 0) > 0
+    : (ls?.event?.participants?.length ?? 0) > 0;
+
   // Each structure signs off its own result, so moving to another one abandons whatever
   // was scored under the current one. Confirm the switch once the match has any scoring
   // recorded so the official can't lose a part-scored tie/match by tapping the wrong tab.
@@ -432,6 +454,22 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     setMode(next);
   };
 
+  // Team ranking <-> Detailed carries nothing over (separate live_state keys),
+  // so confirm before switching whenever the side being left has data.
+  const switchEventMode = async (next: 'team' | 'detailed') => {
+    if (next === eventMode) return;
+    touched.current = true;
+    if (eventHasProgress) {
+      const ok = await confirmDialog({
+        title: 'Switch scoring entry?',
+        confirmLabel: 'Switch & discard',
+        message: `The ${eventMode === 'team' ? 'team ranking' : 'per-athlete'} data recorded here will be lost if you switch to ${next === 'team' ? 'team ranking' : 'per-athlete entry'}. This can't be undone.`,
+      });
+      if (!ok) return;
+    }
+    setEventMode(next);
+  };
+
   // WHICH CONSOLES FILL THE SCREEN.
   //
   // A deck that sizes itself to what is left of the scroll container only means
@@ -442,7 +480,9 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
   // bottom of a phone behind the awards form.
   //
   // Everything else is an ordinary page section and must not have the header
-  // collapsed out from under it.
+  // collapsed out from under it. Named for what it MEANS rather than for cricket:
+  // the condition below has covered the team deck since before this merge, and a
+  // variable called cricketDeckLive was telling the next reader otherwise.
   const fullHeightDeck = structure === 'single'
     && effectiveMode === 'detailed'
     && (isCricketSport(sportName) || (isKernelSport(sportName) && !isRacquetSport(sportName)));
@@ -450,7 +490,7 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
 
   return (
     <div className={focus ? 'flex min-h-0 flex-1 flex-col' : undefined}>
-      {(structures.length > 1 || showDepth) && (
+      {(structures.length > 1 || showDepth || structure === 'event') && (
         <div className={cn('flex flex-wrap items-end gap-x-6 gap-y-3', focus ? 'mb-2 shrink-0' : 'mb-5')}>
           {/* Only offer the structure switch when there's a real choice - event-only
               sports have a single structure, so the lone tab is hidden. */}
@@ -458,10 +498,14 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
             <TabBar label="Match structure" value={structure} onChange={switchStructure} compact={focus}
               options={structures.map((s) => ({ value: s, label: structureLabel(s) }))} />
           )}
-          {/* Event/ranking sports (swimming, powerlifting, athletics) only ever use the
-              Ranking entry - the detailed per-athlete console is intentionally hidden, so
-              officials just set finishing places. Other sports keep the depth toggle. */}
-          {structure !== 'event' && showDepth ? (
+          {/* Event/ranking sports (swimming, powerlifting, athletics) default to the
+              org-level Team ranking; the detailed per-athlete entry is a named toggle
+              of its own, not the depth toggle other sports use below. */}
+          {structure === 'event' ? (
+            <TabBar label="Scoring" value={eventMode} onChange={switchEventMode} compact={focus}
+              compactLabels={{ team: 'Team ranking', detailed: 'Per-athlete' }}
+              options={[{ value: 'team', label: 'Team ranking' }, { value: 'detailed', label: 'Per-athlete · detailed' }]} />
+          ) : showDepth ? (
             <TabBar label="Scoring" value={mode} onChange={switchMode} compact={focus}
               compactLabels={depthLabels(sportName)}
               options={[{ value: 'detailed', label: 'Detailed · live' }, { value: 'manual', label: 'Manual · final score' }]} />
@@ -470,7 +514,9 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
       )}
 
       {structure === 'event' && eventSpec
-        ? <EventRankingConsole key={`evr-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />
+        ? (eventMode === 'detailed'
+          ? <EventConsole key={`evd-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />
+          : <EventRankingConsole key={`evr-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />)
         : structure === 'tie' && tieSpec
           ? <TieConsole key={`tie-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={tieSpec} mode={effectiveMode} live={live} invalidate={invalidate} onDone={onDone} />
           : effectiveMode === 'manual'
@@ -1769,13 +1815,17 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   // without the server needing the event spec. `complete` signs the event off.
   const persistRanking = (complete: boolean) => {
     const rows = orgs.map((o) => ({ orgId: o.id, org: o.name, place: places[o.id] ?? null, points: pointsFor(o.id) }));
+    // Drops any detailed per-athlete data this fixture was PREVIOUSLY scored
+    // with - a stale `event` key here is what let derive.ts's two medal paths
+    // both fire and hand out two medals for one result.
+    const { event: _staleDetailed, ...restLiveState } = (live?.live_state ?? {}) as Record<string, unknown>;
     // "Save ranking" only stores the draft places - it must NOT move the standings. Only
     // "Save & sign off" writes `eventStandings` (what the standings service reads) and
     // completes the event, so the championship table changes only on sign-off. A plain
     // save keeps the fixture's current status + any previously signed-off contribution.
     const live_state = complete
-      ? { ...(live?.live_state ?? {}), eventRanking: { rows }, eventStandings: rankingContributions(rows, medalPoints) }
-      : { ...(live?.live_state ?? {}), eventRanking: { rows } };
+      ? { ...restLiveState, eventRanking: { rows }, eventStandings: rankingContributions(rows, medalPoints) }
+      : { ...restLiveState, eventRanking: { rows } };
     persist.mutate(
       {
         live_state,
@@ -1846,87 +1896,125 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
 
 /* ----------------------------- Event console (multi-competitor) ----------------------------- */
 // Swimming heats / powerlifting categories: many participants, each recording a mark per
-// sub-event, aggregated into team (org) points. Stores EventState in live_state.event.
-// NOTE: final completion + feeding points into standings is the remaining backend track
-// for events (see plan); results save and aggregate live here.
+// sub-event, aggregated into team (org) points. Stores EventState in live_state.event,
+// which derive.ts's eventMedals() reads at lock time to award medals per person.
+// A sub-event's own resultType/winnerIs/unit wins when set (athletics mixes a time
+// and a distance); falls back to the spec-level default otherwise.
+const markMetaFor = (spec: EventSpec, se?: { resultType?: string; unit?: string }) => ({
+  isTime: (se?.resultType ?? spec.result.resultType) === 'time',
+  unit: se?.unit ?? spec.result.unit,
+});
+
+// Spelled out in full so "40" reads as an actual unit, not a guess.
+const placeholderFor = (unit?: string) => (unit ? EVENT_UNIT_LABEL[unit as keyof typeof EVENT_UNIT_LABEL] ?? unit : 'value');
+
 function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   { fixture: any; fixtureId: string; spec: EventSpec; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[] }) {
-  const [state, setState] = useState<EventState>(() => hydrateEvent(live?.live_state?.event));
-  const seeded = useRef(false);
-  useEffect(() => { if (!seeded.current && live) { setState(hydrateEvent(live.live_state?.event)); seeded.current = true; } }, [live]);
+  const pickOne = !!spec.pickOne;
+  const noun = spec.subEventNoun ?? 'sub-event';
+  const nounLower = noun.toLowerCase();
+  // A named discipline ("66kg") already fixes the one category every entrant is
+  // in (effectiveEventSpec narrowed spec.subEvents to just it) - nothing left to
+  // pick. Only "Whole sport" still mixes more than one category.
+  const isNamedDiscipline = !!fixture?.tournament_disciplines?.discipline_id;
+  const fixedCategory = isNamedDiscipline ? spec.subEvents[0]?.key ?? null : null;
 
-  // Orgs entered in this championship drive the "counts towards" picker (standings
-  // aggregate by org). Free of a champ id we simply offer no orgs (the field still
-  // allows an individual entry).
+  // Whoever's org has a team_entries row for this discipline has one registered
+  // entrant on it (squad_max is 1) - shown up front instead of a phone lookup.
+  const entrants: Array<{ user_id: string; name: string; phone: string | null; org_id: string | null; org: string | null }> =
+    (fixture as any)?.event_entrants ?? [];
+  const entrantRow = (e: (typeof entrants)[number]): ParticipantResult =>
+    ({ id: `e${e.user_id}`, name: e.name, phone: e.phone, org: e.org, orgId: e.org_id, category: pickOne ? fixedCategory : null, marks: {} });
+
+  // The roster is the registration record, not something scoring edits - no add,
+  // remove or phone lookup here, only scoring whoever is actually entered.
+  const [state, setState] = useState<EventState>(() => {
+    const hydrated = hydrateEvent(live?.live_state?.event);
+    return hydrated.participants.length === 0 && entrants.length > 0
+      ? { participants: entrants.map(entrantRow) }
+      : hydrated;
+  });
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current || !live) return;
+    seeded.current = true;
+    const hydrated = hydrateEvent(live.live_state?.event);
+    setState(hydrated.participants.length === 0 && entrants.length > 0
+      ? { participants: entrants.map(entrantRow) }
+      : hydrated);
+  }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
+
+  // A late registration folds in automatically, matched by phone (the same
+  // handle resolveFixtureParticipants uses at lock time) - never by hand.
+  useEffect(() => {
+    if (!entrants.length) return;
+    setState((s) => {
+      const known = new Set(s.participants.map((p) => (p.phone ?? '').replace(/\D/g, '')));
+      const missing = entrants.filter((e) => !known.has((e.phone ?? '').replace(/\D/g, '')));
+      return missing.length ? { participants: [...s.participants, ...missing.map(entrantRow)] } : s;
+    });
+  }, [entrants]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // "Whole sport" still mixes categories, but nobody's weight class is known in
+  // advance - so ONE is chosen for the whole session before scoring starts,
+  // rather than guessed per row (a blank row defaulting to the first category
+  // was the bug this replaces).
+  const [globalCategory, setGlobalCategoryState] = useState<string | null>(
+    () => state.participants.find((p) => p.category)?.category ?? null,
+  );
+  const setGlobalCategory = (cat: string) => {
+    setGlobalCategoryState(cat);
+    setState((s) => ({
+      participants: s.participants.map((p) => {
+        const prev = p.category ?? cat;
+        return { ...p, category: cat, marks: { [cat]: p.marks[prev] ?? null } };
+      }),
+    }));
+  };
+  const category = isNamedDiscipline ? fixedCategory : globalCategory;
+
+  // "Counts towards" isn't offered any more - it came from the same registration
+  // the roster already reads, so an editable copy could only go stale against it.
+  // Kept defined (unused) in case a real "unattached entry" need reappears.
   const champId = eventInfo(fixture)?.id;
   const { data: parts } = useApi<{ organizations: { orgId: string; org: { id: string; name: string } | null }[] }>(
     champId ? `/championships/${champId}/participants` : null);
   const orgs = (parts?.organizations ?? [])
     .map((o) => ({ id: o.org?.id ?? o.orgId, name: o.org?.name ?? 'Unaffiliated' }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  // Map a stored row to its dropdown value: prefer the stored orgId, else match the
-  // legacy free-text name to an org so older rows still show their selection.
-  const orgValue = (p: ParticipantResult) => p.orgId ?? orgs.find((o) => o.name === (p.org ?? ''))?.id ?? '';
-
-  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
-
-  const isTime = spec.result.resultType === 'time';
-  const pickOne = !!spec.pickOne;
-  const noun = spec.subEventNoun ?? 'sub-event';
-  const nounLower = noun.toLowerCase();
-  const firstKey = spec.subEvents[0]?.key;
-
-  const addP = () => setState((s) => ({ participants: [...s.participants, { id: `p${Date.now()}`, name: '', phone: null, org: null, orgId: null, category: pickOne ? firstKey : null, marks: {} }] }));
-  const removeP = (id: string) => setState((s) => ({ participants: s.participants.filter((p) => p.id !== id) }));
   const patchP = (id: string, patch: Partial<ParticipantResult>) => setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
   const setOrg = (id: string, orgId: string) => patchP(id, { orgId: orgId || null, org: orgs.find((o) => o.id === orgId)?.name ?? null });
+  void setOrg; // dead code - see comment above
 
-  // Look a competitor up by phone and auto-fill their name + the org they're rostered
-  // under in this championship - faster (and less error-prone) than typing both by hand.
-  const [lookingUp, setLookingUp] = useState<string | null>(null);
-  const lookupPhone = async (id: string, phone: string) => {
-    if (!champId) return;
-    if (phone.replace(/\D/g, '').length < 10) { toast.error('Enter the competitor’s 10-digit phone number'); return; }
-    setLookingUp(id);
-    try {
-      const r: any = await api('GET', `/championships/${champId}/competitors/lookup?phone=${encodeURIComponent(phone)}`);
-      if (r?.found) {
-        patchP(id, { name: r.name ?? '', orgId: r.orgId ?? null, org: r.org ?? null });
-        toast.success(r.org ? `${r.name} · ${r.org}` : `${r.name} — no org in this championship, set it manually`);
-      } else {
-        toast.error('No competitor found for that number');
-      }
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Lookup failed');
-    } finally {
-      setLookingUp(null);
-    }
-  };
+  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
   const setMark = (id: string, key: string, n: number | null) => setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, marks: { ...p.marks, [key]: n } } : p)) }));
-  // Switching weight class carries the mark over to the new key (and drops the old).
-  const setCategory = (id: string, cat: string) => setState((s) => ({ participants: s.participants.map((p) => {
-    if (p.id !== id) return p;
-    const prev = p.category ?? firstKey;
-    return { ...p, category: cat, marks: { [cat]: p.marks[prev] ?? null } };
-  }) }));
 
   // `eventStandings` is the per-org contribution (points + medals from each sub-event's
   // top three) the standings service reads, so detailed event results feed the
   // championship table + medal tally too. `complete` signs the event off.
-  const persistEvent = (complete: boolean) => persist.mutate(
-    {
-      live_state: { ...(live?.live_state ?? {}), event: state, eventStandings: detailedContributions(spec, state) },
-      status: complete ? 'completed' : (fixture.status === 'scheduled' ? 'live' : fixture.status),
-    },
-    { onSuccess: () => toast.success(complete ? 'Event signed off' : 'Results saved'), onError: (e: any) => toast.error(e.message) },
-  );
+  const persistEvent = (complete: boolean) => {
+    // Drops any "Team ranking" org-placement data - see persistRanking's matching
+    // comment on why a stale key here would double up on medals.
+    const { eventRanking: _staleSimple, ...restLiveState } = (live?.live_state ?? {}) as Record<string, unknown>;
+    return persist.mutate(
+      {
+        live_state: { ...restLiveState, event: state, eventStandings: detailedContributions(spec, state) },
+        status: complete ? 'completed' : (fixture.status === 'scheduled' ? 'live' : fixture.status),
+      },
+      { onSuccess: () => toast.success(complete ? 'Event signed off' : 'Results saved'), onError: (e: any) => toast.error(e.message) },
+    );
+  };
   const save = () => persistEvent(false);
 
   const agg = aggregateEvent(spec, state);
   const blocks = subEventResults(spec, state);
-  const unit = spec.result.unit ? ` (${spec.result.unit})` : '';
+  // The one active category carries its OWN unit/direction - a "400m" reads as
+  // seconds/fastest-wins even though the sport's other events don't share that unit.
+  const activeSubEvent = category ? spec.subEvents.find((se) => se.key === category) : undefined;
+  const activeMeta = markMetaFor(spec, activeSubEvent);
+  const unit = activeMeta.unit ? ` (${activeMeta.unit})` : '';
   const pts = (spec.result.medalPoints ?? [5, 3, 1]).join(' / ');
-  const best = spec.result.winnerIs === 'min' ? 'fastest' : 'best';
+  const best = (activeSubEvent?.winnerIs ?? spec.result.winnerIs) === 'min' ? 'fastest' : 'best';
   // Plain-English explanation of how marks become org points, by aggregate rule.
   const scoringText = spec.result.aggregate === 'sumBest'
     ? `Each org's points are the sum of its athletes' marks.`
@@ -1934,9 +2022,19 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
       ? `Each ${nounLower} is ranked (${best} wins) — the top finishers earn ${pts} points for their org. An org's total is the sum across every ${nounLower}.`
       : `Each ${nounLower} awards placement points down the order to each finisher's org; an org's total is the sum across every ${nounLower}.`;
   const subtitle = pickOne
-    ? `Pick each competitor's ${nounLower} and enter their total${unit}.`
-    : `Enter each competitor's mark per ${nounLower}${unit}.`;
+    ? isNamedDiscipline
+      ? `Enter each competitor's total${unit} for ${spec.subEvents[0]?.label ?? noun}.`
+      : `Choose the ${nounLower} this session is scoring, then enter each competitor's total${unit}.`
+    : isNamedDiscipline
+      ? `Enter each competitor's mark${unit} for ${spec.subEvents[0]?.label ?? noun}.`
+      : `Enter each competitor's mark per ${nounLower}${unit}.`;
   const markLabel = `Total${unit}`;
+  // Whole sport, nothing chosen: no default any more, blocks scoring until an
+  // explicit choice is made (was the "silently defaults to first category" bug).
+  const blockedOnCategory = pickOne && !isNamedDiscipline && !category;
+  // Exactly one mark per row for pickOne or a named discipline; only a
+  // genuinely multi-category whole-sport grid sport needs per-race columns.
+  const singleMark = pickOne || isNamedDiscipline;
 
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
@@ -1944,65 +2042,76 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
         <CardHeader title="Participants & results" subtitle={subtitle} />
         <CardBody className="space-y-3">
           <p className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-slate-600 dark:bg-brand-500/10 dark:text-slate-300">{scoringText}</p>
-          {state.participants.length === 0 && <p className="text-sm text-slate-400 dark:text-slate-500">No participants yet - add one below.</p>}
-          {state.participants.map((p) => {
-            const cat = p.category ?? firstKey;
-            return (
-              <div key={p.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
-                <Field label="Find by phone" hint="Auto-fills the competitor’s name and org from this championship.">
-                  <div className="flex gap-2">
-                    <Input
-                      value={p.phone ?? ''} inputMode="tel" placeholder="10-digit phone"
-                      onChange={(e) => patchP(p.id, { phone: e.target.value })}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); lookupPhone(p.id, p.phone ?? ''); } }}
-                    />
-                    <Button type="button" variant="outline" disabled={lookingUp === p.id} onClick={() => lookupPhone(p.id, p.phone ?? '')}>
-                      {lookingUp === p.id ? 'Finding…' : 'Find'}
-                    </Button>
-                  </div>
-                </Field>
-                <div className="mt-2 grid grid-cols-[1fr_1fr_auto] items-end gap-2">
-                  <Field label="Name"><Input value={p.name} onChange={(e) => patchP(p.id, { name: e.target.value })} placeholder="Competitor" /></Field>
-                  <Field label="Counts towards">
-                    <Select value={orgValue(p)} onChange={(e) => setOrg(p.id, e.target.value)}>
-                      <option value="">— Individual —</option>
-                      {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                    </Select>
-                  </Field>
-                  <Button variant="ghost" size="sm" className="mb-1" onClick={() => removeP(p.id)} aria-label="Remove participant" title="Remove">
-                    <Trash2 size={14} />
-                  </Button>
+          {pickOne && !isNamedDiscipline && (
+            <Field label={noun} hint={!category ? `Choose a ${nounLower} before scoring anyone in this session.` : undefined}>
+              <Select value={category ?? ''} onChange={(e) => setGlobalCategory(e.target.value)}>
+                <option value="" disabled>— Choose {nounLower} —</option>
+                {spec.subEvents.map((se) => <option key={se.key} value={se.key}>{se.label}</option>)}
+              </Select>
+            </Field>
+          )}
+          {state.participants.length === 0 && (
+            <p className="text-sm text-slate-400 dark:text-slate-500">No registered entrants for this discipline yet.</p>
+          )}
+          {/* One category applies to every row here - a named discipline, or a
+              chosen global category - so the race/class name belongs once, in the
+              subtitle above, not repeated on every single row. A genuinely
+              multi-category "Whole sport" grid sport is the only shape that still
+              needs its own column per race. */}
+          {state.participants.length > 0 && (singleMark ? (
+            <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+              {state.participants.map((p) => (
+                <div key={p.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</span>
+                  {category && (
+                    <span className="hidden flex-1 truncate text-center text-xs text-slate-400 dark:text-slate-500 sm:block">
+                      {spec.subEvents.find((se) => se.key === category)?.label ?? noun}
+                    </span>
+                  )}
+                  {category ? (
+                    <div className="w-32 shrink-0">
+                      <MarkInput
+                        value={p.marks[category] ?? null} isTime={activeMeta.isTime}
+                        placeholder={activeMeta.isTime ? undefined : placeholderFor(activeMeta.unit)}
+                        onChange={(n) => setMark(p.id, category, n)} ariaLabel={`${p.name || 'competitor'} ${markLabel}`}
+                      />
+                    </div>
+                  ) : (
+                    <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">Choose a {nounLower} above</span>
+                  )}
                 </div>
-                {pickOne ? (
-                  <div className="mt-2 grid grid-cols-[1fr_140px] items-end gap-2">
-                    <Field label={noun}>
-                      <Select value={cat} onChange={(e) => setCategory(p.id, e.target.value)}>
-                        {spec.subEvents.map((se) => <option key={se.key} value={se.key}>{se.label}</option>)}
-                      </Select>
-                    </Field>
-                    <Field label={markLabel}>
-                      <MarkInput value={p.marks[cat] ?? null} isTime={isTime} onChange={(n) => setMark(p.id, cat, n)} ariaLabel={`${p.name || 'competitor'} ${markLabel}`} />
-                    </Field>
-                  </div>
-                ) : (
-                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {spec.subEvents.map((se) => (
+              ))}
+            </div>
+          ) : (
+            state.participants.map((p) => (
+              <div key={p.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+                <Field label="Competitor" compact>
+                  <p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</p>
+                </Field>
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {spec.subEvents.map((se) => {
+                    const seMeta = markMetaFor(spec, se);
+                    return (
                       <label key={se.key} className="block">
                         <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
-                        <MarkInput value={p.marks[se.key] ?? null} isTime={isTime} onChange={(n) => setMark(p.id, se.key, n)} ariaLabel={`${p.name || 'competitor'} ${se.label}`} />
+                        <MarkInput
+                          value={p.marks[se.key] ?? null} isTime={seMeta.isTime}
+                          placeholder={seMeta.isTime ? undefined : placeholderFor(seMeta.unit)}
+                          onChange={(n) => setMark(p.id, se.key, n)} ariaLabel={`${p.name || 'competitor'} ${se.label}`}
+                        />
                       </label>
-                    ))}
-                  </div>
-                )}
+                    );
+                  })}
+                </div>
               </div>
-            );
-          })}
-          <div className="flex items-center justify-between gap-2">
-            <Button variant="outline" size="sm" onClick={addP}>+ Add participant</Button>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" disabled={persist.isPending} onClick={() => persistEvent(false)}>{persist.isPending ? 'Saving…' : 'Save results'}</Button>
-              <Button size="sm" disabled={persist.isPending} onClick={() => persistEvent(true)}>Save &amp; sign off</Button>
-            </div>
+            ))
+          ))}
+          {blockedOnCategory && (
+            <p className="text-sm text-rose-600 dark:text-rose-400">Choose a {nounLower} above before saving.</p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="outline" disabled={persist.isPending || blockedOnCategory} onClick={() => persistEvent(false)}>{persist.isPending ? 'Saving…' : 'Save results'}</Button>
+            <Button size="sm" disabled={persist.isPending || blockedOnCategory} onClick={() => persistEvent(true)}>Save &amp; sign off</Button>
           </div>
         </CardBody>
       </Card>
@@ -2028,19 +2137,22 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
           <Card>
             <CardHeader title={`Results by ${nounLower}`} subtitle="Who placed where, and the points it earned." />
             <CardBody className="space-y-3">
-              {blocks.map((b) => (
+              {blocks.map((b) => {
+                const bMeta = markMetaFor(spec, spec.subEvents.find((se) => se.key === b.key));
+                return (
                 <div key={b.key}>
                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{b.label}</div>
                   <ul className="space-y-1">
                     {b.rows.map((r) => (
                       <li key={r.rank} className="flex items-center justify-between gap-2 text-sm">
                         <span className="truncate text-slate-600 dark:text-slate-300">{r.rank}. {r.name}{r.org ? <span className="text-slate-400 dark:text-slate-500"> · {r.org}</span> : null}</span>
-                        <span className="shrink-0 tabular-nums text-slate-500 dark:text-slate-400">{isTime ? formatTime(r.mark) : r.mark}{!isTime && spec.result.unit ? ` ${spec.result.unit}` : ''} · +{r.points}</span>
+                        <span className="shrink-0 tabular-nums text-slate-500 dark:text-slate-400">{bMeta.isTime ? formatTime(r.mark) : r.mark}{!bMeta.isTime && bMeta.unit ? ` ${bMeta.unit}` : ''} · +{r.points}</span>
                       </li>
                     ))}
                   </ul>
                 </div>
-              ))}
+                );
+              })}
             </CardBody>
           </Card>
         )}
@@ -2058,7 +2170,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
 // Numeric/time mark cell. Keeps the raw string the official typed (so mid-entry values
 // like "1:0" aren't reformatted under the cursor) and emits the parsed number upward;
 // only re-seeds from props when the stored value changes externally (e.g. live reload).
-function MarkInput({ value, isTime, onChange, ariaLabel }: { value: number | null; isTime: boolean; onChange: (n: number | null) => void; ariaLabel?: string }) {
+function MarkInput({ value, isTime, placeholder, onChange, ariaLabel }: { value: number | null; isTime: boolean; placeholder?: string; onChange: (n: number | null) => void; ariaLabel?: string }) {
   const fmt = (v: number | null) => (v == null ? '' : isTime ? formatTime(v) : String(v));
   const [raw, setRaw] = useState(() => fmt(value));
   const emitted = useRef(value);
@@ -2073,7 +2185,7 @@ function MarkInput({ value, isTime, onChange, ariaLabel }: { value: number | nul
     <Input
       type={isTime ? 'text' : 'number'} inputMode={isTime ? 'decimal' : 'numeric'}
       value={raw} onChange={(e) => handle(e.target.value)} onBlur={() => setRaw(fmt(emitted.current))}
-      className="text-center" aria-label={ariaLabel} placeholder={isTime ? 'mm:ss.s' : ''}
+      className="text-center" aria-label={ariaLabel} placeholder={isTime ? 'mm:ss.s' : (placeholder ?? '')}
     />
   );
 }

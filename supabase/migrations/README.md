@@ -167,3 +167,21 @@ Re-running the introspection diff afterwards leaves ONLY field-ordering
 differences, so `schema.prisma` and the database now agree on every column,
 type, default and non-partial index. No `db pull` and no `prisma generate` were
 needed: the committed schema already described the post-migration state.
+
+---
+
+## Renamed 2026-09-25 — two more timestamp collisions
+
+`supabase db push` against a fresh project failed on `schema_migrations_pkey`:
+two more pairs of files shared a version. Same cause as the 2026-08-25
+reconciliation, same fix — only the unapplied file in each pair moved:
+
+- `20260903000000_racquet_scoring_and_stats.sql` → `20260903000001` (its own
+  header already said PENDING APPLY — never ran anywhere).
+- `20260904000000_career_stats_tier.sql` → `20260904000001` (never logged as
+  applied above).
+
+`20260904000000_fixture_completed_at.sql` kept its version — it's the one
+applied 2026-09-08 per this file, so per the rule above it wasn't free to move.
+
+If you add a migration, date it later than `20260917000000`.

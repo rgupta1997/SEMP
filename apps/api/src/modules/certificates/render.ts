@@ -1,6 +1,8 @@
 import QRCode from 'qrcode';
+import { DEFAULT_CERTIFICATE_BODY, DEFAULT_CERTIFICATE_HEADING, DEFAULT_SIGNATORY_TITLE, isFixtureScopedCategory } from '@semp/shared';
 import type { CertificateFacts } from './certificates.service.js';
 import { layoutOf, type LayoutId, type TemplateDesign } from './presets.js';
+import type { RecipientCategory } from './recipients.js';
 
 // The artefact itself (J4-E6).
 //
@@ -34,6 +36,10 @@ export interface RenderInput {
   verifyUrl: string;
   /** certificate_templates.design - an institution's own layout, wording and colour. */
   design?: TemplateDesign | null;
+  /** Winners & medals / Special awards get the template's heading/body; every other
+   *  category gets generic_heading/generic_body (falling back to heading/body when
+   *  those are unset) - a medal claims a result, a participation cert should not. */
+  category?: RecipientCategory;
   /** Stamped across the face when the certificate is no longer good. */
   invalid?: 'withdrawn' | 'superseded' | null;
   /** Gallery thumbnails: drop the shadow and the screen margin so it tiles cleanly. */
@@ -323,10 +329,13 @@ const LAYOUT_BODY: Record<LayoutId, (p: Parts) => string> = {
 };
 
 export async function renderCertificateHtml(input: RenderInput): Promise<string> {
-  const { facts, verifyUrl, design, invalid, bare } = input;
+  const { facts, verifyUrl, design, category, invalid, bare } = input;
   const layout = layoutOf(design);
   const accent = hex(design?.accent, '#0C5A63');
   const ink = hex(design?.ink, '#10151A');
+  const isAchievement = category == null || isFixtureScopedCategory(category);
+  const heading = (isAchievement ? design?.heading : design?.generic_heading ?? design?.heading);
+  const body = (isAchievement ? design?.body : design?.generic_body ?? design?.body);
 
   // Embedded, not linked. A certificate that needs the network to show its own QR is
   // not a document you can keep.
@@ -334,16 +343,16 @@ export async function renderCertificateHtml(input: RenderInput): Promise<string>
 
   const parts: Parts = {
     issuer: esc(facts.organization_name),
-    heading: esc(design?.heading || 'Certificate of Achievement'),
+    heading: esc(heading || DEFAULT_CERTIFICATE_HEADING),
     recipient: esc(facts.recipient_name),
-    body: esc(design?.body || 'is hereby recognised for the achievement below, verified against a locked result.'),
+    body: esc(body || DEFAULT_CERTIFICATE_BODY),
     title: esc(facts.title),
     meta: [
       ...[facts.championship_name, facts.sport].filter(Boolean).map((v) => esc(v)),
       `Issued ${esc(new Date(facts.issued_on).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))}`,
     ].join(' &middot; '),
     signatory: esc(design?.signatory_name || facts.organization_name),
-    signatoryTitle: esc(design?.signatory_title || 'Issuing authority'),
+    signatoryTitle: esc(design?.signatory_title || DEFAULT_SIGNATORY_TITLE),
     serial: esc(facts.serial),
     logo: design?.logo_url ? `<img class="logo" src="${esc(design.logo_url)}" alt="">` : '',
     signatureImage: design?.signature_image_url
