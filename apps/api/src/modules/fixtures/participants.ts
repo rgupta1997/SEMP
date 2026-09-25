@@ -72,12 +72,9 @@ export async function resolveFixtureParticipants(db: Db, fixtureId: string): Pro
   for (const id of [fixture.home_team_id, fixture.away_team_id]) if (id) teamIds.add(id);
 
   // ---- the default "Team ranking" console: orgs, not teams -----------------
-  // EventRankingConsole ranks organisations (live_state.eventRanking.rows), so a
-  // placed org has to be turned into the team_entries row it has for THIS
-  // discipline before it can be expanded into a roster the same way a match's
-  // home/away team is. Individual disciplines cap squad_max at 1 (enforced by
-  // roster-policy.ts), so that roster is always exactly the one athlete who
-  // competed - never a teammate who didn't.
+  // EventRankingConsole ranks organisations, so a placed org is turned into the
+  // team_entries row it has for THIS discipline (squad_max 1, so that's always
+  // exactly the one athlete who competed).
   const rankingRows = (fixture.live_state as any)?.eventRanking?.rows;
   if (Array.isArray(rankingRows) && rankingRows.length && fixture.tournament_discipline_id) {
     const orgIds = [...new Set(
@@ -135,6 +132,21 @@ export async function resolveFixtureParticipants(db: Db, fixtureId: string): Pro
       : [];
 
     const found = new Map(users.map((u) => [phoneLast10(u.phone), u]));
+
+    // Resolved from the real team record (squad_max 1), not trusted from
+    // live_state's own `orgId` - that's only as fresh as what was typed in.
+    const matchedUserIds = [...found.values()].map((u) => u.id);
+    const soloTeams = matchedUserIds.length
+      ? await db.team_members.findMany({
+        where: {
+          user_id: { in: matchedUserIds }, is_active: true,
+          teams: { team_entries: { some: { tournament_discipline_id: fixture.tournament_discipline_id } } },
+        },
+        select: { user_id: true, team_id: true, teams: { select: { organization_id: true } } },
+      })
+      : [];
+    const teamOf = new Map(soloTeams.map((m) => [m.user_id, { teamId: m.team_id, orgId: m.teams?.organization_id ?? null }]));
+
     for (const c of competitors) {
       const key = phoneLast10(c?.phone);
       const user = key.length === 10 ? found.get(key) : undefined;
@@ -147,10 +159,11 @@ export async function resolveFixtureParticipants(db: Db, fixtureId: string): Pro
         if (already) {
           already.competitor_id ??= c?.id ?? null;
         } else {
+          const solo = teamOf.get(user.id);
           resolved.set(user.id, {
             user_id: user.id,
-            team_id: null,
-            organization_id: typeof c?.orgId === 'string' ? c.orgId : null,
+            team_id: solo?.teamId ?? null,
+            organization_id: solo?.orgId ?? (typeof c?.orgId === 'string' ? c.orgId : null),
             competitor_id: c?.id ?? null,
             name: user.name,
           });

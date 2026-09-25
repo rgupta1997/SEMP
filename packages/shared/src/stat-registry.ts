@@ -35,6 +35,9 @@ export interface StatMetric {
   short: string;
   unit?: string;
   source: MetricSource;
+  /** Read from the bag under THIS key instead of `key`, when one raw field
+   *  folds two ways (a personal best and a career average). Defaults to `key`. */
+  sourceKey?: string;
   /** `event` source: the event keys that feed this metric. */
   fromEvents?: string[];
   /** +1 per contributing event, or 'value' to sum the event's own magnitude. */
@@ -404,8 +407,47 @@ export const TEAM_STAT_SPECS: SportStatSpec[] = [
   spec('boxing', 'combat', COMBAT_METRICS),
 ];
 
+// ============================================================================
+// Measured / ranking events (swimming, powerlifting, athletics). No attributable
+// events, no rally log - a mark and a placement come from the console's
+// detailed per-athlete entry (player-stats.service.ts writes `stats.mark`/`rank`).
+// ============================================================================
+// Placement is unit-free (1 = best regardless of sport), so unlike a raw mark
+// it's never wrong to fold sport-wide - it never mixes seconds with kilograms.
+const PLACEMENT_METRICS: StatMetric[] = [
+  { key: 'best_placement', label: 'Best placement', short: 'Best #',
+    source: 'entry', sourceKey: 'rank', aggregate: 'min', headline: true, higherIsBetter: false },
+  { key: 'average_placement', label: 'Average placement', short: 'Avg #',
+    source: 'entry', sourceKey: 'rank', aggregate: 'avg', higherIsBetter: false },
+  // Counts, not marks - safe to fold sport-wide the same way placement is.
+  { key: 'podium_finishes', label: 'Podium finishes', short: 'Podiums',
+    source: 'entry', sourceKey: 'podium', aggregate: 'sum', headline: true },
+  { key: 'measured_appearances', label: 'Measured appearances', short: 'Meas.',
+    source: 'entry', sourceKey: 'measured', aggregate: 'sum' },
+];
+
+const measured = (sport: string, bestAgg: 'min' | 'max', markNoun: string, unit?: string): SportStatSpec => ({
+  sport, family: 'measured', events: [],
+  metrics: [
+    { key: 'personal_best', label: `Personal best${unit ? ` (${unit})` : ''}`, short: 'PB', unit,
+      source: 'entry', sourceKey: 'mark', aggregate: bestAgg, headline: true, higherIsBetter: bestAgg === 'max' },
+    { key: 'average_mark', label: `Average ${markNoun}${unit ? ` (${unit})` : ''}`, short: 'Avg', unit,
+      source: 'entry', sourceKey: 'mark', aggregate: 'avg', higherIsBetter: bestAgg === 'max' },
+    ...PLACEMENT_METRICS,
+  ],
+});
+
+export const MEASURED_STAT_SPECS: SportStatSpec[] = [
+  measured('swimming', 'min', 'time', 'seconds'),
+  measured('powerlifting', 'max', 'lift', 'kg'),
+  // No personal-best/average mark - a sprint (seconds) and a throw (metres)
+  // aren't comparable, so placement is the only career figure Athletics gets
+  // until marks fold per discipline instead of per sport.
+  { sport: 'athletics', family: 'measured', events: [], metrics: PLACEMENT_METRICS },
+];
+
 /** Every sport the stat registry knows, across every family. */
-export const ALL_STAT_SPECS: SportStatSpec[] = [...RACQUET_STAT_SPECS, ...TEAM_STAT_SPECS];
+export const ALL_STAT_SPECS: SportStatSpec[] = [...RACQUET_STAT_SPECS, ...TEAM_STAT_SPECS, ...MEASURED_STAT_SPECS];
 
 const BY_SPORT = new Map(ALL_STAT_SPECS.map((s) => [s.sport, s]));
 
@@ -645,7 +687,7 @@ export function foldCareerStats(spec: SportStatSpec, lines: StatBag[]): StatBag 
   const out: StatBag = {};
   for (const m of spec.metrics) {
     if (m.source === 'derived' && m.aggregate === 'rate') continue; // computed last
-    const vals = lines.map((l) => l[m.key]).filter((v): v is number => typeof v === 'number');
+    const vals = lines.map((l) => l[m.sourceKey ?? m.key]).filter((v): v is number => typeof v === 'number');
     if (!vals.length) continue;
     switch (m.aggregate) {
       case 'max': out[m.key] = Math.max(...vals); break;

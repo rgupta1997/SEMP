@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { isRankingSport } from '@semp/shared';
 import { useApi } from '../../lib/hooks';
 import { Card, CardBody, CardHeader, EmptyState, Select, Spinner } from '../../components/ui';
 
@@ -55,14 +56,23 @@ interface Payload {
 const fmt = (m: Metric) =>
   m.text ?? (m.percent ? `${m.value}%` : `${m.value}${m.notOut ? '*' : ''}`);
 
-/** W-L-D, the way a record is written down. */
-function Record({ r }: { r: TierRecord }) {
+// Null (not 0%) with nothing played yet - "always loses" and "hasn't
+// competed" aren't the same fact. Capped at 100: `played` is per FIXTURE but
+// medals are per RACE, so a multi-race meet can out-medal its fixture count.
+const podiumPct = (r: TierRecord): number | null =>
+  r.played > 0 ? Math.min(100, Math.round(((r.gold + r.silver + r.bronze) / r.played) * 1000) / 10) : null;
+
+// A ranking event has no opponent to beat, so W-L-D doesn't describe it -
+// podium rate (how often they medal) is the question it actually answers.
+function Record({ r, ranking }: { r: TierRecord; ranking?: boolean }) {
+  const pct = ranking ? podiumPct(r) : null;
   return (
     <span style={{ fontVariantNumeric: 'tabular-nums' }}>
       <b>{r.played}</b> played
       <span style={{ color: 'var(--ink-4)' }}>
-        {'  ·  '}{r.won}W {r.lost}L{r.drawn > 0 ? ` ${r.drawn}D` : ''}
-        {r.winPct != null ? `  ·  ${r.winPct}%` : ''}
+        {ranking
+          ? (pct != null ? `  ·  ${pct}% podium` : '')
+          : <>{'  ·  '}{r.won}W {r.lost}L{r.drawn > 0 ? ` ${r.drawn}D` : ''}{r.winPct != null ? `  ·  ${r.winPct}%` : ''}</>}
       </span>
     </span>
   );
@@ -104,12 +114,12 @@ function Metrics({ metrics, dense }: { metrics: Metric[]; dense?: boolean }) {
 }
 
 /** One tier row under a sport. */
-function TierRow({ r }: { r: TierRecord }) {
+function TierRow({ r, ranking }: { r: TierRecord; ranking?: boolean }) {
   return (
     <div style={{ padding: '10px 0', borderTop: '1px solid var(--line)' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', alignItems: 'baseline' }}>
         <span style={{ fontSize: 13, fontWeight: 600, minWidth: 150 }}>{r.label}</span>
-        <span style={{ fontSize: 13.5 }}><Record r={r} /></span>
+        <span style={{ fontSize: 13.5 }}><Record r={r} ranking={ranking} /></span>
       </div>
       {r.hint && <div style={{ fontSize: 11.5, color: 'var(--ink-4)', marginTop: 1 }}>{r.hint}</div>}
       <Medals r={r} />
@@ -120,6 +130,8 @@ function TierRow({ r }: { r: TierRecord }) {
 
 function SportCard({ s }: { s: SportRecord }) {
   const [open, setOpen] = useState(false);
+  // A ranking event has no opponent, so "won/lost" doesn't describe it.
+  const ranking = isRankingSport(s.sport);
   return (
     <Card>
       <CardHeader
@@ -132,7 +144,7 @@ function SportCard({ s }: { s: SportRecord }) {
       />
       <CardBody>
         {/* The combined record leads, because it is the number somebody came for. */}
-        <div style={{ fontSize: 15.5 }}><Record r={s.overall} /></div>
+        <div style={{ fontSize: 15.5 }}><Record r={s.overall} ranking={ranking} /></div>
         <Medals r={s.overall} />
         <Metrics metrics={s.overall.metrics} />
 
@@ -145,7 +157,7 @@ function SportCard({ s }: { s: SportRecord }) {
               fontSize: 10.5, fontWeight: 700, letterSpacing: '.09em',
               textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 2,
             }}>By competition level</div>
-            {s.tiers.map((t) => <TierRow key={t.tier} r={t} />)}
+            {s.tiers.map((t) => <TierRow key={t.tier} r={t} ranking={ranking} />)}
           </div>
         )}
         {s.tiers.length === 1 && (
@@ -171,11 +183,13 @@ function SportCard({ s }: { s: SportRecord }) {
                   <div key={d.disciplineId} style={{ padding: '10px 0', borderTop: '1px solid var(--line)' }}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', alignItems: 'baseline' }}>
                       <span style={{ fontSize: 13, fontWeight: 600, minWidth: 150 }}>{d.discipline}</span>
-                      <span style={{ fontSize: 13.5 }}><Record r={d.overall} /></span>
+                      <span style={{ fontSize: 13.5 }}><Record r={d.overall} ranking={ranking} /></span>
                     </div>
                     {d.tiers.length > 1 && (
                       <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 3 }}>
-                        {d.tiers.map((t) => `${t.label}: ${t.played} played, ${t.won}W ${t.lost}L`).join('  ·  ')}
+                        {d.tiers.map((t) => ranking
+                          ? `${t.label}: ${t.played} played${podiumPct(t) != null ? `, ${podiumPct(t)}% podium` : ''}`
+                          : `${t.label}: ${t.played} played, ${t.won}W ${t.lost}L`).join('  ·  ')}
                       </div>
                     )}
                     <Metrics metrics={d.overall.metrics} dense />

@@ -73,6 +73,14 @@ const TOURNAMENT_FORMATS = [
         name: "League",
         description: "Round-robin league tournament",
     },
+    {
+        name: "Round Robin",
+        description: "Everyone plays everyone once",
+    },
+    {
+        name: "Groups + Knockout",
+        description: "Pool stage, then a knockout bracket among the group qualifiers",
+    },
 ];
 
 async function bootstrapSports() {

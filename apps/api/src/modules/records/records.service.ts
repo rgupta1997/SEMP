@@ -36,6 +36,7 @@ export const FIXTURE_FOR_RECORDS = {
     tournament_disciplines: {
       select: {
         format_config: true,
+        discipline_id: true,
         disciplines: { select: { name: true } },
         tournament_sports: {
           select: {
@@ -89,6 +90,7 @@ export function toDerivableFixture(fx: any): DerivableFixture {
     championship_name: ts?.tournaments?.championships?.name ?? null,
     sport_id: ts?.sports?.id ?? null,
     sport_name: ts?.sports?.name ?? null,
+    discipline_id: fx.tournament_disciplines?.discipline_id ?? null,
     discipline_name: fx.tournament_disciplines?.disciplines?.name ?? null,
     format_config: fx.tournament_disciplines?.format_config ?? null,
     live_state: fx.live_state,

@@ -16,7 +16,7 @@ const FIXTURE: DerivableFixture = {
   occurred_on: new Date('2026-08-16T00:00:00Z'),
   lock_version: 0,
   championship_id: 'champ1', championship_name: 'Inter-College 2026',
-  sport_id: 'sp1', sport_name: 'Football', discipline_name: 'Mens',
+  sport_id: 'sp1', sport_name: 'Football', discipline_id: null, discipline_name: 'Mens',
   format_config: null,
   live_state: null,
 };
@@ -146,10 +146,10 @@ describe('deriveRecords · the timeline (J4-E2-S1)', () => {
     const winner = entries.find((e) => e.user_id === 'u1')!;
     const loser = entries.find((e) => e.user_id === 'u3')!;
 
-    expect(winner.title).toBe('IIMB vs IIMA — Won 3-1');
+    expect(winner.title).toBe('IIMB vs IIMA — Won');
     expect(winner.detail.outcome).toBe('won');
     // The same fixture, read from the other dressing room.
-    expect(loser.title).toBe('IIMA vs IIMB — Lost 1-3');
+    expect(loser.title).toBe('IIMA vs IIMB — Lost');
     expect(loser.detail.outcome).toBe('lost');
     expect(loser.detail.opponent_name).toBe('IIMB');
   });
@@ -273,15 +273,30 @@ describe('ranking events · medals per competitor (J4-E1-S3 + J4-E4-S1)', () => 
     ]);
   });
 
-  it('files a competitor with no head-to-head as participation, with the medal as a chip', () => {
+  it('files a medal-winning competitor as a result even with no head-to-head outcome', () => {
     const { entries } = deriveRecords(input(EVENT_FIXTURE, { participants: COMPETITORS }));
     const gold = entries.find((e) => e.user_id === 'su1')!;
-    expect(gold.kind).toBe('participation');
+    // A race has no home/away pair for outcomeFor() to read, but a gold medal
+    // still settled something for this swimmer - filing it as 'participation'
+    // would make it indistinguishable from a heat nobody placed in.
+    expect(gold.kind).toBe('result');
     expect(gold.detail.role).toBe('competitor');
     expect(gold.title).toBe('Swimming · 50m Freestyle');
     expect(gold.detail.chips).toEqual([
       expect.objectContaining({ medal: 'gold', title: 'Gold · 50m Freestyle' }),
     ]);
+  });
+
+  it('still files a competitor with no medal or placement chip as participation', () => {
+    // A 9-swimmer field: c9 finishes 9th, outside the top-8 placement window
+    // (see the placement-chip cap tests above), so gets no chip at all.
+    const bigField: any = structuredClone(EVENT_FIXTURE);
+    bigField.live_state.event.participants = Array.from({ length: 9 }, (_, i) => ({
+      id: `c${i + 1}`, name: `Swimmer ${i + 1}`, orgId: 'o1', marks: { r50: 24 + i },
+    }));
+    const last = { user_id: 'su9', team_id: null, organization_id: 'o1', competitor_id: 'c9', name: 'Swimmer 9' };
+    const { entries } = deriveRecords(input(bigField, { participants: [last] }));
+    expect(entries.find((e) => e.user_id === 'su9')!.kind).toBe('participation');
   });
 
   it('awards no per-athlete medal when the event totals marks into a team score', () => {
@@ -303,6 +318,148 @@ describe('ranking events · medals per competitor (J4-E1-S3 + J4-E4-S1)', () => 
     expect(medals.filter((m) => m.medal === 'gold')).toHaveLength(2);
     expect(medals.some((m) => m.medal === 'silver')).toBe(false);
     expect(medals.filter((m) => m.medal === 'bronze')).toHaveLength(1);
+  });
+
+  it("falls back to the sport's seeded template when a discipline never stored one", () => {
+    // Creating a discipline never writes format_config.scoring - this is the only
+    // spec that has ever actually existed for these fixtures in real use.
+    // m400 is a TIME (seconds) - the seeded template's per-sub-event winnerIs is
+    // what makes the FASTER (lower) mark win, not the higher one.
+    const fx: DerivableFixture = {
+      ...FIXTURE, ...EVENT_FIXTURE,
+      sport_name: 'Athletics', discipline_id: null, discipline_name: null,
+      format_config: null,
+      live_state: { event: { participants: [
+        { id: 'c1', name: 'A', orgId: 'o1', marks: { m400: 400 } },
+        { id: 'c2', name: 'B', orgId: 'o1', marks: { m400: 350 } },
+      ] } },
+    };
+    expect(eventMedals(fx)).toEqual([
+      { competitor_id: 'c2', medal: 'gold', sub_event: "Men's 400m" },
+      { competitor_id: 'c1', medal: 'silver', sub_event: "Men's 400m" },
+    ]);
+  });
+
+  it('ranks a named athletics track discipline by the FASTER time, not the higher number', () => {
+    // The exact bug reported live: a "400m" discipline (matched back to the
+    // template's "Men's 400m" sub-event by name) was ranking on the raw number,
+    // so a slower 46s beat a faster 40s. Athletics' sub-events each carry their
+    // own resultType/winnerIs precisely because the sport mixes a time (this)
+    // with a distance (long jump/shot put below) in one template.
+    const fx: DerivableFixture = {
+      ...FIXTURE, ...EVENT_FIXTURE,
+      sport_name: 'Athletics', discipline_id: 'disc-400m', discipline_name: '400m',
+      format_config: null,
+      live_state: { event: { participants: [
+        { id: 'c1', name: 'Slower', orgId: 'o1', marks: { 'disc-400m': 46 } },
+        { id: 'c2', name: 'Faster', orgId: 'o2', marks: { 'disc-400m': 40 } },
+      ] } },
+    };
+    expect(eventMedals(fx)).toEqual([
+      { competitor_id: 'c2', medal: 'gold', sub_event: '400m' },
+      { competitor_id: 'c1', medal: 'silver', sub_event: '400m' },
+    ]);
+  });
+
+  it('ranks a named athletics field discipline by the LONGER distance', () => {
+    const fx: DerivableFixture = {
+      ...FIXTURE, ...EVENT_FIXTURE,
+      sport_name: 'Athletics', discipline_id: 'disc-lj', discipline_name: 'Long Jump',
+      format_config: null,
+      live_state: { event: { participants: [
+        { id: 'c1', name: 'Shorter', orgId: 'o1', marks: { 'disc-lj': 5.2 } },
+        { id: 'c2', name: 'Longer', orgId: 'o2', marks: { 'disc-lj': 6.1 } },
+      ] } },
+    };
+    expect(eventMedals(fx)).toEqual([
+      { competitor_id: 'c2', medal: 'gold', sub_event: 'Long Jump' },
+      { competitor_id: 'c1', medal: 'silver', sub_event: 'Long Jump' },
+    ]);
+  });
+
+  it('locks every competitor to a named discipline\'s own category, not the sport\'s full list', () => {
+    const fx: DerivableFixture = {
+      ...FIXTURE, ...EVENT_FIXTURE,
+      sport_name: 'Powerlifting', discipline_id: 'disc-66kg', discipline_name: '66kg',
+      format_config: null,
+      live_state: { event: { participants: [
+        { id: 'c1', name: 'Lifter A', orgId: 'o1', marks: { 'disc-66kg': 120 } },
+        { id: 'c2', name: 'Lifter B', orgId: 'o2', marks: { 'disc-66kg': 110 } },
+        // Filed under the sport's own category key rather than the discipline's -
+        // stale or mis-saved data - and correctly invisible to this ranking.
+        { id: 'c3', name: 'Lifter C', orgId: 'o3', marks: { m63: 999 } },
+      ] } },
+    };
+    expect(eventMedals(fx)).toEqual([
+      { competitor_id: 'c1', medal: 'gold', sub_event: '66kg' },
+      { competitor_id: 'c2', medal: 'silver', sub_event: '66kg' },
+    ]);
+  });
+
+  it('leaves the full category list untouched for "Whole sport" (no named discipline)', () => {
+    const fx: DerivableFixture = {
+      ...FIXTURE, ...EVENT_FIXTURE,
+      sport_name: 'Powerlifting', discipline_id: null, discipline_name: null,
+      format_config: null,
+      live_state: { event: { participants: [
+        { id: 'c1', name: 'Lifter A', orgId: 'o1', marks: { m63: 120 } },
+        { id: 'c2', name: 'Lifter B', orgId: 'o2', marks: { m74: 140 } },
+      ] } },
+    };
+    // Each alone in their own class - both take gold, ranked separately per class.
+    expect(eventMedals(fx)).toEqual([
+      { competitor_id: 'c1', medal: 'gold', sub_event: 'Men ≤63kg' },
+      { competitor_id: 'c2', medal: 'gold', sub_event: 'Men ≤74kg' },
+    ]);
+  });
+
+  it('collapses to one category for a named discipline even on a grid sport (no pickOne)', () => {
+    // Swimming has no pickOne - a swimmer can enter several races in one sitting -
+    // but "100m Backstroke" as its own discipline still means there is only one
+    // race here, the same as a named weight class on a pickOne sport.
+    const fx: DerivableFixture = {
+      ...FIXTURE, ...EVENT_FIXTURE,
+      sport_name: 'Swimming', discipline_id: 'disc-100bk', discipline_name: '100m Backstroke',
+      format_config: null,
+      live_state: { event: { participants: [
+        { id: 'c1', name: 'Swimmer A', orgId: 'o1', marks: { 'disc-100bk': 60.1 } },
+        { id: 'c2', name: 'Swimmer B', orgId: 'o2', marks: { 'disc-100bk': 62.4 } },
+        // Filed under one of the sport's generic race keys rather than the
+        // discipline's own - correctly invisible to this ranking.
+        { id: 'c3', name: 'Swimmer C', orgId: 'o3', marks: { m25bk: 0.1 } },
+      ] } },
+    };
+    expect(eventMedals(fx)).toEqual([
+      { competitor_id: 'c1', medal: 'gold', sub_event: '100m Backstroke' },
+      { competitor_id: 'c2', medal: 'silver', sub_event: '100m Backstroke' },
+    ]);
+  });
+
+  it('gives an off-podium finisher a placement chip instead of nothing', () => {
+    const withFourth: DerivableParticipant[] = [
+      ...COMPETITORS,
+      { user_id: 'su4', team_id: null, organization_id: 'o2', competitor_id: 'c4', name: 'Fourth Swimmer' },
+    ];
+    const { achievements, entries } = deriveRecords(input(EVENT_FIXTURE, { participants: withFourth }));
+    const fourth = achievements.find((a) => a.user_id === 'su4')!;
+    expect(fourth.kind).toBe('placement');
+    expect(fourth.medal).toBeNull();
+    expect(fourth.title).toBe('4th place - 50m Freestyle, Inter-College 2026');
+
+    const entry = entries.find((e) => e.user_id === 'su4')!;
+    expect(entry.detail.chips).toEqual([
+      expect.objectContaining({ kind: 'placement', title: '4th place · 50m Freestyle' }),
+    ]);
+  });
+
+  it('says nothing for a finish outside the top 8 - nobody wants "37th place" on their timeline', () => {
+    const bigField: any = structuredClone(EVENT_FIXTURE);
+    bigField.live_state.event.participants = Array.from({ length: 9 }, (_, i) => ({
+      id: `c${i + 1}`, name: `Swimmer ${i + 1}`, orgId: 'o1', marks: { r50: 24 + i },
+    }));
+    const last = { user_id: 'su9', team_id: null, organization_id: 'o1', competitor_id: 'c9', name: 'Swimmer 9' };
+    const { achievements } = deriveRecords(input(bigField, { participants: [last] }));
+    expect(achievements).toHaveLength(0);
   });
 });
 
@@ -354,10 +511,75 @@ describe('the default "Team ranking" console · medals per org (J4-E4-S1)', () =
     expect(achievements.some((a) => a.user_id === 'a4')).toBe(false);
   });
 
+  it('gives an off-podium org a placement chip too', () => {
+    const fourthPlaced: Partial<DerivableFixture> = {
+      ...RANKING_FIXTURE,
+      live_state: { eventRanking: { rows: [
+        { orgId: 'o1', place: 1 }, { orgId: 'o2', place: 2 }, { orgId: 'o3', place: 3 }, { orgId: 'o4', place: 4 },
+      ] } },
+    };
+    const { achievements } = deriveRecords(input(fourthPlaced, { participants: ENTRANTS }));
+    const fourth = achievements.find((a) => a.user_id === 'a4')!;
+    expect(fourth.kind).toBe('placement');
+    expect(fourth.medal).toBeNull();
+    expect(fourth.title).toContain('4th place');
+  });
+
+  it('says nothing for an org finishing outside the top 8', () => {
+    const farBack: Partial<DerivableFixture> = {
+      ...RANKING_FIXTURE,
+      live_state: { eventRanking: { rows: [{ orgId: 'o4', place: 9 }] } },
+    };
+    const { achievements } = deriveRecords(input(farBack, { participants: ENTRANTS }));
+    expect(achievements.some((a) => a.user_id === 'a4')).toBe(false);
+  });
+
   it('is inert on an ordinary knockout fixture with no eventRanking data', () => {
     // The default FIXTURE/SQUAD already produce a gold+silver pair via verdictsOf -
     // this section must add nothing on top of that when live_state carries no
     // eventRanking rows at all.
     expect(deriveRecords(input()).achievements.filter((a) => a.medal)).toHaveLength(5);
+  });
+
+  it('never awards both an org medal and a per-athlete medal for the same result', () => {
+    // A fixture scored through BOTH consoles at different points (the bug this
+    // guards against): the org-level rows from an earlier "Team ranking" save
+    // are still sitting in live_state alongside a later detailed per-athlete
+    // save. The per-athlete data must win outright - not just take priority
+    // per person, but suppress block 2b entirely for this fixture.
+    const both: Partial<DerivableFixture> = {
+      ...RANKING_FIXTURE,
+      sport_name: 'Swimming',
+      format_config: {
+        scoring: {
+          fixtureType: 'event', scoringMode: 'detailed',
+          event: {
+            subEvents: [{ key: 'r50', label: '50m Freestyle' }],
+            result: { resultType: 'time', winnerIs: 'min', unit: 's', aggregate: 'medals', medalPoints: [5, 3, 1] },
+          },
+        },
+      },
+      live_state: {
+        eventRanking: (RANKING_FIXTURE.live_state as any).eventRanking, // stale, from an earlier save
+        event: { participants: [
+          { id: 'c1', name: 'First Runner', orgId: 'o2', marks: { r50: 24.1 } },
+          { id: 'c2', name: 'Second Runner', orgId: 'o1', marks: { r50: 25.0 } },
+        ] },
+      },
+    };
+    const swimmers: DerivableParticipant[] = [
+      { user_id: 'a1', team_id: 'tA', organization_id: 'o1', competitor_id: 'c2', name: 'First Runner' },
+      { user_id: 'a2', team_id: 'tB', organization_id: 'o2', competitor_id: 'c1', name: 'Second Runner' },
+    ];
+    const { achievements } = deriveRecords(input(both, { participants: swimmers }));
+    const medals = achievements.filter((a) => a.medal);
+    // Exactly one medal per swimmer - never two - and ranked by their actual
+    // time (a1's org placed 1st in the stale org rows, but a1 the SWIMMER was
+    // slower, so the per-athlete result correctly gives them silver, not gold.
+    expect(medals).toHaveLength(2);
+    expect(medals.map((a) => ({ u: a.user_id, m: a.medal }))).toEqual([
+      { u: 'a2', m: 'gold' },
+      { u: 'a1', m: 'silver' },
+    ]);
   });
 });

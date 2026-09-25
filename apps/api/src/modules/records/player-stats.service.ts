@@ -1,9 +1,9 @@
 import {
   canonicalRacquetSport, competitionTier, cricketCareerBag, deriveRacquetStats,
-  deriveTeamStats, foldCricketCareer, isCricketSport, parseStoredFormat, resolveFormat,
-  statSpecFor,
-  type BattingRow, type BowlingRow, type FieldingRow,
-  type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
+  deriveTeamStats, effectiveEventSpec, eventTemplateFor, foldCricketCareer, isCricketSport,
+  parseStoredFormat, rankSubEvent, resolveFormat, statSpecFor,
+  type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
+  type FormatTemplate, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
 import { writeCategoryLines, type CategoryLineInput } from './category-lines.service.js';
@@ -45,6 +45,9 @@ interface StatFixture {
   tournament_disciplines: {
     scoring_format_id?: string | null;
     round_formats?: unknown;
+    format_config?: unknown;
+    discipline_id?: string | null;
+    disciplines?: { name: string } | null;
     tournament_sports: { sport_id: string; sports: { name: string } | null } | null;
   } | null;
 }
@@ -90,6 +93,8 @@ export async function buildPlayerStatRows(
       home_score: true, away_score: true,
       tournament_disciplines: {
         select: {
+          format_config: true, discipline_id: true,
+          disciplines: { select: { name: true } },
           tournament_sports: { select: { sport_id: true, sports: { select: { name: true } } } },
         },
       },
@@ -100,6 +105,86 @@ export async function buildPlayerStatRows(
   const sportName = fx.tournament_disciplines?.tournament_sports?.sports?.name ?? null;
   const sportId = fx.tournament_disciplines?.tournament_sports?.sport_id ?? null;
   const occurred = fx.scheduled_at ?? new Date();
+
+  // A ranking event has no home/away side, so the two-team machinery below has
+  // nothing to attach to - every resolved competitor still gets a bare
+  // appearance row (it's what makes "matches played" answerable).
+  if (!fx.home_team_id && !fx.away_team_id) {
+    // The detailed console's marks, keyed by competitor row id. Empty for the
+    // simple "Team ranking" console, which never writes a per-athlete mark.
+    const eventParticipants = (
+      (fx.live_state as { event?: { participants?: unknown } } | null)?.event?.participants
+      ?? (fx.live_state as { participants?: unknown } | null)?.participants
+      ?? []
+    ) as Array<{ id: string; marks?: Record<string, number | null> }>;
+    const marksOf = new Map(eventParticipants.map((c) => [c.id, c.marks ?? {}]));
+    const state: EventState = { participants: eventParticipants.map((c) => ({ id: c.id, name: '', marks: c.marks ?? {} })) };
+
+    // Same resolution as derive.ts's eventMedals(): stored template wins,
+    // else the sport's seeded one, narrowed to the discipline's own category.
+    const storedSpec = (fx.tournament_disciplines?.format_config as { scoring?: FormatTemplate } | null)?.scoring?.event;
+    const rawSpec: EventSpec | null = storedSpec ?? eventTemplateFor(sportName)?.event ?? null;
+    const spec = rawSpec
+      ? effectiveEventSpec(rawSpec, {
+        id: fx.tournament_disciplines?.discipline_id ?? null,
+        name: fx.tournament_disciplines?.disciplines?.name ?? null,
+      })
+      : null;
+    const rankCache = new Map<string, Map<string, number>>();
+    const rankOf = (competitorId: string | null, category: string | null): number | null => {
+      if (!spec || !competitorId || !category) return null;
+      let ranks = rankCache.get(category);
+      if (!ranks) { ranks = rankSubEvent(spec, state, category); rankCache.set(category, ranks); }
+      return ranks.get(competitorId) ?? null;
+    };
+    // A whole-sport session can leave one person with marks in several
+    // disciplines - a time AND a distance, not comparable as raw numbers the
+    // way two weight classes are. RANK is comparable regardless of what was
+    // measured (1st is 1st), so the entry representing this appearance is
+    // chosen by best rank, not by raw mark. A tied rank falls back to that
+    // category's own winnerIs, which only meaningfully resolves a same-unit tie.
+    const winnerIsOf = (category: string): 'min' | 'max' =>
+      spec?.subEvents.find((se) => se.key === category)?.winnerIs ?? spec?.result.winnerIs ?? 'max';
+    const betterOf = (
+      a: { category: string; mark: number; rank: number | null },
+      b: { category: string; mark: number; rank: number | null },
+    ) => {
+      if (a.rank == null) return b;
+      if (b.rank == null) return a;
+      if (a.rank !== b.rank) return a.rank < b.rank ? a : b;
+      return winnerIsOf(a.category) === 'min' ? (b.mark < a.mark ? b : a) : (b.mark > a.mark ? b : a);
+    };
+
+    return participants.resolved.map((p) => {
+      const marks = p.competitor_id ? marksOf.get(p.competitor_id) ?? {} : {};
+      const entries = Object.entries(marks).filter((e): e is [string, number] => typeof e[1] === 'number');
+      let stats: Record<string, number> = {};
+      if (entries.length) {
+        const ranked = entries.map(([category, mark]) => ({ category, mark, rank: rankOf(p.competitor_id, category) }));
+        const best = ranked.reduce(betterOf);
+        // `measured`/`podium` are unit-free counts, so unlike `mark` they stay
+        // meaningful summed across categories that don't share a unit.
+        stats = { mark: best.mark, measured: 1 };
+        if (best.rank != null) { stats.rank = best.rank; if (best.rank <= 3) stats.podium = 1; }
+      }
+      return {
+        fixture_id: fx.id,
+        user_id: p.user_id,
+        team_id: p.team_id,
+        organization_id: p.organization_id,
+        sport_id: sportId,
+        rubber_key: null,
+        partner_user_id: null,
+        position: null,
+        role: 'player',
+        played: true,
+        outcome: null,
+        stats,
+        occurred_on: occurred,
+        lock_version: fx.lock_version,
+      };
+    });
+  }
 
   // Only racquet sports derive stats from a rally log. Everything else gets its
   // appearance row (which is still worth having - it is what makes "matches played"
