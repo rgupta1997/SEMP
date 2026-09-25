@@ -70,8 +70,11 @@ async function main() {
 
   console.log(`\nFootball · ${t.home} v ${t.away}\n${t.url}\n`);
 
-  const A: Array<{ id: string; name: string }> = t.homeSquad;
-  const B: Array<{ id: string; name: string }> = t.awaySquad;
+  // Same shape the bench writes (qa-sports-bench.ts `squadOf`). The email was being
+  // left off here and then read anyway at the handover line below, which only
+  // compiled because the JSON arrives untyped.
+  const A: Array<{ id: string; name: string; email: string | null }> = t.homeSquad;
+  const B: Array<{ id: string; name: string; email: string | null }> = t.awaySquad;
   if (A.length < 5 || B.length < 5) throw new Error('both squads need at least five players');
 
   const un = await call('POST', `/fixtures/${t.fixtureId}/unlock`,

@@ -27,11 +27,15 @@ describe('nothing the registry measures can be silently dropped', () => {
   });
 
   it('covers every sport that has a stat spec, or says why not', () => {
-    const uncovered = ALL_STAT_SPECS
-      .filter((s) => lineFamilyFor(s.sport) === null)
-      .map((s) => `${s.sport} (${s.family})`);
     // Cricket keeps three tables of its own and 'measured' sports are records, not
-    // match lines. Anything else appearing here is a gap.
+    // match lines. Both were named in this comment and neither was actually excluded,
+    // so the moment the measured family gained its first sport the test failed while
+    // describing that sport as expected. Stated in the filter now, where it binds.
+    const EXEMPT = ['cricket', 'measured'];
+    const uncovered = ALL_STAT_SPECS
+      .filter((s) => !EXEMPT.includes(s.family) && lineFamilyFor(s.sport) === null)
+      .map((s) => `${s.sport} (${s.family})`);
+    // Anything else appearing here is a gap.
     expect(uncovered).toEqual([]);
   });
 });

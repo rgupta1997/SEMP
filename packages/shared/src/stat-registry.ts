@@ -467,7 +467,10 @@ const PLACEMENT_METRICS: StatMetric[] = [
   { key: 'average_placement', label: 'Average placement', short: 'Avg #',
     source: 'entry', sourceKey: 'rank', aggregate: 'avg', higherIsBetter: false },
   // Counts, not marks - safe to fold sport-wide the same way placement is.
-  { key: 'podium_finishes', label: 'Podium finishes', short: 'Podiums',
+  // "Top 3", not "Podiums": the column headers are capped at six characters so a
+  // dense table stays readable, and this was the only one of 456 metrics over it.
+  // It is also the clearer of the two in a narrow column.
+  { key: 'podium_finishes', label: 'Podium finishes', short: 'Top 3',
     source: 'entry', sourceKey: 'podium', aggregate: 'sum', headline: true },
   { key: 'measured_appearances', label: 'Measured appearances', short: 'Meas.',
     source: 'entry', sourceKey: 'measured', aggregate: 'sum' },
