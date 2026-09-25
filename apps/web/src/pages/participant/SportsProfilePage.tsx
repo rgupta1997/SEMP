@@ -6,7 +6,7 @@ import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
 import { titleCase } from '../../lib/format';
 import { useWorkspace } from '../../lib/useWorkspace';
-import { Badge, Button, Card, CardBody, Field, Input, Modal, PageHeader, Select, Spinner, Textarea, toast } from '../../components/ui';
+import { Badge, Button, Card, CardBody, Field, Input, Modal, PageHeader, Pagination, Select, Spinner, Textarea, toast } from '../../components/ui';
 import { SheetPreview, openDoc, downloadCertificate } from '../organization/certificates/shared';
 import { ParticipantDashboard } from './ParticipantDashboard';
 import { LifetimeRecordPage } from './LifetimeRecordPage';
@@ -64,7 +64,7 @@ const TABS: Array<{ key: TabKey; label: string; needs?: 'advanced_stats' }> = [
 
 interface TeamRow {
   id: string; name: string; membership_role: string; jersey_number: number | null;
-  sports?: { name: string } | null;
+  sports?: { name: string; icon?: string | null } | null;
   organizations?: { name: string; short_name: string | null } | null;
   team_entries?: Array<{ championships?: { id: string; name: string; status: string } | null }>;
 }
@@ -84,64 +84,94 @@ const rowStyle: React.CSSProperties = {
 };
 const emptyStyle: React.CSSProperties = { margin: 0, fontSize: 13.5, color: 'var(--faint)' };
 
+const SPORTS_PAGE_SIZE = 8;
+
 /** Sports, derived from the squads this person is actually in. */
 function SportsTab() {
   const { data, isLoading } = useApi<TeamRow[]>('/me/teams');
+  const [page, setPage] = useState(0);
   if (isLoading) return <Spinner />;
   const rows = data ?? [];
 
-  const bySport = new Map<string, { teams: number; orgs: Set<string>; events: number }>();
+  const bySport = new Map<string, { icon: string | null; teams: number; orgs: Set<string>; events: number }>();
   for (const t of rows) {
     const key = t.sports?.name ?? 'Unspecified';
-    const cur = bySport.get(key) ?? { teams: 0, orgs: new Set<string>(), events: 0 };
+    const cur = bySport.get(key) ?? { icon: t.sports?.icon ?? null, teams: 0, orgs: new Set<string>(), events: 0 };
     cur.teams += 1;
     if (t.organizations?.name) cur.orgs.add(t.organizations.name);
     cur.events += (t.team_entries ?? []).length;
     bySport.set(key, cur);
   }
+  const sports = [...bySport.entries()];
+  const page_ = sports.slice(page * SPORTS_PAGE_SIZE, (page + 1) * SPORTS_PAGE_SIZE);
 
   return (
     <div style={cardStyle}>
       <h3 style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, margin: '0 0 4px' }}>Sports you play</h3>
       <p style={{ margin: '0 0 6px', fontSize: 13, color: 'var(--muted)' }}>Taken from the squads you belong to.</p>
-      {bySport.size === 0 ? <p style={emptyStyle}>No sports yet — join a squad and they appear here.</p>
-        : [...bySport.entries()].map(([sport, v]) => (
-          <div key={sport} style={rowStyle}>
-            <span style={{ flex: 1, fontFamily: POP, fontWeight: 700, fontSize: 14 }}>{sport}</span>
-            <span style={{ fontFamily: MONO, fontSize: 11.5, color: 'var(--muted)' }}>
-              {v.teams} {v.teams === 1 ? 'team' : 'teams'} · {v.events} {v.events === 1 ? 'entry' : 'entries'}
-            </span>
-            <span style={{ fontSize: 12, color: 'var(--faint)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {[...v.orgs].join(', ')}
-            </span>
-          </div>
-        ))}
+      {sports.length === 0 ? <p style={emptyStyle}>No sports yet — join a squad and they appear here.</p>
+        : <>
+          {page_.map(([sport, v]) => (
+            <div key={sport} style={rowStyle}>
+              <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, fontFamily: POP, fontWeight: 700, fontSize: 14, minWidth: 0 }}>
+                <span aria-hidden style={{ fontSize: 17, lineHeight: 1, flex: '0 0 auto' }}>{v.icon || '🏅'}</span>
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sport}</span>
+              </span>
+              <span style={{ fontFamily: MONO, fontSize: 11.5, color: 'var(--muted)', flexShrink: 0 }}>
+                {v.teams} {v.teams === 1 ? 'team' : 'teams'} · {v.events} {v.events === 1 ? 'entry' : 'entries'}
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--faint)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {[...v.orgs].join(', ')}
+              </span>
+            </div>
+          ))}
+          <Pagination
+            page={page}
+            pageCount={Math.ceil(sports.length / SPORTS_PAGE_SIZE)}
+            total={sports.length}
+            pageSize={SPORTS_PAGE_SIZE}
+            onPage={setPage}
+          />
+        </>}
     </div>
   );
 }
 
+const TEAMS_PAGE_SIZE = 8;
+
 function TeamsTab() {
   const { data, isLoading } = useApi<TeamRow[]>('/me/teams');
+  const [page, setPage] = useState(0);
   if (isLoading) return <Spinner />;
   const rows = data ?? [];
+  const page_ = rows.slice(page * TEAMS_PAGE_SIZE, (page + 1) * TEAMS_PAGE_SIZE);
   return (
     <div style={cardStyle}>
       <h3 style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, margin: '0 0 6px' }}>Squads</h3>
       {rows.length === 0 ? <p style={emptyStyle}>You are not in a squad yet.</p>
-        : rows.map((t) => (
-          <div key={t.id} style={rowStyle}>
-            <span style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: 'var(--ink-2)' }}>{t.name}</span>
-              <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                {[t.organizations?.short_name ?? t.organizations?.name, t.sports?.name].filter(Boolean).join(' · ')}
+        : <>
+          {page_.map((t) => (
+            <div key={t.id} style={rowStyle}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: 'var(--ink-2)' }}>{t.name}</span>
+                <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                  {[t.organizations?.short_name ?? t.organizations?.name, t.sports?.name].filter(Boolean).join(' · ')}
+                </span>
               </span>
-            </span>
-            {t.jersey_number != null && (
-              <span style={{ fontFamily: MONO, fontSize: 13, color: 'var(--brand)' }}>#{t.jersey_number}</span>
-            )}
-            <Badge tone={t.membership_role === 'captain' ? 'amber' : 'slate'}>{titleCase(t.membership_role)}</Badge>
-          </div>
-        ))}
+              {t.jersey_number != null && (
+                <span style={{ fontFamily: MONO, fontSize: 13, color: 'var(--brand)' }}>#{t.jersey_number}</span>
+              )}
+              <Badge tone={t.membership_role === 'captain' ? 'amber' : 'slate'}>{titleCase(t.membership_role)}</Badge>
+            </div>
+          ))}
+          <Pagination
+            page={page}
+            pageCount={Math.ceil(rows.length / TEAMS_PAGE_SIZE)}
+            total={rows.length}
+            pageSize={TEAMS_PAGE_SIZE}
+            onPage={setPage}
+          />
+        </>}
     </div>
   );
 }
@@ -258,15 +288,28 @@ function CertificateRow({ c }: { c: CertRow }) {
   );
 }
 
+const CERTIFICATES_PAGE_SIZE = 8;
+
 function CertificatesTab() {
   const { data, isLoading } = useApi<{ rows: CertRow[] }>('/me/certificates');
+  const [page, setPage] = useState(0);
   if (isLoading) return <Spinner />;
   const rows = data?.rows ?? [];
+  const page_ = rows.slice(page * CERTIFICATES_PAGE_SIZE, (page + 1) * CERTIFICATES_PAGE_SIZE);
   return (
     <div style={cardStyle}>
       <h3 style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, margin: '0 0 6px' }}>Certificates</h3>
       {rows.length === 0 ? <p style={emptyStyle}>Certificates issued to you will appear here.</p>
-        : rows.map((c) => <CertificateRow key={c.id} c={c} />)}
+        : <>
+          {page_.map((c) => <CertificateRow key={c.id} c={c} />)}
+          <Pagination
+            page={page}
+            pageCount={Math.ceil(rows.length / CERTIFICATES_PAGE_SIZE)}
+            total={rows.length}
+            pageSize={CERTIFICATES_PAGE_SIZE}
+            onPage={setPage}
+          />
+        </>}
     </div>
   );
 }
@@ -672,12 +715,11 @@ export function SportsProfilePage() {
               <ParticipantDashboard />
             </>
           )}
-          {/* Timeline and Achievements read the same lifetime record, but are no
-              longer the same VIEW of it: Achievements keeps the Honours list
-              (its whole point) plus the chronological history underneath;
-              Timeline drops Honours so switching tabs actually shows something
-              different, instead of two pills rendering identical content. */}
-          {active.key === 'achievements' && <LifetimeRecordPage />}
+          {/* Timeline and Achievements read the same lifetime record, but each
+              shows only its own half: Achievements is the Honours list alone,
+              Timeline is the chronological history alone - two pills, two
+              different things, not the same page twice. */}
+          {active.key === 'achievements' && <LifetimeRecordPage hideTimeline />}
           {active.key === 'timeline' && <LifetimeRecordPage hideHonours />}
           {active.key === 'sports' && <SportsTab />}
           {active.key === 'teams' && <TeamsTab />}
