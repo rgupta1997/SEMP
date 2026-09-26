@@ -518,7 +518,10 @@ export function makeEventsRouter(prisma: Prisma): Router {
       ? (await prisma.championships.findUnique({ where: { id: req.params.id }, select: { visibility: true } }))?.visibility !== 'public'
       : false;
 
-    const championship = await prisma.championships.update({ where: { id: req.params.id }, data: req.body });
+    // Not a column - the wizard re-sends its create-time answer on every save, and
+    // Prisma rejects the whole update over one unknown key.
+    const { host_participates: _hostParticipates, ...data } = req.body as Record<string, unknown>;
+    const championship = await prisma.championships.update({ where: { id: req.params.id }, data: data as never });
 
     if (wasPrivate) {
       // Best-effort, matching every other side-effect notification in this codebase -
