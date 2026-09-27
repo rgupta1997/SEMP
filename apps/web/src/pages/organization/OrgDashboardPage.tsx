@@ -91,7 +91,9 @@ export function OrgDashboardPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 60 }}>
 
       {/* ---- hero ---- */}
-      <div style={{
+      {/* Admins only: "things need your attention" reads as "this is your org" to a
+          plain member, who can act on none of it. */}
+      {canManage && <div style={{
         background: C.deep, borderRadius: 14, padding: 22, color: '#fff',
         display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', justifyContent: 'space-between',
       }}>
@@ -121,7 +123,7 @@ export function OrgDashboardPage() {
         >
           {canCreateEvent ? '+ Create Event' : 'Create Event · locked'}
         </button>
-      </div>
+      </div>}
 
       {/* ---- kpis ---- */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12 }}>
@@ -163,7 +165,8 @@ export function OrgDashboardPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(330px,1fr))', gap: 16 }}>
         {/* ---- queue ---- */}
-        <div style={card}>
+        {/* Admins only, same reason as the hero - every item is an admin approval. */}
+        {canManage && <div style={card}>
           <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 16 }}>Needs attention</div>
           <p style={{ margin: '3px 0 12px', fontSize: 12.5, color: C.fg4, lineHeight: 1.55 }}>
             Approvals only. Scorecard locking, achievement validation and certificate issuance
@@ -191,7 +194,7 @@ export function OrgDashboardPage() {
               </Link>
             </div>
           ))}
-        </div>
+        </div>}
 
         {/* ---- participation trend ---- */}
         <div style={card}>
