@@ -176,6 +176,7 @@ export function EventCertificatesPage() {
           orgId={host.id}
           championship={{ id: eventId, name: championship.name }}
           templates={templates.data?.rows ?? []}
+          templatesLoading={!templates.data}
           onClose={() => setGenerating(false)}
           invalidate={[listPath]}
         />

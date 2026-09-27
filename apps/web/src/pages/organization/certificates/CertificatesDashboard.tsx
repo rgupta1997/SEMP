@@ -139,7 +139,7 @@ export function CertificatesDashboard() {
 
       {gen && orgId && (
         <GenerateModal
-          orgId={orgId} templates={templates.data?.rows ?? []}
+          orgId={orgId} templates={templates.data?.rows ?? []} templatesLoading={!templates.data}
           onClose={() => setGen(false)} invalidate={[overviewPath, templatesPath]}
         />
       )}

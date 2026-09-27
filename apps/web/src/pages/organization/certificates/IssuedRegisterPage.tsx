@@ -139,7 +139,7 @@ export function IssuedRegisterPage() {
       </Card>
 
       {gen && orgId && (
-        <GenerateModal orgId={orgId} templates={templates.data?.rows ?? []} onClose={() => setGen(false)} invalidate={[registerPath]} />
+        <GenerateModal orgId={orgId} templates={templates.data?.rows ?? []} templatesLoading={!templates.data} onClose={() => setGen(false)} invalidate={[registerPath]} />
       )}
     </div>
   );
