@@ -327,7 +327,7 @@ function entryDrawLabel(entry: any): string {
 
 // "Now that you're in, pick your discipline" - set or change the discipline draw of a
 // championship entry, inline under its row. Draws are scoped to the team's sport and
-// exclude those another of the org's teams already occupies.
+// exclude those another team of the same contingent already occupies.
 function ChooseDisciplinePanel({ team, entry, onClose }: { team: any; entry: any; onClose: () => void }) {
   const path = `/teams/${team.id}`;
   const eventId = entry.championship_id;
@@ -336,15 +336,18 @@ function ChooseDisciplinePanel({ team, entry, onClose }: { team: any; entry: any
   const [drawId, setDrawId] = useState(entry.tournament_discipline_id ?? '');
   const [error, setError] = useState<string | null>(null);
 
+  // Only a squad playing for the SAME campus/department (or another whole-org squad)
+  // occupies a draw - Finance holding Cricket must not hide it from Computer Science.
   const taken = useMemo(
     () => new Set(
       orgTeams
+        .filter((t: any) => (t.org_unit_id ?? null) === (team.org_unit_id ?? null))
         .flatMap((t: any) => (t.team_entries ?? []) as any[])
         .filter((e) => e.championship_id === eventId && e.team_id !== team.id)
         .map((e) => e.tournament_discipline_id)
         .filter(Boolean),
     ),
-    [orgTeams, eventId, team.id],
+    [orgTeams, eventId, team.id, team.org_unit_id],
   );
   const sportDraws = useMemo(
     () => draws.filter((d) => d.tournament_sports?.sport_id === team.sport_id && !taken.has(d.id)),
