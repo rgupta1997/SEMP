@@ -363,6 +363,7 @@ function OrganisationInvites({ eventId, path, readOnly }: { eventId: string; pat
         onFilterChange={setFilter}
         extraCounts={inviteCounts}
         invitesEmpty={visibleInvites.length === 0}
+        readOnly={readOnly}
       />
 
       {isLoading ? <Spinner /> : invites.length === 0 ? (
