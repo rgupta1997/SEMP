@@ -2,7 +2,7 @@ import { ORGANIZATION_MEMBER_ROLE, type Audience } from '@semp/shared';
 import { limitsFor, type LimitKey } from '@semp/entitlements';
 import { assertWithinOrgLimit, limitState, type LimitState } from '@semp/entitlements/server';
 import type { Tier } from '@semp/entitlements';
-import type { Prisma } from '../../infra/prisma.js';
+import type { Db, Prisma } from '../../infra/prisma.js';
 import { audienceOfRole } from '../iam/module-access.js';
 
 // Counting what a plan's ceilings are ceilings ON.
@@ -38,7 +38,7 @@ export async function countActiveEvents(prisma: Prisma, organizationId: string):
   });
 }
 
-export async function countPeople(prisma: Prisma, organizationId: string): Promise<number> {
+export async function countPeople(prisma: Db, organizationId: string): Promise<number> {
   return prisma.organization_members.count({
     where: { organization_id: organizationId, status: 'active', role: { in: STUDENT_ROLES } },
   });
