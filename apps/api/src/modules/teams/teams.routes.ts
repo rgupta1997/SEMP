@@ -17,6 +17,7 @@ import { assertCanAddMember, assertCanLockRoster } from './domain/roster-policy.
 import { assertPlayerEligible, screenSquad, squadEntryRefusal } from '../championships/contingent.js';
 import { unitLabels } from '@semp/shared';
 import { tellUser, checkRosterIncomplete, notifyRosterLocked, notifyTeamCreated } from './teams.notifications.js';
+import { mintSportagonIds, orgIdPrefixFor } from '../iam/sportagon-id.js';
 
 // Default password for auto-provisioned players from a bulk import. They can be
 // invited / reset later; precomputed once to keep the bulk loop cheap.
@@ -804,17 +805,19 @@ export function makeTeamsRouter(prisma: Prisma): Router {
           : []
         ).map((u) => [u.email, u]),
       );
-      const toCreate = emails
-        .filter((e) => !byEmail.has(e))
-        .map((email) => {
-          const row = rows.find((r) => r.email === email)!;
-          return {
-            name: row.name?.trim() || email.split('@')[0],
-            email,
-            password_hash: DEFAULT_IMPORT_PASSWORD_HASH,
-            organization_id: team.organization_id,
-          };
-        });
+      const newEmails = emails.filter((e) => !byEmail.has(e));
+      // Created under the team's organisation, so the IDs carry its letters.
+      const sportagonIds = await mintSportagonIds(tx, await orgIdPrefixFor(tx, team.organization_id), newEmails.length);
+      const toCreate = newEmails.map((email, i) => {
+        const row = rows.find((r) => r.email === email)!;
+        return {
+          name: row.name?.trim() || email.split('@')[0],
+          email,
+          password_hash: DEFAULT_IMPORT_PASSWORD_HASH,
+          organization_id: team.organization_id,
+          sportagon_id: sportagonIds[i],
+        };
+      });
       if (toCreate.length) {
         const fresh = await tx.users.createManyAndReturn({ data: toCreate, select: { id: true, name: true, email: true } });
         for (const u of fresh) byEmail.set(u.email, u);

@@ -11,6 +11,7 @@ import { ForbiddenError } from '../../shared/errors.js';
 import { can } from '../../http/middleware/can.js';
 import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import { deriveProvisionedPassword, phoneLast10 } from '../iam/users.helpers.js';
+import { mintSportagonIds, orgIdPrefixFor } from '../iam/sportagon-id.js';
 import { GENDERS, validateRoster, type RosterContext, type RosterRow, type RosterRowResult } from './roster-import.js';
 
 // The student roll (J1-E5).
@@ -263,17 +264,25 @@ export function makePeopleRouter(prisma: Prisma): Router {
             select: { email: true },
           })).map((u) => u.email),
         );
-        for (const c of toCreate) {
-          if (!already.has(c.email)) {
-            newLogins.push({ name: c.row.name ?? c.email, email: c.email, phone: c.row.phone, password: c.password });
-          }
+        // Only genuinely new logins, once per email - so an existing or repeated email
+        // neither gets a password reported nor burns a Sportagon ID.
+        const seen = new Set<string>();
+        const fresh = toCreate.filter((c) => {
+          if (already.has(c.email) || seen.has(c.email)) return false;
+          seen.add(c.email);
+          return true;
+        });
+        for (const c of fresh) {
+          newLogins.push({ name: c.row.name ?? c.email, email: c.email, phone: c.row.phone, password: c.password });
         }
 
+        const sportagonIds = await mintSportagonIds(tx, await orgIdPrefixFor(tx, organizationId), fresh.length);
         await tx.users.createMany({
-          data: toCreate.map((c) => ({
+          data: fresh.map((c, i) => ({
             name: c.row.name ?? c.email,
             email: c.email,
             phone: c.row.phone,
+            sportagon_id: sportagonIds[i],
             password_hash: c.password_hash,
             must_change_password: true,
             date_of_birth: c.row.date_of_birth ? new Date(`${c.row.date_of_birth}T00:00:00Z`) : null,
@@ -405,11 +414,14 @@ export function makePeopleRouter(prisma: Prisma): Router {
     if (!userId) {
       const email = row.email ?? `${phoneLast10(row.phone)}@placeholder.invalid`;
       const password = deriveProvisionedPassword(row.name!, row.phone);
+      // Created on the organisation's behalf, so the ID carries its letters.
+      const [sportagonId] = await mintSportagonIds(prisma, await orgIdPrefixFor(prisma, organizationId), 1);
       const created = await prisma.users.create({
         data: {
           name: row.name!,
           email,
           phone: row.phone,
+          sportagon_id: sportagonId,
           password_hash: await bcrypt.hash(password, 10),
           must_change_password: true,
           gender: row.gender,

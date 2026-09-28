@@ -270,6 +270,12 @@ model roles {
   user_org_roles          user_org_roles[]
 }
 
+/// Per-prefix counter behind next_sportagon_ids() (20260928000000). Written only by that function.
+model sportagon_id_counters {
+  prefix     String @id @db.VarChar(3)
+  last_value Int    @default(0)
+}
+
 model sports {
   id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name               String               @db.VarChar

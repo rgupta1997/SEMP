@@ -185,3 +185,18 @@ reconciliation, same fix — only the unapplied file in each pair moved:
 applied 2026-09-08 per this file, so per the rule above it wasn't free to move.
 
 If you add a migration, date it later than `20260917000000`.
+
+---
+
+## Applied 2026-09-28 — `20260928000000_sportagon_id_prefixes`
+
+Sportagon IDs become three letters + a per-prefix counter: `STG0001` for self
+sign-up and every other path, the creating organisation's initials (`AEO0001`)
+for People → Add people / Bulk upload and Team → Paste list. Adds
+`sportagon_id_counters` and `next_sportagon_ids(prefix, count)`, and switches the
+`trg_users_sportagon_id` trigger from `EOS-` to `STG`. Existing IDs untouched.
+
+Applied with the same runner; all four statements succeeded. Verified in a
+rolled-back transaction: trigger attached, `AEO` and `STG` count independently,
+a plain insert gets `STG`, the number grows past `9999` to `10000`, and a
+non-letter prefix is refused. Counter table left empty afterwards.
