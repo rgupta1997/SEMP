@@ -82,6 +82,8 @@ export const AUDIT_ACTIONS = {
   championshipCreated: 'championship.created',
   championshipStatusChanged: 'championship.status_changed',
   championshipDeleted: 'championship.deleted',
+  championshipArchived: 'championship.archived',
+  championshipRetrieved: 'championship.retrieved',
   fixtureSubmitted: 'fixture.submitted',
   fixtureRetracted: 'fixture.retracted',
   fixtureLocked: 'fixture.locked',

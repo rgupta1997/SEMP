@@ -1,13 +1,15 @@
 import { useMemo } from 'react';
 import { Mail, Trophy } from 'lucide-react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
-import { useApi, useTableControls, fmtDateRange } from '../../lib/hooks';
+import { archiveDaysLeft } from '@semp/shared';
+import { api } from '../../lib/api';
+import { useApi, useApiMutation, useTableControls, fmtDate, fmtDateRange } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { titleCase } from '../../lib/format';
 import { InvitationsInbox } from '../../components/InvitationsInbox';
 import {
-  Badge, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Spinner, StatusBadge, SURFACE, FilterChips,
+  Badge, Button, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Spinner, StatusBadge, SURFACE, FilterChips, toast,
 } from '../../components/ui';
 
 // Organisation > Events (F-068).
@@ -24,6 +26,9 @@ interface Row {
   our_teams: number;
   participant_count: number;
   applied_at: string | null;
+  /** Set on events this organisation hosts and has archived. */
+  archived_at: string | null;
+  purge_on: string | null;
 }
 
 const REL_TONE: Record<string, 'brand' | 'green' | 'amber' | 'rose' | 'slate'> = {
@@ -40,6 +45,7 @@ const TABS = [
   { key: 'participating', label: 'Participating' },
   { key: 'pending', label: 'Awaiting approval' },
   { key: 'invitations', label: 'Invitations' },
+  { key: 'archived', label: 'Archived' },
 ] as const;
 
 export function OrgEventsPage() {
@@ -60,18 +66,27 @@ export function OrgEventsPage() {
   const { data: allInvites = [] } = useApi<any[]>(canManage ? '/me/invitations' : null);
   const invites = allInvites.filter((i) => i.organization_id === orgId);
 
-  const rows = data?.rows ?? [];
+  // Archived events live only in their own tab; retrieving one returns it to the rest.
+  const allRows = data?.rows ?? [];
+  const rows = allRows.filter((r) => !r.archived_at);
+  const archived = allRows.filter((r) => !!r.archived_at);
   const counts = useMemo(() => ({
     all: rows.length,
     hosting: rows.filter((r) => r.relationship === 'hosting').length,
     participating: rows.filter((r) => r.relationship === 'participating').length,
     pending: rows.filter((r) => r.relationship === 'pending').length,
     invitations: invites.length,
-  }), [rows, invites.length]);
+    archived: archived.length,
+  }), [rows, archived.length, invites.length]);
 
   const filtered = useMemo(
-    () => rows.filter((r) => tab === 'all' || r.relationship === tab),
-    [rows, tab],
+    () => (tab === 'archived' ? archived : rows.filter((r) => tab === 'all' || r.relationship === tab)),
+    [allRows, tab],
+  );
+
+  const retrieve = useApiMutation(
+    (id: string) => api('POST', `/championships/${id}/retrieve`),
+    [`/organizations/${orgId}/events`, '/championships/mine', '/championships'],
   );
 
   const tc = useTableControls(filtered, {
@@ -90,7 +105,7 @@ export function OrgEventsPage() {
       <FilterChips
         value={tab}
         onChange={setTab}
-        options={TABS.filter((t) => t.key !== 'invitations' || canManage)
+        options={TABS.filter((t) => (t.key !== 'invitations' && t.key !== 'archived') || canManage)
           .map((t) => ({ key: t.key, label: t.label, count: counts[t.key as keyof typeof counts] }))}
       />
 
@@ -104,7 +119,13 @@ export function OrgEventsPage() {
         ) : (
           <InvitationsInbox organizationId={orgId} />
         )
-      ) : rows.length === 0 ? (
+      ) : tab === 'archived' && archived.length === 0 ? (
+        <EmptyState
+          icon={<Trophy size={24} />}
+          title="Nothing archived"
+          description="Events you archive from their Settings show up here for 90 days, so you can retrieve them before they are deleted."
+        />
+      ) : allRows.length === 0 ? (
         <EmptyState
           icon={<Trophy size={24} />}
           title="Not entered in anything yet"
@@ -153,7 +174,19 @@ export function OrgEventsPage() {
                         how much of US is actually in this. */}
                     <td className="px-4 py-3 font-mono text-[13px] text-slate-700 dark:text-slate-300">{r.our_teams}</td>
                     <td className="px-4 py-3 font-mono text-[13px] text-slate-500">{r.participant_count}</td>
-                    <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
+                    <td className="px-4 py-3">
+                      {r.archived_at ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                            Deleted {fmtDate(r.purge_on)} ({archiveDaysLeft(r.archived_at)} days left)
+                          </span>
+                          <Button size="sm" disabled={retrieve.isPending} onClick={() => retrieve.mutate(r.id, {
+                            onSuccess: () => toast.success(`${r.name} retrieved`),
+                            onError: (e: any) => toast.error(e.message),
+                          })}>Retrieve</Button>
+                        </div>
+                      ) : <StatusBadge status={r.status} />}
+                    </td>
                   </tr>
                 ))}
               </tbody>

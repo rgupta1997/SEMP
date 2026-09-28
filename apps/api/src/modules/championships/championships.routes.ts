@@ -19,6 +19,10 @@ import { findUserByPhone } from '../iam/users.helpers.js';
 import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
 import { assertWithinOrgLimit } from '@semp/entitlements/server';
 import { countActiveEvents } from '../billing/usage.js';
+import { ARCHIVE_RETENTION_DAYS, archivePurgeDate } from '@semp/shared';
+import { requireSuperAdmin } from '../../http/middleware/auth.js';
+import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
+import { hardDeleteChampionship, purgeDueArchivedChampionships, removalInfo } from './championship-archive.service.js';
 
 // Prisma include that pulls just the sport names offered by a championship, plus a
 // helper that flattens them to a distinct, sorted `sports: string[]` and drops the
@@ -169,9 +173,11 @@ export function makeEventsRouter(prisma: Prisma): Router {
       select: { organization_id: true },
     })).map((m) => m.organization_id);
 
+    // Archived events are out of every list - their host finds them in the Archived tab.
     const where = req.user!.isSuperAdmin
-      ? {}
+      ? { archived_at: null }
       : {
+        archived_at: null,
         AND: [
           { OR: [{ visibility: 'public' }, { id: { in: [...(await involvedChampionshipIds(req.user!.id))] } }] },
           {
@@ -199,6 +205,8 @@ export function makeEventsRouter(prisma: Prisma): Router {
   // -------------------------------------------------------------------------
   router.get('/mine', asyncHandler(async (req, res) => {
     const userId = req.user!.id;
+    // Lazy purge: this read lists archived events, so it is where overdue ones go.
+    await purgeDueArchivedChampionships(prisma).catch((err) => console.error('[archive] lazy purge failed:', err));
     const roles = new Map<string, Set<string>>();
     const add = (id: string, role: string) => {
       if (!roles.has(id)) roles.set(id, new Set());
@@ -245,7 +253,10 @@ export function makeEventsRouter(prisma: Prisma): Router {
       orderBy: { created_at: 'desc' },
       include: championshipSportsInclude,
     });
-    res.json(championships.map((c) => ({ ...withSports(c), my_roles: [...(roles.get(c.id) ?? [])] })));
+    // An archived event stays visible only to whoever can retrieve it.
+    res.json(championships
+      .filter((c) => !c.archived_at || roles.get(c.id)?.has('organiser'))
+      .map((c) => ({ ...withSports(c), my_roles: [...(roles.get(c.id) ?? [])] })));
   }));
 
   // GET single championship. A private one 404s for outsiders (same as not existing,
@@ -532,29 +543,73 @@ export function makeEventsRouter(prisma: Prisma): Router {
     res.json(championship);
   }));
 
+  // ---- Removing a championship: delete, or archive once it has results ----
+  // See championship-archive.service.ts for what counts as results and why.
+
+  /** Which removal applies, so Settings shows Delete or Archive - never both. */
+  router.get('/:id/removal', ownChampionship, asyncHandler(async (req, res) => {
+    const info = await removalInfo(prisma, req.params.id);
+    if (!info) throw new NotFoundError('Championship');
+    res.json({
+      ...info,
+      purge_on: info.archived_at ? archivePurgeDate(info.archived_at) : null,
+      retention_days: ARCHIVE_RETENTION_DAYS,
+    });
+  }));
+
   // DELETE championship - host (organiser) or super admin only, via ownChampionship.
-  // Most child FKs are ON DELETE NO ACTION in the DB, and every championship has at
-  // least the creator's organiser role row, so we remove dependents in dependency
-  // order inside one transaction. (officials, notifications and invitations cascade
-  // automatically through their own FKs.)
+  // Refused once the event has results: those are archived instead.
   router.delete('/:id', ownChampionship, asyncHandler(async (req, res) => {
-    const id = req.params.id;
-    await prisma.$transaction([
-      // Fixtures sit at the bottom - they reference teams, grounds and disciplines.
-      prisma.fixtures.deleteMany({ where: { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: id } } } } }),
-      // Rosters are cross-championship now, so only their entries for this
-      // championship are removed - the teams + members survive for other events.
-      prisma.team_entries.deleteMany({ where: { championship_id: id } }),
-      prisma.tournament_disciplines.deleteMany({ where: { tournament_sports: { tournaments: { championship_id: id } } } }),
-      prisma.tournament_sports.deleteMany({ where: { tournaments: { championship_id: id } } }),
-      prisma.tournaments.deleteMany({ where: { championship_id: id } }),
-      prisma.venue_grounds.deleteMany({ where: { venues: { championship_id: id } } }),
-      prisma.venues.deleteMany({ where: { championship_id: id } }),
-      prisma.championship_organizations.deleteMany({ where: { championship_id: id } }),
-      prisma.user_championship_roles.deleteMany({ where: { championship_id: id } }),
-      prisma.championships.delete({ where: { id } }),
-    ]);
+    const info = await removalInfo(prisma, req.params.id);
+    if (!info) throw new NotFoundError('Championship');
+    if (info.mode === 'archive') {
+      throw new BusinessRuleError(`This championship can't be deleted because ${info.reasons.join(', ')}. Archive it instead.`);
+    }
+    const champ = await prisma.championships.findUnique({ where: { id: req.params.id }, select: { name: true, host_organization_id: true } });
+    await hardDeleteChampionship(prisma, req.params.id);
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.championshipDeleted,
+      target: { type: 'championships', id: req.params.id, label: champ?.name ?? null },
+      organizationId: champ?.host_organization_id ?? null,
+      summary: `Deleted the championship ${champ?.name ?? ''}`.trim(),
+    });
     res.status(204).send();
+  }));
+
+  // Archive: hidden from every list, restorable, purged after the retention period.
+  router.post('/:id/archive', ownChampionship, asyncHandler(async (req, res) => {
+    const champ = await prisma.championships.findUnique({ where: { id: req.params.id }, select: { name: true, archived_at: true, host_organization_id: true } });
+    if (!champ) throw new NotFoundError('Championship');
+    if (champ.archived_at) throw new BusinessRuleError('This championship is already archived.');
+    const archivedAt = new Date();
+    await prisma.championships.update({ where: { id: req.params.id }, data: { archived_at: archivedAt, archived_by: req.user!.id } });
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.championshipArchived,
+      target: { type: 'championships', id: req.params.id, label: champ.name },
+      organizationId: champ.host_organization_id, championshipId: req.params.id,
+      summary: `Archived ${champ.name} - deleted on ${archivePurgeDate(archivedAt).toISOString().slice(0, 10)} unless retrieved`,
+    });
+    res.json({ archived_at: archivedAt, purge_on: archivePurgeDate(archivedAt) });
+  }));
+
+  // Retrieve: back into the lists as it was. Archiving again restarts the 90 days.
+  router.post('/:id/retrieve', ownChampionship, asyncHandler(async (req, res) => {
+    const champ = await prisma.championships.findUnique({ where: { id: req.params.id }, select: { name: true, archived_at: true, host_organization_id: true } });
+    if (!champ) throw new NotFoundError('Championship');
+    if (!champ.archived_at) throw new BusinessRuleError('This championship is not archived.');
+    await prisma.championships.update({ where: { id: req.params.id }, data: { archived_at: null, archived_by: null } });
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.championshipRetrieved,
+      target: { type: 'championships', id: req.params.id, label: champ.name },
+      organizationId: champ.host_organization_id, championshipId: req.params.id,
+      summary: `Retrieved ${champ.name} from the archive`,
+    });
+    res.json({ archived_at: null });
+  }));
+
+  // The safety net for the lazy purge - same role as POST /billing/sweep.
+  router.post('/purge-archived', requireSuperAdmin, asyncHandler(async (_req, res) => {
+    res.json(await purgeDueArchivedChampionships(prisma));
   }));
 
   // Status transition (validated lifecycle) - defined before generic /:id routes.

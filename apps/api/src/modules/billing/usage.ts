@@ -34,7 +34,8 @@ const FINISHED = ['completed', 'cancelled'];
 
 export async function countActiveEvents(prisma: Prisma, organizationId: string): Promise<number> {
   return prisma.championships.count({
-    where: { host_organization_id: organizationId, status: { notIn: FINISHED } },
+    // An archived event is not running, whatever its status says.
+    where: { host_organization_id: organizationId, status: { notIn: FINISHED }, archived_at: null },
   });
 }
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Award, Lock, ShieldOff } from 'lucide-react';
+import { ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation } from '../../lib/hooks';
 import { useWorkspace } from '../../lib/useWorkspace';
@@ -28,6 +29,13 @@ export function EventCertificatesPage() {
   const { championship, eventId, canManage } = useEvent();
   const host = (championship as any).host_organization as { id: string; name: string } | null;
   const [generating, setGenerating] = useState(false);
+  // Refused by the server too; disabled here so nobody walks the wizard first.
+  const archived = !!championship.archived_at;
+  const generateButton = (
+    <Button disabled={archived} title={archived ? ARCHIVED_READ_ONLY_MESSAGE : undefined} onClick={() => setGenerating(true)}>
+      <Award size={15} aria-hidden />Generate certificates
+    </Button>
+  );
 
   // Same standing the server itself requires to name a host (assertMayHost -
   // owner or org_admin) - offering an org here that would just come back a 403
@@ -119,11 +127,7 @@ export function EventCertificatesPage() {
             certificate the institution has ever issued, across every event) - it
             stays on the org's own Certificates page, not duplicated as a shortcut
             here on the event's. */}
-        {canManage && (
-          <Button onClick={() => setGenerating(true)}>
-            <Award size={15} aria-hidden />Generate certificates
-          </Button>
-        )}
+        {canManage && generateButton}
       </PageHeader>
 
       {rows.length === 0 ? (
@@ -131,7 +135,7 @@ export function EventCertificatesPage() {
           icon={<Award size={24} />}
           title="Nothing issued for this event yet"
           description="Certificates are generated from locked results — never typed in by hand. Lock a scorecard and the medals, placements and awards behind it become issuable."
-          action={canManage ? <Button onClick={() => setGenerating(true)}>Generate certificates</Button> : undefined}
+          action={canManage ? generateButton : undefined}
         />
       ) : (
         <div className={`overflow-x-auto ${SURFACE}`}>

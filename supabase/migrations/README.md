@@ -216,3 +216,24 @@ exist, every organisation and person resolves to the top tier and the Billing ta
 is hidden. Saved plans and subscriptions are untouched; a super admin turns plans
 back on from Platform → Plans & Billing. Verified afterwards: the row reads
 `false`, and a `free` organisation ("Aman admin org") resolves to `max`.
+
+## Applied 2026-09-28 — `20260925000000_fixture_format_overrides`
+
+Arrived with main (per-match rule overrides) and was never applied here. The
+committed Prisma client selects `fixtures.format_overrides`, so once it was
+regenerated every fixtures read failed with P2022 and Schedule and Results were
+empty for every event. Applied with the same runner; all four statements
+succeeded, and the championship fixtures list reads again. The other migrations
+from that merge (`certificate_categories`, `racquet_scoring_and_stats`,
+`career_stats_tier`) were checked and are already in the database.
+
+## Applied 2026-09-28 — `20260928000003_championship_archive`
+
+Adds `championships.archived_at` / `archived_by` and a partial index for the purge.
+An event with results (completed, a played or locked match, an issued certificate)
+can only be archived; archived events leave every list and are permanently deleted
+90 days after `archived_at` unless retrieved. The purge runs lazily from the lists
+that show archived events, plus `POST /championships/purge-archived` (super admin).
+Certificates are detached, not deleted, so they keep verifying; players'
+achievements, timeline and career stats are kept. Verified read-only afterwards:
+"Aman Multisport event" resolves to archive-only, "Intra Bengaluru event" to delete.

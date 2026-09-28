@@ -83,6 +83,10 @@ model championships {
   host_organization_id       String?                      @db.Uuid
   entry_level                String                       @default("organization") @db.VarChar(16)
   entry_scope_unit_id        String?                      @db.Uuid
+  /// Set while archived (20260928000003); permanently deleted 90 days after this unless retrieved.
+  archived_at                DateTime?                    @db.Timestamptz(6)
+  archived_by                String?                      @db.Uuid
+  users_archived_by          users?                       @relation("championships_archived_byTousers", fields: [archived_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
   certificates               certificates[]
   championship_invitations   championship_invitations[]
   championship_officials     championship_officials[]
@@ -544,6 +548,7 @@ model users {
   organization_members_organization_members_verified_byTousers             organization_members[]       @relation("organization_members_verified_byTousers")
   organizations_organizations_created_byTousers                            organizations[]              @relation("organizations_created_byTousers")
   platform_settings                                                        platform_settings[]
+  championships_archived                                                   championships[]              @relation("championships_archived_byTousers")
   player_match_stats_player_match_stats_partner_user_idTousers            player_match_stats[]         @relation("player_match_stats_partner_user_idTousers")
   player_match_stats_player_match_stats_user_idTousers                     player_match_stats[]         @relation("player_match_stats_user_idTousers")
   profile_privacy                                                          profile_privacy?

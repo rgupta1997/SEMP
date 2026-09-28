@@ -47,6 +47,8 @@ export function makeOrgDashboardRouter(prisma: Prisma): Router {
 
       prisma.championships.findMany({
         where: {
+          // Archived events are out of every list, the dashboard included.
+          archived_at: null,
           AND: [
             {
               OR: [

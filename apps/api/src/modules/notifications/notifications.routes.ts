@@ -11,6 +11,7 @@ import {
 } from './audience.js';
 import { markSeen, getUnreadCountByCursor } from './cursor.js';
 import { mintRealtimeToken } from './realtime-token.js';
+import { assertNotArchived } from '../championships/championship-archive.service.js';
 import { notify } from '@semp/notifications/server/notify.js';
 import { Rules, type AudienceRule } from '@semp/notifications/core/rules.js';
 
@@ -102,9 +103,10 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
   // ----- Championships the current user may post into (fills the compose dropdown) -----
   router.get('/notifications/postable-championships', asyncHandler(async (req, res) => {
     const scopes = await getUserEventScopes(prisma, req.user!);
+    // Archived events take no announcements, so they are not offered to post into.
     if (scopes.isSuper) {
       const championships = await prisma.championships.findMany({
-        select: { id: true, name: true }, orderBy: { created_at: 'desc' },
+        where: { archived_at: null }, select: { id: true, name: true }, orderBy: { created_at: 'desc' },
       });
       res.json(championships);
       return;
@@ -112,7 +114,7 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
     const ids = [...scopes.postableEventIds];
     if (ids.length === 0) { res.json([]); return; }
     const championships = await prisma.championships.findMany({
-      where: { id: { in: ids } }, select: { id: true, name: true }, orderBy: { name: 'asc' },
+      where: { id: { in: ids }, archived_at: null }, select: { id: true, name: true }, orderBy: { name: 'asc' },
     });
     res.json(championships);
   }));
@@ -125,6 +127,8 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
     if (!canPostToEvent(scopes, req.body.championship_id)) {
       throw new ForbiddenError('You cannot post notifications for this championship');
     }
+    // An announcement is a change to the event, and an archived event takes none.
+    await assertNotArchived(prisma, req.body.championship_id);
 
     let audience: AudienceRule;
 
@@ -231,6 +235,8 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
     if (!championship_id || !canPostToEvent(scopes, championship_id)) {
       throw new ForbiddenError('You cannot post notifications for this championship');
     }
+    // The compose modal's send path - the one announcements actually go through.
+    await assertNotArchived(prisma, championship_id);
 
     // This endpoint is used by the new audience picker. Do not accept an
     // arbitrary JSON payload that could bypass the audience rule engine.

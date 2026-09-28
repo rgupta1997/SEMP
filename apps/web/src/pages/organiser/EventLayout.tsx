@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation, useOutletContext, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { useApi, useApiMutation, fmtDateRange } from '../../lib/hooks';
+import { archiveDaysLeft, archivePurgeDate } from '@semp/shared';
+import { useApi, useApiMutation, fmtDate, fmtDateRange } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { mayOpenSegment, parseEventSegment } from '../../lib/championship-nav';
@@ -11,6 +12,8 @@ export interface EventDetail {
   venue?: string; description?: string; start_date: string; end_date: string;
   visibility?: string; // 'public' (default) | 'private'
   host_organization_id?: string | null;
+  /** Set while archived: the event is read-only until retrieved. */
+  archived_at?: string | null;
   /**
    * What competes here, resolved by the server.
    *
@@ -57,6 +60,10 @@ export function EventLayout() {
     // rest stayed missing until they reloaded the page by hand.
     [`/championships/${eventId}`, '/championships', '/championships/mine'],
   );
+  const retrieve = useApiMutation(
+    () => api('POST', `/championships/${eventId}/retrieve`),
+    [`/championships/${eventId}`, `/championships/${eventId}/removal`, '/championships', '/championships/mine'],
+  );
 
   if (isLoading || !championship) return <Spinner />;
 
@@ -74,7 +81,9 @@ export function EventLayout() {
     return <Navigate to={`/championships/${eventId}`} replace />;
   }
 
-  const next = NEXT_STATUS[championship.status];
+  // An archived event is read-only; no lifecycle step is offered until it is retrieved.
+  const archivedAt = championship.archived_at ?? null;
+  const next = archivedAt ? null : NEXT_STATUS[championship.status];
 
   // Back goes where they came from - workspace and all. Entering an event moves
   // the whole workspace, so leaving it has to move the workspace back, otherwise
@@ -121,6 +130,24 @@ export function EventLayout() {
           </Button>
         )}
       </div>
+
+      {archivedAt && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+          <p className="text-amber-900 dark:text-amber-200">
+            <span className="font-semibold">This championship is archived.</span>{' '}
+            Everything here is read-only, and it will be permanently deleted on {fmtDate(archivePurgeDate(archivedAt))}{' '}
+            ({archiveDaysLeft(archivedAt)} days left) unless it is retrieved.
+          </p>
+          {canManage && (
+            <Button size="sm" disabled={retrieve.isPending} onClick={() => retrieve.mutate(undefined, {
+              onSuccess: () => toast.success('Championship retrieved'),
+              onError: (e: any) => toast.error(e.message),
+            })}>
+              {retrieve.isPending ? 'Retrieving…' : 'Retrieve'}
+            </Button>
+          )}
+        </div>
+      )}
 
       <Outlet context={{ championship, eventId: eventId!, canManage } satisfies EventCtx} />
     </div>

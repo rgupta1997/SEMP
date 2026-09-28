@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Trash2 } from 'lucide-react';
+import { ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDate } from '../../lib/hooks';
@@ -41,7 +42,10 @@ function AddOrganiserModal({ eventId, roleId, assignedIds, onClose }:
 }
 
 export function EventOrganisersPage() {
-  const { eventId } = useEvent();
+  const { championship, eventId } = useEvent();
+  // Refused by the server too; disabled here so nobody picks people first.
+  const archived = !!championship.archived_at;
+  const archivedTitle = archived ? ARCHIVED_READ_ONLY_MESSAGE : undefined;
   const { data: roles = [], isLoading } = useApi<RoleAssignment[]>(`/championships/${eventId}/roles`);
   const { data: allRoles = [] } = useApi<any[]>('/roles');
   const [adding, setAdding] = useState(false);
@@ -63,7 +67,7 @@ export function EventOrganisersPage() {
           <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">Organising team</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400">{organisers.length} organiser{organisers.length === 1 ? '' : 's'} on this championship.</p>
         </div>
-        <Button onClick={() => setAdding(true)} disabled={!organiserRoleId}>+ Add team members</Button>
+        <Button onClick={() => setAdding(true)} disabled={!organiserRoleId || archived} title={archivedTitle}>+ Add team members</Button>
       </div>
 
       {organisers.length === 0 ? (
@@ -105,9 +109,9 @@ export function EventOrganisersPage() {
                               removeMut.mutate(r.id);
                             }
                           }}
-                          disabled={removeMut.isPending}
+                          disabled={removeMut.isPending || archived}
                           aria-label={`Remove ${u?.name}`}
-                          title="Remove"
+                          title={archivedTitle ?? 'Remove'}
                         >
                           <Trash2 size={14} />
                         </Button>

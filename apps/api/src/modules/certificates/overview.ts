@@ -36,7 +36,8 @@ const pct = (now: number, before: number): number | null =>
  */
 export async function certificatePendingByEvent(prisma: Prisma, organizationId: string) {
   const hosted = await prisma.championships.findMany({
-    where: { host_organization_id: organizationId },
+    // Archived events take no new certificates, so they are not offered to generate for.
+    where: { host_organization_id: organizationId, archived_at: null },
     select: { id: true, name: true },
     orderBy: { start_date: 'desc' },
   });

@@ -10,7 +10,7 @@ import { InvitePanel } from '../../components/InvitePanel';
 const TABS = ['tournaments', 'sports', 'venues', 'invite'] as const;
 
 export function EventSetupPage() {
-  const { eventId } = useEvent();
+  const { championship, eventId } = useEvent();
   const [params] = useSearchParams();
   // Deep links (e.g. the dashboard checklist) can target a tab with ?tab=invite.
   const wanted = params.get('tab');
@@ -35,7 +35,7 @@ export function EventSetupPage() {
         {tab === 'tournaments' && <TournamentsTab eventId={eventId} onCreated={() => setTab('venues')} />}
         {tab === 'venues' && <VenuesTab eventId={eventId} />}
         {tab === 'sports' && <SportsTab eventId={eventId} />}
-        {tab === 'invite' && <InvitePanel eventId={eventId} />}
+        {tab === 'invite' && <InvitePanel eventId={eventId} readOnly={!!championship.archived_at} />}
       </div>
     </div>
   );
