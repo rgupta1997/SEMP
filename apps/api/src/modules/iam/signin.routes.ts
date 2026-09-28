@@ -116,7 +116,9 @@ export function makeSignInRouter(prisma: Prisma): Router {
 
     const accounts = await accountsForSubject(prisma, subject);
 
-    if (purpose === 'signup' && !isPhone(subject) && accounts.length > 0) {
+    // verify_email is the sign-up flow's email code, so a taken address is refused
+    // here too - before a code is sent, not after both have been entered.
+    if ((purpose === 'signup' || purpose === 'verify_email') && !isPhone(subject) && accounts.length > 0) {
       throw new ConflictError('An account with this email already exists - sign in instead');
     }
     if (purpose === 'signup' && isPhone(subject) && !(await phoneHasCapacity(prisma, subject.phone))) {
