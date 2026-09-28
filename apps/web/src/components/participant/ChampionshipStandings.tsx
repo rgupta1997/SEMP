@@ -49,8 +49,11 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
   const [sportId, setSportId] = useState('');
   // Which org's row is expanded to show its per-event points breakdown.
   const [expanded, setExpanded] = useState<string | null>(null);
-  // Olympic-style medal tally (primary) vs the P/W/D/L points table - same rows, two views.
-  const [view, setView] = useState<'points' | 'medals'>('medals');
+  // The P/W/D/L points table (primary) vs the Olympic-style medal tally - same rows,
+  // two views. Points lead: the championship is DECIDED on points, and the medal
+  // tally is a second reading of the same table, so opening on the tally put the
+  // answer to "who is winning" one tap behind a summary of it.
+  const [view, setView] = useState<'points' | 'medals'>('points');
 
   const tournamentOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -106,7 +109,7 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
 
       {!isLoading && rows.length > 0 && (
         <Tabs active={view} onChange={(v) => setView(v as 'points' | 'medals')}
-          tabs={[{ id: 'medals', label: 'Medal tally' }, { id: 'points', label: 'Points table' }]} />
+          tabs={[{ id: 'points', label: 'Points table' }, { id: 'medals', label: 'Medal tally' }]} />
       )}
 
       {isLoading ? <Spinner /> : rows.length === 0 ? (

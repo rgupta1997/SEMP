@@ -2,6 +2,10 @@ import { authToken } from './browserStorage';
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:4000') + '/api';
 
+/** The API origin, for the few callers that must bypass `api()` - a keepalive
+ *  PATCH fired from `pagehide`, which has to build its own fetch. */
+export const API_BASE = BASE;
+
 export const tokenStore = authToken;
 
 export class ApiError extends Error {

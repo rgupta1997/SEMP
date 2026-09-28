@@ -15,11 +15,13 @@ import {
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, formatClock, isCricketSport, isKernelSport, isRacquetSport, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
+import { rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
 import type { TieSpec, EventSpec, ScoringMode, KernelState, Pairing, RallyLog, Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer } from '../../features/scoring/RacquetDeck';
 import { CricketDeck } from '../../features/scoring/CricketDeck';
 import { TeamDeck } from '../../features/scoring/TeamDeck';
+import { AUTOSAVE_MS, useLiveSave, useSaveStatus, useUnloadGuard, useDraftAutosave } from '../../features/scoring/useLiveSave';
+import { flushFixture, getStatus, readOutbox, type OutboxEntry } from '../../features/scoring/liveOutbox';
 
 // Walkover is handled separately (it needs a winner + reason); these are the plain
 // status-only secondary actions. Postpone is intentionally omitted here - it's done
@@ -60,7 +62,13 @@ export function MatchConsolePage() {
   const backLabel = BACK_LABELS.find(([re]) => re.test(back))?.[1] ?? 'Back';
   // Single fixture, authorized for the assigned official OR the championship host.
   const { data: fixture, isLoading } = useApi<any>(fixtureId ? `/fixtures/${fixtureId}/scoring` : null);
-  const { data: live } = useApi<{ live_state: any; live_log: any[] }>(fixtureId ? `/fixtures/${fixtureId}/live` : null);
+  const { data: serverLive } = useApi<{ live_state: any; live_log: any[] }>(fixtureId ? `/fixtures/${fixtureId}/live` : null);
+  // Anything this browser scored but never got acknowledged is replayed over the
+  // server's snapshot before a single deck sees it - see useRecoveredLive below.
+  const { live, recoveredAt } = useRecoveredLive(fixtureId, serverLive);
+  // A refresh, a close or a typed URL with a tap still unsent gets the browser's
+  // own "leave site?" dialog in front of it, and a keepalive PATCH on the way out.
+  useUnloadGuard();
 
   /**
    * SCORING FOCUS: the console gets the whole screen, and nothing follows it.
@@ -112,7 +120,37 @@ export function MatchConsolePage() {
     evId ? `/championships/${evId}/fixtures` : null,
     evId ? `/championships/${evId}/standings` : null,
   ];
-  const done = () => navigate(back);
+  /**
+   * LEAVING THE CONSOLE WITH SOMETHING UNSENT.
+   *
+   * `beforeunload` covers a refresh, a close or a typed URL; walking back to the
+   * results list is an in-app navigation and fires no such event. Nothing is
+   * actually lost either way - the outbox is on disk and the sender keeps retrying
+   * from wherever the official goes next - but "the last four points never saved"
+   * is not something to find out about later, so it is said here, with the offer to
+   * wait for it to land.
+   *
+   * It never refuses to leave. An official whose venue has no signal would be
+   * trapped on a page by a guard that insisted, and their scoring is safe on the
+   * device regardless; the honest thing is to say where it is and let them go.
+   */
+  const done = async () => {
+    if (fixtureId && getStatus(fixtureId).unsaved) {
+      const ok = await confirmDialog({
+        title: 'Scoring not saved yet',
+        tone: 'primary',
+        confirmLabel: 'Save and leave',
+        cancelLabel: 'Stay here',
+        message: 'Some of this match hasn’t reached the server yet. It’s stored on this device and will keep being sent in the background, but you can wait for it now.',
+      });
+      if (!ok) return;
+      const landed = await flushFixture(fixtureId);
+      if (!landed) {
+        toast.error('Still can’t reach the server. Your scoring is saved on this device and will be sent automatically - reopen this match to check.');
+      }
+    }
+    navigate(back);
+  };
 
   // The championship must have started before any match can be recorded. Mirror the
   // server rule in the UI so the official sees *why* - and can't waste effort scoring.
@@ -136,17 +174,23 @@ export function MatchConsolePage() {
           <span className="min-w-0 flex-1 truncate text-slate-500 dark:text-slate-400">
             {disciplineLabel(fixture)}{fixture.round ? ` · ${fixture.round}` : ''}
           </span>
+          <SaveIndicator fixtureId={fixtureId!} compact />
           <StatusBadge status={fixture.status} />
         </div>
       ) : (
         <>
-          <div className="mb-1 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-400">
-            <span>{disciplineLabel(fixture)} {fixture.round ? `· ${fixture.round}` : ''}</span>
-            <StatusBadge status={fixture.status} />
+          <div className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <span className="min-w-0 truncate">{disciplineLabel(fixture)} {fixture.round ? `· ${fixture.round}` : ''}</span>
+            <span className="flex shrink-0 items-center gap-2">
+              <SaveIndicator fixtureId={fixtureId!} />
+              <StatusBadge status={fixture.status} />
+            </span>
           </div>
           <div className="mb-4 text-sm text-slate-500 dark:text-slate-400">{eventLabel(fixture)} · {venueLabel(fixture)} · {fmtDateTime(fixture.scheduled_at)}</div>
         </>
       )}
+
+      {recoveredAt !== null && <RecoveredBanner at={recoveredAt} fixtureId={fixtureId!} />}
 
       {/* A result exists, so the sign-off that makes it official is the next thing
           to do - no longer also conditioned on the layout, which is what hid it. */}
@@ -249,6 +293,144 @@ function TabBar<T extends string>({ value, onChange, options, label, compact, co
         ))}
       </div>
     </div>
+  );
+}
+
+/* ----------------------------- Crash recovery ----------------------------- */
+/**
+ * WHAT THE CONSOLE OPENS ONTO.
+ *
+ * Normally the server's snapshot, which is the only thing this page used to read.
+ * But the whole point of the outbox is that the server's snapshot can be BEHIND
+ * what the official actually scored: they tapped, the network was gone, the phone
+ * was locked, the tab was reloaded. Seeding the decks from the server in that state
+ * is how a half of football vanished - the taps were on disk the entire time, and
+ * nothing looked at them.
+ *
+ * So the staged body is replayed over the server's snapshot before any deck seeds
+ * from it. Every console hydrates from this one object, which is why one overlay
+ * here covers cricket, racquet, team, tie and event scoring alike.
+ *
+ * Read ONCE, into a ref, and never re-read: the sender is flushing the same entry
+ * in parallel, and if this re-ran after the flush cleared it, the overlay would
+ * fall back to a server response that may have been fetched before the flush
+ * landed - which is the original bug, reintroduced by the fix for it.
+ */
+function useRecoveredLive(fixtureId: string | undefined, server?: { live_state: any; live_log: any[] }) {
+  const staged = useRef<OutboxEntry | null | undefined>(undefined);
+  if (staged.current === undefined) staged.current = fixtureId ? readOutbox(fixtureId) : null;
+
+  return useMemo(() => {
+    const entry = staged.current;
+    const body = entry?.body as { live_state?: any; live_log?: any[] } | undefined;
+    // A status-only entry (a walkover, say) carries no scoring to restore.
+    if (!body || (body.live_state === undefined && body.live_log === undefined)) {
+      return { live: server, recoveredAt: null as number | null };
+    }
+    return {
+      live: {
+        live_state: body.live_state ?? server?.live_state ?? {},
+        live_log: body.live_log ?? server?.live_log ?? [],
+      },
+      recoveredAt: entry!.at,
+    };
+  }, [server]);
+}
+
+/** "Recovered 3 min ago" - relative, because the absolute time means nothing here. */
+function agoLabel(at: number): string {
+  const secs = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (secs < 60) return 'moments ago';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+}
+
+/**
+ * Said once, on the way in, when the console had to reach into the outbox to
+ * rebuild the match. The official needs to know that what they are looking at is
+ * their own unsent scoring rather than the server's record of it - if the two ever
+ * disagree (a second device scored the same match in between) this line is the only
+ * warning they will get before signing off on the wrong one.
+ */
+function RecoveredBanner({ at, fixtureId }: { at: number; fixtureId: string }) {
+  const status = useSaveStatus(fixtureId);
+  const [dismissed, setDismissed] = useState(false);
+  // Once the recovered scoring has landed there is nothing left to warn about, so
+  // the banner retires itself - and LATCHES, because `unsaved` goes true again on
+  // the very next tap and a warning about a past recovery must not come back with
+  // it. This is why it is a state that only ever moves one way rather than a plain
+  // read of the current status.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (!status.unsaved && status.savedAt !== null) setSettled(true);
+  }, [status.unsaved, status.savedAt]);
+  if (dismissed || settled) return null;
+  return (
+    <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+      <span aria-hidden>⟳</span>
+      <span className="flex-1">
+        <b>Unsaved scoring restored.</b> Changes made {agoLabel(at)} never reached the server - they’ve been
+        put back on screen and are being saved now. Don’t re-enter them.
+      </span>
+      <button type="button" className="shrink-0 font-semibold underline" onClick={() => setDismissed(true)}>Dismiss</button>
+    </div>
+  );
+}
+
+/* ----------------------------- Save indicator ----------------------------- */
+/**
+ * THE ONE PLACE THAT SAYS WHETHER THE MATCH IS SAFE.
+ *
+ * An official scoring a live game cannot be asked to infer it from an absent error
+ * toast, and a browser's "leave site?" dialog says only that something might be
+ * lost, never what. So the header carries the answer at all times: saved and when,
+ * saving, or unsaved with a way to try again right now.
+ *
+ * It re-renders on a one-second tick only while something is outstanding, so the
+ * "unsaved for 40s" count keeps moving without the console repainting all match.
+ */
+function SaveIndicator({ fixtureId, compact }: { fixtureId: string; compact?: boolean }) {
+  const status = useSaveStatus(fixtureId);
+  const [, tick] = useState(0);
+  const live = status.unsaved || status.sending;
+  useEffect(() => {
+    if (!live) return;
+    const id = window.setInterval(() => tick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [live]);
+
+  if (!status.unsaved && status.savedAt === null && !status.storageFailed) return null;
+
+  const base = 'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold';
+  if (status.unsaved) {
+    const stuck = status.failed || (status.unsavedSince !== null && Date.now() - status.unsavedSince > 15_000);
+    return (
+      <span className={cn(base, stuck
+        ? 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
+        : 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200')}>
+        <span className={cn('h-1.5 w-1.5 rounded-full', stuck ? 'bg-red-500' : 'animate-pulse bg-amber-500')} />
+        {stuck ? 'Not saved' : 'Saving…'}
+        {stuck && (
+          <button type="button" className="underline" onClick={() => { void flushFixture(fixtureId); }}>Retry</button>
+        )}
+      </span>
+    );
+  }
+  if (status.storageFailed) {
+    return (
+      <span className={cn(base, 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200')}
+        title="This browser refused to keep a local backup (private mode, or storage full). Scoring still saves to the server, but a crash before it lands would lose the last tap.">
+        No offline backup
+      </span>
+    );
+  }
+  return (
+    <span className={cn(base, 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300')}>
+      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+      {compact ? 'Saved' : `Saved ${new Date(status.savedAt!).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`}
+    </span>
   );
 }
 
@@ -848,7 +1030,7 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
     }
   }, [live]);
 
-  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
+  const persist = useLiveSave(fixtureId, invalidate);
   const format = resolved.format;
 
   const pairing: Pairing | undefined = useMemo(() => {
@@ -880,7 +1062,13 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
       ? null
       : env.winner === 'A' ? fixture.home_team_id : fixture.away_team_id;
     setStatus(st);
-    setBusy(true);
+    // A SCORE TAP NEVER FREEZES THE PAD. `busy` disables every button on the deck,
+    // which is right while a sign-off is being written - that one must not be
+    // double-submitted - and exactly wrong for an ordinary tap: on a slow
+    // connection it locked the scorer out of the pad between every single point.
+    // The outbox behind `persist` has already made the tap durable by the time the
+    // request leaves, so there is nothing left for the pad to wait on.
+    if (done) setBusy(true);
     persist.mutate(
       {
         live_state: {
@@ -898,6 +1086,8 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
       },
       {
         onSuccess: () => { setBusy(false); after?.(); },
+        // Releasing the button and saying so is ALL this does - the tap is still in
+        // the outbox, and the retry loop will keep trying until it lands.
         onError: (e: any) => { setBusy(false); toast.error(e.message); },
       },
     );
@@ -964,7 +1154,7 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
     }
   }, [live]);
 
-  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
+  const persist = useLiveSave(fixtureId, invalidate);
   const format = resolved.format;
 
   // The ladder returns the union; only a cricket format can drive this console. A
@@ -988,7 +1178,13 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
       : state.winner === 'A' ? fixture.home_team_id : fixture.away_team_id;
     const headline = cricketHeadline(state);
     setStatus(st);
-    setBusy(true);
+    // A SCORE TAP NEVER FREEZES THE PAD. `busy` disables every button on the deck,
+    // which is right while a sign-off is being written - that one must not be
+    // double-submitted - and exactly wrong for an ordinary tap: on a slow
+    // connection it locked the scorer out of the pad between every single point.
+    // The outbox behind `persist` has already made the tap durable by the time the
+    // request leaves, so there is nothing left for the pad to wait on.
+    if (done) setBusy(true);
     persist.mutate(
       {
         live_state: {
@@ -1007,6 +1203,8 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
       },
       {
         onSuccess: () => { setBusy(false); after?.(); },
+        // Releasing the button and saying so is ALL this does - the tap is still in
+        // the outbox, and the retry loop will keep trying until it lands.
         onError: (e: any) => { setBusy(false); toast.error(e.message); },
       },
     );
@@ -1111,7 +1309,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
     if (!seeded.current && live) { setLog(hydrateRally(live.live_state)); seeded.current = true; }
   }, [live]);
 
-  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
+  const persist = useLiveSave(fixtureId, invalidate);
   const format = resolved.format;
 
   // Full rosters, not just two: an invasion sport attributes to eleven people, so
@@ -1121,11 +1319,40 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
     B: rosterPeople(awayTeam(fixture)).map((x) => ({ id: x.id, name: x.name })),
   }), [fixture]);
 
+  /**
+   * A RUNNING CLOCK KEEPS SAYING SO.
+   *
+   * Between kick-off and the first goal a football console can go ten minutes
+   * without an event, which means ten minutes in which the ONLY record that the
+   * half is under way is the single `clockStart` written at the whistle. If that
+   * one write is the one that didn't land, the clock is not merely wrong on reload
+   * - the match never started. Re-sending every ten seconds costs one small request
+   * a minute and removes the single point of failure, and it keeps the stored
+   * reading (see clockSnapshot) fresh for the spectator views that read it.
+   *
+   * Explicitly a background save: no spinner, no disabled pad, nothing on screen.
+   * These hooks sit above the `!format` return, because hooks cannot be conditional;
+   * the interval body checks for it instead.
+   */
+  const logRef = useRef(log);
+  logRef.current = log;
+  const saveRef = useRef<((l: RallyLog, st: KernelState, done: boolean, after?: () => void, quiet?: boolean) => void) | null>(null);
+  const clockRunning = clockReading(log, 0, Date.now()).running;
+  const locked = fixture.scorecard_status === 'locked';
+  useEffect(() => {
+    if (!clockRunning || locked || !format) return;
+    const id = window.setInterval(() => {
+      const l = logRef.current;
+      saveRef.current?.(l, foldRally(format, l, 'A').state, false, undefined, true);
+    }, AUTOSAVE_MS);
+    return () => window.clearInterval(id);
+  }, [clockRunning, locked, format]);
+
   if (!format) {
     return <EmptyState title="No scoring format" description="This sport has no kernel format configured." />;
   }
 
-  const save = (nextLog: RallyLog, state: KernelState, done: boolean, after?: () => void) => {
+  const save = (nextLog: RallyLog, state: KernelState, done: boolean, after?: () => void, quiet = false) => {
     const env = resultEnvelope(format, state);
     // Only the KERNEL ends a match - the same guard the racquet console keeps, so a
     // sign-off part-way through cannot publish a 0-0 with no winner.
@@ -1137,12 +1364,22 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       ? null
       : env.winner === 'A' ? fixture.home_team_id : fixture.away_team_id;
     setStatus(st);
-    setBusy(true);
+    // A SCORE TAP NEVER FREEZES THE PAD. `busy` disables every button on the deck,
+    // which is right while a sign-off is being written - that one must not be
+    // double-submitted - and exactly wrong for an ordinary tap: on a slow
+    // connection it locked the scorer out of the pad between every single point.
+    // The outbox behind `persist` has already made the tap durable by the time the
+    // request leaves, so there is nothing left for the pad to wait on.
+    if (done) setBusy(true);
     persist.mutate(
       {
         live_state: {
           ...(live?.live_state ?? {}),
           rally: nextLog,
+          // The clock, written down as a field rather than left to be folded out of
+          // the log. See clockSnapshot - the log stays authoritative, this is for
+          // the readers that have no log to fold.
+          clock: clockSnapshot(nextLog),
           format: (live?.live_state as any)?.format ?? format,
         },
         // The attributed actions ARE the timeline here, and what the fact writer
@@ -1155,11 +1392,15 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
         winner_team_id,
       },
       {
+        background: quiet,
         onSuccess: () => { setBusy(false); after?.(); },
-        onError: (e: any) => { setBusy(false); toast.error(e.message); },
+        // Releasing the button and saying so is ALL this does - the tap is still in
+        // the outbox, and the retry loop will keep trying until it lands.
+        onError: quiet ? undefined : (e: any) => { setBusy(false); toast.error(e.message); },
       },
     );
   };
+  saveRef.current = save;
 
   return (
     <TeamDeck
@@ -1189,6 +1430,31 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       onSignOff={(nextLog, state) => save(nextLog, state, true)}
     />
   );
+}
+
+/**
+ * THE MATCH CLOCK, AS A STORED FIELD.
+ *
+ * The reading is DERIVED, and stays derived: `clockStart` / `clockPause` /
+ * `clockAdjust` in the rally log, plus the wall clock, reconstruct the time exactly
+ * on any device at any later moment. That is why closing the tab mid-half has never
+ * needed a stored number to get the clock back - what it needed was for those three
+ * events to actually reach the database, which before the outbox they often didn't.
+ *
+ * This writes the reading down anyway, for every reader that has no log to fold: the
+ * spectator ticker, the public championship page, anything looking at live_state
+ * directly, and an official checking whether the half really is recorded as running.
+ * `at` is what keeps it honest - a running clock read a minute later is
+ * `elapsedMs + (now - at)`, never `elapsedMs`.
+ *
+ * Nothing hydrates from this. The log remains the only source of truth.
+ */
+function clockSnapshot(log: RallyLog): { elapsedMs: number; running: boolean; at: string } | null {
+  // fullMs only decides overrun/stoppage, which are presentation and are recomputed
+  // by whoever renders this against the format they resolve - so 0 is correct here.
+  const r = clockReading(log, 0, Date.now());
+  if (!r.started) return null;
+  return { elapsedMs: r.elapsedMs, running: r.running, at: new Date().toISOString() };
 }
 
 /**
@@ -1257,7 +1523,7 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
     }
   }, [live]);
 
-  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
+  const persist = useLiveSave(fixtureId, invalidate);
 
   // `opts.winner` (when the key is present, even if null) overrides the derived
   // winner - used by the cricket quick-result panel to declare a winner directly.
@@ -1537,7 +1803,7 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
     if (!seeded.current && live) { setState(hydrateTie(live.live_state?.tie, spec)); seeded.current = true; }
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- spec is stable per fixture
 
-  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
+  const persist = useLiveSave(fixtureId, invalidate);
 
   // Public ticker log: one line per decided rubber.
   const buildLog = (s: TieState): LogEntry[] =>
@@ -1795,11 +2061,16 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   const [places, setPlaces] = useState<Record<string, number>>(() => seed(live));
   const seeded = useRef(false);
   useEffect(() => { if (!seeded.current && live) { seeded.current = true; setPlaces(seed(live)); } }, [live]);
+  // Only an OFFICIAL'S edit arms the autosave. The seeding above changes `places`
+  // too, and autosaving that would write the fixture's own ranking back to it the
+  // moment anybody so much as opened the console.
+  const [touched, setTouched] = useState(false);
 
-  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
-  const setPlace = (orgId: string, place: number | null) => setPlaces((p) => {
-    const n = { ...p }; if (place) n[orgId] = place; else delete n[orgId]; return n;
-  });
+  const persist = useLiveSave(fixtureId, invalidate);
+  const setPlace = (orgId: string, place: number | null) => {
+    setTouched(true);
+    setPlaces((p) => { const n = { ...p }; if (place) n[orgId] = place; else delete n[orgId]; return n; });
+  };
   // Championship points for an org. Participation is a consolation floor, NOT a top-up:
   // a ranked org earns its place points (10/7/3/…), OR - if it placed below the configured
   // places (0 points) - just the participation point. Unranked orgs score nothing.
@@ -1813,7 +2084,7 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   // Persist the ranking. `eventStandings` is the self-contained per-org contribution
   // (points + medals) the standings service reads - so events feed the championship table
   // without the server needing the event spec. `complete` signs the event off.
-  const persistRanking = (complete: boolean) => {
+  const persistRanking = (complete: boolean, quiet = false) => {
     const rows = orgs.map((o) => ({ orgId: o.id, org: o.name, place: places[o.id] ?? null, points: pointsFor(o.id) }));
     // Drops any detailed per-athlete data this fixture was PREVIOUSLY scored
     // with - a stale `event` key here is what let derive.ts's two medal paths
@@ -1831,10 +2102,21 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
         live_state,
         status: complete ? 'completed' : fixture.status,
       },
-      { onSuccess: () => toast.success(complete ? 'Event signed off' : 'Ranking saved (not in standings yet)'), onError: (e: any) => toast.error(e.message) },
+      {
+        background: quiet,
+        onSuccess: quiet ? undefined : () => toast.success(complete ? 'Event signed off' : 'Ranking saved (not in standings yet)'),
+        onError: quiet ? undefined : (e: any) => toast.error(e.message),
+      },
     );
   };
   const save = () => persistRanking(false);
+  // A PLACE TYPED IS A PLACE SAVED. Nothing here reached the server until somebody
+  // found the Save button, so a whole event's ranking lived in one tab's memory -
+  // the single biggest way scoring was lost, and one no amount of retrying a
+  // request nobody made could have caught. Two seconds after the last change the
+  // draft goes into the outbox with everything else. Quietly: no toast, no spinner,
+  // no disabled button. The official should never notice it happening.
+  useDraftAutosave(places, () => persistRanking(false, true), touched);
 
   const n = orgs.length;
   const ranked = orgs
@@ -1943,6 +2225,9 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
       ? { participants: entrants.map(entrantRow) }
       : hydrated);
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
+  // Armed by the first mark an official types, never by the seeding above - see the
+  // matching comment in EventRankingConsole.
+  const [touched, setTouched] = useState(false);
 
   // A late registration folds in automatically, matched by phone (the same
   // handle resolveFixtureParticipants uses at lock time) - never by hand.
@@ -1982,29 +2267,49 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const orgs = (parts?.organizations ?? [])
     .map((o) => ({ id: o.org?.id ?? o.orgId, name: o.org?.name ?? 'Unaffiliated' }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  const patchP = (id: string, patch: Partial<ParticipantResult>) => setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+  const patchP = (id: string, patch: Partial<ParticipantResult>) => {
+    setTouched(true);
+    setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+  };
   const setOrg = (id: string, orgId: string) => patchP(id, { orgId: orgId || null, org: orgs.find((o) => o.id === orgId)?.name ?? null });
   void setOrg; // dead code - see comment above
 
-  const persist = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
-  const setMark = (id: string, key: string, n: number | null) => setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, marks: { ...p.marks, [key]: n } } : p)) }));
+  const persist = useLiveSave(fixtureId, invalidate);
+  const setMark = (id: string, key: string, n: number | null) => {
+    setTouched(true);
+    setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, marks: { ...p.marks, [key]: n } } : p)) }));
+  };
 
   // `eventStandings` is the per-org contribution (points + medals from each sub-event's
   // top three) the standings service reads, so detailed event results feed the
   // championship table + medal tally too. `complete` signs the event off.
-  const persistEvent = (complete: boolean) => {
+  const persistEvent = (complete: boolean, quiet = false) => {
     // Drops any "Team ranking" org-placement data - see persistRanking's matching
     // comment on why a stale key here would double up on medals.
     const { eventRanking: _staleSimple, ...restLiveState } = (live?.live_state ?? {}) as Record<string, unknown>;
     return persist.mutate(
       {
         live_state: { ...restLiveState, event: state, eventStandings: detailedContributions(spec, state) },
-        status: complete ? 'completed' : (fixture.status === 'scheduled' ? 'live' : fixture.status),
+        // AN AUTOSAVE MOVES DATA, NOT THE MATCH. Saving by hand takes a scheduled
+        // event live, which is right - somebody deliberately recorded a result. Two
+        // seconds after a keystroke is not that, and it would fire the "match is now
+        // live" notification at every entrant because an official opened a console
+        // and typed one digit. The draft is kept; the status is the official's call.
+        status: complete ? 'completed' : (!quiet && fixture.status === 'scheduled' ? 'live' : fixture.status),
       },
-      { onSuccess: () => toast.success(complete ? 'Event signed off' : 'Results saved'), onError: (e: any) => toast.error(e.message) },
+      {
+        background: quiet,
+        onSuccess: quiet ? undefined : () => toast.success(complete ? 'Event signed off' : 'Results saved'),
+        onError: quiet ? undefined : (e: any) => toast.error(e.message),
+      },
     );
   };
   const save = () => persistEvent(false);
+  // Forty swimmers' times typed into React state and nothing on the server until
+  // somebody found Save - the worst of the loss this whole change is about. Two
+  // seconds after typing stops the draft joins everything else in the outbox,
+  // silently: no toast, no spinner, no button greying out mid-entry.
+  useDraftAutosave(state, () => persistEvent(false, true), touched);
 
   const agg = aggregateEvent(spec, state);
   const blocks = subEventResults(spec, state);
@@ -2593,7 +2898,7 @@ function CricketManualResult({ fixture, fixtureId, live, invalidate, onDone }:
     setRB(String(s.runsB ?? 0)); setWB(String(s.wktB ?? 0)); setOB(oversStr(s.ballsB ?? 0));
   }, [live]);
 
-  const save = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
+  const save = useLiveSave(fixtureId, invalidate);
 
   const num = (s: string) => Math.max(0, Math.floor(Number(s) || 0));
   const runsA = num(rA), runsB = num(rB);
