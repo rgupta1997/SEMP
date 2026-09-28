@@ -1,7 +1,8 @@
 import type { RequestHandler } from 'express';
-import { ARCHIVE_RETENTION_DAYS, ARCHIVED_READ_ONLY_MESSAGE, type ChampionshipRemovalMode } from '@semp/shared';
+import { ARCHIVE_RETENTION_DAYS, ARCHIVED_READ_ONLY_MESSAGE, ROLE_CODES, roleWhereByCode, type ChampionshipRemovalMode } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
-import { BusinessRuleError } from '../../shared/errors.js';
+import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
+import { hostOrgManages } from './manage-access.js';
 
 // Removing a championship: archive once it has results, delete only while it has none.
 //
@@ -125,11 +126,32 @@ export function blockArchivedWritesVia(
   prisma: Prisma,
 ): RequestHandler {
   return (req, _res, next) => {
-    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
     const id = req.params.id;
-    if (!id || !UUID.test(id) || opts.allow?.test(req.path)) return next();
-    championshipOf(id).then((championshipId) => assertNotArchived(prisma, championshipId)).then(() => next(), next);
+    if (!id || !UUID.test(id)) return next();
+    const reading = req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS';
+    (async () => {
+      const championshipId = await championshipOf(id);
+      if (!championshipId) return;
+      const champ = await prisma.championships.findUnique({ where: { id: championshipId }, select: { archived_at: true } });
+      if (!champ?.archived_at) return;
+      // Archived: it belongs to its host alone. Anyone else gets the same 404 as an
+      // event that does not exist, whatever they were trying to do.
+      const user = req.user;
+      if (!user?.isSuperAdmin && !(user && await managesChampionship(prisma, user.id, championshipId))) {
+        throw new NotFoundError('Championship');
+      }
+      if (!reading && !opts.allow?.test(req.path)) throw new BusinessRuleError(ARCHIVED_READ_ONLY_MESSAGE);
+    })().then(() => next(), next);
   };
+}
+
+/** Organiser on this event, or holds event authority in the organisation hosting it. */
+async function managesChampionship(prisma: Prisma, userId: string, championshipId: string): Promise<boolean> {
+  const organiser = await prisma.user_championship_roles.findFirst({
+    where: { user_id: userId, championship_id: championshipId, roles: roleWhereByCode(ROLE_CODES.organiser) },
+    select: { id: true },
+  });
+  return !!organiser || hostOrgManages(prisma, userId, championshipId);
 }
 
 /** Every write to a fixture - scoring, the live console, results, lock and unlock. */

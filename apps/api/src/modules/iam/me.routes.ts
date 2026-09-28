@@ -183,7 +183,9 @@ export function makeMeRouter(prisma: Prisma): Router {
           select: {
             sports: { select: { id: true, name: true, icon: true } },
             organizations: { select: { id: true, name: true, short_name: true } },
+            // Archived events leave My Game's championship cards along with the event.
             team_entries: {
+              where: { championships: { archived_at: null } },
               select: {
                 championships: { select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true } },
               },
@@ -238,6 +240,7 @@ export function makeMeRouter(prisma: Prisma): Router {
             sports: true,
             organizations: { select: { id: true, name: true, short_name: true } },
             team_entries: {
+              where: { championships: { archived_at: null } },
               include: {
                 championships: { select: { id: true, name: true, slug: true, status: true } },
                 tournament_disciplines: { include: { disciplines: true, tournament_sports: { include: { tournaments: { select: { id: true, name: true } } } } } },
@@ -338,8 +341,9 @@ export function makeMeRouter(prisma: Prisma): Router {
     const rows = await prisma.fixtures.findMany({
       where: {
         official_id: req.user!.id,
+        // An archived event's matches leave the official's list with the event.
         tournament_disciplines: {
-          tournament_sports: { tournaments: { championship_id: { in: eventIds } } },
+          tournament_sports: { tournaments: { championship_id: { in: eventIds }, championships: { archived_at: null } } },
         },
       },
       include: {
@@ -490,16 +494,19 @@ export function makeMeRouter(prisma: Prisma): Router {
     if (ids.length === 0) { res.json(empty); return; }
 
     const mine = { OR: [{ home_team_id: { in: ids } }, { away_team_id: { in: ids } }] };
+    // Archived events drop out of what is still to do - next, live, owed scorecards.
+    // Played results stay: they are the player's history.
+    const activeEvent = { tournament_disciplines: { tournament_sports: { tournaments: { championships: { archived_at: null } } } } };
 
     const [upcoming, live, played, officiating] = await Promise.all([
       // Next fixture: the soonest one still to come. Unscheduled fixtures have a
       // null scheduled_at and are deliberately excluded - "next" has to have a when.
       prisma.fixtures.findMany({
-        where: { ...mine, status: 'scheduled', scheduled_at: { gte: new Date() } },
+        where: { ...mine, ...activeEvent, status: 'scheduled', scheduled_at: { gte: new Date() } },
         select: matchSelect, orderBy: { scheduled_at: 'asc' }, take: 1,
       }),
       prisma.fixtures.findMany({
-        where: { ...mine, status: 'live' },
+        where: { ...mine, ...activeEvent, status: 'live' },
         select: matchSelect, orderBy: { scheduled_at: 'asc' }, take: 4,
       }),
       prisma.fixtures.findMany({
@@ -511,6 +518,7 @@ export function makeMeRouter(prisma: Prisma): Router {
       // queue (availability, invitations) needs tables that do not exist yet.
       prisma.fixtures.findMany({
         where: {
+          ...activeEvent,
           official_id: req.user!.id,
           status: { in: ['live', 'completed'] },
           scorecard_status: { in: ['draft', 'submitted'] },
@@ -688,9 +696,10 @@ export function makeMeRouter(prisma: Prisma): Router {
 
     const championship = await prisma.championships.findUnique({
       where: { id: eventId },
-      select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true, description: true },
+      select: { id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true, description: true, archived_at: true },
     });
-    if (!championship) throw new NotFoundError('Championship');
+    // Archived: gone from a participant's view, the same as not existing.
+    if (!championship || championship.archived_at) throw new NotFoundError('Championship');
 
     const myTeamIdsInEvent = new Set(myMemberships.map((x) => x.m.team_id));
 

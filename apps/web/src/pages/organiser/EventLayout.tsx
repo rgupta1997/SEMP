@@ -5,7 +5,7 @@ import { useApi, useApiMutation, fmtDate, fmtDateRange } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { mayOpenSegment, parseEventSegment } from '../../lib/championship-nav';
-import { BackButton, Button, Spinner, StatusBadge, toast } from '../../components/ui';
+import { BackButton, Button, EmptyState, Spinner, StatusBadge, toast } from '../../components/ui';
 
 export interface EventDetail {
   id: string; name: string; slug: string; status: string;
@@ -50,7 +50,7 @@ export function EventLayout() {
   const canManage = canManageChampionship(eventId);
   const ws = useWorkspace();
   const roleCodes = ws.contexts.find((c) => c.id === eventId)?.roleCodes ?? [];
-  const { data: championship, isLoading } = useApi<EventDetail>(`/championships/${eventId}`);
+  const { data: championship, isLoading, error } = useApi<EventDetail>(`/championships/${eventId}`);
   const statusMut = useApiMutation(
     (status: string) => api('PATCH', `/championships/${eventId}/status`, { status }),
     // `/championships/mine` matters as much as the other two: it is what the SIDEBAR
@@ -65,6 +65,18 @@ export function EventLayout() {
     [`/championships/${eventId}`, `/championships/${eventId}/removal`, '/championships', '/championships/mine'],
   );
 
+  // A private event you are not in, an archived event you do not host, or one that
+  // is gone all answer 404 - said plainly rather than spinning forever.
+  if (!isLoading && !championship && error) {
+    return (
+      <EmptyState
+        icon="🔍"
+        title="Event not available"
+        description="This event doesn't exist, or you no longer have access to it."
+        action={<Button variant="outline" onClick={() => ws.leaveTo('/championships')}>Back to my events</Button>}
+      />
+    );
+  }
   if (isLoading || !championship) return <Spinner />;
 
   // A section reachable by URL that the sidebar does not offer is an access bug
