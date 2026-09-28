@@ -1,7 +1,7 @@
 import { orgIdPrefix } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
 
-/** The letters this organisation stamps on accounts it creates (AEO for "Aman enterprise org"). */
+/** The letters this organisation stamps on accounts it creates (EOS-AEO0001 for "Aman enterprise org"). */
 export async function orgIdPrefixFor(db: Db, organizationId: string): Promise<string> {
   const org = await db.organizations.findUnique({ where: { id: organizationId }, select: { name: true } });
   return orgIdPrefix(org?.name);

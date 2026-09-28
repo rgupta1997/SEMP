@@ -200,3 +200,11 @@ Applied with the same runner; all four statements succeeded. Verified in a
 rolled-back transaction: trigger attached, `AEO` and `STG` count independently,
 a plain insert gets `STG`, the number grows past `9999` to `10000`, and a
 non-letter prefix is refused. Counter table left empty afterwards.
+
+## Applied 2026-09-28 — `20260928000001_sportagon_id_eos_brand`
+
+Keeps the `EOS-` brand: IDs are now `EOS-STG0001` / `EOS-AEO0001`. Redefines
+`next_sportagon_ids()` only; counters untouched. Verified the same way, in a
+rolled-back transaction. One real account ("Aman knights", created minutes
+earlier) was issued a bare `STG0001` in the gap between the two migrations; it
+was renamed to `EOS-STG0001` by hand so every new-style ID carries the brand.

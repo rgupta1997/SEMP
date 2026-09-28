@@ -1,8 +1,9 @@
-// The Sportagon ID: three letters + a per-prefix counter (STG0001, AEO0042).
+// The Sportagon ID: EOS- + three letters + a per-prefix counter (EOS-STG0001, EOS-AEO0042).
 //
 // STG is for accounts nobody issued on an organisation's behalf - self sign-up and
-// every other path. It is also minted by the database trigger in
-// 20260928000000_sportagon_id_prefixes.sql, which cannot import this constant.
+// every other path. The string itself is built by next_sportagon_ids() in
+// 20260928000001_sportagon_id_eos_brand.sql, which cannot import these constants.
+export const EOS_ID_BRAND = 'EOS-';
 export const DEFAULT_ID_PREFIX = 'STG';
 
 // Joining words carry no identity: "Northfield Institute of Technology" is NIT, not NIO.
