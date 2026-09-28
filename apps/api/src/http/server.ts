@@ -51,6 +51,7 @@ import { makeNotificationsRouter } from '../modules/notifications/notifications.
 import { makeDemoRequestsRouter } from '../modules/marketing/demo-requests.routes.js';
 import { makeFeedbackRouter } from '../modules/marketing/feedback.routes.js';
 import { makeDemosRouter } from '../modules/demos/demos.routes.js';
+import { makePlatformSettingsRouter } from '../modules/platform/platform-settings.routes.js';
 import { makeBillingRouter } from '../modules/billing/billing.routes.js';
 import { applyDuePlanChanges } from '../modules/billing/subscription.service.js';
 import { BusinessRuleError } from '../shared/errors.js';
@@ -105,6 +106,9 @@ export function buildApp(prisma: Prisma) {
 
   // ----- Demo sandboxes - super-admin only (guards are inside the router) -----
   api.use('/demos', makeDemosRouter(prisma));
+
+  // ----- Platform switches (plan enforcement) - super-admin only, guards inside -----
+  api.use('/platform/settings', makePlatformSettingsRouter(prisma));
 
   // ----- "Me"-scoped read endpoints (resolved from the authenticated user) -----
   api.use('/', makeMeRouter(prisma));

@@ -402,11 +402,19 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     const drawId: string | null = req.body.tournament_discipline_id ?? null;
     if (drawId) {
       await assertDisciplineForTeam(prisma, drawId, entry.championship_id, team.sport_id);
+      // One team per draw per CONTINGENT - the entry's own unit, as on entering. Keyed
+      // on the organisation alone, a second department or campus of the same
+      // institution was told its institution already held the draw.
       const taken = await prisma.team_entries.findFirst({
-        where: { organization_id: team.organization_id, tournament_discipline_id: drawId, team_id: { not: team.id } },
+        where: {
+          organization_id: team.organization_id, org_unit_id: entry.org_unit_id ?? null,
+          tournament_discipline_id: drawId, team_id: { not: team.id },
+        },
         select: { id: true },
       });
-      if (taken) throw new BusinessRuleError('Your organization already has a team in this discipline draw');
+      if (taken) throw new BusinessRuleError(entry.org_unit_id
+        ? 'That campus or department already has a team in this discipline draw'
+        : 'Your organization already has a team in this discipline draw');
     }
     await prisma.team_entries.update({ where: { id: entry.id }, data: { tournament_discipline_id: drawId } });
     if (drawId) await checkRosterIncomplete(prisma, team.id, req.user!.id, drawId);
@@ -498,10 +506,12 @@ export function makeTeamsRouter(prisma: Prisma): Router {
         .map((e) => [e.id, e]),
     );
     // Reject duplicate draw entries against existing entries (one query) and within the batch.
+    // These are whole-organisation squads, so only another whole-organisation entry
+    // (org_unit_id null) occupies the draw - a department's or campus's does not.
     const dupKey = (t: { organization_id: string; championship_id: string; tournament_discipline_id: string }) =>
       `${t.organization_id}|${t.championship_id}|${t.tournament_discipline_id}`;
     const existing = await prisma.team_entries.findMany({
-      where: { OR: teams.map((t) => ({ organization_id: t.organization_id, championship_id: t.championship_id, tournament_discipline_id: t.tournament_discipline_id })) },
+      where: { org_unit_id: null, OR: teams.map((t) => ({ organization_id: t.organization_id, championship_id: t.championship_id, tournament_discipline_id: t.tournament_discipline_id })) },
       select: { organization_id: true, championship_id: true, tournament_discipline_id: true },
     });
     const seen = new Set(existing.map((e) => `${e.organization_id}|${e.championship_id}|${e.tournament_discipline_id}`));

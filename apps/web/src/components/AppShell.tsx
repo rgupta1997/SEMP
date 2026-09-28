@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   BadgeCheck, Compass, Flag, FlaskConical, Landmark, Layers, LayoutGrid, LayoutList, Lock,
-  Mail, Medal, Menu, MessageSquare, Moon, Plus, Sun, Trophy, Upload, User, Users, X,
+  Mail, Medal, Menu, MessageSquare, Moon, Plus, Sun, Trophy, Upload, User, Users, X, CreditCard,
   Zap,
 } from 'lucide-react';
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
@@ -58,6 +58,7 @@ function navFor(role: AppRole): NavGroup[] {
         { to: '/platform/demo-requests', label: 'Demo Requests', icon: <Mail size={16} /> },
         { to: '/platform/demos', label: 'Demo Sandboxes', icon: <FlaskConical size={16} /> },
         { to: '/platform/feedback', label: 'Feedback', icon: <MessageSquare size={16} /> },
+        { to: '/platform/plans', label: 'Plans & Billing', icon: <CreditCard size={16} /> },
       ],
     }];
   }

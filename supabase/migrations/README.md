@@ -208,3 +208,11 @@ Keeps the `EOS-` brand: IDs are now `EOS-STG0001` / `EOS-AEO0001`. Redefines
 rolled-back transaction. One real account ("Aman knights", created minutes
 earlier) was issued a bare `STG0001` in the gap between the two migrations; it
 was renamed to `EOS-STG0001` by hand so every new-style ID carries the brand.
+
+## Applied 2026-09-28 — `20260928000002_platform_settings`
+
+Adds `platform_settings` and seeds `plans_enforced = false`: until real payments
+exist, every organisation and person resolves to the top tier and the Billing tab
+is hidden. Saved plans and subscriptions are untouched; a super admin turns plans
+back on from Platform → Plans & Billing. Verified afterwards: the row reads
+`false`, and a `free` organisation ("Aman admin org") resolves to `max`.

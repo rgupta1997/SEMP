@@ -38,6 +38,8 @@ interface AssignedFixture {
 interface EntitlementSnapshot {
   org: { tier: string; capabilities: CapabilityKey[] };
   personal: { tier: string; capabilities: CapabilityKey[] };
+  /** False while a super admin has plans switched off platform-wide. */
+  plans_enforced?: boolean;
 }
 
 /** One row of GET /championships/mine - every event this person is involved in. */
@@ -303,5 +305,7 @@ export function useWorkspace() {
     landing: active ? landingFor(active, granted, navFacts) : '/home',
     loading: ent.isLoading,
     tiers: ent.data ? { org: ent.data.org.tier, personal: ent.data.personal.tier } : null,
+    // Unknown until loaded, and an older API omits it - both mean "enforced".
+    plansEnforced: ent.data?.plans_enforced ?? true,
   };
 }

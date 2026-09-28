@@ -2,6 +2,8 @@ import {
   granted,
   grantedCapabilities,
   CAPABILITIES,
+  PLANS_ENFORCED_SETTING,
+  UNENFORCED_TIER,
   type CapabilityKey,
   type Ladder,
   type Tier,
@@ -29,6 +31,42 @@ export interface EntitlementsPrisma {
       select: { personal_plan: true };
     }): Promise<{ personal_plan: Tier } | null>;
   };
+  /** Optional so test doubles need not model it; absent means plans are enforced. */
+  platform_settings?: {
+    findUnique(args: {
+      where: { key: string };
+      select: { value: true };
+    }): Promise<{ value: unknown } | null>;
+  };
+}
+
+// Every capability check asks this, so the answer is held briefly rather than read
+// per check. A flip therefore reaches other API instances within this window.
+const ENFORCEMENT_CACHE_MS = 15_000;
+let enforcementCache: { value: boolean; at: number } | null = null;
+
+/** Forget the cached switch - called by the route that flips it, so this instance sees it at once. */
+export function clearPlanEnforcementCache(): void {
+  enforcementCache = null;
+}
+
+/**
+ * Are plans enforced platform-wide? Only an explicit `false` turns them off: a
+ * missing row, a missing table or a failed read all mean "enforced", which is what
+ * the product did before the switch existed.
+ */
+export async function plansEnforced(prisma: EntitlementsPrisma): Promise<boolean> {
+  if (!prisma.platform_settings) return true;
+  if (enforcementCache && Date.now() - enforcementCache.at < ENFORCEMENT_CACHE_MS) return enforcementCache.value;
+  let value = true;
+  try {
+    const row = await prisma.platform_settings.findUnique({ where: { key: PLANS_ENFORCED_SETTING }, select: { value: true } });
+    value = row?.value !== false;
+  } catch {
+    value = true;
+  }
+  enforcementCache = { value, at: Date.now() };
+  return value;
 }
 
 /** Raised when a capability is missing. Carries the key so the API can name it. */
@@ -57,6 +95,7 @@ export async function orgTier(
   prisma: EntitlementsPrisma,
   organizationId: string,
 ): Promise<Tier> {
+  if (!(await plansEnforced(prisma))) return UNENFORCED_TIER;
   const row = await prisma.organizations.findUnique({
     where: { id: organizationId },
     select: { plan: true },
@@ -68,6 +107,7 @@ export async function personalTier(
   prisma: EntitlementsPrisma,
   userId: string,
 ): Promise<Tier> {
+  if (!(await plansEnforced(prisma))) return UNENFORCED_TIER;
   const row = await prisma.users.findUnique({
     where: { id: userId },
     select: { personal_plan: true },
@@ -91,7 +131,7 @@ export async function tierFor(
   // An org capability outside any org context is ungranted, not free-tier-granted:
   // 'free' is the correct answer because the free tier is what a caller with no
   // organisation can rely on, and create_event is deliberately available there.
-  if (!holder.organizationId) return 'free';
+  if (!holder.organizationId) return (await plansEnforced(prisma)) ? 'free' : UNENFORCED_TIER;
   return orgTier(prisma, holder.organizationId);
 }
 
@@ -124,14 +164,17 @@ export async function entitlementSnapshot(
 ): Promise<{
   org: { tier: Tier; capabilities: CapabilityKey[] };
   personal: { tier: Tier; capabilities: CapabilityKey[] };
+  /** Lets the client hide billing surfaces while plans are switched off. */
+  plans_enforced: boolean;
 }> {
+  const enforced = await plansEnforced(prisma);
   const [org, personal] = await Promise.all([
-    holder.organizationId ? orgTier(prisma, holder.organizationId) : Promise.resolve<Tier>('free'),
+    holder.organizationId ? orgTier(prisma, holder.organizationId) : Promise.resolve<Tier>(enforced ? 'free' : UNENFORCED_TIER),
     personalTier(prisma, holder.userId),
   ]);
   const snap = (ladder: Ladder, tier: Tier) => ({
     tier,
     capabilities: grantedCapabilities(ladder, tier),
   });
-  return { org: snap('org', org), personal: snap('personal', personal) };
+  return { org: snap('org', org), personal: snap('personal', personal), plans_enforced: enforced };
 }

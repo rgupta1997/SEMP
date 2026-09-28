@@ -81,11 +81,14 @@ export function AdminPage() {
   const visible = useMemo(() => {
     const codes = roleCodes.filter((c) => c in ROLE_ADMIN);
     if (codes.length === 0) return [];
+    // Billing only exists while plans are enforced - a super admin switches it
+    // platform-wide, and switching it back brings the tab back with it.
+    const tabs = ws.plansEnforced ? TABS : TABS.filter((t) => t.key !== 'billing');
     // Union across every role held, and an unrestricted role opens all of them.
-    if (codes.some((c) => ROLE_ADMIN[c] === null)) return TABS;
+    if (codes.some((c) => ROLE_ADMIN[c] === null)) return tabs;
     const allowed = new Set(codes.flatMap((c) => ROLE_ADMIN[c] ?? []));
-    return TABS.filter((t) => allowed.has(t.key));
-  }, [roleCodes.join(',')]);
+    return tabs.filter((t) => allowed.has(t.key));
+  }, [roleCodes.join(','), ws.plansEnforced]);
 
   if (ws.loading) return <Spinner />;
 
