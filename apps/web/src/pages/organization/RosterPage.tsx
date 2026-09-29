@@ -10,6 +10,7 @@ import { usePermissions } from '../../lib/permissions';
 import { Avatar, BackButton, Badge, Button, Card, CardBody, CardHeader, Checkbox, confirmDialog, Field, Input, Modal, Pills, Progress, SearchInput, Select, Spinner, StatusBadge, Tabs, Textarea, toast, INSET} from '../../components/ui';
 import { EnterChampionshipsPanel } from '../../components/EnterChampionshipsModal';
 import { useOrgUnits } from '../../lib/units';
+import { useOrgArchived } from '../../lib/useOrgArchived';
 import { downloadCsvTemplate } from '../../lib/import';
 
 interface Credential { name: string; email: string; phone: string | null; password: string }
@@ -422,6 +423,8 @@ export function RosterPage() {
     ({ memberId, role }: { memberId: string; role: string }) => api('PATCH', `/teams/${teamId}/members/${memberId}`, { role }),
     [path],
   );
+  // Archived organisation: the team can be read, nothing on it changed.
+  const { archived: frozen, title: frozenTitle } = useOrgArchived(team?.organization_id);
 
   if (isLoading || !team) return <Spinner />;
   const members = team.team_members ?? [];
@@ -506,8 +509,8 @@ export function RosterPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!allLocked && canManage && <Button variant="outline" onClick={() => setEditing(true)}>Edit team</Button>}
-          {canDeleteTeam && <Button variant="danger" disabled={deleteTeam.isPending} onClick={onDeleteTeam}>{deleteTeam.isPending ? 'Deleting…' : 'Delete team'}</Button>}
+          {!allLocked && canManage && <Button variant="outline" disabled={frozen} title={frozenTitle} onClick={() => setEditing(true)}>Edit team</Button>}
+          {canDeleteTeam && <Button variant="danger" disabled={deleteTeam.isPending || frozen} title={frozenTitle} onClick={onDeleteTeam}>{deleteTeam.isPending ? 'Deleting…' : 'Delete team'}</Button>}
         </div>
       </div>
 
@@ -518,6 +521,8 @@ export function RosterPage() {
         ]} />
       </div>
 
+      {/* One switch for every control below - entering, locking, adding players. */}
+      <fieldset disabled={frozen} title={frozenTitle} className="m-0 min-w-0 border-0 p-0">
       {tab === 'championships' && (
         <>
           {entries.length === 0 && (
@@ -667,6 +672,8 @@ export function RosterPage() {
           </CardBody>
         </Card>
       )}
+
+      </fieldset>
 
       {editing && <EditTeamModal team={team} onClose={() => setEditing(false)} />}
     </div>

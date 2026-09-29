@@ -41,8 +41,9 @@ export function EventCertificatesPage() {
   // owner or org_admin) - offering an org here that would just come back a 403
   // is worse than sending the person to Settings empty-handed.
   const ws = useWorkspace();
+  // An archived organisation can't host - the server refuses it too.
   const hostable = ws.contexts.filter(
-    (c) => c.kind === 'org' && c.roleCodes.some((r) => r === 'owner' || r === 'org_admin'),
+    (c) => c.kind === 'org' && !c.archived && c.roleCodes.some((r) => r === 'owner' || r === 'org_admin'),
   );
   const [hostPick, setHostPick] = useState('');
   const setHost = useApiMutation(

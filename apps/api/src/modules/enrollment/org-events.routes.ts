@@ -36,6 +36,7 @@ export function makeOrgEventsRouter(prisma: Prisma): Router {
     const select = {
       id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true,
       archived_at: true,
+      archived_with_org: true,
       _count: { select: { championship_organizations: true } },
     } as const;
 
@@ -76,7 +77,8 @@ export function makeOrgEventsRouter(prisma: Prisma): Router {
       our_teams: teamsByEvent.get(c.id) ?? 0,
       participant_count: c._count.championship_organizations,
       archived_at: c.archived_at,
-      purge_on: c.archived_at ? archivePurgeDate(c.archived_at) : null,
+      archived_with_org: c.archived_with_org,
+      purge_on: c.archived_at && !c.archived_with_org ? archivePurgeDate(c.archived_at) : null,
     });
 
     // An organisation can host an event AND enter it, which is normal at an

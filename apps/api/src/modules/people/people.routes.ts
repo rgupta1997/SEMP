@@ -12,6 +12,7 @@ import { can } from '../../http/middleware/can.js';
 import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import { deriveProvisionedPassword, phoneLast10 } from '../iam/users.helpers.js';
 import { mintSportagonIds, orgIdPrefixFor } from '../iam/sportagon-id.js';
+import { assertOrgNotArchived } from '../iam/organization-archive.service.js';
 import { GENDERS, validateRoster, type RosterContext, type RosterRow, type RosterRowResult } from './roster-import.js';
 
 // The student roll (J1-E5).
@@ -208,6 +209,8 @@ export function makePeopleRouter(prisma: Prisma): Router {
   // ---- J1-E5-S2 · apply ---------------------------------------------------
   router.post('/:id/people/import', canImportPeople, validateBody(rosterImportSchema), asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
+    // An archived organisation's roll is frozen - nobody new is added to it.
+    await assertOrgNotArchived(prisma, organizationId);
     const rows = req.body.rows as RosterRow[];
     const consentVersion = (req.body.consent_version as string | null) ?? null;
 
@@ -396,6 +399,8 @@ export function makePeopleRouter(prisma: Prisma): Router {
   // ---- J1-E5-S3 · one person ---------------------------------------------
   router.post('/:id/people', canEditPeople, validateBody(addPersonSchema), asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
+    // An archived organisation's roll is frozen - nobody new is added to it.
+    await assertOrgNotArchived(prisma, organizationId);
     // The roll ceiling. Checked before any user is provisioned, so a refusal does
     // not leave an orphaned account behind it.
     await assertWithinOrgLimit(prisma, 'people', organizationId, await countPeople(prisma, organizationId));
@@ -561,6 +566,8 @@ export function makePeopleRouter(prisma: Prisma): Router {
     const organizationId = req.params.id;
     const { member_ids, verification, note } = req.body as
       { member_ids: string[]; verification: 'verified' | 'rejected'; note?: string | null };
+    // An archived organisation's roll is frozen - nobody is verified or rejected.
+    await assertOrgNotArchived(prisma, organizationId);
 
     const members = await prisma.organization_members.findMany({
       where: { id: { in: member_ids }, organization_id: organizationId },

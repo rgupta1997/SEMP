@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/useWorkspace';
+import { ORG_ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useTableControls, fmtDateRange } from '../lib/hooks';
 import { Button, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge, SURFACE, toast } from '../components/ui';
@@ -19,7 +20,7 @@ interface OrgMembership {
   organization_id: string;
   status: string;
   role: string;
-  organization?: { name?: string; short_name?: string } | null;
+  organization?: { name?: string; short_name?: string; archived_at?: string | null } | null;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -70,7 +71,8 @@ function ApplyModal({ championship, onClose }: {
   const { ctx, refresh } = useAuth();
   const qc = useQueryClient();
   const myOrgs = useMemo(
-    () => ((ctx?.organizations ?? []) as OrgMembership[]).filter(canEnter),
+    // An archived organisation can't apply, so it isn't offered.
+    () => ((ctx?.organizations ?? []) as OrgMembership[]).filter((m) => canEnter(m) && !m.organization?.archived_at),
     [ctx],
   );
   const [mode, setMode] = useState<'pick' | 'create'>(myOrgs.length ? 'pick' : 'create');
@@ -168,6 +170,8 @@ export function DiscoverPage() {
     return ((ctx?.organizations ?? []) as OrgMembership[]).find((m) => m.organization_id === id);
   }, [ws.active, ctx]);
   const mayEnter = !activeOrg || canEnter(activeOrg);
+  // An archived organisation enters nothing - the server refuses it too.
+  const orgArchived = !!activeOrg?.organization?.archived_at;
 
   // In an organisation, only ITS application counts: one made under another of your
   // organisations is not this one's, and reporting it here would tell an org it had
@@ -319,7 +323,8 @@ export function DiscoverPage() {
                                 Owner or admin only
                               </span>
                             ) : (
-                              <Button size="sm" disabled={busyId === c.id} title={`Register ${orgLabel(activeOrg)}`} onClick={() => registerActiveOrg(c)}>
+                              <Button size="sm" disabled={busyId === c.id || orgArchived}
+                                title={orgArchived ? ORG_ARCHIVED_READ_ONLY_MESSAGE : `Register ${orgLabel(activeOrg)}`} onClick={() => registerActiveOrg(c)}>
                                 {busyId === c.id ? 'Registering…' : 'Register'}
                               </Button>
                             )

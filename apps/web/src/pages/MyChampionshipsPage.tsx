@@ -16,6 +16,8 @@ interface MyChampionship {
   sports?: string[];
   /** Set while archived; only ever returned to the event's host. */
   archived_at?: string | null;
+  /** Archived with its organisation: no clock, restored with the organisation. */
+  archived_with_org?: boolean;
 }
 
 const ROLE_TONE: Record<string, 'brand' | 'green' | 'amber' | 'slate'> = {
@@ -170,13 +172,15 @@ export function MyChampionshipsPage() {
                     <div className="text-xs text-slate-500 dark:text-slate-400">{c.venue || 'Venue TBD'} · {fmtDateRange(c.start_date, c.end_date)}</div>
                     {c.archived_at && (
                       <div className="mt-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
-                        Deleted permanently on {fmtDate(archivePurgeDate(c.archived_at))} ({archiveDaysLeft(c.archived_at)} days left) unless retrieved
+                        {c.archived_with_org
+                          ? 'Archived with its organisation — retrieve the organisation to bring it back'
+                          : `Deleted permanently on ${fmtDate(archivePurgeDate(c.archived_at))} (${archiveDaysLeft(c.archived_at)} days left) unless retrieved`}
                       </div>
                     )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {c.archived_at && (
+                  {c.archived_at && !c.archived_with_org && (
                     <Button
                       size="sm"
                       disabled={retrieve.isPending}

@@ -7,6 +7,7 @@ import { useApi } from '../../lib/hooks';
 import { useOrgUnits, type UnitNode } from '../../lib/units';
 import { useAuth } from '../../lib/auth';
 import { useWorkspace } from '../../lib/useWorkspace';
+import { useOrgArchived } from '../../lib/useOrgArchived';
 import { usePermissions } from '../../lib/permissions';
 import { titleCase } from '../../lib/format';
 import { CapabilityLock } from '../../components/CapabilityLock';
@@ -447,6 +448,8 @@ export function CampusesPage() {
   // A second campus needs the capability. Shown as a locked button rather than a
   // hidden one: somebody who cannot find a feature concludes it does not exist.
   const canAddCampus = campuses.length === 0 || ws.granted.has('multi_campus');
+  // Archived: the structure stays readable, nothing in it changes.
+  const { archived: frozen, title: frozenTitle } = useOrgArchived(orgId);
 
   const toggle = (id: string) => setExpanded((s) => {
     const n = new Set(s);
@@ -527,11 +530,11 @@ export function CampusesPage() {
             </div>
             {canShape ? (
               <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" variant="ghost" onClick={() => setRenaming(true)}>Rename levels</Button>
+                <Button size="sm" variant="ghost" disabled={frozen} title={frozenTitle} onClick={() => setRenaming(true)}>Rename levels</Button>
                 <Button
                   size="sm"
-                  disabled={!canAddCampus}
-                  title={canAddCampus ? undefined : 'Running more than one campus is a plan capability'}
+                  disabled={!canAddCampus || frozen}
+                  title={frozenTitle ?? (canAddCampus ? undefined : 'Running more than one campus is a plan capability')}
                   onClick={() => setEditing({ type: 'campus' })}
                 >
                   <Plus size={14} /> Add {labels.campus.toLowerCase()}
@@ -561,7 +564,7 @@ export function CampusesPage() {
               title={`No ${labels.campus.toLowerCase()} yet`}
               description={`Add one and it becomes available as a role scope, a placement for your people, and an entrant in championships run inside this organisation.`}
               action={canShape
-                ? <Button onClick={() => setEditing({ type: 'campus' })}><Plus size={14} /> Add {labels.campus.toLowerCase()}</Button>
+                ? <Button disabled={frozen} title={frozenTitle} onClick={() => setEditing({ type: 'campus' })}><Plus size={14} /> Add {labels.campus.toLowerCase()}</Button>
                 : undefined}
             />
           ) : (
@@ -610,13 +613,13 @@ export function CampusesPage() {
 
                       {canEditUnit(c) && (
                         <div className="flex flex-none items-center gap-1">
-                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setEditing({ unit: c, type: 'campus' }); }} aria-label={`Edit ${c.name}`}>
+                          <Button size="sm" variant="ghost" disabled={frozen} title={frozenTitle} onClick={(e) => { e.stopPropagation(); setEditing({ unit: c, type: 'campus' }); }} aria-label={`Edit ${c.name}`}>
                             <Pencil size={14} />
                           </Button>
                           {/* Deleting is never the unit administrator's - removing the
                               thing you run is not the same as correcting its name. */}
                           {canShape && (
-                            <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); remove(c, null); }} aria-label={`Delete ${c.name}`}>
+                            <Button size="sm" variant="ghost" disabled={frozen} title={frozenTitle} onClick={(e) => { e.stopPropagation(); remove(c, null); }} aria-label={`Delete ${c.name}`}>
                               <Trash2 size={14} />
                             </Button>
                           )}
@@ -651,11 +654,11 @@ export function CampusesPage() {
                             </div>
                             {canEditUnit(d) && (
                               <div className="flex flex-none items-center gap-1">
-                                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setEditing({ unit: { ...d, parent: c }, type: 'department' }); }} aria-label={`Edit ${d.name}`}>
+                                <Button size="sm" variant="ghost" disabled={frozen} title={frozenTitle} onClick={(e) => { e.stopPropagation(); setEditing({ unit: { ...d, parent: c }, type: 'department' }); }} aria-label={`Edit ${d.name}`}>
                                   <Pencil size={14} />
                                 </Button>
                                 {canShape && (
-                                  <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); remove(d, c); }} aria-label={`Delete ${d.name}`}>
+                                  <Button size="sm" variant="ghost" disabled={frozen} title={frozenTitle} onClick={(e) => { e.stopPropagation(); remove(d, c); }} aria-label={`Delete ${d.name}`}>
                                     <Trash2 size={14} />
                                   </Button>
                                 )}
@@ -666,7 +669,7 @@ export function CampusesPage() {
 
                         {canShape && (
                           <div className="border-t border-slate-100 pt-2.5 dark:border-slate-800">
-                            <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setEditing({ type: 'department', parentId: c.id }); }}>
+                            <Button size="sm" variant="outline" disabled={frozen} title={frozenTitle} onClick={(e) => { e.stopPropagation(); setEditing({ type: 'department', parentId: c.id }); }}>
                               <Plus size={13} /> Add {labels.department.toLowerCase()} to {c.name}
                             </Button>
                           </div>

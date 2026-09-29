@@ -28,6 +28,7 @@ interface Row {
   applied_at: string | null;
   /** Set on events this organisation hosts and has archived. */
   archived_at: string | null;
+  archived_with_org?: boolean;
   purge_on: string | null;
 }
 
@@ -175,7 +176,9 @@ export function OrgEventsPage() {
                     <td className="px-4 py-3 font-mono text-[13px] text-slate-700 dark:text-slate-300">{r.our_teams}</td>
                     <td className="px-4 py-3 font-mono text-[13px] text-slate-500">{r.participant_count}</td>
                     <td className="px-4 py-3">
-                      {r.archived_at ? (
+                      {r.archived_at && r.archived_with_org ? (
+                        <span className="text-xs font-medium text-amber-700 dark:text-amber-300">Archived with the organisation</span>
+                      ) : r.archived_at ? (
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-medium text-amber-700 dark:text-amber-300">
                             Deleted {fmtDate(r.purge_on)} ({archiveDaysLeft(r.archived_at)} days left)

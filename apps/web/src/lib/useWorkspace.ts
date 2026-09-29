@@ -118,6 +118,7 @@ export function useWorkspace() {
         ].filter(Boolean) as string[],
         sub: m.organization?.city ?? undefined,
         verified: m.organization?.verified ?? false,
+        archived: !!m.organization?.archived_at,
         theme: themeOf(m.organization?.settings),
       }));
 

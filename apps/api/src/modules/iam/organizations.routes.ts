@@ -11,6 +11,8 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { findUserByPhone, hashProvisionedPassword } from './users.helpers.js';
+import { archiveOrganization, orgRemovalInfo, retrieveOrganization } from './organization-archive.service.js';
+import { audit, AUDIT_ACTIONS } from './audit.service.js';
 import {
   notifyOrganizationCreated, notifyJoinRequested, notifyJoinApproved, notifyJoinDeclined,
   newlyAddedMembers, notifyNewOrgMembers,
@@ -42,7 +44,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     const u = req.user!;
     if (u.isSuperAdmin) return next();
     if (await guards.orgRole(u.id, req.params.id, ['owner'])) return next();
-    throw new ForbiddenError('Only the organization owner can delete it');
+    throw new ForbiddenError('Only the organization owner can delete, archive or retrieve it');
   });
 
   // List/search the master org list. `q` matches name/short_name/city/code (used by
@@ -52,16 +54,21 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const take = req.query.limit ? Math.min(Math.max(Number(req.query.limit) || 0, 0), 100) : undefined;
     const rows = await prisma.organizations.findMany({
-      where: q
-        ? {
-          OR: [
-            { name: { contains: q, mode: 'insensitive' } },
-            { short_name: { contains: q, mode: 'insensitive' } },
-            { city: { contains: q, mode: 'insensitive' } },
-            { code: { contains: q, mode: 'insensitive' } },
-          ],
-        }
-        : undefined,
+      where: {
+        // Archived organisations leave the master list, search and every invite
+        // picker - only the platform console still sees them.
+        ...(req.user?.isSuperAdmin ? {} : { archived_at: null }),
+        ...(q
+          ? {
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { short_name: { contains: q, mode: 'insensitive' } },
+              { city: { contains: q, mode: 'insensitive' } },
+              { code: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+          : {}),
+      },
       orderBy: { name: 'asc' },
       ...(take ? { take } : {}),
     });
@@ -168,10 +175,50 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   // so we clear it in one transaction; members + standings cascade on their own.
   // Completed/scored matches are protected - those results must be removed first, even
   // with cascade - and a non-empty org needs an explicit ?cascade=true confirmation.
+  // ---- Removing an organisation: delete it only with no footprint, archive otherwise ----
+  // See organization-archive.service.ts for what counts and why there is no purge.
+
+  /** Which removal applies, and what blocks archiving - so the screen offers one, and says why. */
+  router.get('/:id/removal', orgOwner, asyncHandler(async (req, res) => {
+    const info = await orgRemovalInfo(prisma, req.params.id);
+    if (!info) throw new NotFoundError('Organization');
+    res.json(info);
+  }));
+
+  router.post('/:id/archive', orgOwner, asyncHandler(async (req, res) => {
+    const org = await prisma.organizations.findUnique({ where: { id: req.params.id }, select: { name: true } });
+    const result = await archiveOrganization(prisma, req.params.id, req.user!.id);
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.orgArchived,
+      target: { type: 'organizations', id: req.params.id, label: org?.name ?? null },
+      organizationId: req.params.id,
+      summary: `Archived the organisation${result.events_archived ? `, with ${result.events_archived} hosted event${result.events_archived === 1 ? '' : 's'}` : ''}`,
+    });
+    res.json(result);
+  }));
+
+  router.post('/:id/retrieve', orgOwner, asyncHandler(async (req, res) => {
+    const org = await prisma.organizations.findUnique({ where: { id: req.params.id }, select: { name: true } });
+    const result = await retrieveOrganization(prisma, req.params.id);
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.orgRetrieved,
+      target: { type: 'organizations', id: req.params.id, label: org?.name ?? null },
+      organizationId: req.params.id,
+      summary: 'Retrieved the organisation from the archive',
+    });
+    res.json(result);
+  }));
+
   router.delete('/:id', orgOwner, asyncHandler(async (req, res) => {
     const orgId = req.params.id;
     const org = await prisma.organizations.findUnique({ where: { id: orgId }, select: { id: true } });
     if (!org) throw new NotFoundError('Organization');
+    // Deleting is for an organisation with no footprint at all. Anything else would
+    // take certificates, career stats and other hosts' results with it - archive it.
+    const removal = await orgRemovalInfo(prisma, orgId);
+    if (removal?.mode === 'archive') {
+      throw new BusinessRuleError(`This organisation can't be deleted because ${removal.reasons.join(', ')}. Archive it instead.`);
+    }
     const cascade = req.query.cascade === 'true' || req.query.cascade === '1';
 
     const teams = await prisma.teams.findMany({ where: { organization_id: orgId }, select: { id: true } });
@@ -216,8 +263,8 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   router.post('/:id/join', asyncHandler(async (req, res) => {
     const userId = req.user!.id;
     const orgId = req.params.id;
-    const org = await prisma.organizations.findUnique({ where: { id: orgId }, select: { id: true, name: true } });
-    if (!org) throw new NotFoundError('Organization');
+    const org = await prisma.organizations.findUnique({ where: { id: orgId }, select: { id: true, name: true, archived_at: true } });
+    if (!org || org.archived_at) throw new NotFoundError('Organization');
 
     const existing = await prisma.organization_members.findUnique({
       where: { user_id_organization_id: { user_id: userId, organization_id: orgId } },

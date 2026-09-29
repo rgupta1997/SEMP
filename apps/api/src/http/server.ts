@@ -53,6 +53,7 @@ import { makeFeedbackRouter } from '../modules/marketing/feedback.routes.js';
 import { makeDemosRouter } from '../modules/demos/demos.routes.js';
 import { makePlatformSettingsRouter } from '../modules/platform/platform-settings.routes.js';
 import { blockDrawWritesToArchived, blockFixtureWritesToArchived, blockWritesToArchived } from '../modules/championships/championship-archive.service.js';
+import { blockOrgWritesWhenArchived, blockTeamWritesWhenArchived } from '../modules/iam/organization-archive.service.js';
 import { makeBillingRouter } from '../modules/billing/billing.routes.js';
 import { applyDuePlanChanges } from '../modules/billing/subscription.service.js';
 import { BusinessRuleError } from '../shared/errors.js';
@@ -147,6 +148,9 @@ export function buildApp(prisma: Prisma) {
   }));
   // Organizations - open reads; any user can create (becomes owner); member
   // management requires an owner/admin (see organizations.routes).
+  // An archived organisation is read-only across every router that lives under it.
+  api.use('/organizations/:id', blockOrgWritesWhenArchived(prisma));
+  api.use('/teams/:id', blockTeamWritesWhenArchived(prisma));
   api.use('/organizations', makeOrganizationsRouter(prisma));
 
   // An archived event is read-only: every write under /championships/:id - invitations,

@@ -237,3 +237,14 @@ that show archived events, plus `POST /championships/purge-archived` (super admi
 Certificates are detached, not deleted, so they keep verifying; players'
 achievements, timeline and career stats are kept. Verified read-only afterwards:
 "Aman Multisport event" resolves to archive-only, "Intra Bengaluru event" to delete.
+
+## Applied 2026-09-29 — `20260929000000_organization_archive`
+
+Adds `organizations.archived_at` / `archived_by` (partial index) and
+`championships.archived_with_org`. An organisation with any event footprint can only
+be archived - no automatic purge - and archiving is blocked while it hosts a live event
+or has a team in someone else's unfinished one. Events archived with their
+organisation carry `archived_with_org`, are skipped by the 90-day event purge, and
+come back when the organisation is retrieved. Verified read-only afterwards: every
+"Aman …" organisation resolves to archive-only with the expected blockers, and none
+is archived.

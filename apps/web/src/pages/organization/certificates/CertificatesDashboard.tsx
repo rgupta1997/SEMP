@@ -4,6 +4,7 @@ import { Award, FileText, LayoutTemplate, QrCode, ScanLine, Sparkles, Upload } f
 import { useApi } from '../../../lib/hooks';
 import { Button, Card, EmptyState, PageHeader, Skeleton, cn } from '../../../components/ui';
 import { useWorkspace } from '../../../lib/useWorkspace';
+import { useOrgArchived } from '../../../lib/useOrgArchived';
 import { GenerateModal } from './GenerateModal';
 import { KpiTile, whenish, type Delta, type Template } from './shared';
 
@@ -30,6 +31,8 @@ export function CertificatesDashboard() {
   const { orgId } = useParams();
   const ws = useWorkspace();
   const [gen, setGen] = useState(false);
+  // Archived: the register stays readable; nothing new is issued.
+  const { archived, title: archivedTitle } = useOrgArchived(orgId);
 
   const overviewPath = orgId ? `/organizations/${orgId}/certificates/overview` : null;
   const templatesPath = orgId ? `/organizations/${orgId}/certificate-templates` : null;
@@ -60,7 +63,7 @@ export function CertificatesDashboard() {
             <ScanLine size={15} aria-hidden />QR verifier
           </Button>
         )}
-        <Button onClick={() => setGen(true)}>
+        <Button disabled={archived} title={archivedTitle} onClick={() => setGen(true)}>
           <Sparkles size={15} aria-hidden />Generate certificates
         </Button>
       </PageHeader>
@@ -128,7 +131,7 @@ export function CertificatesDashboard() {
               return (
                 <li key={a.label}>
                   {a.onClick
-                    ? <button type="button" onClick={a.onClick} className={cls}>{inner}</button>
+                    ? <button type="button" onClick={a.onClick} disabled={archived} title={archivedTitle} className={cn(cls, 'disabled:cursor-not-allowed disabled:opacity-50')}>{inner}</button>
                     : <Link to={a.to} className={cls}>{inner}</Link>}
                 </li>
               );

@@ -323,6 +323,12 @@ export function makeEventsRouter(prisma: Prisma): Router {
    * field, and a guard on only one of them is not a guard.
    */
   async function assertMayHost(userId: string, isSuper: boolean, organizationId: string) {
+    // An archived organisation runs nothing new - not even for a super admin, since the
+    // event would be born archived-in-all-but-name.
+    const org = await prisma.organizations.findUnique({ where: { id: organizationId }, select: { archived_at: true } });
+    if (org?.archived_at) {
+      throw new BusinessRuleError('This organisation is archived, so it can’t host events. Retrieve it first, from Administration → Organization Profile.');
+    }
     if (isSuper) return;
     // ONE rule, and it is the permission engine's.
     //
@@ -356,7 +362,8 @@ export function makeEventsRouter(prisma: Prisma): Router {
       // they belong to - so an inferred host can never grant what an explicit one
       // would have refused.
       const memberships = await prisma.organization_members.findMany({
-        where: { user_id: req.user!.id, status: 'active' },
+        // An archived organisation is never a candidate host.
+        where: { user_id: req.user!.id, status: 'active', organizations: { archived_at: null } },
         select: { organization_id: true },
       });
       const candidates: string[] = [];
@@ -552,7 +559,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
     if (!info) throw new NotFoundError('Championship');
     res.json({
       ...info,
-      purge_on: info.archived_at ? archivePurgeDate(info.archived_at) : null,
+      purge_on: info.archived_at && !info.archived_with_org ? archivePurgeDate(info.archived_at) : null,
       retention_days: ARCHIVE_RETENTION_DAYS,
     });
   }));
@@ -594,9 +601,12 @@ export function makeEventsRouter(prisma: Prisma): Router {
 
   // Retrieve: back into the lists as it was. Archiving again restarts the 90 days.
   router.post('/:id/retrieve', ownChampionship, asyncHandler(async (req, res) => {
-    const champ = await prisma.championships.findUnique({ where: { id: req.params.id }, select: { name: true, archived_at: true, host_organization_id: true } });
+    const champ = await prisma.championships.findUnique({ where: { id: req.params.id }, select: { name: true, archived_at: true, archived_with_org: true, host_organization_id: true } });
     if (!champ) throw new NotFoundError('Championship');
     if (!champ.archived_at) throw new BusinessRuleError('This championship is not archived.');
+    if (champ.archived_with_org) {
+      throw new BusinessRuleError('This championship was archived with its organisation. Retrieve the organisation and it comes back too.');
+    }
     await prisma.championships.update({ where: { id: req.params.id }, data: { archived_at: null, archived_by: null } });
     await audit(prisma, req, {
       action: AUDIT_ACTIONS.championshipRetrieved,

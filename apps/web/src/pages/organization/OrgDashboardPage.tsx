@@ -63,7 +63,9 @@ export function OrgDashboardPage() {
   const onboarding = usePocOnboarding(orgId, canManage);
   const { data, isLoading } = useApi<Dash>(orgId ? `/organizations/${orgId}/dashboard` : null);
 
-  const canCreateEvent = ws.granted.has('create_event');
+  // An archived organisation hosts nothing new - the server refuses it too.
+  const archived = !!ws.contexts.find((c) => c.id === orgId)?.archived;
+  const canCreateEvent = ws.granted.has('create_event') && !archived;
   const first = (ctx?.user?.name ?? '').split(' ')[0];
   const waiting = data?.kpis.awaiting_approval ?? 0;
 
@@ -112,7 +114,9 @@ export function OrgDashboardPage() {
           type="button"
           onClick={() => canCreateEvent && navigate('/championships/new')}
           disabled={!canCreateEvent}
-          title={canCreateEvent ? undefined : 'Creating events needs the Create event capability on your plan'}
+          title={canCreateEvent ? undefined : archived
+            ? 'This organisation is archived. Retrieve it first to create events.'
+            : 'Creating events needs the Create event capability on your plan'}
           style={{
             flex: 'none', padding: '11px 18px', border: 'none', borderRadius: 10,
             fontFamily: POP, fontWeight: 700, fontSize: 13.5,
@@ -121,7 +125,7 @@ export function OrgDashboardPage() {
               : { background: 'rgba(255,255,255,.12)', color: 'var(--faint)', cursor: 'not-allowed' }),
           }}
         >
-          {canCreateEvent ? '+ Create Event' : 'Create Event · locked'}
+          {canCreateEvent ? '+ Create Event' : archived ? 'Create Event · archived' : 'Create Event · locked'}
         </button>
       </div>}
 

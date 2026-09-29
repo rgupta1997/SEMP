@@ -24,8 +24,9 @@ export function EventSettingsPage() {
   // event's certificates, so the Certificates page points people here when it is
   // unset - which means this control has to exist.
   const ws = useWorkspace();
+  // An archived organisation can't host - the server refuses it too.
   const hostable = ws.contexts.filter(
-    (c) => c.kind === 'org' && c.roleCodes.some((r) => r === 'owner' || r === 'org_admin'),
+    (c) => c.kind === 'org' && !c.archived && c.roleCodes.some((r) => r === 'owner' || r === 'org_admin'),
   );
   const [hostOrgId, setHostOrgId] = useState<string>(
     (championship as any).host_organization_id ?? '',
@@ -129,6 +130,7 @@ interface Removal {
   mode: ChampionshipRemovalMode;
   reasons: string[];
   archived_at: string | null;
+  archived_with_org?: boolean;
   purge_on: string | null;
   retention_days: number;
 }
@@ -148,6 +150,20 @@ function DangerZone({ eventId, name, onDelete, deleting }: {
 
   if (!data) return null;
   const days = data.retention_days ?? ARCHIVE_RETENTION_DAYS;
+
+  if (data.archived_at && data.archived_with_org) {
+    return (
+      <Card className="border-amber-200 dark:border-amber-500/30">
+        <CardHeader title="Archived" subtitle={`Archived with its organisation on ${fmtDate(data.archived_at)}`} />
+        <CardBody>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            This championship was archived together with its organisation. It isn't on a 90-day clock — it comes back
+            when the organisation is retrieved, from the organisation's Administration → Organization Profile.
+          </p>
+        </CardBody>
+      </Card>
+    );
+  }
 
   if (data.archived_at) {
     return (

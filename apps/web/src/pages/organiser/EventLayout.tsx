@@ -14,6 +14,8 @@ export interface EventDetail {
   host_organization_id?: string | null;
   /** Set while archived: the event is read-only until retrieved. */
   archived_at?: string | null;
+  /** Archived by its organisation's archive: no clock, and it returns with the organisation. */
+  archived_with_org?: boolean;
   /**
    * What competes here, resolved by the server.
    *
@@ -147,10 +149,12 @@ export function EventLayout() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-500/30 dark:bg-amber-500/10">
           <p className="text-amber-900 dark:text-amber-200">
             <span className="font-semibold">This championship is archived.</span>{' '}
-            Everything here is read-only, and it will be permanently deleted on {fmtDate(archivePurgeDate(archivedAt))}{' '}
-            ({archiveDaysLeft(archivedAt)} days left) unless it is retrieved.
+            {championship.archived_with_org
+              ? 'It was archived with its organisation. Everything here is read-only, and it comes back when the organisation is retrieved.'
+              : <>Everything here is read-only, and it will be permanently deleted on {fmtDate(archivePurgeDate(archivedAt))}{' '}
+                ({archiveDaysLeft(archivedAt)} days left) unless it is retrieved.</>}
           </p>
-          {canManage && (
+          {canManage && !championship.archived_with_org && (
             <Button size="sm" disabled={retrieve.isPending} onClick={() => retrieve.mutate(undefined, {
               onSuccess: () => toast.success('Championship retrieved'),
               onError: (e: any) => toast.error(e.message),

@@ -10,6 +10,7 @@ import { useFilterBar, usePageFilters } from '../../lib/filters';
 import { useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import { pluralise } from '@semp/shared';
 import { useOrgUnits, unitPath } from '../../lib/units';
+import { useOrgArchived } from '../../lib/useOrgArchived';
 import { newTeamIds as newTeamIdsStorage } from '../../lib/browserStorage';
 import { Badge, Button, Card, Checkbox, cn, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchableSelect, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge, Tabs, INSET} from '../../components/ui';
 
@@ -598,6 +599,8 @@ export function TeamsPage() {
   const [searchParams] = useSearchParams();
   const { orgId } = useParams();
   const institutionId = orgId ?? ctx?.organization?.id ?? ctx?.user.organization_id ?? '';
+  // Archived: its teams can be looked at, not created or entered.
+  const { archived: frozen, title: frozenTitle } = useOrgArchived(institutionId);
   // Organization staff see all their organization's teams; a captain with no
   // organization still sees the teams they captain (via /me/teams).
   // The org being viewed - NOT ctx.organization, which is the user's primary org. A POC
@@ -705,8 +708,8 @@ export function TeamsPage() {
   // Open the create-team panel straight from a deep link (?create=1), e.g. the
   // getting-started checklist's "Create a team" step.
   useEffect(() => {
-    if (searchParams.get('create') === '1') setCreating(true);
-  }, [searchParams]);
+    if (searchParams.get('create') === '1' && !frozen) setCreating(true);
+  }, [searchParams, frozen]);
 
   // Reset the tournament drill-down when the header championship changes.
   useEffect(() => { setTournamentFilter('all'); }, [eventId]);
@@ -825,13 +828,13 @@ export function TeamsPage() {
                 <Button
                   variant="outline"
                   onClick={() => setBulkCreating(true)}
-                  disabled={!canEnterTeams}
-                  title={canEnterTeams ? undefined
+                  disabled={!canEnterTeams || frozen}
+                  title={frozenTitle ?? (canEnterTeams ? undefined
                     : approved.length === 0
                       ? 'You have no approved championship entry yet.'
-                      : 'This championship has no discipline draws yet — set up its sports first.'}
+                      : 'This championship has no discipline draws yet — set up its sports first.')}
                 >+ Enter multiple</Button>
-                <Button onClick={() => setCreating(true)}>
+                <Button disabled={frozen} title={frozenTitle} onClick={() => setCreating(true)}>
                   + Create {playsFor === 'organization' ? 'team' : (playsFor === 'campus' ? labels.campus : labels.department).toLowerCase() + ' squad'}
                 </Button>
               </div>
@@ -844,8 +847,8 @@ export function TeamsPage() {
           drawn - but the actions still have to be somewhere. */}
       {campusTree.length === 0 && canManage && (
         <div className="mb-4 flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => setBulkCreating(true)} disabled={!canEnterTeams}>+ Enter multiple</Button>
-          <Button onClick={() => setCreating(true)}>+ Create team</Button>
+          <Button variant="outline" onClick={() => setBulkCreating(true)} disabled={!canEnterTeams || frozen} title={frozenTitle}>+ Enter multiple</Button>
+          <Button disabled={frozen} title={frozenTitle} onClick={() => setCreating(true)}>+ Create team</Button>
         </div>
       )}
 
@@ -900,7 +903,7 @@ export function TeamsPage() {
         </div>
       ) : teams.length === 0 && !eventId ? (
         <EmptyState icon="⚇" title="No teams yet" description="Create a team for your organization, then assign it to a championship."
-          action={canManage ? <Button onClick={() => setCreating(true)}>+ Create team</Button> : undefined} />
+          action={canManage ? <Button disabled={frozen} title={frozenTitle} onClick={() => setCreating(true)}>+ Create team</Button> : undefined} />
       ) : (
         <>
           <ListToolbar>
@@ -929,8 +932,8 @@ export function TeamsPage() {
               description={eventId ? 'Enter a team to participate in this championship, or try a different filter.' : 'Try a different search or filter.'}
               action={canManage && tournamentFilter === 'all' ? (
                 <div className="flex flex-wrap justify-center gap-2">
-                  <Button onClick={() => setCreating(true)}>+ Create team</Button>
-                  {eventId && canEnterTeams && <Button variant="outline" onClick={() => setBulkCreating(true)}>+ Enter multiple</Button>}
+                  <Button disabled={frozen} title={frozenTitle} onClick={() => setCreating(true)}>+ Create team</Button>
+                  {eventId && canEnterTeams && <Button variant="outline" disabled={frozen} title={frozenTitle} onClick={() => setBulkCreating(true)}>+ Enter multiple</Button>}
                 </div>
               ) : undefined}
             />

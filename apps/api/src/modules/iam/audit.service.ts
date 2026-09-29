@@ -48,6 +48,8 @@ export const AUDIT_ACTIONS = {
   orgVerificationWithdrawn: 'org.verification.withdrawn',
   orgVerificationRejected: 'org.verification.rejected',
   orgDeleted: 'org.deleted',
+  orgArchived: 'org.archived',
+  orgRetrieved: 'org.retrieved',
   orgSettingsChanged: 'org.settings.changed',
   platformSettingChanged: 'platform.setting.changed',
   orgUnitCreated: 'org.unit.created',

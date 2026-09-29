@@ -19,11 +19,13 @@ export interface RemovalInfo {
   /** Why it is archive-only, in words the settings screen can show. */
   reasons: string[];
   archived_at: Date | null;
+  /** Archived by its organisation's archive: no clock, and it comes back with the organisation. */
+  archived_with_org: boolean;
 }
 
 export async function removalInfo(prisma: Prisma, championshipId: string): Promise<RemovalInfo | null> {
   const champ = await prisma.championships.findUnique({
-    where: { id: championshipId }, select: { status: true, archived_at: true },
+    where: { id: championshipId }, select: { status: true, archived_at: true, archived_with_org: true },
   });
   if (!champ) return null;
   const inEvent = { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: championshipId } } } };
@@ -38,7 +40,7 @@ export async function removalInfo(prisma: Prisma, championshipId: string): Promi
     ...(locked ? [`${locked} scorecard${locked === 1 ? ' is' : 's are'} locked`] : []),
     ...(certificates ? [`${certificates} certificate${certificates === 1 ? ' has' : 's have'} been issued`] : []),
   ];
-  return { mode: reasons.length ? 'archive' : 'delete', reasons, archived_at: champ.archived_at };
+  return { mode: reasons.length ? 'archive' : 'delete', reasons, archived_at: champ.archived_at, archived_with_org: champ.archived_with_org };
 }
 
 /**
@@ -80,7 +82,9 @@ export async function hardDeleteChampionship(prisma: Prisma, id: string): Promis
 export async function purgeDueArchivedChampionships(prisma: Prisma): Promise<{ purged: string[] }> {
   const cutoff = new Date(Date.now() - ARCHIVE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
   const due = await prisma.championships.findMany({
-    where: { archived_at: { not: null, lte: cutoff } }, select: { id: true }, take: 25,
+    // Events archived by their organisation's archive are frozen with it, not on a
+    // clock - they come back when it is retrieved.
+    where: { archived_at: { not: null, lte: cutoff }, archived_with_org: false }, select: { id: true }, take: 25,
   });
   const purged: string[] = [];
   for (const { id } of due) {

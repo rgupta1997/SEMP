@@ -8,6 +8,7 @@ import {
   BackButton, Button, Card, Input, PageHeader, Select, Skeleton, Textarea, confirmDialog, toast,
 } from '../../../components/ui';
 import { SheetPreview, type Template } from './shared';
+import { useOrgArchived } from '../../../lib/useOrgArchived';
 
 // A certificate template needs no upload infrastructure of its own: these are small,
 // occasional images (a logo, a signature) so they're kept as data URIs right inside
@@ -105,6 +106,7 @@ export function TemplatePreviewPage() {
     () => api('DELETE', `/certificate-templates/${templateId}`),
     [templatesPath],
   );
+  const { archived, title: archivedTitle } = useOrgArchived(orgId);
 
   if (isLoading || !form) return <Skeleton className="h-96" />;
   if (!tpl) return null;
@@ -142,13 +144,13 @@ export function TemplatePreviewPage() {
     <div className="grid gap-5">
       <BackButton to={`/organizations/${orgId}/certificates/templates`}>Back to templates</BackButton>
       <PageHeader title={tpl.name} subtitle={`${tpl.used_count} certificate${tpl.used_count === 1 ? '' : 's'} issued from this template`}>
-        <Button variant="ghost" onClick={onDelete}><Trash2 size={15} aria-hidden />Archive</Button>
+        <Button variant="ghost" disabled={archived} title={archivedTitle} onClick={onDelete}><Trash2 size={15} aria-hidden />Archive</Button>
         {!tpl.is_default && (
-          <Button variant="ghost" onClick={() => onSave({ is_default: true })}>
+          <Button variant="ghost" disabled={archived} title={archivedTitle} onClick={() => onSave({ is_default: true })}>
             <BadgeCheck size={15} aria-hidden />Make default
           </Button>
         )}
-        <Button onClick={() => onSave()} disabled={save.isPending}>
+        <Button onClick={() => onSave()} disabled={save.isPending || archived} title={archivedTitle}>
           <Save size={15} aria-hidden />{save.isPending ? 'Saving…' : 'Save'}
         </Button>
       </PageHeader>

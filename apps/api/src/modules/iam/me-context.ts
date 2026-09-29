@@ -94,7 +94,9 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
   return {
     user: publicUser,
     organization,
-    organizations: orgMemberships.map((m) => ({
+    // An archived organisation stays in the switcher only for those who can retrieve
+    // it - its owner and admins. For everyone else it is gone.
+    organizations: orgMemberships.filter((m) => !m.organizations?.archived_at || m.role === 'owner' || m.role === 'admin').map((m) => ({
       id: m.id,
       organization_id: m.organization_id,
       organization: m.organizations,

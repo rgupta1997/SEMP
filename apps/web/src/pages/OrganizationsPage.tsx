@@ -118,8 +118,10 @@ function Section({ title, memberships }: { title: string; memberships: any[] }) 
       <div className="grid gap-4 sm:grid-cols-2">
         {memberships.map((m) => {
           const canManage = ADMIN_ROLES.includes(m.role);
+          // Only owners and admins still see an archived organisation - it is theirs to retrieve.
+          const archived = !!m.organization?.archived_at;
           return (
-            <Card key={m.id} className="flex items-start justify-between p-5">
+            <Card key={m.id} className={`flex items-start justify-between p-5 ${archived ? 'opacity-75' : ''}`}>
               <div className="flex items-start gap-3">
                 <span className="grid h-12 w-12 place-items-center rounded-xl bg-slate-900 text-sm font-black text-white">
                   {(m.organization?.short_name ?? m.organization?.name ?? '?').slice(0, 3).toUpperCase()}
@@ -132,7 +134,10 @@ function Section({ title, memberships }: { title: string; memberships: any[] }) 
                 </div>
               </div>
               <div className="flex flex-col items-end gap-2">
-                <Badge tone="brand">{titleCase(m.role)}</Badge>
+                <div className="flex flex-wrap justify-end gap-1.5">
+                  {archived && <span title="Hidden from everyone else until you retrieve it"><Badge tone="amber">Archived</Badge></span>}
+                  <Badge tone="brand">{titleCase(m.role)}</Badge>
+                </div>
                 {/* Owners/admins manage; members (and other roles) can still view the org's teams + members. */}
                 <button
                   onClick={() => open(m.organization_id)}

@@ -6,6 +6,7 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { can } from '../../http/middleware/can.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { assertNotArchived } from '../championships/championship-archive.service.js';
+import { assertOrgNotArchived } from '../iam/organization-archive.service.js';
 import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import {
   allocateNumber, codeFor, formatSerial, newToken, signCertificate, type CertificateFacts,
@@ -239,6 +240,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     const existing = await prisma.certificate_templates.findUnique({ where: { id: req.params.templateId } });
     if (!existing) throw new NotFoundError('Template');
     await assertIssuer(req, existing.organization_id);
+    await assertOrgNotArchived(prisma, existing.organization_id);
     const body = req.body as Partial<z.infer<typeof templateSchema>>;
 
     const row = await prisma.$transaction(async (tx) => {
@@ -273,6 +275,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     const existing = await prisma.certificate_templates.findUnique({ where: { id: req.params.templateId } });
     if (!existing) throw new NotFoundError('Template');
     await assertIssuer(req, existing.organization_id);
+    await assertOrgNotArchived(prisma, existing.organization_id);
     await prisma.certificate_templates.update({ where: { id: existing.id }, data: { archived_at: new Date(), is_default: false } });
     await audit(prisma, req, {
       action: AUDIT_ACTIONS.certificateTemplateArchived,

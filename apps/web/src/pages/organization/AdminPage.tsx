@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
+import { ORG_ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { useParams, useSearchParams } from 'react-router-dom';
 import type { CapabilityKey } from '@semp/entitlements';
 import { useAuth } from '../../lib/auth';
@@ -69,6 +70,15 @@ const ROLE_ADMIN: Record<string, string[] | null> = {
 // this section sits behind this rail, so it was the single highest-leverage place to
 // fix the theme.
 
+/** Every control inside disabled while the organisation is archived. */
+function Frozen({ on, children }: { on: boolean; children: ReactNode }) {
+  return (
+    <fieldset disabled={on} title={on ? ORG_ARCHIVED_READ_ONLY_MESSAGE : undefined} className="m-0 min-w-0 border-0 p-0">
+      {children}
+    </fieldset>
+  );
+}
+
 export function AdminPage() {
   const { orgId = '' } = useParams();
   const { ctx } = useAuth();
@@ -107,6 +117,8 @@ export function AdminPage() {
   const active = visible.find((t) => t.key === wanted) ?? visible[0];
   const locked = !!active.needs && !ws.granted.has(active.needs);
 
+  // Profile keeps its own Retrieve; Members and Roles lock their own write controls.
+  const archived = !!org?.archived;
   const orgName = ctx?.organizations?.find((m: any) => m.organization_id === orgId)?.organization?.name;
 
   return (
@@ -161,11 +173,11 @@ export function AdminPage() {
           {locked ? <CapabilityLock capability={active.needs!} title={active.label} /> : (
             <>
               {active.key === 'profile' && <OrgProfilePanel orgId={orgId} />}
-              {active.key === 'appearance' && <AppearancePanel orgId={orgId} />}
+              {active.key === 'appearance' && <Frozen on={archived}><AppearancePanel orgId={orgId} /></Frozen>}
               {active.key === 'members' && <MembersPanel orgId={orgId} />}
               {active.key === 'roles' && <RolesPanel orgId={orgId} />}
               {active.key === 'billing' && <BillingPanel orgId={orgId} />}
-              {active.key === 'security' && <PolicyPanel kind="security" orgId={orgId} />}
+              {active.key === 'security' && <Frozen on={archived}><PolicyPanel kind="security" orgId={orgId} /></Frozen>}
               {active.key === 'audit' && <AuditLogPanel orgId={orgId} />}
             </>
           )}

@@ -18,6 +18,7 @@ import { assertPlayerEligible, screenSquad, squadEntryRefusal } from '../champio
 import { unitLabels } from '@semp/shared';
 import { tellUser, checkRosterIncomplete, notifyRosterLocked, notifyTeamCreated } from './teams.notifications.js';
 import { mintSportagonIds, orgIdPrefixFor } from '../iam/sportagon-id.js';
+import { assertOrgNotArchived } from '../iam/organization-archive.service.js';
 import { deriveProvisionedPassword, findUsersByPhones, phoneLast10 } from '../iam/users.helpers.js';
 import { assertWithinOrgLimit } from '@semp/entitlements/server';
 import { countPeople } from '../billing/usage.js';
@@ -196,6 +197,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       name: string; short_name: string; sport_id: string; organization_id: string;
       championship_id?: string; championship_organization_id?: string; tournament_discipline_id?: string;
     };
+    await assertOrgNotArchived(prisma, organization_id);
     // Which campus or department this team plays for. Not taken from the request:
     // it is read off the ENTRY the team is being created against, because the entry
     // is the row that was already validated as a legal contingent for this event.
@@ -497,6 +499,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       championship_id: string; sport_id: string; organization_id: string;
       championship_organization_id: string; tournament_discipline_id: string; name: string; short_name: string;
     }>;
+    for (const orgId of new Set(teams.map((t) => t.organization_id))) await assertOrgNotArchived(prisma, orgId);
     for (const t of teams) {
       await assertDisciplineForTeam(prisma, t.tournament_discipline_id, t.championship_id, t.sport_id);
     }
@@ -952,6 +955,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   router.post('/teams/by-token/:token/join', validateBody(joinTeamSchema), asyncHandler(async (req, res) => {
     const team = await prisma.teams.findUnique({ where: { invite_token: req.params.token } });
     if (!team) throw new NotFoundError('Team');
+    await assertOrgNotArchived(prisma, team.organization_id);
     const member = await addMember(prisma, team.id, { user_id: req.user!.id, role: req.body.role, jersey_number: req.body.jersey_number }, req.user!.id);
     res.status(201).json(member);
   }));

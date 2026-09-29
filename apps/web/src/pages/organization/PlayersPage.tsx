@@ -7,7 +7,7 @@ import { usePermissions } from '../../lib/permissions';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { api } from '../../lib/api';
 import { AddPlayersModal } from '../../components/AddPlayersModal';
-import { pluralise } from '@semp/shared';
+import { ORG_ARCHIVED_READ_ONLY_MESSAGE, pluralise } from '@semp/shared';
 import { useOrgUnits, unitPath } from '../../lib/units';
 import { titleCase } from '../../lib/format';
 import {
@@ -185,6 +185,10 @@ export function PlayersPage() {
   // reader gets two empty columns and a table that reflows for nothing.
   const canSelect = canVerify || canEditPeople;
   const ws = useWorkspace();
+  // Archived: the roll can be read, not changed - nobody added, verified or rejected.
+  // The server refuses each of these too; the buttons say so before anyone tries.
+  const archived = !!ws.contexts.find((c) => c.id === orgId)?.archived;
+  const archivedTitle = archived ? ORG_ARCHIVED_READ_ONLY_MESSAGE : undefined;
 
   const { data: people = [], isLoading, isError, error, refetch } = useApi<Person[]>(orgId ? `/organizations/${orgId}/people` : null);
   const { flat: unitOptions, labels: unitLabels } = useOrgUnits(orgId);
@@ -363,12 +367,12 @@ export function PlayersPage() {
           // Icon-only below sm: two full-width buttons under the title cost a whole
           // row of a 390px screen, and "Bulk upload" is not a word anybody needs
           // read to them next to an upload arrow.
-          <Button variant="outline" aria-label="Bulk upload" onClick={() => navigate(`/organizations/${orgId}/students/import`)}>
+          <Button variant="outline" aria-label="Bulk upload" disabled={archived} title={archivedTitle} onClick={() => navigate(`/organizations/${orgId}/students/import`)}>
             <Upload size={15} /> <span className="hidden sm:inline">Bulk upload</span>
           </Button>
         )}
         {canEditPeople && (
-          <Button onClick={() => setAdding(true)}>
+          <Button disabled={archived} title={archivedTitle} onClick={() => setAdding(true)}>
             <UserPlus size={15} /> <span className="hidden sm:inline">Add Person</span><span className="sm:hidden">Add</span>
           </Button>
         )}
@@ -387,9 +391,9 @@ export function PlayersPage() {
           description="Import a roll, or add people one at a time. Anyone signing up on your email domain lands here too."
           action={canEditPeople || canImport ? (
             <div className="flex flex-wrap justify-center gap-2">
-              {canEditPeople && <Button onClick={() => setAdding(true)}>Add a player</Button>}
+              {canEditPeople && <Button disabled={archived} title={archivedTitle} onClick={() => setAdding(true)}>Add a player</Button>}
               {canImport && (
-                <Button variant="outline" onClick={() => navigate(`/organizations/${orgId}/students/import`)}>Import a roll</Button>
+                <Button variant="outline" disabled={archived} title={archivedTitle} onClick={() => navigate(`/organizations/${orgId}/students/import`)}>Import a roll</Button>
               )}
             </div>
           ) : undefined}
@@ -453,10 +457,10 @@ export function PlayersPage() {
               )}
               {canVerify && (
                 <>
-                  <Button size="sm" disabled={busy} onClick={() => review([...selected], 'verified', selectedLabel)}>
+                  <Button size="sm" disabled={busy || archived} title={archivedTitle} onClick={() => review([...selected], 'verified', selectedLabel)}>
                     Verify {selected.size}
                   </Button>
-                  <Button size="sm" variant="outline" disabled={busy} onClick={() => review([...selected], 'rejected', selectedLabel)}>
+                  <Button size="sm" variant="outline" disabled={busy || archived} title={archivedTitle} onClick={() => review([...selected], 'rejected', selectedLabel)}>
                     Reject {selected.size}
                   </Button>
                 </>
@@ -474,7 +478,8 @@ export function PlayersPage() {
                   aria-label={`Add ${selected.size} to a ${unitLabels.campus.toLowerCase()}`}
                   className="min-w-[11rem] text-[13px]"
                   value=""
-                  disabled={busy}
+                  disabled={busy || archived}
+                  title={archivedTitle}
                   onChange={async (e) => {
                     const unitId = e.target.value;
                     if (!unitId) return;                    // the placeholder
@@ -564,10 +569,10 @@ export function PlayersPage() {
                     {canEditPeople && (
                       <button
                         type="button"
-                        disabled={busy}
+                        disabled={busy || archived}
                         onClick={(e) => { e.stopPropagation(); setPlacing(row); }}
                         aria-label={`Edit ${row.name}'s units`}
-                        title="Edit units"
+                        title={archivedTitle ?? 'Edit units'}
                         className="tap grid h-6 w-6 shrink-0 place-items-center rounded text-brand-600 hover:bg-brand-50 disabled:opacity-50 dark:text-brand-400 dark:hover:bg-brand-500/15"
                       >
                         <Pencil size={13} />
@@ -610,9 +615,9 @@ export function PlayersPage() {
                 actions: true,
                 render: (row: Person) => (row.verification === 'pending' ? (
                   <div className="flex flex-1 items-center gap-2 sm:justify-end">
-                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" disabled={busy}
+                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" disabled={busy || archived} title={archivedTitle}
                       onClick={() => review([row.id], 'verified', `“${row.name ?? 'this person'}”`)}>Verify</Button>
-                    <Button size="sm" variant="ghost" className="flex-1 sm:flex-none" disabled={busy}
+                    <Button size="sm" variant="ghost" className="flex-1 sm:flex-none" disabled={busy || archived} title={archivedTitle}
                       onClick={() => review([row.id], 'rejected', `“${row.name ?? 'this person'}”`)}>Reject</Button>
                   </div>
                 ) : null),

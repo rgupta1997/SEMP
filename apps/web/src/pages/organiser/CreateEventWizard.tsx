@@ -57,8 +57,9 @@ export function CreateEventWizard() {
   // asked at all; the server infers it, and a question with one answer is a
   // question not worth putting on the screen.
   const ws = useWorkspace();
+  // An archived organisation can't host - the server refuses it too.
   const hostable = ws.contexts.filter(
-    (c) => c.kind === 'org' && c.roleCodes.some((r) => r === 'owner' || r === 'org_admin'),
+    (c) => c.kind === 'org' && !c.archived && c.roleCodes.some((r) => r === 'owner' || r === 'org_admin'),
   );
   const [hostOrgId, setHostOrgId] = useState<string>('');
 
