@@ -3,6 +3,8 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { ForbiddenError } from '../../shared/errors.js';
+import { archivePurgeDate } from '@semp/shared';
+import { purgeDueArchivedChampionships } from '../championships/championship-archive.service.js';
 
 // Every event an organisation is associated with, in one table (F-068).
 //
@@ -28,8 +30,13 @@ export function makeOrgEventsRouter(prisma: Prisma): Router {
       || await guards.orgRole(u.id, orgId, ['owner', 'admin', 'member', 'viewer']);
     if (!member) throw new ForbiddenError('You are not a member of this organisation');
 
+    // Lazy purge: this read lists archived events, so it is where overdue ones go.
+    await purgeDueArchivedChampionships(prisma).catch((err) => console.error('[archive] lazy purge failed:', err));
+
     const select = {
       id: true, name: true, slug: true, status: true, start_date: true, end_date: true, venue: true,
+      archived_at: true,
+      archived_with_org: true,
       _count: { select: { championship_organizations: true } },
     } as const;
 
@@ -69,6 +76,9 @@ export function makeOrgEventsRouter(prisma: Prisma): Router {
       applied_at,
       our_teams: teamsByEvent.get(c.id) ?? 0,
       participant_count: c._count.championship_organizations,
+      archived_at: c.archived_at,
+      archived_with_org: c.archived_with_org,
+      purge_on: c.archived_at && !c.archived_with_org ? archivePurgeDate(c.archived_at) : null,
     });
 
     // An organisation can host an event AND enter it, which is normal at an
@@ -77,8 +87,10 @@ export function makeOrgEventsRouter(prisma: Prisma): Router {
     const hostedIds = new Set(hosted.map((c) => c.id));
     const rows = [
       ...hosted.map((c) => shape(c, 'hosting', null)),
+      // Someone else's archived event is simply gone from this list; only the host
+      // keeps it, in the Archived tab.
       ...entries
-        .filter((e) => e.championships && !hostedIds.has(e.championships.id))
+        .filter((e) => e.championships && !hostedIds.has(e.championships.id) && !e.championships.archived_at)
         .map((e) => shape(
           e.championships!,
           e.status === 'approved' ? 'participating' : e.status,

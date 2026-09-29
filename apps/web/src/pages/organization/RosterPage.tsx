@@ -10,8 +10,11 @@ import { usePermissions } from '../../lib/permissions';
 import { Avatar, BackButton, Badge, Button, Card, CardBody, CardHeader, Checkbox, confirmDialog, Field, Input, Modal, Pills, Progress, SearchInput, Select, Spinner, StatusBadge, Tabs, Textarea, toast, INSET} from '../../components/ui';
 import { EnterChampionshipsPanel } from '../../components/EnterChampionshipsModal';
 import { useOrgUnits } from '../../lib/units';
+import { useOrgArchived } from '../../lib/useOrgArchived';
+import { downloadCsvTemplate } from '../../lib/import';
 
-interface BulkResult { added: number; skipped: { label: string; reason: string }[]; total: number }
+interface Credential { name: string; email: string; phone: string | null; password: string }
+interface BulkResult { added: number; skipped: { label: string; reason: string }[]; total: number; credentials?: Credential[] }
 
 // Rename a squad, and move it between campuses and batches.
 //
@@ -77,19 +80,22 @@ function EditTeamModal({ team, onClose }: { team: any; onClose: () => void }) {
 
 // Parse pasted roster lines: "Name, email@x.com, 7" (jersey optional, order-tolerant
 // for email vs name). One member per non-empty line.
-function parsePasted(text: string): { name?: string; email?: string; jersey_number?: number }[] {
+interface PastedRow { phone?: string; name?: string; email?: string; line: string }
+
+// One person per line: phone, name, email (email optional). Fields are recognised
+// by shape, so the order on the line does not matter.
+function parsePasted(text: string): PastedRow[] {
   return text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((line) => {
     const parts = line.split(/[,\t;]/).map((p) => p.trim()).filter(Boolean);
     const email = parts.find((p) => /\S+@\S+\.\S+/.test(p));
-    const jerseyTok = parts.find((p) => /^#?\d{1,3}$/.test(p));
-    const name = parts.find((p) => p !== email && p !== jerseyTok);
-    return {
-      name,
-      email,
-      jersey_number: jerseyTok ? Number(jerseyTok.replace('#', '')) : undefined,
-    };
-  }).filter((m) => m.email || m.name);
+    const phone = parts.find((p) => p !== email && p.replace(/\D/g, '').length >= 10 && /^[+\d\s()-]+$/.test(p));
+    const name = parts.find((p) => p !== email && p !== phone);
+    return { phone, name, email, line };
+  });
 }
+
+// Both are needed to create a login: the temporary password is first name @ last four phone digits.
+const pastedRowIsComplete = (r: PastedRow) => !!r.phone && !!r.name;
 
 // Inline "Add players" block (not a popup). Lists the organization's members in a
 // table you tick to add, or paste a list. Shows the import result inline when done.
@@ -130,6 +136,7 @@ function AddPlayersPanel({ teamId, team, institutionId, existingUserIds, remaini
   }, [candidates, search]);
 
   const parsed = useMemo(() => parsePasted(paste), [paste]);
+  const incomplete = parsed.filter((r) => !pastedRowIsComplete(r));
 
   // An empty or short list is the commonest confusion on this screen, and the cause
   // is almost always placement rather than the squad. Naming the unit turns "where
@@ -147,10 +154,14 @@ function AddPlayersPanel({ teamId, team, institutionId, existingUserIds, remaini
 
   const members = tab === 'roster'
     ? candidates.filter((u) => selected.has(u.id)).map((u) => ({ user_id: u.id, role }))
-    : parsed.map((m) => ({ ...m, role }));
+    : parsed.filter(pastedRowIsComplete).map(({ phone, name, email }) => ({ phone, name, email, role }));
 
   const submit = () => {
     setError(null);
+    if (tab === 'paste' && incomplete.length) {
+      setError(`${incomplete.length} line${incomplete.length === 1 ? ' needs' : 's need'} a 10-digit phone number and a name.`);
+      return;
+    }
     if (members.length === 0) { setError('Nothing to add'); return; }
     bulk.mutate({ members }, {
       onSuccess: (r) => { setResult(r); setSelected(new Set()); setPaste(''); },
@@ -172,6 +183,30 @@ function AddPlayersPanel({ teamId, team, institutionId, existingUserIds, remaini
             <div className="mb-3 max-h-40 overflow-auto rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3 text-sm">
               <div className="mb-1 font-semibold text-slate-600 dark:text-slate-300">Skipped {result.skipped.length}:</div>
               {result.skipped.map((s, i) => <div key={i} className="text-slate-500 dark:text-slate-400">{s.label} - {s.reason}</div>)}
+            </div>
+          )}
+          {/* Shown once - the passwords are not stored anywhere readable. */}
+          {!!result.credentials?.length && (
+            <div className="mb-3 rounded-xl bg-amber-50 p-3 text-sm dark:bg-amber-500/10">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <span className="font-semibold text-amber-900 dark:text-amber-300">
+                  Sign-ins for {result.credentials.length} new {result.credentials.length === 1 ? 'account' : 'accounts'} - shown only once
+                </span>
+                <Button size="sm" variant="outline" onClick={() => downloadCsvTemplate(
+                  'new-player-sign-ins.csv',
+                  ['name', 'phone', 'email', 'temporary_password'],
+                  result.credentials!.map((c) => [c.name, c.phone ?? '', c.email, c.password]),
+                )}>Download CSV</Button>
+              </div>
+              <div className="max-h-40 overflow-auto">
+                {result.credentials.map((c) => (
+                  <div key={c.email} className="flex flex-wrap gap-x-3 text-amber-900/90 dark:text-amber-200/90">
+                    <span className="font-medium">{c.name}</span>
+                    <span className="font-mono text-xs">{c.phone}</span>
+                    <span className="font-mono text-xs">{c.password}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           <div className="flex justify-end gap-2">
@@ -258,8 +293,17 @@ function AddPlayersPanel({ teamId, team, institutionId, existingUserIds, remaini
           ) : (
             <div>
               <Textarea rows={6} value={paste} onChange={(e) => setPaste(e.target.value)}
-                placeholder={"One per line:\nAarav Mehta, aarav@vjti.local, 7\nRohan Kulkarni, rohan@vjti.local\nkiran@vjti.local"} />
-              <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">Format: <span className="font-medium">Name, email, jersey#</span> - email is required, name & jersey optional. New people are created under your organization. {parsed.length > 0 && <span className="text-brand-600 dark:text-brand-300">{parsed.length} row{parsed.length === 1 ? '' : 's'} detected.</span>}</p>
+                placeholder={"One per line:\n9876543210, Aarav Mehta, aarav@vjti.local\n9876500011, Rohan Kulkarni"} />
+              <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+                Format: <span className="font-medium">Phone, name, email</span> - phone and name are required, email optional.
+                Everyone pasted is added to your organization's People as a verified member; anyone new also gets a login (temporary password: first name @ last 4 phone digits).{' '}
+                {parsed.length > 0 && <span className="text-brand-600 dark:text-brand-300">{parsed.length} row{parsed.length === 1 ? '' : 's'} detected.</span>}
+              </p>
+              {incomplete.length > 0 && (
+                <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+                  Missing a phone or name: {incomplete.slice(0, 3).map((r) => `“${r.line}”`).join(', ')}{incomplete.length > 3 ? ` and ${incomplete.length - 3} more` : ''}
+                </div>
+              )}
             </div>
           )}
 
@@ -284,7 +328,7 @@ function entryDrawLabel(entry: any): string {
 
 // "Now that you're in, pick your discipline" - set or change the discipline draw of a
 // championship entry, inline under its row. Draws are scoped to the team's sport and
-// exclude those another of the org's teams already occupies.
+// exclude those another team of the same contingent already occupies.
 function ChooseDisciplinePanel({ team, entry, onClose }: { team: any; entry: any; onClose: () => void }) {
   const path = `/teams/${team.id}`;
   const eventId = entry.championship_id;
@@ -293,15 +337,18 @@ function ChooseDisciplinePanel({ team, entry, onClose }: { team: any; entry: any
   const [drawId, setDrawId] = useState(entry.tournament_discipline_id ?? '');
   const [error, setError] = useState<string | null>(null);
 
+  // Only a squad playing for the SAME campus/department (or another whole-org squad)
+  // occupies a draw - Finance holding Cricket must not hide it from Computer Science.
   const taken = useMemo(
     () => new Set(
       orgTeams
+        .filter((t: any) => (t.org_unit_id ?? null) === (team.org_unit_id ?? null))
         .flatMap((t: any) => (t.team_entries ?? []) as any[])
         .filter((e) => e.championship_id === eventId && e.team_id !== team.id)
         .map((e) => e.tournament_discipline_id)
         .filter(Boolean),
     ),
-    [orgTeams, eventId, team.id],
+    [orgTeams, eventId, team.id, team.org_unit_id],
   );
   const sportDraws = useMemo(
     () => draws.filter((d) => d.tournament_sports?.sport_id === team.sport_id && !taken.has(d.id)),
@@ -376,6 +423,8 @@ export function RosterPage() {
     ({ memberId, role }: { memberId: string; role: string }) => api('PATCH', `/teams/${teamId}/members/${memberId}`, { role }),
     [path],
   );
+  // Archived organisation: the team can be read, nothing on it changed.
+  const { archived: frozen, title: frozenTitle } = useOrgArchived(team?.organization_id);
 
   if (isLoading || !team) return <Spinner />;
   const members = team.team_members ?? [];
@@ -460,8 +509,8 @@ export function RosterPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!allLocked && canManage && <Button variant="outline" onClick={() => setEditing(true)}>Edit team</Button>}
-          {canDeleteTeam && <Button variant="danger" disabled={deleteTeam.isPending} onClick={onDeleteTeam}>{deleteTeam.isPending ? 'Deleting…' : 'Delete team'}</Button>}
+          {!allLocked && canManage && <Button variant="outline" disabled={frozen} title={frozenTitle} onClick={() => setEditing(true)}>Edit team</Button>}
+          {canDeleteTeam && <Button variant="danger" disabled={deleteTeam.isPending || frozen} title={frozenTitle} onClick={onDeleteTeam}>{deleteTeam.isPending ? 'Deleting…' : 'Delete team'}</Button>}
         </div>
       </div>
 
@@ -472,6 +521,8 @@ export function RosterPage() {
         ]} />
       </div>
 
+      {/* One switch for every control below - entering, locking, adding players. */}
+      <fieldset disabled={frozen} title={frozenTitle} className="m-0 min-w-0 border-0 p-0">
       {tab === 'championships' && (
         <>
           {entries.length === 0 && (
@@ -621,6 +672,8 @@ export function RosterPage() {
           </CardBody>
         </Card>
       )}
+
+      </fieldset>
 
       {editing && <EditTeamModal team={team} onClose={() => setEditing(false)} />}
     </div>

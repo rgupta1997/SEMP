@@ -7,6 +7,7 @@ import { useAuth } from '../../../lib/auth';
 import { usePermissions } from '../../../lib/permissions';
 import { api } from '../../../lib/api';
 import { InstitutionFormModal, type InstitutionFormBody } from '../../../components/InstitutionFormModal';
+import { useOrgArchived } from '../../../lib/useOrgArchived';
 import {
   Badge, Button, Card, CardBody, Field, Input, Modal, Spinner, Textarea, confirmDialog, toast,
 } from '../../../components/ui';
@@ -205,13 +206,15 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [requesting, setRequesting] = useState(false);
+  // Archived: only Retrieve (in the danger zone) still acts.
+  const { archived, title: archivedTitle } = useOrgArchived(orgId);
 
   // The API protects completed and scored matches and cascades the rest;
   // ?cascade=true is the explicit confirmation it requires.
   async function handleDelete() {
     const ok = await confirmDialog({
       title: 'Delete this organization?',
-      message: `“${org?.name ?? 'This organization'}” and its teams, rosters and championship entries will be permanently removed. This can’t be undone.`,
+      message: `“${org?.name ?? 'This organization'}” will be permanently removed, straight away, with its members and campuses. It has never taken part in an event, so nothing else is affected. This can’t be undone.`,
       confirmLabel: 'Delete organization',
       tone: 'danger',
     });
@@ -287,7 +290,7 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
         <CardBody>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
             <h3 style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, margin: 0 }}>Organisation</h3>
-            {canManage && <Button size="sm" variant="outline" onClick={() => setEditing(true)}>Edit details</Button>}
+            {canManage && <Button size="sm" variant="outline" disabled={archived} title={archivedTitle} onClick={() => setEditing(true)}>Edit details</Button>}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 14, marginTop: 14 }}>
             {([['Name', org.name], ['Kind', org.kind], ['City', org.city ?? '—'], ['Code', org.code ?? '—']] as const).map(([k, v]) => (
@@ -345,12 +348,12 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
                     We will let your administrators know either way.
                   </span>
                   {canManage && (
-                    <Button size="sm" variant="ghost" onClick={withdrawRequest}>Withdraw</Button>
+                    <Button size="sm" variant="ghost" disabled={archived} title={archivedTitle} onClick={withdrawRequest}>Withdraw</Button>
                   )}
                 </>
               ) : canManage ? (
                 <>
-                  <Button size="sm" onClick={() => setRequesting(true)}>
+                  <Button size="sm" disabled={archived} title={archivedTitle} onClick={() => setRequesting(true)}>
                     {refused ? 'Send a new request' : 'Request verification'}
                   </Button>
                   <span className="text-[13px] text-slate-500 dark:text-slate-400">
@@ -384,23 +387,7 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
         </CardBody>
       </Card>
 
-      {canDelete && (
-        <Card>
-          <CardBody>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ minWidth: 240 }}>
-                <h3 style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, margin: 0, color: '#B02525' }}>Delete this organisation</h3>
-                <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--muted)', lineHeight: 1.55 }}>
-                  Its teams, rosters and entries go with it. Events with completed or
-                  scored matches are refused — a locked result is somebody’s record,
-                  and it does not disappear because an account was closed.
-                </p>
-              </div>
-              <Button variant="danger" onClick={handleDelete} disabled={deleting}>Delete organisation</Button>
-            </div>
-          </CardBody>
-        </Card>
-      )}
+      {canDelete && <OrgDangerZone orgId={orgId} orgName={org.name} onDelete={handleDelete} deleting={deleting} />}
 
       {requesting && (
         <VerificationRequestModal
@@ -425,5 +412,130 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
         />
       )}
     </>
+  );
+}
+
+interface OrgRemoval {
+  mode: 'delete' | 'archive';
+  reasons: string[];
+  blockers: string[];
+  archived_at: string | null;
+}
+
+// Delete OR archive, never both. With any footprint in any event - hosted, entered,
+// certificates issued, players' career stats - it can only be archived, and archiving
+// waits until nothing it is part of is still running.
+function OrgDangerZone({ orgId, orgName, onDelete, deleting }: {
+  orgId: string; orgName: string; onDelete: () => void; deleting: boolean;
+}) {
+  const { refresh } = useAuth();
+  const removalPath = `/organizations/${orgId}/removal`;
+  const { data, refetch } = useApi<OrgRemoval>(removalPath);
+  const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  if (!data) return null;
+
+  const run = async (path: string, done: string) => {
+    setBusy(true);
+    try {
+      await api('POST', path);
+      await Promise.all([refetch(), refresh()]);
+      toast.success(done);
+      setConfirming(false);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const heading = (text: string, color = '#B02525') => (
+    <h3 style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, margin: 0, color }}>{text}</h3>
+  );
+  const note = { margin: '4px 0 0', fontSize: 13, color: 'var(--muted)', lineHeight: 1.55 } as const;
+  const row = { display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' } as const;
+
+  if (data.archived_at) {
+    return (
+      <Card>
+        <CardBody>
+          <div style={row}>
+            <div style={{ minWidth: 240 }}>
+              {heading('This organisation is archived', '#92400E')}
+              <p style={note}>
+                Archived on {fmtDate(data.archived_at)}. It's hidden, and its hosted events are archived with it.
+                It stays like this until you retrieve it — nothing is deleted.
+              </p>
+            </div>
+            <Button disabled={busy} onClick={() => run(`/organizations/${orgId}/retrieve`, 'Organisation retrieved')}>
+              {busy ? 'Retrieving…' : 'Retrieve'}
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  if (data.mode === 'delete') {
+    return (
+      <Card>
+        <CardBody>
+          <div style={row}>
+            <div style={{ minWidth: 240 }}>
+              {heading('Delete this organisation')}
+              <p style={note}>It has never taken part in an event and has issued nothing, so it can be deleted outright.</p>
+            </div>
+            <Button variant="danger" onClick={onDelete} disabled={deleting}>Delete organisation</Button>
+          </div>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  const blocked = data.blockers.length > 0;
+  return (
+    <Card>
+      <CardBody>
+        <div style={row}>
+          <div style={{ minWidth: 240, flex: 1 }}>
+            {heading('Archive this organisation')}
+            <p style={note}>
+              It can't be deleted because {data.reasons.join(', ')} — deleting would take its certificates,
+              its players' career stats and other hosts' results with it. Archiving hides it and archives the
+              events it hosts, and you can retrieve it any time.
+            </p>
+            {blocked && (
+              <ul style={{ margin: '10px 0 0', paddingLeft: 18, fontSize: 13, color: '#92400E', lineHeight: 1.6 }}>
+                {data.blockers.map((b) => <li key={b}>{b}</li>)}
+              </ul>
+            )}
+          </div>
+          <Button variant="danger" disabled={blocked || busy} title={blocked ? 'Deal with the items listed first' : undefined}
+            onClick={() => { setTyped(''); setConfirming(true); }}>
+            Archive organisation
+          </Button>
+        </div>
+      </CardBody>
+      {confirming && (
+        <Modal title="Archive this organisation?" onClose={() => setConfirming(false)}>
+          <p className="mb-3 text-sm text-slate-600 dark:text-slate-300">
+            “{orgName}” will be hidden from every list and search, and the events it hosts will be archived with it.
+            Its results in other hosts' events stay as they are. Nothing is deleted, and you can retrieve it later.
+          </p>
+          <Field label={`Type ${orgName} to confirm`}>
+            <Input value={typed} onChange={(e) => setTyped(e.target.value)} autoFocus />
+          </Field>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setConfirming(false)}>Cancel</Button>
+            <Button variant="danger" disabled={busy || typed.trim() !== orgName.trim()}
+              onClick={() => run(`/organizations/${orgId}/archive`, 'Organisation archived')}>
+              {busy ? 'Archiving…' : 'Archive organisation'}
+            </Button>
+          </div>
+        </Modal>
+      )}
+    </Card>
   );
 }

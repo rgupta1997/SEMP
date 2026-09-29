@@ -15,7 +15,7 @@ import {
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
+import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
 import type { TieSpec, EventSpec, ScoringMode, KernelState, Pairing, RallyLog, Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer } from '../../features/scoring/RacquetDeck';
 import { CricketDeck } from '../../features/scoring/CricketDeck';
@@ -156,6 +156,9 @@ export function MatchConsolePage() {
   // server rule in the UI so the official sees *why* - and can't waste effort scoring.
   const champStatus = fixture.tournament_disciplines?.tournament_sports?.tournaments?.championships?.status;
   const notStarted = champStatus === 'draft' || champStatus === 'registration_open';
+  // Archived: the result can be looked at, not changed. Everything below sits in a
+  // disabled fieldset, so every console's inputs and Save buttons are off at once.
+  const archived = !!fixture.tournament_disciplines?.tournament_sports?.tournaments?.championships?.archived_at;
   // A match can't be scored until both sides are known - a TBD bracket slot (e.g. a
   // final waiting on its semis) has no teams to score. Mirror the server rule here.
   // Sports that can be scored as a multi-competitor event have no two teams, so the
@@ -192,6 +195,14 @@ export function MatchConsolePage() {
 
       {recoveredAt !== null && <RecoveredBanner at={recoveredAt} fixtureId={fixtureId!} />}
 
+      {archived && (
+        <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          {ARCHIVED_READ_ONLY_MESSAGE}
+        </p>
+      )}
+
+      {/* Carries the flex chain in scoring-focus mode, so the deck still fills the screen. */}
+      <fieldset disabled={archived} className={cn('m-0 min-w-0 border-0 p-0', scoringFocus && 'flex min-h-0 flex-1 flex-col')}>
       {/* A result exists, so the sign-off that makes it official is the next thing
           to do - no longer also conditioned on the layout, which is what hid it. */}
       {OVER.includes(fixture.status) && (
@@ -260,6 +271,7 @@ export function MatchConsolePage() {
           )}
         </div>
       )}
+      </fieldset>
     </div>
   );
 }

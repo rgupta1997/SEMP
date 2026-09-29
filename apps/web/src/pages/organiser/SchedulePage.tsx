@@ -5,7 +5,7 @@ import { Pencil, Trash2 } from 'lucide-react';
 import { FIXTURE_STATUS, inheritedOverrides, resolveFormat } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
-import { isRankingSport, isScoredSport } from '@semp/shared';
+import { ARCHIVED_READ_ONLY_MESSAGE, isRankingSport, isScoredSport } from '@semp/shared';
 import { FormatPicker } from '../../features/scoring/FormatPicker';
 import { usePageFilters, useFilterBar } from '../../lib/filters';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
@@ -40,6 +40,9 @@ function ScoreButton({ fixture, sportName, onNavigate }: { fixture: any; sportNa
   // that check doesn't apply to it - without this it could never be scored.
   const scorable = (!!fixture.home_team_id && !!fixture.away_team_id || isRankingSport(sportName))
     && !['cancelled', 'postponed', 'bye'].includes(fixture.status);
+  // Archived: still opens, but the scoring page is read-only - so it reads "View".
+  const { championship } = useEvent();
+  const archived = !!championship.archived_at;
   if (!scorable) return null;
   const played = ['completed', 'walkover'].includes(fixture.status);
   return (
@@ -56,7 +59,7 @@ function ScoreButton({ fixture, sportName, onNavigate }: { fixture: any; sportNa
         });
       }}
     >
-      {fixture.status === 'live' ? 'Resume' : played ? 'Scorecard' : 'Score'}
+      {archived ? 'View' : fixture.status === 'live' ? 'Resume' : played ? 'Scorecard' : 'Score'}
     </Button>
   );
 }
@@ -547,6 +550,11 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
   // just fixturesLoading) keeps the grid from ever painting real fixtures with no
   // names to show for them.
   const isLoading = fixturesLoading || teamsLoading;
+  // Archived: the draw stays visible, but nothing on it can be generated, edited or
+  // scored - the server refuses it too, so the buttons say so up front.
+  const { championship: drawChampionship } = useEvent();
+  const archived = !!drawChampionship.archived_at;
+  const archivedTitle = archived ? ARCHIVED_READ_ONLY_MESSAGE : undefined;
   const qc = useQueryClient();
   const generate = useApiMutation(
     (replace?: boolean) => api('POST', `/tournament-disciplines/${td.id}/fixtures/generate`, { params: {}, ...(replace ? { replace: true } : {}) }),
@@ -622,9 +630,9 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
 
   // Scoring straight from the bracket tree, without opening a dialog first.
   // Scoring straight from the bracket tree, without opening a dialog first.
-  const goScore = (f: { id: string }) => drawNavigate(`/score/${f.id}`, {
-    state: { from: `/championships/${drawEventId}/schedule` },
-  });
+  // Opens while archived too - the scoring page is read-only then.
+  const goScore = (f: { id: string }) =>
+    drawNavigate(`/score/${f.id}`, { state: { from: `/championships/${drawEventId}/schedule` } });
 
   // A rebuild over an existing (unplayed) draw discards its scheduling, grounds and
   // official assignments, so the server refuses it outright unless told explicitly
@@ -689,30 +697,30 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
               could never be changed at all. Every scored sport now, cricket
               included - it has a format shelf of its own. */}
           {canManage && isScoredSport(sportName) && (
-            <Button size="sm" variant="subtle" onClick={() => setEditingFormat(true)}>Format</Button>
+            <Button size="sm" variant="subtle" disabled={archived} title={archivedTitle} onClick={() => setEditingFormat(true)}>Format</Button>
           )}
-          {canManage && <Button size="sm" variant="subtle" onClick={() => setCreating(true)}>+ Add fixture</Button>}
+          {canManage && <Button size="sm" variant="subtle" disabled={archived} title={archivedTitle} onClick={() => setCreating(true)}>+ Add fixture</Button>}
           {canManage && (
             poolShaped ? (
               // Pools feeding a bracket can only ever come from the stage-config
               // wizard (generate-all) - the plain single-stage route below can never
               // produce both, so it is not offered at all for this shape of format.
-              <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={hasPlayed}
-                title={hasPlayed
+              <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={hasPlayed || archived}
+                title={archivedTitle ?? (hasPlayed
                   ? 'This draw has played matches - reconfiguring would erase those results.'
                   : fixtures.length > 0 && !multiStage
                     ? "This draw was built without its knockout stage - reconfigure it to add one."
-                    : undefined}
+                    : undefined)}
                 onClick={() => setConfiguringStages(true)}>
                 {fixtures.length ? 'Reconfigure stages' : 'Configure stages'}
               </Button>
             ) : (
-              <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={generate.isPending || (hasPlayed && (!isLeague || leagueDrawMismatched))}
-                title={isLeague && !leagueDrawMismatched && fixtures.length
+              <Button size="sm" variant={fixtures.length ? 'outline' : 'primary'} disabled={archived || generate.isPending || (hasPlayed && (!isLeague || leagueDrawMismatched))}
+                title={archivedTitle ?? (isLeague && !leagueDrawMismatched && fixtures.length
                   ? 'Keeps existing matches and adds fixtures for newly-registered teams.'
                   : leagueDrawMismatched
                     ? "This draw still has its old fixtures from before the format changed - regenerate to build this discipline's actual league draw."
-                    : hasPlayed ? 'This draw has played matches - regenerating would erase those results.' : undefined}
+                    : hasPlayed ? 'This draw has played matches - regenerating would erase those results.' : undefined)}
                 onClick={() => {
                   if (isScoredSport(sportName)) { setPicking(true); return; }
                   runGenerate();
@@ -746,7 +754,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
                 <div className="grid w-full grid-cols-2 items-center justify-items-center gap-2 sm:flex sm:w-auto sm:gap-3">
                   <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
                   {canManage && <ScoreButton fixture={f} sportName={sportName} />}
-                  {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)} aria-label="Edit fixture" title="Edit fixture"><Pencil size={14} /></Button>}
+                  {canManage && <Button size="sm" variant="ghost" disabled={archived} onClick={() => setEditing(f)} aria-label="Edit fixture" title={archivedTitle ?? 'Edit fixture'}><Pencil size={14} /></Button>}
                 </div>
               </div>
             ))}
@@ -757,9 +765,9 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
               const groupHasBracket = group.some((f) => f.bracket_position != null);
               const content = groupHasBracket
                 ? <Bracket fixtures={group} teamName={teamName} teamOrg={teamOrg}
-                    onSelect={canManage ? setEditing : () => {}}
+                    onSelect={canManage && !archived ? setEditing : () => {}}
                     onScore={canManage ? (f: any) => goScore(f) : undefined} />
-                : <RoundRobinGrid fixtures={group} teamName={teamName} teamOrg={teamOrg} onSelect={canManage ? setEditing : () => {}} />;
+                : <RoundRobinGrid fixtures={group} teamName={teamName} teamOrg={teamOrg} onSelect={canManage && !archived ? setEditing : () => {}} />;
               if (!multiStage) return <div key={seq}>{content}</div>;
               // Every stage numbers its OWN pools fresh (Pool A, B, C...), so a later
               // stage's "Pool B" is a completely different pool from an earlier
@@ -815,7 +823,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
                 <div className="grid w-full grid-cols-2 items-center justify-items-center gap-2 sm:flex sm:w-auto sm:gap-3">
                   <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
                   {canManage && <ScoreButton fixture={f} sportName={sportName} />}
-                  {canManage && <Button size="sm" variant="ghost" onClick={() => setEditing(f)} aria-label="Edit fixture" title="Edit fixture"><Pencil size={14} /></Button>}
+                  {canManage && <Button size="sm" variant="ghost" disabled={archived} onClick={() => setEditing(f)} aria-label="Edit fixture" title={archivedTitle ?? 'Edit fixture'}><Pencil size={14} /></Button>}
                 </div>
               </div>
             ))}

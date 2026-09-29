@@ -5,6 +5,8 @@ import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { can } from '../../http/middleware/can.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { assertNotArchived } from '../championships/championship-archive.service.js';
+import { assertOrgNotArchived } from '../iam/organization-archive.service.js';
 import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import {
   allocateNumber, codeFor, formatSerial, newToken, signCertificate, type CertificateFacts,
@@ -238,6 +240,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     const existing = await prisma.certificate_templates.findUnique({ where: { id: req.params.templateId } });
     if (!existing) throw new NotFoundError('Template');
     await assertIssuer(req, existing.organization_id);
+    await assertOrgNotArchived(prisma, existing.organization_id);
     const body = req.body as Partial<z.infer<typeof templateSchema>>;
 
     const row = await prisma.$transaction(async (tx) => {
@@ -272,6 +275,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     const existing = await prisma.certificate_templates.findUnique({ where: { id: req.params.templateId } });
     if (!existing) throw new NotFoundError('Template');
     await assertIssuer(req, existing.organization_id);
+    await assertOrgNotArchived(prisma, existing.organization_id);
     await prisma.certificate_templates.update({ where: { id: existing.id }, data: { archived_at: new Date(), is_default: false } });
     await audit(prisma, req, {
       action: AUDIT_ACTIONS.certificateTemplateArchived,
@@ -318,6 +322,8 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     const organizationId = req.params.id;
     await assertIssuer(req, organizationId);
     const body = req.body as z.infer<typeof generateSchema>;
+    // Issuing is a change to the event, and an archived event takes none.
+    await assertNotArchived(prisma, body.championship_id);
 
     const [org, champ, template] = await Promise.all([
       prisma.organizations.findUnique({ where: { id: organizationId }, select: { name: true } }),
@@ -433,6 +439,15 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     certificate_templates: { select: { id: true, name: true } },
   } as const;
 
+  /**
+   * The event a certificate is for. Its championship link is removed when an archived
+   * event is purged, so fall back to the name frozen into its payload at issue.
+   */
+  const withEvent = <T extends { championships: { name: string } | null; payload: unknown }>(r: T) => {
+    const name = (r.payload as any)?.championship_name as string | undefined;
+    return { ...r, championships: r.championships ?? (name ? { id: null, name } : null) };
+  };
+
   /** Scans per certificate, so the register can show VERIFIED rather than guess it. */
   const scanCounts = async (ids: string[]) => {
     if (!ids.length) return new Map<string, number>();
@@ -465,7 +480,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     const byCert = await scanCounts(rows.map((r) => r.id));
     res.json({
       rows: rows.map((r) => ({
-        ...r,
+        ...withEvent(r),
         sport: (r.payload as any)?.sport ?? null,
         title: (r.payload as any)?.title ?? null,
         scans: byCert.get(r.id) ?? 0,
@@ -491,7 +506,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     const cell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const header = ['Certificate ID', 'Recipient', 'Event', 'Sport', 'Achievement', 'Issue Date', 'Status', 'Verification scans', 'Verify URL'];
     const body = rows.map((r) => [
-      r.serial, r.recipient_name, r.championships?.name ?? '', (r.payload as any)?.sport ?? '',
+      r.serial, r.recipient_name, withEvent(r).championships?.name ?? '', (r.payload as any)?.sport ?? '',
       (r.payload as any)?.title ?? '', r.issued_at.toISOString().slice(0, 10),
       statusOf({ ...r, _scans: byCert.get(r.id) ?? 0 }), byCert.get(r.id) ?? 0,
       `${env.WEB_ORIGIN}/verify/${r.token}`,
@@ -593,7 +608,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
         payload: true, organizations: { select: { name: true } }, championships: { select: { name: true } },
       },
     });
-    res.json({ rows });
+    res.json({ rows: rows.map(withEvent) });
   }));
 
   router.get('/me/certificates/:certId/render', asyncHandler(async (req, res) => {

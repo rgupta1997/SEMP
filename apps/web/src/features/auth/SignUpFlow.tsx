@@ -63,10 +63,11 @@ export function SignUpFlow({ dark, inputStyle, labelStyle, t, onHeading }: SignU
   async function startPhone(e: React.FormEvent) {
     e.preventDefault(); setError(null); setBusy(true);
     try {
-      // Checked before a code is spent, so someone at the cap is told now rather
-      // than after two rounds of verification.
-      const info = await identify({ phone });
-      if (!info.can_sign_up) { setError('This number already has the maximum number of accounts.'); return; }
+      // Both checked before a code is spent, so a taken email or a number at the cap
+      // is told now rather than after two rounds of verification.
+      const [phoneInfo, emailInfo] = await Promise.all([identify({ phone }), identify({ email })]);
+      if (emailInfo.registered) { setError('An account with this email already exists - sign in instead.'); return; }
+      if (!phoneInfo.can_sign_up) { setError('This number already has the maximum number of accounts.'); return; }
 
       const r = await sendCode({ phone }, 'verify_phone');
       setDevCode(r.dev_code ?? null); setCode(''); setStep('phone');

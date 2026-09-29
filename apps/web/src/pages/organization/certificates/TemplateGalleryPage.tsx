@@ -7,6 +7,7 @@ import {
   BackButton, Button, Card, PageHeader, SearchInput, Select, Skeleton, cn, toast,
 } from '../../../components/ui';
 import { SheetPreview, type Preset, type Template } from './shared';
+import { useOrgArchived } from '../../../lib/useOrgArchived';
 
 // The Template Gallery.
 //
@@ -20,6 +21,7 @@ export function TemplateGalleryPage() {
   const nav = useNavigate();
   const [q, setQ] = useState('');
   const [category, setCategory] = useState('');
+  const { archived, title: archivedTitle } = useOrgArchived(orgId);
 
   const templatesPath = orgId ? `/organizations/${orgId}/certificate-templates` : null;
   const templates = useApi<{ rows: Template[] }>(templatesPath);
@@ -118,7 +120,7 @@ export function TemplateGalleryPage() {
                   <p className="text-xs text-slate-500 dark:text-slate-400">{p.category}</p>
                   <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{p.blurb}</p>
                 </div>
-                <Button onClick={() => onAdopt(p)} disabled={adopt.isPending} className="w-full justify-center">
+                <Button onClick={() => onAdopt(p)} disabled={adopt.isPending || archived} title={archivedTitle} className="w-full justify-center">
                   <Plus size={14} aria-hidden />Use this design
                 </Button>
               </Card>

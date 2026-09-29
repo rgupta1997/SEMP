@@ -265,9 +265,12 @@ function UnlockModal({ label, busy, onClose, onConfirm }: {
 }
 
 export function ResultsPage() {
-  const { eventId, canManage } = useEvent();
+  const { eventId, canManage, championship } = useEvent();
   const { ctx } = useAuth();
   const navigate = useNavigate();
+  // Archived: results stay visible, but none can be rescored, locked or reopened -
+  // the server refuses it too, so the controls are off rather than failing on click.
+  const archived = !!championship.archived_at;
   const { data: fixtures = [], isLoading, isFetching } = useApi<ResultRow[]>(`/championships/${eventId}/fixtures`);
   // Is this championship awarding custom (hand-entered) points anywhere? If so, the
   // organiser is reminded to add points per result. Rules are organiser-only.
@@ -327,6 +330,7 @@ export function ResultsPage() {
   // one person actually there to record the score had to leave the event and find
   // the match again in their own Officiating queue.
   const myId = ctx?.user?.id;
+  // Still opens while archived - the scoring page is read-only then, so the host can view the result.
   const canScore = (f: ResultRow) => canManage || (!!myId && f.official_id === myId);
   const scoresAny = canManage || rows.some(canScore);
 
@@ -584,7 +588,7 @@ export function ResultsPage() {
             </span>
             {lockedCount > 0 && <span className="text-brand-600/80 dark:text-brand-300/70"> {lockedCount} already locked.</span>}
           </div>
-          <Button size="sm" disabled={busyId !== null} onClick={lockAllReady}>
+          <Button size="sm" disabled={busyId !== null || archived} onClick={lockAllReady}>
             <Lock size={14} /> {busyId === 'bulk' ? 'Locking…' : `Lock ${Math.min(readyRows.length, 50)}`}
           </Button>
         </div>
@@ -746,14 +750,14 @@ export function ResultsPage() {
                                 390px row genuinely cannot spare it. */}
                             {isLocked && (
                               <IconAction expressive short="Reopen" tone="warn"
-                                label="Reopen this result" onClick={() => setUnlocking(f)} disabled={busyId !== null}>
+                                label="Reopen this result" onClick={() => setUnlocking(f)} disabled={busyId !== null || archived}>
                                 <LockOpen size={16} />
                               </IconAction>
                             )}
                             {lockable(f) && (
                               <IconAction expressive short={busyId === f.id ? 'Locking…' : 'Lock'} tone="primary"
                                 label="Make this result official"
-                                onClick={() => void lockOne(f)} disabled={busyId !== null} busy={busyId === f.id}>
+                                onClick={() => void lockOne(f)} disabled={busyId !== null || archived} busy={busyId === f.id}>
                                 <Lock size={16} />
                               </IconAction>
                             )}
@@ -893,14 +897,14 @@ export function ResultsPage() {
                           list. */}
                       {canManage && isLocked && (
                         <IconAction expressive short="Reopen" tone="warn"
-                          label="Reopen this result" disabled={busyId !== null}
+                          label="Reopen this result" disabled={busyId !== null || archived}
                           onClick={() => setUnlocking(f)}>
                           <LockOpen size={15} />
                         </IconAction>
                       )}
                       {canManage && lockable(f) && (
                         <IconAction expressive short={busyId === f.id ? 'Locking…' : 'Lock'} tone="primary"
-                          label="Make this result official" disabled={busyId !== null} busy={busyId === f.id}
+                          label="Make this result official" disabled={busyId !== null || archived} busy={busyId === f.id}
                           onClick={() => void lockOne(f)}>
                           <Lock size={15} />
                         </IconAction>

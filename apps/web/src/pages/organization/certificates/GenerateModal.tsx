@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import {
   CERTIFICATE_ISSUE_TRIGGER_LABEL, DEFAULT_TEMPLATE_LABEL, isEventWideCategory, RECIPIENT_CATEGORY,
@@ -52,6 +53,9 @@ const TRIGGER_OPTIONS: Array<{ value: Trigger; label: string }> = [
 ];
 
 interface Filters { sportId: string; tournamentDisciplineId: string; teamId: string }
+
+/** One category's candidate pool, as the footer needs it. */
+interface CategoryCount { total: number; already: number }
 
 const candidatesPath = (orgId: string, championshipId: string, category: RecipientCategory, filters: Filters) =>
   `/organizations/${orgId}/certificates/candidates?championship_id=${championshipId}&category=${category}`
@@ -111,8 +115,9 @@ const SectionLabel = ({ children, action }: { children: string; action?: React.R
 
 /** A category's live recipient count - a compact pill label, its own fetch so a
  *  slow or empty category never blocks the others from showing theirs. */
-function CategoryCountPill({ orgId, championshipId, category, filters, tone }: {
+function CategoryCountPill({ orgId, championshipId, category, filters, tone, onCount }: {
   orgId: string; championshipId: string; category: RecipientCategory; filters: Filters; tone: BadgeTone;
+  onCount: (count: CategoryCount) => void;
 }) {
   // The candidate pool includes people who already hold this certificate - Generate
   // skips them as duplicates, so the pill has to say how many are actually NEW, or
@@ -121,6 +126,8 @@ function CategoryCountPill({ orgId, championshipId, category, filters, tone }: {
   const rows = data?.rows ?? [];
   const already = rows.filter((r) => r.already_issued).length;
   const fresh = rows.length - already;
+  // Reported up so the footer can total the run before Review, not only on it.
+  useEffect(() => { if (data?.rows) onCount({ total: rows.length, already }); }, [data]);
   return (
     <span className="flex shrink-0 flex-wrap items-center gap-1.5">
       <Badge tone={isLoading ? 'slate' : fresh > 0 ? tone : 'slate'} className="uppercase tracking-wide">
@@ -133,9 +140,10 @@ function CategoryCountPill({ orgId, championshipId, category, filters, tone }: {
   );
 }
 
-function RecipientsStep({ orgId, championship, filters, setFilter, enabled, onToggleCategory, onSelectAll }: {
+function RecipientsStep({ orgId, championship, filters, setFilter, enabled, onToggleCategory, onSelectAll, onCount }: {
   orgId: string; championship: Champ; filters: Filters; setFilter: (p: Partial<Filters>) => void;
   enabled: Record<RecipientCategory, boolean>; onToggleCategory: (c: RecipientCategory) => void; onSelectAll: () => void;
+  onCount: (c: RecipientCategory, count: CategoryCount) => void;
 }) {
   const { data: tournaments = [] } = useApi<any[]>(`/tournaments?championship_id=${championship.id}`);
   const tournamentId = tournaments[0]?.id;
@@ -200,7 +208,10 @@ function RecipientsStep({ orgId, championship, filters, setFilter, enabled, onTo
                   <Checkbox checked={enabled[c]} onChange={() => onToggleCategory(c)} />
                   <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="font-semibold text-slate-900 dark:text-slate-100">{meta.label}</span>
-                    <CategoryCountPill orgId={orgId} championshipId={championship.id} category={c} filters={filters} tone={meta.tone} />
+                    <CategoryCountPill
+                      orgId={orgId} championshipId={championship.id} category={c} filters={filters} tone={meta.tone}
+                      onCount={(count) => onCount(c, count)}
+                    />
                   </span>
                 </div>
                 <p className="pl-6 text-sm text-slate-500 dark:text-slate-400">{meta.desc}</p>
@@ -216,8 +227,9 @@ function RecipientsStep({ orgId, championship, filters, setFilter, enabled, onTo
 
 /* ----------------------------- Templates step ----------------------------- */
 
-function TemplatesStep({ enabledCategories, templates, templateId, setTemplateId, trigger, setTrigger, hasDeferred }: {
-  enabledCategories: RecipientCategory[]; templates: Template[];
+function TemplatesStep({ orgId, enabledCategories, templates, hasDefault, missingTemplate, templateId, setTemplateId, trigger, setTrigger, hasDeferred }: {
+  orgId: string; enabledCategories: RecipientCategory[]; templates: Template[];
+  hasDefault: boolean; missingTemplate: RecipientCategory[];
   templateId: Record<RecipientCategory, string>; setTemplateId: (c: RecipientCategory, v: string) => void;
   trigger: Record<RecipientCategory, Trigger>; setTrigger: (c: RecipientCategory, v: Trigger) => void;
   hasDeferred: boolean;
@@ -227,6 +239,26 @@ function TemplatesStep({ enabledCategories, templates, templateId, setTemplateId
       <p className="text-sm text-slate-500 dark:text-slate-400">
         One template and one issuing rule per category, for this event only.
       </p>
+      {/* Said here, before Generate - otherwise the run "succeeds" with 0 issued and
+          the reason only appears afterwards, once per category. */}
+      {missingTemplate.length > 0 && (
+        <div className="rounded-xl bg-amber-50 p-3.5 dark:bg-amber-500/10">
+          <div className="font-semibold text-amber-900 dark:text-amber-300">
+            {templates.length ? 'No default template set' : 'No certificate template yet'}
+          </div>
+          <p className="mt-0.5 text-sm text-amber-800/80 dark:text-amber-300/70">
+            {templates.length
+              ? `Pick a template for ${missingTemplate.map((c) => CATEGORY_META[c].label).join(', ')}, or mark one as the default.`
+              : 'There is nothing to issue from. Create one from a starter design, then come back to generate.'}
+          </p>
+          <Link
+            to={`/organizations/${orgId}/certificates/templates`}
+            className="mt-2 inline-block text-sm font-semibold text-amber-900 underline dark:text-amber-300"
+          >
+            Go to certificate templates
+          </Link>
+        </div>
+      )}
       <div className="grid gap-2.5">
         {enabledCategories.map((c) => {
           const meta = CATEGORY_META[c];
@@ -239,7 +271,7 @@ function TemplatesStep({ enabledCategories, templates, templateId, setTemplateId
                 <label className="grid gap-1 text-xs">
                   <span className="font-medium text-slate-600 dark:text-slate-400">Template</span>
                   <Select value={templateId[c] ?? ''} onChange={(e) => setTemplateId(c, e.target.value)}>
-                    <option value="">{DEFAULT_TEMPLATE_LABEL}</option>
+                    <option value="">{hasDefault ? DEFAULT_TEMPLATE_LABEL : 'Choose a template'}</option>
                     {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </Select>
                 </label>
@@ -318,8 +350,9 @@ function CategoryReview({ orgId, championshipId, category, filters, templateName
 
 /* ----------------------------- Wizard ----------------------------- */
 
-function Wizard({ orgId, championship, templates, onClose, invalidate }: {
-  orgId: string; championship: Champ; templates: Template[]; onClose: () => void; invalidate: (string | null)[];
+function Wizard({ orgId, championship, templates, templatesLoading, onClose, invalidate }: {
+  orgId: string; championship: Champ; templates: Template[]; templatesLoading: boolean;
+  onClose: () => void; invalidate: (string | null)[];
 }) {
   const [step, setStep] = useState(0);
   const [filters, setFilters] = useState<Filters>({ sportId: '', tournamentDisciplineId: '', teamId: '' });
@@ -401,10 +434,22 @@ function Wizard({ orgId, championship, templates, onClose, invalidate }: {
   const totalIssued = outcome ? Object.values(outcome).reduce((n, r) => n + r.issued, 0) : 0;
   const totalSkipped = outcome ? Object.values(outcome).reduce((n, r) => n + r.skipped, 0) : 0;
 
-  // The footer's running "N certificates in this run" count. On Review it reflects
-  // included-minus-excluded; before that it's each enabled category's live total.
-  const [scopeCounts, setScopeCounts] = useState<Record<string, number>>({});
-  const scopeTotal = enabledManualCategories.reduce((n, c) => n + (scopeCounts[c] ?? 0), 0) - totalExcluded;
+  // The footer's running "N certificates in this run" count. Once a category has been
+  // reviewed it is included-minus-excluded; before that, its new (not yet certified) total.
+  const [counts, setCounts] = useState<Record<string, CategoryCount>>({});
+  const setCount = (c: RecipientCategory, count: CategoryCount) => setCounts((cur) => ({ ...cur, [c]: count }));
+  const scopeTotal = enabledManualCategories.reduce((n, c) => {
+    const count = counts[c];
+    if (!count) return n;
+    return n + count.total - (seeded.has(c) ? excludedFor(c).size : count.already);
+  }, 0);
+
+  // "Default template" only issues if the organisation has one. Unknown while loading,
+  // so nothing is flagged until the list has arrived.
+  const hasDefault = templates.some((t) => t.is_default);
+  const missingTemplate = templatesLoading || hasDefault
+    ? []
+    : enabledManualCategories.filter((c) => !templateId[c]);
 
   const footerLine2 = outcome
     ? 'Serials are QR-verifiable at sportagon.in/verify'
@@ -443,7 +488,7 @@ function Wizard({ orgId, championship, templates, onClose, invalidate }: {
             ) : step === 0 ? (
               <Button size="lg" onClick={() => setStep(1)} disabled={!enabledCategories.length}>Continue</Button>
             ) : step === 1 ? (
-              <Button size="lg" onClick={() => setStep(2)}>Continue</Button>
+              <Button size="lg" onClick={() => setStep(2)} disabled={missingTemplate.length > 0}>Continue</Button>
             ) : (
               <Button size="lg" onClick={onGenerate} disabled={running || !enabledManualCategories.length}>
                 {running ? 'Generating…' : `Generate ${Math.max(scopeTotal, 0)}`}
@@ -477,10 +522,12 @@ function Wizard({ orgId, championship, templates, onClose, invalidate }: {
         <RecipientsStep
           orgId={orgId} championship={championship} filters={filters} setFilter={setFilter}
           enabled={enabled} onToggleCategory={toggleCategory} onSelectAll={selectAll}
+          onCount={setCount}
         />
       ) : step === 1 ? (
         <TemplatesStep
-          enabledCategories={enabledCategories} templates={templates}
+          orgId={orgId} enabledCategories={enabledCategories} templates={templates}
+          hasDefault={hasDefault} missingTemplate={missingTemplate}
           templateId={templateId} setTemplateId={setTemplateId}
           trigger={trigger} setTrigger={setTrigger}
           hasDeferred={enabledDeferredCategories.length > 0}
@@ -506,7 +553,7 @@ function Wizard({ orgId, championship, templates, onClose, invalidate }: {
                 onToggle={(userId) => onToggleRecipient(c, userId)}
                 onSeed={(rows) => {
                   seedIfNeeded(c, rows);
-                  setScopeCounts((cur) => ({ ...cur, [c]: rows.length }));
+                  setCount(c, { total: rows.length, already: rows.filter((r) => r.already_issued).length });
                 }}
               />
             ))}
@@ -517,8 +564,9 @@ function Wizard({ orgId, championship, templates, onClose, invalidate }: {
   );
 }
 
-export function GenerateModal({ orgId, championship, templates, onClose, invalidate }: {
-  orgId: string; championship?: Champ; templates: Template[]; onClose: () => void; invalidate: (string | null)[];
+export function GenerateModal({ orgId, championship, templates, templatesLoading = false, onClose, invalidate }: {
+  orgId: string; championship?: Champ; templates: Template[]; templatesLoading?: boolean;
+  onClose: () => void; invalidate: (string | null)[];
 }) {
   const [champId, setChampId] = useState('');
   const champs = useApi<{ rows: Array<{ id: string; name: string; pending: number }> }>(
@@ -533,7 +581,7 @@ export function GenerateModal({ orgId, championship, templates, onClose, invalid
     // an event with a flat 0 is noise, not a choice.
     const withPending = (champs.data?.rows ?? []).filter((c) => c.pending > 0);
     const picked = withPending.find((c) => c.id === champId);
-    if (picked) return <Wizard orgId={orgId} championship={picked} templates={templates} onClose={onClose} invalidate={invalidate} />;
+    if (picked) return <Wizard orgId={orgId} championship={picked} templates={templates} templatesLoading={templatesLoading} onClose={onClose} invalidate={invalidate} />;
     return (
       <Modal title="Generate certificates" onClose={onClose} footer={<Button variant="ghost" onClick={onClose}>Cancel</Button>}>
         <label className="grid gap-1 text-sm">
@@ -547,5 +595,5 @@ export function GenerateModal({ orgId, championship, templates, onClose, invalid
     );
   }
 
-  return <Wizard orgId={orgId} championship={championship} templates={templates} onClose={onClose} invalidate={invalidate} />;
+  return <Wizard orgId={orgId} championship={championship} templates={templates} templatesLoading={templatesLoading} onClose={onClose} invalidate={invalidate} />;
 }

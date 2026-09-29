@@ -5,6 +5,7 @@ import type { PermissionCode } from '@semp/shared';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
+import { useOrgArchived } from '../../lib/useOrgArchived';
 import {
   Badge, Button, Card, CardBody, confirmDialog, PageHeader, Spinner, toast,
 } from '../../components/ui';
@@ -64,6 +65,7 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
   // boxes. Shown as a padlock on the box rather than hidden, because "you cannot
   // grant this" is information and an absent row is not.
   const perms = usePermissions();
+  const { archived, title: archivedTitle } = useOrgArchived(orgId);
   const mine = perms.orgPermissions(orgId);
   const canGrant = (code: string) => perms.isSuper || mine.has(code as PermissionCode);
 
@@ -183,6 +185,8 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
         {/* ---- the matrix ---- */}
         <Card>
           <CardBody>
+            {/* Archived: every role reads as it stands, none can be changed. */}
+            <fieldset disabled={archived} title={archivedTitle} className="m-0 min-w-0 border-0 p-0">
             {!selected ? (
               <p className="text-sm text-slate-500">Pick a role to see what it grants.</p>
             ) : (
@@ -301,6 +305,7 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
                 )}
               </>
             )}
+            </fieldset>
           </CardBody>
         </Card>
       </div>

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Megaphone } from 'lucide-react';
+import { ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { useApi } from '../../lib/hooks';
 import type { NotificationDto } from '../../lib/notifications';
 import { NotificationComposeModal } from '../../components/NotificationComposeModal';
@@ -19,8 +20,15 @@ import { useEvent } from './EventLayout';
 // afterwards is a product where nobody can quote what they were told.
 
 export function EventCommunicationsPage() {
-  const { eventId, canManage } = useEvent();
+  const { championship, eventId, canManage } = useEvent();
   const [composing, setComposing] = useState(false);
+  // Refused by the server too; disabled here so nobody writes an announcement first.
+  const archived = !!championship.archived_at;
+  const announce = (
+    <Button disabled={archived} title={archived ? ARCHIVED_READ_ONLY_MESSAGE : undefined} onClick={() => setComposing(true)}>
+      <Megaphone size={15} aria-hidden />Make an announcement
+    </Button>
+  );
   const { data: rows = [], isLoading, refetch } = useApi<NotificationDto[]>(
     `/notifications?championship_id=${eventId}&take=100`,
   );
@@ -31,11 +39,7 @@ export function EventCommunicationsPage() {
         title="Communications"
         subtitle="Every announcement made about this event, newest first."
       >
-        {canManage && (
-          <Button onClick={() => setComposing(true)}>
-            <Megaphone size={15} aria-hidden />Make an announcement
-          </Button>
-        )}
+        {canManage && announce}
       </PageHeader>
 
       {isLoading ? <Spinner /> : rows.length === 0 ? (
@@ -45,9 +49,7 @@ export function EventCommunicationsPage() {
           description={canManage
             ? 'Announcements you make here reach the audience you choose — everyone, or just captains, officials or points of contact.'
             : 'Announcements from the organising team will appear here.'}
-          action={canManage
-            ? <Button onClick={() => setComposing(true)}>Make an announcement</Button>
-            : undefined}
+          action={canManage ? announce : undefined}
         />
       ) : (
         <div className="space-y-2">

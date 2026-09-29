@@ -70,6 +70,22 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
     }),
   ]);
 
+  // An archived event belongs to its host alone: everyone else's roles, officiating and
+  // team entries for it drop out, so it leaves their workspace switcher and My Game.
+  const managedIds = await managedChampionshipIds(prisma, user.id);
+  const managed = new Set(managedIds);
+  const referenced = [...new Set([
+    ...championshipRoleRows.map((r) => r.championship_id),
+    ...officialRows.map((o) => o.championship_id),
+    ...memberships.flatMap((m) => m.teams?.team_entries?.map((e) => e.championship_id) ?? []),
+  ])];
+  const archived = new Set(referenced.length
+    ? (await prisma.championships.findMany({
+      where: { id: { in: referenced }, archived_at: { not: null } }, select: { id: true },
+    })).map((c) => c.id)
+    : []);
+  const visible = (championshipId: string) => !archived.has(championshipId) || managed.has(championshipId);
+
   // If the user's primary org field is empty but they own/admin one, use the first.
   const organization = orgFromUser
     ?? orgMemberships.find((m) => m.status === 'active' && (m.role === 'owner' || m.role === 'admin'))?.organizations
@@ -78,7 +94,9 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
   return {
     user: publicUser,
     organization,
-    organizations: orgMemberships.map((m) => ({
+    // An archived organisation stays in the switcher only for those who can retrieve
+    // it - its owner and admins. For everyone else it is gone.
+    organizations: orgMemberships.filter((m) => !m.organizations?.archived_at || m.role === 'owner' || m.role === 'admin').map((m) => ({
       id: m.id,
       organization_id: m.organization_id,
       organization: m.organizations,
@@ -86,12 +104,12 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
       status: m.status,
       joined_at: m.joined_at,
     })),
-    official_championship_ids: officialRows.map((o) => o.championship_id),
+    official_championship_ids: officialRows.map((o) => o.championship_id).filter(visible),
     // Answered here rather than on the client, which was deciding it by role NAME
     // against a table that has a rename screen, and could only ever see half of it
     // - an institution's owner manages the events it hosts without holding an
     // Organiser row on any of them.
-    managed_championship_ids: await managedChampionshipIds(prisma, user.id),
+    managed_championship_ids: managedIds,
     // What this person was explicitly GRANTED per organisation, as opposed to what
     // their membership implies. The shell unions the two: a Sports Admin grant has
     // to widen the nav, and losing it must not silently remove the member's own
@@ -102,7 +120,7 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
       name: g.roles?.name ?? null,
       scope_ref: g.scope_ref,
     })),
-    championship_roles: championshipRoleRows.map((r) => ({
+    championship_roles: championshipRoleRows.filter((r) => visible(r.championship_id)).map((r) => ({
       id: r.id,
       championship_id: r.championship_id,
       championship: r.championships,
@@ -113,7 +131,7 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
       team_id: m.team_id,
       role: m.role,
       jersey_number: m.jersey_number,
-      team: m.teams,
+      team: m.teams && { ...m.teams, team_entries: m.teams.team_entries.filter((e) => visible(e.championship_id)) },
     })),
   };
 }

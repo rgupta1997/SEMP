@@ -7,6 +7,7 @@ import { useOrgUnits, unitPath } from '../../lib/units';
 import { usePermissions } from '../../lib/permissions';
 import { titleCase } from '../../lib/format';
 import { DataList } from '../../components/primitives';
+import { useOrgArchived } from '../../lib/useOrgArchived';
 import {
   Avatar, BackButton, Badge, Button, Card, CardBody, confirmDialog, EmptyState, Field,
   ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Spinner, toast,
@@ -154,6 +155,8 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
   const perms = usePermissions();
   const canManageMembers = perms.hasOrgPermission('org.member.manage', orgId);
   const canManageRoles = perms.hasOrgPermission('role.manage', orgId);
+  // Archived: membership and roles are frozen until it is retrieved.
+  const { archived, title: archivedTitle } = useOrgArchived(orgId);
 
   const members = useApi<Member[]>(`/organizations/${orgId}/members`);
   const grants = useApi<Grant[]>(canManageRoles ? `/organizations/${orgId}/roles` : null);
@@ -280,11 +283,11 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
                     <span className="block truncate font-medium text-slate-800 dark:text-slate-100">{m.users?.name ?? 'Unnamed'}</span>
                     <span className="block truncate text-[12px] text-slate-500 dark:text-slate-400">{m.users?.email ?? m.users?.phone ?? 'No contact'}</span>
                   </span>
-                  <Button size="sm" disabled={deciding !== null} onClick={() => decide(m, 'approve')}>
+                  <Button size="sm" disabled={deciding !== null || archived} title={archivedTitle} onClick={() => decide(m, 'approve')}>
                     {deciding === m.id ? 'Saving…' : 'Approve'}
                   </Button>
                   <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
-                    disabled={deciding !== null} onClick={() => decide(m, 'decline')}>Decline</Button>
+                    disabled={deciding !== null || archived} title={archivedTitle} onClick={() => decide(m, 'decline')}>Decline</Button>
                 </li>
               ))}
             </ul>
@@ -356,15 +359,17 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
                             {canManageRoles && (
                               <>
                                 <button
-                                  className="tap text-[12px] font-semibold text-brand-600 hover:underline dark:text-brand-400"
+                                  disabled={archived} title={archivedTitle}
+                                  className="tap text-[12px] font-semibold text-brand-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50 dark:text-brand-400"
                                   onClick={() => setStatus(g, g.status === 'SUSPENDED' ? 'ACTIVE' : 'SUSPENDED')}>
                                   {g.status === 'SUSPENDED' ? 'Restore' : 'Suspend'}
                                 </button>
                                 <button
                                   className="tap grid h-6 w-6 shrink-0 place-items-center rounded text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/15"
                                   onClick={() => revoke(g)}
+                                  disabled={archived}
                                   aria-label={`Remove ${g.role?.name} role`}
-                                  title="Remove role">
+                                  title={archivedTitle ?? 'Remove role'}>
                                   <Trash2 size={13} />
                                 </button>
                               </>
@@ -381,7 +386,7 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
                   align: 'right' as const,
                   actions: true,
                   render: (m: Member) => (
-                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => setGranting(m)}>
+                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" disabled={archived} title={archivedTitle} onClick={() => setGranting(m)}>
                       <ShieldCheck size={14} /> Give role
                     </Button>
                   ),

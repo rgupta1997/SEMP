@@ -15,15 +15,19 @@ export function makePublicRouter(prisma: Prisma): Router {
   const router = Router();
 
   // Resolve the token to a championship id, or 404 (never reveal whether the id exists).
-  const resolve = (token: string): string => {
+  // An archived event is withdrawn from public view, so its links 404 the same way -
+  // and work again if it is retrieved, since the token itself never changes.
+  const resolve = async (token: string): Promise<string> => {
     const id = verifyShareToken(token);
     if (!id) throw new NotFoundError('Shared championship');
+    const champ = await prisma.championships.findUnique({ where: { id }, select: { archived_at: true } });
+    if (!champ || champ.archived_at) throw new NotFoundError('Shared championship');
     return id;
   };
 
   // Overview: championship header + sports + headline counts.
   router.get('/championships/:token/overview', asyncHandler(async (req, res) => {
-    const id = resolve(req.params.token);
+    const id = await resolve(req.params.token);
     const draw = { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: id } } } };
     const [champ, organizations, fixtures, completed_matches, sports] = await Promise.all([
       prisma.championships.findUnique({
@@ -47,7 +51,7 @@ export function makePublicRouter(prisma: Prisma): Router {
 
   // Standings for a scope (same shape + ranking the spectator view uses).
   router.get('/championships/:token/standings', asyncHandler(async (req, res) => {
-    const id = resolve(req.params.token);
+    const id = await resolve(req.params.token);
     const scope = (req.query.scope as StandingsAggScope) || 'championship';
     if (!STANDINGS_AGG_SCOPE.includes(scope)) throw new NotFoundError('Scope');
     const scopeId = scope === 'championship' ? null : (req.query.scopeId as string | undefined) ?? null;
@@ -60,7 +64,7 @@ export function makePublicRouter(prisma: Prisma): Router {
   // Per-event breakdown for one org (same shape as the authed route) - drives the
   // expandable standings row on the public share page.
   router.get('/championships/:token/standings/breakdown', asyncHandler(async (req, res) => {
-    const id = resolve(req.params.token);
+    const id = await resolve(req.params.token);
     const scope = (req.query.scope as StandingsAggScope) || 'championship';
     if (!STANDINGS_AGG_SCOPE.includes(scope)) throw new NotFoundError('Scope');
     const scopeId = scope === 'championship' ? null : (req.query.scopeId as string | undefined) ?? null;
@@ -77,13 +81,13 @@ export function makePublicRouter(prisma: Prisma): Router {
 
   // All fixtures (powers the Schedule + Results tabs - same shape the spectator gets).
   router.get('/championships/:token/fixtures', asyncHandler(async (req, res) => {
-    const id = resolve(req.params.token);
+    const id = await resolve(req.params.token);
     res.json(await listChampionshipFixtures(prisma, id));
   }));
 
   // Tournament/sport options so the public standings can offer the same filters.
   router.get('/championships/:token/draws', asyncHandler(async (req, res) => {
-    const id = resolve(req.params.token);
+    const id = await resolve(req.params.token);
     const draws = await prisma.tournament_disciplines.findMany({
       where: { tournament_sports: { tournaments: { championship_id: id } } },
       select: { tournament_sports: { select: { sports: { select: { id: true, name: true } }, tournaments: { select: { id: true, name: true } } } } },

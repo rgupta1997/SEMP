@@ -1,16 +1,21 @@
 import { Navigate, Outlet, useLocation, useOutletContext, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { useApi, useApiMutation, fmtDateRange } from '../../lib/hooks';
+import { archiveDaysLeft, archivePurgeDate } from '@semp/shared';
+import { useApi, useApiMutation, fmtDate, fmtDateRange } from '../../lib/hooks';
 import { usePermissions } from '../../lib/permissions';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { mayOpenSegment, parseEventSegment } from '../../lib/championship-nav';
-import { BackButton, Button, Spinner, StatusBadge, toast } from '../../components/ui';
+import { BackButton, Button, EmptyState, Spinner, StatusBadge, toast } from '../../components/ui';
 
 export interface EventDetail {
   id: string; name: string; slug: string; status: string;
   venue?: string; description?: string; start_date: string; end_date: string;
   visibility?: string; // 'public' (default) | 'private'
   host_organization_id?: string | null;
+  /** Set while archived: the event is read-only until retrieved. */
+  archived_at?: string | null;
+  /** Archived by its organisation's archive: no clock, and it returns with the organisation. */
+  archived_with_org?: boolean;
   /**
    * What competes here, resolved by the server.
    *
@@ -47,7 +52,7 @@ export function EventLayout() {
   const canManage = canManageChampionship(eventId);
   const ws = useWorkspace();
   const roleCodes = ws.contexts.find((c) => c.id === eventId)?.roleCodes ?? [];
-  const { data: championship, isLoading } = useApi<EventDetail>(`/championships/${eventId}`);
+  const { data: championship, isLoading, error } = useApi<EventDetail>(`/championships/${eventId}`);
   const statusMut = useApiMutation(
     (status: string) => api('PATCH', `/championships/${eventId}/status`, { status }),
     // `/championships/mine` matters as much as the other two: it is what the SIDEBAR
@@ -57,7 +62,23 @@ export function EventLayout() {
     // rest stayed missing until they reloaded the page by hand.
     [`/championships/${eventId}`, '/championships', '/championships/mine'],
   );
+  const retrieve = useApiMutation(
+    () => api('POST', `/championships/${eventId}/retrieve`),
+    [`/championships/${eventId}`, `/championships/${eventId}/removal`, '/championships', '/championships/mine'],
+  );
 
+  // A private event you are not in, an archived event you do not host, or one that
+  // is gone all answer 404 - said plainly rather than spinning forever.
+  if (!isLoading && !championship && error) {
+    return (
+      <EmptyState
+        icon="🔍"
+        title="Event not available"
+        description="This event doesn't exist, or you no longer have access to it."
+        action={<Button variant="outline" onClick={() => ws.leaveTo('/championships')}>Back to my events</Button>}
+      />
+    );
+  }
   if (isLoading || !championship) return <Spinner />;
 
   // A section reachable by URL that the sidebar does not offer is an access bug
@@ -74,7 +95,9 @@ export function EventLayout() {
     return <Navigate to={`/championships/${eventId}`} replace />;
   }
 
-  const next = NEXT_STATUS[championship.status];
+  // An archived event is read-only; no lifecycle step is offered until it is retrieved.
+  const archivedAt = championship.archived_at ?? null;
+  const next = archivedAt ? null : NEXT_STATUS[championship.status];
 
   // Back goes where they came from - workspace and all. Entering an event moves
   // the whole workspace, so leaving it has to move the workspace back, otherwise
@@ -121,6 +144,26 @@ export function EventLayout() {
           </Button>
         )}
       </div>
+
+      {archivedAt && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+          <p className="text-amber-900 dark:text-amber-200">
+            <span className="font-semibold">This championship is archived.</span>{' '}
+            {championship.archived_with_org
+              ? 'It was archived with its organisation. Everything here is read-only, and it comes back when the organisation is retrieved.'
+              : <>Everything here is read-only, and it will be permanently deleted on {fmtDate(archivePurgeDate(archivedAt))}{' '}
+                ({archiveDaysLeft(archivedAt)} days left) unless it is retrieved.</>}
+          </p>
+          {canManage && !championship.archived_with_org && (
+            <Button size="sm" disabled={retrieve.isPending} onClick={() => retrieve.mutate(undefined, {
+              onSuccess: () => toast.success('Championship retrieved'),
+              onError: (e: any) => toast.error(e.message),
+            })}>
+              {retrieve.isPending ? 'Retrieving…' : 'Retrieve'}
+            </Button>
+          )}
+        </div>
+      )}
 
       <Outlet context={{ championship, eventId: eventId!, canManage } satisfies EventCtx} />
     </div>

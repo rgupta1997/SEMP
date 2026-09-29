@@ -28,6 +28,9 @@ export * from './schemas.js';
 export * from './role-codes.js';
 export * from './role-model.js';
 export * from './org-structure.js';
+export * from './sportagon-id.js';
+export * from './championship-archive.js';
+export * from './organization-archive.js';
 
 export * from './category-lines.js';
 export * from './cricket-stats.js';

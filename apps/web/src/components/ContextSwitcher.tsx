@@ -162,6 +162,12 @@ export function ContextSwitcher({
                         {c.kind === 'org' && c.verified && (
                           <Check size={12} style={{ color: 'var(--ok-ink)', flex: '0 0 auto' }} aria-label="Verified" />
                         )}
+                        {c.kind === 'org' && c.archived && (
+                          <span style={{
+                            flex: '0 0 auto', fontSize: 9.5, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase',
+                            padding: '1px 6px', borderRadius: 999, background: 'var(--amber-soft)', color: 'var(--amber-ink)',
+                          }}>Archived</span>
+                        )}
                       </span>
                       <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', marginTop: 1 }}>
                         {c.roleCodes.length

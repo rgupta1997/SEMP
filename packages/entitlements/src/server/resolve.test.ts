@@ -1,11 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { beforeEach, describe, it, expect } from 'vitest';
 import {
   assertCapability,
   CapabilityRequiredError,
+  clearPlanEnforcementCache,
   entitlementSnapshot,
   hasCapability,
   orgTier,
   personalTier,
+  plansEnforced,
   tierFor,
   type EntitlementsPrisma,
 } from './resolve.js';
@@ -158,5 +160,33 @@ describe('entitlementSnapshot', () => {
     const p = fakePrisma({ orgs: { iimb: 'pro' }, users: { akash: 'pro' } });
     await entitlementSnapshot(p, { userId: 'akash', organizationId: 'iimb' });
     expect(p.calls.sort()).toEqual(['org:iimb', 'user:akash']);
+  });
+});
+
+describe('the platform-wide plans switch', () => {
+  const withSetting = (value: unknown, over: Parameters<typeof fakePrisma>[0] = {}) => ({
+    ...fakePrisma(over),
+    platform_settings: { async findUnique() { return value === undefined ? null : { value }; } },
+  });
+  beforeEach(() => clearPlanEnforcementCache());
+
+  it('treats everyone as the top tier while plans are off', async () => {
+    const p = withSetting(false, { orgs: { iimb: 'free' }, users: { u1: 'free' } });
+    expect(await orgTier(p, 'iimb')).toBe('max');
+    expect(await personalTier(p, 'u1')).toBe('max');
+    expect(await hasCapability(p, 'audit_logs', { userId: 'u1', organizationId: 'iimb' })).toBe(true);
+    expect((await entitlementSnapshot(p, { userId: 'u1', organizationId: 'iimb' })).plans_enforced).toBe(false);
+  });
+
+  it('applies the saved plans again when switched back on', async () => {
+    const p = withSetting(true, { orgs: { iimb: 'free' } });
+    expect(await orgTier(p, 'iimb')).toBe('free');
+  });
+
+  it('counts a missing setting or a failed read as enforced', async () => {
+    expect(await plansEnforced(withSetting(undefined))).toBe(true);
+    clearPlanEnforcementCache();
+    const broken = { ...fakePrisma(), platform_settings: { async findUnique(): Promise<never> { throw new Error('no table'); } } };
+    expect(await plansEnforced(broken)).toBe(true);
   });
 });

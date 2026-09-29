@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
-import { useApiMutation } from '../../lib/hooks';
-import { CHAMPIONSHIP_STATUS } from '@semp/shared';
+import { fmtDate, useApi, useApiMutation } from '../../lib/hooks';
+import { ARCHIVE_RETENTION_DAYS, archiveDaysLeft, CHAMPIONSHIP_STATUS, type ChampionshipRemovalMode } from '@semp/shared';
 import { titleCase } from '../../lib/format';
 import { Button, Card, CardBody, CardHeader, confirmDialog, Field, Input, Pills, Progress, Select, StatusBadge, Textarea, toast } from '../../components/ui';
 import { useWorkspace } from '../../lib/useWorkspace';
@@ -24,8 +24,9 @@ export function EventSettingsPage() {
   // event's certificates, so the Certificates page points people here when it is
   // unset - which means this control has to exist.
   const ws = useWorkspace();
+  // An archived organisation can't host - the server refuses it too.
   const hostable = ws.contexts.filter(
-    (c) => c.kind === 'org' && c.roleCodes.some((r) => r === 'owner' || r === 'org_admin'),
+    (c) => c.kind === 'org' && !c.archived && c.roleCodes.some((r) => r === 'owner' || r === 'org_admin'),
   );
   const [hostOrgId, setHostOrgId] = useState<string>(
     (championship as any).host_organization_id ?? '',
@@ -120,27 +121,128 @@ export function EventSettingsPage() {
 
       <StandingsRulesCard eventId={eventId} />
 
-      <Card className="border-rose-200 dark:border-rose-500/30">
-        <CardHeader title="Danger zone" subtitle="Permanently delete this championship and everything in it" />
+      <DangerZone eventId={eventId} name={championship.name} onDelete={() => remove.mutateAsync(undefined)} deleting={remove.isPending} />
+    </div>
+  );
+}
+
+interface Removal {
+  mode: ChampionshipRemovalMode;
+  reasons: string[];
+  archived_at: string | null;
+  archived_with_org?: boolean;
+  purge_on: string | null;
+  retention_days: number;
+}
+
+// Delete OR archive, never both. Once the event has results - completed, a played or
+// locked match, an issued certificate - it can only be archived: hidden, restorable,
+// and permanently deleted after the retention period unless retrieved.
+function DangerZone({ eventId, name, onDelete, deleting }: {
+  eventId: string; name: string; onDelete: () => Promise<unknown>; deleting: boolean;
+}) {
+  const navigate = useNavigate();
+  const removalPath = `/championships/${eventId}/removal`;
+  const { data } = useApi<Removal>(removalPath);
+  const lists = ['/championships', '/championships/mine', removalPath];
+  const archive = useApiMutation(() => api('POST', `/championships/${eventId}/archive`), lists);
+  const retrieve = useApiMutation(() => api('POST', `/championships/${eventId}/retrieve`), lists);
+
+  if (!data) return null;
+  const days = data.retention_days ?? ARCHIVE_RETENTION_DAYS;
+
+  if (data.archived_at && data.archived_with_org) {
+    return (
+      <Card className="border-amber-200 dark:border-amber-500/30">
+        <CardHeader title="Archived" subtitle={`Archived with its organisation on ${fmtDate(data.archived_at)}`} />
+        <CardBody>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            This championship was archived together with its organisation. It isn't on a 90-day clock — it comes back
+            when the organisation is retrieved, from the organisation's Administration → Organization Profile.
+          </p>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  if (data.archived_at) {
+    return (
+      <Card className="border-amber-200 dark:border-amber-500/30">
+        <CardHeader title="Archived" subtitle={`Archived on ${fmtDate(data.archived_at)}`} />
         <CardBody>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Deletes all tournaments, teams, venues, fixtures, enrollments and notifications for this championship. This cannot be undone.
+              This championship is hidden from every list and will be permanently deleted on{' '}
+              <span className="font-semibold text-slate-700 dark:text-slate-200">{fmtDate(data.purge_on!)}</span>{' '}
+              ({archiveDaysLeft(data.archived_at)} days left) unless you retrieve it.
             </p>
-            <Button
-              variant="danger"
-              disabled={remove.isPending}
-              onClick={async () => {
-                if (await confirmDialog({ title: 'Delete championship', confirmLabel: 'Delete championship', message: `Delete “${championship.name}”? This permanently removes the championship and all of its data. This cannot be undone.` })) {
-                  remove.mutate(undefined, { onError: (e: any) => toast.error(e.message) });
-                }
-              }}
-            >
-              {remove.isPending ? 'Deleting…' : 'Delete championship'}
+            <Button disabled={retrieve.isPending} onClick={() => retrieve.mutate(undefined, {
+              onSuccess: () => toast.success('Championship retrieved'),
+              onError: (e: any) => toast.error(e.message),
+            })}>
+              {retrieve.isPending ? 'Retrieving…' : 'Retrieve'}
             </Button>
           </div>
         </CardBody>
       </Card>
-    </div>
+    );
+  }
+
+  if (data.mode === 'archive') {
+    return (
+      <Card className="border-rose-200 dark:border-rose-500/30">
+        <CardHeader title="Danger zone" subtitle="Archive this championship" />
+        <CardBody>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              This championship can't be deleted because {data.reasons.join(', ')}. You can archive it instead:
+              it is hidden from every list, and you can retrieve it from the Archived tab for {days} days.
+            </p>
+            <Button
+              variant="danger"
+              disabled={archive.isPending}
+              onClick={async () => {
+                const ok = await confirmDialog({
+                  title: 'Archive championship',
+                  confirmLabel: 'Archive championship',
+                  message: `“${name}” will be hidden from every list. It will be permanently deleted after ${days} days unless you retrieve it from the Archived tab before then. Players keep their results and certificates stay valid.`,
+                });
+                if (!ok) return;
+                archive.mutate(undefined, {
+                  onSuccess: () => { toast.success(`Archived - deleted in ${days} days unless retrieved`); navigate('/championships?tab=archived'); },
+                  onError: (e: any) => toast.error(e.message),
+                });
+              }}
+            >
+              {archive.isPending ? 'Archiving…' : 'Archive championship'}
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="border-rose-200 dark:border-rose-500/30">
+      <CardHeader title="Danger zone" subtitle="Permanently delete this championship and everything in it" />
+      <CardBody>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Deletes all tournaments, venues, fixtures, enrollments and notifications for this championship. Teams are kept. This cannot be undone.
+          </p>
+          <Button
+            variant="danger"
+            disabled={deleting}
+            onClick={async () => {
+              if (await confirmDialog({ title: 'Delete championship', confirmLabel: 'Delete championship', message: `Delete “${name}” now? It is removed permanently, straight away, and cannot be retrieved.` })) {
+                onDelete().catch((e: any) => toast.error(e.message));
+              }
+            }}
+          >
+            {deleting ? 'Deleting…' : 'Delete championship'}
+          </Button>
+        </div>
+      </CardBody>
+    </Card>
   );
 }

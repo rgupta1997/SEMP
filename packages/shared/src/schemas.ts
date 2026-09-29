@@ -678,18 +678,23 @@ export const updateTeamMemberSchema = z
   });
 
 // ---------- Bulk operations ----------
-// A single member in a bulk roster import: either an existing user_id, or a
-// name+email pair that will be resolved (created or matched) under the team's
-// organization.
+// A single member in a bulk roster import: either an existing user_id, or a pasted
+// phone + name (+ optional email) that is matched or created under the team's
+// organization. Both are needed to create a login: the temporary password is
+// first name @ last four phone digits, same as People -> Add people.
 export const bulkTeamMemberSchema = z
   .object({
     user_id: uuid.optional(),
+    phone: z.string().optional(),
     name: z.string().optional(),
     email: z.string().email().optional(),
     role: z.enum(TEAM_MEMBER_ROLE).default('player'),
     jersey_number: z.number().int().nullable().optional(),
   })
-  .refine((m) => !!(m.user_id || m.email), { message: 'Each row needs a user or an email' });
+  .refine(
+    (m) => !!m.user_id || ((m.phone ?? '').replace(/\D/g, '').length >= 10 && !!m.name?.trim()),
+    { message: 'Each pasted row needs a 10-digit phone number and a name' },
+  );
 export const bulkAddTeamMembersSchema = z.object({
   members: z.array(bulkTeamMemberSchema).min(1).max(200),
 });

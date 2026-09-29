@@ -6,6 +6,7 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError, BusinessRuleError } from '../../shared/errors.js';
 import { findEntrant } from '../championships/contingent.js';
+import { assertNotArchived } from '../championships/championship-archive.service.js';
 import { notifyApplicationReceived, notifyEnrollmentApproved, notifyRegistrationRejected } from './enrollment.notifications.js';
 
 export function makeEnrollmentRouter(prisma: Prisma): Router {
@@ -40,6 +41,10 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
     }
     if (championship.status !== 'registration_open') {
       throw new BusinessRuleError('This championship is not open for registration');
+    }
+    const applicant = await prisma.organizations.findUnique({ where: { id: req.body.organization_id }, select: { archived_at: true } });
+    if (applicant?.archived_at) {
+      throw new BusinessRuleError('This organisation is archived. Retrieve it before applying to events.');
     }
     // Private championships are invite-only: an org may enroll only if the organiser
     // has invited it (the usual path is accepting the invitation, which enrolls
@@ -92,6 +97,8 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
       include: { organizations: { select: { name: true, short_name: true } }, championships: { select: { name: true } } },
     });
     if (!existing) throw new NotFoundError('Enrollment');
+    // An archived event's field is frozen - no application is approved or rejected.
+    await assertNotArchived(prisma, existing.championship_id);
     const row = await prisma.championship_organizations.update({
       where: { id: req.params.id },
       data: {
@@ -185,6 +192,8 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
       },
     });
     if (!entry) throw new NotFoundError('Entry');
+    // An archived event's field is frozen - nobody is withdrawn from it.
+    await assertNotArchived(prisma, entry.championship_id);
 
     const label = entry.org_units?.name ?? entry.organizations?.name ?? 'That entry';
     const teams = await prisma.team_entries.count({ where: { championship_organization_id: entry.id } });

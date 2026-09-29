@@ -14,6 +14,13 @@ export * from './limits.js';
 // locked surface by accident.
 export * from './plans.js';
 
+/**
+ * The platform_settings key that switches plans on and off platform-wide. Off, every
+ * holder resolves to UNENFORCED_TIER; saved plans are untouched, so on restores them.
+ */
+export const PLANS_ENFORCED_SETTING = 'plans_enforced';
+export const UNENFORCED_TIER: Tier = 'max';
+
 /** The entitlement check. One comparison, used by the API guard and the UI alike. */
 export function granted(held: Tier, key: CapabilityKey): boolean {
   return atLeast(held, CAPABILITIES[key].minTier);

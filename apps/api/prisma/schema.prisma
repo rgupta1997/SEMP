@@ -83,6 +83,12 @@ model championships {
   host_organization_id       String?                      @db.Uuid
   entry_level                String                       @default("organization") @db.VarChar(16)
   entry_scope_unit_id        String?                      @db.Uuid
+  /// Set while archived (20260928000003); permanently deleted 90 days after this unless retrieved.
+  archived_at                DateTime?                    @db.Timestamptz(6)
+  archived_by                String?                      @db.Uuid
+  /// Archived by its organisation's archive (20260929000000) - restored with it, never purged while it lasts.
+  archived_with_org          Boolean                      @default(false)
+  users_archived_by          users?                       @relation("championships_archived_byTousers", fields: [archived_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
   certificates               certificates[]
   championship_invitations   championship_invitations[]
   championship_officials     championship_officials[]
@@ -189,6 +195,10 @@ model organizations {
   billing_address                       String?
   billing_gstin                         String?
   billing_state_code                    String?
+  /// Set while archived (20260929000000). No automatic purge - it stays until retrieved.
+  archived_at                           DateTime?                    @db.Timestamptz(6)
+  archived_by                           String?                      @db.Uuid
+  users_archived_by                     users?                       @relation("organizations_archived_byTousers", fields: [archived_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
   achievement_claims                    achievement_claims[]
   career_stats                          career_stats[]
   certificate_counters                  certificate_counters[]
@@ -268,6 +278,21 @@ model roles {
   organizations           organizations?            @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   user_championship_roles user_championship_roles[]
   user_org_roles          user_org_roles[]
+}
+
+/// Platform-wide switches set from the super-admin console (20260928000002), e.g. plans_enforced.
+model platform_settings {
+  key        String   @id @db.VarChar(64)
+  value      Json
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_by String?  @db.Uuid
+  users      users?   @relation(fields: [updated_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
+}
+
+/// Per-prefix counter behind next_sportagon_ids() (20260928000000). Written only by that function.
+model sportagon_id_counters {
+  prefix     String @id @db.VarChar(3)
+  last_value Int    @default(0)
 }
 
 model sports {
@@ -528,7 +553,10 @@ model users {
   organization_members                                                     organization_members[]
   organization_members_organization_members_verified_byTousers             organization_members[]       @relation("organization_members_verified_byTousers")
   organizations_organizations_created_byTousers                            organizations[]              @relation("organizations_created_byTousers")
-  player_match_stats_player_match_stats_partner_user_idTousers             player_match_stats[]         @relation("player_match_stats_partner_user_idTousers")
+  platform_settings                                                        platform_settings[]
+  championships_archived                                                   championships[]              @relation("championships_archived_byTousers")
+  organizations_archived                                                   organizations[]              @relation("organizations_archived_byTousers")
+  player_match_stats_player_match_stats_partner_user_idTousers            player_match_stats[]         @relation("player_match_stats_partner_user_idTousers")
   player_match_stats_player_match_stats_user_idTousers                     player_match_stats[]         @relation("player_match_stats_user_idTousers")
   profile_privacy                                                          profile_privacy?
   racquet_match_lines                                                      racquet_match_lines[]

@@ -51,6 +51,9 @@ import { makeNotificationsRouter } from '../modules/notifications/notifications.
 import { makeDemoRequestsRouter } from '../modules/marketing/demo-requests.routes.js';
 import { makeFeedbackRouter } from '../modules/marketing/feedback.routes.js';
 import { makeDemosRouter } from '../modules/demos/demos.routes.js';
+import { makePlatformSettingsRouter } from '../modules/platform/platform-settings.routes.js';
+import { blockDrawWritesToArchived, blockFixtureWritesToArchived, blockWritesToArchived } from '../modules/championships/championship-archive.service.js';
+import { blockOrgWritesWhenArchived, blockTeamWritesWhenArchived } from '../modules/iam/organization-archive.service.js';
 import { makeBillingRouter } from '../modules/billing/billing.routes.js';
 import { applyDuePlanChanges } from '../modules/billing/subscription.service.js';
 import { BusinessRuleError } from '../shared/errors.js';
@@ -106,6 +109,9 @@ export function buildApp(prisma: Prisma) {
   // ----- Demo sandboxes - super-admin only (guards are inside the router) -----
   api.use('/demos', makeDemosRouter(prisma));
 
+  // ----- Platform switches (plan enforcement) - super-admin only, guards inside -----
+  api.use('/platform/settings', makePlatformSettingsRouter(prisma));
+
   // ----- "Me"-scoped read endpoints (resolved from the authenticated user) -----
   api.use('/', makeMeRouter(prisma));
 
@@ -142,7 +148,19 @@ export function buildApp(prisma: Prisma) {
   }));
   // Organizations - open reads; any user can create (becomes owner); member
   // management requires an owner/admin (see organizations.routes).
+  // An archived organisation is read-only across every router that lives under it.
+  api.use('/organizations/:id', blockOrgWritesWhenArchived(prisma));
+  api.use('/teams/:id', blockTeamWritesWhenArchived(prisma));
   api.use('/organizations', makeOrganizationsRouter(prisma));
+
+  // An archived event is read-only: every write under /championships/:id - invitations,
+  // roles, officials, setup - is refused here, ahead of the routers that would do it.
+  api.use('/championships/:id', blockWritesToArchived(prisma));
+  // Fixtures and draws belong to an event without living under its URL, so they get
+  // the same guard - no generating, regenerating, rescoring or (un)locking. Mounted
+  // here, ahead of every router that writes to them, including the generic CRUD ones.
+  api.use('/fixtures/:id', blockFixtureWritesToArchived(prisma));
+  api.use('/tournament-disciplines/:id', blockDrawWritesToArchived(prisma));
 
   // ----- Phase 2: championship creation - setup-resource writes require the championship's organiser -----
   api.use('/championships', makeEventsRouter(prisma));

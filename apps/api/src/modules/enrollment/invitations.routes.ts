@@ -128,8 +128,9 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
     }
 
     // ---- open: another organisation ---------------------------------------
-    const org = await prisma.organizations.findUnique({ where: { id: req.body.organization_id }, select: { id: true, name: true } });
-    if (!org) throw new NotFoundError('Organization');
+    const org = await prisma.organizations.findUnique({ where: { id: req.body.organization_id }, select: { id: true, name: true, archived_at: true } });
+    // An archived organisation takes part in nothing new - invited the same as not existing.
+    if (!org || org.archived_at) throw new NotFoundError('Organization');
     const existing = await prisma.championship_invitations.findFirst({
       where: { championship_id: req.params.eventId, organization_id: org.id, org_unit_id: null, status: 'pending' },
       select: { id: true },

@@ -17,7 +17,8 @@ interface Enrollment {
 const CHOOSE_LATER = '';
 
 // One selectable championship: a checkbox + (when checked) an OPTIONAL discipline
-// picker scoped to the team's sport, excluding draws the org has already taken.
+// picker scoped to the team's sport, excluding draws already taken by a team of the
+// same contingent (same campus/department, or another whole-org squad).
 // Picking a discipline is not required - a team can enter now and choose later.
 function EnrollmentRow({ enrollment, team, orgTeams, checked, drawId, onToggle, onDraw }: {
   enrollment: Enrollment; team: any; orgTeams: any[]; checked: boolean; drawId: string;
@@ -29,12 +30,13 @@ function EnrollmentRow({ enrollment, team, orgTeams, checked, drawId, onToggle, 
   const taken = useMemo(
     () => new Set(
       orgTeams
+        .filter((t: any) => (t.org_unit_id ?? null) === (team.org_unit_id ?? null))
         .flatMap((t: any) => (t.team_entries ?? []) as any[])
         .filter((e) => e.championship_id === eventId && e.team_id !== team.id)
         .map((e) => e.tournament_discipline_id)
         .filter(Boolean),
     ),
-    [orgTeams, eventId, team.id],
+    [orgTeams, eventId, team.id, team.org_unit_id],
   );
   const sportDraws = useMemo(
     () => draws.filter((d) => d.tournament_sports?.sport_id === team.sport_id && !taken.has(d.id)),

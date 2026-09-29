@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, useTableControls, fmtDateTime } from '../../lib/hooks';
 import { Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, ListToolbar, Modal, Pagination, SearchInput, SortDirButton, StatusBadge, Table, toast , FilterChips} from '../../components/ui';
@@ -22,9 +23,11 @@ import { APPLICATION_STATUS, INVITE_BUCKET, INVITE_FILTER_OPTIONS, type InviteFi
 // application and a host-sent "Pending" invitation are the same concept from two
 // directions, and switching tabs must move both lists together.
 export function ApplicationsQueue({
-  eventId, filter, onFilterChange, extraCounts, invitesEmpty = true,
+  eventId, filter, onFilterChange, extraCounts, invitesEmpty = true, readOnly = false,
 }: {
   eventId: string;
+  /** Archived event: applications can be seen, not approved or rejected. */
+  readOnly?: boolean;
   filter: InviteFilter;
   onFilterChange: (f: InviteFilter) => void;
   /** Invitation counts per bucket, folded into the tab pills so a count reflects both halves of the pair. */
@@ -33,6 +36,7 @@ export function ApplicationsQueue({
   invitesEmpty?: boolean;
 }) {
   const path = `/championships/${eventId}/enrollments`;
+  const readOnlyTitle = readOnly ? ARCHIVED_READ_ONLY_MESSAGE : undefined;
   const { data: rows = [], isLoading } = useApi<any[]>(path);
   const [rejecting, setRejecting] = useState<any | null>(null);
   const [note, setNote] = useState('');
@@ -112,13 +116,13 @@ export function ApplicationsQueue({
 
       <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
         {toApprove.length > 0 && (
-          <Button size="sm" disabled={bulkReview.isPending}
+          <Button size="sm" disabled={bulkReview.isPending || readOnly} title={readOnlyTitle}
             onClick={() => bulkReview.mutate({ ids: toApprove, status: APPLICATION_STATUS.APPROVED }, { onSuccess: () => toast.success(`${toApprove.length} approved`), onError: (e: any) => toast.error(e.message) })}>
             Approve selected
           </Button>
         )}
         {toReject.length > 0 && (
-          <Button size="sm" variant="outline" disabled={bulkReview.isPending}
+          <Button size="sm" variant="outline" disabled={bulkReview.isPending || readOnly} title={readOnlyTitle}
             onClick={() => bulkReview.mutate({ ids: toReject, status: APPLICATION_STATUS.REJECTED }, { onSuccess: () => toast.success(`${toReject.length} rejected`), onError: (e: any) => toast.error(e.message) })}>
             Reject selected
           </Button>
@@ -156,10 +160,10 @@ export function ApplicationsQueue({
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-2">
                     {r.status !== APPLICATION_STATUS.APPROVED && (
-                      <Button size="sm" onClick={() => review.mutate({ id: r.id, status: APPLICATION_STATUS.APPROVED })} disabled={review.isPending}>Approve</Button>
+                      <Button size="sm" onClick={() => review.mutate({ id: r.id, status: APPLICATION_STATUS.APPROVED })} disabled={review.isPending || readOnly} title={readOnlyTitle}>Approve</Button>
                     )}
                     {r.status !== APPLICATION_STATUS.REJECTED && (
-                      <Button size="sm" variant="outline" onClick={() => setRejecting(r)}>Reject</Button>
+                      <Button size="sm" variant="outline" onClick={() => setRejecting(r)} disabled={readOnly} title={readOnlyTitle}>Reject</Button>
                     )}
                     {r.status === APPLICATION_STATUS.REJECTED && r.rejection_note && <Badge tone="rose">{r.rejection_note}</Badge>}
                   </div>

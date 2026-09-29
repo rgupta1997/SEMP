@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Trash2 } from 'lucide-react';
+import { ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { useApi, useApiMutation, useTableControls, fmtDate } from '../../lib/hooks';
 import { api } from '../../lib/api';
@@ -44,7 +45,10 @@ function AssignOfficialModal({ eventId, existingIds, onClose }: { eventId: strin
 }
 
 export function EventOfficialsPage() {
-  const { eventId } = useEvent();
+  const { championship, eventId } = useEvent();
+  // Refused by the server too; disabled here so nobody picks people first.
+  const archived = !!championship.archived_at;
+  const archivedTitle = archived ? ARCHIVED_READ_ONLY_MESSAGE : undefined;
   const { data: officials, isLoading } = useApi<Official[]>(`/championships/${eventId}/officials`);
   const [assigning, setAssigning] = useState(false);
   const removeMut = useApiMutation(
@@ -79,7 +83,7 @@ export function EventOfficialsPage() {
         </div>
         <ListToolbar inline>
           {list.length > 0 && <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search officials…" className="w-56" />}
-          <Button onClick={() => setAssigning(true)}>+ Assign Official</Button>
+          <Button onClick={() => setAssigning(true)} disabled={archived} title={archivedTitle}>+ Assign Official</Button>
         </ListToolbar>
       </div>
 
@@ -146,9 +150,9 @@ export function EventOfficialsPage() {
                       removeMut.mutate(o.id);
                     }
                   }}
-                  disabled={removeMut.isPending}
+                  disabled={removeMut.isPending || archived}
                   aria-label={`Remove ${o.user.name}`}
-                  title="Remove"
+                  title={archivedTitle ?? 'Remove'}
                 >
                   <Trash2 size={14} />
                 </Button>
@@ -167,7 +171,7 @@ export function EventOfficialsPage() {
           <p className="text-sm mb-4">
             Assign officials to this championship so they can score matches and manage fixtures.
           </p>
-          <Button onClick={() => setAssigning(true)}>+ Assign Official</Button>
+          <Button onClick={() => setAssigning(true)} disabled={archived} title={archivedTitle}>+ Assign Official</Button>
         </Card>
       )}
 

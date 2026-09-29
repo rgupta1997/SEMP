@@ -185,3 +185,66 @@ reconciliation, same fix — only the unapplied file in each pair moved:
 applied 2026-09-08 per this file, so per the rule above it wasn't free to move.
 
 If you add a migration, date it later than `20260917000000`.
+
+---
+
+## Applied 2026-09-28 — `20260928000000_sportagon_id_prefixes`
+
+Sportagon IDs become three letters + a per-prefix counter: `STG0001` for self
+sign-up and every other path, the creating organisation's initials (`AEO0001`)
+for People → Add people / Bulk upload and Team → Paste list. Adds
+`sportagon_id_counters` and `next_sportagon_ids(prefix, count)`, and switches the
+`trg_users_sportagon_id` trigger from `EOS-` to `STG`. Existing IDs untouched.
+
+Applied with the same runner; all four statements succeeded. Verified in a
+rolled-back transaction: trigger attached, `AEO` and `STG` count independently,
+a plain insert gets `STG`, the number grows past `9999` to `10000`, and a
+non-letter prefix is refused. Counter table left empty afterwards.
+
+## Applied 2026-09-28 — `20260928000001_sportagon_id_eos_brand`
+
+Keeps the `EOS-` brand: IDs are now `EOS-STG0001` / `EOS-AEO0001`. Redefines
+`next_sportagon_ids()` only; counters untouched. Verified the same way, in a
+rolled-back transaction. One real account ("Aman knights", created minutes
+earlier) was issued a bare `STG0001` in the gap between the two migrations; it
+was renamed to `EOS-STG0001` by hand so every new-style ID carries the brand.
+
+## Applied 2026-09-28 — `20260928000002_platform_settings`
+
+Adds `platform_settings` and seeds `plans_enforced = false`: until real payments
+exist, every organisation and person resolves to the top tier and the Billing tab
+is hidden. Saved plans and subscriptions are untouched; a super admin turns plans
+back on from Platform → Plans & Billing. Verified afterwards: the row reads
+`false`, and a `free` organisation ("Aman admin org") resolves to `max`.
+
+## Applied 2026-09-28 — `20260925000000_fixture_format_overrides`
+
+Arrived with main (per-match rule overrides) and was never applied here. The
+committed Prisma client selects `fixtures.format_overrides`, so once it was
+regenerated every fixtures read failed with P2022 and Schedule and Results were
+empty for every event. Applied with the same runner; all four statements
+succeeded, and the championship fixtures list reads again. The other migrations
+from that merge (`certificate_categories`, `racquet_scoring_and_stats`,
+`career_stats_tier`) were checked and are already in the database.
+
+## Applied 2026-09-28 — `20260928000003_championship_archive`
+
+Adds `championships.archived_at` / `archived_by` and a partial index for the purge.
+An event with results (completed, a played or locked match, an issued certificate)
+can only be archived; archived events leave every list and are permanently deleted
+90 days after `archived_at` unless retrieved. The purge runs lazily from the lists
+that show archived events, plus `POST /championships/purge-archived` (super admin).
+Certificates are detached, not deleted, so they keep verifying; players'
+achievements, timeline and career stats are kept. Verified read-only afterwards:
+"Aman Multisport event" resolves to archive-only, "Intra Bengaluru event" to delete.
+
+## Applied 2026-09-29 — `20260929000000_organization_archive`
+
+Adds `organizations.archived_at` / `archived_by` (partial index) and
+`championships.archived_with_org`. An organisation with any event footprint can only
+be archived - no automatic purge - and archiving is blocked while it hosts a live event
+or has a team in someone else's unfinished one. Events archived with their
+organisation carry `archived_with_org`, are skipped by the 90-day event purge, and
+come back when the organisation is retrieved. Verified read-only afterwards: every
+"Aman …" organisation resolves to archive-only with the expected blockers, and none
+is archived.

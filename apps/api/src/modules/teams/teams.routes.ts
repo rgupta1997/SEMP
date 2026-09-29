@@ -17,10 +17,11 @@ import { assertCanAddMember, assertCanLockRoster } from './domain/roster-policy.
 import { assertPlayerEligible, screenSquad, squadEntryRefusal } from '../championships/contingent.js';
 import { unitLabels } from '@semp/shared';
 import { tellUser, checkRosterIncomplete, notifyRosterLocked, notifyTeamCreated } from './teams.notifications.js';
-
-// Default password for auto-provisioned players from a bulk import. They can be
-// invited / reset later; precomputed once to keep the bulk loop cheap.
-const DEFAULT_IMPORT_PASSWORD_HASH = bcrypt.hashSync('demo123', 10);
+import { mintSportagonIds, orgIdPrefixFor } from '../iam/sportagon-id.js';
+import { assertOrgNotArchived } from '../iam/organization-archive.service.js';
+import { deriveProvisionedPassword, findUsersByPhones, phoneLast10 } from '../iam/users.helpers.js';
+import { assertWithinOrgLimit } from '@semp/entitlements/server';
+import { countPeople } from '../billing/usage.js';
 
 // Validate that a discipline draw belongs to the given championship and (optionally)
 // matches the team's sport. Returns the loaded draw.
@@ -196,6 +197,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       name: string; short_name: string; sport_id: string; organization_id: string;
       championship_id?: string; championship_organization_id?: string; tournament_discipline_id?: string;
     };
+    await assertOrgNotArchived(prisma, organization_id);
     // Which campus or department this team plays for. Not taken from the request:
     // it is read off the ENTRY the team is being created against, because the entry
     // is the row that was already validated as a legal contingent for this event.
@@ -402,11 +404,19 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     const drawId: string | null = req.body.tournament_discipline_id ?? null;
     if (drawId) {
       await assertDisciplineForTeam(prisma, drawId, entry.championship_id, team.sport_id);
+      // One team per draw per CONTINGENT - the entry's own unit, as on entering. Keyed
+      // on the organisation alone, a second department or campus of the same
+      // institution was told its institution already held the draw.
       const taken = await prisma.team_entries.findFirst({
-        where: { organization_id: team.organization_id, tournament_discipline_id: drawId, team_id: { not: team.id } },
+        where: {
+          organization_id: team.organization_id, org_unit_id: entry.org_unit_id ?? null,
+          tournament_discipline_id: drawId, team_id: { not: team.id },
+        },
         select: { id: true },
       });
-      if (taken) throw new BusinessRuleError('Your organization already has a team in this discipline draw');
+      if (taken) throw new BusinessRuleError(entry.org_unit_id
+        ? 'That campus or department already has a team in this discipline draw'
+        : 'Your organization already has a team in this discipline draw');
     }
     await prisma.team_entries.update({ where: { id: entry.id }, data: { tournament_discipline_id: drawId } });
     if (drawId) await checkRosterIncomplete(prisma, team.id, req.user!.id, drawId);
@@ -489,6 +499,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       championship_id: string; sport_id: string; organization_id: string;
       championship_organization_id: string; tournament_discipline_id: string; name: string; short_name: string;
     }>;
+    for (const orgId of new Set(teams.map((t) => t.organization_id))) await assertOrgNotArchived(prisma, orgId);
     for (const t of teams) {
       await assertDisciplineForTeam(prisma, t.tournament_discipline_id, t.championship_id, t.sport_id);
     }
@@ -498,10 +509,12 @@ export function makeTeamsRouter(prisma: Prisma): Router {
         .map((e) => [e.id, e]),
     );
     // Reject duplicate draw entries against existing entries (one query) and within the batch.
+    // These are whole-organisation squads, so only another whole-organisation entry
+    // (org_unit_id null) occupies the draw - a department's or campus's does not.
     const dupKey = (t: { organization_id: string; championship_id: string; tournament_discipline_id: string }) =>
       `${t.organization_id}|${t.championship_id}|${t.tournament_discipline_id}`;
     const existing = await prisma.team_entries.findMany({
-      where: { OR: teams.map((t) => ({ organization_id: t.organization_id, championship_id: t.championship_id, tournament_discipline_id: t.tournament_discipline_id })) },
+      where: { org_unit_id: null, OR: teams.map((t) => ({ organization_id: t.organization_id, championship_id: t.championship_id, tournament_discipline_id: t.tournament_discipline_id })) },
       select: { organization_id: true, championship_id: true, tournament_discipline_id: true },
     });
     const seen = new Set(existing.map((e) => `${e.organization_id}|${e.championship_id}|${e.tournament_discipline_id}`));
@@ -774,9 +787,11 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     res.status(201).json(member);
   }));
 
-  // Bulk roster import: accepts existing users and/or name+email rows. Emails are
-  // resolved (matched or auto-created under the team's organization). Validates the
-  // whole batch against the loose squad cap up front, then inserts atomically.
+  // Bulk roster import: existing users (by id) and/or pasted phone + name (+ email)
+  // rows. A pasted row is matched by phone, then email; otherwise a login is created
+  // the same way People -> Add people does - first name @ last four phone digits,
+  // forced change on first sign-in. Every pasted person becomes a verified member of
+  // the team's organisation. Validates against the loose squad cap, then inserts atomically.
   router.post('/teams/:id/members/bulk', guards.teamManager, validateBody(bulkAddTeamMembersSchema), asyncHandler(async (req, res) => {
     const team = await prisma.teams.findUnique({
       where: { id: req.params.id },
@@ -788,36 +803,94 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       throw new BusinessRuleError('Every championship entry for this team is locked');
     }
     const rules = looseAddRules(entries);
+    const rows = req.body.members as Array<{ user_id?: string; phone?: string; name?: string; email?: string; role: string; jersey_number?: number | null }>;
+
+    // Matched and hashed BEFORE the transaction: bcrypt is slow, and 200 hashes inside
+    // it would outlast the transaction's time budget.
+    const pasted = rows.filter((r) => !r.user_id);
+    const byPhone = await findUsersByPhones(prisma, pasted.map((r) => r.phone));
+    const emails = [...new Set(pasted.map((r) => r.email).filter((e): e is string => !!e))];
+    const emailOwner = new Map(
+      (emails.length ? await prisma.users.findMany({ where: { email: { in: emails } }, select: { id: true, email: true } }) : [])
+        .map((u) => [u.email, u.id]),
+    );
+    const existingId = (r: (typeof rows)[number]) =>
+      byPhone.get(phoneLast10(r.phone))?.id ?? (r.email ? emailOwner.get(r.email) : undefined);
+
+    // One new login per phone (and per email), however often it was pasted.
+    const seenPhones = new Set<string>();
+    const seenEmails = new Set<string>();
+    const toCreate = await Promise.all(pasted
+      .filter((r) => {
+        const key = phoneLast10(r.phone);
+        const email = r.email ?? `${key}@placeholder.invalid`;
+        if (existingId(r) || seenPhones.has(key) || seenEmails.has(email)) return false;
+        seenPhones.add(key);
+        seenEmails.add(email);
+        return true;
+      })
+      .map(async (r) => {
+        const name = r.name!.trim();
+        const password = deriveProvisionedPassword(name, r.phone);
+        return {
+          name, phone: r.phone!, password,
+          email: r.email ?? `${phoneLast10(r.phone)}@placeholder.invalid`,
+          password_hash: await bcrypt.hash(password, 10),
+        };
+      }));
 
     const result = await prisma.$transaction(async (tx) => {
       // Ineligible players are SKIPPED with a reason, not thrown on. A captain
       // pasting thirty names wants the list of who cannot play and the other
       // twenty-seven added, not a wall on the first out-of-campus name.
-      const rows = req.body.members as Array<{ user_id?: string; name?: string; email?: string; role: string; jersey_number?: number | null }>;
-
-      // Resolve every email in one query instead of a findUnique per row, then
-      // batch-create the users that don't exist yet (createManyAndReturn gives ids).
-      const emails = [...new Set(rows.map((r) => r.email).filter((e): e is string => !!e))];
-      const byEmail = new Map(
-        (emails.length
-          ? await tx.users.findMany({ where: { email: { in: emails } }, select: { id: true, name: true, email: true } })
-          : []
-        ).map((u) => [u.email, u]),
-      );
-      const toCreate = emails
-        .filter((e) => !byEmail.has(e))
-        .map((email) => {
-          const row = rows.find((r) => r.email === email)!;
-          return {
-            name: row.name?.trim() || email.split('@')[0],
-            email,
-            password_hash: DEFAULT_IMPORT_PASSWORD_HASH,
-            organization_id: team.organization_id,
-          };
-        });
+      const createdByPhone = new Map<string, string>();
       if (toCreate.length) {
-        const fresh = await tx.users.createManyAndReturn({ data: toCreate, select: { id: true, name: true, email: true } });
-        for (const u of fresh) byEmail.set(u.email, u);
+        // Created under the team's organisation, so the IDs carry its letters.
+        const sportagonIds = await mintSportagonIds(tx, await orgIdPrefixFor(tx, team.organization_id), toCreate.length);
+        const fresh = await tx.users.createManyAndReturn({
+          data: toCreate.map((c, i) => ({
+            name: c.name, email: c.email, phone: c.phone, password_hash: c.password_hash,
+            must_change_password: true, organization_id: team.organization_id, sportagon_id: sportagonIds[i],
+          })),
+          select: { id: true, phone: true },
+        });
+        for (const u of fresh) createdByPhone.set(phoneLast10(u.phone), u.id);
+      }
+      const userIdFor = (r: (typeof rows)[number]) =>
+        r.user_id ?? existingId(r) ?? createdByPhone.get(phoneLast10(r.phone)) ?? null;
+
+      // Everyone pasted - new login or existing account - joins the team's
+      // organisation's People, verified, exactly as People -> Add people does.
+      // Someone already a member keeps their membership and placement untouched.
+      const pastedIds = [...new Set(pasted.map(userIdFor).filter((id): id is string => !!id))];
+      const alreadyMembers = new Set((pastedIds.length
+        ? await tx.organization_members.findMany({
+          where: { organization_id: team.organization_id, user_id: { in: pastedIds } },
+          select: { user_id: true },
+        })
+        : []).map((m) => m.user_id));
+      const joining = pastedIds.filter((id) => !alreadyMembers.has(id));
+      if (joining.length) {
+        // Same roll ceiling People enforces - adding people here must not bypass it.
+        await assertWithinOrgLimit(tx, 'people', team.organization_id, (await countPeople(tx, team.organization_id)) + joining.length - 1);
+        await tx.organization_members.createMany({
+          data: joining.map((user_id) => ({
+            user_id, organization_id: team.organization_id, role: 'member', status: 'active',
+            verification: 'verified', verified_by: req.user!.id, verified_at: new Date(),
+          })),
+          skipDuplicates: true,
+        });
+        // A unit squad only picks people placed in that unit, so newcomers are placed
+        // there (and in its campus). Existing members are never moved: someone in
+        // Mumbai pasted into a Bangalore squad is still refused as Mumbai's.
+        if (team.org_unit_id) {
+          const unit = await tx.org_units.findUnique({ where: { id: team.org_unit_id }, select: { id: true, parent_id: true } });
+          const unitIds = unit ? [unit.id, ...(unit.parent_id ? [unit.parent_id] : [])] : [];
+          await tx.org_unit_members.createMany({
+            data: joining.flatMap((user_id) => unitIds.map((org_unit_id) => ({ organization_id: team.organization_id, org_unit_id, user_id }))),
+            skipDuplicates: true,
+          });
+        }
       }
 
       // Existing roster ids in one query; a running count enforces the squad cap.
@@ -828,7 +901,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       // Screened AFTER the auto-create step above, so a person the import just
       // created is judged on the membership it gave them rather than on not having
       // existed a moment ago.
-      const candidateIds = [...new Set(rows.map((r) => r.user_id ?? (r.email ? byEmail.get(r.email)?.id : null)).filter((id): id is string => !!id))];
+      const candidateIds = [...new Set(rows.map(userIdFor).filter((id): id is string => !!id))];
       const screened = await screenSquad(tx, team, candidateIds);
       const ineligible = new Map(screened.refused.map((r) => [r.user_id, r.reason]));
       let count = await tx.team_members.count({ where: { team_id: team.id, is_active: true } });
@@ -838,13 +911,9 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       const newMembers: { team_id: string; user_id: string; role: string; jersey_number: number | null }[] = [];
 
       for (const row of rows) {
-        let userId = row.user_id ?? null;
-        let label = row.name || row.email || 'member';
-        if (!userId && row.email) {
-          const u = byEmail.get(row.email);
-          if (u) { userId = u.id; label = u.name; }
-        }
-        if (!userId) { skipped.push({ label, reason: 'no user/email' }); continue; }
+        const userId = userIdFor(row);
+        const label = row.name || row.phone || row.email || 'member';
+        if (!userId) { skipped.push({ label, reason: 'no matching or new account' }); continue; }
         // onRoster also absorbs duplicates within the same batch (we add as we go).
         if (onRoster.has(userId)) { skipped.push({ label, reason: 'already on roster' }); continue; }
         const refusal = ineligible.get(userId);
@@ -869,7 +938,12 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       return { added: added.length, skipped, total: count, newMembers };
     });
 
-    const { newMembers: addedMembers, ...summary } = result;
+    const { newMembers: addedMembers, ...rest } = result;
+    // Returned once so the manager can pass them on - same contract as People.
+    const summary = {
+      ...rest,
+      credentials: toCreate.map((c) => ({ name: c.name, email: c.email, phone: c.phone, password: c.password })),
+    };
     for (const m of addedMembers) {
       await tellUser(prisma, req.user!.id, m.user_id, 'team_player_added', { teamName: team.name });
     }
@@ -881,6 +955,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   router.post('/teams/by-token/:token/join', validateBody(joinTeamSchema), asyncHandler(async (req, res) => {
     const team = await prisma.teams.findUnique({ where: { invite_token: req.params.token } });
     if (!team) throw new NotFoundError('Team');
+    await assertOrgNotArchived(prisma, team.organization_id);
     const member = await addMember(prisma, team.id, { user_id: req.user!.id, role: req.body.role, jersey_number: req.body.jersey_number }, req.user!.id);
     res.status(201).json(member);
   }));

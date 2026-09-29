@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Trophy } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
-import { useApi, useTableControls, fmtDateRange } from '../lib/hooks';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
+import { archiveDaysLeft, archivePurgeDate } from '@semp/shared';
+import { api } from '../lib/api';
+import { useApi, useApiMutation, useTableControls, fmtDate, fmtDateRange } from '../lib/hooks';
 import { titleCase } from '../lib/format';
 import { useWorkspace } from '../lib/useWorkspace';
-import { Badge, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge, FilterChips } from '../components/ui';
+import { Badge, Button, Card, EmptyState, ListToolbar, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge, FilterChips, toast } from '../components/ui';
 import { InvitationsInbox } from '../components/InvitationsInbox';
 
 interface MyChampionship {
@@ -12,6 +14,10 @@ interface MyChampionship {
   venue?: string | null; start_date: string; end_date: string;
   my_roles: string[];
   sports?: string[];
+  /** Set while archived; only ever returned to the event's host. */
+  archived_at?: string | null;
+  /** Archived with its organisation: no clock, restored with the organisation. */
+  archived_with_org?: boolean;
 }
 
 const ROLE_TONE: Record<string, 'brand' | 'green' | 'amber' | 'slate'> = {
@@ -24,18 +30,22 @@ const ROLE_TONE: Record<string, 'brand' | 'green' | 'amber' | 'slate'> = {
 // rather than "what is currently running?" - and it is why an event can appear under
 // both Playing and Completed without the tabs contradicting each other. "All" is the
 // one tab that asks neither question - just "every event I'm involved in, however".
-type TabKey = 'all' | 'playing' | 'hosting' | 'completed';
+type TabKey = 'all' | 'playing' | 'hosting' | 'completed' | 'archived';
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'all', label: 'All' },
   { key: 'playing', label: 'Playing' },
   { key: 'hosting', label: 'Hosting' },
   { key: 'completed', label: 'Completed' },
+  { key: 'archived', label: 'Archived' },
 ];
 
 const HOSTING_ROLES = ['organiser', 'organizer', 'poc'];
 
 function inTab(c: MyChampionship, tab: TabKey): boolean {
+  // Archived events live only in their own tab; retrieving one returns it to the rest.
+  if (tab === 'archived') return !!c.archived_at;
+  if (c.archived_at) return false;
   if (tab === 'all') return true;
   if (tab === 'completed') return c.status === 'completed';
   const hosting = c.my_roles.some((r) => HOSTING_ROLES.includes(r));
@@ -60,7 +70,14 @@ export function MyChampionshipsPage() {
   const { data: rows = [], isLoading } = useApi<MyChampionship[]>('/championships/mine');
   // Where the event should send people back to when they are done with it.
   const open = (c: MyChampionship) => ws.enter(c.id, detailHref(c), pathname);
-  const [tab, setTab] = useState<TabKey>('playing');
+  // ?tab=archived lets Settings land the host here right after archiving.
+  const [params] = useSearchParams();
+  const initialTab = TABS.some((t) => t.key === params.get('tab')) ? params.get('tab') as TabKey : 'playing';
+  const [tab, setTab] = useState<TabKey>(initialTab);
+  const retrieve = useApiMutation(
+    (id: string) => api('POST', `/championships/${id}/retrieve`),
+    ['/championships/mine', '/championships'],
+  );
   const [sport, setSport] = useState('');
 
   const sportOptions = useMemo(() => {
@@ -77,10 +94,11 @@ export function MyChampionshipsPage() {
   // Counts come from the unfiltered list, so a sport filter narrows what you see
   // without making the other tabs look empty.
   const counts = useMemo(() => ({
-    all: rows.length,
+    all: rows.filter((c) => inTab(c, 'all')).length,
     playing: rows.filter((c) => inTab(c, 'playing')).length,
     hosting: rows.filter((c) => inTab(c, 'hosting')).length,
     completed: rows.filter((c) => inTab(c, 'completed')).length,
+    archived: rows.filter((c) => inTab(c, 'archived')).length,
   }), [rows]);
 
   const tc = useTableControls(filtered, {
@@ -152,9 +170,31 @@ export function MyChampionshipsPage() {
                       <StatusBadge status={c.status} />
                     </div>
                     <div className="text-xs text-slate-500 dark:text-slate-400">{c.venue || 'Venue TBD'} · {fmtDateRange(c.start_date, c.end_date)}</div>
+                    {c.archived_at && (
+                      <div className="mt-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+                        {c.archived_with_org
+                          ? 'Archived with its organisation — retrieve the organisation to bring it back'
+                          : `Deleted permanently on ${fmtDate(archivePurgeDate(c.archived_at))} (${archiveDaysLeft(c.archived_at)} days left) unless retrieved`}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {c.archived_at && !c.archived_with_org && (
+                    <Button
+                      size="sm"
+                      disabled={retrieve.isPending}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        retrieve.mutate(c.id, {
+                          onSuccess: () => toast.success(`${c.name} retrieved`),
+                          onError: (err: any) => toast.error(err.message),
+                        });
+                      }}
+                    >
+                      Retrieve
+                    </Button>
+                  )}
                   {c.my_roles.map((r) => <Badge key={r} tone={ROLE_TONE[r] ?? 'slate'}>{titleCase(r)}</Badge>)}
                   {/* Kept as a link so it can be opened in a new tab, but handled
                       here so the click switches workspace rather than just navigating. */}

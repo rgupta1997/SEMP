@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { createHash } from 'node:crypto';
 import { Prisma as PrismaNS } from '@prisma/client';
-import type { Prisma } from '../../infra/prisma.js';
+import type { Db, Prisma } from '../../infra/prisma.js';
 
 // Shared default for provisioned logins - they're forced to set their own on
 // first sign-in (see users.must_change_password).
@@ -72,7 +72,7 @@ export function deriveProvisionedPassword(name: string, phone?: string | null): 
 // same key findUserByPhone matches on). Phones shorter than 10 digits are dropped.
 // Used by the matrix import to match POCs/captains to already-provisioned logins.
 export async function findUsersByPhones(
-  prisma: Prisma,
+  prisma: Db,
   phones: Array<string | null | undefined>,
 ): Promise<Map<string, { id: string; name: string; email: string; phone: string | null }>> {
   const map = new Map<string, { id: string; name: string; email: string; phone: string | null }>();

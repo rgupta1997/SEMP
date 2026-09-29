@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
+import { ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
 import { Avatar, Badge, Button, Card, Input, Spinner, StatusBadge, toast } from './ui';
@@ -156,7 +157,7 @@ function OrgPicker({ value, onChange, excludeIds }: { value: Org[]; onChange: (o
  * wrong to make somebody search for. There is nobody outside to negotiate with, so
  * being invited IS taking part - the campus administrator then builds the squads.
  */
-function CampusInvites({ eventId, path }: { eventId: string; path: string }) {
+function CampusInvites({ eventId, path, readOnly }: { eventId: string; path: string; readOnly: boolean }) {
   const qc = useQueryClient();
   const { data, isLoading } = useApi<{ intra: boolean; units: InvitableUnit[] }>(
     `/championships/${eventId}/invitable`,
@@ -216,7 +217,7 @@ function CampusInvites({ eventId, path }: { eventId: string; path: string }) {
           administrator then builds its squads and enters them; you do not enter rosters.
         </p>
         {units.length > invited.length && (
-          <Button onClick={inviteAll} disabled={busy !== null}>
+          <Button onClick={inviteAll} disabled={busy !== null || readOnly} title={readOnlyTitle(readOnly)}>
             {busy === 'all' ? 'Adding…' : `+ Add all ${units.length - invited.length}`}
           </Button>
         )}
@@ -245,11 +246,11 @@ function CampusInvites({ eventId, path }: { eventId: string; path: string }) {
                 {u.invited && <Badge tone="green">In</Badge>}
                 {u.invited ? (
                   <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
-                    disabled={busy !== null} onClick={() => withdraw(u)} aria-label={`Remove ${u.name}`} title="Remove">
+                    disabled={busy !== null || readOnly} onClick={() => withdraw(u)} aria-label={`Remove ${u.name}`} title={readOnlyTitle(readOnly) ?? 'Remove'}>
                     <Trash2 size={14} />
                   </Button>
                 ) : (
-                  <Button size="sm" disabled={busy !== null} onClick={() => invite(u)}>
+                  <Button size="sm" disabled={busy !== null || readOnly} title={readOnlyTitle(readOnly)} onClick={() => invite(u)}>
                     {busy === u.key ? 'Adding…' : '+ Add'}
                   </Button>
                 )}
@@ -275,7 +276,7 @@ function CampusInvites({ eventId, path }: { eventId: string; path: string }) {
  * honest shape: these are two controls that happen to answer the same question.
  * The one hook here runs unconditionally, so the early return below is safe.
  */
-export function InvitePanel({ eventId }: { eventId: string }) {
+export function InvitePanel({ eventId, readOnly = false }: { eventId: string; readOnly?: boolean }) {
   const path = `/championships/${eventId}/invitations`;
   // Asked of the server rather than inferred - the shape is a property of the
   // championship, not something the client can work out.
@@ -283,14 +284,17 @@ export function InvitePanel({ eventId }: { eventId: string }) {
 
   if (isLoading) return <Spinner />;
   return invitable?.intra
-    ? <CampusInvites eventId={eventId} path={path} />
-    : <OrganisationInvites eventId={eventId} path={path} />;
+    ? <CampusInvites eventId={eventId} path={path} readOnly={readOnly} />
+    : <OrganisationInvites eventId={eventId} path={path} readOnly={readOnly} />;
 }
+
+// While archived nothing here can change - the server refuses it too.
+const readOnlyTitle = (readOnly: boolean) => (readOnly ? ARCHIVED_READ_ONLY_MESSAGE : undefined);
 
 // Host-side invite manager for an OPEN championship: search the master institution
 // list and send the request straight to the org. Reused in the create wizard's
 // Invite step and the Invite tab.
-function OrganisationInvites({ eventId, path }: { eventId: string; path: string }) {
+function OrganisationInvites({ eventId, path, readOnly }: { eventId: string; path: string; readOnly: boolean }) {
   const qc = useQueryClient();
   const { data: invites = [], isLoading } = useApi<Invitation[]>(path);
   const [orgs, setOrgs] = useState<Org[]>([]);
@@ -344,7 +348,7 @@ function OrganisationInvites({ eventId, path }: { eventId: string; path: string 
           <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Organizations / teams</span>
           <OrgPicker value={orgs} onChange={setOrgs} excludeIds={invitedIds} />
         </label>
-        <Button onClick={submit} disabled={inviting || orgs.length === 0}>
+        <Button onClick={submit} disabled={inviting || orgs.length === 0 || readOnly} title={readOnlyTitle(readOnly)}>
           {inviting ? 'Inviting…' : orgs.length > 1 ? `+ Invite ${orgs.length}` : '+ Invite'}
         </Button>
       </div>
@@ -359,6 +363,7 @@ function OrganisationInvites({ eventId, path }: { eventId: string; path: string 
         onFilterChange={setFilter}
         extraCounts={inviteCounts}
         invitesEmpty={visibleInvites.length === 0}
+        readOnly={readOnly}
       />
 
       {isLoading ? <Spinner /> : invites.length === 0 ? (
@@ -378,7 +383,7 @@ function OrganisationInvites({ eventId, path }: { eventId: string; path: string 
                 {inv.status === INVITATION_STATUS.PENDING && (
                   <Button size="sm" variant="ghost" className="text-rose-600 dark:text-rose-400"
                     onClick={() => cancel.mutate(inv.id, { onSuccess: () => toast.success('Invitation cancelled'), onError: (e: any) => toast.error(e.message) })}
-                    disabled={cancel.isPending}>
+                    disabled={cancel.isPending || readOnly} title={readOnlyTitle(readOnly)}>
                     Cancel
                   </Button>
                 )}

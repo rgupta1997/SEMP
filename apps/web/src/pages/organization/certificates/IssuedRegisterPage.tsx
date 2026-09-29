@@ -7,6 +7,7 @@ import {
   Table, TD, TH, THead, TR,
 } from '../../../components/ui';
 import { GenerateModal } from './GenerateModal';
+import { useOrgArchived } from '../../../lib/useOrgArchived';
 import { CertStatus, openDoc, shortDate, type Cert, type Template } from './shared';
 
 // The Issued Register: the answer to "did we issue this, and is it still good?".
@@ -29,6 +30,7 @@ export function IssuedRegisterPage() {
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(0);
   const [gen, setGen] = useState(false);
+  const { archived, title: archivedTitle } = useOrgArchived(orgId);
 
   // One query string for the table and the export, so the CSV is exactly what is on
   // screen. An Export button that quietly ignores the filters is a trap.
@@ -70,7 +72,7 @@ export function IssuedRegisterPage() {
         )}>
           <Download size={15} aria-hidden />Export
         </Button>
-        <Button onClick={() => setGen(true)}><Sparkles size={15} aria-hidden />Generate certificates</Button>
+        <Button disabled={archived} title={archivedTitle} onClick={() => setGen(true)}><Sparkles size={15} aria-hidden />Generate certificates</Button>
       </PageHeader>
 
       <Card className="p-0">
@@ -101,7 +103,7 @@ export function IssuedRegisterPage() {
               : 'Certificates are generated from locked results — never typed in by hand.'}
             action={filters.toString()
               ? <Button variant="ghost" onClick={() => reset(() => { setQ(''); setSport(''); setChamp(''); setStatus(''); })}>Clear filters</Button>
-              : <Button onClick={() => setGen(true)}><Sparkles size={15} aria-hidden />Generate certificates</Button>}
+              : <Button disabled={archived} title={archivedTitle} onClick={() => setGen(true)}><Sparkles size={15} aria-hidden />Generate certificates</Button>}
           />
         ) : (
           <div className="px-4 pb-4">
@@ -139,7 +141,7 @@ export function IssuedRegisterPage() {
       </Card>
 
       {gen && orgId && (
-        <GenerateModal orgId={orgId} templates={templates.data?.rows ?? []} onClose={() => setGen(false)} invalidate={[registerPath]} />
+        <GenerateModal orgId={orgId} templates={templates.data?.rows ?? []} templatesLoading={!templates.data} onClose={() => setGen(false)} invalidate={[registerPath]} />
       )}
     </div>
   );
