@@ -1,0 +1,82 @@
+-- Drop notifications_type_check: the last piece of the notification-service v2
+-- migration that never made it onto RDS.
+--
+-- STATUS: NOT APPLIED. Written 2026-09-26, unapplied as of that date.
+--
+-- ---------------------------------------------------------------------------
+-- What this fixes, and how it was found
+-- ---------------------------------------------------------------------------
+-- docs/notification-service-plan.md section 4 specified two constraint drops when
+-- `type` stopped being a fixed enum and became a registry key validated in the
+-- application layer:
+--
+--     alter table notifications drop constraint notifications_audience_check;
+--     alter table notifications drop constraint notifications_type_check;
+--
+-- 001_notifications_audience_to_jsonb.sql did the first one. The second was never
+-- written, so RDS still enforces the ORIGINAL six-value enum from the Supabase era:
+--
+--     manual, event_lifecycle, enrollment_approved,
+--     org_join_request, org_join_approved, org_join_declined
+--
+-- packages/notifications/src/core/registry.ts defines SIXTY types. The other 54 -
+-- every match_*, team_*, plan_*, role_*, certificate_*, claim_* and registration_*
+-- notification - fail their INSERT with a 23514 check_violation.
+--
+-- Confirmed against the live database on 2026-09-26:
+--
+--     ERROR:  new row for relation "notifications" violates check constraint
+--             "notifications_type_check"
+--     DETAIL: Failing row contains (..., match_scheduled, probe, ...).
+--
+-- ---------------------------------------------------------------------------
+-- Why it is worth fixing now rather than at leisure
+-- ---------------------------------------------------------------------------
+-- notify() writes the row FIRST, before resolving recipients or publishing, so the
+-- throw happens inside the caller's request. Of the 48 notify() call sites, 43 sit
+-- inside a try/catch and therefore drop the notification silently - bad, but the
+-- business action still succeeds. TWO DO NOT:
+--
+--   apps/api/src/modules/billing/billing.routes.ts:286       plan_upgrade_requested
+--   apps/api/src/modules/iam/user-invitations.routes.ts:154  org_invitation
+--
+-- At those two, the check violation propagates out of the route and the user gets an
+-- HTTP 500 for requesting a plan upgrade, or for inviting someone to an organisation.
+--
+-- This is also why notification_deliveries was empty and the realtime publisher had
+-- never been invoked before 2026-09-26: outside the six grandfathered types, the
+-- feature could not write a row at all, so there was never anything to fan out.
+--
+-- ---------------------------------------------------------------------------
+-- Why a plain DROP is the whole fix, and is safe
+-- ---------------------------------------------------------------------------
+-- Dropping a CHECK constraint neither rewrites the table nor takes more than an
+-- ACCESS EXCLUSIVE lock for the catalogue update, so it is effectively instant on
+-- the 144 rows here and would still be instant on millions.
+--
+-- Nothing is left unvalidated. `type` is checked at the application boundary against
+-- NOTIFICATION_TYPES before any write (core/registry.ts), which is the point of the
+-- registry: adding a notification type should be one registry entry, not a migration
+-- plus a CHECK-constraint edit plus a deploy ordering problem. A constraint listing
+-- six of sixty values is not defence in depth, it is drift.
+--
+-- IF NOT EXISTS so re-running this file is a no-op rather than an error - it has to
+-- be replayable, because these files are the only record of what RDS has had applied.
+
+ALTER TABLE notifications
+  DROP CONSTRAINT IF EXISTS notifications_type_check;
+
+-- Verification. Expect zero rows; a row means the drop did not take.
+--
+--   SELECT conname FROM pg_constraint
+--   WHERE conrelid = 'notifications'::regclass AND conname = 'notifications_type_check';
+--
+-- Then prove a previously-blocked type actually writes, end to end, rather than
+-- trusting the catalogue:
+--
+--   BEGIN;
+--   INSERT INTO notifications (id, type, title, audience, created_at)
+--   VALUES (gen_random_uuid(), 'match_scheduled', 'post-migration probe',
+--           jsonb_build_object('kind','direct_user','user_id',
+--                              '00000000-0000-0000-0000-000000000000'), now());
+--   ROLLBACK;
