@@ -218,6 +218,34 @@ export function TeamDeck(p: TeamDeckProps) {
     }
     return tally;
   }, [log, events]);
+
+  /**
+   * WHAT HAS BEEN BOOKED, per PERSON.
+   *
+   * The tally above answers "how many cards has this team got", which is what the
+   * scoreboard needs. It is not what the official about to book somebody needs,
+   * and that question - is this one already on a yellow? - is the one the console
+   * was silent on. Getting it wrong is not a cosmetic error: a second caution is a
+   * sending-off, and the only way to check was to open the timeline and read back
+   * through the half.
+   *
+   * Keyed on the declared TONE, exactly like the team tally, so this is football's
+   * yellows and reds, basketball's fouls, and nothing at all for a sport that books
+   * nobody - rather than a hardcoded pair of card colours every sport carries.
+   */
+  const playerCards = useMemo(() => {
+    const toneByKind = new Map(events.map((e) => [e.key, e.tone]));
+    const tally = new Map<string, { caution: number; dismissal: number }>();
+    for (const ev of log) {
+      if (ev.t !== 'point' || !ev.kind || !ev.playerId) continue;
+      const tone = toneByKind.get(ev.kind);
+      if (tone !== 'caution' && tone !== 'dismissal') continue;
+      const cur = tally.get(ev.playerId) ?? { caution: 0, dismissal: 0 };
+      tally.set(ev.playerId, { ...cur, [tone]: cur[tone] + 1 });
+    }
+    return tally;
+  }, [log, events]);
+
   const canAttribute = events.length > 0 && players.length > 0;
   // Only a goal-shaped action offers a second person; nothing else does.
   const wantsSecond = events.some((e) => e.secondPlayer);
@@ -494,6 +522,7 @@ export function TeamDeck(p: TeamDeckProps) {
                   <PeopleGrid
                     value={actor} qa={`actor-${side}`}
                     options={players.map((x) => [x.id, x.name] as [string, string])}
+                    cards={playerCards}
                     onChange={(v) => { setActor(v); if (v === second) setSecond(''); setAssistOpen(false); }}
                   />
                 </Group>
@@ -520,6 +549,7 @@ export function TeamDeck(p: TeamDeckProps) {
                           value={second} qa={`second-${side}`}
                           options={[['', 'Nobody'] as [string, string],
                             ...players.filter((x) => x.id !== actor).map((x) => [x.id, x.name] as [string, string])]}
+                          cards={playerCards}
                           onChange={(v) => { setSecond(v); setAssistOpen(false); }}
                         />
                         <p className="mt-1 text-[10px] text-muted">Optional — recorded on the same tap as the goal.</p>
@@ -1011,8 +1041,62 @@ function shortNames(names: string[]): string[] {
   });
 }
 
-function PeopleGrid({ value, options, onChange, qa }: {
+/**
+ * HOW BIG THE NAME IS PRINTED, from how long it is.
+ *
+ * Three chips across a 390px phone leaves about seven ems at 12px, and every squad
+ * has somebody who does not fit: `truncate` then cut "Shaurya Sharma" to "Shaurya
+ * Sha…", which is the half of the name that distinguishes nobody. Dropping a step
+ * or two of type is a far smaller cost than losing the surname, and at 9px a chip
+ * is still a tap target with a readable label - it is read at arm's length, once,
+ * to check the right person is selected.
+ *
+ * Stepped rather than measured on purpose. Measuring means a layout read per chip,
+ * and this grid re-renders on every single tap of a live match; the budget is the
+ * chip's own width, which is known, so the steps are just that division done once.
+ *
+ * `extra` is the room the card pips take when a player has been booked - counted in
+ * characters, because it comes out of the same line the name is on.
+ */
+function chipFont(label: string, extra: number): string {
+  const n = label.length + extra;
+  if (n <= 9) return 'text-xs';
+  if (n <= 12) return 'text-[11px]';
+  if (n <= 15) return 'text-[10px]';
+  return 'text-[9px]';
+}
+
+/**
+ * The cards a player is carrying, on their own chip.
+ *
+ * Small, because it must not cost the name more width than it has to, and to the
+ * RIGHT of the name rather than over it - a badge floated on the corner of a 32px
+ * pill either clips or overlaps the chip above. The count is printed only from two
+ * upwards: "1" next to a single yellow is noise on a grid of sixteen, and one card
+ * is what a bare pip already means.
+ */
+function CardPips({ counts, on }: { counts: { caution: number; dismissal: number }; on: boolean }) {
+  const pip = (n: number, cls: string, label: string) => n > 0 && (
+    <span className="flex items-center gap-px" title={`${n} ${label}${n > 1 ? 's' : ''}`}>
+      <span className={cn('h-2.5 w-[6px] rounded-[1px] shadow-sm', cls)} />
+      {n > 1 && (
+        <span className={cn('font-mono text-[9px] font-bold leading-none tabular-nums',
+          on ? 'text-white' : 'text-slate-500 dark:text-slate-400')}>{n}</span>
+      )}
+    </span>
+  );
+  return (
+    <span className="flex shrink-0 items-center gap-0.5" aria-hidden>
+      {pip(counts.caution, 'bg-yellow-400', 'caution')}
+      {pip(counts.dismissal, 'bg-red-500', 'dismissal')}
+    </span>
+  );
+}
+
+function PeopleGrid({ value, options, onChange, qa, cards }: {
   value: string; options: Array<[string, string]>; onChange: (v: string) => void; qa?: string;
+  /** Cards booked per player id, so a chip can say who is already on a yellow. */
+  cards?: Map<string, { caution: number; dismissal: number }>;
 }) {
   const labels = shortNames(options.map(([, label]) => label));
   return (
@@ -1023,16 +1107,36 @@ function PeopleGrid({ value, options, onChange, qa }: {
     <div data-qa={qa} className="grid grid-cols-3 gap-1 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
       {options.map(([v, label], i) => {
         const on = value === v;
+        const shown = v === '' ? label : labels[i];
+        const booked = v ? cards?.get(v) : undefined;
+        const marks = booked && (booked.caution || booked.dismissal) ? booked : null;
+        // Each pip is about two characters of the line, and a count is one more.
+        const extra = marks
+          ? (marks.caution ? 2 + (marks.caution > 1 ? 1 : 0) : 0)
+            + (marks.dismissal ? 2 + (marks.dismissal > 1 ? 1 : 0) : 0)
+          : 0;
         return (
-          <button key={v || '_none'} type="button" data-qa-value={v} title={label}
+          <button key={v || '_none'} type="button" data-qa-value={v}
+            // The tooltip is the only place the name is guaranteed whole, so it now
+            // carries the booking too rather than just repeating the label.
+            title={marks
+              ? `${label} — ${[marks.caution && `${marks.caution} caution${marks.caution > 1 ? 's' : ''}`,
+                  marks.dismissal && `${marks.dismissal} dismissal${marks.dismissal > 1 ? 's' : ''}`]
+                  .filter(Boolean).join(', ')}`
+              : label}
             onClick={() => onChange(v)}
             className={cn(
-              'h-8 truncate rounded-full px-2 text-center text-xs font-semibold transition active:scale-[0.97]',
+              'flex h-8 items-center justify-center gap-1 overflow-hidden rounded-full px-2 text-center font-semibold transition active:scale-[0.97]',
+              chipFont(shown, extra),
               on
                 ? 'bg-brand-600 text-white shadow-sm'
                 : 'border border-line bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200',
+              // A sending-off is not a footnote on the chip - the player is off, and
+              // an official about to attribute a goal to them should see it first.
+              !!marks?.dismissal && !on && 'border-red-300 bg-red-50 dark:border-red-500/40 dark:bg-red-500/10',
             )}>
-            {v === '' ? label : labels[i]}
+            <span className="truncate">{shown}</span>
+            {marks && <CardPips counts={marks} on={on} />}
           </button>
         );
       })}
