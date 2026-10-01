@@ -346,6 +346,14 @@ export function makeSignInRouter(prisma: Prisma): Router {
       console.error(`[signup] welcome email failed for ${created.id}:`, err);
     }
 
+    // The in-app welcome is separate from the email (account_created has no email
+    // channel), so it must still be sent - replacing it dropped it from the feed.
+    try {
+      await notify(prisma, { type: 'account_created', userId: created.id, senderId: created.id, data: {} });
+    } catch (err) {
+      console.error(`[signup] account_created notification failed for ${created.id}:`, err);
+    }
+
     res.status(201).json({ token: sessionFor(created), user: { id: created.id, name: created.name, email: created.email } });
   }));
 
