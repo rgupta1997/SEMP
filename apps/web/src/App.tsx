@@ -179,9 +179,16 @@ function AppRoutes() {
   // Consume the one-shot login flag once we've acted on it (below).
   useEffect(() => { if (justLoggedIn) clearJustLoggedIn(); }, [justLoggedIn, clearJustLoggedIn]);
 
+  // Every route match is read before the first early return below: a hook skipped by
+  // a return changes the hook count between renders, which React does not forgive.
+  const publicMatch = useMatch('/c/:token');
+  const verifyMatch = useMatch('/verify/:token');
+  const verifyRoot = useMatch('/verify');
+  const publicProfileMatch = useMatch('/p/:handle');
+  const inviteMatch = useMatch('/invites/:token');
+
   // Public, view-only share link - rendered with no sidebar/login, regardless of
   // whether the visitor is signed in (so the link works for anyone).
-  const publicMatch = useMatch('/c/:token');
   if (publicMatch?.params.token) return <PublicChampionshipPage token={publicMatch.params.token} />;
 
   // Certificate verification, outside the shell and outside auth for the same
@@ -189,23 +196,17 @@ function AppRoutes() {
   // employer or a selector has no account here, and a verifier that asked them to
   // sign in would verify nothing for the people who most need it. Matched before
   // the signed-out redirect below so it works whoever opens it.
-  // Both matches are read unconditionally - a hook behind an `if` changes the hook
-  // order between renders, which React does not forgive.
-  const verifyMatch = useMatch('/verify/:token');
-  const verifyRoot = useMatch('/verify');
   if (verifyMatch || verifyRoot) return <VerifyCertificatePage token={verifyMatch?.params.token} />;
 
   // Public sports profile - outside the shell and outside auth for the same
   // reason: a profile someone chose to make public has to be openable by a
   // stranger with no account, or "public" does not mean anything.
-  const publicProfileMatch = useMatch('/p/:handle');
   if (publicProfileMatch) return <PublicProfilePage handle={publicProfileMatch.params.handle} />;
 
   // An emailed invitation. Also matched ahead of the signed-out redirect, and for the
   // same reason as the two above: the recipient usually has no account yet, and a
   // login wall reached from an email - with no statement of what it is for - is
   // indistinguishable from a phishing page.
-  const inviteMatch = useMatch('/invites/:token');
   if (inviteMatch?.params.token) return <InviteAcceptPage token={inviteMatch.params.token} />;
 
   if (loading) return <div className="grid h-screen place-items-center"><Spinner /></div>;
