@@ -285,8 +285,8 @@ export function AppShell() {
           )}
         >
           <div className={cn('flex items-center gap-2.5 border-b py-3.5', railed ? 'md:justify-center md:px-0 px-4' : 'px-4')} style={{ borderColor: 'var(--sidebar-border)' }}>
-            <BrandMark height={22} className={cn(railed && 'md:hidden')} />
-            {railed && <span className="hidden md:block"><BrandMark height={22} markOnly /></span>}
+            <span className={cn(railed && 'md:hidden')}><BrandMark height={22} website /></span>
+            {railed && <span className="hidden md:block"><BrandMark height={22} markOnly website /></span>}
             <button onClick={() => setSidebarOpen(false)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-[var(--sidebar-muted)] transition-[background-color,color,transform] duration-150 hover:bg-[var(--sidebar-active)] hover:text-[var(--sidebar-fg-strong)] active:scale-90 md:hidden" aria-label="Close menu"><X size={16} /></button>
           </div>
           {/* Keyed to the workspace, not the route: re-entering on every click

@@ -8,6 +8,7 @@ const base = import.meta.env.BASE_URL;
 export const BRAND = {
   name: 'Sportagon',
   productBadge: 'EOS',
+  website: 'https://www.sportagon.in',
   logo: {
     blue:  `${base}assets/sportagon-logo-blue.png`,
     white: `${base}assets/sportagon-logo-white.png`,

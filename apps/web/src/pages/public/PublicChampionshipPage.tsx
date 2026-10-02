@@ -35,7 +35,7 @@ export function PublicChampionshipPage({ token }: { token: string }) {
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       <header className="border-b border-slate-800 bg-slate-900 px-4 py-3">
         <div className="mx-auto flex max-w-4xl items-center justify-between">
-          <BrandMark variant="white" />
+          <BrandMark variant="white" website />
           <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Public view</span>
         </div>
       </header>
