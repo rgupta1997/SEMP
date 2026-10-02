@@ -1,7 +1,11 @@
 -- Drop notifications_type_check: the last piece of the notification-service v2
 -- migration that never made it onto RDS.
 --
--- STATUS: NOT APPLIED. Written 2026-09-26, unapplied as of that date.
+-- STATUS: APPLIED. Written 2026-09-26. Re-checked against semp-prod on
+-- 2026-10-02: notifications_type_check is absent from pg_constraint, and the
+-- table now holds 157 rows against the 144 recorded here, so types outside the
+-- original six are writing. 001 and 002 re-confirmed applied at the same time
+-- (audience is jsonb, notifications_audience_check absent, 71 tables).
 --
 -- ---------------------------------------------------------------------------
 -- What this fixes, and how it was found
