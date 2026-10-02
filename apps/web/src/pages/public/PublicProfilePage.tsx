@@ -87,7 +87,7 @@ export function PublicProfilePage({ handle }: { handle?: string }) {
   const Shell = ({ children }: { children: React.ReactNode }) => (
     <div className="flex min-h-screen flex-col bg-[var(--canvas)] dark:bg-slate-950">
       <header className="flex shrink-0 items-center justify-between border-b border-[var(--line)] bg-white px-6 py-3.5 dark:border-slate-800 dark:bg-slate-900">
-        <BrandMark height={22} website />
+        <BrandMark height={22} />
         <ThemeToggle />
       </header>
       {children}

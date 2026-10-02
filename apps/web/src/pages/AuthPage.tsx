@@ -123,7 +123,7 @@ export function AuthPage() {
           </svg>
 
           {/* logo lockup */}
-          <a href={import.meta.env.VITE_LANDING_URL ?? '/'} style={{ display: 'inline-flex', alignItems: 'center', gap: 11, position: 'relative', width: 'fit-content' }}>
+          <a href={BRAND.website} aria-label={`${BRAND.name} website`} style={{ display: 'inline-flex', alignItems: 'center', gap: 11, position: 'relative', width: 'fit-content' }}>
             <img src={BRAND.logo.white} alt={BRAND.name} style={{ height: 28, display: 'block' }} />
             <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, color: C.teal, letterSpacing: '.16em', padding: '3px 7px', border: `1px solid ${C.teal}66`, borderRadius: 6 }}>{BRAND.productBadge}</span>
           </a>
@@ -166,7 +166,7 @@ export function AuthPage() {
         <main className="authMain" style={{ position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 'clamp(28px,5vh,64px) clamp(22px,5vw,56px)' }}>
           {/* top bar: brand on mobile + theme toggle */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 28 }}>
-            <a href={import.meta.env.VITE_LANDING_URL ?? '/'} className="mobileBrand" style={{ display: 'none', alignItems: 'center', gap: 10 }}>
+            <a href={BRAND.website} aria-label={`${BRAND.name} website`} className="mobileBrand" style={{ display: 'none', alignItems: 'center', gap: 10 }}>
               <img src={dark ? BRAND.logo.white : BRAND.logo.blue} alt={BRAND.name} style={{ height: 26, display: 'block' }} />
               <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, color: C.teal6, letterSpacing: '.16em', padding: '3px 7px', border: '1px solid #BFE7E9', borderRadius: 6 }}>{BRAND.productBadge}</span>
             </a>

@@ -9,22 +9,12 @@ import { cn } from './ui';
 //   variant 'blue'  - always-light surfaces.
 //   markOnly        - the hexagon alone, no wordmark and no badge. For the
 //                     collapsed sidebar rail, where 72px cannot hold a wordmark.
-//   website         - links the mark to the marketing site (BRAND.website); `to` is for in-app routes.
 export function BrandMark({
-  variant = 'auto', height = 26, to, website = false, className = '', markOnly = false,
-}: { variant?: 'blue' | 'white' | 'auto'; height?: number; to?: string; website?: boolean; className?: string; markOnly?: boolean }) {
-  const wrap = (node: JSX.Element) => {
-    if (website) {
-      return (
-        <a href={BRAND.website} aria-label={`${BRAND.name} website`}
-          className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">{node}</a>
-      );
-    }
-    return to ? <Link to={to} className="inline-flex">{node}</Link> : node;
-  };
-
+  variant = 'auto', height = 26, to, className = '', markOnly = false,
+}: { variant?: 'blue' | 'white' | 'auto'; height?: number; to?: string; className?: string; markOnly?: boolean }) {
   if (markOnly) {
-    return wrap(<img src={BRAND.logo.mark} alt={BRAND.name} className={cn('block', className)} style={{ height }} />);
+    const mark = <img src={BRAND.logo.mark} alt={BRAND.name} className={cn('block', className)} style={{ height }} />;
+    return to ? <Link to={to} className="inline-flex">{mark}</Link> : mark;
   }
 
   const badge =
@@ -46,5 +36,5 @@ export function BrandMark({
     </span>
   );
 
-  return wrap(inner);
+  return to ? <Link to={to} className="inline-flex">{inner}</Link> : inner;
 }

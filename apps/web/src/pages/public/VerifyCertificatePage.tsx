@@ -72,7 +72,7 @@ export function VerifyCertificatePage({ token }: { token?: string }) {
   if (!token) {
     return (
       <main className="mx-auto max-w-lg px-6 py-20">
-        <BrandMark website />
+        <BrandMark />
         <h1 className="mt-8 text-xl font-bold text-slate-900 dark:text-slate-100">Check a certificate</h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
           Scan the QR code on the certificate, or type the code printed beneath it.
@@ -125,7 +125,7 @@ export function VerifyCertificatePage({ token }: { token?: string }) {
   return (
     <div className="min-h-screen bg-[var(--canvas)] dark:bg-slate-950">
       <header className="border-b border-slate-200 bg-white px-6 py-3.5 dark:border-slate-800 dark:bg-slate-900">
-        <BrandMark height={22} website />
+        <BrandMark height={22} />
       </header>
 
       <main className="mx-auto grid max-w-4xl gap-5 px-6 py-10 md:grid-cols-2">
