@@ -48,6 +48,9 @@ const API_ORIGIN = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http:
 
 export const API_URL = API_ORIGIN ? `${API_ORIGIN}/api` : null
 
+// The main Sportagon website - where the logo leads, from the nav and the footer.
+export const MAIN_SITE = 'https://www.sportagon.in'
+
 export const CONTACT = {
   email: 'play@sportagon.in',
   phone: '+91 72760 88888',

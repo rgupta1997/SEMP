@@ -136,6 +136,22 @@ describe('placement floors accrue progressively, round by round', () => {
     expect(rows.E.points).toBe(5);
     expect(rows.C.points).toBe(3); // lost SF → stays at semi-finalist
     expect(rows.G.points).toBe(3);
+    // Final unplayed: finalists, not runners-up, so no provisional silver for either.
+    expect(rows.A.detail).toMatchObject({ finalist: 1 });
+    expect(rows.E.detail).toMatchObject({ finalist: 1 });
+    expect(rows.A.detail.runner_up).toBeUndefined();
+    expect(rows.E.detail.runner_up).toBeUndefined();
+  });
+
+  it('makes the final loser runner-up only once the final is played', () => {
+    const rows = byId(runScheme([
+      fx('A', 'C', 1, 0, 'SF'), fx('E', 'G', 2, 1, 'SF'),
+      fx('A', 'E', 2, 1, 'Final'),
+    ], rule));
+    expect(rows.A.detail).toMatchObject({ winner: 1 });
+    expect(rows.E.points).toBe(5);
+    expect(rows.E.detail).toMatchObject({ runner_up: 1 });
+    expect(rows.E.detail.finalist).toBeUndefined();
   });
 });
 
@@ -180,7 +196,7 @@ describe('placement byes earn the reached-stage floor', () => {
   it('a bye into the final banks the runner-up floor', () => {
     const rows = byId(runScheme([bye('A', 'SF')], rule));
     expect(rows.A.points).toBe(5);
-    expect(rows.A.detail).toMatchObject({ runner_up: 1 });
+    expect(rows.A.detail).toMatchObject({ finalist: 1 }); // final still unplayed
   });
 
   it('does not double-count a bye followed by a loss at that stage', () => {

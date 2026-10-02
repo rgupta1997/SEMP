@@ -1,0 +1,836 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+# semp-api: the Express app on Lambda, behind an API Gateway HTTP API.
+#
+# Deployed on EVERY push:
+#   sam build --config-env api && sam deploy --config-env api
+#
+# Imports two secret ARNs from semp-infra and nothing else. It cannot reach the
+# database's own resources, which is the point of the split.
+Description: SEMP API - Express on Lambda (no VPC) behind an HTTP API
+
+Parameters:
+  InfraStackName:
+    Type: String
+    Default: semp-infra
+    Description: Parameterised so a semp-infra-staging is a one-flag deploy.
+
+  FunctionName:
+    Type: String
+    Default: semp-api
+    Description: >-
+      Explicit so ApiLogGroup's name is predictable. Trade-off accepted: this stack
+      can exist only once per region and the function cannot be renamed without
+      replacement. NOTE the old scripts/deploy-lambda.sh created an UNMANAGED
+      function with this exact name - see the teardown checklist in README.md, or
+      the first deploy fails with "already exists".
+
+  WebOrigin:
+    Type: String
+    Description: >-
+      CORS allow-list, comma-separated. Consumed by the `cors` middleware in
+      apps/api/src/http/server.ts - NOT by API Gateway (see the HttpApi comment).
+
+  WebAppUrl:
+    Type: String
+    Description: >-
+      ONE origin, no trailing slash. Every absolute link in an outgoing email is
+      built from it. Deliberately separate from WebOrigin, which is a list and so
+      cannot have a URL built out of it.
+
+  MailApiUrl:
+    Type: String
+    Description: The mail service's BASE ORIGIN, no path. The client appends /mail.
+
+  SecretsExtensionLayerArn:
+    Type: String
+    Default: ''
+    Description: >-
+      AWS Parameters and Secrets Lambda Extension, pinned to an exact ARN. LEAVE
+      EMPTY to resolve the current one automatically, which is the recommended
+      path - see the Layers property below.
+
+      This ARN is per-REGION and per-ARCHITECTURE (separate arm64 and x86_64
+      layers) and is version-bumped often, which is why hardcoding it was a
+      mistake: the AWS docs table listed ap-south-1 arm64 at version 111 while the
+      account actually served 137. Getting the architecture wrong fails at cold
+      start with an extension that never listens on port 2773.
+
+      Set this only when you need a byte-identical redeploy of a past build.
+
+  Runtime:
+    Type: String
+    Default: nodejs22.x
+    AllowedValues: [nodejs22.x, nodejs24.x]
+    Description: >-
+      nodejs20.x (what the old bash deploy used) was DEPRECATED on 2026-04-30 -
+      creation of new functions on it is disabled from 2027-02-01, so it is not a
+      viable target for a new stack. 22.x matches the Node actually installed on
+      the dev machine (v22.17.1) and is LTS.
+      Note .node-version in the repo root still says 20, as do render.yaml and
+      netlify.toml - that drift predates this stack and is worth reconciling
+      separately. Whatever is chosen here must match the esbuild `target` in
+      apps/api/scripts/build-lambda.mjs.
+
+  MemorySize:
+    Type: Number
+    Default: 1024
+    Description: >-
+      Was 512 under the bash deploy. 1024 because cold start is Prisma engine spawn
+      plus building ~40 routers, both CPU-bound, and Lambda scales vCPU with memory
+      - so doubling this often more than halves duration and the bill goes DOWN.
+      Worth one measurement against 512 before settling.
+
+  ReservedConcurrency:
+    Type: Number
+    Default: 0
+    Description: >-
+      0 means OMIT, i.e. this function may scale to the whole account concurrency
+      limit. That is NOT a safe production setting against the current database.
+      This value times connection_limit=1 (set in apps/api/src/lambda.ts) IS the
+      worst-case connection load, and db.t4g.micro reports max_connections = 79,
+      of which superuser_reserved_connections takes 3 - so ~76 are usable, and
+      psql, migrations and monitoring need some of those too.
+      MEASURED, not derived from the class's nominal 1 GiB: RDS computes
+      max_connections from DBInstanceClassMemory, which excludes what the OS and
+      RDS processes reserve (79 x 9531392 bytes ~= 718 MiB usable of 1 GiB).
+      Cap it around 50 before this stack serves real traffic, and re-check the
+      figure with `select current_setting('max_connections')` if the instance class
+      changes - it roughly doubles on db.t4g.small.
+      Caveat when raising it: a literal value HARD-FAILS the stack on an account
+      whose total quota is 10, because AWS requires 10 left unreserved. The old
+      bash script detected that and skipped gracefully; CloudFormation cannot.
+
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+
+  # ---------------------------------------------------------------------------
+  # Realtime notifications (AppSync Events)
+  # ---------------------------------------------------------------------------
+  RealtimeChannelNamespace:
+    Type: String
+    Default: notifications
+    Description: >-
+      The AppSync channel namespace, and therefore the FIRST SEGMENT of every channel
+      path. It must match NOTIFICATION_CHANNEL_NAMESPACE in
+      packages/notifications/src/core/channels.ts, which the API, the publisher and
+      the browser all import. Changing it here alone is a silent total outage: the
+      publisher keeps publishing successfully to a namespace nobody is subscribed to,
+      and no error is raised anywhere.
+
+  RealtimeTokenTtlSeconds:
+    Type: Number
+    Default: 900
+    # Floor: below ~2 minutes the client's refresh buffer consumes the whole lifetime
+    # and it would reconnect continuously. Ceiling matches AuthorizerResultTtlSeconds'
+    # own hard limit below, since a token outliving the cached authorization it earned
+    # buys nothing.
+    MinValue: 120
+    MaxValue: 3600
+    Description: >-
+      Lifetime of the token minted by POST /notifications/realtime-token. Three
+      numbers have to stay consistent and this is the one they derive from: the
+      browser re-subscribes at roughly TTL minus two minutes, and the authorizer
+      caps its cached answer at the token's own remaining life. Too long and a
+      connection outlives the token behind it; too short and every user gets a gap
+      on every cycle.
+
+  AlarmEmail:
+    Type: String
+    Default: ''
+    Description: >-
+      Where realtime alarms go. Optional so a deploy never blocks on it, but leaving
+      it empty means the DLQ and the queue-age alarm do not exist - and notify()
+      swallows realtime failures by design, so nothing else would tell you the
+      fan-out is broken.
+
+  AuthorizerResultTtlSeconds:
+    Type: Number
+    Default: 300
+    # 3600 is AWS's own hard maximum for LambdaAuthorizerConfig.AuthorizerResultTtlInSeconds
+    # (confirmed against the live AWS::AppSync::Api resource schema in ap-south-1).
+    # Declared here so a bad value is rejected when the changeset is built, rather than
+    # part-way through creating the API.
+    MinValue: 0
+    MaxValue: 3600
+    Description: >-
+      How long AppSync caches an authorization, keyed on (apiId, channel, operation,
+      token). MUST NOT exceed RealtimeTokenTtlSeconds - CloudFormation cannot assert
+      that, hence this note. The authorizer additionally clamps its own ttlOverride
+      to the token's remaining lifetime, so a cached allow can never outlive the
+      token that earned it.
+
+Conditions:
+  HasReservedConcurrency: !Not [!Equals [!Ref ReservedConcurrency, 0]]
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
+  HasPinnedSecretsLayer: !Not [!Equals [!Ref SecretsExtensionLayerArn, '']]
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Front door
+  # ---------------------------------------------------------------------------
+  # EXPLICIT rather than implicit. SAM's implicit HttpApi would also give a
+  # $default auto-deploy stage, so that is not the reason - the reasons are that
+  # the implicit one is a synthesized logical id configurable only through
+  # Globals (splitting the API's configuration across two places, with nothing to
+  # Ref in Outputs), that DefaultRouteSettings throttling is not optional here,
+  # and that a custom domain is coming and is a one-block diff on a real resource.
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      # NO CorsConfiguration, deliberately. apps/api/src/http/server.ts already runs
+      # the `cors` middleware over a comma-split WEB_ORIGIN allow-list. Configuring
+      # CORS here as well means API Gateway answers OPTIONS itself under a DIFFERENT
+      # policy than the app enforces on the real request, and responses can carry
+      # two Access-Control-Allow-Origin headers - which every browser rejects.
+      # One owner for CORS: Express.
+      DefaultRouteSettings:
+        # A db.t4g.small behind a small concurrency ceiling has a narrow failure
+        # envelope, so the front door needs a limit. A clean 429 from here is much
+        # better than connection exhaustion at the database.
+        ThrottlingBurstLimit: 50
+        ThrottlingRateLimit: 25
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId","ip":"$context.identity.sourceIp","method":"$context.httpMethod","path":"$context.path","status":"$context.status","latency":"$context.responseLatency","integrationStatus":"$context.integrationStatus","integrationError":"$context.integrationErrorMessage"}
+
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/http-api/${FunctionName}'
+      RetentionInDays: !Ref LogRetentionDays
+
+  # Declared rather than left to Lambda's implicit creation, which produces a group
+  # CloudFormation does not own, with "Never expire" retention, that nothing cleans up.
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FunctionName}'
+      RetentionInDays: !Ref LogRetentionDays
+
+  # ---------------------------------------------------------------------------
+  # Execution role
+  # ---------------------------------------------------------------------------
+  # Written out rather than letting SAM synthesize one, because SAM always attaches
+  # AWSLambdaBasicExecutionRole to a role it creates - and that managed policy
+  # grants logs:CreateLogGroup on "*", which is exactly how a second, unmanaged,
+  # never-expiring log group appears the first time a name drifts.
+  FunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: logs-to-owned-group-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # No CreateLogGroup: the group is declared above, so the function
+              # never needs to make one, and cannot make one somewhere else.
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub '${ApiLogGroup.Arn}:*'
+        - PolicyName: read-own-secrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !ImportValue
+                      'Fn::Sub': '${InfraStackName}-DbSecretArn'
+                  - !ImportValue
+                      'Fn::Sub': '${InfraStackName}-AppSecretArn'
+        # Enqueue only. Note what is deliberately NOT granted: appsync:EventPublish.
+        # The API physically cannot publish to AppSync itself, which is what makes
+        # "notify() must never fan out inline" an enforced boundary rather than an
+        # agreement - an inline publish would fail with an IAM error in development,
+        # not silently time out in production on the one championship big enough to
+        # matter.
+        - PolicyName: enqueue-realtime-notifications
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:SendMessageBatch
+                Resource: !GetAtt NotificationQueue.Arn
+
+  # ---------------------------------------------------------------------------
+  # The function
+  # ---------------------------------------------------------------------------
+  SempApiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      # Runs `build-SempApiFunction` in apps/api/Makefile. NOT BuildMethod: esbuild
+      # - SAM's native esbuild builder has no post-build hook, and this artifact is
+      # incomplete without one: @prisma/client is external and has to be copied in,
+      # then pruned to a single engine binary. Also never --use-container; the
+      # Makefile header explains why.
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Ref FunctionName
+      CodeUri: ../apps/api
+      Handler: index.handler
+      Runtime: !Ref Runtime
+      # Must match PRISMA_ENGINE_TARGET in apps/api/Makefile and the binaryTargets
+      # entry in apps/api/prisma/schema.prisma. All three move together.
+      Architectures:
+        - arm64
+      MemorySize: !Ref MemorySize
+      # API Gateway HTTP API caps the integration at 30s, so anything above 29 is
+      # unreachable. Note this is ALSO why the two fire-and-forget background jobs
+      # (modules/demos, modules/reports) cannot work here - Lambda freezes the
+      # container when the response returns. They are a separate workstream and a
+      # hard gate before this stack serves production traffic.
+      Timeout: 15
+      Role: !GetAtt FunctionRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref ApiLogGroup
+      ReservedConcurrentExecutions: !If
+        - HasReservedConcurrency
+        - !Ref ReservedConcurrency
+        - !Ref 'AWS::NoValue'
+      Layers:
+        # AWS publishes the current extension ARN as a PUBLIC SSM parameter, one
+        # path per architecture, correct in every region. CloudFormation resolves
+        # it at deploy time, so there is nothing to look up, nothing to paste, and
+        # no way to end up on the stale value the docs table advertises. The arm64
+        # path matches Architectures: above - the two move together.
+        - !If
+          - HasPinnedSecretsLayer
+          - !Ref SecretsExtensionLayerArn
+          - '{{resolve:ssm:/aws/service/aws-parameters-and-secrets-lambda-extension/arm64/latest}}'
+      Environment:
+        Variables:
+          # apps/api/src/config/env.ts parses process.env at MODULE LOAD, so every
+          # value below is load-bearing: a missing or wrong one is a cold-start
+          # crash on every invocation, not an error on one route.
+          #
+          # DATABASE_URL, JWT_SECRET and MAIL_API_KEY are
+          # deliberately ABSENT - apps/api/src/lambda.ts fetches them from the two
+          # secrets below and assigns them before importing the app, so no secret
+          # is ever readable via lambda:GetFunctionConfiguration.
+          NODE_ENV: production
+          DB_SECRET_ARN: !ImportValue
+            'Fn::Sub': '${InfraStackName}-DbSecretArn'
+          APP_SECRET_ARN: !ImportValue
+            'Fn::Sub': '${InfraStackName}-AppSecretArn'
+          WEB_ORIGIN: !Ref WebOrigin
+          WEB_APP_URL: !Ref WebAppUrl
+          # env.schema.ts refuses to boot in production on 'console', which
+          # silently discards every email.
+          MAIL_TRANSPORT: http
+          MAIL_API_URL: !Ref MailApiUrl
+          MAIL_TIMEOUT_MS: '5000'
+          # Both hand sign-in codes back to the caller, and /auth/otp/send is
+          # mounted before requireAuth. env.schema.ts refuses to boot in production
+          # with either on; these are set explicitly so that guard is never the only
+          # thing standing in the way.
+          AUTH_EMAIL_BYPASS: 'false'
+          OTP_SMS_BYPASS: 'false'
+          # Realtime notifications. Same bargain as MAIL_TRANSPORT above: 'off'
+          # makes every notify() a feed-only write so a fresh clone runs with no AWS
+          # account, and env.schema.ts refuses to boot in production on 'off'.
+          REALTIME_TRANSPORT: appsync
+          APPSYNC_NOTIFICATIONS_QUEUE_URL: !Ref NotificationQueue
+          # Handed to the browser by POST /notifications/realtime-token, so the
+          # client never learns this at Vite build time and a stack redeploy cannot
+          # leave the frontend pointing at a dead endpoint.
+          # Dns.Http, NOT Dns.Realtime - the browser connects over WebSockets but
+          # Amplify derives that URL from the HTTP one. See env.schema.ts.
+          APPSYNC_EVENTS_HTTP_ENDPOINT: !GetAtt RealtimeApi.Dns.Http
+          APPSYNC_EVENTS_REGION: !Ref 'AWS::Region'
+          REALTIME_CHANNEL_NAMESPACE: !Ref RealtimeChannelNamespace
+          REALTIME_TOKEN_TTL_SECONDS: !Ref RealtimeTokenTtlSeconds
+          OTP_TTL_MIN: '10'
+          OTP_MAX_ATTEMPTS: '5'
+          MAX_ACCOUNTS_PER_PHONE: '3'
+          # Extension tuning: cache each secret for the container's life so the
+          # fetch in lambda.ts is one loopback call per cold start, not per request.
+          SECRETS_MANAGER_TTL: '300'
+          PARAMETERS_SECRETS_EXTENSION_HTTP_PORT: '2773'
+      Events:
+        # Path and Method omitted ON PURPOSE: SAM then creates a single $default
+        # route with ANY method, which is what the old `create-api --target`
+        # quick-create produced and what lets Express keep owning all routing.
+        Proxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+
+  # ---------------------------------------------------------------------------
+  # Realtime notifications: AppSync Events
+  # ---------------------------------------------------------------------------
+  # Replaces Supabase Realtime, which read Supabase's own Postgres WAL and therefore
+  # cannot survive the move to RDS - see infra/README.md. Delivery stops being a
+  # database side effect and becomes an explicit publish from application code.
+  #
+  # Nothing here costs anything while idle. AppSync Events bills per operation and
+  # per connection-minute only; an API with no connections is $0, so this whole block
+  # can be deployed well ahead of the code that uses it.
+  RealtimeApi:
+    Type: AWS::AppSync::Api
+    Properties:
+      # Max 50 chars, and no dots allowed by the service's own pattern.
+      Name: !Sub '${FunctionName}-events'
+      EventConfig:
+        AuthProviders:
+          - AuthType: AWS_LAMBDA
+            LambdaAuthorizerConfig:
+              AuthorizerUri: !GetAtt RealtimeAuthorizerFunction.Arn
+              AuthorizerResultTtlInSeconds: !Ref AuthorizerResultTtlSeconds
+              # Cheap shape check that rejects anything non-JWT before paying for a
+              # Lambda invoke. Deliberately loose - a strict pattern here becomes a
+              # silent auth failure the first time a claim lengthens the token.
+              IdentityValidationExpression: '^ey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$'
+          - AuthType: AWS_IAM
+        ConnectionAuthModes:
+          - AuthType: AWS_LAMBDA
+        DefaultSubscribeAuthModes:
+          - AuthType: AWS_LAMBDA
+        # PUBLISH IS IAM-ONLY, and that is a security boundary rather than a
+        # preference. The publisher Lambda signs with SigV4; a browser has no IAM
+        # credentials and so cannot publish at all. That removes "a client forged a
+        # notification to another user" at the transport layer, before the
+        # authorizer's own publish denial is ever consulted.
+        DefaultPublishAuthModes:
+          - AuthType: AWS_IAM
+        LogConfig:
+          CloudWatchLogsRoleArn: !GetAtt RealtimeApiLogsRole.Arn
+          # ERROR, not ALL. ALL logs every connect, subscribe and publish - at one
+          # publish per recipient, that is a CloudWatch bill shaped like the fan-out.
+          LogLevel: ERROR
+
+  RealtimeNamespace:
+    Type: AWS::AppSync::ChannelNamespace
+    Properties:
+      ApiId: !GetAtt RealtimeApi.ApiId
+      Name: !Ref RealtimeChannelNamespace
+      PublishAuthModes:
+        - AuthType: AWS_IAM
+      SubscribeAuthModes:
+        - AuthType: AWS_LAMBDA
+
+  RealtimeApiLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: appsync.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: logs-to-appsync-groups-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                # A PATH PREFIX, not RealtimeApiLogGroup.Arn, and the reason is a
+                # genuine CloudFormation cycle rather than laziness:
+                #   RealtimeApi -> this role (CloudWatchLogsRoleArn)
+                #   this role   -> RealtimeApiLogGroup (its Arn)
+                #   log group   -> RealtimeApi (its name embeds ApiId)
+                # `sam validate --lint` rejects exactly that loop. Naming the prefix
+                # instead breaks it: the role then depends on nothing, and the group
+                # still depends only on the API.
+                #
+                # The cost is that this role could write to any AppSync API's log
+                # group in this account and region. Bounded: only appsync.amazonaws.com
+                # can assume it, and the alternative is giving up a CloudFormation-owned
+                # log group with a retention policy - which is how an unmanaged,
+                # never-expiring group appears, the thing ApiLogGroup above exists to
+                # avoid.
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/appsync/apis/*'
+
+  # Declared rather than left to AppSync's implicit creation, for the same reason
+  # ApiLogGroup above is: an implicitly created group is not owned by CloudFormation,
+  # never expires, and nothing cleans it up.
+  #
+  # KNOWN HAZARD, unverified until a real deploy: AppSync may create this group
+  # itself the moment the API exists, in which case the stack fails with
+  # "already exists". If that happens, delete this resource and RealtimeApiLogsRole's
+  # reference to it, then set retention out of band:
+  #   aws logs put-retention-policy --log-group-name /aws/appsync/apis/<apiId> \
+  #     --retention-in-days 14
+  RealtimeApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/appsync/apis/${RealtimeApi.ApiId}'
+      RetentionInDays: !Ref LogRetentionDays
+
+  # ---------------------------------------------------------------------------
+  # The authorizer - what replaced the row-level-security policy
+  # ---------------------------------------------------------------------------
+  # AppSync invokes this before every connect, subscribe and publish. Its subscribe
+  # answer is the ONLY thing keeping one user's notifications out of another user's
+  # browser, now that notification_deliveries no longer has an RLS policy doing it.
+  # The decision is a pure function in apps/api/src/modules/realtime/authorize.ts,
+  # tested against a hostile channel table including wildcards.
+  RealtimeAuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub '${FunctionName}-realtime-authorizer'
+      CodeUri: ../apps/api
+      Handler: index.handler
+      Runtime: !Ref Runtime
+      Architectures:
+        - arm64
+      # Small because the bundle is ~140 KB with no Prisma and no env schema (the
+      # Makefile enforces that with a size budget). Memory still buys vCPU, and this
+      # sits on the latency-sensitive connect path where AWS asks for sub-1s.
+      MemorySize: 256
+      # AppSync's own ceiling is 10s. Failing at 5 is more diagnosable than hanging.
+      Timeout: 5
+      Role: !GetAtt RealtimeAuthorizerRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref RealtimeAuthorizerLogGroup
+      Layers:
+        # AWS publishes the current extension ARN as a PUBLIC SSM parameter, one
+        # path per architecture, correct in every region. CloudFormation resolves
+        # it at deploy time, so there is nothing to look up, nothing to paste, and
+        # no way to end up on the stale value the docs table advertises. The arm64
+        # path matches Architectures: above - the two move together.
+        - !If
+          - HasPinnedSecretsLayer
+          - !Ref SecretsExtensionLayerArn
+          - '{{resolve:ssm:/aws/service/aws-parameters-and-secrets-lambda-extension/arm64/latest}}'
+      Environment:
+        Variables:
+          # JWT_SECRET is fetched from here at cold start and immediately replaced by
+          # a DERIVED key - see modules/realtime/token-key.ts. The raw secret never
+          # signs a realtime token, because parseAuth() would then accept one as a
+          # session.
+          APP_SECRET_ARN: !ImportValue
+            'Fn::Sub': '${InfraStackName}-AppSecretArn'
+          REALTIME_TOKEN_TTL_SECONDS: !Ref RealtimeTokenTtlSeconds
+          SECRETS_MANAGER_TTL: '300'
+          PARAMETERS_SECRETS_EXTENSION_HTTP_PORT: '2773'
+
+  RealtimeAuthorizerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: logs-to-owned-group-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub '${RealtimeAuthorizerLogGroup.Arn}:*'
+        # AppSecret ONLY - deliberately not DbSecretArn. An authorizer that can read
+        # the database credentials is an authorizer whose compromise is a database
+        # compromise, and it has no possible use for them.
+        - PolicyName: read-app-secret-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !ImportValue
+                  'Fn::Sub': '${InfraStackName}-AppSecretArn'
+
+  RealtimeAuthorizerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FunctionName}-realtime-authorizer'
+      RetentionInDays: !Ref LogRetentionDays
+
+  # Without this AppSync cannot call the authorizer at all, and every connection is
+  # refused. SourceAccount alongside SourceArn closes the confused-deputy shape.
+  RealtimeAuthorizerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt RealtimeAuthorizerFunction.Arn
+      Principal: appsync.amazonaws.com
+      SourceArn: !GetAtt RealtimeApi.ApiArn
+      SourceAccount: !Ref 'AWS::AccountId'
+
+  # ---------------------------------------------------------------------------
+  # The fan-out queue
+  # ---------------------------------------------------------------------------
+  # STANDARD, not FIFO, deliberately. FIFO would buy per-user ordering at the price
+  # of throughput ceilings and a MessageGroupId, and ordering buys nothing here: the
+  # payload is an idempotent ping, so two arriving out of order is indistinguishable
+  # from one arriving twice, which is already expected and harmless.
+  NotificationDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${FunctionName}-realtime-dlq'
+      # 14 days: this queue IS the forensic record, so it keeps the maximum.
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  NotificationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${FunctionName}-realtime'
+      # SSE-SQS rather than a KMS key: encryption at rest with no per-request KMS
+      # charge on a queue sized to the notification volume.
+      SqsManagedSseEnabled: true
+      # AWS requires this to be at least 6x the consumer's timeout. Publisher is 30s.
+      VisibilityTimeout: 180
+      # ONE HOUR, not the 4-day default, and this is a real trade rather than a
+      # rounding of convenience. A realtime ping delivered four days late is not a
+      # notification, it is noise - and after an outage a multi-day backlog would
+      # arrive as a flood of stale badge increments. The cost is that a message the
+      # publisher never manages to receive at all for an hour expires without
+      # reaching the DLQ; that is an outage the queue-age alarm below has already
+      # told you about.
+      MessageRetentionPeriod: 3600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt NotificationDlq.Arn
+        maxReceiveCount: 5
+
+  # ---------------------------------------------------------------------------
+  # The publisher
+  # ---------------------------------------------------------------------------
+  RealtimePublisherFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub '${FunctionName}-realtime-publisher'
+      CodeUri: ../apps/api
+      Handler: index.handler
+      Runtime: !Ref Runtime
+      Architectures:
+        - arm64
+      # Network-bound fan-out; memory here buys the vCPU that computes one SigV4
+      # signature per recipient.
+      MemorySize: 512
+      # NOT bounded by API Gateway's 29s ceiling - nothing HTTP invokes this.
+      Timeout: 30
+      Role: !GetAtt RealtimePublisherRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref RealtimePublisherLogGroup
+      # No Layers: authorization is this role's SigV4 signature, so there is no
+      # secret to fetch and no Secrets extension to pay for at cold start.
+      Environment:
+        Variables:
+          APPSYNC_EVENTS_HTTP_ENDPOINT: !GetAtt RealtimeApi.Dns.Http
+          PUBLISH_CONCURRENCY: '20'
+          PUBLISH_TIMEOUT_MS: '2000'
+      Events:
+        Queue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt NotificationQueue.Arn
+            BatchSize: 10
+            # ZERO, and this is the setting people get wrong. Any batching window
+            # adds that many seconds to EVERY notification's perceived latency,
+            # which is the entire feature being built.
+            MaximumBatchingWindowInSeconds: 0
+            # Pairs with the handler returning batchItemFailures. Without it SQS
+            # ignores that value and redelivers the WHOLE batch when anything in it
+            # failed - a 10x amplification of every transient blip. The two settings
+            # only work together; changing either alone silently breaks the other.
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+            ScalingConfig:
+              # Bounds concurrent publishers, and therefore the total request rate
+              # against AppSync's 2,000-request-tokens-per-second account quota.
+              MaximumConcurrency: 10
+
+  RealtimePublisherRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: logs-to-owned-group-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub '${RealtimePublisherLogGroup.Arn}:*'
+        - PolicyName: consume-notification-queue
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ChangeMessageVisibility
+                Resource: !GetAtt NotificationQueue.Arn
+        # EventPublish only, scoped to the ONE channel namespace. Note what is
+        # absent: no EventConnect and no EventSubscribe, so this role cannot read
+        # anyone's notifications even though it can address every channel.
+        - PolicyName: publish-to-notifications-namespace
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: appsync:EventPublish
+                Resource: !Sub 'arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${RealtimeApi.ApiId}/channelNamespace/${RealtimeChannelNamespace}'
+
+  RealtimePublisherLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FunctionName}-realtime-publisher'
+      RetentionInDays: !Ref LogRetentionDays
+
+  # ---------------------------------------------------------------------------
+  # Alarms - the FIRST in this stack, and the reason is structural
+  # ---------------------------------------------------------------------------
+  # notify() swallows realtime failures by design, so that a transport outage cannot
+  # turn "your fixture moved" into a failed request for the organiser who moved it.
+  # That silence is correct, and it is exactly why something else has to raise the
+  # alarm. Without these, a broken fan-out is invisible: no 500s, no user complaints
+  # for days, just a bell that stopped counting.
+  #
+  # AlarmEmail is optional so a deploy does not require it, but a DLQ nobody watches
+  # is a deleted message with extra steps.
+  RealtimeAlarmTopic:
+    Condition: HasAlarmEmail
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${FunctionName}-realtime-alarms'
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlarmEmail
+
+  # Anything here has failed 5 deliveries. Threshold is zero, not a rate.
+  RealtimeDlqAlarm:
+    Condition: HasAlarmEmail
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${FunctionName}-realtime-dlq-not-empty'
+      AlarmDescription: A notification fan-out gave up entirely. Inspect before purging.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt NotificationDlq.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref RealtimeAlarmTopic
+
+  # THE realtime SLO alarm: it fires when pings are late, which is the failure a
+  # hard cutover is most likely to produce and the one users would never report.
+  RealtimeQueueAgeAlarm:
+    Condition: HasAlarmEmail
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${FunctionName}-realtime-queue-backed-up'
+      AlarmDescription: Notifications are being delivered late - the publisher is not keeping up.
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt NotificationQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 60
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref RealtimeAlarmTopic
+
+  # Every denial is a warn, not an error, so this only fires on genuine faults -
+  # a thrown authorizer, a missing secret, a cold-start crash. Those present to users
+  # as "the bell never connects" with nothing in the UI to explain it.
+  RealtimeAuthorizerErrorAlarm:
+    Condition: HasAlarmEmail
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${FunctionName}-realtime-authorizer-errors'
+      AlarmDescription: The AppSync authorizer is faulting - subscriptions are being refused.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref RealtimeAuthorizerFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref RealtimeAlarmTopic
+
+Outputs:
+  ApiEndpoint:
+    Description: >-
+      Set Netlify/Amplify's VITE_API_URL to this - no trailing slash, no /api, the
+      client appends /api itself. It is BUILD-TIME inlined by Vite, so changing it
+      needs a frontend rebuild, not just a saved variable.
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'
+
+  HealthCheck:
+    Description: Exercises no database, so it isolates cold-start problems from connection problems.
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/health'
+
+  FunctionArn:
+    Value: !GetAtt SempApiFunction.Arn
+
+  # ---------------------------------------------------------------------------
+  # Realtime
+  # ---------------------------------------------------------------------------
+  # Note what is NOT here: a VITE_* value for the frontend build. The browser learns
+  # its endpoint and its channel from the response to POST /notifications/realtime-token,
+  # not from a Vite constant - so redeploying this stack cannot leave the frontend
+  # pointing at a dead endpoint, and no rebuild is needed when it changes. That is a
+  # deliberate contrast with ApiEndpoint above, which does have that problem.
+  RealtimeHttpEndpoint:
+    Description: >-
+      Where the publisher POSTs events (it appends /event). Set as
+      APPSYNC_EVENTS_HTTP_ENDPOINT on the publisher function.
+    Value: !GetAtt RealtimeApi.Dns.Http
+
+  RealtimeWsEndpoint:
+    Description: The WebSocket endpoint browsers subscribe on; returned by the mint endpoint.
+    Value: !GetAtt RealtimeApi.Dns.Realtime
+
+  RealtimeApiId:
+    Description: For CloudWatch log-group paths and for scoping appsync:EventPublish.
+    Value: !GetAtt RealtimeApi.ApiId
+
+  NotificationQueueUrl:
+    Value: !Ref NotificationQueue
+
+  NotificationDlqUrl:
+    Description: Redrive is safe at any time - the ping is idempotent. See message.ts.
+    Value: !Ref NotificationDlq

@@ -32,7 +32,10 @@ import { makeChampionshipTemplatesRouter } from '../modules/championships/templa
 import { makeStandingsRouter } from '../modules/standings/standings.routes.js';
 import { makeEnrollmentRouter } from '../modules/enrollment/enrollment.routes.js';
 import { makeInvitationsRouter } from '../modules/enrollment/invitations.routes.js';
-import { makeUserInvitationsRouter } from '../modules/iam/user-invitations.routes.js';
+import { makeUserInvitationsRouter, makePublicInviteRouter, makeInviteAcceptRouter } from '../modules/iam/user-invitations.routes.js';
+import { setNotificationPorts } from '@semp/notifications/server/notify.js';
+import { notificationMailPort } from '../modules/comms/notification-mail.js';
+import { notificationRealtimePort } from '../modules/realtime/notification-realtime.js';
 import { makeTeamsRouter } from '../modules/teams/teams.routes.js';
 import { makeMatrixImportRouter } from '../modules/import/matrix-import.routes.js';
 import { makePublicRouter } from '../modules/public/public.routes.js';
@@ -59,6 +62,25 @@ import { applyDuePlanChanges } from '../modules/billing/subscription.service.js'
 import { BusinessRuleError } from '../shared/errors.js';
 
 export function buildApp(prisma: Prisma) {
+  // Register the notification transport.
+  //
+  // This call was missing for the whole life of the feature: the two imports
+  // above were present and never used, so `mailPort` in @semp/notifications
+  // stayed null and every notification email was silently dropped. That failure
+  // is invisible by design - notify() treats an unregistered port as a no-op so a
+  // mail outage cannot fail the request that triggered it - which is exactly why
+  // nothing surfaced it, and why buildApp-registers-its-ports is now asserted in
+  // server.ports.test.ts rather than left to review.
+  //
+  // buildApp() is the single composition root: main.ts (Render) and lambda-app.ts
+  // (Lambda) both do nothing but call it, so registering here covers both. It has
+  // to be inside the function rather than at module scope because lambda.ts
+  // populates process.env from Secrets Manager and only THEN imports the app.
+  setNotificationPorts({
+    mail: notificationMailPort,
+    realtime: notificationRealtimePort,
+  });
+
   const app = express();
   // Allow any localhost origin in dev (Vite may pick 5173/5174/...), plus an
   // explicit production allowlist. WEB_ORIGIN may be a comma-separated list so the
@@ -100,6 +122,12 @@ export function buildApp(prisma: Prisma) {
   // Public, view-only championship pages via a share token (Overview + Standings).
   // Mounted before requireAuth so anyone with the link can view without signing in.
   api.use('/public', makePublicRouter(prisma));
+
+  // Reading an emailed invitation. Mounted before requireAuth because the recipient
+  // has, by definition, not signed in yet - a link that demanded a session before it
+  // would say what it was for would be indistinguishable from a phishing page.
+  // Accepting is a different matter and sits below the gate (see makeInviteAcceptRouter).
+  api.use('/public', makePublicInviteRouter(prisma));
 
   // Everything below requires authentication.
   api.use(requireAuth);
@@ -218,6 +246,8 @@ export function buildApp(prisma: Prisma) {
   api.use('/', makeEnrollmentRouter(prisma));
   api.use('/', makeInvitationsRouter(prisma));
   api.use('/', makeUserInvitationsRouter(prisma));
+  // Accepting an emailed invitation: the signed-in user is who joins.
+  api.use('/', makeInviteAcceptRouter(prisma));
 
   // ----- Phase 4: teams & rosters -----
   api.use('/', makeTeamsRouter(prisma));

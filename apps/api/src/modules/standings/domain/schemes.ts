@@ -1,4 +1,4 @@
-import type { StandingsRule, StandingsPlacement, StandingsTiebreaker } from '@semp/shared';
+import { FINALIST_DETAIL_KEY, type StandingsRule, type StandingsPlacement, type StandingsTiebreaker } from '@semp/shared';
 
 // Pure standings computation. A scheme turns a single draw's (tournament_discipline)
 // completed fixtures into per-CONTINGENT tallies. The service aggregates these
@@ -180,6 +180,14 @@ function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule,
     }
   }
 
+  // Only losing a played final makes a team runner-up; reaching it is still a floor.
+  const finalLosers = new Set<string>();
+  for (const f of fixtures) {
+    if (f.status !== 'completed' || f.round !== 'Final' || !f.winner_team_id) continue;
+    const loser = f.home_team_id === f.winner_team_id ? f.away_team_id : f.home_team_id;
+    if (loser) finalLosers.add(loser);
+  }
+
   // Contingents that banked a scored placement - they do NOT also get participation.
   const placed = new Set<string>();
   for (const [teamId, earned] of candidates) {
@@ -190,7 +198,9 @@ function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule,
     let row = table.get(entityId);
     if (!row) { row = emptyTally(entityId); table.set(entityId, row); }
     row.points += rule.points[chosen]!;
-    row.detail[chosen] = (row.detail[chosen] ?? 0) + 1;
+    // Same points either way; the label decides whether the medal tally counts a silver.
+    const key = chosen === 'runner_up' && !finalLosers.has(teamId) ? FINALIST_DETAIL_KEY : chosen;
+    row.detail[key] = (row.detail[key] ?? 0) + 1;
     placed.add(entityId);
   }
 

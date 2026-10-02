@@ -148,6 +148,10 @@ export const PLACEMENT_LABEL: Record<StandingsPlacement, string> = {
   quarter_finalist: 'Quarter-finalist',
 };
 
+// Standings `detail` key for a team through to an unplayed final: scores the runner-up
+// floor, but is not `runner_up`, so the medal tally gives no silver until the final.
+export const FINALIST_DETAIL_KEY = 'finalist';
+
 // ---------- Achievements & the lifetime record (J4-E2 / J4-E4) ----------
 
 // What a lifetime timeline entry is. Lock-derived entries are always
