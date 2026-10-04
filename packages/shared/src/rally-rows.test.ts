@@ -118,3 +118,13 @@ describe('diffStats', () => {
       .toEqual([{ metric: 'points_won', expected: 5, actual: 4 }]);
   });
 });
+
+describe('expedite survives the row round trip', () => {
+  it('rebuilds the event, including a replayed rally', () => {
+    const f = fmt('ittf_bo5_11');
+    const log: RallyLog = [...points('A', 1), { t: 'expedite', reason: 'time', inRally: true }, ...points('B', 3)];
+    const back = rowsToRallyLog(rallyLogToRows(f, log));
+    expect(back[1]).toEqual({ t: 'expedite', reason: 'time', inRally: true });
+    expect(foldRally(f, back, 'A').state.serve).toEqual(foldRally(f, log, 'A').state.serve);
+  });
+});

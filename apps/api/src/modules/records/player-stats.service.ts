@@ -1,7 +1,8 @@
 import {
   canonicalRacquetSport, competitionTier, cricketCareerBag, deriveRacquetStats,
   deriveTeamStats, effectiveEventSpec, eventTemplateFor, foldCricketCareer, isCricketSport,
-  parseStoredFormat, rankSubEvent, resolveFormat, statSpecFor,
+  parseStoredFormat, playedContests, rankSubEvent, resolveFormat, seatIn, statSpecFor,
+  type PlayedContest,
   type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
   type FormatTemplate, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
@@ -47,7 +48,7 @@ interface StatFixture {
     round_formats?: unknown;
     format_config?: unknown;
     discipline_id?: string | null;
-    disciplines?: { name: string } | null;
+    disciplines?: { name: string; entry_type?: string | null } | null;
     tournament_sports: { sport_id: string; sports: { name: string } | null } | null;
   } | null;
 }
@@ -60,6 +61,8 @@ export interface PlayerStatRow {
   sport_id: string | null;
   rubber_key: string | null;
   partner_user_id: string | null;
+  /** Who they played against in this contest - the source of head-to-head records. */
+  opponent_user_ids: string[] | null;
   position: string | null;
   role: string;
   played: boolean;
@@ -94,7 +97,7 @@ export async function buildPlayerStatRows(
       tournament_disciplines: {
         select: {
           format_config: true, discipline_id: true,
-          disciplines: { select: { name: true } },
+          disciplines: { select: { name: true, entry_type: true } },
           tournament_sports: { select: { sport_id: true, sports: { select: { name: true } } } },
         },
       },
@@ -175,6 +178,7 @@ export async function buildPlayerStatRows(
         sport_id: sportId,
         rubber_key: null,
         partner_user_id: null,
+        opponent_user_ids: null,
         position: null,
         role: 'player',
         played: true,
@@ -219,6 +223,22 @@ export async function buildPlayerStatRows(
     return null;
   };
 
+  // Where we know who played (a named racquet match, or a tie's rubbers), each player
+  // gets one line per contest they played - the same contests derive.ts files results for.
+  const played = playedContests({
+    liveState: fx.live_state,
+    sportName,
+    entryType: fx.tournament_disciplines?.disciplines?.entry_type ?? null,
+    roster: { A: onSide('A'), B: onSide('B') },
+    matchWinner: winnerSide(),
+  });
+  if (played.kind === 'contests') {
+    return contestRows(fx, played.contests, people, sideOf, {
+      sportId, occurred, racquet: !!canonical,
+      singleOutcome: (side) => outcomeForFixture(fx, side),
+    });
+  }
+
   // ---- the stat line, per family --------------------------------------------
   //
   // Racquet folds the rally log THROUGH THE KERNEL, because crediting a service
@@ -256,18 +276,7 @@ export async function buildPlayerStatRows(
     statOf = (userId) => derived.players.find((x) => x.userId === userId)?.stats ?? {};
   }
 
-  const outcomeFor = (side: Side): 'won' | 'lost' | 'drew' | null => {
-    // Prefer the kernel's own verdict; fall back to the persisted winner so a
-    // manually-entered result still files an outcome.
-    const teamId = side === 'A' ? fx.home_team_id : fx.away_team_id;
-    if (fx.winner_team_id) return fx.winner_team_id === teamId ? 'won' : 'lost';
-    if (fx.home_score != null && fx.away_score != null) {
-      if (fx.home_score === fx.away_score) return 'drew';
-      const homeWon = fx.home_score > fx.away_score;
-      return (side === 'A') === homeWon ? 'won' : 'lost';
-    }
-    return null;
-  };
+  const outcomeFor = (side: Side) => outcomeForFixture(fx, side);
 
   const rows: PlayerStatRow[] = [];
   for (const p of people) {
@@ -288,6 +297,7 @@ export async function buildPlayerStatRows(
       sport_id: sportId,
       rubber_key: null,
       partner_user_id: partner,
+      opponent_user_ids: null,
       // singles/doubles describes a RUBBER. A football team sheet has neither, and
       // labelling eleven players "singles" was simply false.
       position: canonical ? (mates.length > 1 ? 'doubles' : 'singles') : null,
@@ -304,6 +314,81 @@ export async function buildPlayerStatRows(
       stats: statOf(p.user_id),
       occurred_on: occurred,
       lock_version: fx.lock_version,
+    });
+  }
+  return rows;
+}
+
+/** The fixture's result for one side. Prefers the persisted winner; falls back to the score. */
+function outcomeForFixture(fx: StatFixture, side: Side): 'won' | 'lost' | 'drew' | null {
+  const teamId = side === 'A' ? fx.home_team_id : fx.away_team_id;
+  if (fx.winner_team_id) return fx.winner_team_id === teamId ? 'won' : 'lost';
+  if (fx.home_score != null && fx.away_score != null) {
+    if (fx.home_score === fx.away_score) return 'drew';
+    const homeWon = fx.home_score > fx.away_score;
+    return (side === 'A') === homeWon ? 'won' : 'lost';
+  }
+  return null;
+}
+
+/**
+ * One line per player per contest they played, plus a bare "did not play" line for
+ * the rest of the squad. A tie rubber carries its key, so a player in two rubbers has
+ * two lines - the (fixture, user, rubber) unique index was built for exactly this.
+ */
+function contestRows(
+  fx: StatFixture,
+  contests: PlayedContest[],
+  people: FixtureParticipants['resolved'],
+  sideOf: Map<string, Side>,
+  opts: { sportId: string | null; occurred: Date; racquet: boolean; singleOutcome: (side: Side) => 'won' | 'lost' | 'drew' | null },
+): PlayerStatRow[] {
+  const byUser = new Map(people.map((p) => [p.user_id, p]));
+  const rows: PlayerStatRow[] = [];
+  const playedSomething = new Set<string>();
+
+  for (const c of contests) {
+    // Racquet stats come from the contest's own rally log, through the kernel, with
+    // the named players as the pairing - so service points land on the right person.
+    const derived = opts.racquet && c.format && c.log.length
+      ? deriveRacquetStats(c.format, c.log, { pairing: c.lineup, firstServer: c.firstServer })
+      : null;
+    for (const userId of [...c.lineup.A, ...c.lineup.B]) {
+      const p = byUser.get(userId);
+      const seat = seatIn(c, userId);
+      if (!p || !seat) continue;
+      playedSomething.add(userId);
+      rows.push({
+        fixture_id: fx.id,
+        user_id: userId,
+        team_id: p.team_id,
+        organization_id: p.organization_id,
+        sport_id: opts.sportId,
+        rubber_key: c.rubberKey,
+        partner_user_id: seat.partner,
+        opponent_user_ids: seat.opponents,
+        position: seat.position,
+        role: 'player',
+        played: true,
+        outcome: c.rubberKey === null
+          ? opts.singleOutcome(seat.side)
+          : c.winner ? (c.winner === seat.side ? 'won' : 'lost') : null,
+        stats: derived?.players.find((x) => x.userId === userId)?.stats ?? {},
+        occurred_on: opts.occurred,
+        lock_version: fx.lock_version,
+      });
+    }
+  }
+
+  // The rest of the squad was there but did not play: an appearance-free line, so the
+  // squad stays visible without anyone collecting a result they did not earn.
+  for (const p of people) {
+    if (playedSomething.has(p.user_id) || !sideOf.has(p.user_id)) continue;
+    rows.push({
+      fixture_id: fx.id, user_id: p.user_id, team_id: p.team_id, organization_id: p.organization_id,
+      sport_id: opts.sportId, rubber_key: null, partner_user_id: null, opponent_user_ids: null,
+      position: null, role: 'player', played: false, outcome: null, stats: {},
+      occurred_on: opts.occurred, lock_version: fx.lock_version,
     });
   }
   return rows;
@@ -332,12 +417,12 @@ export async function writePlayerMatchStats(
     const [inserted] = await db.$queryRaw<Array<{ id: string }>>`
       insert into player_match_stats
         (fixture_id, user_id, team_id, organization_id, sport_id, rubber_key,
-         partner_user_id, position, role, played, outcome, stats, occurred_on,
+         partner_user_id, opponent_user_ids, position, role, played, outcome, stats, occurred_on,
          source, lock_version)
       values
         (${r.fixture_id}::uuid, ${r.user_id}::uuid, ${r.team_id}::uuid,
          ${r.organization_id}::uuid, ${r.sport_id}::uuid, ${r.rubber_key},
-         ${r.partner_user_id}::uuid, ${r.position}, ${r.role}, ${r.played},
+         ${r.partner_user_id}::uuid, ${r.opponent_user_ids}::uuid[], ${r.position}, ${r.role}, ${r.played},
          ${r.outcome}, ${JSON.stringify(r.stats)}::jsonb, ${r.occurred_on}::date,
          'locked_result', ${r.lock_version})
       returning id`;
@@ -498,9 +583,9 @@ export async function recomputeCareerStatBags(
   // inter-department game are not the same hundred, and adding them together is the
   // one thing a career record must not do.
   const rows = await db.$queryRaw<Array<{
-    sport_id: string | null; sport: string | null; stats: unknown; entry_level: string | null;
+    sport_id: string | null; sport: string | null; stats: unknown; entry_level: string | null; position: string | null;
   }>>`
-    select p.sport_id, s.name as sport, p.stats, c.entry_level
+    select p.sport_id, s.name as sport, p.stats, c.entry_level, p.position
     from player_match_stats p
     left join sports s on s.id = p.sport_id
     left join fixtures f on f.id = p.fixture_id
@@ -516,21 +601,41 @@ export async function recomputeCareerStatBags(
 
   // Keyed by sport AND tier. Each row also goes into the 'all' rollup, which is
   // stored rather than summed on read so no consumer has to re-implement it.
-  const buckets = new Map<string, { sportId: string; sport: string | null; tier: string; bags: Record<string, number>[] }>();
+  // A singles or doubles line also folds into its own position bucket (the career's
+  // singles / doubles split), beside the whole-sport one.
+  type BagBucket = { sportId: string; sport: string | null; tier: string; position: string | null; bags: Record<string, number>[] };
+  const buckets = new Map<string, BagBucket>();
   for (const r of rows) {
     if (!r.sport_id) continue;
     const bag = (r.stats ?? {}) as Record<string, number>;
+    const position = r.position === 'singles' || r.position === 'doubles' ? r.position : null;
     for (const tier of [competitionTier(r.entry_level), 'all']) {
-      const k = `${r.sport_id}|${tier}`;
-      const e = buckets.get(k) ?? { sportId: r.sport_id, sport: r.sport, tier, bags: [] };
-      e.bags.push(bag);
-      buckets.set(k, e);
+      for (const pos of position ? [null, position] : [null]) {
+        const k = `${r.sport_id}|${tier}|${pos ?? ''}`;
+        const e = buckets.get(k) ?? { sportId: r.sport_id, sport: r.sport, tier, position: pos, bags: [] };
+        e.bags.push(bag);
+        buckets.set(k, e);
+      }
     }
   }
 
   let written = 0;
   const { foldCareerStats } = await import('@semp/shared');
-  for (const { sportId, sport, tier, bags } of buckets.values()) {
+  for (const { sportId, sport, tier, position, bags } of buckets.values()) {
+    if (position) {
+      const spec = statSpecFor(sport);
+      if (!spec) continue;
+      written += await db.$executeRaw`
+        update career_stats
+        set stats = ${JSON.stringify(foldCareerStats(spec, bags))}::jsonb
+        where user_id = ${userId}::uuid
+          and organization_id = ${organizationId}::uuid
+          and sport_id = ${sportId}::uuid
+          and grain = 'position'
+          and position = ${position}
+          and tier = ${tier}`;
+      continue;
+    }
     // CRICKET HAS NO STAT SPEC, and correctly so: its figures come from three typed
     // tables rather than from an attributed event log, so there is no event->metric
     // mapping to fold. Without this branch `statSpecFor` returned undefined and the

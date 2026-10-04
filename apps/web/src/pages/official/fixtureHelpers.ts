@@ -11,6 +11,15 @@ export function isRankingEvent(f: any): boolean { return f?.round === 'Event' &&
 // Organization sub-heading for a team (short name preferred), '' when unaffiliated.
 export function orgLabel(t: any): string { return t?.organizations?.short_name || t?.organizations?.name || ''; }
 
+/** Longest organisation name a scoreboard header shows in full; longer ones use the short name. */
+const ORG_TITLE_MAX = 28;
+// Organization as a headline: the full name where it fits, the short name otherwise.
+export function orgTitle(t: any): string {
+  const full = t?.organizations?.name || '';
+  const short = t?.organizations?.short_name || '';
+  return full && (full.length <= ORG_TITLE_MAX || !short) ? full : short;
+}
+
 export function sportName(f: any): string | null {
   return f.tournament_disciplines?.tournament_sports?.sports?.name ?? null;
 }

@@ -76,6 +76,12 @@ export type RallyEvent =
   /** The console's buzzer. The kernel applies the format's cap resolution. */
   | { t: 'capFired'; at?: string }
   /**
+   * Table tennis expedite system switched on: by the game's time limit or at both
+   * players' request. `inRally`: the ball was in play, so that rally is replayed by
+   * the same server; otherwise the previous rally's receiver serves next.
+   */
+  | { t: 'expedite'; reason?: 'time' | 'request'; inRally?: boolean; by?: string; at?: string }
+  /**
    * THE WHISTLE. A clock-terminated period is over; tally what was scored.
    *
    * Separate from `capFired`, which is a whole-match time cap with a resolution
@@ -119,6 +125,8 @@ export interface ServeState {
   serverNo: number;
   /** Points served in the current turn (everyN movement). */
   turnCount: number;
+  /** Serving turns completed in this unit. Drives the doubles rotation (table tennis). */
+  turns: number;
   /** Which side served the first point of the current innermost unit. */
   unitFirstServer: Side;
   /** Right / left service court, or null where the sport has none. */
@@ -155,6 +163,8 @@ export interface KernelState {
   capFired: boolean;
   /** The level raw points currently land on. >0 when a collapsed decider is running. */
   pointLevel: number;
+  /** Table tennis expedite system in force: one serve each until it is lifted. */
+  expedite: boolean;
 }
 
 /** What one event did, for the console timeline and the stat fold. */
@@ -311,6 +321,7 @@ export function initKernel(format: ScoringFormat, firstServer: Side = 'A'): Kern
       side: firstServer,
       serverNo: serveOpeningServerNo(serve),
       turnCount: 0,
+      turns: 0,
       unitFirstServer: firstServer,
       courtHalf: serve.courtModel === 'none' ? null : 'right',
       openingTurn: opensSpecially(serve),
@@ -323,7 +334,54 @@ export function initKernel(format: ScoringFormat, firstServer: Side = 'A'): Kern
     switchEnds: false,
     capFired: false,
     pointLevel: 0,
+    expedite: false,
   };
+}
+
+// ---- expedite (table tennis) ----------------------------------------------
+
+/** The format's expedite plugin, as stored on `plugins.expedite`. */
+export interface ExpediteConfig {
+  enabled: boolean;
+  /** Playing time in a game before the system comes in. ITTF: 10. */
+  afterMinutes: number;
+  /** Not introduced once this many points in total have been scored in the game. ITTF 2.15.2: 18. */
+  exemptAtTotal: number;
+  /** Good returns by the receiver that win them the point. ITTF: 13. */
+  returnsToWinPoint: number;
+  /** Serves per turn once it is in force. ITTF: 1. */
+  serveEvery: number;
+  /** Stays on for the rest of the match. ITTF: yes. */
+  stickyForMatch: boolean;
+}
+
+export const ITTF_EXPEDITE: ExpediteConfig = {
+  enabled: true, afterMinutes: 10, exemptAtTotal: 18, returnsToWinPoint: 13, serveEvery: 1, stickyForMatch: true,
+};
+
+/** The expedite rules in force for this format, or null when it has none. */
+export function expediteConfig(format: ScoringFormat): ExpediteConfig | null {
+  const raw = format.plugins?.expedite as (Partial<ExpediteConfig> & { exemptAtScore?: number }) | undefined;
+  if (!raw?.enabled) return null;
+  // Formats saved before 2026-10-04 carry a per-side `exemptAtScore` (9); the rule is a total.
+  const { exemptAtScore: legacy, ...rest } = raw;
+  return { ...ITTF_EXPEDITE, ...(legacy !== undefined ? { exemptAtTotal: legacy * 2 } : {}), ...rest };
+}
+
+/** True when the expedite system may still be introduced in the game under way. */
+export function expediteAllowed(format: ScoringFormat, state: KernelState): boolean {
+  const cfg = expediteConfig(format);
+  if (!cfg || state.expedite || state.ended) return false;
+  const [a, b] = state.score[state.pointLevel];
+  return a + b < cfg.exemptAtTotal;
+}
+
+/** Serves in the current turn: opening turn, the collapse at deuce, or expedite. */
+export function serveEveryNow(format: ScoringFormat, spec: ServeSpec, state: KernelState): number {
+  if (state.expedite) return expediteConfig(format)?.serveEvery ?? 1;
+  return state.serve.openingTurn && spec.firstTurnEvery
+    ? spec.firstTurnEvery
+    : effectiveEvery(spec, state.score[state.pointLevel]);
 }
 
 // Pickleball's 0-0-2: the first serving team of a game gets ONE server, so the call
@@ -350,7 +408,7 @@ const clone = (s: KernelState): KernelState => ({
 // ---- serve movement --------------------------------------------------------
 
 /** `every` collapses to one-serve-each once BOTH sides reach `collapseAt`. */
-function effectiveEvery(spec: ServeSpec, score: Pair): number {
+export function effectiveEvery(spec: ServeSpec, score: Pair): number {
   const at = spec.collapseAt;
   if (at != null && score[0] >= at && score[1] >= at) return spec.collapseEvery ?? 1;
   return spec.every ?? 2;
@@ -378,7 +436,7 @@ function courtHalfFor(spec: ServeSpec, state: KernelState, pointScore: Pair): 'r
 }
 
 /** Move the serve after a rally. `rallyWinner` won it; `scored` says if a point landed. */
-function moveServe(spec: ServeSpec, state: KernelState, rallyWinner: Side, scored: boolean): void {
+function moveServe(format: ScoringFormat, spec: ServeSpec, state: KernelState, rallyWinner: Side, scored: boolean): void {
   const sv = state.serve;
   switch (spec.movement) {
     case 'rallyWinner':
@@ -389,12 +447,10 @@ function moveServe(spec: ServeSpec, state: KernelState, rallyWinner: Side, score
       sv.turnCount += 1;
       // The tennis tie-break opens with a single serve, then runs in twos. Tracked on
       // `openingTurn` so it survives undo rather than being inferred from the score.
-      const every = sv.openingTurn && spec.firstTurnEvery
-        ? spec.firstTurnEvery
-        : effectiveEvery(spec, state.score[state.pointLevel]);
-      if (sv.turnCount >= every) {
+      if (sv.turnCount >= serveEveryNow(format, spec, state)) {
         sv.side = other(sv.side);
         sv.turnCount = 0;
+        sv.turns += 1;
         sv.openingTurn = false;
       }
       break;
@@ -444,11 +500,13 @@ function resetForNewUnit(format: ScoringFormat, state: KernelState, unitWinnerSi
     side: next,
     serverNo: serveOpeningServerNo(spec),
     turnCount: 0,
+    turns: 0,
     unitFirstServer: next,
     courtHalf: spec.courtModel === 'none' ? null : 'right',
     openingTurn: opensSpecially(spec),
   };
   state.unitPoints = 0;
+  if (state.expedite && !expediteConfig(format)?.stickyForMatch) state.expedite = false;
 }
 
 // ---- the cascade -----------------------------------------------------------
@@ -565,6 +623,22 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       // Neither scores nor moves the serve. Recorded for the timeline and the stats.
       return { state, effect: base };
 
+    case 'expedite': {
+      if (state.expedite || !expediteConfig(format)) return { state: prev, effect: base };
+      state.expedite = true;
+      const sv = state.serve;
+      // Ball in play: the rally is replayed and its server serves it. Between rallies:
+      // the previous rally's receiver serves, i.e. a part-used turn passes over now.
+      if (!ev.inRally && sv.turnCount > 0) {
+        sv.side = other(sv.side);
+        sv.turns += 1;
+        sv.openingTurn = false;
+      }
+      sv.turnCount = 0;
+      sv.courtHalf = courtHalfFor(spec, state, state.score[state.pointLevel]);
+      return { state, effect: base };
+    }
+
     case 'point': {
       const rallyWinner = ev.side;
       /**
@@ -595,7 +669,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       // did not win the rally, a card - none of them ends a rally, so none of them
       // hands the serve over.
       if (magnitude > 0) {
-        moveServe(spec, state, rallyWinner, scores);
+        moveServe(format, spec, state, rallyWinner, scores);
         state.serve.courtHalf = courtHalfFor(spec, state, state.score[state.pointLevel]);
       }
       if (scores) {
@@ -622,6 +696,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
     }
 
     case 'awardServe':
+      if (state.serve.side !== ev.side) state.serve.turns += 1;
       state.serve.side = ev.side;
       state.serve.serverNo = 1;
       state.serve.turnCount = 0;
@@ -629,6 +704,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       break;
 
     case 'setServe':
+      if (state.serve.side !== ev.side) state.serve.turns += 1;
       state.serve.side = ev.side;
       state.serve.serverNo = ev.serverNo ?? 1;
       state.serve.turnCount = 0;
@@ -878,6 +954,106 @@ export interface ResultEnvelope {
   unitsFor: Pair;
   pointsFor: Pair;
   ended: boolean;
+}
+
+/**
+ * Do the players change ends now that these units have finished?
+ *
+ * Kept apart from `switchEnds`, which means a change DURING a unit (the decider
+ * midpoint) and is persisted per rally. Between-unit changes are a console prompt.
+ * Tennis changes when the games played in the set are odd; a finished set counts its own total.
+ */
+export function changesEndsAfterUnit(format: ScoringFormat, state: KernelState, won: FinishedUnit[]): boolean {
+  if (state.ended || !won.length) return false;
+  switch (format.changeEnds) {
+    case 'betweenUnits':
+    case 'atDeciderMidpoint':
+      return true;
+    case 'oddCumulativeUnits': {
+      const setLevel = format.levels.findIndex((l) => l.key === 'set');
+      if (setLevel < 0) return false;
+      const setDone = won.find((u) => u.level === setLevel);
+      const games = setDone ? setDone.score : state.score[setLevel];
+      return (games[0] + games[1]) % 2 === 1;
+    }
+    default:
+      return false;
+  }
+}
+
+export interface RallyTiming {
+  /** First to last rally, in ms. null when untimed or keyed in after the fact. */
+  matchMs: number | null;
+  /** Per finished innermost unit, first to last rally of that unit, in order. */
+  unitMs: (number | null)[];
+}
+
+/** Under this average a point was not played live - the log was typed in afterwards. */
+const MIN_LIVE_MS_PER_RALLY = 3000;
+
+/**
+ * Playing time from the tap timestamps. Breaks between units fall outside every
+ * unit, so a game's time is its own rallies only.
+ */
+export function rallyTiming(format: ScoringFormat, log: RallyLog, firstServer: Side = 'A'): RallyTiming {
+  let state = initKernel(format, firstServer);
+  const unitMs: (number | null)[] = [];
+  let first: number | null = null;
+  let last: number | null = null;
+  let unitStart: number | null = null;
+  let rallies = 0;
+  for (const ev of log) {
+    const r = step(format, state, ev);
+    state = r.state;
+    if (ev.t !== 'point' && ev.t !== 'penalty') continue;
+    const t = ev.at ? Date.parse(ev.at) : NaN;
+    const timed = Number.isFinite(t);
+    if (timed) {
+      first ??= t;
+      last = t;
+      unitStart ??= t;
+      rallies += 1;
+    }
+    if (r.effect.unitsWon.length) {
+      unitMs.push(timed && unitStart !== null ? t - unitStart : null);
+      unitStart = null;
+    }
+  }
+  const matchMs = first !== null && last !== null ? last - first : null;
+  if (matchMs === null || (rallies >= 10 && matchMs / rallies < MIN_LIVE_MS_PER_RALLY)) {
+    return { matchMs: null, unitMs: unitMs.map(() => null) };
+  }
+  return { matchMs, unitMs };
+}
+
+export interface GameClock {
+  /** Running time of the current unit, in ms, as at `nowMs`. */
+  elapsedMs: number;
+  paused: boolean;
+}
+
+/**
+ * The clock for the unit in play (the table tennis expedite limit). It starts at the
+ * unit's first rally, stops on clockPause and restarts on clockStart - or on the next
+ * rally, since a rally means play is on. null before the unit's first rally.
+ */
+export function unitClock(format: ScoringFormat, log: RallyLog, firstServer: Side, nowMs: number): GameClock | null {
+  const { trace } = foldRally(format, log, firstServer);
+  let from = 0;
+  trace.forEach((t, i) => { if (t.unitsWon.length) from = i + 1; });
+  let banked = 0;
+  let runFrom: number | null = null;
+  let started = false;
+  for (let i = from; i < log.length; i++) {
+    const ev = log[i];
+    const t = ev.at ? Date.parse(ev.at) : NaN;
+    if (!Number.isFinite(t)) continue;
+    if (ev.t === 'point' || ev.t === 'penalty') { started = true; runFrom ??= t; }
+    else if (ev.t === 'clockPause' && runFrom !== null) { banked += t - runFrom; runFrom = null; }
+    else if (ev.t === 'clockStart' && started && runFrom === null) runFrom = t;
+  }
+  if (!started) return null;
+  return { elapsedMs: banked + (runFrom !== null ? Math.max(0, nowMs - runFrom) : 0), paused: runFrom === null };
 }
 
 export function resultEnvelope(format: ScoringFormat, state: KernelState): ResultEnvelope {

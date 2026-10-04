@@ -248,3 +248,12 @@ organisation carry `archived_with_org`, are skipped by the 90-day event purge, a
 come back when the organisation is retrieved. Verified read-only afterwards: every
 "Aman …" organisation resolves to archive-only with the expected blockers, and none
 is archived.
+
+## Applied 2026-10-04 — `20261004000000_rubber_lineups_head_to_head`
+
+Adds `player_match_stats.opponent_user_ids uuid[]` (GIN index) for head-to-head
+records, and `career_stats.position` with a `'position'` grain for the singles /
+doubles split; `uq_career_stats_grain` widened to include it. Checked first that the
+grain check was named `career_stats_grain_check`. Applied with the same runner; all
+seven statements succeeded. Verified afterwards: both columns present, the grain check
+allows `'position'`, and both indexes exist as written. No data changed.

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { presetByKey } from '@semp/shared';
 import { buildPlayerStatRows } from './player-stats.service.js';
 import type { Db } from '../../infra/prisma.js';
 import type { FixtureParticipants } from '../fixtures/participants.js';
@@ -200,5 +201,59 @@ describe('buildPlayerStatRows · ranking events', () => {
     });
     const rows = await buildPlayerStatRows(db, 'fx1', { resolved: [], unmatched: [] });
     expect(rows).toEqual([]);
+  });
+});
+
+describe('buildPlayerStatRows · who actually played', () => {
+  const ittf = presetByKey('ittf_bo5_11')!;
+  const pts = (side: 'A' | 'B', n: number) => Array.from({ length: n }, () => ({ t: 'point', side }));
+  const squad: FixtureParticipants = {
+    resolved: [
+      { user_id: 'a1', team_id: 'tA', organization_id: 'oA', competitor_id: null, name: 'Karan' },
+      { user_id: 'a2', team_id: 'tA', organization_id: 'oA', competitor_id: null, name: 'Priya' },
+      { user_id: 'a3', team_id: 'tA', organization_id: 'oA', competitor_id: null, name: 'Bench' },
+      { user_id: 'b1', team_id: 'tB', organization_id: 'oB', competitor_id: null, name: 'Sameer' },
+      { user_id: 'b2', team_id: 'tB', organization_id: 'oB', competitor_id: null, name: 'Isha' },
+    ],
+    unmatched: [],
+  };
+  const fixture = (live_state: unknown, entry_type = 'team') => fakeDb({
+    id: 'fx1', round: 'Final', stage_sequence: null, home_team_id: 'tA', away_team_id: 'tB',
+    live_state, lock_version: 1, scheduled_at: new Date('2026-10-04'),
+    winner_team_id: 'tA', home_score: 1, away_score: 0,
+    tournament_disciplines: {
+      disciplines: { name: 'Mixed', entry_type },
+      tournament_sports: { sport_id: 'sp-tt', sports: { name: 'Table Tennis' } },
+    },
+  });
+
+  it('a tie: one line per rubber played, with its own result, stats, partner and opponents', async () => {
+    const rows = await buildPlayerStatRows(fixture({
+      tie: {
+        activeRubber: 1,
+        rubbers: [
+          { key: 'ms', label: "Men's Singles", winner: 'A', status: 'completed', state: {},
+            lineup: { A: ['a1'], B: ['b1'] }, rally: pts('A', 33), format: ittf, firstServer: 'A' },
+          { key: 'xd', label: 'Mixed Doubles', winner: 'B', status: 'completed', state: {},
+            lineup: { A: ['a1', 'a2'], B: ['b1', 'b2'] } },
+        ],
+      },
+    }), 'fx1', squad);
+
+    const karan = rows.filter((r) => r.user_id === 'a1');
+    expect(karan.map((r) => [r.rubber_key, r.outcome, r.position])).toEqual([['ms', 'won', 'singles'], ['xd', 'lost', 'doubles']]);
+    expect(karan[0].opponent_user_ids).toEqual(['b1']);
+    expect(karan[0].stats.points_won).toBe(33);
+    expect(karan[1]).toMatchObject({ partner_user_id: 'a2', opponent_user_ids: ['b1', 'b2'] });
+    // The bench player is in the squad but played nothing.
+    expect(rows.find((r) => r.user_id === 'a3')).toMatchObject({ played: false, rubber_key: null, outcome: null });
+  });
+
+  it('a single match: the named lineup plays, the rest of a big squad does not', async () => {
+    const rows = await buildPlayerStatRows(fixture({ lineup: { A: ['a2'], B: ['b2'] } }), 'fx1', squad);
+    expect(rows.filter((r) => r.played).map((r) => [r.user_id, r.outcome, r.opponent_user_ids])).toEqual([
+      ['a2', 'won', ['b2']], ['b2', 'lost', ['a2']],
+    ]);
+    expect(rows.filter((r) => !r.played).map((r) => r.user_id).sort()).toEqual(['a1', 'a3', 'b1']);
   });
 });

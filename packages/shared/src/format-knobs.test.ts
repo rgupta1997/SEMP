@@ -371,3 +371,29 @@ describe('extra time and the shoot-out are editable, and survive the editor', ()
     expect(knobsFor({ ...k, extraTimeEnabled: true }).map((x) => x.key)).toContain('extraTimeMinutes');
   });
 });
+
+describe('the expedite system knob', () => {
+  it('reads on for ITTF standard and is offered for an officiated serve-every-N format', () => {
+    const k = readKnobs(fmt('ittf_bo5_11'));
+    expect(k.expediteEnabled).toBe(true);
+    expect(k.expediteMinutes).toBe(10);
+    expect(knobsFor(k).map((s) => s.key)).toContain('expediteEnabled');
+  });
+
+  it('is not offered where nobody can count returns, or where the serve does not run on a count', () => {
+    expect(knobsFor(readKnobs(fmt('corp_bo3_11_timecap'))).map((s) => s.key)).not.toContain('expediteEnabled');
+    expect(knobsFor(readKnobs(fmt('bwf_official_3x21'))).map((s) => s.key)).not.toContain('expediteEnabled');
+  });
+
+  it('writes the time limit, turns off cleanly, and keeps other plugins', () => {
+    const base = fmt('ittf_bo7_11');
+    const k = readKnobs(base);
+    const twelve = applyKnobs(base, { ...k, expediteMinutes: 12 });
+    expect((twelve.plugins?.expedite as { afterMinutes: number }).afterMinutes).toBe(12);
+    const off = applyKnobs({ ...base, plugins: { ...base.plugins, other: 1 } }, { ...k, expediteEnabled: false });
+    expect(off.plugins?.expedite).toBeUndefined();
+    expect(off.plugins?.other).toBe(1);
+    const selfScored = applyKnobs(base, { ...k, officiatingMode: 'selfScored' });
+    expect(selfScored.plugins?.expedite).toBeUndefined();
+  });
+});

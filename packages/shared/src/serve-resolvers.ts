@@ -118,13 +118,10 @@ function ttPairCycle(state: KernelState, pair: Pairing, format: ScoringFormat): 
   if (!isDoubles(people)) {
     return { server: people[0] ?? null, receiver: pair[other(side)][0] ?? null, courtHalf: null };
   }
-  const lv = effectiveLevel(format, state, state.pointLevel);
-  const spec = serveSpecFor(format, lv);
-  const every = spec.every ?? 2;
-  // Which serving block we are in, counting from the start of the unit. Both sides
-  // alternate blocks, so a side's own block count is half the total (rounded).
-  const block = Math.floor(state.unitPoints / Math.max(1, every));
-  const ownBlock = Math.floor(block / 2);
+  // Which serving turn we are in, counted by the kernel as the serve changes hands -
+  // so the one-serve-each phase (10-10, expedite) keeps the rotation, which dividing
+  // points by the base `every` did not. Both sides alternate, so a side's own turn is half.
+  const ownBlock = Math.floor(state.serve.turns / 2);
   const server = people[ownBlock % 2];
   const opp = pair[other(side)];
   // Table tennis serves right-half to right-half: the diagonal is constant, so the

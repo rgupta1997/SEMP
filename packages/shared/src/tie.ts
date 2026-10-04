@@ -4,7 +4,9 @@
 // Lives here (not in the web app) so BOTH the scoring console AND the API (demo
 // seeder, scripts) can build and evaluate tie states from one implementation.
 
-import type { ContestSpec, TieSpec } from './scoring.js';
+import type { ContestSpec, RubberSpec, TieSpec } from './scoring.js';
+import type { RallyLog } from './rally-kernel.js';
+import type { ScoringFormat } from './scoring-rules.js';
 
 // Snapshot of one contest (a single match, or one rubber of a tie). Structurally the
 // state the web engine's reducer operates on; hydrate() tolerates partial persists.
@@ -33,12 +35,69 @@ export function hydrate(raw: any): MatchState {
 
 export type RubberStatus = 'pending' | 'live' | 'completed' | 'dead';
 
+/** Who played one rubber, as user ids per side, in nominated order (first = first server / receiver). */
+export interface RubberLineup {
+  A: string[];
+  B: string[];
+}
+
 export interface RubberInstance {
   key: string;
   label: string;
   state: MatchState;       // the rubber's own contest state
   winner: 'A' | 'B' | null;
   status: RubberStatus;
+  /** Players named for this rubber. Absent: not named yet, or skipped. */
+  lineup?: RubberLineup;
+  /** The scorer chose not to name players - the rubber counts for the team only. */
+  lineupSkipped?: boolean;
+  /** Racquet rubbers: the point-by-point log, scored by the rally kernel. */
+  rally?: RallyLog;
+  firstServer?: 'A' | 'B';
+  /** Racquet rubbers: the rules in force, frozen at the first rally. */
+  format?: ScoringFormat;
+}
+
+/** Players per side in a rubber: an explicit size, else doubles by name. */
+export function rubberSize(r: Pick<RubberSpec, 'label'> & { size?: number }): number {
+  return r.size ?? (/doubles/i.test(r.label) ? 2 : 1);
+}
+
+const isIdList = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
+
+/** A persisted lineup, or undefined when absent or malformed. */
+export function readLineup(raw: unknown): RubberLineup | undefined {
+  const l = raw as { A?: unknown; B?: unknown } | null | undefined;
+  return l && isIdList(l.A) && isIdList(l.B) ? { A: l.A, B: l.B } : undefined;
+}
+const hydrateLineup = readLineup;
+
+/** Players per side in a single racquet match, from the discipline's entry type. */
+export function playersPerSide(entryType: string | null | undefined): number {
+  return entryType === 'individual' ? 1 : 2;
+}
+
+export type LineupSource = 'named' | 'roster' | 'skipped' | 'legacy';
+
+/**
+ * Who played a single match - one rule for the console and the stat writer.
+ *
+ *   named   - the scorer picked them (order = first server / receiver)
+ *   roster  - each side's roster is no bigger than the match, so it IS the lineup
+ *   skipped - the scorer declined to name anyone: nobody is credited
+ *   legacy  - scored before lineups existed: the first players listed, as before
+ */
+export function resolveMatchLineup(
+  liveState: unknown, roster: RubberLineup, size: number,
+): { lineup: RubberLineup | null; source: LineupSource } {
+  const ls = (liveState ?? {}) as { lineup?: unknown; lineupSkipped?: unknown; pairSwap?: { A?: unknown; B?: unknown } };
+  const named = readLineup(ls.lineup);
+  if (named) return { lineup: named, source: 'named' };
+  const swap = (pair: string[], on: unknown) => (on === true && pair.length === 2 ? [pair[1], pair[0]] : pair);
+  const ordered = (l: RubberLineup): RubberLineup => ({ A: swap(l.A, ls.pairSwap?.A), B: swap(l.B, ls.pairSwap?.B) });
+  if (roster.A.length <= size && roster.B.length <= size) return { lineup: ordered(roster), source: 'roster' };
+  if (ls.lineupSkipped === true) return { lineup: null, source: 'skipped' };
+  return { lineup: ordered({ A: roster.A.slice(0, size), B: roster.B.slice(0, size) }), source: 'legacy' };
 }
 
 export interface TieState {
@@ -75,12 +134,20 @@ export function hydrateTie(raw: any, spec: TieSpec): TieState {
     base.rubbers = spec.rubbers.map((r, i) => {
       const rr = rawRubbers[i] ?? {};
       const status: RubberStatus = ['pending', 'live', 'completed', 'dead'].includes(rr.status) ? rr.status : 'pending';
+      const lineup = hydrateLineup(rr.lineup);
       return {
         key: r.key,
         label: r.label,
         state: hydrate(rr.state),
         winner: rr.winner === 'A' || rr.winner === 'B' ? rr.winner : null,
         status,
+        ...(lineup ? { lineup } : {}),
+        ...(rr.lineupSkipped === true ? { lineupSkipped: true } : {}),
+        ...(Array.isArray(rr.rally)
+          ? { rally: rr.rally.filter((e: any) => !!e && typeof e === 'object' && typeof e.t === 'string') }
+          : {}),
+        ...(rr.firstServer === 'A' || rr.firstServer === 'B' ? { firstServer: rr.firstServer } : {}),
+        ...(rr.format && typeof rr.format === 'object' ? { format: rr.format } : {}),
       };
     });
     if (typeof raw.activeRubber === 'number') base.activeRubber = Math.min(Math.max(0, raw.activeRubber), spec.rubbers.length - 1);
@@ -169,7 +236,12 @@ export function decideRubber(spec: TieSpec, state: TieState, index: number, winn
 // `resetState` true also wipes the rubber's point tally to start the contest fresh.
 export function reopenRubber(spec: TieSpec, state: TieState, index: number, resetState = false): TieState {
   const rubbers = state.rubbers.map((r, i) => {
-    if (i === index) return { ...r, winner: null, status: 'live' as RubberStatus, state: resetState ? initState() : r.state };
+    if (i === index) {
+      const reopened: RubberInstance = { ...r, winner: null, status: 'live', state: resetState ? initState() : r.state };
+      // A fresh re-score clears the points and their frozen rules; who played stays.
+      if (resetState) { delete reopened.rally; delete reopened.format; delete reopened.firstServer; }
+      return reopened;
+    }
     return r.winner === null && r.status === 'dead' ? { ...r, status: 'pending' as RubberStatus } : r;
   });
   return applyDead(spec, { ...state, activeRubber: index, rubbers });

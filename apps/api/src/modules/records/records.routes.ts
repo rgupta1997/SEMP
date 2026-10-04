@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { sportRecordsFor, sportStatsFilterOptions } from './sport-stats.service.js';
+import { playerRelationsFor, sportRecordsFor, sportStatsFilterOptions } from './sport-stats.service.js';
 import type { Prisma } from '../../infra/prisma.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -253,6 +253,20 @@ export function makeRecordsRouter(prisma: Prisma): Router {
       sportStatsFilterOptions(prisma, req.user!.id, org),
     ]);
     res.json({ sports, filters: options });
+  }));
+
+  /** Partners and head-to-head in one sport: `?sport=` (required), `?organization=`. */
+  router.get('/people/:userId/sport-relations', asyncHandler(async (req, res) => {
+    await authorize(req.user!.id, !!req.user!.isSuperAdmin, req.params.userId);
+    const sport = typeof req.query.sport === 'string' ? req.query.sport : null;
+    const org = typeof req.query.organization === 'string' ? req.query.organization : null;
+    res.json(await playerRelationsFor(prisma, req.params.userId, sport, org));
+  }));
+
+  router.get('/me/sport-relations', asyncHandler(async (req, res) => {
+    const sport = typeof req.query.sport === 'string' ? req.query.sport : null;
+    const org = typeof req.query.organization === 'string' ? req.query.organization : null;
+    res.json(await playerRelationsFor(prisma, req.user!.id, sport, org));
   }));
 
   router.get('/people/:userId/career-stats', asyncHandler(async (req, res) => {

@@ -1,4 +1,5 @@
 import { isPeriodShaped, pluralizePeriodLabel } from './match-format.js';
+import { expediteConfig, ITTF_EXPEDITE } from './rally-kernel.js';
 import type {
   CapAction, CapTieRule, ChangeEndsRule, LevelSpec, OfficiatingMode,
   ScoringFormat, ServeMovement, PointScoring,
@@ -58,6 +59,10 @@ export interface FormatKnobs {
   switchEndsAt: number;
   letsEnabled: boolean;
   penaltiesEnabled: boolean;
+  /** Table tennis expedite system: one serve each and 13 returns wins, after a time limit. */
+  expediteEnabled: boolean;
+  /** Playing minutes in a game before expedite comes in. */
+  expediteMinutes: number;
 
   // ---- the clock
   clockEnabled: boolean;
@@ -227,6 +232,13 @@ export const KNOB_SPECS: KnobSpec[] = [
   { key: 'penaltiesEnabled', label: 'Allow conduct points', group: 'ends', type: 'bool',
     hint: 'An official can award a point for misconduct. Off for self-scored play — a player cannot card their opponent.',
     applies: (k) => !k.periodShaped },
+  // Needs an umpire to count returns, so it is not offered for self-scored play.
+  { key: 'expediteEnabled', label: 'Expedite system', group: 'ends', type: 'bool',
+    hint: 'Table tennis: a game unfinished after the time limit switches to one serve each, and 13 good returns by the receiver win the point.',
+    applies: (k) => !k.periodShaped && k.movement === 'everyN' && k.officiatingMode === 'officiated' },
+  { key: 'expediteMinutes', label: 'Minutes before expedite', group: 'ends', type: 'int', min: 1, max: 60,
+    hint: 'Playing time in one game. ITTF: 10.',
+    applies: (k) => !k.periodShaped && k.movement === 'everyN' && k.officiatingMode === 'officiated' && k.expediteEnabled },
 
   // ---- clock
   { key: 'clockEnabled', label: 'Time cap', group: 'clock', type: 'bool',
@@ -359,6 +371,8 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
       ?? f.changeEndsAt ?? Math.floor(inner.target / 2),
     letsEnabled: f.letsEnabled,
     penaltiesEnabled: f.penaltyEvents !== 'off',
+    expediteEnabled: !!expediteConfig(f),
+    expediteMinutes: expediteConfig(f)?.afterMinutes ?? ITTF_EXPEDITE.afterMinutes,
 
     clockEnabled: !!f.clock,
     clockMinutes: f.clock?.minutes ?? 20,
@@ -421,6 +435,14 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
       : { serversPerSide: undefined, firstTurnSingle: undefined }),
   };
 
+  // Other sport plugins ride through untouched; only `expedite` is the knobs' to set.
+  const { expedite: priorExpedite, ...otherPlugins } = f.plugins ?? {};
+  const expediteOn = k.expediteEnabled && k.movement === 'everyN' && k.officiatingMode === 'officiated';
+  const pluginMap = expediteOn
+    ? { ...otherPlugins, expedite: { ...ITTF_EXPEDITE, ...((priorExpedite as object) ?? {}), enabled: true, afterMinutes: Math.max(1, k.expediteMinutes) } }
+    : otherPlugins;
+  const plugins = Object.keys(pluginMap).length ? pluginMap : undefined;
+
   const inner: LevelSpec = {
     ...baseInner,
     target: Math.max(1, k.target),
@@ -470,6 +492,7 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
     changeEnds: k.changeEnds,
     ...(k.changeEnds === 'everyNPoints' ? { changeEndsAt: Math.max(1, k.switchEndsAt) } : {}),
     letsEnabled: k.letsEnabled,
+    plugins,
     // A player cannot card their opponent, whatever the knob says.
     penaltyEvents: k.penaltiesEnabled && k.officiatingMode === 'officiated' ? 'pointGameMatch' : 'off',
     clock: k.clockEnabled

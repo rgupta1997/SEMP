@@ -583,3 +583,63 @@ describe('the default "Team ranking" console · medals per org (J4-E4-S1)', () =
     ]);
   });
 });
+
+describe('deriveRecords · a team tie with named players', () => {
+  // Rubber 1: u1 beats u3. Rubber 2: u2 + u1 lose to u3 + u4. Rubber 3 skipped.
+  const TIE_SQUAD: DerivableParticipant[] = [
+    ...SQUAD,
+    { user_id: 'u4', team_id: 'tB', organization_id: 'o2', competitor_id: null, name: 'Loser Two' },
+    { user_id: 'u5', team_id: 'tA', organization_id: 'o1', competitor_id: null, name: 'Bench' },
+  ];
+  const tie = {
+    tie: {
+      activeRubber: 2,
+      rubbers: [
+        { key: 'ms', label: "Men's Singles", winner: 'A', status: 'completed', state: {}, lineup: { A: ['u1'], B: ['u3'] } },
+        { key: 'md', label: "Men's Doubles", winner: 'B', status: 'completed', state: {}, lineup: { A: ['u2', 'u1'], B: ['u3', 'u4'] } },
+        { key: 'xd', label: 'Mixed Doubles', winner: 'A', status: 'completed', state: {}, lineupSkipped: true },
+      ],
+    },
+  };
+  const out = deriveRecords(input(
+    { sport_name: 'Table Tennis', discipline_entry_type: 'team', live_state: tie, home_score: 2, away_score: 1 },
+    { participants: TIE_SQUAD },
+  ));
+
+  it('files one entry per rubber played, with that rubber’s own result', () => {
+    const mine = (u: string) => out.entries.filter((e) => e.user_id === u).map((e) => [e.title, e.detail.outcome]);
+    expect(mine('u1')).toEqual([
+      ["Men's Singles: IIMB vs IIMA — Won", 'won'],
+      ["Men's Doubles: IIMB vs IIMA — Lost", 'lost'],
+    ]);
+    expect(mine('u3')).toEqual([
+      ["Men's Singles: IIMA vs IIMB — Lost", 'lost'],
+      ["Men's Doubles: IIMA vs IIMB — Won", 'won'],
+    ]);
+  });
+
+  it('gives nothing to a squad member who played no rubber, or for a skipped rubber', () => {
+    expect(out.entries.some((e) => e.user_id === 'u5')).toBe(false);
+    expect(out.entries).toHaveLength(6);
+  });
+
+  it('records partner, opponents and singles/doubles - the head-to-head source', () => {
+    const md = out.entries.find((e) => e.user_id === 'u2')!;
+    expect(md.detail).toMatchObject({
+      position: 'doubles', partner_user_id: 'u1', partner_name: 'Winner One',
+      opponent_user_ids: ['u3', 'u4'], opponent_names: ['Loser One', 'Loser Two'],
+      rubber_key: 'md', tie_score: '2-1',
+    });
+  });
+
+  it('puts the medal chip on a player’s first entry only', () => {
+    const chips = out.entries.filter((e) => e.user_id === 'u1').map((e) => (e.detail.chips as unknown[]).length);
+    expect(chips).toEqual([1, 0]);
+  });
+
+  it('leaves a tie with no players named on the old per-squad path', () => {
+    const old = { tie: { ...tie.tie, rubbers: tie.tie.rubbers.map(({ lineup: _l, lineupSkipped: _s, ...r }) => r) } };
+    const legacy = deriveRecords(input({ sport_name: 'Table Tennis', live_state: old }, { participants: TIE_SQUAD }));
+    expect(legacy.entries).toHaveLength(TIE_SQUAD.length);
+  });
+});

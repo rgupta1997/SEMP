@@ -43,11 +43,19 @@ interface DisciplineRecord {
   disciplineId: string; discipline: string;
   overall: TierRecord; tiers: TierRecord[];
 }
+interface PositionRecord {
+  position: 'singles' | 'doubles';
+  overall: TierRecord; tiers: TierRecord[];
+}
 interface SportRecord {
   sportId: string; sport: string;
   overall: TierRecord; tiers: TierRecord[];
   disciplines: DisciplineRecord[];
+  /** Singles and doubles - racquet sports, once results say which. */
+  positions?: PositionRecord[];
 }
+interface PersonRecord { userId: string; name: string; played: number; won: number; lost: number }
+interface Relations { partners: PersonRecord[]; opponents: PersonRecord[] }
 interface Payload {
   sports: SportRecord[];
   filters: Array<{ sportId: string; sport: string; disciplines: Array<{ id: string; name: string }> }>;
@@ -128,8 +136,55 @@ function TierRow({ r, ranking }: { r: TierRecord; ranking?: boolean }) {
   );
 }
 
-function SportCard({ s }: { s: SportRecord }) {
+/** Who they play with and against. Fetched only when opened - most visits never ask. */
+function PeopleSection({ userId, sportId }: { userId?: string; sportId: string }) {
   const [open, setOpen] = useState(false);
+  const base = userId ? `/people/${userId}/sport-relations` : '/me/sport-relations';
+  const { data, isLoading } = useApi<Relations>(open ? `${base}?sport=${sportId}` : null);
+  const list = (title: string, rows: PersonRecord[], verb: string) => (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>{title}</div>
+      {rows.map((r) => (
+        <div key={r.userId} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderTop: '1px solid var(--line)', fontSize: 13 }}>
+          <span>{verb} <b>{r.name}</b></span>
+          <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-3)' }}>
+            {r.won}–{r.lost}<span style={{ color: 'var(--ink-4)' }}>{'  ·  '}{r.played} played</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+  return (
+    <div style={{ marginTop: 12 }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{ cursor: 'pointer', background: 'none', border: 'none', padding: 0, fontSize: 12.5, fontWeight: 600, color: 'var(--brand)' }}
+      >
+        {open ? 'Hide' : 'Show'} partners &amp; head-to-head
+      </button>
+      {open && (isLoading ? <Spinner /> : !data || (!data.partners.length && !data.opponents.length) ? (
+        <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 6 }}>
+          No named opponents yet - they appear once matches record who played.
+        </div>
+      ) : (
+        <>
+          {data.opponents.length > 0 && list('Head-to-head', data.opponents, 'vs')}
+          {data.partners.length > 0 && list('Partners', data.partners, 'with')}
+        </>
+      ))}
+    </div>
+  );
+}
+
+type PlayView = 'all' | 'singles' | 'doubles';
+
+function SportCard({ s, userId }: { s: SportRecord; userId?: string }) {
+  const [open, setOpen] = useState(false);
+  // Singles and doubles are different games; the split is one tap away when known.
+  const [view, setView] = useState<PlayView>('all');
+  const positions = s.positions ?? [];
+  const picked = view === 'all' ? null : positions.find((p) => p.position === view) ?? null;
+  const shown = picked ? { overall: picked.overall, tiers: picked.tiers } : { overall: s.overall, tiers: s.tiers };
   // A ranking event has no opponent, so "won/lost" doesn't describe it.
   const ranking = isRankingSport(s.sport);
   return (
@@ -143,30 +198,51 @@ function SportCard({ s }: { s: SportRecord }) {
         }
       />
       <CardBody>
+        {positions.length > 0 && (
+          <div style={{ display: 'inline-flex', gap: 2, padding: 2, marginBottom: 10, borderRadius: 8, background: 'var(--line)' }}>
+            {(['all', ...positions.map((p) => p.position)] as PlayView[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                style={{
+                  cursor: 'pointer', border: 'none', borderRadius: 6, padding: '4px 12px',
+                  fontSize: 12.5, fontWeight: 600,
+                  background: view === v ? 'var(--bg-1, #fff)' : 'transparent',
+                  color: view === v ? 'var(--ink-1)' : 'var(--ink-4)',
+                }}
+              >
+                {v === 'all' ? 'All' : v === 'singles' ? 'Singles' : 'Doubles'}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* The combined record leads, because it is the number somebody came for. */}
-        <div style={{ fontSize: 15.5 }}><Record r={s.overall} ranking={ranking} /></div>
-        <Medals r={s.overall} />
-        <Metrics metrics={s.overall.metrics} />
+        <div style={{ fontSize: 15.5 }}><Record r={shown.overall} ranking={ranking} /></div>
+        <Medals r={shown.overall} />
+        <Metrics metrics={shown.overall.metrics} />
 
         {/* The split. Shown only when there IS one - a person who has only played
             inter-institution has no intra record, and a zeroed row would read as
             something missing rather than something that never happened. */}
-        {s.tiers.length > 1 && (
+        {shown.tiers.length > 1 && (
           <div style={{ marginTop: 12 }}>
             <div style={{
               fontSize: 10.5, fontWeight: 700, letterSpacing: '.09em',
               textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 2,
             }}>By competition level</div>
-            {s.tiers.map((t) => <TierRow key={t.tier} r={t} ranking={ranking} />)}
+            {shown.tiers.map((t) => <TierRow key={t.tier} r={t} ranking={ranking} />)}
           </div>
         )}
-        {s.tiers.length === 1 && (
+        {shown.tiers.length === 1 && (
           <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 8 }}>
-            All {s.tiers[0].label.toLowerCase()}.
+            All {shown.tiers[0].label.toLowerCase()}.
           </div>
         )}
 
-        {s.disciplines.length > 0 && (
+        {!ranking && <PeopleSection userId={userId} sportId={s.sportId} />}
+
+        {view === 'all' && s.disciplines.length > 0 && (
           <div style={{ marginTop: 12 }}>
             <button
               onClick={() => setOpen((v) => !v)}
@@ -271,7 +347,7 @@ export function SportStatsPanel({ userId }: { userId?: string }) {
         )}
       </div>
 
-      {data.sports.map((s) => <SportCard key={s.sportId} s={s} />)}
+      {data.sports.map((s) => <SportCard key={s.sportId} s={s} userId={userId} />)}
 
       <p style={{ fontSize: 11.5, color: 'var(--ink-4)', margin: 0 }}>
         Only results from locked scorecards count. A result that is unlocked for a

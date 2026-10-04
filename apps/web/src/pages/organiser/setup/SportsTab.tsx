@@ -3,7 +3,8 @@ import { Medal, Pencil, Trash2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 import { useApi, useApiMutation } from '../../../lib/hooks';
-import { ENTRY_TYPE, TOURNAMENT_DISCIPLINE_STATUS } from '@semp/shared';
+import { ENTRY_TYPE, TOURNAMENT_DISCIPLINE_STATUS, tieLayoutsFor, type TieSpec } from '@semp/shared';
+import { TieLayoutEditor, type TieLayoutValue } from '../../../features/scoring/TieLayoutEditor';
 import { usePermissions } from '../../../lib/permissions';
 import { isPoolShapedFormat, titleCase } from '../../../lib/format';
 import { eventTemplateFor } from '../../../features/scoring/templates';
@@ -434,6 +435,11 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
   const [formatId, setFormatId] = useState(discipline.format_id ?? ''); // '' = inherit the sport's format
   const [status, setStatus] = useState(discipline.status ?? 'upcoming');
   const [error, setError] = useState<string | null>(null);
+  // The team-tie layout, when the organiser touches it (null = leave as saved).
+  const [tieLayout, setTieLayout] = useState<TieLayoutValue | null>(null);
+  const storedScoring = discipline.format_config?.scoring;
+  const storedTie: TieSpec | undefined = storedScoring?.fixtureType === 'tie' ? storedScoring.tie : undefined;
+  const offersTie = entryType === 'team' && tieLayoutsFor(sportName).length > 0;
   const sportFormatName = formats.find((f) => f.id === sportFormatId)?.name;
   const squadFixed = SQUAD_BY_ENTRY[entryType]?.fixed ?? false;
   const onEntryTypeChange = (v: string) => {
@@ -464,9 +470,15 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
 
   const save = () => {
     setError(null);
-    // Match structure + scoring depth are now chosen by the official on the match
-    // console, not here - so this no longer writes format_config.scoring (any existing
-    // value is left untouched by omitting format_config from the update).
+    // Only the team-tie layout is written to format_config.scoring, and only when the
+    // organiser changed it; every other key in format_config is carried over as-is.
+    let formatConfig: Record<string, unknown> | undefined;
+    if (tieLayout) {
+      const { scoring: _old, ...rest } = (discipline.format_config ?? {}) as Record<string, unknown>;
+      formatConfig = tieLayout.standard
+        ? rest
+        : { ...rest, scoring: { fixtureType: 'tie', scoringMode: storedScoring?.scoringMode ?? 'detailed', tie: tieLayout.spec } };
+    }
     update.mutate(
       {
         venue_id: venueId || null,
@@ -475,6 +487,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
         squad_min: Number(squadMin),
         squad_max: Number(squadMax),
         status,
+        ...(formatConfig ? { format_config: formatConfig } : {}),
       },
       {
         onSuccess: () => {
@@ -540,6 +553,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
           {TOURNAMENT_DISCIPLINE_STATUS.map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
         </Select>
       </Field>
+      {offersTie && <TieLayoutEditor sport={sportName} stored={storedTie} onChange={setTieLayout} />}
       <p className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
         Match structure (single / team tie / event) and scoring depth (live vs final score) are chosen by the official on the match console.
       </p>

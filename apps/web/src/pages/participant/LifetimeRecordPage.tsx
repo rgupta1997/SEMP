@@ -34,6 +34,9 @@ interface TimelineEntry {
     outcome?: 'won' | 'lost' | 'drew' | null; score?: string | null; round?: string | null;
     sport?: string | null; discipline?: string | null; championship_name?: string | null;
     chips?: Chip[];
+    /** Set where the match named its players (a lineup, or a tie's rubber). */
+    position?: 'singles' | 'doubles'; partner_name?: string | null; opponent_names?: string[];
+    rubber_label?: string | null; tie_score?: string | null;
   } | null;
 }
 
@@ -117,6 +120,11 @@ function TimelineRow({ e }: { e: TimelineEntry }) {
   const d = e.detail ?? {};
   const meta = [d.championship_name, [d.sport, d.discipline].filter(Boolean).join(' · ') || null, d.round]
     .filter(Boolean).join(' · ');
+  // "vs Sameer · with Neha" - who it was actually against, where the match named them.
+  const people = [
+    d.opponent_names?.length ? `vs ${d.opponent_names.join(' / ')}` : null,
+    d.partner_name ? `with ${d.partner_name}` : null,
+  ].filter(Boolean).join(' · ');
   const expandable = !!d.role;
 
   return (
@@ -133,6 +141,7 @@ function TimelineRow({ e }: { e: TimelineEntry }) {
         >
           <div className="min-w-0">
             <p className={cn('truncate text-sm font-medium', d.outcome ? OUTCOME_TONE[d.outcome] : '')}>{e.title}</p>
+            {people && <p className="mt-0.5 truncate text-xs text-slate-600 dark:text-slate-300">{people}</p>}
             {meta && <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{meta}</p>}
             {/* Chips ride only on verified rows. A gold medal shown against a
                 scorecard the official can still edit is exactly the claim this
@@ -157,6 +166,9 @@ function TimelineRow({ e }: { e: TimelineEntry }) {
         {open && expandable && (
           <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/40 dark:text-slate-400">
             Played as <span className="font-medium text-slate-700 dark:text-slate-300">{titleCase(d.role!)}</span>
+            {d.position && <> · {titleCase(d.position)}</>}
+            {d.score && <> · Score {d.score}</>}
+            {d.rubber_label && d.tie_score && <> · Tie {d.tie_score}</>}
           </div>
         )}
       </div>

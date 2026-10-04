@@ -2,6 +2,7 @@ import type {
   ClockSpec, EndStatePolicy, LevelSpec, OfficiatingMode, ScoringFormat, ServeSpec,
 } from './scoring-rules.js';
 import { canonicalTeamSport, teamPresetsFor, TEAM_PRESETS } from './team-presets.js';
+import { ITTF_EXPEDITE } from './rally-kernel.js';
 
 // ============================================================================
 // The shelf. Every named format a customer picks off it, as data.
@@ -205,6 +206,8 @@ const TABLE_TENNIS: ScoringFormat[] = [
   fmt({
     sport: 'table tennis', key: 'ittf_bo5_11', name: 'ITTF Standard — best of 5 games to 11',
     levels: [ttGame(11, 2, null, 5), match(3)], serve: ttServe(2, 10), mode: 'officiated',
+    // ITTF law for every officiated match, not only championship best-of-7s.
+    plugins: { expedite: { ...ITTF_EXPEDITE } },
   }),
   fmt({
     sport: 'table tennis', key: 'ittf_bo7_11', name: 'ITTF Championship — best of 7 games to 11',
@@ -214,7 +217,7 @@ const TABLE_TENNIS: ScoringFormat[] = [
       // WITHIN-rally counter (the receiver's 13th return) and the trigger is elapsed
       // PLAYING time, neither of which the kernel's event alphabet can express. Ships
       // off in every umpireless preset; the returns are counted by a human, never inferred.
-      expedite: { enabled: true, afterMinutes: 10, exemptAtScore: 9, returnsToWinPoint: 13, serveEvery: 1, stickyForMatch: true },
+      expedite: { ...ITTF_EXPEDITE },
     },
     rulesSheet: { ballDiameterMm: 40, netHeightCm: 15.25, towelBreakEveryPoints: 6, timeoutsPerSidePerMatch: 1 },
   }),

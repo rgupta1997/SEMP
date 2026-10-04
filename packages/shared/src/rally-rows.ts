@@ -68,6 +68,8 @@ export interface RallyRow {
     unitsWon: Array<{ level: number; key: string; winner: Side; score: [number, number] }>;
     reason?: string;
     by?: string;
+    /** `expedite` only: the ball was in play, so that rally was replayed. */
+    inRally?: boolean;
   };
 }
 
@@ -81,6 +83,9 @@ const LABELS: Record<string, string> = {
   adjust: 'Score corrected',
   setServe: 'Serve corrected',
   capFired: 'Time up',
+  expedite: 'Expedite system',
+  clockPause: 'Clock paused',
+  clockStart: 'Clock resumed',
   end: 'Match ended',
 };
 
@@ -137,6 +142,7 @@ export function rallyLogToRows(
         unitsWon: eff.unitsWon.map((u) => ({ level: u.level, key: u.key, winner: u.winner, score: u.score })),
         ...('reason' in ev && ev.reason ? { reason: String(ev.reason) } : {}),
         ...('by' in ev && ev.by ? { by: String(ev.by) } : {}),
+        ...(ev.t === 'expedite' && ev.inRally ? { inRally: true } : {}),
       },
     });
   });
@@ -171,6 +177,10 @@ export function rowsToRallyLog(rows: Array<Pick<RallyRow, 'event_key' | 'team_si
         case 'awardUnit': return side ? { t: 'awardUnit', side, reason: r.meta?.reason } : null;
         case 'setServe': return side ? { t: 'setServe', side, serverNo: r.meta?.serverNo, reason: r.meta?.reason } : null;
         case 'capFired': return { t: 'capFired' };
+        case 'expedite':
+          return { t: 'expedite', reason: r.meta?.reason === 'request' ? 'request' : 'time', inRally: !!r.meta?.inRally };
+        case 'clockPause': return { t: 'clockPause' };
+        case 'clockStart': return { t: 'clockStart' };
         case 'end':
           return {
             t: 'end',

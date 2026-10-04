@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  aggregateScore, foldRally, headline, initKernel, resultEnvelope, step, undo, unitWinner,
+  aggregateScore, changesEndsAfterUnit, expediteAllowed, expediteConfig, foldRally, headline, initKernel, rallyTiming, resultEnvelope, step, undo, unitClock, unitWinner,
   type KernelState, type RallyEvent, type RallyLog,
 } from './rally-kernel.js';
 import { defaultFormatFor, presetByKey, presetsFor, RACQUET_PRESETS } from './racquet-presets.js';
@@ -749,5 +749,174 @@ describe('rescoring a finished match', () => {
     const bTakesTwo = foldRally(f, [...log, ...points('B', 11), ...points('B', 11)]);
     expect(bTakesTwo.state.score[1]).toEqual([2, 2]);
     expect(bTakesTwo.state.ended).toBe(false);
+  });
+});
+
+describe('change of ends between units', () => {
+  /** Does the LAST event of this log prompt a change of ends? */
+  const promptsAfter = (f: ScoringFormat, log: RallyLog) => {
+    const { state, trace } = foldRally(f, log);
+    return changesEndsAfterUnit(f, state, trace[trace.length - 1].unitsWon);
+  };
+
+  it('table tennis changes after every game, but not mid-game or once the match is over', () => {
+    const f = fmtOf('ittf_bo5_11');
+    expect(promptsAfter(f, points('A', 10))).toBe(false);
+    expect(promptsAfter(f, points('A', 11))).toBe(true);
+    expect(promptsAfter(f, [...points('A', 11), ...points('B', 11)])).toBe(true);
+    expect(promptsAfter(f, [...points('A', 11), ...points('A', 11), ...points('A', 11)])).toBe(false);
+  });
+
+  it('a format that never changes ends stays silent', () => {
+    const f = fmtOf('corp_bo3_11_timecap');
+    expect(f.changeEnds).toBe('never');
+    expect(promptsAfter(f, points('A', 11))).toBe(false);
+  });
+
+  it('tennis changes when the games played in the set are odd, counting a finished set', () => {
+    const f = fmtOf('itf_standard_bo3');
+    const games = (side: Side, n: number) => points(side, 4 * n);
+    expect(promptsAfter(f, games('A', 1))).toBe(true);           // 1-0
+    expect(promptsAfter(f, games('A', 2))).toBe(false);          // 2-0
+    expect(promptsAfter(f, [...games('B', 3), ...games('A', 6)])).toBe(true);  // set 6-3: 9 games
+    expect(promptsAfter(f, [...games('B', 4), ...games('A', 6)])).toBe(false); // set 6-4: 10 games
+  });
+});
+
+describe('rally timing', () => {
+  const f = fmtOf('ittf_bo5_11');
+  const at = (sec: number) => new Date(Date.UTC(2026, 9, 4, 10, 0, sec)).toISOString();
+  /** Points stamped `gap` seconds apart, starting at `from`. */
+  const timed = (side: Side, n: number, from: number, gap: number): RallyLog =>
+    Array.from({ length: n }, (_, i) => ({ t: 'point', side, at: at(from + i * gap) }) as RallyEvent);
+
+  it('measures the match and each game from first rally to last, leaving breaks out', () => {
+    // Game 1: 11 points 20s apart (200s). A 60s break. Game 2: 11 points 20s apart.
+    const log = [...timed('A', 11, 0, 20), ...timed('B', 11, 260, 20)];
+    const t = rallyTiming(f, log);
+    expect(t.unitMs).toEqual([200_000, 200_000]);
+    expect(t.matchMs).toBe(460_000);
+  });
+
+  it('reports nothing for a log keyed in after the fact', () => {
+    const t = rallyTiming(f, timed('A', 11, 0, 1));
+    expect(t.matchMs).toBeNull();
+    expect(t.unitMs).toEqual([null]);
+  });
+
+  it('reports nothing for an untimed log', () => {
+    expect(rallyTiming(f, points('A', 11)).matchMs).toBeNull();
+  });
+});
+
+describe('table tennis expedite system', () => {
+  const f = fmtOf('ittf_bo5_11');
+  const exp = (inRally = false): RallyEvent => ({ t: 'expedite', reason: 'time', inRally });
+  /** Server of each of the next n points from this log. */
+  const servers = (log: RallyLog, n: number): Side[] => {
+    let s = foldRally(f, log, 'A').state;
+    const out: Side[] = [];
+    for (let i = 0; i < n; i++) { out.push(s.serve.side); s = step(f, s, { t: 'point', side: 'A' }).state; }
+    return out;
+  };
+
+  it('ships on the ITTF standard format and not on self-scored corporate play', () => {
+    expect(expediteConfig(f)?.returnsToWinPoint).toBe(13);
+    expect(expediteConfig(fmtOf('corp_bo3_11_timecap'))).toBeNull();
+  });
+
+  it('between rallies, mid-turn: the previous receiver serves, then one serve each', () => {
+    // A has served one of their two. Expedite: B (who received it) serves next.
+    expect(servers([...points('A', 1), exp()], 4)).toEqual(['B', 'A', 'B', 'A']);
+  });
+
+  it('between rallies, at a fresh turn: the serve stays where it was due', () => {
+    expect(servers([...points('A', 2), exp()], 3)).toEqual(['B', 'A', 'B']);
+  });
+
+  it('ball in play: the interrupted rally is replayed by the same server', () => {
+    expect(servers([...points('A', 1), exp(true)], 3)).toEqual(['A', 'B', 'A']);
+  });
+
+  it('stays in force for the rest of the match', () => {
+    const s = foldRally(f, [exp(), ...points('A', 11)], 'A').state;
+    expect(s.score[1]).toEqual([1, 0]);
+    expect(s.expedite).toBe(true);
+    expect(servers([exp(), ...points('A', 11)], 3)).toEqual(['B', 'A', 'B']);
+  });
+
+  it('is ignored by a format without it, and a second call changes nothing', () => {
+    const corp = fmtOf('corp_bo3_11_timecap');
+    expect(foldRally(corp, [exp()], 'A').state.expedite).toBe(false);
+    expect(servers([...points('A', 1), exp(), exp()], 2)).toEqual(['B', 'A']);
+  });
+
+  it('doubles rotation runs through all four players once it is one serve each (10-10)', () => {
+    const pair = { A: ['a1', 'a2'], B: ['b1', 'b2'] };
+    const tenAll: RallyLog = Array.from({ length: 20 }, (_, i) => ({ t: 'point', side: i % 2 ? 'B' : 'A' }) as RallyEvent);
+    let s = foldRally(f, tenAll, 'A').state;
+    const seen: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      seen.push(resolveServer(f, s, pair).server!);
+      s = step(f, s, { t: 'point', side: i % 2 ? 'B' : 'A' }).state;
+    }
+    expect(new Set(seen).size).toBe(4);
+  });
+});
+
+describe('the unit clock (expedite time limit)', () => {
+  const f = fmtOf('ittf_bo5_11');
+  const T0 = Date.UTC(2026, 9, 4, 10, 0, 0);
+  const at = (sec: number) => new Date(T0 + sec * 1000).toISOString();
+  const pt = (side: Side, sec: number): RallyEvent => ({ t: 'point', side, at: at(sec) });
+  const now = (sec: number) => T0 + sec * 1000;
+
+  it('has not started before the first rally of the game', () => {
+    expect(unitClock(f, [], 'A', now(30))).toBeNull();
+  });
+
+  it('runs from the first rally', () => {
+    expect(unitClock(f, [pt('A', 0)], 'A', now(90))).toEqual({ elapsedMs: 90_000, paused: false });
+  });
+
+  it('stops for a towel break and carries on from where it stopped', () => {
+    const log: RallyLog = [pt('A', 0), { t: 'clockPause', at: at(60) }];
+    expect(unitClock(f, log, 'A', now(500))).toEqual({ elapsedMs: 60_000, paused: true });
+    const resumed: RallyLog = [...log, { t: 'clockStart', at: at(120) }];
+    expect(unitClock(f, resumed, 'A', now(150))).toEqual({ elapsedMs: 90_000, paused: false });
+  });
+
+  it('a rally scored while paused means play is on, so the clock restarts', () => {
+    const log: RallyLog = [pt('A', 0), { t: 'clockPause', at: at(60) }, pt('B', 100)];
+    expect(unitClock(f, log, 'A', now(130))).toEqual({ elapsedMs: 90_000, paused: false });
+  });
+
+  it('starts again for each new game, leaving the break between games out', () => {
+    const game1: RallyLog = Array.from({ length: 11 }, (_, i) => pt('A', i * 30));
+    const log: RallyLog = [...game1, pt('B', 600)];
+    expect(unitClock(f, log, 'A', now(660))).toEqual({ elapsedMs: 60_000, paused: false });
+  });
+});
+
+describe('expedite is not introduced once 18 points are scored (ITTF 2.15.2)', () => {
+  const f = fmtOf('ittf_bo5_11');
+  const score = (a: number, b: number) => {
+    const log: RallyLog = [];
+    for (let i = 0; i < Math.max(a, b); i++) {
+      if (i < a) log.push({ t: 'point', side: 'A' });
+      if (i < b) log.push({ t: 'point', side: 'B' });
+    }
+    return foldRally(f, log, 'A').state;
+  };
+
+  it('counts the total, not each side', () => {
+    expect(expediteAllowed(f, score(10, 7))).toBe(true);   // 17
+    expect(expediteAllowed(f, score(10, 8))).toBe(false);  // 18 - one side below 9, still exempt
+    expect(expediteAllowed(f, score(9, 9))).toBe(false);
+  });
+
+  it('reads a format saved with the old per-side setting as the same total', () => {
+    const legacy = { ...f, plugins: { expedite: { enabled: true, afterMinutes: 10, exemptAtScore: 9 } } };
+    expect(expediteConfig(legacy)?.exemptAtTotal).toBe(18);
   });
 });
