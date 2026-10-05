@@ -1,6 +1,6 @@
 import type { ScoringFormat, Side } from './scoring-rules.js';
-import { foldRally, type RallyEvent, type RallyLog } from './rally-kernel.js';
-import { resolveServer, type Pairing } from './serve-resolvers.js';
+import { foldRally, misconductTerms, type RallyEvent, type RallyLog } from './rally-kernel.js';
+import { formatForPairing, resolveServer, type Pairing } from './serve-resolvers.js';
 
 // ============================================================================
 // The rally log as TABLE ROWS, and back again.
@@ -81,6 +81,7 @@ const LABELS: Record<string, string> = {
   fault: 'Fault',
   penalty: 'Conduct point',
   card: 'Yellow card',
+  timeout: 'Timeout',
   awardServe: 'Serve awarded',
   awardUnit: 'Unit awarded',
   adjust: 'Score corrected',
@@ -100,10 +101,12 @@ const LABELS: Record<string, string> = {
  * what makes "points won while serving" a WHERE clause instead of a program.
  */
 export function rallyLogToRows(
-  format: ScoringFormat,
+  played: ScoringFormat,
   log: RallyLog,
   opts: { pairing?: Pairing; firstServer?: Side; rubberKey?: string | null } = {},
 ): RallyRow[] {
+  const format = formatForPairing(played, opts.pairing);
+  const terms = misconductTerms(format.sport);
   const first = opts.firstServer ?? 'A';
   const { trace } = foldRally(format, log, first);
 
@@ -127,7 +130,7 @@ export function rallyLogToRows(
       rubber_key: opts.rubberKey ?? null,
       team_side: eff.scored ?? side,
       event_key: ev.t,
-      label: card === 'red' ? 'Red card' : LABELS[ev.t] ?? ev.t,
+      label: card === 'red' ? terms.foul : card === 'yellow' ? terms.warning : LABELS[ev.t] ?? ev.t,
       points: eff.scored ? 1 : 0,
       player_user_id: resolved?.server ?? null,
       second_user_id: resolved?.receiver ?? null,
@@ -182,6 +185,7 @@ export function rowsToRallyLog(rows: Array<Pick<RallyRow, 'event_key' | 'team_si
         case 'penalty':
           return side ? { t: 'penalty', side, reason: r.meta?.reason, ...(r.meta?.card === 'red' ? { card: 'red' as const } : {}) } : null;
         case 'card': return side ? { t: 'card', card: 'yellow', against: side, reason: r.meta?.reason } : null;
+        case 'timeout': return side ? { t: 'timeout', side } : null;
         case 'awardServe': return side ? { t: 'awardServe', side, reason: r.meta?.reason } : null;
         case 'awardUnit': return side ? { t: 'awardUnit', side, reason: r.meta?.reason } : null;
         case 'setServe': return side ? { t: 'setServe', side, serverNo: r.meta?.serverNo, reason: r.meta?.reason } : null;
@@ -244,6 +248,32 @@ export function readRallyLog(liveState: unknown): RallyLog {
   if (!Array.isArray(raw)) return [];
   return raw.filter((e): e is RallyEvent => !!e && typeof e === 'object' && typeof (e as RallyEvent).t === 'string');
 }
+
+/** A match that stopped before the score could finish it. */
+export type EarlyEnd = 'retired' | 'disqualified' | 'conceded';
+
+const EARLY_ENDS: ReadonlySet<string> = new Set<EarlyEnd>(['retired', 'disqualified', 'conceded']);
+
+/**
+ * Why a match ended early, read from its log: the last `end` event, if nothing was
+ * played after it (Rescore drops it). Null for a match played out, or one with no log.
+ */
+export function earlyEndOf(liveState: unknown): EarlyEnd | null {
+  const log = readRallyLog(liveState);
+  for (let i = log.length - 1; i >= 0; i--) {
+    const ev = log[i];
+    if (ev.t === 'end') return EARLY_ENDS.has(ev.reason) ? (ev.reason as EarlyEnd) : null;
+    if (ev.t === 'point' || ev.t === 'penalty') return null;
+  }
+  return null;
+}
+
+/** How a results line marks it: "21-15, 8-3 (ret.)". */
+export const EARLY_END_LABEL: Record<EarlyEnd, string> = {
+  retired: 'ret.',
+  disqualified: 'DSQ',
+  conceded: 'conceded',
+};
 
 /** Who served the first point, as persisted. Defaults to the home side. */
 export function readFirstServer(liveState: unknown): Side {

@@ -70,6 +70,8 @@ export type RallyEvent =
    * a disqualification (badminton's black card) is an `end` with reason 'disqualified'.
    */
   | { t: 'card'; card: 'yellow'; against: Side; reason?: string; by?: string; at?: string }
+  /** A timeout called by a side. Changes nothing on the scoreboard; counted against its allowance. */
+  | { t: 'timeout'; side: Side; by?: string; at?: string }
   /** Award the serve without a rally (badminton red card). */
   | { t: 'awardServe'; side: Side; reason?: string; by?: string; at?: string }
   /** Force the current unit to a side regardless of the tally. */
@@ -151,7 +153,18 @@ export interface ServeState {
    * Badminton: the pair's courts - flipped each time it scores on its own serve; reset each game.
    */
   pairFlip?: Partial<Record<Side, boolean>>;
+  /**
+   * Pickleball side-out doubles: which of the pair (index into the pairing) is server 1
+   * this turn - whoever stood in the right court when the serve came over.
+   */
+  turnLead?: number;
 }
+
+/** Index in the pairing of the side's player in the right court. */
+const rightIndex = (sv: ServeState, side: Side) => (sv.pairFlip?.[side] ? 1 : 0);
+
+// Serving pairs whose partners swap courts on every point they win on their own serve.
+const SWAPS_ON_SERVE = new Set(['bwfSingleServer', 'pickleballTwoServer']);
 
 export interface FinishedUnit {
   level: number;
@@ -386,6 +399,66 @@ export function expediteConfig(format: ScoringFormat): ExpediteConfig | null {
   return { ...ITTF_EXPEDITE, ...(legacy !== undefined ? { exemptAtTotal: legacy * 2 } : {}), ...rest };
 }
 
+// ---- misconduct wording ------------------------------------------------------
+
+/**
+ * What each sport calls the three misconduct steps the console records: a warning
+ * (`card` event), a point to the opponent (`penalty` with card 'red'), and removal
+ * (`end` with reason 'disqualified'). Pickleball uses no cards.
+ */
+export function misconductTerms(sport?: string | null): { warning: string; foul: string; removal: string } {
+  switch ((sport ?? '').toLowerCase()) {
+    case 'pickleball': return { warning: 'Technical warning', foul: 'Technical foul', removal: 'Ejection' };
+    case 'badminton': return { warning: 'Yellow card', foul: 'Red card', removal: 'Black card' };
+    default: return { warning: 'Yellow card', foul: 'Red card', removal: 'Disqualification' };
+  }
+}
+
+// ---- timeouts ----------------------------------------------------------------
+
+/** How many timeouts each side may call, and how long one lasts. */
+export interface TimeoutRules {
+  /** Per side per game (pickleball); unused ones do not carry over. */
+  perGame: number | null;
+  /** Per side per match (table tennis). */
+  perMatch: number | null;
+  seconds: number;
+}
+
+/**
+ * The format's timeout allowance: `rulesSheet.timeouts` when set (false turns them off),
+ * else the sport's rule - pickleball 2 a game (3 in games to 21), table tennis 1 a match.
+ */
+export function timeoutRules(format: ScoringFormat): TimeoutRules | null {
+  const own = (format.rulesSheet as { timeouts?: Partial<TimeoutRules> | false } | undefined)?.timeouts;
+  if (own === false) return null;
+  const sport = (format.sport ?? '').toLowerCase();
+  const base: TimeoutRules | null = sport === 'pickleball'
+    ? { perGame: format.levels[0].target >= 21 ? 3 : 2, perMatch: null, seconds: 60 }
+    : sport === 'table tennis'
+    ? { perGame: null, perMatch: 1, seconds: 60 }
+    : null;
+  if (!own) return base;
+  return { perGame: null, perMatch: null, seconds: 60, ...base, ...own };
+}
+
+/** Timeouts each side has left now: per game, or per match. Never below 0. */
+export function timeoutsLeft(format: ScoringFormat, log: RallyLog, firstServer: Side = 'A'): Record<Side, number> | null {
+  const rules = timeoutRules(format);
+  const allowed = rules?.perGame ?? rules?.perMatch;
+  if (!rules || allowed == null) return null;
+  const used: Record<Side, number> = { A: 0, B: 0 };
+  let state = initKernel(format, firstServer);
+  for (const ev of log) {
+    const games = state.finished.filter((u) => u.level === 0).length;
+    state = step(format, state, ev).state;
+    if (ev.t === 'timeout') used[ev.side] += 1;
+    // A new game starts a new allowance.
+    if (rules.perGame != null && state.finished.filter((u) => u.level === 0).length > games) used.A = used.B = 0;
+  }
+  return { A: Math.max(0, allowed - used.A), B: Math.max(0, allowed - used.B) };
+}
+
 /** True when the expedite system may still be introduced in the game under way. */
 export function expediteAllowed(format: ScoringFormat, state: KernelState): boolean {
   const cfg = expediteConfig(format);
@@ -487,6 +560,7 @@ function moveServe(format: ScoringFormat, spec: ServeSpec, state: KernelState, r
         sv.side = other(sv.side);
         sv.serverNo = 1;
         sv.openingTurn = false;
+        sv.turnLead = rightIndex(sv, sv.side);
       }
       sv.turnCount = 0;
       break;
@@ -661,6 +735,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
     case 'let':
     case 'fault':
     case 'card':
+    case 'timeout':
       // Neither scores nor moves the serve. Recorded for the timeline and the stats.
       return { state, effect: base };
 
@@ -709,8 +784,8 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       // A nil-magnitude ACTION does not move the serve either. A dig, a block that
       // did not win the rally, a card - none of them ends a rally, so none of them
       // hands the serve over.
-      // Badminton doubles: a pair swaps courts only when it scores on its own serve.
-      if (scores && spec.resolver === 'bwfSingleServer' && rallyWinner === serverSide) {
+      // Badminton and pickleball doubles: a pair swaps courts only when it scores on its own serve.
+      if (scores && SWAPS_ON_SERVE.has(spec.resolver) && rallyWinner === serverSide) {
         flipPair(state.serve, rallyWinner);
       }
       if (magnitude > 0) {
@@ -733,8 +808,10 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       if (spec.resolver === 'ttPairCycle' && !ev.side) {
         flipPair(sv, 'A');
         flipPair(sv, 'B');
-      } else if (spec.resolver === 'bwfSingleServer' && ev.side) {
+      } else if (SWAPS_ON_SERVE.has(spec.resolver) && ev.side) {
         flipPair(sv, ev.side);
+        // The new right-court player of the serving pair opens the game.
+        if (ev.side === sv.side) sv.turnLead = rightIndex(sv, sv.side);
       } else {
         return { state: prev, effect: base };
       }
@@ -753,7 +830,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       // takes the serve in badminton, and the point counts in table tennis's 2-serve turn.
       // Side-out formats keep the serve where it was - only the score changes.
       if (spec.pointScoring === 'rally') {
-        if (spec.resolver === 'bwfSingleServer' && ev.side === serverSide) flipPair(state.serve, ev.side);
+        if (SWAPS_ON_SERVE.has(spec.resolver) && ev.side === serverSide) flipPair(state.serve, ev.side);
         moveServe(format, spec, state, ev.side, true);
       }
       state.serve.courtHalf = courtHalfFor(spec, state, state.score[state.pointLevel]);
@@ -765,7 +842,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
     }
 
     case 'awardServe':
-      if (state.serve.side !== ev.side) state.serve.turns += 1;
+      if (state.serve.side !== ev.side) { state.serve.turns += 1; state.serve.turnLead = rightIndex(state.serve, ev.side); }
       state.serve.side = ev.side;
       state.serve.serverNo = 1;
       state.serve.turnCount = 0;
@@ -773,7 +850,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       break;
 
     case 'setServe':
-      if (state.serve.side !== ev.side) state.serve.turns += 1;
+      if (state.serve.side !== ev.side) { state.serve.turns += 1; state.serve.turnLead = rightIndex(state.serve, ev.side); }
       state.serve.side = ev.side;
       state.serve.serverNo = ev.serverNo ?? 1;
       state.serve.turnCount = 0;

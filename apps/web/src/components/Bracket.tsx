@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { EARLY_END_LABEL, earlyEndOf } from '@semp/shared';
 import { cn, StatusBadge } from './ui';
 import { fmtDateTime } from '../lib/hooks';
 import { describeSlot, describeTieBlocked, isTieBlockedFor } from '../lib/stageTree';
@@ -19,7 +20,7 @@ export interface BracketFixture {
   // Set by stage-resolver.ts when the pool feeding this slot finished but ended in
   // a tie it can't break automatically - the slot is stuck until an organiser
   // intervenes (e.g. editing a result to break the tie).
-  live_state?: { tie_blocked?: { pool: number; rank: number } } | null;
+  live_state?: { tie_blocked?: { pool: number; rank: number }; rally?: unknown } | null;
   home_score?: number | null;
   away_score?: number | null;
   winner_team_id?: string | null;
@@ -58,8 +59,8 @@ function roundTitle(round: string | null, teamsInRound: number): string {
   }
 }
 
-function TeamRow({ name, org, score, isWinner, decided, warning }:
-  { name: string; org?: string; score: number | null | undefined; isWinner: boolean; decided: boolean; warning?: boolean }) {
+function TeamRow({ name, org, score, isWinner, decided, warning, note }:
+  { name: string; org?: string; score: number | null | undefined; isWinner: boolean; decided: boolean; warning?: boolean; note?: string | null }) {
   return (
     <div
       className={cn(
@@ -78,7 +79,13 @@ function TeamRow({ name, org, score, isWinner, decided, warning }:
           {org && <span className="block truncate text-[10px] font-normal leading-tight text-slate-400 dark:text-slate-500">{org}</span>}
         </span>
       </span>
-      {score != null && <span className="tnum tabular-nums text-sm">{score}</span>}
+      {score != null && (
+        <span className="tnum tabular-nums text-sm">
+          {/* Retired / DSQ / conceded: marked on the side that stopped. */}
+          {note && <span className="mr-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">{note}</span>}
+          {score}
+        </span>
+      )}
     </div>
   );
 }
@@ -108,12 +115,14 @@ function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect, onScore }:
   const scorable = !!onScore && !!fixture.home_team_id && !!fixture.away_team_id
     && !['cancelled', 'postponed', 'bye'].includes(fixture.status ?? '');
   const played = ['completed', 'walkover'].includes(fixture.status ?? '');
+  const early = decided ? earlyEndOf(fixture.live_state) : null;
+  const noteFor = (teamId: string | null) => (early && fixture.winner_team_id !== teamId ? EARLY_END_LABEL[early] : null);
 
   const teamRows = (
     <div className="border-t border-slate-100 dark:border-slate-800">
-      <TeamRow name={home} org={homeOrg} score={fixture.home_score} isWinner={decided && fixture.winner_team_id === fixture.home_team_id} decided={decided} warning={!!homeTieMsg} />
+      <TeamRow name={home} org={homeOrg} score={fixture.home_score} isWinner={decided && fixture.winner_team_id === fixture.home_team_id} decided={decided} warning={!!homeTieMsg} note={noteFor(fixture.home_team_id)} />
       <div className="border-t border-slate-100 dark:border-slate-800" />
-      <TeamRow name={away} org={awayOrg} score={isBye ? null : fixture.away_score} isWinner={decided && fixture.winner_team_id === fixture.away_team_id} decided={decided} warning={!!awayTieMsg} />
+      <TeamRow name={away} org={awayOrg} score={isBye ? null : fixture.away_score} isWinner={decided && fixture.winner_team_id === fixture.away_team_id} decided={decided} warning={!!awayTieMsg} note={noteFor(fixture.away_team_id)} />
     </div>
   );
 

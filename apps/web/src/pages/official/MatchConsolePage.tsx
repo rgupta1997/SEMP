@@ -16,7 +16,7 @@ import {
 } from '../../features/scoring/tie';
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
 import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
-import { playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
+import { formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
 import type { TieSpec, EventSpec, ScoringMode, KernelState, Pairing, RallyLog, RubberLineup, Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer, hydratePairSwap } from '../../features/scoring/RacquetDeck';
 import { LineupPanel } from '../../features/scoring/LineupPanel';
@@ -1046,7 +1046,6 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
   }, [live]);
 
   const persist = useLiveSave(fixtureId, invalidate);
-  const format = resolved.format;
 
   const homeRoster = useMemo(() => rosterPeople(homeTeam(fixture)), [fixture]);
   const awayRoster = useMemo(() => rosterPeople(awayTeam(fixture)), [fixture]);
@@ -1061,6 +1060,8 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
   const namesOf = (ids?: string[]) => ids?.map((id) => nameOfId.get(id) ?? '-');
   const pairing: Pairing | undefined = who.lineup ? { A: namesOf(who.lineup.A)!, B: namesOf(who.lineup.B)! } : undefined;
   const squadIsBigger = homeRoster.length > size || awayRoster.length > size;
+  // Singles plays a side-out format with one server per turn - the stat writer folds the same way.
+  const format = resolved.format ? formatForPairing(resolved.format, pairing) : resolved.format;
 
   if (!format) {
     return <EmptyState title="No scoring format" description="This sport has no racquet format configured." />;
@@ -1367,8 +1368,9 @@ function rallyTimeline(format: any, log: RallyLog, firstServer: Side, homeName: 
     const other = (s: Side): Side => (s === 'A' ? 'B' : 'A');
     const txt = ev.t === 'point'
       ? (t.scored ? `Point to ${nameOf(t.scored)}` : `${nameOf(ev.side)} won the rally — no point`)
-      : ev.t === 'card' ? `Yellow card · ${nameOf(ev.against)}`
-      : ev.t === 'penalty' && ev.card === 'red' ? `Red card · ${nameOf(other(ev.side))} — point to ${nameOf(ev.side)}`
+      : ev.t === 'card' ? `${misconductTerms(format?.sport).warning} to ${nameOf(ev.against)}`
+      : ev.t === 'timeout' ? `Timeout — ${nameOf(ev.side)}`
+      : ev.t === 'penalty' && ev.card === 'red' ? `${misconductTerms(format?.sport).foul} to ${nameOf(other(ev.side))} — point to ${nameOf(ev.side)}`
       : ev.t === 'end' && ev.reason === 'disqualified' && ev.winner ? `${nameOf(other(ev.winner))} disqualified`
       : RALLY_EVENT_TEXT[ev.t] ?? ev.t;
     out.unshift({

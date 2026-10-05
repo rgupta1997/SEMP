@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  atAdvantage, changesEndsAfterUnit, effectiveLevel, expediteAllowed, expediteConfig, foldRally, initKernel, isDecider, rallyTiming,
-  resolveServer, resultEnvelope, serveCall, serveEveryNow, serveSpecFor, step, unitClock,
+  atAdvantage, changesEndsAfterUnit, effectiveLevel, expediteAllowed, expediteConfig, foldRally, formatForPairing, initKernel, isDecider, rallyTiming,
+  resolveServer, resultEnvelope, serveCall, serveEveryNow, serveSpecFor, step, misconductTerms, timeoutRules, timeoutsLeft, unitClock,
   type KernelState, type LevelSpec, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
 import { Button, Card, cn, confirmDialog, Select, toast } from '../../components/ui';
@@ -21,6 +21,8 @@ import { Button, Card, cn, confirmDialog, Select, toast } from '../../components
 
 /** Log events that only run the clock - no rally, no score, no serve. */
 const CLOCK_EVENTS: ReadonlySet<string> = new Set(['clockStart', 'clockPause', 'clockAdjust']);
+/** Events that pause play rather than play it: prompts read past them. */
+const PASSIVE_EVENTS: ReadonlySet<string> = new Set([...CLOCK_EVENTS, 'timeout']);
 
 export interface RacquetDeckProps {
   format: ScoringFormat;
@@ -49,7 +51,11 @@ export interface RacquetDeckProps {
 }
 
 export function RacquetDeck(p: RacquetDeckProps) {
-  const { format, log, firstServer } = p;
+  const { log, firstServer } = p;
+  // Singles plays a side-out format with one server per turn (keyed on the pair sizes,
+  // so an inline pairing object does not refold the log on every render).
+  const sizes = p.pairing ? `${p.pairing.A.length}/${p.pairing.B.length}` : '';
+  const format = useMemo(() => formatForPairing(p.format, p.pairing), [p.format, sizes]); // eslint-disable-line react-hooks/exhaustive-deps
   const fold = useMemo(() => foldRally(format, log, firstServer), [format, log, firstServer]);
   const state = fold.state;
   const lv = effectiveLevel(format, state, state.pointLevel);
@@ -66,6 +72,8 @@ export function RacquetDeck(p: RacquetDeckProps) {
   const dismissed = useRef<number>(-1);
   // Same one-shot for the interval reminder (a reminder only - nothing is recorded).
   const [intervalDismissed, setIntervalDismissed] = useState(-1);
+  // The timeout banner, ended by hand (log index of the timeout it belongs to).
+  const [timeoutEnded, setTimeoutEnded] = useState(-1);
   // Mirrors the deck so the scorer's left/right matches the court after a change of ends.
   const [flipped, setFlipped] = useState(false);
   // Who serves (and, in doubles, who serves/receives first) is settled before the first
@@ -178,7 +186,8 @@ export function RacquetDeck(p: RacquetDeckProps) {
 
   const resolved = p.pairing ? resolveServer(format, state, p.pairing) : null;
   const pairCycle = serve.resolver === 'ttPairCycle';
-  const bwfPairs = serve.resolver === 'bwfSingleServer';
+  // Pairs that hold courts and swap on scoring their own serve: badminton and pickleball.
+  const bwfPairs = serve.resolver === 'bwfSingleServer' || serve.resolver === 'pickleballTwoServer';
   // Game 1's order is set in the start panel; later games are picked at 0-0.
   const choosePairServer = (pairCycle || bwfPairs) && doubles && !!p.pairing && !state.ended
     && state.finished.some((u) => u.level === 0)
@@ -187,7 +196,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
   // Two kinds of change: mid-game (the decider midpoint) and after a finished game.
   // Read off the last PLAYED event, so pausing the clock does not hide the prompt.
   let playIdx = fold.trace.length - 1;
-  while (playIdx >= 0 && CLOCK_EVENTS.has(fold.trace[playIdx].event.t)) playIdx -= 1;
+  while (playIdx >= 0 && PASSIVE_EVENTS.has(fold.trace[playIdx].event.t)) playIdx -= 1;
   const lastEffect = playIdx >= 0 ? fold.trace[playIdx] : undefined;
   const afterUnit = !!lastEffect && changesEndsAfterUnit(format, state, lastEffect.unitsWon);
   const showSwitch = (!!lastEffect?.switchEnds || afterUnit) && dismissed.current !== playIdx;
@@ -202,7 +211,25 @@ export function RacquetDeck(p: RacquetDeckProps) {
   const interval = intervalDue(format, state, lastEffect);
   const showInterval = !!interval && intervalDismissed !== playIdx;
 
+  // Timeouts: the allowance left, and the one just called (the latest event).
+  const toRules = timeoutRules(format);
+  const toLeft = useMemo(() => timeoutsLeft(format, log, firstServer), [format, log, firstServer]);
+  const lastEvent = log[log.length - 1];
+  const activeTimeout = lastEvent?.t === 'timeout' && timeoutEnded !== log.length - 1 ? lastEvent : null;
+  const callTimeout = async (side: Side) => {
+    if (toLeft && toLeft[side] === 0) {
+      const ok = await confirmDialog({
+        title: `${nameOf(side)} has no timeouts left`,
+        message: 'Calling another one is a technical warning under the rules. Record it anyway?',
+        confirmLabel: 'Record timeout',
+      });
+      if (!ok) return;
+    }
+    push({ t: 'timeout', side });
+  };
+
   const timing = useMemo(() => rallyTiming(format, log, firstServer), [format, log, firstServer]);
+  const cards = useMemo(() => cardTally(log, format.sport), [log, format.sport]);
 
   const panel = (side: Side) => (
     <ScorePanel
@@ -212,6 +239,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
       serving={serve.movement !== 'none' && state.serve.side === side}
       cue={pointCue(side)}
       units={multiUnit ? { label: `${unitLabel}s`, won: state.score[top][side === 'A' ? 0 : 1] } : null}
+      cards={cards[side]}
       align={(side === 'A') !== flipped ? 'left' : 'right'}
     />
   );
@@ -400,6 +428,40 @@ export function RacquetDeck(p: RacquetDeckProps) {
         );
       })()}
 
+      {/* Timeouts: the allowance per side, and a 1-minute banner for the one just called. */}
+      {activeTimeout && toRules && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-violet-100 px-3 py-2 text-sm font-semibold text-violet-900 dark:bg-violet-500/15 dark:text-violet-200">
+          <span className="mr-auto">
+            Timeout — {nameOf(activeTimeout.side)} <Countdown from={activeTimeout.at} seconds={toRules.seconds} />
+          </span>
+          <Button size="sm" variant="subtle" onClick={() => setTimeoutEnded(log.length - 1)}>End timeout</Button>
+        </div>
+      )}
+      {toLeft && toRules && !state.ended && !needsSetup && (
+        <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-xs text-slate-500 dark:text-slate-400">
+          <span className="font-semibold uppercase tracking-wide text-[10.5px]">
+            Timeouts {toRules.perGame != null ? `per ${lv.label.toLowerCase()}` : 'per match'}
+          </span>
+          {([leftSide, rightSide] as Side[]).map((side) => {
+            const allowed = (toRules.perGame ?? toRules.perMatch)!;
+            return (
+              <span key={side} className="flex items-center gap-1.5">
+                <span>{nameOf(side)}</span>
+                <span aria-label={`${toLeft[side]} of ${allowed} left`} className="tracking-widest">
+                  {'●'.repeat(toLeft[side])}{'○'.repeat(Math.max(0, allowed - toLeft[side]))}
+                </span>
+                <Button size="sm" variant="subtle" disabled={p.disabled}
+                  title={toLeft[side] === 0 ? 'None left - another would be a technical warning' : undefined}
+                  className={toLeft[side] === 0 ? 'opacity-50' : undefined}
+                  onClick={() => callTimeout(side)}>
+                  Timeout
+                </Button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       {/* ── The two buttons that matter ───────────────────────────────────── */}
       {state.ended && !rescoring ? (
         <div className="grid gap-2 rounded-lg bg-slate-50 p-3 text-center text-sm dark:bg-slate-800/60">
@@ -584,15 +646,17 @@ function Badge({ tone, children }: { tone: 'amber' | 'slate'; children: React.Re
   );
 }
 
-function ScorePanel({ name, org, points, serving, cue, units, align = 'left' }: {
+function ScorePanel({ name, org, points, serving, cue, units, cards, align = 'left' }: {
   name: string; org?: string | null; side: Side; points: string; serving: boolean;
   cue: string | null; units: { label: string; won: number } | null; align?: 'left' | 'right';
+  cards?: CardTally;
 }) {
   return (
     <div className={cn('min-w-0', align === 'right' && 'text-right')}>
       <div className="flex items-center gap-1.5" style={align === 'right' ? { justifyContent: 'flex-end' } : undefined}>
         {serving && align === 'left' && <ServeDot />}
         <span className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{name}</span>
+        {cards && <CardBadges cards={cards} />}
         {serving && align === 'right' && <ServeDot />}
       </div>
       {org && <div className="truncate text-[11px] text-slate-400 dark:text-slate-500">{org}</div>}
@@ -620,6 +684,37 @@ function ScorePanel({ name, org, points, serving, cue, units, align = 'left' }: 
         </div>
       )}
     </div>
+  );
+}
+
+/** Misconduct a side has received this match, in the sport's own words. */
+interface CardTally { warnings: number; fouls: number; terms: { warning: string; foul: string } }
+
+/** Warnings and point penalties so far, from the log - so Undo takes a card back too. */
+export function cardTally(log: RallyLog, sport?: string): Record<Side, CardTally> {
+  const terms = misconductTerms(sport);
+  const out: Record<Side, CardTally> = { A: { warnings: 0, fouls: 0, terms }, B: { warnings: 0, fouls: 0, terms } };
+  for (const ev of log) {
+    if (ev.t === 'card') out[ev.against].warnings += 1;
+    if (ev.t === 'penalty' && ev.card === 'red') out[ev.side === 'A' ? 'B' : 'A'].fouls += 1;
+  }
+  return out;
+}
+
+/** Small card chips beside a name: yellow for a warning, red for a point penalty. */
+function CardBadges({ cards }: { cards: CardTally }) {
+  const chip = (n: number, colour: string, label: string) => n > 0 && (
+    <span title={`${label}${n > 1 ? ` ×${n}` : ''}`} aria-label={`${n} ${label}`} className="flex shrink-0 items-center gap-0.5">
+      <span className={cn('inline-block h-3.5 w-2.5 rounded-[2px]', colour)} />
+      {n > 1 && <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">×{n}</span>}
+    </span>
+  );
+  if (!cards.warnings && !cards.fouls) return null;
+  return (
+    <span className="flex shrink-0 items-center gap-1">
+      {chip(cards.warnings, 'bg-yellow-400', cards.terms.warning)}
+      {chip(cards.fouls, 'bg-rose-500', cards.terms.foul)}
+    </span>
   );
 }
 
@@ -785,9 +880,10 @@ function ToolPanel({ format, state, log, homeName, awayName, doubles, firstServe
     if (ok) onEvent({ t: 'end', outcome: 'win', reason: 'walkover', winner: side });
   };
 
+  const terms = misconductTerms(format.sport);
   const disqualify = async (side: Side) => {
     const ok = await confirmDialog({
-      title: `Disqualify ${nameOf(side)}?`,
+      title: `${terms.removal} — disqualify ${nameOf(side)}?`,
       message: `The match is awarded to ${nameOf(side === 'A' ? 'B' : 'A')}. The score so far is kept on the record.`,
       confirmLabel: 'Disqualify',
     });
@@ -834,24 +930,26 @@ function ToolPanel({ format, state, log, homeName, awayName, doubles, firstServe
         </div>
       )}
 
-      {/* Misconduct, by card: yellow warns, red gives the opponent a point, the last
-          one ends the match (badminton's black card). Off for self-scored formats. */}
+      {/* Misconduct: a warning, a point to the opponent, removal - in the sport's own
+          words (cards in badminton and table tennis, technicals in pickleball). Off for
+          self-scored formats. */}
       {format.penaltyEvents !== 'off' && !state.ended && (['A', 'B'] as Side[]).map((side) => {
         const opp: Side = side === 'A' ? 'B' : 'A';
         return (
           <div key={side} className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-500 dark:text-slate-400">Card for {nameOf(side)}:</span>
+            {/* Named as the OFFENDER, so the card and the point are never read the wrong way round. */}
+            <span className="text-xs text-slate-500 dark:text-slate-400">Penalise {nameOf(side)}:</span>
             <Button size="sm" variant="subtle" className="border-l-4 border-l-yellow-400"
               onClick={() => onEvent({ t: 'card', card: 'yellow', against: side, reason: 'warning' })}>
-              Yellow · warning
+              {terms.warning}
             </Button>
             <Button size="sm" variant="subtle" className="border-l-4 border-l-rose-500"
               onClick={() => onEvent({ t: 'penalty', side: opp, card: 'red', reason: 'misconduct' })}>
-              Red · point to {nameOf(opp)}
+              {terms.foul} (point to {nameOf(opp)})
             </Button>
             <Button size="sm" variant="subtle" className="border-l-4 border-l-slate-900 dark:border-l-slate-100"
               onClick={() => disqualify(side)}>
-              {format.sport === 'badminton' ? 'Black · disqualify' : 'Disqualify'}
+              {terms.removal}
             </Button>
           </div>
         );
@@ -987,7 +1085,7 @@ function Timeline({ format, log, firstServer, homeName, awayName }:
           <li key={i} className="flex items-baseline gap-2 px-3 py-1.5">
             <span className="w-8 shrink-0 font-mono tabular-nums text-slate-400 dark:text-slate-500">{i + 1}</span>
             <span className="min-w-0 flex-1 text-slate-600 dark:text-slate-300">
-              {describe(t, nameOf)}
+              {describe(t, nameOf, format.sport)}
               {t.event.t === 'point' && t.serverSide && (
                 <span className="ml-1.5 text-slate-400 dark:text-slate-500">· {nameOf(t.serverSide)} served</span>
               )}
@@ -1009,7 +1107,7 @@ function Timeline({ format, log, firstServer, homeName, awayName }:
   );
 }
 
-function describe(t: ReturnType<typeof foldRally>['trace'][number], nameOf: (s: Side) => string): string {
+function describe(t: ReturnType<typeof foldRally>['trace'][number], nameOf: (s: Side) => string, sport?: string): string {
   const ev = t.event;
   switch (ev.t) {
     case 'point':
@@ -1028,9 +1126,10 @@ function describe(t: ReturnType<typeof foldRally>['trace'][number], nameOf: (s: 
     case 'fault': return `Fault · ${nameOf(ev.side)}`;
     case 'penalty':
       return ev.card === 'red'
-        ? `Red card · ${nameOf(ev.side === 'A' ? 'B' : 'A')} — point to ${nameOf(ev.side)}`
+        ? `${misconductTerms(sport).foul} to ${nameOf(ev.side === 'A' ? 'B' : 'A')} — point to ${nameOf(ev.side)}`
         : `Conduct point to ${nameOf(ev.side)}`;
-    case 'card': return `Yellow card · ${nameOf(ev.against)} — warning`;
+    case 'card': return `${misconductTerms(sport).warning} to ${nameOf(ev.against)}`;
+    case 'timeout': return `Timeout — ${nameOf(ev.side)}`;
     case 'awardServe': return `Serve awarded to ${nameOf(ev.side)}`;
     case 'awardUnit': return `Unit awarded to ${nameOf(ev.side)}${ev.reason ? ` · ${ev.reason}` : ''}`;
     case 'adjust': return `${ev.delta > 0 ? '+' : ''}${ev.delta} ${nameOf(ev.side)}${ev.reason ? ` · ${ev.reason}` : ''}`;

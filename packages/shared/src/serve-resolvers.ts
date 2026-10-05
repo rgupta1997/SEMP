@@ -1,4 +1,4 @@
-import type { ScoringFormat, ServeResolverId, Side } from './scoring-rules.js';
+import type { LevelSpec, ScoringFormat, ServeResolverId, ServeSpec, Side } from './scoring-rules.js';
 import { effectiveLevel, serveSpecFor, type KernelState } from './rally-kernel.js';
 
 // ============================================================================
@@ -38,6 +38,26 @@ export interface ResolvedServer {
 }
 
 const isDoubles = (p: string[]) => p.length >= 2;
+
+/**
+ * The format as it applies to who is actually on court. Side-out formats are written
+ * for doubles (server 1, server 2, the 0-0-2 opening); in singles there is one server,
+ * so the serve crosses on the first lost rally. Unchanged for doubles or no pairing.
+ */
+export function formatForPairing(format: ScoringFormat, pairing?: Pairing | null): ScoringFormat {
+  if (!pairing || pairing.A.length > 1 || pairing.B.length > 1) return format;
+  const one = (s?: ServeSpec): ServeSpec | undefined =>
+    s && s.movement === 'handOut' && (s.serversPerSide ?? 2) > 1 ? { ...s, serversPerSide: 1, firstTurnSingle: false } : s;
+  const level = (l: LevelSpec): LevelSpec => ({
+    ...l,
+    ...(l.serve ? { serve: one(l.serve) } : {}),
+    ...(l.substitute ? { substitute: { ...l.substitute, spec: level(l.substitute.spec) } } : {}),
+    ...(l.deciderOverride?.serve ? { deciderOverride: { ...l.deciderOverride, serve: one(l.deciderOverride.serve) } } : {}),
+  });
+  const touched = [format.serve, ...format.levels.flatMap((l) => [l.serve, l.substitute?.spec.serve, l.deciderOverride?.serve])]
+    .some((s) => s && one(s) !== s);
+  return touched ? { ...format, serve: one(format.serve)!, levels: format.levels.map(level) } : format;
+}
 const other = (s: Side): Side => (s === 'A' ? 'B' : 'A');
 
 /**
@@ -87,21 +107,38 @@ function classicTwoServer(state: KernelState, pair: Pairing): ResolvedServer {
 }
 
 /**
- * PICKLEBALL, traditional side-out. Server #1 then #2 then the serve crosses, with
- * the first serving team of a game getting one server only (the 0-0-2 call). Server
- * #2 stands on the court opposite the one parity names, because partners do not
- * change places when they lose a rally - the kernel's courtHalfFor already inverts
- * for serverNo 2, so we just read it.
+ * PICKLEBALL. Partners swap courts only when their team scores on its own serve; the
+ * kernel keeps each pair's courts in `serve.pairFlip`. At 0-0 the first-listed player
+ * of each pair stands in the right court.
+ *
+ * Side-out: server 1 is whoever stood in the right court when the serve came over
+ * (`serve.turnLead`), serving from wherever they now stand; server 2 is the partner,
+ * from their own court. The 0-0-2 opening is the right-court player.
+ * Rally scoring: one server per turn, from the court the score names - even right,
+ * odd left - so the server is whoever stands there (the badminton model).
  */
-function pickleballTwoServer(state: KernelState, pair: Pairing): ResolvedServer {
+function pickleballTwoServer(state: KernelState, pair: Pairing, format: ScoringFormat): ResolvedServer {
   const side = state.serve.side;
   const people = pair[side];
-  const half = state.serve.courtHalf;
-  if (!isDoubles(people)) return { server: people[0] ?? null, receiver: null, courtHalf: half };
-  const server = people[Math.min(state.serve.serverNo, people.length) - 1];
   const opp = pair[other(side)];
-  const receiver = isDoubles(opp) ? (half === 'left' ? opp[1] : opp[0]) : (opp[0] ?? null);
-  return { server, receiver, courtHalf: half };
+  if (!isDoubles(people)) return { server: people[0] ?? null, receiver: null, courtHalf: state.serve.courtHalf };
+  const flip = (s: Side) => (state.serve.pairFlip?.[s] ? 1 : 0);
+  const courtOf = (s: Side, i: number): 'right' | 'left' => (i === flip(s) ? 'right' : 'left');
+  const inCourt = (s: Side, h: 'right' | 'left') => pair[s][((h === 'left' ? 1 : 0) + flip(s)) % 2] ?? null;
+
+  const spec = serveSpecFor(format, effectiveLevel(format, state, state.pointLevel));
+  let serverIdx: number;
+  if (spec.movement === 'handOut') {
+    const lead = state.serve.turnLead ?? 0;
+    // The opening "server 2" is the right-court player, i.e. the lead.
+    serverIdx = state.serve.serverNo === 1 || state.serve.openingTurn ? lead : 1 - lead;
+  } else {
+    serverIdx = ((state.serve.courtHalf === 'left' ? 1 : 0) + flip(side)) % 2;
+  }
+  const half = courtOf(side, serverIdx);
+  // The receiver stands diagonally opposite: the same-named court on the other side.
+  const receiver = isDoubles(opp) ? inCourt(other(side), half) : (opp[0] ?? null);
+  return { server: people[serverIdx] ?? null, receiver, courtHalf: half };
 }
 
 /**
@@ -182,7 +219,7 @@ export const SERVE_RESOLVER_IMPLS: Record<ServeResolverId, ResolverFn> = {
   none: (s, p) => ({ server: p[s.serve.side][0] ?? null, receiver: null, courtHalf: null }),
   bwfSingleServer: (s, p) => bwfSingleServer(s, p),
   classicTwoServer: (s, p) => classicTwoServer(s, p),
-  pickleballTwoServer: (s, p) => pickleballTwoServer(s, p),
+  pickleballTwoServer: (s, p, f) => pickleballTwoServer(s, p, f),
   ttPairCycle: (s, p, f) => ttPairCycle(s, p, f),
   tennisGameLocked: (s, p, f, n) => tennisGameLocked(s, p, f, n),
   squashHandOut: (s, p) => squashHandOut(s, p),

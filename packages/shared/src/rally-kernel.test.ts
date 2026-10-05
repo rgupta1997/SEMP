@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  aggregateScore, changesEndsAfterUnit, expediteAllowed, expediteConfig, foldRally, headline, initKernel, rallyTiming, resultEnvelope, step, undo, unitClock, unitWinner,
+  aggregateScore, changesEndsAfterUnit, expediteAllowed, expediteConfig, foldRally, headline, initKernel, misconductTerms, rallyTiming, resultEnvelope, step, timeoutRules, timeoutsLeft, undo, unitClock, unitWinner,
   type KernelState, type RallyEvent, type RallyLog,
 } from './rally-kernel.js';
 import { defaultFormatFor, presetByKey, presetsFor, RACQUET_PRESETS } from './racquet-presets.js';
-import { resolveServer, serveCall } from './serve-resolvers.js';
+import { formatForPairing, resolveServer, serveCall } from './serve-resolvers.js';
+import { earlyEndOf } from './rally-rows.js';
 import { scoringFormatSchema, type ScoringFormat, type Side } from './scoring-rules.js';
 import { deriveRacquetStats, foldCareerStats, statSpecFor } from './stat-registry.js';
 
@@ -394,6 +395,113 @@ describe('pickleball', () => {
     expect(s.serve.side).toBe(before.side);
     expect(s.serve.serverNo).toBe(before.serverNo);
   });
+
+  const rallies = (s: string): RallyLog => s.split('').map((side) => ({ t: 'point', side }) as RallyEvent);
+  const dbl = { A: ['a1', 'a2'], B: ['b1', 'b2'] };
+  const who = (f: ScoringFormat, s: string) => {
+    const st = foldRally(f, rallies(s), 'A').state;
+    const r = resolveServer(f, st, dbl);
+    return `${serveCall(f, st, true)} ${r.server}@${r.courtHalf}>${r.receiver}`;
+  };
+
+  it('side-out doubles: server 1 is the right-court player at each side-out; partners swap on scoring', () => {
+    const f = fmtOf('usap_tournament_bo3_11');
+    expect(['', 'A', 'AB', 'ABA', 'ABAA', 'ABAAB'].map((s) => who(f, s))).toEqual([
+      '0-0-2 a1@right>b1', // the right-court player opens
+      '1-0-2 a1@left>b2',  // scored, so a1 and a2 swap; a1 keeps serving
+      '0-1-1 b1@right>a2', // side-out: B's right-court player; a2 now stands right
+      '0-1-2 b2@left>a1',  // b1 lost: partner serves from where they stand
+      '1-0-1 a2@right>b1', // side-out: a2 is in A's right court now
+      '1-0-2 a1@left>b2',
+    ]);
+  });
+
+  it('rally-scoring doubles: the server is whoever stands in the court the score names', () => {
+    const f = fmtOf('mlp_rally_21');
+    expect(['AAB', 'AABB', 'AABBA'].map((s) => who(f, s))).toEqual([
+      '1-2 b2@left>a2',  // B never moved, so b2 is in the left court
+      '2-2 b2@right>a1', // b2 scored and switched
+      '3-2 a2@left>b1',
+    ]);
+  });
+
+  it('side-out singles: one server, so the serve crosses on the first lost rally', () => {
+    const sgl = { A: ['a1'], B: ['b1'] };
+    const f = formatForPairing(fmtOf('usap_tournament_bo3_11'), sgl);
+    let s = initKernel(f, 'A');
+    expect(s.serve.serverNo).toBe(1); // no 0-0-2 in singles
+    s = step(f, s, { t: 'point', side: 'B' }).state;
+    expect(s.serve.side).toBe('B');
+    s = step(f, s, { t: 'point', side: 'A' }).state; // B loses: straight back to A
+    expect(s.serve.side).toBe('A');
+    expect(s.score[0]).toEqual([0, 0]);
+    // Doubles is left as written.
+    const asWritten = fmtOf('usap_tournament_bo3_11');
+    expect(formatForPairing(asWritten, dbl)).toBe(asWritten);
+  });
+
+  it('counts side-outs won and points per service turn under side-out scoring', () => {
+    const f = fmtOf('usap_tournament_bo3_11');
+    // A opens (one server): scores 2, loses -> side-out to B. B: s1 loses, s2 loses -> side-out to A.
+    const { sides } = deriveRacquetStats(f, rallies('AAB' + 'AA'), {});
+    expect(sides.B.side_outs_won).toBe(1);
+    expect(sides.A.side_outs_won).toBe(1);
+    expect(sides.A.service_turns).toBe(1);
+    expect(sides.A.service_turn_points).toBe(2);
+    expect(sides.B.service_turns).toBe(1);
+    expect(sides.B.service_turn_points ?? 0).toBe(0);
+    const career = foldCareerStats(statSpecFor('pickleball')!, [sides.A]);
+    expect(career.points_per_service_turn).toBe(2);
+    // Rally scoring has no side-outs to count.
+    expect(deriveRacquetStats(fmtOf('mlp_rally_21'), rallies('AABB'), {}).sides.A.side_outs_won).toBeUndefined();
+  });
+
+  it('side-out %: side-outs won out of the opponents\' service turns faced', () => {
+    const f = fmtOf('usap_tournament_bo3_11');
+    // A opens and is sided out (B: 1 of 1). B's turn ends with a side-out too (A: 1 of 1).
+    const { sides } = deriveRacquetStats(f, rallies('AAB' + 'AA'), {});
+    expect(sides.B).toMatchObject({ side_outs_won: 1, service_turns_faced: 1 });
+    const career = foldCareerStats(statSpecFor('pickleball')!, [sides.B]);
+    expect(career.side_out_pct).toBe(100);
+  });
+
+  it('a pickle is a game won with the opponents on 0 - pickleball only', () => {
+    const f = fmtOf('mlp_rally_21');
+    expect(deriveRacquetStats(f, rallies('A'.repeat(21)), {}).sides.A.pickles).toBe(1);
+    expect(deriveRacquetStats(f, rallies('B' + 'A'.repeat(21)), {}).sides.A.pickles).toBeUndefined();
+    // A 21-0 in badminton is not a pickle.
+    expect(deriveRacquetStats(fmtOf('bwf_official_3x21'), rallies('A'.repeat(21)), {}).sides.A.pickles).toBeUndefined();
+  });
+
+  it('misconduct is worded in the sport\'s own terms', () => {
+    expect(misconductTerms('pickleball')).toEqual({ warning: 'Technical warning', foul: 'Technical foul', removal: 'Ejection' });
+    expect(misconductTerms('badminton').removal).toBe('Black card');
+  });
+
+  it('timeouts: 2 a team per game, reset each game; 3 in games to 21', () => {
+    const f = fmtOf('usap_tournament_bo3_11');
+    const to = (side: Side): RallyEvent => ({ t: 'timeout', side });
+    expect(timeoutsLeft(f, [])).toEqual({ A: 2, B: 2 });
+    const used = [to('A'), ...rallies('A'), to('A'), to('B')];
+    expect(timeoutsLeft(f, used)).toEqual({ A: 0, B: 1 });
+    // A timeout changes nothing on the scoreboard.
+    expect(foldRally(f, used, 'A').state.score[0]).toEqual(foldRally(f, rallies('A'), 'A').state.score[0]);
+    // A wins game 1 (side-out scoring: A serves throughout), so game 2 starts afresh.
+    expect(timeoutsLeft(f, [...used, ...rallies('A'.repeat(10))])).toEqual({ A: 2, B: 2 });
+    expect(timeoutsLeft(fmtOf('usap_single_game_21'), [])).toEqual({ A: 3, B: 3 });
+    // Table tennis: one a match; badminton: none.
+    expect(timeoutRules(fmtOf('ittf_bo5_11'))).toMatchObject({ perMatch: 1, perGame: null });
+    expect(timeoutRules(fmtOf('bwf_official_3x21'))).toBeNull();
+  });
+
+  it('side-out serve and receive stats count rallies, not only points', () => {
+    const f = fmtOf('usap_tournament_bo3_11');
+    // A serves and wins 1, loses 1 (side-out); B then loses 1 and wins 1.
+    const { sides } = deriveRacquetStats(f, rallies('ABAB'), {});
+    expect(sides.A.service_points_won).toBeGreaterThan(0);
+    expect(sides.A.service_points_won).toBeLessThan(sides.A.service_points_played!);
+    expect(sides.B.return_points_won).toBeGreaterThan(0);
+  });
 });
 
 describe('squash', () => {
@@ -485,6 +593,20 @@ describe('manual intervention', () => {
     expect(r.state.reason).toBe('retired');
     const env = resultEnvelope(f, r.state);
     expect(env.unitScores[0]).toEqual([11, 0]);
+  });
+});
+
+describe('a match stopped early', () => {
+  const pts = (n: number): RallyLog => Array.from({ length: n }, () => ({ t: 'point', side: 'A' }) as RallyEvent);
+  it('reads the reason from the last end event', () => {
+    expect(earlyEndOf({ rally: [...pts(3), { t: 'end', outcome: 'win', reason: 'retired', winner: 'A' }] })).toBe('retired');
+    expect(earlyEndOf({ rally: [...pts(3), { t: 'end', outcome: 'win', reason: 'disqualified', winner: 'B' }, { t: 'clockPause' }] })).toBe('disqualified');
+  });
+  it('is nothing for a match played out, a walkover, or an end that Rescore reopened', () => {
+    expect(earlyEndOf({ rally: pts(3) })).toBeNull();
+    expect(earlyEndOf({ rally: [{ t: 'end', outcome: 'win', reason: 'walkover', winner: 'A' }] })).toBeNull();
+    expect(earlyEndOf({ rally: [{ t: 'end', outcome: 'win', reason: 'retired', winner: 'A' }, ...pts(1)] })).toBeNull();
+    expect(earlyEndOf({})).toBeNull();
   });
 });
 
@@ -1079,6 +1201,8 @@ describe('pair serve and receive points in doubles', () => {
     for (const id of ['a1', 'a2']) {
       expect(of(id).pair_service_points_played).toBe(doubles.sides.A.service_points_played);
       expect(of(id).pair_return_points_played).toBe(doubles.sides.A.return_points_played);
+      expect(of(id).pair_service_points_won).toBe(doubles.sides.A.service_points_won);
+      expect(of(id).pair_return_points_won).toBe(doubles.sides.A.return_points_won ?? 0);
     }
     expect(of('a1').service_points_played).toBeLessThan(of('a1').pair_service_points_played!);
   });

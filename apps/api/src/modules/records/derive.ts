@@ -1,6 +1,6 @@
 import {
   PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor, playedContests, seatIn,
-  type PlayedContest,
+  earlyEndOf, type EarlyEnd, type PlayedContest,
   type AchievementKind, type EventSpec, type EventState, type FormatTemplate,
   type LifetimeEntryKind, type Medal, type StandingsPlacement,
 } from '@semp/shared';
@@ -286,8 +286,13 @@ function entryTitle(fx: DerivableFixture, teamId: string | null): string {
   // count, say), and it's already on the fixture for anyone who wants it.
   const outcome = outcomeFor(fx, teamId);
   const verb = outcome === 'won' ? 'Won' : outcome === 'lost' ? 'Lost' : outcome === 'drew' ? 'Drew' : null;
-  return verb ? `${versus} — ${verb}` : versus;
+  // Stopped early: "Won (opponent retired)" / "Lost (retired)" - never a match played out.
+  const early = earlyEndOf(fx.live_state);
+  const why = early && verb ? ` (${outcome === 'won' ? `opponent ${EARLY_END_WORD[early]}` : EARLY_END_WORD[early]})` : '';
+  return verb ? `${versus} — ${verb}${why}` : versus;
 }
+
+const EARLY_END_WORD: Record<EarlyEnd, string> = { retired: 'retired', disqualified: 'disqualified', conceded: 'conceded' };
 
 /**
  * Everything a locked fixture writes into the permanent record.

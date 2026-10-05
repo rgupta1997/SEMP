@@ -1717,6 +1717,15 @@ model racquet_match_lines {
   /// Doubles: the pair's serve / receive points, beside the player's own above.
   pair_service_points_played Int           @default(0)
   pair_return_points_played  Int           @default(0)
+  pair_service_points_won    Int           @default(0)
+  pair_return_points_won     Int           @default(0)
+  /// Side-out scoring only: serve won back, service turns, points scored in them.
+  side_outs_won          Int               @default(0)
+  service_turns          Int               @default(0)
+  service_turn_points    Int               @default(0)
+  service_turns_faced    Int               @default(0)
+  /// Pickleball: games won with the opponents on 0.
+  pickles                Int               @default(0)
   /// Table tennis expedite system; 0 when it never came in.
   expedite_matches       Int               @default(0)
   expedite_wins          Int               @default(0)

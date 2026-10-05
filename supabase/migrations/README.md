@@ -285,3 +285,21 @@ the same runner; all six statements succeeded.
 Adds nine integer counters (default 0) to `racquet_match_lines` for pressure stats:
 game / match points played, won, faced and saved, and `comeback_games`. Applied with
 the same runner; all nine statements succeeded.
+
+## Applied 2026-10-05 — `20261005000004_side_out_stats`
+
+Adds three integer counters (default 0) to `racquet_match_lines` for side-out scoring:
+`side_outs_won`, `service_turns`, `service_turn_points`. Applied with the same runner;
+all three statements succeeded.
+
+## Applied 2026-10-05 — `20261005000005_side_out_pct_pickles`
+
+Adds `service_turns_faced` (the denominator of side-out %) and `pickles` (pickleball
+games won to 0) to `racquet_match_lines`, integer default 0. Applied with the same
+runner; both statements succeeded.
+
+## Applied 2026-10-05 — `20261005000006_pair_points_won`
+
+Adds `pair_service_points_won` and `pair_return_points_won` to `racquet_match_lines`,
+integer default 0, beside the existing pair played counts. Applied with the same
+runner; both statements succeeded.

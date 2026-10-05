@@ -29,7 +29,8 @@ const ALLOWED = new Set([
   // racquet
   'rubber_key', 'partner_user_id', 'points_won', 'points_lost',
   'service_points_played', 'service_points_won', 'return_points_played', 'return_points_won',
-  'pair_service_points_played', 'pair_return_points_played',
+  'pair_service_points_played', 'pair_return_points_played', 'pair_service_points_won', 'pair_return_points_won',
+  'side_outs_won', 'service_turns', 'service_turn_points', 'service_turns_faced', 'pickles',
   'expedite_matches', 'expedite_wins', 'expedite_points_played', 'expedite_points_won',
   'expedite_return_wins', 'expedite_return_losses',
   'game_points_played', 'game_points_won', 'game_points_faced', 'game_points_saved',
