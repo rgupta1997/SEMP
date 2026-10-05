@@ -135,8 +135,14 @@ export async function applyShape(
     }
 
     for (const disciplineName of draw.disciplines) {
+      // The catalogue or this event's own - never another event's custom discipline.
       const discipline = await prisma.disciplines.findFirst({
-        where: { sport_id: sport.id, name: { equals: disciplineName, mode: 'insensitive' } },
+        where: {
+          sport_id: sport.id,
+          name: { equals: disciplineName, mode: 'insensitive' },
+          OR: [{ championship_id: null }, { championship_id: championshipId }],
+        },
+        orderBy: { championship_id: { sort: 'asc', nulls: 'first' } },
         select: { id: true },
       });
       if (!discipline) { skipped.push(`${draw.sport} · ${disciplineName}`); continue; }

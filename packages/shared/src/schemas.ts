@@ -329,6 +329,8 @@ export const updateSportSchema = createSportSchema.partial();
 
 export const createDisciplineSchema = z.object({
   sport_id: uuid,
+  /** Set for an organiser's own discipline: it belongs to that event only. */
+  championship_id: uuid.nullable().optional(),
   name: z.string().min(1),
   description: z.string().optional(),
   entry_type: z.enum(ENTRY_TYPE).default('team'),
@@ -336,7 +338,8 @@ export const createDisciplineSchema = z.object({
   squad_max: z.number().int().min(1).default(15),
   display_order: z.number().int().default(0),
 });
-export const updateDisciplineSchema = createDisciplineSchema.partial();
+// Which event a discipline belongs to is fixed at creation - an edit cannot publish it to everyone.
+export const updateDisciplineSchema = createDisciplineSchema.omit({ championship_id: true }).partial();
 
 export const createFormatSchema = z.object({
   name: z.string().min(1),

@@ -920,3 +920,95 @@ describe('expedite is not introduced once 18 points are scored (ITTF 2.15.2)', (
     expect(expediteConfig(legacy)?.exemptAtTotal).toBe(18);
   });
 });
+
+describe('who serves and who receives in table tennis doubles', () => {
+  const f = fmtOf('ittf_bo5_11');
+  const pair = { A: ['a1', 'a2'], B: ['b1', 'b2'] };
+
+  it('follows A1 > B1 > A2 > B2: each receiver serves next', () => {
+    let s = foldRally(f, [], 'A').state;
+    const seen: Array<[string | null, string | null]> = [];
+    for (let i = 0; i < 8; i++) {
+      const r = resolveServer(f, s, pair);
+      seen.push([r.server, r.receiver]);
+      s = step(f, s, { t: 'point', side: 'A' }).state;
+    }
+    // Two serves each, so every pair of points shares a server and receiver.
+    expect(seen.filter((_, i) => i % 2 === 0)).toEqual([['a1', 'b1'], ['b1', 'a2'], ['a2', 'b2'], ['b2', 'a1']]);
+  });
+});
+
+describe('serve and receive points are personal in doubles', () => {
+  const f = fmtOf('ittf_bo5_11');
+  const pair = { A: ['a1', 'a2'], B: ['b1', 'b2'] };
+  // A wins every rally of one game to 11.
+  const stats = deriveRacquetStats(f, points('A', 11), { pairing: pair, firstServer: 'A' });
+  const of = (id: string) => stats.players.find((p) => p.userId === id)!.stats;
+
+  it('splits receiving between the partners, adding up to the pair', () => {
+    const sideReturns = stats.sides.B.return_points_played ?? 0;
+    expect((of('b1').return_points_played ?? 0) + (of('b2').return_points_played ?? 0)).toBe(sideReturns);
+    expect(of('b1').return_points_played).toBeGreaterThan(0);
+    expect(of('b2').return_points_played).toBeGreaterThan(0);
+  });
+
+  it('a doubles player gets 0 of their own, never their pair’s figure', () => {
+    // A served 6 of the 11 rallies (a1 4, a2 2); B received them, so A received only B's 5.
+    expect((of('a1').service_points_played ?? 0) + (of('a2').service_points_played ?? 0)).toBe(stats.sides.A.service_points_played);
+    expect(of('a1').return_points_won! + of('a2').return_points_won!).toBe(stats.sides.A.return_points_won);
+  });
+
+  it('singles is unchanged: every rally is yours', () => {
+    const solo = deriveRacquetStats(f, points('A', 11), { pairing: { A: ['x'], B: ['y'] }, firstServer: 'A' });
+    const y = solo.players.find((p) => p.userId === 'y')!.stats;
+    expect(y.return_points_played).toBe(solo.sides.B.return_points_played);
+  });
+});
+
+describe('pair serve and receive points in doubles', () => {
+  const f = fmtOf('ittf_bo5_11');
+  const doubles = deriveRacquetStats(f, points('A', 11), { pairing: { A: ['a1', 'a2'], B: ['b1', 'b2'] }, firstServer: 'A' });
+  const of = (id: string) => doubles.players.find((p) => p.userId === id)!.stats;
+
+  it('both partners carry the pair’s totals, beside their own', () => {
+    for (const id of ['a1', 'a2']) {
+      expect(of(id).pair_service_points_played).toBe(doubles.sides.A.service_points_played);
+      expect(of(id).pair_return_points_played).toBe(doubles.sides.A.return_points_played);
+    }
+    expect(of('a1').service_points_played).toBeLessThan(of('a1').pair_service_points_played!);
+  });
+
+  it('singles has no pair tiles', () => {
+    const solo = deriveRacquetStats(f, points('A', 11), { pairing: { A: ['x'], B: ['y'] }, firstServer: 'A' });
+    expect(solo.players[0].stats.pair_service_points_played).toBeUndefined();
+  });
+});
+
+describe('expedite system stats', () => {
+  const f = fmtOf('ittf_bo5_11');
+  // A wins a point, expedite comes in between rallies (B now serves), A survives 13
+  // returns for the next point, then A takes the match 3-0.
+  const log: RallyLog = [
+    ...points('A', 1),
+    { t: 'expedite', reason: 'time', inRally: false },
+    { t: 'point', side: 'A', kind: 'expedite_returns' },
+    ...points('A', 31),
+  ];
+  const stats = deriveRacquetStats(f, log, { pairing: { A: ['x'], B: ['y'] }, firstServer: 'A' });
+
+  it('counts the match, the win, and the points played under it', () => {
+    expect(stats.sides.A).toMatchObject({ expedite_matches: 1, expedite_wins: 1, expedite_points_played: 32, expedite_points_won: 32 });
+    expect(stats.sides.B).toMatchObject({ expedite_matches: 1, expedite_points_played: 32 });
+    expect(stats.sides.B.expedite_wins).toBeUndefined();
+  });
+
+  it('credits 13 returns to the receiver and charges the server', () => {
+    expect(stats.sides.A.expedite_return_wins).toBe(1);
+    expect(stats.players.find((p) => p.userId === 'y')!.stats.expedite_return_losses).toBe(1);
+  });
+
+  it('a match expedite never came into has no expedite stats at all', () => {
+    const plain = deriveRacquetStats(f, points('A', 33), { pairing: { A: ['x'], B: ['y'] }, firstServer: 'A' });
+    expect(Object.keys(plain.sides.A).filter((k) => k.startsWith('expedite'))).toEqual([]);
+  });
+});

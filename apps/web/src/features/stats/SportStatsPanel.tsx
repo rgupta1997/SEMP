@@ -42,6 +42,8 @@ interface TierRecord {
 interface DisciplineRecord {
   disciplineId: string; discipline: string;
   overall: TierRecord; tiers: TierRecord[];
+  /** Tie rubbers played inside a team discipline. */
+  rubbers?: Array<{ label: string; played: number; won: number; lost: number }>;
 }
 interface PositionRecord {
   position: 'singles' | 'doubles';
@@ -55,7 +57,13 @@ interface SportRecord {
   positions?: PositionRecord[];
 }
 interface PersonRecord { userId: string; name: string; played: number; won: number; lost: number }
-interface Relations { partners: PersonRecord[]; opponents: PersonRecord[] }
+/** One opposing side: a player in singles, a pair in doubles. */
+interface OpponentRecord {
+  position: 'singles' | 'doubles'; userIds: string[]; names: string[];
+  partnerId: string | null; partnerName: string | null;
+  played: number; won: number; lost: number;
+}
+interface Relations { partners: PersonRecord[]; opponents: OpponentRecord[] }
 interface Payload {
   sports: SportRecord[];
   filters: Array<{ sportId: string; sport: string; disciplines: Array<{ id: string; name: string }> }>;
@@ -141,19 +149,36 @@ function PeopleSection({ userId, sportId }: { userId?: string; sportId: string }
   const [open, setOpen] = useState(false);
   const base = userId ? `/people/${userId}/sport-relations` : '/me/sport-relations';
   const { data, isLoading } = useApi<Relations>(open ? `${base}?sport=${sportId}` : null);
-  const list = (title: string, rows: PersonRecord[], verb: string) => (
-    <div style={{ marginTop: 8 }}>
-      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>{title}</div>
-      {rows.map((r) => (
-        <div key={r.userId} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderTop: '1px solid var(--line)', fontSize: 13 }}>
-          <span>{verb} <b>{r.name}</b></span>
-          <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-3)' }}>
-            {r.won}–{r.lost}<span style={{ color: 'var(--ink-4)' }}>{'  ·  '}{r.played} played</span>
-          </span>
-        </div>
-      ))}
+  const heading = (title: string) => (
+    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--ink-4)', marginTop: 10 }}>{title}</div>
+  );
+  const row = (key: string, who: React.ReactNode, r: { won: number; lost: number; played: number }) => (
+    <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderTop: '1px solid var(--line)', fontSize: 13 }}>
+      <span>{who}</span>
+      <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-3)' }}>
+        {r.won}W {r.lost}L<span style={{ color: 'var(--ink-4)' }}>{'  ·  '}{r.played} played</span>
+      </span>
     </div>
   );
+  // Each match is one row, so the rows add up to the matches played. A doubles row
+  // names both pairs: "with Aman knights vs Aman devils / Aman Player 1".
+  const opponents = (position: 'singles' | 'doubles') => {
+    const rows = data?.opponents.filter((o) => o.position === position) ?? [];
+    if (!rows.length) return null;
+    return (
+      <div>
+        {heading(position === 'singles' ? 'Singles' : 'Doubles')}
+        {rows.map((o) => row(
+          `${o.partnerId ?? ''}|${o.userIds.join('|')}`,
+          <>
+            {o.partnerName && <>with <b>{o.partnerName}</b>{' '}</>}
+            vs <b>{o.names.join(' / ')}</b>
+          </>,
+          o,
+        ))}
+      </div>
+    );
+  };
   return (
     <div style={{ marginTop: 12 }}>
       <button
@@ -168,8 +193,8 @@ function PeopleSection({ userId, sportId }: { userId?: string; sportId: string }
         </div>
       ) : (
         <>
-          {data.opponents.length > 0 && list('Head-to-head', data.opponents, 'vs')}
-          {data.partners.length > 0 && list('Partners', data.partners, 'with')}
+          {opponents('singles')}
+          {opponents('doubles')}
         </>
       ))}
     </div>
@@ -221,6 +246,13 @@ function SportCard({ s, userId }: { s: SportRecord; userId?: string }) {
         <div style={{ fontSize: 15.5 }}><Record r={shown.overall} ranking={ranking} /></div>
         <Medals r={shown.overall} />
         <Metrics metrics={shown.overall.metrics} />
+        {/* Serve and receive tiles are personal; in doubles the partner's are theirs. */}
+        {view !== 'singles' && positions.some((p) => p.position === 'doubles')
+          && shown.overall.metrics.some((m) => m.key === 'service_points_played') && (
+          <div style={{ fontSize: 11.5, color: 'var(--ink-4)', marginTop: 6 }}>
+            Doubles: serve and receive tiles count only the serves you hit and the serves you had to return - your partner's are theirs.
+          </div>
+        )}
 
         {/* The split. Shown only when there IS one - a person who has only played
             inter-institution has no intra record, and a zeroed row would read as
@@ -261,6 +293,13 @@ function SportCard({ s, userId }: { s: SportRecord; userId?: string }) {
                       <span style={{ fontSize: 13, fontWeight: 600, minWidth: 150 }}>{d.discipline}</span>
                       <span style={{ fontSize: 13.5 }}><Record r={d.overall} ranking={ranking} /></span>
                     </div>
+                    {/* A team discipline names the rubbers inside it: "Mixed · Men's Singles rubber · 0W 1L". */}
+                    {d.rubbers?.map((r) => (
+                      <div key={r.label} style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>
+                        {d.discipline} · {r.label} rubber · {r.won}W {r.lost}L
+                        {r.played > r.won + r.lost && <span style={{ color: 'var(--ink-4)' }}> · {r.played} played</span>}
+                      </div>
+                    ))}
                     {d.tiers.length > 1 && (
                       <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 3 }}>
                         {d.tiers.map((t) => ranking

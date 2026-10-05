@@ -28,6 +28,8 @@ model disciplines {
   squad_min              Int                      @default(1) @db.SmallInt
   squad_max              Int                      @default(15) @db.SmallInt
   display_order          Int                      @default(0)
+  /// null = the platform catalogue; set = a custom discipline of that event only.
+  championship_id        String?                  @db.Uuid
   career_stats           career_stats[]
   sports                 sports                   @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   tournament_disciplines tournament_disciplines[]
@@ -1712,6 +1714,16 @@ model racquet_match_lines {
   service_points_won    Int                @default(0)
   return_points_played  Int                @default(0)
   return_points_won     Int                @default(0)
+  /// Doubles: the pair's serve / receive points, beside the player's own above.
+  pair_service_points_played Int           @default(0)
+  pair_return_points_played  Int           @default(0)
+  /// Table tennis expedite system; 0 when it never came in.
+  expedite_matches       Int               @default(0)
+  expedite_wins          Int               @default(0)
+  expedite_points_played Int               @default(0)
+  expedite_points_won    Int               @default(0)
+  expedite_return_wins   Int               @default(0)
+  expedite_return_losses Int               @default(0)
   games_won             Int                @default(0)
   games_lost            Int                @default(0)
   sets_won              Int                @default(0)

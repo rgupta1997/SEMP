@@ -257,3 +257,25 @@ doubles split; `uq_career_stats_grain` widened to include it. Checked first that
 grain check was named `career_stats_grain_check`. Applied with the same runner; all
 seven statements succeeded. Verified afterwards: both columns present, the grain check
 allows `'position'`, and both indexes exist as written. No data changed.
+
+## Applied 2026-10-05 — `20261005000000_event_scoped_disciplines`
+
+Adds `disciplines.championship_id` (nullable, cascades with the event) and an index.
+Null = the platform catalogue; set = a custom discipline of that event only, offered
+in no other event's setup. Applied with the same runner; both statements succeeded.
+Verified afterwards: the column exists and all 154 existing disciplines are untouched
+(every one still null, i.e. in the catalogue).
+
+## Applied 2026-10-05 — `20261005000001_pair_serve_receive_points`
+
+Adds `racquet_match_lines.pair_service_points_played` and `pair_return_points_played`
+(integer, default 0): a doubles player's pair totals beside their now-personal serve /
+receive points. Applied with the same runner; both statements succeeded. Existing rows
+read 0 until their fixture is locked again.
+
+## Applied 2026-10-05 — `20261005000002_expedite_stats`
+
+Adds six integer counters (default 0) to `racquet_match_lines` for the table tennis
+expedite tiles: `expedite_matches`, `expedite_wins`, `expedite_points_played`,
+`expedite_points_won`, `expedite_return_wins`, `expedite_return_losses`. Applied with
+the same runner; all six statements succeeded.

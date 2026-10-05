@@ -53,6 +53,8 @@ export interface StatMetric {
   higherIsBetter?: boolean;
   /** Percentages render differently from counts. */
   percent?: boolean;
+  /** Stored only to compute a rate; not shown as a tile of its own. */
+  hidden?: boolean;
 }
 
 /**
@@ -145,13 +147,28 @@ const RACQUET_CORE: StatMetric[] = [
   rally('points_lost', 'Points lost', 'PtsL', { higherIsBetter: false }),
   rally('point_diff', 'Point difference', '+/-', { source: 'derived', formula: { op: 'diff', of: ['points_won', 'points_lost'] } }),
 
-  rally('service_points_played', 'Service points', 'SvP'),
-  rally('service_points_won', 'Service points won', 'SvW'),
-  rate('service_win_pct', 'Service win %', 'Sv%', ['service_points_won', 'service_points_played'], true),
+  // Yours in doubles: rallies YOU served, and rallies YOU had to return the serve in.
+  rally('service_points_played', 'Points on your serve', 'SvP'),
+  rally('service_points_won', 'Won on your serve', 'SvW'),
+  rate('service_win_pct', 'Serve win %', 'Sv%', ['service_points_won', 'service_points_played'], true),
 
-  rally('return_points_played', 'Return points', 'RtP'),
-  rally('return_points_won', 'Return points won', 'RtW'),
-  rate('return_win_pct', 'Return win %', 'Rt%', ['return_points_won', 'return_points_played']),
+  rally('return_points_played', 'Points receiving', 'RtP'),
+  rally('return_points_won', 'Won receiving', 'RtW'),
+  rate('return_win_pct', 'Receive win %', 'Rt%', ['return_points_won', 'return_points_played']),
+
+  // Doubles only: the pair's totals, beside the personal ones above.
+  rally('pair_service_points_played', 'Points your pair served', 'PSv'),
+  rally('pair_return_points_played', 'Points your pair received', 'PRt'),
+
+  // Table tennis expedite system - present only for matches it came into.
+  rally('expedite_matches', 'Expedite matches', 'ExM'),
+  rally('expedite_wins', 'Expedite wins', 'ExW'),
+  rally('expedite_points_played', 'Expedite points', 'ExP', { hidden: true }),
+  rally('expedite_points_won', 'Expedite points won', 'ExPW', { hidden: true }),
+  rate('expedite_point_win_pct', 'Expedite point win %', 'Ex%', ['expedite_points_won', 'expedite_points_played']),
+  rally('expedite_return_wins', 'Won by 13 returns', '13W'),
+  // Against the SERVER personally: their opponent survived 13 returns on their serve.
+  rally('expedite_return_losses', 'Lost to 13 returns', '13L', { higherIsBetter: false }),
 
   rally('games_won', 'Games won', 'GW'),
   rally('games_lost', 'Games lost', 'GL', { higherIsBetter: false }),
@@ -569,6 +586,8 @@ export function deriveRacquetStats(
   let state: KernelState = initKernel(format, first);
   let streak: Record<Side, number> = { A: 0, B: 0 };
   let firstUnitWinner: Side | null = null;
+  let personalReturns = false;
+  let expediteSeen = false;
 
   for (const ev of log) {
     const before = state;
@@ -578,7 +597,11 @@ export function deriveRacquetStats(
     const wasDecider = isDecider(format, before, before.pointLevel);
     const isTiebreak = lv.key === 'tiebreak';
     const serverSide = spec.movement === 'none' ? null : before.serve.side;
-    const server = opts.pairing ? resolveServer(format, before, opts.pairing, opts.nomination).server : null;
+    const resolved = opts.pairing ? resolveServer(format, before, opts.pairing, opts.nomination) : null;
+    const server = resolved?.server ?? null;
+    // Who had to return the serve - only where the sport's rules name them.
+    const receiver = RECEIVER_RESOLVERS.has(spec.resolver) ? resolved?.receiver ?? null : null;
+    if (receiver) personalReturns = true;
 
     // Break point: the RECEIVER is one point from taking a game the server is serving.
     // Only meaningful where the serve is locked to a unit, i.e. tennis.
@@ -587,6 +610,8 @@ export function deriveRacquetStats(
     const r = step(format, before, ev);
     state = r.state;
     const eff = r.effect;
+    const underExpedite = before.expedite;
+    if (state.expedite) expediteSeen = true;
 
     if (ev.t === 'let') { bump(sides.A, 'lets'); bump(sides.B, 'lets'); continue; }
 
@@ -625,6 +650,24 @@ export function deriveRacquetStats(
         if (server) {
           bump(personBag(server), 'service_points_played');
           if (w === serverSide) bump(personBag(server), 'service_points_won');
+        }
+        if (receiver) {
+          bump(personBag(receiver), 'return_points_played');
+          if (w !== serverSide) bump(personBag(receiver), 'return_points_won');
+        }
+      }
+
+      if (underExpedite) {
+        bump(sides.A, 'expedite_points_played');
+        bump(sides.B, 'expedite_points_played');
+        bump(sides[w], 'expedite_points_won');
+      }
+      // The receiver survived 13 returns: their point, and a loss on the server's serve.
+      if (ev.t === 'point' && ev.kind === 'expedite_returns') {
+        bump(sides[w], 'expedite_return_wins');
+        if (serverSide && serverSide !== w) {
+          bump(sides[serverSide], 'expedite_return_losses');
+          if (server) bump(personBag(server), 'expedite_return_losses');
         }
       }
 
@@ -669,6 +712,11 @@ export function deriveRacquetStats(
   // Match-level outcome.
   bump(sides.A, 'matches');
   bump(sides.B, 'matches');
+  if (expediteSeen) {
+    bump(sides.A, 'expedite_matches');
+    bump(sides.B, 'expedite_matches');
+    if (state.winner) bump(sides[state.winner], 'expedite_wins');
+  }
   if (state.outcome === 'draw') { bump(sides.A, 'draws'); bump(sides.B, 'draws'); }
   else if (state.winner) {
     const w = state.winner;
@@ -680,8 +728,31 @@ export function deriveRacquetStats(
     if (firstUnitWinner === w && (sides[w].games_lost ?? 0) === 0) bump(sides[w], 'whitewashes');
   }
 
+  // In doubles a player who never served (or never received) has 0 of their own,
+  // not their pair's figure - which is what the side-level fallback would give them.
+  for (const side of ['A', 'B'] as Side[]) {
+    const people = opts.pairing?.[side] ?? [];
+    if (people.length < 2) continue;
+    // The pair's totals ride on the side bag, so each partner gets them unchanged.
+    sides[side].pair_service_points_played = sides[side].service_points_played ?? 0;
+    sides[side].pair_return_points_played = sides[side].return_points_played ?? 0;
+    for (const id of people) {
+      const b = personBag(id);
+      b.service_points_played ??= 0;
+      b.service_points_won ??= 0;
+      if (personalReturns) { b.return_points_played ??= 0; b.return_points_won ??= 0; }
+      if (expediteSeen) b.expedite_return_losses ??= 0;
+    }
+  }
+
   return { sides, players: attribute(sides, perPerson, opts.pairing) };
 }
+
+/**
+ * Serve resolvers that name the RECEIVER from the rules (diagonal court, fixed TT
+ * rotation). Tennis and squash doubles do not, so their return points stay per pair.
+ */
+const RECEIVER_RESOLVERS: ReadonlySet<string> = new Set(['bwfSingleServer', 'pickleballTwoServer', 'ttPairCycle']);
 
 /**
  * A doubles point is won by the PAIR, so both partners receive the side's rally

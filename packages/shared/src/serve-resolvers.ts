@@ -124,9 +124,10 @@ function ttPairCycle(state: KernelState, pair: Pairing, format: ScoringFormat): 
   const ownBlock = Math.floor(state.serve.turns / 2);
   const server = people[ownBlock % 2];
   const opp = pair[other(side)];
-  // Table tennis serves right-half to right-half: the diagonal is constant, so the
-  // receiver is fixed by the same block parity on the other side.
-  const receiver = isDoubles(opp) ? opp[ownBlock % 2] : (opp[0] ?? null);
+  // The receiver is the NEXT turn's server (A1 > B1 > A2 > B2): the other side's
+  // player at the next turn's block.
+  const nextBlock = Math.floor((state.serve.turns + 1) / 2);
+  const receiver = isDoubles(opp) ? opp[nextBlock % 2] : (opp[0] ?? null);
   return { server, receiver, courtHalf: 'right' };
 }
 

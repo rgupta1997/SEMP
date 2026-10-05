@@ -215,9 +215,10 @@ const SQUAD_BY_ENTRY: Record<string, { min: number; max: number; fixed: boolean 
 // once and applied to all selected ("copy for all"). Master disciplines keep their
 // own entry type + squad; the "Whole sport" tile (always available, so individual
 // or single-discipline sports work too) takes its own entry type + squad.
-function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues, formats, drawsPath, onClose }: { tournamentSport: any; sportName?: string; existing?: any[]; venues: any[]; formats: any[]; drawsPath: string; onClose: () => void }) {
+function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues, formats, drawsPath, eventId, onClose }: { tournamentSport: any; sportName?: string; existing?: any[]; venues: any[]; formats: any[]; drawsPath: string; eventId: string; onClose: () => void }) {
   const qc = useQueryClient();
-  const disciplinesPath = `/disciplines?sport_id=${tournamentSport.sport_id}`;
+  // The platform catalogue plus this event's own custom disciplines - never another event's.
+  const disciplinesPath = `/disciplines?sport_id=${tournamentSport.sport_id}&championship_id=${eventId}`;
   const { data: disciplines = [], isLoading: disciplinesLoading } = useApi<any[]>(disciplinesPath);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [venueId, setVenueId] = useState(venues[0]?.id ?? '');     // default to the first venue when one exists
@@ -257,7 +258,8 @@ function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues,
     const min = Number(dMin), max = Number(dMax);
     if (min > max) { setError('Squad min cannot exceed max'); return; }
     try {
-      const d: any = await createDiscipline.mutateAsync({ sport_id: tournamentSport.sport_id, name: dName.trim(), entry_type: dEntry, squad_min: min, squad_max: max });
+      // Belongs to this event only: other organisers never see it in their list.
+      const d: any = await createDiscipline.mutateAsync({ sport_id: tournamentSport.sport_id, championship_id: eventId, name: dName.trim(), entry_type: dEntry, squad_min: min, squad_max: max });
       await qc.invalidateQueries({ queryKey: [disciplinesPath] });
       setSelected((s) => new Set(s).add(d.id));
       setCreatingDisc(false); setDName(''); setDEntry('team'); setDMin('1'); setDMax('15');
@@ -341,7 +343,8 @@ function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues,
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         <Tile id={WHOLE} title="Whole sport" subtitle="no sub-discipline" />
         {!disciplinesLoading && disciplines.map((d) => (
-          <Tile key={d.id} id={d.id} title={d.name} subtitle={`${d.entry_type ?? 'team'} · squad ${d.squad_min ?? 1}–${d.squad_max ?? 15}`} />
+          <Tile key={d.id} id={d.id} title={d.name}
+            subtitle={`${d.entry_type ?? 'team'} · squad ${d.squad_min ?? 1}–${d.squad_max ?? 15}${d.championship_id ? ' · this event only' : ''}`} />
         ))}
       </div>
       {disciplinesLoading ? (
@@ -639,7 +642,7 @@ function EditSportModal({ ts, sportName, formats, onClose }: { ts: any; sportNam
 }
 
 /* ----------------------------- Tournament-sport card ----------------------------- */
-function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws, drawsPath, fixturesPath }: { ts: any; sportName: string; sportIcon?: string; formatName: string; formats: any[]; venues: any[]; draws: any[]; drawsPath: string; fixturesPath: string }) {
+function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws, drawsPath, fixturesPath, eventId }: { ts: any; sportName: string; sportIcon?: string; formatName: string; formats: any[]; venues: any[]; draws: any[]; drawsPath: string; fixturesPath: string; eventId: string }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(true);
   const [adding, setAdding] = useState(false);
@@ -724,7 +727,7 @@ function SportRow({ ts, sportName, sportIcon, formatName, formats, venues, draws
               })}
             </div>
           )}
-          {adding && <AddDisciplineModal tournamentSport={ts} sportName={sportName} existing={disciplines} venues={venues} formats={formats} drawsPath={drawsPath} onClose={() => setAdding(false)} />}
+          {adding && <AddDisciplineModal tournamentSport={ts} sportName={sportName} existing={disciplines} venues={venues} formats={formats} drawsPath={drawsPath} eventId={eventId} onClose={() => setAdding(false)} />}
           {editing && (
             <EditDisciplineModal
               discipline={editing} sportName={sportName} sportFormatId={ts.format_id} venues={venues} formats={formats}
@@ -807,7 +810,7 @@ export function SportsTab({ eventId }: { eventId: string }) {
         <div className="grid gap-3">
           {tsports.map((ts) => (
             <SportRow key={ts.id} ts={ts} sportName={sportName(ts.sport_id)} sportIcon={sportIcon(ts.sport_id)} formatName={formatName(ts.format_id)} formats={formats} venues={venues}
-              draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} drawsPath={drawsPath} fixturesPath={fixturesPath} />
+              draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} drawsPath={drawsPath} fixturesPath={fixturesPath} eventId={eventId} />
           ))}
         </div>
       )}
