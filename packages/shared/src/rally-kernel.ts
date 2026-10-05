@@ -63,7 +63,13 @@ export type RallyEvent =
   /** A service fault. Tennis needs it natively (two serves); elsewhere it is a stat. */
   | { t: 'fault'; side: Side; at?: string }
   /** Conduct point awarded from outside the rally stream. Advances the serve clock. */
-  | { t: 'penalty'; side: Side; reason?: string; by?: string; at?: string }
+  | { t: 'penalty'; side: Side; reason?: string; by?: string; at?: string; card?: 'red' }
+  /**
+   * A warning card (yellow). Changes nothing on the scoreboard - it is the record that
+   * the warning was given. A red card is a `penalty` to the other side with `card: 'red'`;
+   * a disqualification (badminton's black card) is an `end` with reason 'disqualified'.
+   */
+  | { t: 'card'; card: 'yellow'; against: Side; reason?: string; by?: string; at?: string }
   /** Award the serve without a rally (badminton red card). */
   | { t: 'awardServe'; side: Side; reason?: string; by?: string; at?: string }
   /** Force the current unit to a side regardless of the tally. */
@@ -81,6 +87,12 @@ export type RallyEvent =
    * the same server; otherwise the previous rally's receiver serves next.
    */
   | { t: 'expedite'; reason?: 'time' | 'request'; inRally?: boolean; by?: string; at?: string }
+  /**
+   * Doubles, at 0-0 of a game: a pair's other partner starts. Table tennis (no `side`):
+   * the serving pair picks and the first receiver follows (ITTF 2.13.5), so both flip.
+   * Badminton (`side`): each pair picks its own - that pair's partners swap courts.
+   */
+  | { t: 'switchPairServer'; side?: Side; by?: string; at?: string }
   /**
    * THE WHISTLE. A clock-terminated period is over; tally what was scored.
    *
@@ -133,6 +145,12 @@ export interface ServeState {
   courtHalf: 'right' | 'left' | null;
   /** True while this side's opening turn of the unit is the single-server one. */
   openingTurn: boolean;
+  /**
+   * Doubles: a side whose partner order is reversed from the pairing's.
+   * Table tennis: carried across games; flipped by `switchPairServer` and the decider's switch at 5.
+   * Badminton: the pair's courts - flipped each time it scores on its own serve; reset each game.
+   */
+  pairFlip?: Partial<Record<Side, boolean>>;
 }
 
 export interface FinishedUnit {
@@ -401,7 +419,7 @@ function opensSpecially(spec: ServeSpec): boolean {
 const clone = (s: KernelState): KernelState => ({
   ...s,
   score: s.score.map((p) => [p[0], p[1]] as Pair),
-  serve: { ...s.serve },
+  serve: { ...s.serve, ...(s.serve.pairFlip ? { pairFlip: { ...s.serve.pairFlip } } : {}) },
   finished: [...s.finished],
 });
 
@@ -504,6 +522,9 @@ function resetForNewUnit(format: ScoringFormat, state: KernelState, unitWinnerSi
     unitFirstServer: next,
     courtHalf: spec.courtModel === 'none' ? null : 'right',
     openingTurn: opensSpecially(spec),
+    // Table tennis keeps it: with the same partner serving first, the receiver is the one
+    // who served to them last game. Badminton starts each game from the listed order.
+    ...(state.serve.pairFlip && spec.resolver === 'ttPairCycle' ? { pairFlip: state.serve.pairFlip } : {}),
   };
   state.unitPoints = 0;
   if (state.expedite && !expediteConfig(format)?.stickyForMatch) state.expedite = false;
@@ -579,17 +600,36 @@ function shouldSwitchEnds(
       // at 11-x in games 1 and 2 - which is exactly the drift the reference engine's
       // README got wrong, so it is asserted in the tests.
       if (!inDecider) return false;
-      const at = spec.switchEndsAt ?? null;
-      if (at == null) return false;
-      // Fires once: the moment the leader first LANDS on `at` while the other side is
-      // still below it. Comparing against the pre-point score is what makes it once.
-      const hi = Math.max(after[0], after[1]);
-      const lo = Math.min(after[0], after[1]);
-      const hiBefore = Math.max(before[0], before[1]);
-      return hi === at && lo < at && hiBefore < at;
+      return leaderLandsOn(spec.switchEndsAt ?? null, before, after);
     }
     default:
       return false;
+  }
+}
+
+// Fires once: the moment the leader first LANDS on `at` while the other side is
+// still below it. Comparing against the pre-point score is what makes it once.
+function leaderLandsOn(at: number | null, before: Pair, after: Pair): boolean {
+  if (at == null) return false;
+  const hi = Math.max(after[0], after[1]);
+  const lo = Math.min(after[0], after[1]);
+  const hiBefore = Math.max(before[0], before[1]);
+  return hi === at && lo < at && hiBefore < at;
+}
+
+const flipPair = (sv: ServeState, side: Side) => {
+  sv.pairFlip = { ...sv.pairFlip, [side]: !sv.pairFlip?.[side] };
+};
+
+/**
+ * ITTF 2.13.6: in the last possible game of a doubles match, the pair due next to
+ * receive changes its order when one pair first reaches 5 (the change-of-ends score).
+ * Independent of the console's change-ends setting - it is a serving rule.
+ */
+function deciderReceiverSwitch(spec: ServeSpec, lv: LevelSpec, state: KernelState, before: Pair, inDecider: boolean): void {
+  if (spec.resolver !== 'ttPairCycle' || !inDecider) return;
+  if (leaderLandsOn(lv.switchEndsAt ?? null, before, state.score[state.pointLevel])) {
+    flipPair(state.serve, other(state.serve.side));
   }
 }
 
@@ -620,6 +660,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
   switch (ev.t) {
     case 'let':
     case 'fault':
+    case 'card':
       // Neither scores nor moves the serve. Recorded for the timeline and the stats.
       return { state, effect: base };
 
@@ -668,6 +709,10 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       // A nil-magnitude ACTION does not move the serve either. A dig, a block that
       // did not win the rally, a card - none of them ends a rally, so none of them
       // hands the serve over.
+      // Badminton doubles: a pair swaps courts only when it scores on its own serve.
+      if (scores && spec.resolver === 'bwfSingleServer' && rallyWinner === serverSide) {
+        flipPair(state.serve, rallyWinner);
+      }
       if (magnitude > 0) {
         moveServe(format, spec, state, rallyWinner, scores);
         state.serve.courtHalf = courtHalfFor(spec, state, state.score[state.pointLevel]);
@@ -675,9 +720,25 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       if (scores) {
         base.switchEnds = shouldSwitchEnds(format, state, lv, before, base.inDecider);
         state.switchEnds = base.switchEnds;
+        deciderReceiverSwitch(spec, lv, state, before, base.inDecider);
         base.unitsWon = cascade(format, state, state.pointLevel);
       }
       break;
+    }
+
+    case 'switchPairServer': {
+      // Only before the first rally of a game.
+      const sv = state.serve;
+      if (state.unitPoints > 0 || sv.turns > 0 || sv.turnCount > 0) return { state: prev, effect: base };
+      if (spec.resolver === 'ttPairCycle' && !ev.side) {
+        flipPair(sv, 'A');
+        flipPair(sv, 'B');
+      } else if (spec.resolver === 'bwfSingleServer' && ev.side) {
+        flipPair(sv, ev.side);
+      } else {
+        return { state: prev, effect: base };
+      }
+      return { state, effect: base };
     }
 
     case 'penalty': {
@@ -688,9 +749,17 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       state.unitPoints += 1;
       state.totalPoints += 1;
       base.scored = ev.side;
+      // Under rally scoring the serve moves as if the awarded side won the rally: it
+      // takes the serve in badminton, and the point counts in table tennis's 2-serve turn.
+      // Side-out formats keep the serve where it was - only the score changes.
+      if (spec.pointScoring === 'rally') {
+        if (spec.resolver === 'bwfSingleServer' && ev.side === serverSide) flipPair(state.serve, ev.side);
+        moveServe(format, spec, state, ev.side, true);
+      }
       state.serve.courtHalf = courtHalfFor(spec, state, state.score[state.pointLevel]);
       base.switchEnds = shouldSwitchEnds(format, state, lv, before, base.inDecider);
       state.switchEnds = base.switchEnds;
+      deciderReceiverSwitch(spec, lv, state, before, base.inDecider);
       base.unitsWon = cascade(format, state, state.pointLevel);
       break;
     }
@@ -853,7 +922,10 @@ function applyCap(format: ScoringFormat, state: KernelState): { unitsWon: Finish
   // A units-decided format (racquet sports: sets, games) has no such banked
   // total to add in - the level in progress IS the whole comparison, exactly
   // as before.
-  const [a, b] = isAggregate(format) ? aggregateScore(state) : state.score[at];
+  // A units-decided match compares from the top down: sets, then games, then points in
+  // the game under way. A side a game up leads, whoever leads the live game.
+  const [a, b] = isAggregate(format) ? aggregateScore(state) : leadingScore(state, at);
+  const live = state.score[at];
 
   const settle = (): { unitsWon: FinishedUnit[] } => {
     if (a === b) {
@@ -866,7 +938,10 @@ function applyCap(format: ScoringFormat, state: KernelState): { unitsWon: Finish
       return { unitsWon: [] };
     }
     const lead: Side = a > b ? 'A' : 'B';
-    const units = cascade(format, state, at, lead);
+    // The game under way goes to the leader only if they lead it too; otherwise it
+    // stays unfinished rather than being recorded as won from behind.
+    const liveLead = live[0] === live[1] ? null : live[0] > live[1] ? 'A' : 'B';
+    const units = isAggregate(format) || liveLead === lead ? cascade(format, state, at, lead) : [];
     if (!state.ended) { state.ended = true; state.outcome = 'win'; state.winner = lead; }
     state.reason = 'cap';
     return { unitsWon: units };
@@ -882,6 +957,15 @@ function applyCap(format: ScoringFormat, state: KernelState): { unitsWon: Finish
     default:
       return { unitsWon: [] };
   }
+}
+
+/** The first level, from the top, where the sides differ - or the live points if none do. */
+function leadingScore(state: KernelState, at: number): Pair {
+  for (let i = state.score.length - 1; i > at; i--) {
+    const s = state.score[i];
+    if (s[0] !== s[1]) return s;
+  }
+  return state.score[at];
 }
 
 // ---- fold ------------------------------------------------------------------

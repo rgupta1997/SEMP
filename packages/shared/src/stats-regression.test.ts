@@ -361,10 +361,10 @@ describe('2. what one match produces', () => {
     expect(n(sides.B, 'faults'), 'the receiver was charged with the server\'s fault').toBe(0);
   });
 
-  it('2.9 a retirement is recorded against both sides, a walkover against one', () => {
+  it('2.9 a retirement is recorded against the side that retired, a walkover against one', () => {
     const r = deriveRacquetStats(tt, [...pts('A', 4),
       { t: 'end', outcome: 'win', reason: 'retired', winner: 'A' }], {});
-    expect(n(r.sides.A, 'retirements')).toBe(1);
+    expect(n(r.sides.A, 'retirements')).toBe(0);
     expect(n(r.sides.B, 'retirements')).toBe(1);
 
     const w = deriveRacquetStats(tt, [{ t: 'end', outcome: 'win', reason: 'walkover', winner: 'B' }], {});

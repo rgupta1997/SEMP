@@ -70,6 +70,8 @@ export interface RallyRow {
     by?: string;
     /** `expedite` only: the ball was in play, so that rally was replayed. */
     inRally?: boolean;
+    /** Misconduct: a yellow warning, or the red card behind a conduct point. */
+    card?: 'yellow' | 'red';
   };
 }
 
@@ -78,12 +80,14 @@ const LABELS: Record<string, string> = {
   let: 'Let',
   fault: 'Fault',
   penalty: 'Conduct point',
+  card: 'Yellow card',
   awardServe: 'Serve awarded',
   awardUnit: 'Unit awarded',
   adjust: 'Score corrected',
   setServe: 'Serve corrected',
   capFired: 'Time up',
   expedite: 'Expedite system',
+  switchPairServer: 'Doubles order changed',
   clockPause: 'Clock paused',
   clockStart: 'Clock resumed',
   end: 'Match ended',
@@ -116,12 +120,14 @@ export function rallyLogToRows(
     const next = foldRally(format, log.slice(0, i + 1), first).state;
     state = next;
 
-    const side: Side | null = 'side' in ev && ev.side ? (ev.side as Side) : null;
+    // A warning card names the side it was given against; it scores nothing.
+    const side: Side | null = 'side' in ev && ev.side ? (ev.side as Side) : ev.t === 'card' ? ev.against : null;
+    const card = ev.t === 'card' ? ev.card : ev.t === 'penalty' ? ev.card : undefined;
     rows.push({
       rubber_key: opts.rubberKey ?? null,
       team_side: eff.scored ?? side,
       event_key: ev.t,
-      label: LABELS[ev.t] ?? ev.t,
+      label: card === 'red' ? 'Red card' : LABELS[ev.t] ?? ev.t,
       points: eff.scored ? 1 : 0,
       player_user_id: resolved?.server ?? null,
       second_user_id: resolved?.receiver ?? null,
@@ -143,6 +149,7 @@ export function rallyLogToRows(
         ...('reason' in ev && ev.reason ? { reason: String(ev.reason) } : {}),
         ...('by' in ev && ev.by ? { by: String(ev.by) } : {}),
         ...(ev.t === 'expedite' && ev.inRally ? { inRally: true } : {}),
+        ...(card ? { card } : {}),
       },
     });
   });
@@ -172,13 +179,16 @@ export function rowsToRallyLog(rows: Array<Pick<RallyRow, 'event_key' | 'team_si
           return side ? { t: 'point', side } : null;
         case 'let': return { t: 'let' };
         case 'fault': return side ? { t: 'fault', side } : null;
-        case 'penalty': return side ? { t: 'penalty', side, reason: r.meta?.reason } : null;
+        case 'penalty':
+          return side ? { t: 'penalty', side, reason: r.meta?.reason, ...(r.meta?.card === 'red' ? { card: 'red' as const } : {}) } : null;
+        case 'card': return side ? { t: 'card', card: 'yellow', against: side, reason: r.meta?.reason } : null;
         case 'awardServe': return side ? { t: 'awardServe', side, reason: r.meta?.reason } : null;
         case 'awardUnit': return side ? { t: 'awardUnit', side, reason: r.meta?.reason } : null;
         case 'setServe': return side ? { t: 'setServe', side, serverNo: r.meta?.serverNo, reason: r.meta?.reason } : null;
         case 'capFired': return { t: 'capFired' };
         case 'expedite':
           return { t: 'expedite', reason: r.meta?.reason === 'request' ? 'request' : 'time', inRally: !!r.meta?.inRally };
+        case 'switchPairServer': return side ? { t: 'switchPairServer', side } : { t: 'switchPairServer' };
         case 'clockPause': return { t: 'clockPause' };
         case 'clockStart': return { t: 'clockStart' };
         case 'end':

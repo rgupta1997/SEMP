@@ -44,23 +44,23 @@ const other = (s: Side): Side => (s === 'A' ? 'B' : 'A');
  * BADMINTON, BWF 21-point. One server per side. The service court comes from the
  * SERVING side's score parity - even is right, odd is left - and the two partners
  * swap places only when their own side wins a point on its own serve. So the same
- * score can name either partner depending on history, which is exactly why this
- * cannot be a formula over the score alone: we replay the parity from the point
- * count instead.
+ * score can name either partner depending on history: the kernel keeps each pair's
+ * courts in `serve.pairFlip`, flipped on every point a pair wins on its own serve.
  */
 function bwfSingleServer(state: KernelState, pair: Pairing): ResolvedServer {
   const side = state.serve.side;
   const people = pair[side];
   const half = state.serve.courtHalf;
   if (!isDoubles(people)) return { server: people[0] ?? null, receiver: null, courtHalf: half };
-  // Parity picks right/left; the slot lookup turns that into a person. The starting
-  // arrangement puts the nominated first server on the right at 0-0 (even).
-  const rightPlayer = people[0];
-  const leftPlayer = people[1];
-  const server = half === 'left' ? leftPlayer : rightPlayer;
-  // The receiver is the opponent standing diagonally opposite.
+  // At 0-0 the first-listed player of each pair stands in the right court.
+  const inCourt = (s: Side, h: 'right' | 'left' | null) => {
+    const flip = state.serve.pairFlip?.[s] ? 1 : 0;
+    return pair[s][((h === 'left' ? 1 : 0) + flip) % 2] ?? null;
+  };
+  const server = inCourt(side, half);
+  // The receiver is the opponent in the diagonally opposite court - the same-named one.
   const opp = pair[other(side)];
-  const receiver = isDoubles(opp) ? (half === 'left' ? opp[1] : opp[0]) : (opp[0] ?? null);
+  const receiver = isDoubles(opp) ? inCourt(other(side), half) : (opp[0] ?? null);
   return { server, receiver, courtHalf: half, note: half ? `${server} to serve from the ${half} court` : undefined };
 }
 
@@ -121,13 +121,16 @@ function ttPairCycle(state: KernelState, pair: Pairing, format: ScoringFormat): 
   // Which serving turn we are in, counted by the kernel as the serve changes hands -
   // so the one-serve-each phase (10-10, expedite) keeps the rotation, which dividing
   // points by the base `every` did not. Both sides alternate, so a side's own turn is half.
+  // A flipped side starts from its second-listed partner (a new first server, or the
+  // decider's switch at 5); the cycle and "receiver serves next" are unchanged.
+  const flip = (s: Side) => (state.serve.pairFlip?.[s] ? 1 : 0);
   const ownBlock = Math.floor(state.serve.turns / 2);
-  const server = people[ownBlock % 2];
+  const server = people[(ownBlock + flip(side)) % 2];
   const opp = pair[other(side)];
   // The receiver is the NEXT turn's server (A1 > B1 > A2 > B2): the other side's
   // player at the next turn's block.
   const nextBlock = Math.floor((state.serve.turns + 1) / 2);
-  const receiver = isDoubles(opp) ? opp[nextBlock % 2] : (opp[0] ?? null);
+  const receiver = isDoubles(opp) ? opp[(nextBlock + flip(other(side))) % 2] : (opp[0] ?? null);
   return { server, receiver, courtHalf: 'right' };
 }
 

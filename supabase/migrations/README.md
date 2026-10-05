@@ -279,3 +279,9 @@ Adds six integer counters (default 0) to `racquet_match_lines` for the table ten
 expedite tiles: `expedite_matches`, `expedite_wins`, `expedite_points_played`,
 `expedite_points_won`, `expedite_return_wins`, `expedite_return_losses`. Applied with
 the same runner; all six statements succeeded.
+
+## Applied 2026-10-05 — `20261005000003_clutch_stats`
+
+Adds nine integer counters (default 0) to `racquet_match_lines` for pressure stats:
+game / match points played, won, faced and saved, and `comeback_games`. Applied with
+the same runner; all nine statements succeeded.

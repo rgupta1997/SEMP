@@ -1076,7 +1076,12 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
     // legitimate draw. The deck no longer offers it, and this makes it unreachable
     // even if another caller asks.
     const reallyDone = done && env.ended;
-    const st = reallyDone
+    // A walkover from the deck is saved exactly like the Walkover button's: its own
+    // status and no scoreline, so the record never shows a match nobody played.
+    const walkover = reallyDone && state.reason === 'walkover';
+    const st = walkover
+      ? 'walkover'
+      : reallyDone
       ? 'completed'
       : (status === 'scheduled' || status === 'completed' || status === 'confirmed' ? 'live' : status);
     const winner_team_id = !reallyDone || env.winner === null
@@ -1105,8 +1110,8 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
           format: (live?.live_state as any)?.format ?? format,
         },
         live_log: rallyTimeline(format, nextLog, firstServer, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
-        home_score: env.headline[0],
-        away_score: env.headline[1],
+        home_score: walkover ? null : env.headline[0],
+        away_score: walkover ? null : env.headline[1],
         status: st,
         winner_team_id,
       },
@@ -1347,6 +1352,7 @@ function cricketTimeline(state: CricketState, homeName: string, awayName: string
 /** Readable text for the non-rally events in the saved match timeline. */
 const RALLY_EVENT_TEXT: Record<string, string> = {
   expedite: 'Expedite system in',
+  switchPairServer: 'Doubles order changed for this game',
   clockPause: 'Game clock paused',
   clockStart: 'Game clock resumed',
 };
@@ -1357,9 +1363,14 @@ function rallyTimeline(format: any, log: RallyLog, firstServer: Side, homeName: 
   const out: LogEntry[] = [];
   trace.forEach((t, i) => {
     const unit = t.unitsWon.map((u) => `${u.label} ${u.score[0]}–${u.score[1]}`).join(' · ');
-    const txt = t.event.t === 'point'
-      ? (t.scored ? `Point to ${nameOf(t.scored)}` : `${nameOf((t.event as any).side)} won the rally — no point`)
-      : RALLY_EVENT_TEXT[t.event.t] ?? t.event.t;
+    const ev = t.event;
+    const other = (s: Side): Side => (s === 'A' ? 'B' : 'A');
+    const txt = ev.t === 'point'
+      ? (t.scored ? `Point to ${nameOf(t.scored)}` : `${nameOf(ev.side)} won the rally — no point`)
+      : ev.t === 'card' ? `Yellow card · ${nameOf(ev.against)}`
+      : ev.t === 'penalty' && ev.card === 'red' ? `Red card · ${nameOf(other(ev.side))} — point to ${nameOf(ev.side)}`
+      : ev.t === 'end' && ev.reason === 'disqualified' && ev.winner ? `${nameOf(other(ev.winner))} disqualified`
+      : RALLY_EVENT_TEXT[ev.t] ?? ev.t;
     out.unshift({
       t: `#${i + 1}`,
       team: t.scored ?? undefined,

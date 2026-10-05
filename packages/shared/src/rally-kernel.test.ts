@@ -193,12 +193,40 @@ describe('badminton, BWF 21', () => {
     expect(inG1.trace.some((t) => t.switchEnds)).toBe(false);
   });
 
-  it('names the partner on the correct service court in doubles', () => {
+  it('keeps the same server after winning on serve, now from the other court', () => {
     const pair = { A: ['Ann', 'Amy'], B: ['Bob', 'Ben'] };
     let s = initKernel(f, 'A');
-    expect(resolveServer(f, s, pair).server).toBe('Ann'); // 0-0, right court
+    expect(resolveServer(f, s, pair)).toMatchObject({ server: 'Ann', courtHalf: 'right' }); // 0-0
     s = step(f, s, { t: 'point', side: 'A' }).state;
-    expect(resolveServer(f, s, pair).server).toBe('Amy'); // 1-0, left court
+    expect(resolveServer(f, s, pair)).toMatchObject({ server: 'Ann', courtHalf: 'left' }); // 1-0
+  });
+
+  const pair = { A: ['a1', 'a2'], B: ['b1', 'b2'] };
+  const who = (log: RallyLog) => {
+    const r = resolveServer(f, foldRally(f, log, 'A').state, pair);
+    return `${r.server}>${r.receiver}`;
+  };
+  const rallies = (s: string): RallyLog => s.split('').map((side) => ({ t: 'point', side }) as RallyEvent);
+
+  it('doubles: partners swap courts only when their side scores on its own serve', () => {
+    expect(['', 'A', 'AA', 'AAB', 'AABB', 'AABBA'].map((s) => who(rallies(s)))).toEqual([
+      'a1>b1', // 0-0
+      'a1>b2', // 1-0: a1 keeps serving, now from the left
+      'a1>b1', // 2-0
+      'b2>a2', // 2-1: B never moved, so b2 is in the left court
+      'b2>a1', // 2-2: b2 keeps serving, now from the right
+      'a2>b1', // 3-2: B swapped once, so b1 is on the left
+    ]);
+  });
+
+  it('a new game starts from the listed order, and each pair may pick who starts', () => {
+    // A wins game 1 and serves first in game 2 from a1 / b1, whatever the courts were.
+    const g1 = rallies('A'.repeat(21));
+    expect(who(g1)).toBe('a1>b1');
+    expect(who([...g1, { t: 'switchPairServer', side: 'A' }])).toBe('a2>b1');
+    expect(who([...g1, { t: 'switchPairServer', side: 'A' }, { t: 'switchPairServer', side: 'B' }])).toBe('a2>b2');
+    // Not once the game is under way.
+    expect(who([...g1, ...rallies('B'), { t: 'switchPairServer', side: 'A' }])).toBe(who([...g1, ...rallies('B')]));
   });
 });
 
@@ -460,6 +488,35 @@ describe('manual intervention', () => {
   });
 });
 
+describe('misconduct', () => {
+  it('a conduct point moves the serve like a rally won: badminton hands it over', () => {
+    const f = fmtOf('bwf_official_3x21');
+    const s = foldRally(f, [{ t: 'penalty', side: 'B', card: 'red' }], 'A').state;
+    expect(s.score[0]).toEqual([0, 1]);
+    expect(s.serve.side).toBe('B');
+  });
+
+  it('table tennis: a conduct point counts in the 2-serve turn', () => {
+    const f = fmtOf('ittf_bo5_11');
+    const s = foldRally(f, [{ t: 'penalty', side: 'B' }, { t: 'point', side: 'A' }], 'A').state;
+    expect(s.serve.side).toBe('B');
+  });
+
+  it('a yellow card changes nothing on the scoreboard', () => {
+    const f = fmtOf('bwf_official_3x21');
+    const before = foldRally(f, points('A', 3), 'A').state;
+    const after = foldRally(f, [...points('A', 3), { t: 'card', card: 'yellow', against: 'B' }], 'A').state;
+    expect(after.score).toEqual(before.score);
+    expect(after.serve).toEqual(before.serve);
+  });
+
+  it('a disqualification ends the match for the other side', () => {
+    const f = fmtOf('bwf_official_3x21');
+    const s = foldRally(f, [...points('A', 3), { t: 'end', outcome: 'win', reason: 'disqualified', winner: 'B' }], 'A').state;
+    expect(s).toMatchObject({ ended: true, winner: 'B', reason: 'disqualified' });
+  });
+});
+
 describe('the buzzer', () => {
   it('gives a capped game to the leader', () => {
     const f = fmtOf('corp_bo3_11_timecap');
@@ -467,6 +524,20 @@ describe('the buzzer', () => {
     expect(r.state.ended).toBe(true);
     expect(r.state.winner).toBe('A');
     expect(r.state.reason).toBe('cap');
+  });
+
+  it('a side a game up wins at the buzzer, even trailing the game under way', () => {
+    const f = fmtOf('corp_bo3_11_timecap');
+    const r = foldRally(f, [...points('A', 11), ...points('B', 5), ...points('A', 3), { t: 'capFired' }]);
+    expect(r.state).toMatchObject({ ended: true, winner: 'A', reason: 'cap' });
+    // The unfinished game is not recorded as won by A from 3-5 down.
+    expect(r.state.finished.filter((u) => u.level === 0)).toHaveLength(1);
+  });
+
+  it('level on games, the live game decides', () => {
+    const f = fmtOf('corp_bo3_11_timecap');
+    const r = foldRally(f, [...points('A', 11), ...points('B', 11), ...points('B', 4), ...points('A', 2), { t: 'capFired' }]);
+    expect(r.state).toMatchObject({ ended: true, winner: 'B' });
   });
 
   it('records a draw when the format allows one and the scores are level', () => {
@@ -935,6 +1006,40 @@ describe('who serves and who receives in table tennis doubles', () => {
     }
     // Two serves each, so every pair of points shares a server and receiver.
     expect(seen.filter((_, i) => i % 2 === 0)).toEqual([['a1', 'b1'], ['b1', 'a2'], ['a2', 'b2'], ['b2', 'a1']]);
+  });
+
+  const who = (log: RallyLog) => {
+    const r = resolveServer(f, foldRally(f, log, 'A').state, pair);
+    return [r.server, r.receiver];
+  };
+  // Games alternate A, B, A, B, so game 5 is the decider at 2-2 and A serves first.
+  const toDecider: RallyLog = [...points('A', 11), ...points('B', 11), ...points('A', 11), ...points('B', 11)];
+
+  it('game 2: the first receiver is the player who served to the new first server', () => {
+    // Game 1 opened a1 > b1, so b1 serving first in game 2 receives from a1.
+    expect(who(points('A', 11))).toEqual(['b1', 'a1']);
+  });
+
+  it('game 2: choosing the other partner to serve first moves the receiver with it', () => {
+    const log: RallyLog = [...points('A', 11), { t: 'switchPairServer' }];
+    expect(who(log)).toEqual(['b2', 'a2']);
+    // Then "each receiver serves next" carries on: b2 > a2 > b1 > a1.
+    expect(who([...log, ...points('B', 2)])).toEqual(['a2', 'b1']);
+  });
+
+  it('the partner choice is refused once the game has started', () => {
+    expect(who([...points('A', 12), { t: 'switchPairServer' }])).toEqual(who(points('A', 12)));
+  });
+
+  it('decider: the receiving pair switches order when a pair reaches 5 (ITTF 2.13.6)', () => {
+    // 4-0: a2 serving to b2. The point to 5-0 makes b1 the receiver; b1 then serves to a1.
+    expect(who([...toDecider, ...points('A', 4)])).toEqual(['a2', 'b2']);
+    expect(who([...toDecider, ...points('A', 5)])).toEqual(['a2', 'b1']);
+    expect(who([...toDecider, ...points('A', 6)])).toEqual(['b1', 'a1']);
+  });
+
+  it('no switch at 5 in a game that is not the decider', () => {
+    expect(who(points('A', 5))).toEqual(['a2', 'b2']);
   });
 });
 

@@ -144,8 +144,60 @@ function TierRow({ r, ranking }: { r: TierRecord; ranking?: boolean }) {
   );
 }
 
+interface InsightItem { key: string; tone: 'strength' | 'weakness' | 'up' | 'down'; text: string }
+interface InsightReport {
+  enoughData: boolean;
+  strengths: InsightItem[]; weaknesses: InsightItem[]; trends: InsightItem[];
+  form: Array<'W' | 'L' | 'D'>;
+}
+
+/** Strengths, things to work on and trends, in plain words - what the numbers mean. */
+function InsightsCard({ userId, sportId }: { userId?: string; sportId: string }) {
+  const base = userId ? `/people/${userId}/sport-insights` : '/me/sport-insights';
+  const { data } = useApi<InsightReport | null>(`${base}?sport=${sportId}`);
+  if (!data) return null;
+  if (!data.enoughData) {
+    return (
+      <div style={{ fontSize: 12.5, color: 'var(--ink-4)', marginBottom: 12 }}>
+        Insights appear after a few more results.
+      </div>
+    );
+  }
+  const block = (title: string, items: InsightItem[], mark: (i: InsightItem) => string, colour: (i: InsightItem) => string) =>
+    items.length > 0 && (
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 4 }}>{title}</div>
+        {items.map((i) => (
+          <div key={i.key} style={{ display: 'flex', gap: 6, fontSize: 13, lineHeight: 1.45, marginBottom: 3 }}>
+            <span style={{ color: colour(i), fontWeight: 700 }}>{mark(i)}</span>
+            <span>{i.text}</span>
+          </div>
+        ))}
+      </div>
+    );
+  const good = 'var(--success, #059669)';
+  const bad = 'var(--danger, #e11d48)';
+  return (
+    <div style={{ border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px', marginBottom: 12, display: 'grid', gap: 10 }}>
+      {data.form.length > 0 && (
+        <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
+          Last {data.form.length}:{' '}
+          {data.form.map((r, n) => (
+            <b key={n} style={{ color: r === 'W' ? good : r === 'L' ? bad : 'var(--ink-4)', marginRight: 4 }}>{r}</b>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+        {block('Strengths', data.strengths, () => '✓', () => good)}
+        {block('Work on', data.weaknesses, () => '!', () => bad)}
+        {block('Trend', data.trends, (i) => (i.tone === 'up' ? '▲' : '▼'), (i) => (i.tone === 'up' ? good : bad))}
+      </div>
+    </div>
+  );
+}
+
 /** Who they play with and against. Fetched only when opened - most visits never ask. */
-function PeopleSection({ userId, sportId }: { userId?: string; sportId: string }) {
+function PeopleSection({ userId, sportId, view }: { userId?: string; sportId: string; view: PlayView }) {
   const [open, setOpen] = useState(false);
   const base = userId ? `/people/${userId}/sport-relations` : '/me/sport-relations';
   const { data, isLoading } = useApi<Relations>(open ? `${base}?sport=${sportId}` : null);
@@ -179,23 +231,23 @@ function PeopleSection({ userId, sportId }: { userId?: string; sportId: string }
       </div>
     );
   };
+  // Follows the All / Singles / Doubles tab above.
+  const shown = view === 'all' ? ['singles', 'doubles'] as const : [view] as const;
+  const any = !!data?.opponents.some((o) => (shown as readonly string[]).includes(o.position));
   return (
     <div style={{ marginTop: 12 }}>
       <button
         onClick={() => setOpen((v) => !v)}
         style={{ cursor: 'pointer', background: 'none', border: 'none', padding: 0, fontSize: 12.5, fontWeight: 600, color: 'var(--brand)' }}
       >
-        {open ? 'Hide' : 'Show'} partners &amp; head-to-head
+        {open ? 'Hide' : 'Show'} {view === 'singles' ? 'head-to-head' : 'partners & head-to-head'}
       </button>
-      {open && (isLoading ? <Spinner /> : !data || (!data.partners.length && !data.opponents.length) ? (
+      {open && (isLoading ? <Spinner /> : !any ? (
         <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 6 }}>
-          No named opponents yet - they appear once matches record who played.
+          No named opponents{view === 'all' ? '' : ` in ${view}`} yet - they appear once matches record who played.
         </div>
       ) : (
-        <>
-          {opponents('singles')}
-          {opponents('doubles')}
-        </>
+        <>{shown.map((p) => <div key={p}>{opponents(p)}</div>)}</>
       ))}
     </div>
   );
@@ -223,6 +275,8 @@ function SportCard({ s, userId }: { s: SportRecord; userId?: string }) {
         }
       />
       <CardBody>
+        {/* What the numbers mean, before the numbers - racquet sports only (the API says). */}
+        {!ranking && <InsightsCard userId={userId} sportId={s.sportId} />}
         {positions.length > 0 && (
           <div style={{ display: 'inline-flex', gap: 2, padding: 2, marginBottom: 10, borderRadius: 8, background: 'var(--line)' }}>
             {(['all', ...positions.map((p) => p.position)] as PlayView[]).map((v) => (
@@ -246,11 +300,11 @@ function SportCard({ s, userId }: { s: SportRecord; userId?: string }) {
         <div style={{ fontSize: 15.5 }}><Record r={shown.overall} ranking={ranking} /></div>
         <Medals r={shown.overall} />
         <Metrics metrics={shown.overall.metrics} />
-        {/* Serve and receive tiles are personal; in doubles the partner's are theirs. */}
+        {/* Doubles has both: pair tiles for the side, the rest personal. */}
         {view !== 'singles' && positions.some((p) => p.position === 'doubles')
           && shown.overall.metrics.some((m) => m.key === 'service_points_played') && (
           <div style={{ fontSize: 11.5, color: 'var(--ink-4)', marginTop: 6 }}>
-            Doubles: serve and receive tiles count only the serves you hit and the serves you had to return - your partner's are theirs.
+            Doubles: "Points your pair served / received" count the whole pair. The other serve and receive tiles count only your own serves and returns.
           </div>
         )}
 
@@ -272,7 +326,7 @@ function SportCard({ s, userId }: { s: SportRecord; userId?: string }) {
           </div>
         )}
 
-        {!ranking && <PeopleSection userId={userId} sportId={s.sportId} />}
+        {!ranking && <PeopleSection userId={userId} sportId={s.sportId} view={view} />}
 
         {view === 'all' && s.disciplines.length > 0 && (
           <div style={{ marginTop: 12 }}>

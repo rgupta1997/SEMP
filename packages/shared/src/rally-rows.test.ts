@@ -65,10 +65,11 @@ describe('the facts survive the round trip', () => {
 
   it('records who served each rally, which is the per-person fact in a doubles point', () => {
     const f = fmt('bwf_official_3x21');
-    const rows = rallyLogToRows(f, points('A', 2), { pairing: PAIR, firstServer: 'A' });
-    // Badminton parity: 0-0 is the right court (Ann), 1-0 the left (Amy).
-    expect(rows[0].player_user_id).toBe('ann');
-    expect(rows[1].player_user_id).toBe('amy');
+    const rows = rallyLogToRows(f, [...points('A', 2), ...points('B', 1)], { pairing: PAIR, firstServer: 'A' });
+    // Badminton: Ann serves from the right at 0-0 and keeps serving (from the left) at 1-0
+    // after winning on serve; B's first serve, at 2-1, is from the left court.
+    expect(rows.map((r) => r.player_user_id)).toEqual(['ann', 'ann', 'ann']);
+    expect(rows[2].meta.scoreAfter).toEqual([2, 1]);
   });
 
   it('flags the unit a rally belonged to', () => {

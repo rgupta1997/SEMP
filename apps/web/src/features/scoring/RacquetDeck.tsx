@@ -64,6 +64,8 @@ export function RacquetDeck(p: RacquetDeckProps) {
   // The switch-ends prompt is a one-shot: it fires on a single point and must not
   // re-appear on every re-render of that same state.
   const dismissed = useRef<number>(-1);
+  // Same one-shot for the interval reminder (a reminder only - nothing is recorded).
+  const [intervalDismissed, setIntervalDismissed] = useState(-1);
   // Mirrors the deck so the scorer's left/right matches the court after a change of ends.
   const [flipped, setFlipped] = useState(false);
   // Who serves (and, in doubles, who serves/receives first) is settled before the first
@@ -175,6 +177,12 @@ export function RacquetDeck(p: RacquetDeckProps) {
   const label = (n: number) => pointLabel(lv, n);
 
   const resolved = p.pairing ? resolveServer(format, state, p.pairing) : null;
+  const pairCycle = serve.resolver === 'ttPairCycle';
+  const bwfPairs = serve.resolver === 'bwfSingleServer';
+  // Game 1's order is set in the start panel; later games are picked at 0-0.
+  const choosePairServer = (pairCycle || bwfPairs) && doubles && !!p.pairing && !state.ended
+    && state.finished.some((u) => u.level === 0)
+    && state.unitPoints === 0 && state.serve.turns === 0 && state.serve.turnCount === 0;
   const call = serve.movement === 'none' ? null : serveCall(format, state, doubles);
   // Two kinds of change: mid-game (the decider midpoint) and after a finished game.
   // Read off the last PLAYED event, so pausing the clock does not hide the prompt.
@@ -185,7 +193,14 @@ export function RacquetDeck(p: RacquetDeckProps) {
   const showSwitch = (!!lastEffect?.switchEnds || afterUnit) && dismissed.current !== playIdx;
   const switchText = afterUnit
     ? `Change ends before the next ${lastEffect!.unitsWon[0].label.toLowerCase()}`
-    : `Change ends · midpoint of the deciding ${lv.label.toLowerCase()}`;
+    : `Change ends · midpoint of the deciding ${lv.label.toLowerCase()}`
+      // ITTF 2.13.6: the receiving pair also switches order here.
+      + (pairCycle && doubles && resolved?.receiver ? ` · receivers switch: ${resolved.receiver} now receives` : '');
+
+  // Interval reminders, where the format's rules sheet sets them (BWF: 60s when the
+  // leader reaches 11, 120s between games). Nothing is recorded.
+  const interval = intervalDue(format, state, lastEffect);
+  const showInterval = !!interval && intervalDismissed !== playIdx;
 
   const timing = useMemo(() => rallyTiming(format, log, firstServer), [format, log, firstServer]);
 
@@ -225,12 +240,26 @@ export function RacquetDeck(p: RacquetDeckProps) {
 
       {showSwitch && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-900 dark:bg-amber-500/15 dark:text-amber-300">
-          <span className="mr-auto">{switchText}</span>
+          <span className="mr-auto">
+            {switchText}
+            {/* Same moment as an interval (between games, or 11 in the decider): one banner. */}
+            {showInterval && <> · {interval!.label} <Countdown from={lastEffect?.event.at} seconds={interval!.seconds} /></>}
+          </span>
           <Button size="sm" variant="outline"
-            onClick={() => { dismissed.current = playIdx; setShowTools(false); setFlipped((f) => !f); }}>
+            onClick={() => { dismissed.current = playIdx; setIntervalDismissed(playIdx); setShowTools(false); setFlipped((f) => !f); }}>
             Swap sides on screen
           </Button>
-          <Button size="sm" variant="subtle" onClick={() => { dismissed.current = playIdx; setShowTools(false); }}>
+          <Button size="sm" variant="subtle" onClick={() => { dismissed.current = playIdx; setIntervalDismissed(playIdx); setShowTools(false); }}>
+            Dismiss
+          </Button>
+        </div>
+      )}
+      {!showSwitch && showInterval && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-sky-100 px-3 py-2 text-sm font-semibold text-sky-900 dark:bg-sky-500/15 dark:text-sky-200">
+          <span className="mr-auto">
+            {interval!.label} <Countdown from={lastEffect?.event.at} seconds={interval!.seconds} />
+          </span>
+          <Button size="sm" variant="subtle" onClick={() => setIntervalDismissed(playIdx)}>
             Dismiss
           </Button>
         </div>
@@ -327,11 +356,49 @@ export function RacquetDeck(p: RacquetDeckProps) {
       {serve.movement !== 'none' && !state.ended && (
         <div className="text-center text-xs text-slate-500 dark:text-slate-400">
           <span className="font-semibold text-slate-700 dark:text-slate-200">{resolved?.server ?? nameOf(state.serve.side)}</span> to serve
-          {resolved?.courtHalf ? ` from the ${resolved.courtHalf} court` : ''}
+          {(pairCycle || bwfPairs) && doubles && resolved?.receiver && (
+            <> to <span className="font-semibold text-slate-700 dark:text-slate-200">{resolved.receiver}</span></>
+          )}
+          {resolved?.courtHalf && !pairCycle ? ` from the ${resolved.courtHalf} court` : ''}
           {serve.movement === 'handOut' && doubles ? ` · server ${state.serve.serverNo}` : ''}
           {serveTurn && <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">{serveTurn}</span>}
         </div>
       )}
+
+      {/* Games 2+, at 0-0. Table tennis: the serving pair picks, the receiver follows
+          (ITTF 2.13.5). Badminton: each pair picks who starts in the right court. */}
+      {choosePairServer && (() => {
+        const servingSide = state.serve.side;
+        const receivingSide: Side = servingSide === 'A' ? 'B' : 'A';
+        const picker = (side: Side, question: string, current: string | null | undefined) => (
+          <div key={side} className="flex flex-wrap items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <span>{question}</span>
+            {/* Alphabetical, so picking moves only the highlight. */}
+            {[...p.pairing![side]].sort((a, b) => a.localeCompare(b)).map((name) => (
+              <button key={name} type="button" disabled={p.disabled}
+                className={cn(
+                  'rounded-lg border-2 px-3 py-1 text-sm font-semibold transition',
+                  name === current
+                    ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300'
+                    : 'border-slate-200 text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:text-slate-200',
+                )}
+                onClick={() => {
+                  if (name !== current) push(bwfPairs ? { t: 'switchPairServer', side } : { t: 'switchPairServer' });
+                }}>
+                {name}
+              </button>
+            ))}
+          </div>
+        );
+        const unit = lv.label.toLowerCase();
+        return (
+          <div className="grid gap-1.5">
+            {picker(servingSide, `Who serves first for ${nameOf(servingSide)} this ${unit}?`, resolved?.server)}
+            {bwfPairs && p.pairing![receivingSide].length > 1
+              && picker(receivingSide, `Who receives first for ${nameOf(receivingSide)}?`, resolved?.receiver)}
+          </div>
+        );
+      })()}
 
       {/* ── The two buttons that matter ───────────────────────────────────── */}
       {state.ended && !rescoring ? (
@@ -718,6 +785,15 @@ function ToolPanel({ format, state, log, homeName, awayName, doubles, firstServe
     if (ok) onEvent({ t: 'end', outcome: 'win', reason: 'walkover', winner: side });
   };
 
+  const disqualify = async (side: Side) => {
+    const ok = await confirmDialog({
+      title: `Disqualify ${nameOf(side)}?`,
+      message: `The match is awarded to ${nameOf(side === 'A' ? 'B' : 'A')}. The score so far is kept on the record.`,
+      confirmLabel: 'Disqualify',
+    });
+    if (ok) onEvent({ t: 'end', outcome: 'win', reason: 'disqualified', winner: side === 'A' ? 'B' : 'A' });
+  };
+
   const awardUnit = async (side: Side) => {
     const ok = await confirmDialog({
       title: `Award this ${lv.label.toLowerCase()} to ${nameOf(side)}?`,
@@ -758,13 +834,28 @@ function ToolPanel({ format, state, log, homeName, awayName, doubles, firstServe
         </div>
       )}
 
-      {format.penaltyEvents !== 'off' && !state.ended && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-slate-500 dark:text-slate-400">Conduct point to:</span>
-          <Button size="sm" variant="subtle" onClick={() => onEvent({ t: 'penalty', side: 'A', reason: 'conduct' })}>{homeName}</Button>
-          <Button size="sm" variant="subtle" onClick={() => onEvent({ t: 'penalty', side: 'B', reason: 'conduct' })}>{awayName}</Button>
-        </div>
-      )}
+      {/* Misconduct, by card: yellow warns, red gives the opponent a point, the last
+          one ends the match (badminton's black card). Off for self-scored formats. */}
+      {format.penaltyEvents !== 'off' && !state.ended && (['A', 'B'] as Side[]).map((side) => {
+        const opp: Side = side === 'A' ? 'B' : 'A';
+        return (
+          <div key={side} className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-500 dark:text-slate-400">Card for {nameOf(side)}:</span>
+            <Button size="sm" variant="subtle" className="border-l-4 border-l-yellow-400"
+              onClick={() => onEvent({ t: 'card', card: 'yellow', against: side, reason: 'warning' })}>
+              Yellow · warning
+            </Button>
+            <Button size="sm" variant="subtle" className="border-l-4 border-l-rose-500"
+              onClick={() => onEvent({ t: 'penalty', side: opp, card: 'red', reason: 'misconduct' })}>
+              Red · point to {nameOf(opp)}
+            </Button>
+            <Button size="sm" variant="subtle" className="border-l-4 border-l-slate-900 dark:border-l-slate-100"
+              onClick={() => disqualify(side)}>
+              {format.sport === 'badminton' ? 'Black · disqualify' : 'Disqualify'}
+            </Button>
+          </div>
+        );
+      })}
 
       {!state.ended && (
         <div className="flex flex-wrap items-center gap-2">
@@ -825,6 +916,45 @@ function ToolPanel({ format, state, log, homeName, awayName, doubles, firstServe
       )}
     </Card>
   );
+}
+
+interface IntervalRules { intervalAt?: number; intervalSeconds?: number; betweenGamesSeconds?: number }
+
+/**
+ * The break the last point earned, if any: mid-game when the side that just scored
+ * first reaches `intervalAt` (once - the other side is still below it), or between games.
+ */
+function intervalDue(
+  format: ScoringFormat, state: KernelState, last: ReturnType<typeof foldRally>['trace'][number] | undefined,
+): { label: string; seconds: number } | null {
+  const rules = (format.rulesSheet ?? {}) as IntervalRules;
+  if (!last || state.ended || (last.event.t !== 'point' && last.event.t !== 'penalty')) return null;
+  if (last.unitsWon.some((u) => u.level === 0)) {
+    const s = rules.betweenGamesSeconds;
+    return s ? { label: `${Math.round(s / 60)}-minute break`, seconds: s } : null;
+  }
+  if (!rules.intervalAt || !last.scored || state.pointLevel !== 0) return null;
+  const sc = state.score[0];
+  const mine = sc[last.scored === 'A' ? 0 : 1];
+  const theirs = sc[last.scored === 'A' ? 1 : 0];
+  if (mine !== rules.intervalAt || theirs >= rules.intervalAt) return null;
+  const s = rules.intervalSeconds ?? 60;
+  return { label: `Interval · ${s} seconds`, seconds: s };
+}
+
+/** Time left in a break, counted from the point that started it. */
+function Countdown({ from, seconds }: { from?: string; seconds: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  // Keyed in without times: no countdown, just the length.
+  if (!from) return null;
+  const left = Math.max(0, seconds - Math.floor((now - Date.parse(from)) / 1000));
+  return left > 0
+    ? <span className="font-mono tabular-nums">{Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')} left</span>
+    : <span>- time is up, resume play</span>;
 }
 
 /** Score in the level's own display labels (tennis 15/30/40). */
@@ -890,17 +1020,26 @@ function describe(t: ReturnType<typeof foldRally>['trace'][number], nameOf: (s: 
         : `${nameOf(ev.side)} won the rally — side-out, no point`;
     case 'expedite':
       return `Expedite system in — ${ev.reason === 'request' ? 'both players asked' : 'time limit'}${ev.inRally ? ' · rally replayed' : ''}`;
+    case 'switchPairServer':
+      return ev.side ? `${nameOf(ev.side)}: partners swap starting courts` : 'Other partner serves first this game';
     case 'clockPause': return 'Game clock paused';
     case 'clockStart': return 'Game clock resumed';
     case 'let': return 'Let — rally replayed';
     case 'fault': return `Fault · ${nameOf(ev.side)}`;
-    case 'penalty': return `Conduct point to ${nameOf(ev.side)}`;
+    case 'penalty':
+      return ev.card === 'red'
+        ? `Red card · ${nameOf(ev.side === 'A' ? 'B' : 'A')} — point to ${nameOf(ev.side)}`
+        : `Conduct point to ${nameOf(ev.side)}`;
+    case 'card': return `Yellow card · ${nameOf(ev.against)} — warning`;
     case 'awardServe': return `Serve awarded to ${nameOf(ev.side)}`;
     case 'awardUnit': return `Unit awarded to ${nameOf(ev.side)}${ev.reason ? ` · ${ev.reason}` : ''}`;
     case 'adjust': return `${ev.delta > 0 ? '+' : ''}${ev.delta} ${nameOf(ev.side)}${ev.reason ? ` · ${ev.reason}` : ''}`;
     case 'setServe': return `Serve corrected to ${nameOf(ev.side)}${ev.serverNo ? ` (server ${ev.serverNo})` : ''}`;
     case 'capFired': return 'Time up';
-    case 'end': return `${ev.reason}${ev.winner ? ` — ${nameOf(ev.winner)}` : ''}`;
+    case 'end':
+      return ev.reason === 'disqualified' && ev.winner
+        ? `${nameOf(ev.winner === 'A' ? 'B' : 'A')} disqualified — match to ${nameOf(ev.winner)}`
+        : `${ev.reason}${ev.winner ? ` — ${nameOf(ev.winner)}` : ''}`;
     default: return '';
   }
 }

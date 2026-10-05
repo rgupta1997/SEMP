@@ -178,6 +178,21 @@ const RACQUET_CORE: StatMetric[] = [
   rally('deuce_points_played', 'Deuce points', 'DcP'),
   rate('deuce_win_pct', 'Deuce win %', 'Dc%', ['deuce_points_won', 'deuce_points_played']),
 
+  // Pressure: a rally that would win the game (or match) for one side.
+  rally('game_points_played', 'Game points', 'GPP', { hidden: true }),
+  rally('game_points_won', 'Game points converted', 'GPW', { hidden: true }),
+  rate('game_point_conversion_pct', 'Game point conversion %', 'GP%', ['game_points_won', 'game_points_played']),
+  rally('game_points_faced', 'Game points faced', 'GPF', { hidden: true }),
+  rally('game_points_saved', 'Game points saved', 'GPS', { hidden: true }),
+  rate('game_point_save_pct', 'Game point save %', 'GS%', ['game_points_saved', 'game_points_faced']),
+  rally('match_points_played', 'Match points', 'MPP', { hidden: true }),
+  rally('match_points_won', 'Match points converted', 'MPW', { hidden: true }),
+  rate('match_point_conversion_pct', 'Match point conversion %', 'MP%', ['match_points_won', 'match_points_played']),
+  rally('match_points_faced', 'Match points faced', 'MPF', { hidden: true }),
+  rally('match_points_saved', 'Match points saved', 'MPS'),
+  // Won a game after trailing by COMEBACK_GAME_DEFICIT or more in it.
+  rally('comeback_games', 'Games won from behind', 'GFB'),
+
   rally('longest_streak', 'Longest point streak', 'Strk', { aggregate: 'max', headline: true }),
   rally('comeback_wins', 'Comeback wins', 'CB', { headline: true }),
   rally('whitewashes', 'Straight-games wins', 'SGW'),
@@ -588,6 +603,8 @@ export function deriveRacquetStats(
   let firstUnitWinner: Side | null = null;
   let personalReturns = false;
   let expediteSeen = false;
+  // Biggest deficit each side has faced in the game under way (for comeback games).
+  let deficit: Record<Side, number> = { A: 0, B: 0 };
 
   for (const ev of log) {
     const before = state;
@@ -607,6 +624,9 @@ export function deriveRacquetStats(
     // Only meaningful where the serve is locked to a unit, i.e. tennis.
     const bpSide = breakPointSide(format, before, lv, spec);
 
+    // Game / match point, from the kernel itself: would winning this rally settle it?
+    const onPoint = ev.t === 'point' && !before.ended ? pressureBefore(format, before) : null;
+
     const r = step(format, before, ev);
     state = r.state;
     const eff = r.effect;
@@ -622,7 +642,8 @@ export function deriveRacquetStats(
     }
 
     if (ev.t === 'end') {
-      if (ev.reason === 'retired') { bump(sides.A, 'retirements'); bump(sides.B, 'retirements'); }
+      // Only the side that retired - the winner is the other one.
+      if (ev.reason === 'retired' && ev.winner) bump(sides[ev.winner === 'A' ? 'B' : 'A'], 'retirements');
       if (ev.reason === 'walkover' && ev.winner) bump(sides[ev.winner], 'walkovers_received');
       continue;
     }
@@ -657,6 +678,12 @@ export function deriveRacquetStats(
         }
       }
 
+      // Deficits in the game under way, read after the point lands.
+      const sc = state.score[state.pointLevel];
+      if (!eff.unitsWon.length) {
+        deficit = { A: Math.max(deficit.A, sc[1] - sc[0]), B: Math.max(deficit.B, sc[0] - sc[1]) };
+      }
+
       if (underExpedite) {
         bump(sides.A, 'expedite_points_played');
         bump(sides.B, 'expedite_points_played');
@@ -682,6 +709,26 @@ export function deriveRacquetStats(
       if (streak[w] > (sides[w].longest_streak ?? 0)) sides[w].longest_streak = streak[w];
     }
 
+    // Game and match points: counted on every rally they were on, scored or not (a
+    // side-out under server-only scoring is a saved game point too).
+    if (onPoint) {
+      const settled = eff.unitsWon.length > 0;
+      for (const s of ['A', 'B'] as Side[]) {
+        const o: Side = s === 'A' ? 'B' : 'A';
+        const kind = onPoint[s];
+        if (!kind) continue;
+        const converted = settled && eff.unitsWon[0].winner === s;
+        bump(sides[s], 'game_points_played');
+        bump(sides[o], 'game_points_faced');
+        if (converted) bump(sides[s], 'game_points_won'); else bump(sides[o], 'game_points_saved');
+        if (kind === 'match') {
+          bump(sides[s], 'match_points_played');
+          bump(sides[o], 'match_points_faced');
+          if (converted && state.ended) bump(sides[s], 'match_points_won'); else bump(sides[o], 'match_points_saved');
+        }
+      }
+    }
+
     // A DECIDER IS THE DECIDING UNIT OF THE MATCH, whatever that unit is called.
     //
     // In a two-level sport (table tennis, badminton, pickleball, squash) that is the
@@ -701,6 +748,8 @@ export function deriveRacquetStats(
         bump(sides[l], 'games_lost');
         if (firstUnitWinner === null) firstUnitWinner = w;
         streak = { A: 0, B: 0 };
+        if (deficit[w] >= COMEBACK_GAME_DEFICIT) bump(sides[w], 'comeback_games');
+        deficit = { A: 0, B: 0 };
       } else if (format.levels[u.level]?.key === 'set') {
         bump(sides[w], 'sets_won');
         bump(sides[l], 'sets_lost');
@@ -746,6 +795,20 @@ export function deriveRacquetStats(
   }
 
   return { sides, players: attribute(sides, perPerson, opts.pairing) };
+}
+
+/** A game won after trailing by this many points in it counts as won from behind. */
+export const COMEBACK_GAME_DEFICIT = 3;
+
+/** For each side: would winning the next rally take the game ('game') or the match ('match')? */
+function pressureBefore(format: ScoringFormat, before: KernelState): Record<Side, 'game' | 'match' | null> {
+  const out: Record<Side, 'game' | 'match' | null> = { A: null, B: null };
+  for (const s of ['A', 'B'] as Side[]) {
+    const r = step(format, before, { t: 'point', side: s });
+    if (!r.effect.unitsWon.length || r.effect.unitsWon[0].winner !== s) continue;
+    out[s] = r.state.ended && r.state.winner === s ? 'match' : 'game';
+  }
+  return out;
 }
 
 /**
