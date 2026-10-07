@@ -1354,7 +1354,9 @@ function cricketTimeline(state: CricketState, homeName: string, awayName: string
 const RALLY_EVENT_TEXT: Record<string, string> = {
   expedite: 'Expedite system in',
   switchPairServer: 'Doubles order changed for this game',
-  switchReceiver: 'Receiving courts changed for this set',
+  switchReceiver: 'Receiving sides changed',
+  setChoice: 'Set election at 8-all',
+  switchBox: 'Service box switched',
   clockPause: 'Game clock paused',
   clockStart: 'Game clock resumed',
 };

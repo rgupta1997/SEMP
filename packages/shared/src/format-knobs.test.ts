@@ -46,10 +46,12 @@ describe('reading a format into knobs', () => {
     expect(k.collapseAt).toBe(8);
   });
 
-  it('reads squash English 9 as server-only scoring', () => {
+  it('reads squash English 9 as server-only scoring, "set two" at 8-8', () => {
     const k = readKnobs(fmt('english9_bo5'));
     expect(k.pointScoring).toBe('serverOnly');
-    expect(k.winBy).toBe(1);
+    // First to 9 by two, capped at 10: from 8-8 it is first to 10.
+    expect(k.winBy).toBe(2);
+    expect(k.cap).toBe(10);
   });
 
   it('reads a handicap start', () => {

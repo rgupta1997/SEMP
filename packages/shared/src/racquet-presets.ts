@@ -476,14 +476,14 @@ const SQUASH: ScoringFormat[] = [
     sport: 'squash', key: 'english9_bo5', name: 'English / hand-in-hand-out — 9 points, best of 5',
     // Only the server scores; the serve still moves to the rally winner. Expressible
     // ONLY because pointScoring and movement are separate params.
-    // The 8-8 "set one / set two" election is a documented non-goal: the target is
-    // hard-set to 10, and the draw sheet says "set two always played".
-    levels: [sqGame(9, 1)], serve: squashEnglishServe, mode: 'officiated', changeEnds: 'never',
+    // "Set two" at 8-8: first to 9 by two, capped at 10 - so 8-8 plays to 10 (10-8 or
+    // 10-9), exactly the traditional set two. Best of 5 needs the match level it lacked.
+    levels: [sqGame(9, 2, 10), match(3)], serve: squashEnglishServe, mode: 'officiated', changeEnds: 'never',
     rulesSheet: { setChoiceAt8All: 'set two always played — the receiver election is not offered' },
   }),
   fmt({
     sport: 'squash', key: 'english9_bo3', name: 'English 9 — best of 3',
-    levels: [sqGame(9, 1), match(2)], serve: squashEnglishServe, mode: 'selfScored', changeEnds: 'never',
+    levels: [sqGame(9, 2, 10), match(2)], serve: squashEnglishServe, mode: 'selfScored', changeEnds: 'never',
   }),
   fmt({
     sport: 'squash', key: 'single_game_15_pars', name: 'Corporate single game to 15 (PARS)',

@@ -207,16 +207,33 @@ function tennisGameLocked(state: KernelState, pair: Pairing, format: ScoringForm
 
 /**
  * SQUASH. The server chooses a box at the start of a game and at each new hand, then
- * alternates while that hand continues. Doubles under modern PARS alternates partners
- * on each side-out; the kernel's handAlternate court model supplies the box.
+ * alternates while that hand continues; the kernel's handAlternate court model supplies
+ * the box.
+ *
+ * Doubles (WSF Doubles Rules 2022, 5.2-5.8): the serving order is fixed for the match
+ * and rotates A1 -> B1 -> A2 -> B2, passing at every hand-out (`serve.turns`). Each game
+ * opens with the team's nominated first server; `pairFlip` is the scorer's choice of the
+ * other partner. Receivers keep a side: one partner receives on the right, the other on
+ * the left (`receiveFlip`), and a serve from one box is received on the opposite side.
  */
 function squashHandOut(state: KernelState, pair: Pairing): ResolvedServer {
   const side = state.serve.side;
   const people = pair[side];
   const half = state.serve.courtHalf;
-  if (!isDoubles(people)) return { server: people[0] ?? null, receiver: pair[other(side)][0] ?? null, courtHalf: half };
-  const server = people[Math.min(state.serve.serverNo, people.length) - 1];
-  return { server, receiver: null, courtHalf: half };
+  const rec = other(side);
+  const opp = pair[rec];
+  if (!isDoubles(people)) return { server: people[0] ?? null, receiver: opp[0] ?? null, courtHalf: half };
+  // Hands this team has served in the game so far: the side that served first has the
+  // even turns, the other the odd ones - each side's own count is half the total.
+  const ownHand = Math.floor(state.serve.turns / 2);
+  const lead = state.serve.pairFlip?.[side] ? 1 : 0;
+  const server = people[(lead + ownHand) % 2] ?? null;
+  // A serve from the right box goes to the left side, and from the left to the right.
+  const rightReceiver = state.serve.receiveFlip?.[rec] ? 1 : 0;
+  const receiver = isDoubles(opp)
+    ? opp[half === 'right' ? 1 - rightReceiver : rightReceiver] ?? null
+    : (opp[0] ?? null);
+  return { server, receiver, courtHalf: half };
 }
 
 export type ResolverFn = (

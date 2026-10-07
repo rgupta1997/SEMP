@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   atAdvantage, changesEndsAfterUnit, effectiveLevel, expediteAllowed, expediteConfig, foldRally, formatForPairing, initKernel, isDecider, rallyTiming,
-  resolveServer, resultEnvelope, serveCall, serveEveryNow, serveSpecFor, step, misconductTerms, timeoutRules, timeoutsLeft, unitClock,
+  resolveServer, resultEnvelope, serveCall, serveEveryNow, serveSpecFor, setChoiceDue, step, misconductTerms, timeoutRules, timeoutsLeft, unitClock,
   type KernelState, type LevelSpec, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
 import { ArrowLeftRight, CheckCircle2, Flag, RotateCcw, SlidersHorizontal, Timer, Undo2 } from 'lucide-react';
@@ -192,14 +192,22 @@ export function RacquetDeck(p: RacquetDeckProps) {
   // Tennis: first and second serve.
   const twoServes = serve.resolver === 'tennisGameLocked' && serve.movement !== 'none';
   const secondServe = twoServes && !!state.serve.faults;
-  // Tennis doubles: at the start of each set, each pair says who receives in the deuce court.
+  // Receivers keeping a position: tennis doubles at the start of each set (the deuce court),
+  // squash doubles at the start of each game (the right side).
   const setGames = state.score[1] ?? [0, 0];
-  const chooseReceivers = serve.resolver === 'tennisGameLocked' && doubles && !!p.pairing && !state.ended
-    && state.pointLevel === 0 && state.unitPoints === 0 && setGames[0] + setGames[1] === 0;
+  const gameStart = state.unitPoints === 0 && state.serve.turns === 0 && state.serve.turnCount === 0;
+  const chooseReceivers = doubles && !!p.pairing && !state.ended && (
+    (serve.resolver === 'tennisGameLocked' && state.pointLevel === 0 && state.unitPoints === 0 && setGames[0] + setGames[1] === 0)
+    || (serve.resolver === 'squashHandOut' && gameStart));
+  const receiverQuestion = (team: string) => (serve.resolver === 'squashHandOut'
+    ? `Who receives on the right side for ${team} this game?`
+    : `Who receives in the deuce court for ${team} this set?`);
   // Pairs that hold courts and swap on scoring their own serve: badminton and pickleball.
   const bwfPairs = serve.resolver === 'bwfSingleServer' || serve.resolver === 'pickleballTwoServer';
+  // Squash doubles: four servers in rotation, receivers keeping a side.
+  const squashPairs = serve.resolver === 'squashHandOut';
   // Game 1's order is set in the start panel; later games are picked at 0-0.
-  const choosePairServer = (pairCycle || bwfPairs) && doubles && !!p.pairing && !state.ended
+  const choosePairServer = (pairCycle || bwfPairs || squashPairs) && doubles && !!p.pairing && !state.ended
     && state.finished.some((u) => u.level === 0)
     && state.unitPoints === 0 && state.serve.turns === 0 && state.serve.turnCount === 0;
   const call = serve.movement === 'none' ? null : serveCall(format, state, doubles);
@@ -356,14 +364,21 @@ export function RacquetDeck(p: RacquetDeckProps) {
           <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-xl bg-white px-3 py-2.5 text-sm text-slate-600 ring-1 ring-slate-200 sm:text-base dark:bg-white/5 dark:text-slate-300 dark:ring-0">
             <span>
               <span className="font-bold text-slate-900 dark:text-white">{resolved?.server ?? nameOf(state.serve.side)}</span> to serve
-              {(pairCycle || bwfPairs || twoServes) && doubles && resolved?.receiver && (
+              {(pairCycle || bwfPairs || twoServes || squashPairs) && doubles && resolved?.receiver && (
                 <> to <span className="font-bold text-slate-900 dark:text-white">{resolved.receiver}</span></>
               )}
             </span>
             {resolved?.courtHalf && !pairCycle && (
               <span className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                <CourtHalf half={resolved.courtHalf} /> {resolved.courtHalf} court
+                <CourtHalf half={resolved.courtHalf} /> {resolved.courtHalf} {squashPairs ? 'box' : 'court'}
               </span>
+            )}
+            {/* Squash: the server picks the box at the start of each hand, then alternates. */}
+            {squashPairs && state.serve.turnCount === 0 && !needsSetup && (
+              <button type="button" disabled={p.disabled} onClick={() => push({ t: 'switchBox' })}
+                className="text-xs font-semibold text-brand-600 underline underline-offset-2 dark:text-brand-400">
+                Serve from the {resolved?.courtHalf === 'left' ? 'right' : 'left'} box
+              </button>
             )}
             {serve.movement === 'handOut' && doubles && (
               <span className="rounded-md bg-slate-200 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-slate-800 dark:bg-white/10 dark:text-white">Server {state.serve.serverNo}</span>
@@ -447,6 +462,23 @@ export function RacquetDeck(p: RacquetDeckProps) {
         </div>
       )}
 
+      {/* English squash at 8-8: the receiver elects how far the game goes. */}
+      {setChoiceDue(format, state) && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-900 dark:bg-amber-500/15 dark:text-amber-300">
+          <span className="mr-auto">
+            {lv.target - 1}-all: {nameOf(state.serve.side === 'A' ? 'B' : 'A')} (receiving) chooses how far the game goes
+          </span>
+          <Button size="sm" variant="outline" disabled={p.disabled}
+            onClick={() => push({ t: 'setChoice', choice: 'one' })}>
+            Set one · first to {lv.target}
+          </Button>
+          <Button size="sm" variant="outline" disabled={p.disabled}
+            onClick={() => push({ t: 'setChoice', choice: 'two' })}>
+            Set two · first to {lv.target + 1}
+          </Button>
+        </div>
+      )}
+
       {/* Tennis doubles, at the start of each set: each pair keeps one player in the deuce
           court and one in the ad court for the whole set. */}
       {chooseReceivers && !needsSetup && (
@@ -455,7 +487,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
             const deuce = p.pairing![side][state.serve.receiveFlip?.[side] ? 1 : 0];
             return (
               <div key={side} className="flex flex-wrap items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                <span>Who receives in the deuce court for {nameOf(side)} this set?</span>
+                <span>{receiverQuestion(nameOf(side))}</span>
                 {/* Alphabetical, so picking moves only the highlight. */}
                 {[...p.pairing![side]].sort((a, b) => a.localeCompare(b)).map((name) => (
                   <button key={name} type="button" disabled={p.disabled}
@@ -493,7 +525,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
                     : 'border-slate-200 text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:text-slate-200',
                 )}
                 onClick={() => {
-                  if (name !== current) push(bwfPairs ? { t: 'switchPairServer', side } : { t: 'switchPairServer' });
+                  if (name !== current) push(bwfPairs || squashPairs ? { t: 'switchPairServer', side } : { t: 'switchPairServer' });
                 }}>
                 {name}
               </button>
@@ -1301,7 +1333,9 @@ function describe(t: ReturnType<typeof foldRally>['trace'][number], nameOf: (s: 
       return `Expedite system in — ${ev.reason === 'request' ? 'both players asked' : 'time limit'}${ev.inRally ? ' · rally replayed' : ''}`;
     case 'switchPairServer':
       return ev.side ? `${nameOf(ev.side)}: partners swap starting courts` : 'Other partner serves first this game';
-    case 'switchReceiver': return `${nameOf(ev.side)}: partners swap receiving courts for this set`;
+    case 'switchReceiver': return `${nameOf(ev.side)}: partners swap receiving sides`;
+    case 'setChoice': return ev.choice === 'one' ? 'Set one chosen at 8-all - first to 9' : 'Set two chosen at 8-all - first to 10';
+    case 'switchBox': return 'Server switched service box';
     case 'clockPause': return 'Game clock paused';
     case 'clockStart': return 'Game clock resumed';
     case 'let': return 'Let — rally replayed';

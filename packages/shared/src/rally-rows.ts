@@ -74,6 +74,8 @@ export interface RallyRow {
     card?: 'yellow' | 'red';
     /** A named kind of rally - 'ace', 'expedite_returns'. */
     kind?: string;
+    /** English squash 8-8 election. */
+    choice?: 'one' | 'two';
   };
 }
 
@@ -92,6 +94,8 @@ const LABELS: Record<string, string> = {
   expedite: 'Expedite system',
   switchPairServer: 'Doubles order changed',
   switchReceiver: 'Receiving courts changed',
+  setChoice: 'Set election at 8-8',
+  switchBox: 'Service box chosen',
   clockPause: 'Clock paused',
   clockStart: 'Clock resumed',
   end: 'Match ended',
@@ -158,6 +162,7 @@ export function rallyLogToRows(
         ...(card ? { card } : {}),
         // An ace (or any named kind of rally) survives the round trip through the rows.
         ...(ev.t === 'point' && ev.kind ? { kind: ev.kind } : {}),
+        ...(ev.t === 'setChoice' ? { choice: ev.choice } : {}),
       },
     });
   });
@@ -204,6 +209,8 @@ export function rowsToRallyLog(rows: Array<Pick<RallyRow, 'event_key' | 'team_si
           return { t: 'expedite', reason: r.meta?.reason === 'request' ? 'request' : 'time', inRally: !!r.meta?.inRally };
         case 'switchPairServer': return side ? { t: 'switchPairServer', side } : { t: 'switchPairServer' };
         case 'switchReceiver': return side ? { t: 'switchReceiver', side } : null;
+        case 'setChoice': return r.meta?.choice === 'one' || r.meta?.choice === 'two' ? { t: 'setChoice', choice: r.meta.choice } : null;
+        case 'switchBox': return { t: 'switchBox' };
         case 'clockPause': return { t: 'clockPause' };
         case 'clockStart': return { t: 'clockStart' };
         case 'end':

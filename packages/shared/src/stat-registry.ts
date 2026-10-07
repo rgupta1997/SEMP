@@ -914,11 +914,10 @@ function pressureBefore(format: ScoringFormat, before: KernelState): Record<Side
 }
 
 /**
- * Serve resolvers that name the RECEIVER from the rules (diagonal court, fixed TT
- * rotation, tennis receivers holding their courts for the set). Squash doubles does
- * not, so its return points stay per pair.
+ * Serve resolvers that name the RECEIVER from the rules: the diagonal court, the fixed
+ * TT rotation, and receivers holding a side (tennis for a set, squash for a game).
  */
-const RECEIVER_RESOLVERS: ReadonlySet<string> = new Set(['bwfSingleServer', 'pickleballTwoServer', 'ttPairCycle', 'tennisGameLocked']);
+const RECEIVER_RESOLVERS: ReadonlySet<string> = new Set(['bwfSingleServer', 'pickleballTwoServer', 'ttPairCycle', 'tennisGameLocked', 'squashHandOut']);
 
 /**
  * A doubles point is won by the PAIR, so both partners receive the side's rally

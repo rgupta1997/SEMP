@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  aggregateScore, changesEndsAfterUnit, expediteAllowed, expediteConfig, foldRally, headline, initKernel, misconductTerms, rallyTiming, resultEnvelope, step, timeoutRules, timeoutsLeft, undo, unitClock, unitWinner,
+  aggregateScore, changesEndsAfterUnit, expediteAllowed, expediteConfig, foldRally, headline, initKernel, misconductTerms, rallyTiming, resultEnvelope, setChoiceDue, step, timeoutRules, timeoutsLeft, undo, unitClock, unitWinner,
   type KernelState, type RallyEvent, type RallyLog,
 } from './rally-kernel.js';
 import { defaultFormatFor, presetByKey, presetsFor, RACQUET_PRESETS } from './racquet-presets.js';
@@ -635,10 +635,70 @@ describe('squash', () => {
     expect(r2.state.score[0]).toEqual([0, 1]); // now B is the server
   });
 
-  it('English 9 ends at 9-8 (win by 1)', () => {
+  it('English best of 5 is a best of 5: a game to 9 is one game, not the match', () => {
     const f = fmtOf('english9_bo5');
-    const r = foldRally(f, points('A', 9), 'A');
-    expect(r.state.ended).toBe(true);
+    const one = foldRally(f, points('A', 9), 'A').state; // A serves throughout and wins 9-0
+    expect(one.ended).toBe(false);
+    expect(one.score[1]).toEqual([1, 0]);
+    // Three games to A ends it.
+    expect(foldRally(f, points('A', 27), 'A').state).toMatchObject({ ended: true, winner: 'A' });
+  });
+
+  it('English scoring plays "set two" from 8-8: first to 10', () => {
+    const f = fmtOf('english9_bo5');
+    // A to 8 (A serves); B wins the serve back and scores 8; A wins the serve back.
+    const eightAll: RallyLog = [...points('A', 8), ...points('B', 9), { t: 'point', side: 'A' } as RallyEvent];
+    const s = foldRally(f, eightAll, 'A').state;
+    expect(s.score[0]).toEqual([8, 8]);
+    expect(foldRally(f, [...eightAll, ...points('A', 1)], 'A').state.score[0]).toEqual([9, 8]); // not over at 9-8
+    expect(foldRally(f, [...eightAll, ...points('A', 2)], 'A').state.score[1]).toEqual([1, 0]); // 10-8 wins
+  });
+
+  it('at 8-8 the receiver may elect "set one": the next point the server wins takes the game', () => {
+    const f = fmtOf('english9_bo5');
+    const eightAll: RallyLog = [...points('A', 8), ...points('B', 9), { t: 'point', side: 'A' } as RallyEvent];
+    const s = foldRally(f, eightAll, 'A').state;
+    expect(setChoiceDue(f, s)).toBe(true);
+    const one = foldRally(f, [...eightAll, { t: 'setChoice', choice: 'one' }, ...points('A', 1)], 'A').state;
+    expect(one.score[1]).toEqual([1, 0]); // 9-8 wins under set one
+    // Set two: 9-8 does not end it.
+    const two = foldRally(f, [...eightAll, { t: 'setChoice', choice: 'two' }, ...points('A', 1)], 'A').state;
+    expect(two.score[0]).toEqual([9, 8]);
+    // The election is for that game only, and only at 8-8.
+    expect(foldRally(f, [...points('A', 3), { t: 'setChoice', choice: 'one' }], 'A').state.setChoice).toBeUndefined();
+    expect(foldRally(f, [...eightAll, { t: 'setChoice', choice: 'one' }, ...points('A', 1)], 'A').state.setChoice).toBeUndefined();
+  });
+
+  it('the server chooses the box at the start of each hand, then alternates (WSF 5.7)', () => {
+    const f = fmtOf('pars11_bo3');
+    const box = (log: RallyLog) => foldRally(f, log, 'A').state.serve.courtHalf;
+    const pick: RallyEvent = { t: 'switchBox' };
+    expect([box([]), box([pick]), box([pick, ...points('A', 1)])]).toEqual(['right', 'left', 'right']);
+    expect(box([...points('A', 1), pick])).toBe(box(points('A', 1))); // not mid-hand
+    // A new server chooses afresh: B starts on the right unless they pick otherwise.
+    expect(box([pick, ...points('B', 1)])).toBe('right');
+  });
+
+  it('uses squash conduct wording', () => {
+    expect(misconductTerms('squash')).toEqual({ warning: 'Conduct warning', foul: 'Conduct stroke', removal: 'Conduct match' });
+  });
+
+  it('doubles: the serve rotates A1 > B1 > A2 > B2 at each hand-out (WSF doubles 5.2-5.5)', () => {
+    const f = fmtOf('doubles_pars11_bo3');
+    const pair = { A: ['a1', 'a2'], B: ['b1', 'b2'] };
+    const server = (s: string) => resolveServer(f, foldRally(f, s.split('').map((side) => ({ t: 'point', side }) as RallyEvent), 'A').state, pair).server;
+    expect(['', 'B', 'BA', 'BAB', 'BABA'].map(server)).toEqual(['a1', 'b1', 'a2', 'b2', 'a1']);
+    expect(server('AAB')).toBe('b1'); // a1 keeps serving while winning
+  });
+
+  it('doubles receivers keep a side: a serve from the right box goes to the left-side receiver', () => {
+    const f = fmtOf('doubles_pars11_bo3');
+    const pair = { A: ['a1', 'a2'], B: ['b1', 'b2'] };
+    const rec = (log: RallyLog) => resolveServer(f, foldRally(f, log, 'A').state, pair).receiver;
+    // b1 receives on the right, b2 on the left: a1 serves right first, to b2.
+    expect([rec([]), rec(points('A', 1))]).toEqual(['b2', 'b1']);
+    // At the start of the game B may swap sides.
+    expect(rec([{ t: 'switchReceiver', side: 'B' }])).toBe('b1');
   });
 
   it('PARS 11 scores every rally', () => {

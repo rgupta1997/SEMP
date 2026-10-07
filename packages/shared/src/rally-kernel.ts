@@ -98,6 +98,13 @@ export type RallyEvent =
   /** Tennis doubles, at the start of a set: the pair's other player receives in the deuce court. */
   | { t: 'switchReceiver'; side: Side; by?: string; at?: string }
   /**
+   * English squash scoring, first at 8-8: the receiver elects to play to 9 ("set one") or
+   * to 10 ("set two", what the format plays when no election is recorded).
+   */
+  | { t: 'setChoice'; choice: 'one' | 'two'; by?: string; at?: string }
+  /** Squash: at the start of a hand, the server serves from the other box. */
+  | { t: 'switchBox'; by?: string; at?: string }
+  /**
    * THE WHISTLE. A clock-terminated period is over; tally what was scored.
    *
    * Separate from `capFired`, which is a whole-match time cap with a resolution
@@ -163,10 +170,13 @@ export interface ServeState {
   /** Tennis: 1 while the server is on their second serve (a first-serve fault called). */
   faults?: number;
   /**
-   * Tennis doubles: a side whose SECOND-listed player receives in the deuce court this
-   * set. Chosen by each pair at the start of a set and kept for the whole of it.
+   * A side whose SECOND-listed player takes the first receiving position. Tennis doubles:
+   * the deuce court, for the set. Squash doubles: the right side, kept game to game
+   * unless changed at the start of one (WSF doubles rules 5.8, 5.10).
    */
   receiveFlip?: Partial<Record<Side, boolean>>;
+  /** Squash: the server chose the left box to start this hand (the box then alternates). */
+  boxFlip?: boolean;
 }
 
 /** Sports with a first and a second serve, where a second fault loses the point. */
@@ -208,6 +218,21 @@ export interface KernelState {
   pointLevel: number;
   /** Table tennis expedite system in force: one serve each until it is lifted. */
   expedite: boolean;
+  /** English squash: the receiver's election at 8-8 for the game under way. */
+  setChoice?: 'one' | 'two';
+}
+
+/**
+ * The English squash "set" election applies: a game to N by two capped at N + 1 (set two
+ * by default), in server-only scoring, with both sides on N - 1.
+ */
+export function setChoiceDue(format: ScoringFormat, state: KernelState): boolean {
+  if (state.ended || state.setChoice) return false;
+  const lv = format.levels[state.pointLevel];
+  const spec = serveSpecFor(format, lv);
+  const [a, b] = state.score[state.pointLevel];
+  return spec.pointScoring === 'serverOnly' && lv.winBy === 2 && lv.cap === lv.target + 1
+    && a === lv.target - 1 && b === lv.target - 1;
 }
 
 /** What one event did, for the console timeline and the stat fold. */
@@ -266,6 +291,9 @@ export function effectiveLevel(format: ScoringFormat, state: KernelState, i: num
       };
     }
   }
+
+  // English squash "set one": the receiver chose, at 8-8, to play to 9 - the next point wins.
+  if (state.setChoice === 'one' && i === state.pointLevel) spec = { ...spec, winBy: 1, cap: null };
   return spec;
 }
 
@@ -421,6 +449,8 @@ export function expediteConfig(format: ScoringFormat): ExpediteConfig | null {
 export function misconductTerms(sport?: string | null): { warning: string; foul: string; removal: string } {
   switch ((sport ?? '').toLowerCase()) {
     case 'pickleball': return { warning: 'Technical warning', foul: 'Technical foul', removal: 'Ejection' };
+    // Squash's conduct penalties (a conduct game is the "Award game" correction).
+    case 'squash': return { warning: 'Conduct warning', foul: 'Conduct stroke', removal: 'Conduct match' };
     case 'badminton': return { warning: 'Yellow card', foul: 'Red card', removal: 'Black card' };
     default: return { warning: 'Yellow card', foul: 'Red card', removal: 'Disqualification' };
   }
@@ -539,9 +569,9 @@ function courtHalfFor(spec: ServeSpec, state: KernelState, pointScore: Pair): 'r
       // (left) on odd - whoever won them. 0-15 is from the ad court, not the deuce.
       return (pointScore[0] + pointScore[1]) % 2 === 0 ? 'right' : 'left';
     case 'handAlternate':
-      // Squash: the server picks a box at each new hand, then alternates while the
-      // hand continues. Modelled as alternating on points served in this turn.
-      return state.serve.turnCount % 2 === 0 ? 'right' : 'left';
+      // Squash: the server picks a box at each new hand (right unless `boxFlip`), then
+      // alternates while the hand continues - on points served in this turn.
+      return (state.serve.turnCount + (state.serve.boxFlip ? 1 : 0)) % 2 === 0 ? 'right' : 'left';
     default: return null;
   }
 }
@@ -551,7 +581,10 @@ function moveServe(format: ScoringFormat, spec: ServeSpec, state: KernelState, r
   const sv = state.serve;
   switch (spec.movement) {
     case 'rallyWinner':
-      if (sv.side !== rallyWinner) { sv.side = rallyWinner; sv.turnCount = 0; }
+      // A change of serving side is a hand-out: counted in `turns`, which squash doubles
+      // rotates its four servers on.
+      // A new server chooses their box afresh, so the last hand's choice is dropped.
+      if (sv.side !== rallyWinner) { sv.side = rallyWinner; sv.turnCount = 0; sv.turns += 1; sv.boxFlip = false; }
       else sv.turnCount += 1;
       break;
     case 'everyN': {
@@ -628,6 +661,8 @@ function resetForNewUnit(format: ScoringFormat, state: KernelState, unitWinnerSi
     ...(state.serve.receiveFlip ? { receiveFlip: state.serve.receiveFlip } : {}),
   };
   state.unitPoints = 0;
+  // An 8-8 election is for the game it was made in.
+  delete state.setChoice;
   if (state.expedite && !expediteConfig(format)?.stickyForMatch) state.expedite = false;
 }
 
@@ -784,11 +819,29 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
     }
 
     case 'switchReceiver': {
-      // Only at the very start of a set: no point and no game played in it yet.
+      // Tennis: only at the very start of a set. Squash doubles: at the start of any game
+      // (WSF doubles rule 5.10 - partners may change receiving sides for a new game).
       const games = state.score[1] ?? [0, 0];
       const atSetStart = state.pointLevel === 0 && state.unitPoints === 0 && games[0] + games[1] === 0;
-      if (spec.resolver !== 'tennisGameLocked' || !atSetStart) return { state: prev, effect: base };
+      const atGameStart = state.unitPoints === 0 && state.serve.turns === 0 && state.serve.turnCount === 0;
+      const allowed = (spec.resolver === 'tennisGameLocked' && atSetStart) || (spec.resolver === 'squashHandOut' && atGameStart);
+      if (!allowed) return { state: prev, effect: base };
       state.serve.receiveFlip = { ...state.serve.receiveFlip, [ev.side]: !state.serve.receiveFlip?.[ev.side] };
+      return { state, effect: base };
+    }
+
+    case 'setChoice':
+      // Only at the moment it is due, and only once a game.
+      if (!setChoiceDue(format, state)) return { state: prev, effect: base };
+      state.setChoice = ev.choice;
+      return { state, effect: base };
+
+    case 'switchBox': {
+      // Squash: the server picks the box at the start of each hand (WSF 5.7) - before
+      // the hand's first serve, and never mid-hand, where the boxes must alternate.
+      if (spec.courtModel !== 'handAlternate' || state.serve.turnCount !== 0) return { state: prev, effect: base };
+      state.serve.boxFlip = !state.serve.boxFlip;
+      state.serve.courtHalf = courtHalfFor(spec, state, state.score[state.pointLevel]);
       return { state, effect: base };
     }
 
@@ -874,6 +927,10 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
         flipPair(sv, ev.side);
         // The new right-court player of the serving pair opens the game.
         if (ev.side === sv.side) sv.turnLead = rightIndex(sv, sv.side);
+      } else if (spec.resolver === 'squashHandOut' && ev.side) {
+        // Squash doubles: a team's other partner serves first in this game (rule 5.6
+        // names only the team, so the scorer can say which of them).
+        flipPair(sv, ev.side);
       } else {
         return { state: prev, effect: base };
       }
