@@ -92,7 +92,7 @@ const tennisServe: ServeSpec = {
   pointScoring: 'rally',
   movement: 'perUnit',
   resolver: 'tennisGameLocked',
-  courtModel: 'parity',
+  courtModel: 'gameTotal',
   firstServer: 'toss',
   nextUnitServer: 'alternate',
 };
@@ -104,7 +104,7 @@ const tennisTiebreakServe: ServeSpec = {
   every: 2,
   firstTurnEvery: 1,
   resolver: 'tennisGameLocked',
-  courtModel: 'parity',
+  courtModel: 'gameTotal',
   firstServer: 'organiser',
   nextUnitServer: 'subUnitFirstServerReceives',
 };

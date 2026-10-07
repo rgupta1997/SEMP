@@ -298,6 +298,19 @@ Adds `service_turns_faced` (the denominator of side-out %) and `pickles` (pickle
 games won to 0) to `racquet_match_lines`, integer default 0. Applied with the same
 runner; both statements succeeded.
 
+## Applied 2026-10-07 — `20261007000001_tennis_service_games`
+
+Adds `service_games_played`, `service_games_won`, `return_games_played` and
+`return_games_won` to `racquet_match_lines`, integer default 0, for tennis holds and breaks
+(tie-breaks not counted). Applied with the same runner; all four statements succeeded.
+
+## Applied 2026-10-07 — `20261007000000_tennis_serve_stats`
+
+Adds `serve_points_tracked`, `first_serve_points_won`, `second_serve_points_played` and
+`second_serve_points_won` to `racquet_match_lines`, integer default 0, for tennis first /
+second serve figures (counted only in matches where the scorer recorded serves). Applied
+with the same runner; all four statements succeeded.
+
 ## Applied 2026-10-05 — `20261005000006_pair_points_won`
 
 Adds `pair_service_points_won` and `pair_return_points_won` to `racquet_match_lines`,

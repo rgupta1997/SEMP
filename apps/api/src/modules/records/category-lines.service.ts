@@ -39,6 +39,8 @@ const ALLOWED = new Set([
   'games_won', 'games_lost', 'sets_won', 'sets_lost', 'deciders_won', 'deciders_lost',
   'deuce_points_played', 'deuce_points_won', 'tiebreaks_won', 'tiebreaks_lost',
   'longest_streak', 'comeback_win', 'aces', 'double_faults', 'first_serves_in',
+  'serve_points_tracked', 'first_serve_points_won', 'second_serve_points_played', 'second_serve_points_won',
+  'service_games_played', 'service_games_won', 'return_games_played', 'return_games_won',
   'winners', 'unforced_errors', 'lets', 'break_points_played', 'break_points_won',
   'break_points_saved', 'retired', 'walkover_received', 'whitewash',
   // invasion

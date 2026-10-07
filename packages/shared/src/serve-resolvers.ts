@@ -184,14 +184,25 @@ function tennisGameLocked(state: KernelState, pair: Pairing, format: ScoringForm
     return { server: people[0] ?? null, receiver: pair[other(side)][0] ?? null, courtHalf: state.serve.courtHalf };
   }
   // Games completed in the current set decide how far the rotation has turned. With
-  // one level (a flat format) there are no games, so fall back to the point count.
+  // one level (a flat format) there are no games, so fall back to the point count. A
+  // match tie-break played as the deciding set has no games either - its score IS points.
   const setLevel = format.levels.length > 1 ? 1 : 0;
   const gs = state.score[setLevel] ?? [0, 0];
-  const gamesPlayed = setLevel === 0 ? 0 : gs[0] + gs[1];
-  const ownTurn = Math.floor(gamesPlayed / 2);
+  const gamesPlayed = setLevel === 0 || state.pointLevel > 0 ? 0 : gs[0] + gs[1];
+  // Inside a tie-break the rotation carries on by serving TURN (one serve, then two):
+  // a1, b1-b1, a2-a2, b2-b2... `turns` is 0 in an ordinary game, so this adds nothing there.
+  const ownTurn = Math.floor(gamesPlayed / 2) + Math.floor(state.serve.turns / 2);
   const start = (side === 'A' ? nom?.A : nom?.B) ?? 0;
   const server = people[(start + ownTurn) % people.length];
-  return { server, receiver: null, courtHalf: state.serve.courtHalf };
+  // Each receiving pair keeps one player in the deuce (right) court for the whole set,
+  // so the receiver is whoever stands in the court this point is served to.
+  const rec = other(side);
+  const opp = pair[rec];
+  const deuce = state.serve.receiveFlip?.[rec] ? 1 : 0;
+  const receiver = isDoubles(opp)
+    ? opp[state.serve.courtHalf === 'left' ? 1 - deuce : deuce] ?? null
+    : (opp[0] ?? null);
+  return { server, receiver, courtHalf: state.serve.courtHalf };
 }
 
 /**
@@ -260,6 +271,13 @@ export function serveCall(format: ScoringFormat, state: KernelState, doubles: bo
   if (spec.pointScoring === 'serverOnly') return `${first}-${second}`;
   const labels = lv.pointLabels;
   if (labels) {
+    // Tennis says the words at 40-40 and beyond: "Deuce", "Ad in" (server ahead), "Ad out".
+    // No-ad scoring has no advantage - 40-40 is the deciding point.
+    const fortyAt = labels.indexOf('40');
+    if (fortyAt >= 0 && first >= fortyAt && second >= fortyAt) {
+      if (first === second) return lv.winBy <= 1 ? 'Deciding point' : 'Deuce';
+      return first > second ? 'Ad in' : 'Ad out';
+    }
     const lbl = (n: number) => labels[Math.min(n, labels.length - 1)] ?? String(n);
     return `${lbl(first)}-${lbl(second)}`;
   }

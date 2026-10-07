@@ -129,3 +129,16 @@ describe('expedite survives the row round trip', () => {
     expect(foldRally(f, back, 'A').state.serve).toEqual(foldRally(f, log, 'A').state.serve);
   });
 });
+
+describe('tennis serves survive the row round trip', () => {
+  it('rebuilds faults, double faults and aces exactly', () => {
+    const f = fmt('itf_standard_bo3');
+    const log: RallyLog = [
+      { t: 'point', side: 'A', kind: 'ace' }, { t: 'fault', side: 'A' }, { t: 'fault', side: 'A' }, ...points('B', 1),
+    ];
+    const back = rowsToRallyLog(rallyLogToRows(f, log, { firstServer: 'A' }));
+    // The double fault's row is credited to the receiver; the fault is still the server's.
+    expect(back).toEqual(log);
+    expect(foldRally(f, back, 'A').state.score).toEqual(foldRally(f, log, 'A').state.score);
+  });
+});

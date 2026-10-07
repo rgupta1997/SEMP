@@ -1763,6 +1763,16 @@ model racquet_match_lines {
   created_at            DateTime           @default(now()) @db.Timestamptz(6)
   deciders_lost         Int                @default(0)
   first_serves_in       Int                @default(0)
+  /// Tennis serves, from matches where the scorer recorded them (Fault / Ace).
+  serve_points_tracked       Int           @default(0)
+  first_serve_points_won     Int           @default(0)
+  second_serve_points_played Int           @default(0)
+  second_serve_points_won    Int           @default(0)
+  /// Tennis service games: held (won your own) and broken (won the receiver's).
+  service_games_played       Int           @default(0)
+  service_games_won          Int           @default(0)
+  return_games_played        Int           @default(0)
+  return_games_won           Int           @default(0)
   winners               Int                @default(0)
   unforced_errors       Int                @default(0)
   retired               Boolean            @default(false)

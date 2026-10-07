@@ -228,7 +228,23 @@ const RACQUET_CORE: StatMetric[] = [
 
 /** Tennis alone tracks serve outcomes as first-class events - it has two serves. */
 const TENNIS_EXTRA: StatMetric[] = [
-  rally('first_serves_in', 'First serves in', '1stIn'),
+  // First and second serve - counted only in matches where the scorer recorded serves
+  // (Fault / Ace), so `serve_points_tracked` is their own denominator, not every point served.
+  rally('serve_points_tracked', 'Serve points recorded', 'SvR', { hidden: true }),
+  rally('first_serves_in', 'First serves in', '1stIn', { hidden: true }),
+  rate('first_serve_pct', '1st serve in %', '1st%', ['first_serves_in', 'serve_points_tracked'], true),
+  rally('first_serve_points_won', '1st serve points won', '1stW', { hidden: true }),
+  rate('first_serve_win_pct', '1st serve points won %', '1stW%', ['first_serve_points_won', 'first_serves_in']),
+  rally('second_serve_points_played', '2nd serve points', '2ndP', { hidden: true }),
+  rally('second_serve_points_won', '2nd serve points won', '2ndW', { hidden: true }),
+  rate('second_serve_win_pct', '2nd serve points won %', '2ndW%', ['second_serve_points_won', 'second_serve_points_played']),
+  // Service games: held when you win your own, broken when the receiver does.
+  rally('service_games_played', 'Service games', 'SvG', { hidden: true }),
+  rally('service_games_won', 'Service games held', 'Held', { hidden: true }),
+  rate('service_games_held_pct', 'Service games held %', 'Hold%', ['service_games_won', 'service_games_played'], true),
+  rally('return_games_played', 'Return games', 'RtG', { hidden: true }),
+  rally('return_games_won', 'Breaks of serve', 'Brk'),
+  rate('return_games_won_pct', 'Return games won %', 'Brk%', ['return_games_won', 'return_games_played']),
   rally('break_points_won', 'Break points won', 'BPW', { headline: true }),
   rally('break_points_played', 'Break points', 'BP'),
   rally('break_points_saved', 'Break points saved', 'BPS'),
@@ -628,6 +644,8 @@ export function deriveRacquetStats(
   // Biggest deficit each side has faced in the game under way (for comeback games).
   let deficit: Record<Side, number> = { A: 0, B: 0 };
   const pickleball = (format.sport ?? '').toLowerCase() === 'pickleball';
+  // Serves were recorded (a fault or an ace tapped) - only then are first/second-serve figures honest.
+  const serveDetail = log.some((e) => e.t === 'fault' || (e.t === 'point' && e.kind === 'ace'));
   // The service turn under way (side-out scoring), to count each turn once.
   let turn: { side: Side | null; games: number } = { side: null, games: 0 };
 
@@ -660,10 +678,36 @@ export function deriveRacquetStats(
 
     if (ev.t === 'let') { bump(sides.A, 'lets'); bump(sides.B, 'lets'); continue; }
 
+    // A fault that the kernel turned into a point is a double fault: counted, then scored
+    // below like any rally the receiver won. A first-serve fault is only counted.
+    const doubleFault = ev.t === 'fault' && !!eff.scored;
     if (ev.t === 'fault' && serverSide) {
       bump(sides[serverSide], 'faults');
       if (server) bump(personBag(server), 'faults');
-      continue;
+      if (!doubleFault) continue;
+      bump(sides[serverSide], 'double_faults');
+      if (server) bump(personBag(server), 'double_faults');
+    }
+    if (ev.t === 'point' && ev.kind === 'ace' && serverSide) {
+      bump(sides[serverSide], 'aces');
+      if (server) bump(personBag(server), 'aces');
+    }
+
+    // First and second serve. Only where the scorer recorded serves (faults or aces) -
+    // a match tapped as plain rallies would otherwise read as "100% first serves in".
+    if (serveDetail && serverSide && (ev.t === 'point' || doubleFault) && (ev.t !== 'point' || (ev.pts ?? 1) > 0)) {
+      const won = ev.t === 'point' && ev.side === serverSide;
+      const bags = server ? [sides[serverSide], personBag(server)] : [sides[serverSide]];
+      for (const b of bags) {
+        bump(b, 'serve_points_tracked');
+        if (!before.serve.faults && !doubleFault) {
+          bump(b, 'first_serves_in');
+          if (won) bump(b, 'first_serve_points_won');
+        } else {
+          bump(b, 'second_serve_points_played');
+          if (won) bump(b, 'second_serve_points_won');
+        }
+      }
     }
 
     if (ev.t === 'end') {
@@ -784,6 +828,18 @@ export function deriveRacquetStats(
       if (decidedTheMatch) { bump(sides[w], 'deciders_won'); bump(sides[l], 'deciders_lost'); }
       if (u.level === 0) {
         if (isTiebreak) { bump(sides[w], 'tiebreaks_won'); bump(sides[l], 'tiebreaks_lost'); }
+        // Tennis service games: one server for the whole game (not a tie-break). The server
+        // holds by winning it; the receiver breaks. Awarded games were not played out.
+        if (spec.movement === 'perUnit' && !isTiebreak && serverSide && !u.awarded) {
+          const rec: Side = serverSide === 'A' ? 'B' : 'A';
+          const held = w === serverSide;
+          for (const b of server ? [sides[serverSide], personBag(server)] : [sides[serverSide]]) {
+            bump(b, 'service_games_played');
+            if (held) bump(b, 'service_games_won');
+          }
+          bump(sides[rec], 'return_games_played');
+          if (!held) bump(sides[rec], 'return_games_won');
+        }
         bump(sides[w], 'games_won');
         bump(sides[l], 'games_lost');
         if (firstUnitWinner === null) firstUnitWinner = w;
@@ -833,6 +889,8 @@ export function deriveRacquetStats(
       const b = personBag(id);
       b.service_points_played ??= 0;
       b.service_points_won ??= 0;
+      // A partner who never served a tennis game has none held - not the pair's figure.
+      if (sides[side].service_games_played !== undefined) { b.service_games_played ??= 0; b.service_games_won ??= 0; }
       if (personalReturns) { b.return_points_played ??= 0; b.return_points_won ??= 0; }
       if (expediteSeen) b.expedite_return_losses ??= 0;
     }
@@ -857,9 +915,10 @@ function pressureBefore(format: ScoringFormat, before: KernelState): Record<Side
 
 /**
  * Serve resolvers that name the RECEIVER from the rules (diagonal court, fixed TT
- * rotation). Tennis and squash doubles do not, so their return points stay per pair.
+ * rotation, tennis receivers holding their courts for the set). Squash doubles does
+ * not, so its return points stay per pair.
  */
-const RECEIVER_RESOLVERS: ReadonlySet<string> = new Set(['bwfSingleServer', 'pickleballTwoServer', 'ttPairCycle']);
+const RECEIVER_RESOLVERS: ReadonlySet<string> = new Set(['bwfSingleServer', 'pickleballTwoServer', 'ttPairCycle', 'tennisGameLocked']);
 
 /**
  * A doubles point is won by the PAIR, so both partners receive the side's rally

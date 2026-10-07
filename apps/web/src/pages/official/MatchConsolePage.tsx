@@ -1354,6 +1354,7 @@ function cricketTimeline(state: CricketState, homeName: string, awayName: string
 const RALLY_EVENT_TEXT: Record<string, string> = {
   expedite: 'Expedite system in',
   switchPairServer: 'Doubles order changed for this game',
+  switchReceiver: 'Receiving courts changed for this set',
   clockPause: 'Game clock paused',
   clockStart: 'Game clock resumed',
 };
@@ -1367,7 +1368,8 @@ function rallyTimeline(format: any, log: RallyLog, firstServer: Side, homeName: 
     const ev = t.event;
     const other = (s: Side): Side => (s === 'A' ? 'B' : 'A');
     const txt = ev.t === 'point'
-      ? (t.scored ? `Point to ${nameOf(t.scored)}` : `${nameOf(ev.side)} won the rally — no point`)
+      ? (t.scored ? `${ev.kind === 'ace' ? 'Ace — point' : 'Point'} to ${nameOf(t.scored)}` : `${nameOf(ev.side)} won the rally — no point`)
+      : ev.t === 'fault' ? (t.scored ? `Double fault · ${nameOf(ev.side)} — point to ${nameOf(t.scored)}` : `Fault · ${nameOf(ev.side)}`)
       : ev.t === 'card' ? `${misconductTerms(format?.sport).warning} to ${nameOf(ev.against)}`
       : ev.t === 'timeout' ? `Timeout — ${nameOf(ev.side)}`
       : ev.t === 'penalty' && ev.card === 'red' ? `${misconductTerms(format?.sport).foul} to ${nameOf(other(ev.side))} — point to ${nameOf(ev.side)}`

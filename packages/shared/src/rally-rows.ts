@@ -72,6 +72,8 @@ export interface RallyRow {
     inRally?: boolean;
     /** Misconduct: a yellow warning, or the red card behind a conduct point. */
     card?: 'yellow' | 'red';
+    /** A named kind of rally - 'ace', 'expedite_returns'. */
+    kind?: string;
   };
 }
 
@@ -89,6 +91,7 @@ const LABELS: Record<string, string> = {
   capFired: 'Time up',
   expedite: 'Expedite system',
   switchPairServer: 'Doubles order changed',
+  switchReceiver: 'Receiving courts changed',
   clockPause: 'Clock paused',
   clockStart: 'Clock resumed',
   end: 'Match ended',
@@ -153,6 +156,8 @@ export function rallyLogToRows(
         ...('by' in ev && ev.by ? { by: String(ev.by) } : {}),
         ...(ev.t === 'expedite' && ev.inRally ? { inRally: true } : {}),
         ...(card ? { card } : {}),
+        // An ace (or any named kind of rally) survives the round trip through the rows.
+        ...(ev.t === 'point' && ev.kind ? { kind: ev.kind } : {}),
       },
     });
   });
@@ -177,11 +182,16 @@ export function rowsToRallyLog(rows: Array<Pick<RallyRow, 'event_key' | 'team_si
           // The row's `team_side` is who SCORED, which under server-only scoring is
           // not who won the rally - so a scoreless rally is reconstructed from the
           // server, which is the only side that could have lost it.
-          if (r.meta?.scored) return { t: 'point', side: r.meta.scored };
+          if (r.meta?.scored) return { t: 'point', side: r.meta.scored, ...(r.meta.kind ? { kind: r.meta.kind } : {}) };
           if (r.meta?.serverSide) return { t: 'point', side: r.meta.serverSide === 'A' ? 'B' : 'A' };
           return side ? { t: 'point', side } : null;
         case 'let': return { t: 'let' };
-        case 'fault': return side ? { t: 'fault', side } : null;
+        // The row's side is who SCORED - the receiver, on a double fault - so the fault is
+        // rebuilt from who was serving.
+        case 'fault': {
+          const by = r.meta?.serverSide ?? side;
+          return by ? { t: 'fault', side: by } : null;
+        }
         case 'penalty':
           return side ? { t: 'penalty', side, reason: r.meta?.reason, ...(r.meta?.card === 'red' ? { card: 'red' as const } : {}) } : null;
         case 'card': return side ? { t: 'card', card: 'yellow', against: side, reason: r.meta?.reason } : null;
@@ -193,6 +203,7 @@ export function rowsToRallyLog(rows: Array<Pick<RallyRow, 'event_key' | 'team_si
         case 'expedite':
           return { t: 'expedite', reason: r.meta?.reason === 'request' ? 'request' : 'time', inRally: !!r.meta?.inRally };
         case 'switchPairServer': return side ? { t: 'switchPairServer', side } : { t: 'switchPairServer' };
+        case 'switchReceiver': return side ? { t: 'switchReceiver', side } : null;
         case 'clockPause': return { t: 'clockPause' };
         case 'clockStart': return { t: 'clockStart' };
         case 'end':

@@ -189,6 +189,13 @@ export function RacquetDeck(p: RacquetDeckProps) {
 
   const resolved = p.pairing ? resolveServer(format, state, p.pairing) : null;
   const pairCycle = serve.resolver === 'ttPairCycle';
+  // Tennis: first and second serve.
+  const twoServes = serve.resolver === 'tennisGameLocked' && serve.movement !== 'none';
+  const secondServe = twoServes && !!state.serve.faults;
+  // Tennis doubles: at the start of each set, each pair says who receives in the deuce court.
+  const setGames = state.score[1] ?? [0, 0];
+  const chooseReceivers = serve.resolver === 'tennisGameLocked' && doubles && !!p.pairing && !state.ended
+    && state.pointLevel === 0 && state.unitPoints === 0 && setGames[0] + setGames[1] === 0;
   // Pairs that hold courts and swap on scoring their own serve: badminton and pickleball.
   const bwfPairs = serve.resolver === 'bwfSingleServer' || serve.resolver === 'pickleballTwoServer';
   // Game 1's order is set in the start panel; later games are picked at 0-0.
@@ -349,7 +356,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
           <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-xl bg-white px-3 py-2.5 text-sm text-slate-600 ring-1 ring-slate-200 sm:text-base dark:bg-white/5 dark:text-slate-300 dark:ring-0">
             <span>
               <span className="font-bold text-slate-900 dark:text-white">{resolved?.server ?? nameOf(state.serve.side)}</span> to serve
-              {(pairCycle || bwfPairs) && doubles && resolved?.receiver && (
+              {(pairCycle || bwfPairs || twoServes) && doubles && resolved?.receiver && (
                 <> to <span className="font-bold text-slate-900 dark:text-white">{resolved.receiver}</span></>
               )}
             </span>
@@ -363,6 +370,9 @@ export function RacquetDeck(p: RacquetDeckProps) {
             )}
             {serveTurn && (
               <span className="rounded-md bg-amber-400 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-slate-950">{serveTurn}</span>
+            )}
+            {secondServe && (
+              <span className="rounded-md bg-amber-400 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-slate-950">2nd serve</span>
             )}
           </div>
         )}
@@ -434,6 +444,34 @@ export function RacquetDeck(p: RacquetDeckProps) {
         <div className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
           {expedite!.afterMinutes} minutes of play reached, but {pts[0] + pts[1]} points have been scored
           (score {pts[0]}–{pts[1]}; {expedite!.exemptAtTotal} or more) — the expedite system does not apply in this game.
+        </div>
+      )}
+
+      {/* Tennis doubles, at the start of each set: each pair keeps one player in the deuce
+          court and one in the ad court for the whole set. */}
+      {chooseReceivers && !needsSetup && (
+        <div className="grid gap-1.5">
+          {([leftSide, rightSide] as Side[]).filter((side) => (p.pairing![side]?.length ?? 0) > 1).map((side) => {
+            const deuce = p.pairing![side][state.serve.receiveFlip?.[side] ? 1 : 0];
+            return (
+              <div key={side} className="flex flex-wrap items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <span>Who receives in the deuce court for {nameOf(side)} this set?</span>
+                {/* Alphabetical, so picking moves only the highlight. */}
+                {[...p.pairing![side]].sort((a, b) => a.localeCompare(b)).map((name) => (
+                  <button key={name} type="button" disabled={p.disabled}
+                    className={cn(
+                      'rounded-lg border-2 px-3 py-1 text-sm font-semibold transition',
+                      name === deuce
+                        ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300'
+                        : 'border-slate-200 text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:text-slate-200',
+                    )}
+                    onClick={() => { if (name !== deuce) push({ t: 'switchReceiver', side }); }}>
+                    {name}
+                  </button>
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -598,6 +636,30 @@ export function RacquetDeck(p: RacquetDeckProps) {
             </div>
             <Button size="sm" variant="subtle" disabled={returns === 0} onClick={() => setReturns(returns - 1)}>−1</Button>
             <Button size="sm" disabled={p.disabled || p.busy} onClick={addReturn}>+1 return</Button>
+          </div>
+        )}
+        {/* Tennis has two serves: a fault sets up the second, a second fault is a double
+            fault (the point to the receiver). An ace is a point won off the serve. Tapping
+            these, rather than only who won the rally, is what fills the serve stats. */}
+        {twoServes && !state.ended && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60">
+            <span className={cn(
+              'rounded-md px-2 py-0.5 text-xs font-black uppercase tracking-wider',
+              secondServe ? 'bg-amber-400 text-slate-950' : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
+            )}>
+              {secondServe ? '2nd serve' : '1st serve'}
+            </span>
+            <span className="mr-auto text-sm text-slate-600 dark:text-slate-300">{resolved?.server ?? nameOf(state.serve.side)}</span>
+            <Button variant="outline" disabled={p.disabled || p.busy}
+              title={secondServe ? 'Second serve missed - the point goes to the receiver' : 'First serve missed - a second serve follows'}
+              onClick={() => push({ t: 'fault', side: state.serve.side })}>
+              {secondServe ? 'Double fault' : 'Fault'}
+            </Button>
+            <Button variant="outline" disabled={p.disabled || p.busy}
+              title="A serve the receiver could not touch - the point to the server"
+              onClick={() => push({ t: 'point', side: state.serve.side, kind: 'ace' })}>
+              Ace
+            </Button>
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">
@@ -1210,7 +1272,7 @@ function Timeline({ format, log, firstServer, homeName, awayName }:
               )}
             </span>
             {/* A unit-winning point resets the score, so its row shows the unit tag instead. */}
-            {!t.unitsWon.length && ['point', 'penalty', 'adjust'].includes(t.event.t) && (
+            {!t.unitsWon.length && (['point', 'penalty', 'adjust'].includes(t.event.t) || (t.event.t === 'fault' && t.scored)) && (
               <span className="shrink-0 font-mono tabular-nums font-semibold text-slate-700 dark:text-slate-200">{score}</span>
             )}
             {t.atDeuce && <span className="shrink-0 text-[10px] uppercase text-amber-600 dark:text-amber-400">deuce</span>}
@@ -1233,16 +1295,19 @@ function describe(t: ReturnType<typeof foldRally>['trace'][number], nameOf: (s: 
       // Under serverOnly scoring a receiver win is a side-out, not a point - and the
       // timeline has to say so or the log reads as a scoring error.
       return t.scored
-        ? `Point to ${nameOf(t.scored)}${ev.kind === 'expedite_returns' ? ` · ${ev.label ?? 'expedite returns'}` : ''}`
+        ? `${ev.kind === 'ace' ? 'Ace — point' : 'Point'} to ${nameOf(t.scored)}${ev.kind === 'expedite_returns' ? ` · ${ev.label ?? 'expedite returns'}` : ''}`
         : `${nameOf(ev.side)} won the rally — side-out, no point`;
     case 'expedite':
       return `Expedite system in — ${ev.reason === 'request' ? 'both players asked' : 'time limit'}${ev.inRally ? ' · rally replayed' : ''}`;
     case 'switchPairServer':
       return ev.side ? `${nameOf(ev.side)}: partners swap starting courts` : 'Other partner serves first this game';
+    case 'switchReceiver': return `${nameOf(ev.side)}: partners swap receiving courts for this set`;
     case 'clockPause': return 'Game clock paused';
     case 'clockStart': return 'Game clock resumed';
     case 'let': return 'Let — rally replayed';
-    case 'fault': return `Fault · ${nameOf(ev.side)}`;
+    case 'fault':
+      // The kernel scores a second fault for the receiver: that is a double fault.
+      return t.scored ? `Double fault · ${nameOf(ev.side)} — point to ${nameOf(t.scored)}` : `Fault · ${nameOf(ev.side)} — second serve`;
     case 'penalty':
       return ev.card === 'red'
         ? `${misconductTerms(sport).foul} to ${nameOf(ev.side === 'A' ? 'B' : 'A')} — point to ${nameOf(ev.side)}`

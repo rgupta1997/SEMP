@@ -95,6 +95,8 @@ export type RallyEvent =
    * Badminton (`side`): each pair picks its own - that pair's partners swap courts.
    */
   | { t: 'switchPairServer'; side?: Side; by?: string; at?: string }
+  /** Tennis doubles, at the start of a set: the pair's other player receives in the deuce court. */
+  | { t: 'switchReceiver'; side: Side; by?: string; at?: string }
   /**
    * THE WHISTLE. A clock-terminated period is over; tally what was scored.
    *
@@ -158,7 +160,17 @@ export interface ServeState {
    * this turn - whoever stood in the right court when the serve came over.
    */
   turnLead?: number;
+  /** Tennis: 1 while the server is on their second serve (a first-serve fault called). */
+  faults?: number;
+  /**
+   * Tennis doubles: a side whose SECOND-listed player receives in the deuce court this
+   * set. Chosen by each pair at the start of a set and kept for the whole of it.
+   */
+  receiveFlip?: Partial<Record<Side, boolean>>;
 }
+
+/** Sports with a first and a second serve, where a second fault loses the point. */
+const TWO_SERVES = new Set(['tennisGameLocked']);
 
 /** Index in the pairing of the side's player in the right court. */
 const rightIndex = (sv: ServeState, side: Side) => (sv.pairFlip?.[side] ? 1 : 0);
@@ -492,7 +504,11 @@ function opensSpecially(spec: ServeSpec): boolean {
 const clone = (s: KernelState): KernelState => ({
   ...s,
   score: s.score.map((p) => [p[0], p[1]] as Pair),
-  serve: { ...s.serve, ...(s.serve.pairFlip ? { pairFlip: { ...s.serve.pairFlip } } : {}) },
+  serve: {
+    ...s.serve,
+    ...(s.serve.pairFlip ? { pairFlip: { ...s.serve.pairFlip } } : {}),
+    ...(s.serve.receiveFlip ? { receiveFlip: { ...s.serve.receiveFlip } } : {}),
+  },
   finished: [...s.finished],
 });
 
@@ -518,6 +534,10 @@ function courtHalfFor(spec: ServeSpec, state: KernelState, pointScore: Pair): 'r
       const flip = spec.movement === 'handOut' && state.serve.serverNo === 2;
       return (right !== flip) ? 'right' : 'left';
     }
+    case 'gameTotal':
+      // Tennis: deuce (right) court on an even number of points played in the game, ad
+      // (left) on odd - whoever won them. 0-15 is from the ad court, not the deuce.
+      return (pointScore[0] + pointScore[1]) % 2 === 0 ? 'right' : 'left';
     case 'handAlternate':
       // Squash: the server picks a box at each new hand, then alternates while the
       // hand continues. Modelled as alternating on points served in this turn.
@@ -584,10 +604,15 @@ function serveForNextUnit(spec: ServeSpec, state: KernelState, unitWinnerSide: S
   }
 }
 
-function resetForNewUnit(format: ScoringFormat, state: KernelState, unitWinnerSide: Side): void {
+/**
+ * `nextSide`: who serves next, already decided by the unit that just finished. When a
+ * point ends a game AND the set, the set's reset must not decide again - it alternated
+ * a second time and handed the opening game of the next set to the wrong player.
+ */
+function resetForNewUnit(format: ScoringFormat, state: KernelState, unitWinnerSide: Side, nextSide?: Side): void {
   const lv = effectiveLevel(format, state, state.pointLevel);
   const spec = serveSpecFor(format, lv);
-  const next = serveForNextUnit(spec, state, unitWinnerSide);
+  const next = nextSide ?? serveForNextUnit(spec, state, unitWinnerSide);
   state.serve = {
     side: next,
     serverNo: serveOpeningServerNo(spec),
@@ -599,6 +624,8 @@ function resetForNewUnit(format: ScoringFormat, state: KernelState, unitWinnerSi
     // Table tennis keeps it: with the same partner serving first, the receiver is the one
     // who served to them last game. Badminton starts each game from the listed order.
     ...(state.serve.pairFlip && spec.resolver === 'ttPairCycle' ? { pairFlip: state.serve.pairFlip } : {}),
+    // Tennis receivers hold their courts for the set; the cascade clears this at a new set.
+    ...(state.serve.receiveFlip ? { receiveFlip: state.serve.receiveFlip } : {}),
   };
   state.unitPoints = 0;
   if (state.expedite && !expediteConfig(format)?.stickyForMatch) state.expedite = false;
@@ -613,6 +640,9 @@ function resetForNewUnit(format: ScoringFormat, state: KernelState, unitWinnerSi
  */
 function cascade(format: ScoringFormat, state: KernelState, from: number, forced?: Side): FinishedUnit[] {
   const won: FinishedUnit[] = [];
+  // Who serves next is decided once, by the innermost unit to finish (a tie-break's
+  // "first receiver serves next"); the levels it carries up only re-apply it.
+  let nextServer: Side | undefined;
   let i = from;
   for (;;) {
     const spec = effectiveLevel(format, state, i);
@@ -646,7 +676,10 @@ function cascade(format: ScoringFormat, state: KernelState, from: number, forced
     state.pointLevel = activePointLevel(format, state);
     // A collapsed decider resets its own score too - it is now the point level.
     if (state.pointLevel > 0) state.score[state.pointLevel] = [0, 0];
-    resetForNewUnit(format, state, w);
+    resetForNewUnit(format, state, w, nextServer);
+    nextServer ??= state.serve.side;
+    // A new set: each doubles pair chooses its receiving courts again.
+    if (i >= 1) delete state.serve.receiveFlip;
     i += 1;
   }
   return won;
@@ -667,8 +700,13 @@ function shouldSwitchEnds(
       const total = after[0] + after[1];
       return total > 0 && total % n === 0;
     }
-    case 'oddCumulativeUnits':
-      return false; // settled at unit boundaries, not mid-unit
+    case 'oddCumulativeUnits': {
+      // Games change ends at unit boundaries. A tie-break (and a match tie-break played
+      // as the deciding set) changes every 6 points inside it.
+      const inTiebreak = spec.key === 'tiebreak' || state.pointLevel > 0;
+      const total = after[0] + after[1];
+      return inTiebreak && total > 0 && total % 6 === 0;
+    }
     case 'atDeciderMidpoint': {
       // The rule is decider-only, in badminton and volleyball alike. Nothing happens
       // at 11-x in games 1 and 2 - which is exactly the drift the reference engine's
@@ -732,8 +770,30 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
   base.inDecider = isDecider(format, state, state.pointLevel);
 
   switch (ev.t) {
+    case 'fault': {
+      // Tennis has two serves: the first fault sets up a second serve; a second fault is a
+      // DOUBLE FAULT, and the receiver wins the point exactly as if they had won a rally.
+      // Elsewhere a fault is only a stat (the scorer taps the point as well).
+      if (!TWO_SERVES.has(spec.resolver)) return { state, effect: base };
+      if (!state.serve.faults) {
+        state.serve.faults = 1;
+        return { state, effect: base };
+      }
+      const r = step(format, { ...state, serve: { ...state.serve, faults: 0 } }, { t: 'point', side: other(state.serve.side) });
+      return { state: r.state, effect: { ...r.effect, event: ev } };
+    }
+
+    case 'switchReceiver': {
+      // Only at the very start of a set: no point and no game played in it yet.
+      const games = state.score[1] ?? [0, 0];
+      const atSetStart = state.pointLevel === 0 && state.unitPoints === 0 && games[0] + games[1] === 0;
+      if (spec.resolver !== 'tennisGameLocked' || !atSetStart) return { state: prev, effect: base };
+      state.serve.receiveFlip = { ...state.serve.receiveFlip, [ev.side]: !state.serve.receiveFlip?.[ev.side] };
+      return { state, effect: base };
+    }
+
     case 'let':
-    case 'fault':
+      // A let replays the serve it interrupted - a let on a second serve is a second serve.
     case 'card':
     case 'timeout':
       // Neither scores nor moves the serve. Recorded for the timeline and the stats.
@@ -773,6 +833,8 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
        * Absent still means one, because that is what a plain point is.
        */
       const magnitude = Math.max(0, ev.pts ?? 1);
+      // A rally played ends the serve in hand: the next point starts on a first serve.
+      if (magnitude > 0) state.serve.faults = 0;
       const scores = magnitude > 0
         && (spec.pointScoring === 'rally' || rallyWinner === state.serve.side);
       if (scores) {
@@ -822,6 +884,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       // A conduct point behaves exactly like a rallied point for the score and the
       // serve clock - it can trigger deuce, the change of ends and the unit end.
       if (format.penaltyEvents === 'off') return { state: prev, effect: base };
+      state.serve.faults = 0;
       state.score[state.pointLevel][idx(ev.side)] += 1;
       state.unitPoints += 1;
       state.totalPoints += 1;
@@ -846,6 +909,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       state.serve.side = ev.side;
       state.serve.serverNo = 1;
       state.serve.turnCount = 0;
+      state.serve.faults = 0;
       state.serve.courtHalf = courtHalfFor(spec, state, state.score[state.pointLevel]);
       break;
 
@@ -854,6 +918,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       state.serve.side = ev.side;
       state.serve.serverNo = ev.serverNo ?? 1;
       state.serve.turnCount = 0;
+      state.serve.faults = 0;
       state.serve.courtHalf = courtHalfFor(spec, state, state.score[state.pointLevel]);
       break;
 

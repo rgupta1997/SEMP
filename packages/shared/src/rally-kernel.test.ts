@@ -265,6 +265,125 @@ describe('badminton classic 15 - serverOnly scoring, built not stubbed', () => {
   });
 });
 
+describe('tennis serving', () => {
+  const f = fmtOf('itf_standard_bo3');
+  const rallies = (s: string): RallyLog => s.split('').map((side) => ({ t: 'point', side }) as RallyEvent);
+  const st = (log: RallyLog) => foldRally(f, log, 'A');
+  // Each side holds serve: A serves games 1, 3, ...; B serves 2, 4, ... - to 6-6.
+  const sixAll: RallyLog = Array.from({ length: 12 }, (_, g) => rallies((g % 2 === 0 ? 'A' : 'B').repeat(4))).flat();
+
+  it('serves from the deuce court on an even number of points played, the ad court on odd', () => {
+    expect(['', 'A', 'B', 'AB', 'BB'].map((s) => st(rallies(s)).state.serve.courtHalf))
+      .toEqual(['right', 'left', 'left', 'right', 'right']); // 0-15 is the ad court
+  });
+
+  it('the player who received first in a tie-break serves the next set', () => {
+    // A serves the first point of the tie-break, so B opens set 2.
+    expect(st([...sixAll, ...rallies('AAAAAAA')]).state.serve.side).toBe('B');
+  });
+
+  it('a set won in an ordinary game hands the serve on once, not twice', () => {
+    // Set 1 to A 6-4: B served game 10, so A opens set 2.
+    const holds = Array.from({ length: 8 }, (_, g) => rallies((g % 2 === 0 ? 'A' : 'B').repeat(4))).flat();
+    const s = st([...holds, ...rallies('AAAA'), ...rallies('AAAA')]).state; // A holds 5-4, breaks to 6-4
+    expect(s.score[2]).toEqual([1, 0]);
+    expect(s.serve.side).toBe('A');
+  });
+
+  it('changes ends every 6 points of a tie-break', () => {
+    const r = st([...sixAll, ...rallies('ABABAB')]);
+    expect(r.trace[r.trace.length - 1].switchEnds).toBe(true);
+    expect(st([...sixAll, ...rallies('ABAB')]).trace.at(-1)!.switchEnds).toBe(false);
+  });
+
+  it('doubles partners keep rotating through a tie-break', () => {
+    const pair = { A: ['a1', 'a2'], B: ['b1', 'b2'] };
+    const servers = ['', 'A', 'AA', 'AAA', 'AAAA', 'AAAAA'].map((s) => resolveServer(f, st([...sixAll, ...rallies(s)]).state, pair).server);
+    expect(servers).toEqual(['a1', 'b1', 'b1', 'a2', 'a2', 'b2']);
+  });
+
+  const fault: RallyEvent = { t: 'fault', side: 'A' };
+  const ace: RallyEvent = { t: 'point', side: 'A', kind: 'ace' };
+
+  it('a fault sets up a second serve; a second fault is a double fault, the point to the receiver', () => {
+    const one = st([fault]).state;
+    expect(one.serve.faults).toBe(1);
+    expect(one.score[0]).toEqual([0, 0]);
+    const two = st([fault, fault]).state;
+    expect(two.score[0]).toEqual([0, 1]);
+    expect(two.serve.faults).toBe(0); // the next point starts on a first serve
+  });
+
+  it('a let on a second serve is still a second serve; any rally resets to the first', () => {
+    expect(st([fault, { t: 'let' }]).state.serve.faults).toBe(1);
+    expect(st([fault, ...rallies('A')]).state.serve.faults).toBe(0);
+  });
+
+  it('a double fault can end the game, and changes ends like any point', () => {
+    const r = st([...rallies('AAA'), fault, fault, ...rallies('BBB'), fault, fault]); // 40-40, then two double faults
+    expect(r.state.score[1]).toEqual([0, 1]);
+  });
+
+  it('counts aces, double faults and first / second serve - only where serves were recorded', () => {
+    // A: ace, then a fault and a point won on the second serve, then a double fault, then a first-serve point lost.
+    const log: RallyLog = [ace, fault, ...rallies('A'), fault, fault, ...rallies('B')];
+    const { sides } = deriveRacquetStats(f, log, { firstServer: 'A' });
+    expect(sides.A).toMatchObject({
+      aces: 1, double_faults: 1, serve_points_tracked: 4,
+      first_serves_in: 2, first_serve_points_won: 1,
+      second_serve_points_played: 2, second_serve_points_won: 1,
+    });
+    const career = foldCareerStats(statSpecFor('tennis')!, [sides.A]);
+    expect(career).toMatchObject({ first_serve_pct: 50, first_serve_win_pct: 50, second_serve_win_pct: 50 });
+    // Plain rallies only: no serve figures at all, rather than "100% first serves in".
+    expect(deriveRacquetStats(f, rallies('AAAB'), { firstServer: 'A' }).sides.A.first_serves_in).toBeUndefined();
+  });
+
+  it('counts service games held and broken, but not tie-breaks', () => {
+    // A holds game 1; B serves game 2 and A breaks.
+    const { sides } = deriveRacquetStats(f, rallies('AAAA' + 'AAAA'), { firstServer: 'A' });
+    expect(sides.A).toMatchObject({ service_games_played: 1, service_games_won: 1, return_games_played: 1, return_games_won: 1 });
+    expect(sides.B).toMatchObject({ service_games_played: 1, return_games_played: 1 });
+    expect(sides.B.service_games_won ?? 0).toBe(0);
+    expect(foldCareerStats(statSpecFor('tennis')!, [sides.A])).toMatchObject({ service_games_held_pct: 100, return_games_won_pct: 100 });
+    // 6-6 with every game held, then a tie-break: 6 service games each, the tie-break not among them.
+    const tb = deriveRacquetStats(f, [...sixAll, ...rallies('AAAAAAA')], { firstServer: 'A' }).sides;
+    expect(tb.A).toMatchObject({ service_games_played: 6, service_games_won: 6 });
+  });
+
+  it('doubles receivers hold their courts for the set: deuce on even points, ad on odd', () => {
+    const pair = { A: ['a1', 'a2'], B: ['b1', 'b2'] };
+    const rec = (log: RallyLog) => resolveServer(f, st(log).state, pair).receiver;
+    expect(['', 'A', 'AB', 'ABB'].map((s) => rec(rallies(s)))).toEqual(['b1', 'b2', 'b1', 'b2']);
+    // B chooses b2 for the deuce court at the start of the set.
+    const flip: RallyEvent = { t: 'switchReceiver', side: 'B' };
+    expect([rec([flip]), rec([flip, ...rallies('A')])]).toEqual(['b2', 'b1']);
+    // Not once the set is under way.
+    expect(rec([...rallies('AAAA'), flip])).toBe(rec(rallies('AAAA')));
+  });
+
+  it('a new set starts the receiving courts afresh', () => {
+    const flip: RallyEvent = { t: 'switchReceiver', side: 'B' };
+    const set1 = Array.from({ length: 6 }, () => rallies('AAAA')).flat(); // A wins every point: set 1 to A, 6-0
+    expect(st([flip, ...set1]).state.serve.receiveFlip).toBeUndefined();
+  });
+
+  it('personal receive points in tennis doubles go to the player in that court', () => {
+    const pair = { A: ['a1', 'a2'], B: ['b1', 'b2'] };
+    const { players } = deriveRacquetStats(f, rallies('AAAA'), { pairing: pair, firstServer: 'A' });
+    const of = (id: string) => players.find((x) => x.userId === id)!.stats;
+    expect(of('b1').return_points_played).toBe(2); // the two deuce-court points
+    expect(of('b2').return_points_played).toBe(2);
+  });
+
+  it('calls deuce and advantage in words', () => {
+    expect(serveCall(f, st(rallies('AAABBB')).state, false)).toBe('Deuce');
+    expect(serveCall(f, st(rallies('AAABBBA')).state, false)).toBe('Ad in');
+    expect(serveCall(f, st(rallies('AAABBBB')).state, false)).toBe('Ad out');
+    expect(serveCall(fmtOf('no_ad_match_tb_bo3'), foldRally(fmtOf('no_ad_match_tb_bo3'), rallies('AAABBB'), 'A').state, false)).toBe('Deciding point');
+  });
+});
+
 describe('tennis - the acid test for the nested level array', () => {
   const f = fmtOf('itf_standard_bo3');
 
