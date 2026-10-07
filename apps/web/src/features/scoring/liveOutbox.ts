@@ -210,6 +210,15 @@ const refreshKeys = new Map<string, string[]>();
 let refresh: ((keys: string[]) => void) | null = null;
 
 export function setRefresher(fn: (keys: string[]) => void): void { refresh = fn; }
+
+/**
+ * Told the body the server just acknowledged, so the app's cached copy of the match
+ * can be brought up to it. Without this, leaving the console mid-save and coming back
+ * found the outbox already cleared and the cache still holding the score from BEFORE
+ * the last tap - the console reopened a point behind the server.
+ */
+let onAcknowledged: ((fixtureId: string, body: Record<string, unknown>) => void) | null = null;
+export function setAcknowledgedHandler(fn: (fixtureId: string, body: Record<string, unknown>) => void): void { onAcknowledged = fn; }
 export function setRefreshKeys(fixtureId: string, keys: string[]): void {
   if (keys.length) refreshKeys.set(fixtureId, keys);
 }
@@ -237,6 +246,7 @@ export async function flushFixture(fixtureId: string): Promise<boolean> {
     setStatus(fixtureId, { sending: true });
     try {
       await api('PATCH', `/fixtures/${fixtureId}/live`, entry.body);
+      onAcknowledged?.(fixtureId, entry.body);
       acknowledge(fixtureId, entry.seq);
       setStatus(fixtureId, { sending: false, failed: false, savedAt: Date.now() });
       // Everything staged at or before the acknowledged seq was inside that body,

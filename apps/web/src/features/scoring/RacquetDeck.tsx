@@ -4,6 +4,7 @@ import {
   resolveServer, resultEnvelope, serveCall, serveEveryNow, serveSpecFor, step, misconductTerms, timeoutRules, timeoutsLeft, unitClock,
   type KernelState, type LevelSpec, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
+import { ArrowLeftRight, CheckCircle2, Flag, RotateCcw, SlidersHorizontal, Timer, Undo2 } from 'lucide-react';
 import { Button, Card, cn, confirmDialog, Select, toast } from '../../components/ui';
 
 // ============================================================================
@@ -125,11 +126,13 @@ export function RacquetDeck(p: RacquetDeckProps) {
   const gameClock = expedite && !state.expedite && !state.ended ? unitClock(format, log, firstServer, now) : null;
   const clockRunning = gameClock !== null;
   const clockPaused = !!gameClock?.paused;
+  // At the time limit the clock has done its job: it stops ticking there.
+  const limitReached = clockRunning && gameClock!.elapsedMs >= expedite!.afterMinutes * 60_000;
   useEffect(() => {
-    if (!clockRunning || clockPaused) return;
+    if (!clockRunning || clockPaused || limitReached) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [clockRunning, clockPaused]);
+  }, [clockRunning, clockPaused, limitReached]);
   const gameElapsed = gameClock?.elapsedMs ?? 0;
   const expediteDue = clockRunning && gameElapsed >= expedite!.afterMinutes * 60_000;
   const pts = state.score[state.pointLevel];
@@ -214,8 +217,13 @@ export function RacquetDeck(p: RacquetDeckProps) {
   // Timeouts: the allowance left, and the one just called (the latest event).
   const toRules = timeoutRules(format);
   const toLeft = useMemo(() => timeoutsLeft(format, log, firstServer), [format, log, firstServer]);
-  const lastEvent = log[log.length - 1];
-  const activeTimeout = lastEvent?.t === 'timeout' && timeoutEnded !== log.length - 1 ? lastEvent : null;
+  // The timeout just called: the latest event, or the one right before the clock pause it brought.
+  const toIdx = (() => {
+    let i = log.length - 1;
+    if (log[i]?.t === 'clockPause') i -= 1;
+    return log[i]?.t === 'timeout' ? i : -1;
+  })();
+  const activeTimeout = toIdx >= 0 && timeoutEnded !== toIdx ? (log[toIdx] as Extract<RallyEvent, { t: 'timeout' }>) : null;
   const callTimeout = async (side: Side) => {
     if (toLeft && toLeft[side] === 0) {
       const ok = await confirmDialog({
@@ -225,38 +233,53 @@ export function RacquetDeck(p: RacquetDeckProps) {
       });
       if (!ok) return;
     }
-    push({ t: 'timeout', side });
+    // A timeout is not playing time: the expedite clock stops with it (ITTF 2.15.1,
+    // "10 minutes' play"). It restarts on End timeout, or on its own at the next rally.
+    if (p.disabled) return;
+    const at = new Date().toISOString();
+    const added: RallyEvent[] = [{ t: 'timeout', side, at }];
+    if (clockRunning && !clockPaused) added.push({ t: 'clockPause', at });
+    const next = [...log, ...added];
+    p.onChange(next, foldRally(format, next, firstServer).state);
+  };
+  const endTimeout = () => {
+    setTimeoutEnded(toIdx);
+    if (clockRunning && clockPaused) push({ t: 'clockStart' });
   };
 
   const timing = useMemo(() => rallyTiming(format, log, firstServer), [format, log, firstServer]);
   const cards = useMemo(() => cardTally(log, format.sport), [log, format.sport]);
 
+  const [leftSide, rightSide]: [Side, Side] = flipped ? ['B', 'A'] : ['A', 'B'];
+  // A team keeps its colour wherever it sits, so after "Swap sides" it is still found by colour.
+  const accentOf = (side: Side) => (side === 'A' ? ACCENT.left : ACCENT.right);
   const panel = (side: Side) => (
-    <ScorePanel
+    <ScoreSide
       key={side}
-      name={nameOf(side)} org={subOf(side)} side={side}
+      name={nameOf(side)} org={subOf(side)}
       points={label(state.score[state.pointLevel][side === 'A' ? 0 : 1])}
-      serving={serve.movement !== 'none' && state.serve.side === side}
+      serving={serve.movement !== 'none' && !state.ended && state.serve.side === side}
       cue={pointCue(side)}
-      units={multiUnit ? { label: `${unitLabel}s`, won: state.score[top][side === 'A' ? 0 : 1] } : null}
+      units={multiUnit ? { label: `${unitLabel}s`, won: state.score[top][side === 'A' ? 0 : 1], needed: format.levels[top].target } : null}
       cards={cards[side]}
-      align={(side === 'A') !== flipped ? 'left' : 'right'}
+      align={side === leftSide ? 'left' : 'right'}
+      accent={accentOf(side)}
     />
   );
-  const [leftSide, rightSide]: [Side, Side] = flipped ? ['B', 'A'] : ['A', 'B'];
 
   return (
     <div className="grid gap-4">
       {/* ── Header: what rules are in force, and where they came from ─────── */}
-      <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs">
-        <div className="text-slate-500 dark:text-slate-400">
-          <span className="font-semibold text-slate-700 dark:text-slate-200">{format.name}</span>
-          {p.provenance && <span className="ml-2">· {p.provenance}</span>}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0 text-sm text-slate-500 dark:text-slate-400">
+          <span className="font-semibold text-slate-800 dark:text-slate-100">{format.name}</span>
+          {p.provenance && <span className="ml-2 text-xs">· {p.provenance}</span>}
         </div>
-        <div className="flex items-center gap-2 text-[11px] text-slate-400 dark:text-slate-500">
+        <div className="flex flex-wrap items-center gap-2">
           {!state.ended && timing.matchMs !== null && (
-            <span title="Playing time: first point to the latest" className="font-mono tabular-nums">
-              ⏱ {minutes(timing.matchMs)}
+            <span title="Playing time: first point to the latest"
+              className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 font-mono text-xs font-semibold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              <Timer className="h-3.5 w-3.5" /> {minutes(timing.matchMs)}
             </span>
           )}
           {state.expedite && <Badge tone="amber">Expedite</Badge>}
@@ -293,51 +316,82 @@ export function RacquetDeck(p: RacquetDeckProps) {
         </div>
       )}
 
-      {/* ── The score ─────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-        {panel(leftSide)}
-        <div className="text-center">
-          <div className="font-mono text-xs uppercase tracking-wider text-slate-400 dark:text-slate-500">
-            {heading}
+      {/* ── The scoreboard ────────────────────────────────────────────────────
+          A courtside board in the page's theme. Each side wears its own colour; the
+          serving side is outlined in it. */}
+      <div className="overflow-hidden rounded-2xl bg-gradient-to-b from-slate-50 to-slate-100 p-3 text-slate-900 ring-1 ring-slate-200 sm:p-4 dark:from-slate-900 dark:to-slate-950 dark:text-white dark:ring-white/10">
+        <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2 sm:gap-4">
+          {panel(leftSide)}
+          <div className="flex min-w-[6.5rem] flex-col items-center justify-center gap-2 text-center">
+            <div className="rounded-full bg-slate-200 px-3 py-1 font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-slate-700 dark:bg-white/10 dark:text-slate-200">
+              {heading}
+            </div>
+            {subHeading && (
+              <div className="text-xs font-black uppercase tracking-wider text-amber-600 dark:text-amber-300">{subHeading}</div>
+            )}
+            {/* The serving side's score is always called first - labelled rather than
+                reordered, so the call reads correctly for anyone announcing it courtside. */}
+            {call && !state.ended && (
+              <div title="Score as called: server's score first">
+                <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-500 dark:text-slate-400">Call</div>
+                {/* Read aloud before every serve, so it is sized to be read from arm's length. */}
+                <div className="font-mono text-3xl font-black tabular-nums text-amber-600 sm:text-4xl dark:text-amber-300">{call}</div>
+              </div>
+            )}
+            {/* Games already played: "21-15", "18-21". */}
+            <UnitStrip format={format} state={state} env={env} />
           </div>
-          {subHeading && (
-            <div className="mt-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
-              {subHeading}
-            </div>
-          )}
-          {/* The serving side's score is always called first - labelled rather than
-              reordered, so the call reads correctly for anyone announcing it courtside. */}
-          {call && !state.ended && (
-            <div className="mt-1.5" title="Score as called: server's score first">
-              {/* Read aloud before every serve, so it is sized to be read from arm's length. */}
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Call</div>
-              <div className="font-mono text-2xl font-bold tabular-nums text-slate-800 dark:text-slate-100">{call}</div>
-            </div>
-          )}
+          {panel(rightSide)}
         </div>
-        {panel(rightSide)}
+
+        {/* Who serves, to whom, from where - the line an umpire reads before every rally. */}
+        {serve.movement !== 'none' && !state.ended && (
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-xl bg-white px-3 py-2.5 text-sm text-slate-600 ring-1 ring-slate-200 sm:text-base dark:bg-white/5 dark:text-slate-300 dark:ring-0">
+            <span>
+              <span className="font-bold text-slate-900 dark:text-white">{resolved?.server ?? nameOf(state.serve.side)}</span> to serve
+              {(pairCycle || bwfPairs) && doubles && resolved?.receiver && (
+                <> to <span className="font-bold text-slate-900 dark:text-white">{resolved.receiver}</span></>
+              )}
+            </span>
+            {resolved?.courtHalf && !pairCycle && (
+              <span className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                <CourtHalf half={resolved.courtHalf} /> {resolved.courtHalf} court
+              </span>
+            )}
+            {serve.movement === 'handOut' && doubles && (
+              <span className="rounded-md bg-slate-200 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-slate-800 dark:bg-white/10 dark:text-white">Server {state.serve.serverNo}</span>
+            )}
+            {serveTurn && (
+              <span className="rounded-md bg-amber-400 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-slate-950">{serveTurn}</span>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* The finished-unit strip: "11–7 · 9–11 · 11–6". */}
-      <UnitStrip format={format} state={state} env={env} />
-
-      {/* The expedite game clock: its own row, since the umpire watches and pauses it. */}
-      {clockRunning && (
+      {/* The expedite game clock: its own row, since the umpire watches and pauses it.
+          Its only job is to reach the time limit, so it stops there - and it is not shown
+          at all once the scorer has said expedite is not being played in this match. */}
+      {clockRunning && !expediteDeclined && (
         <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400">
           <span>Game time</span>
-          <span className={cn(
-            'font-mono text-base font-semibold tabular-nums text-slate-800 dark:text-slate-100',
-            expediteDue && 'text-rose-600 dark:text-rose-400',
-          )}>
-            {clockText(gameElapsed)}
-          </span>
-          <span className="font-mono tabular-nums">/ {clockText(expedite!.afterMinutes * 60_000)}</span>
-          {clockPaused && <Badge tone="amber">Paused</Badge>}
-          <Button size="sm" variant={clockPaused ? 'outline' : 'subtle'} disabled={p.disabled}
-            title="Stop the expedite clock for a towel break, timeout or interruption"
-            onClick={() => push({ t: clockPaused ? 'clockStart' : 'clockPause' })}>
-            {clockPaused ? 'Resume clock' : 'Pause clock'}
-          </Button>
+          {expediteDue ? (
+            <span className="font-mono text-base font-semibold tabular-nums text-rose-600 dark:text-rose-400">
+              {clockText(expedite!.afterMinutes * 60_000)} · time limit reached
+            </span>
+          ) : (
+            <>
+              <span className="font-mono text-base font-semibold tabular-nums text-slate-800 dark:text-slate-100">
+                {clockText(gameElapsed)}
+              </span>
+              <span className="font-mono tabular-nums">/ {clockText(expedite!.afterMinutes * 60_000)}</span>
+              {clockPaused && <Badge tone="amber">Paused</Badge>}
+              <Button size="sm" variant={clockPaused ? 'outline' : 'subtle'} disabled={p.disabled}
+                title="Stop the expedite clock for a towel break, timeout or interruption"
+                onClick={() => push({ t: clockPaused ? 'clockStart' : 'clockPause' })}>
+                {clockPaused ? 'Resume clock' : 'Pause clock'}
+              </Button>
+            </>
+          )}
         </div>
       )}
 
@@ -383,18 +437,6 @@ export function RacquetDeck(p: RacquetDeckProps) {
         </div>
       )}
 
-      {serve.movement !== 'none' && !state.ended && (
-        <div className="text-center text-xs text-slate-500 dark:text-slate-400">
-          <span className="font-semibold text-slate-700 dark:text-slate-200">{resolved?.server ?? nameOf(state.serve.side)}</span> to serve
-          {(pairCycle || bwfPairs) && doubles && resolved?.receiver && (
-            <> to <span className="font-semibold text-slate-700 dark:text-slate-200">{resolved.receiver}</span></>
-          )}
-          {resolved?.courtHalf && !pairCycle ? ` from the ${resolved.courtHalf} court` : ''}
-          {serve.movement === 'handOut' && doubles ? ` · server ${state.serve.serverNo}` : ''}
-          {serveTurn && <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">{serveTurn}</span>}
-        </div>
-      )}
-
       {/* Games 2+, at 0-0. Table tennis: the serving pair picks, the receiver follows
           (ITTF 2.13.5). Badminton: each pair picks who starts in the right court. */}
       {choosePairServer && (() => {
@@ -436,7 +478,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
           <span className="mr-auto">
             Timeout — {nameOf(activeTimeout.side)} <Countdown from={activeTimeout.at} seconds={toRules.seconds} />
           </span>
-          <Button size="sm" variant="subtle" onClick={() => setTimeoutEnded(log.length - 1)}>End timeout</Button>
+          <Button size="sm" variant="subtle" onClick={endTimeout}>End timeout</Button>
         </div>
       )}
       {/* One card per side, under that side's score panel: dots for what is left, then the button. */}
@@ -566,6 +608,8 @@ export function RacquetDeck(p: RacquetDeckProps) {
               label={nameOf(side)}
               players={playersOf(side)?.join(' / ')}
               hint={state.ended ? 'undo a point first' : serve.pointScoring === 'serverOnly' && state.serve.side !== side ? 'wins the serve' : 'won the rally'}
+              accent={accentOf(side)}
+              serving={serve.movement !== 'none' && state.serve.side === side}
               disabled={p.disabled || p.busy || state.ended}
               onClick={() => push({ t: 'point', side })}
             />
@@ -588,21 +632,22 @@ export function RacquetDeck(p: RacquetDeckProps) {
       )}
 
       {/* ── Corrections ───────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="outline" disabled={!log.length || p.disabled} onClick={undo}>
-          Undo
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-900/60">
+        <Button variant="outline" disabled={!log.length || p.disabled} onClick={undo} className="gap-1.5">
+          <Undo2 className="h-4 w-4" /> Undo
         </Button>
         {format.letsEnabled && (!state.ended || rescoring) && (
-          <Button size="sm" variant="subtle" disabled={p.disabled} onClick={() => push({ t: 'let' })}>
-            Let
+          <Button variant="subtle" disabled={p.disabled} onClick={() => push({ t: 'let' })} className="gap-1.5"
+            title="Replay the rally - no point to anyone">
+            <RotateCcw className="h-4 w-4" /> Let
           </Button>
         )}
-        <Button size="sm" variant="subtle" onClick={() => setShowTools((v) => !v)}>
-          {showTools ? 'Hide corrections' : 'Corrections'}
+        <Button variant={showTools ? 'outline' : 'subtle'} onClick={() => setShowTools((v) => !v)} className="gap-1.5">
+          <SlidersHorizontal className="h-4 w-4" /> {showTools ? 'Hide corrections' : 'Corrections'}
         </Button>
-        <Button size="sm" variant="subtle" title="Mirror the screen to match the court after a change of ends"
-          onClick={() => setFlipped((f) => !f)}>
-          ⇄ Swap sides
+        <Button variant="subtle" title="Mirror the screen to match the court after a change of ends"
+          onClick={() => setFlipped((f) => !f)} className="gap-1.5">
+          <ArrowLeftRight className="h-4 w-4" /> Swap sides
         </Button>
         {/* SIGNING OFF ALWAYS REACHABLE - BUT NEVER SILENTLY AS A 0-0 DRAW.
             The original bug: eight points into a game to 11, Sign off published a
@@ -614,17 +659,17 @@ export function RacquetDeck(p: RacquetDeckProps) {
             confirms the real result in one tap. Before that it asks HOW the match
             ended and records that reason - so an outcome is always deliberate. */}
         {state.ended ? (
-          <Button size="sm" className="ml-auto" disabled={p.disabled || p.busy}
+          <Button className="ml-auto gap-1.5" disabled={p.disabled || p.busy}
             onClick={() => { setRescoring(false); p.onSignOff(log, state); }}>
-            Confirm result
+            <CheckCircle2 className="h-4 w-4" /> Confirm result
           </Button>
         ) : (
           <Button
-            size="sm" variant="outline" className="ml-auto"
+            variant="outline" className="ml-auto gap-1.5"
             disabled={p.disabled || p.busy}
             onClick={() => setFinishing((v) => !v)}
           >
-            {finishing ? 'Keep scoring' : 'End match'}
+            <Flag className="h-4 w-4" /> {finishing ? 'Keep scoring' : 'End match'}
           </Button>
         )}
       </div>
@@ -668,44 +713,91 @@ function Badge({ tone, children }: { tone: 'amber' | 'slate'; children: React.Re
   );
 }
 
-function ScorePanel({ name, org, points, serving, cue, units, cards, align = 'left' }: {
-  name: string; org?: string | null; side: Side; points: string; serving: boolean;
-  cue: string | null; units: { label: string; won: number } | null; align?: 'left' | 'right';
-  cards?: CardTally;
+/**
+ * Each side keeps one colour everywhere on the console - its half of the scoreboard,
+ * its rally button - so a scorer glancing up finds "their" side by colour, not text.
+ * Static class strings, so Tailwind keeps them.
+ */
+const ACCENT = {
+  left: {
+    text: 'text-sky-600 dark:text-sky-300', pip: 'bg-sky-500 dark:bg-sky-400', pipOff: 'border-sky-500/40 dark:border-sky-400/40',
+    border: 'border-sky-500 dark:border-sky-400', bar: 'bg-sky-500 dark:bg-sky-400',
+    button: 'bg-gradient-to-br from-sky-500 to-sky-700 hover:from-sky-400 hover:to-sky-600 ring-sky-300/40',
+  },
+  right: {
+    text: 'text-orange-600 dark:text-orange-300', pip: 'bg-orange-500 dark:bg-orange-400', pipOff: 'border-orange-500/40 dark:border-orange-400/40',
+    border: 'border-orange-500 dark:border-orange-400', bar: 'bg-orange-500 dark:bg-orange-400',
+    button: 'bg-gradient-to-br from-orange-500 to-orange-700 hover:from-orange-400 hover:to-orange-600 ring-orange-300/40',
+  },
+} as const;
+type Accent = (typeof ACCENT)[keyof typeof ACCENT];
+
+/** One half of the scoreboard: who, how many points, how many games, and what is at stake. */
+function ScoreSide({ name, org, points, serving, cue, units, cards, align, accent }: {
+  name: string; org?: string | null; points: string; serving: boolean; cue: string | null;
+  units: { label: string; won: number; needed: number } | null; cards?: CardTally;
+  align: 'left' | 'right'; accent: Accent;
 }) {
+  const right = align === 'right';
   return (
-    <div className={cn('min-w-0', align === 'right' && 'text-right')}>
-      <div className="flex items-center gap-1.5" style={align === 'right' ? { justifyContent: 'flex-end' } : undefined}>
-        {serving && align === 'left' && <ServeDot />}
-        <span className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{name}</span>
+    // The serving side is outlined in its own colour - plain, no glow.
+    <div className={cn(
+      'relative min-w-0 rounded-xl border-2 bg-white px-4 py-3 transition dark:bg-white/[0.03]',
+      serving ? accent.border : 'border-slate-200 dark:border-transparent',
+      right && 'text-right',
+    )}>
+      {/* The side's colour bar, on its outer edge. */}
+      <span className={cn('absolute inset-y-3 w-1 rounded-full', accent.bar, right ? 'right-0' : 'left-0')} />
+      <div className={cn('flex items-center gap-2', right && 'flex-row-reverse')}>
+        <span className="truncate text-base font-bold text-slate-900 sm:text-lg dark:text-white">{name}</span>
         {cards && <CardBadges cards={cards} />}
-        {serving && align === 'right' && <ServeDot />}
       </div>
-      {org && <div className="truncate text-[11px] text-slate-400 dark:text-slate-500">{org}</div>}
-      {/* Units won sits on the inner side of the points, as on a courtside flip board. */}
-      <div className={cn('mt-1 flex items-end gap-3', align === 'right' && 'flex-row-reverse')}>
+      {org && <div className="truncate text-xs text-slate-500 sm:text-sm dark:text-slate-400">{org}</div>}
+
+      <div className={cn('mt-2 flex flex-wrap items-end gap-x-3 gap-y-1', right && 'flex-row-reverse')}>
         <div className={cn(
-          'font-mono text-4xl font-bold tabular-nums',
-          cue ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-900 dark:text-slate-50',
+          'font-mono text-6xl font-black leading-none tabular-nums sm:text-7xl',
+          cue ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-900 dark:text-white',
         )}>
           {points}
         </div>
-        {units && (
-          <div className="mb-1 rounded-md bg-slate-100 px-2 py-0.5 text-center dark:bg-slate-800">
-            <div className="font-mono text-xl font-bold tabular-nums text-slate-800 dark:text-slate-100">{units.won}</div>
-            <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{units.label}</div>
-          </div>
-        )}
+        <div className={cn('mb-1 flex flex-col gap-1.5', right ? 'items-end' : 'items-start')}>
+          {serving && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-slate-950">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-slate-950" /> Serving
+            </span>
+          )}
+          {units && (
+            <div className={cn('flex items-center gap-1', right && 'flex-row-reverse')} aria-label={`${units.won} ${units.label} won`}>
+              {/* One pip per game needed to win: filled as they are won. */}
+              {Array.from({ length: units.needed }, (_, i) => (
+                <span key={i} className={cn('h-3 w-3 rounded-full border-2', i < units.won ? `${accent.pip} border-transparent` : `${accent.pipOff} bg-transparent`)} />
+              ))}
+              <span className={cn('px-1 text-[10px] font-semibold uppercase tracking-wider', accent.text)}>{units.label}</span>
+            </div>
+          )}
+        </div>
       </div>
+
       {cue && (
         <div className={cn(
-          'text-[10px] font-semibold uppercase tracking-wide',
-          cue === 'Match point' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400',
+          'mt-2 inline-block rounded-md px-2 py-0.5 text-xs font-black uppercase tracking-wider',
+          cue === 'Match point' ? 'animate-pulse bg-rose-500 text-white' : 'bg-emerald-400 text-slate-950',
         )}>
           {cue}
         </div>
       )}
     </div>
+  );
+}
+
+/** Which half of the court the serve goes from: a tiny court with that half lit. */
+function CourtHalf({ half }: { half: 'right' | 'left' }) {
+  return (
+    <span className="inline-flex h-6 w-10 overflow-hidden rounded border border-slate-300 dark:border-white/30" aria-label={`${half} court`}>
+      <span className={cn('flex-1 border-r border-slate-300 dark:border-white/30', half === 'left' ? 'bg-amber-400' : 'bg-slate-100 dark:bg-white/5')} />
+      <span className={cn('flex-1', half === 'right' ? 'bg-amber-400' : 'bg-slate-100 dark:bg-white/5')} />
+    </span>
   );
 }
 
@@ -740,17 +832,13 @@ function CardBadges({ cards }: { cards: CardTally }) {
   );
 }
 
-const ServeDot = () => (
-  <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-amber-500" aria-label="serving" />
-);
-
 /**
  * The tap that scores the match. Deliberately large - this is used courtside, on a
  * phone, one-handed - and deliberately labelled "won the rally", because under
  * serverOnly scoring a receiver's rally win is a side-out and scores nothing.
  */
-function RallyButton({ label, players, hint, disabled, onClick, qa }:
-  { label: string; players?: string; hint: string; disabled?: boolean; onClick: () => void; qa?: string }) {
+function RallyButton({ label, players, hint, accent, serving, disabled, onClick, qa }:
+  { label: string; players?: string; hint: string; accent: Accent; serving: boolean; disabled?: boolean; onClick: () => void; qa?: string }) {
   return (
     <button
       type="button"
@@ -758,16 +846,22 @@ function RallyButton({ label, players, hint, disabled, onClick, qa }:
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'flex min-h-24 flex-col items-center justify-center gap-1 rounded-xl border-2 px-3 py-4 transition',
-        'border-slate-300 bg-white text-slate-800 active:scale-[.98]',
-        'hover:border-emerald-500 hover:bg-emerald-50',
-        'dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-emerald-500 dark:hover:bg-emerald-500/10',
-        disabled && 'pointer-events-none opacity-40',
+        'relative flex min-h-32 flex-col items-center justify-center gap-1 rounded-2xl px-3 py-5 text-white shadow-lg ring-1 transition',
+        'active:scale-[.97] active:shadow-md',
+        accent.button,
+        disabled && 'pointer-events-none opacity-40 saturate-50',
       )}
     >
-      <span className="line-clamp-2 text-center text-sm font-semibold">{label}</span>
-      {players && <span className="line-clamp-1 text-center text-xs text-slate-500 dark:text-slate-400">{players}</span>}
-      <span className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">{hint}</span>
+      {serving && (
+        <span className="absolute right-2 top-2 rounded-full bg-amber-300 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-slate-950">
+          Serving
+        </span>
+      )}
+      {/* Under side-out scoring the receiver's rally wins the serve, not a point. */}
+      <span className="text-3xl font-black leading-none">{hint === 'wins the serve' ? 'Side-out' : '+1'}</span>
+      <span className="line-clamp-2 text-center text-base font-bold sm:text-lg">{label}</span>
+      {players && <span className="line-clamp-1 text-center text-xs text-white/80 sm:text-sm">{players}</span>}
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-white/70">{hint}</span>
     </button>
   );
 }
@@ -797,9 +891,9 @@ function StartPanel({ format, pairing, doubles, firstServer, order, nameOf, play
   // Tennis rotates servers by game, so the other pair's first player serves THEIR first game.
   const tennis = serveSpecFor(format, format.levels[0]).resolver === 'tennisGameLocked';
   const choice = (selected: boolean) => cn(
-    'rounded-lg border-2 px-3 py-2 text-sm font-semibold transition',
+    'relative rounded-xl border-2 px-4 py-3.5 text-base font-bold transition',
     selected
-      ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300'
+      ? 'border-emerald-500 bg-emerald-50 text-emerald-800 shadow-[0_0_0_4px_rgba(16,185,129,0.15)] dark:bg-emerald-500/10 dark:text-emerald-300'
       : 'border-slate-200 text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:text-slate-200',
   );
   const pairPicker = (side: Side, question: string) => {
@@ -809,8 +903,8 @@ function StartPanel({ format, pairing, doubles, firstServer, order, nameOf, play
     // shown alphabetically, with only the highlight moving to the one picked.
     const shown = [...people].sort((a, b) => a.localeCompare(b));
     return (
-      <div className="grid gap-1.5">
-        <div className="text-xs text-slate-500 dark:text-slate-400">{question}</div>
+      <div className="grid gap-2">
+        <div className="text-sm font-semibold text-slate-600 dark:text-slate-300">{question}</div>
         <div className="grid grid-cols-2 gap-2">
           {shown.map((name) => (
             <button key={name} type="button" className={choice(name === people[0])}
@@ -823,19 +917,20 @@ function StartPanel({ format, pairing, doubles, firstServer, order, nameOf, play
     );
   };
   return (
-    <Card className="grid gap-3 p-4">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-        Before the first point
+    <Card className="grid gap-4 p-5">
+      <div>
+        <div className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-400">Before the first point</div>
+        <div className="mt-0.5 text-lg font-bold text-slate-900 dark:text-slate-50">Set up the serve</div>
       </div>
-      <div className="grid gap-1.5">
-        <div className="text-xs text-slate-500 dark:text-slate-400">Who serves first? (after the toss)</div>
+      <div className="grid gap-2">
+        <div className="text-sm font-semibold text-slate-600 dark:text-slate-300">Who serves first? (after the toss)</div>
         <div className="grid grid-cols-2 gap-2">
           {order.map((side) => (
             <button key={side} type="button" className={choice(firstServer === side)}
               onClick={() => onFirstServerChange(side)}>
               {nameOf(side)}
               {playersOf(side) && (
-                <span className="block text-xs font-normal text-slate-500 dark:text-slate-400">
+                <span className="mt-0.5 block text-sm font-normal text-slate-500 dark:text-slate-400">
                   {/* Alphabetical, like the partner buttons below, so picking a server moves nothing. */}
                   {playersOf(side)!.split(' / ').sort((a, b) => a.localeCompare(b)).join(' / ')}
                 </span>
@@ -848,7 +943,7 @@ function StartPanel({ format, pairing, doubles, firstServer, order, nameOf, play
       {doubles && pairPicker(receiving, tennis
         ? `Who serves first for ${nameOf(receiving)} (their first service game)?`
         : `Who receives first for ${nameOf(receiving)}?`)}
-      <Button onClick={onStart}>Start match</Button>
+      <Button onClick={onStart} className="h-12 text-base font-bold">Start match</Button>
     </Card>
   );
 }
@@ -858,18 +953,20 @@ function UnitStrip({ format, state, env }:
   // Units won now sits beside each side's points; this strip carries the history.
   const top = format.levels.length - 1;
   const setLevel = format.levels.findIndex((l) => l.key === 'set');
+  // Sits on the scoreboard: one chip per finished unit.
+  if (!(setLevel > 0 && setLevel < top) && env.unitScores.length === 0) return null;
   return (
-    <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+    <div className="flex flex-wrap items-center justify-center gap-1">
       {setLevel > 0 && setLevel < top && (
-        <span className="font-mono tabular-nums">
-          Games: {state.score[setLevel][0]}–{state.score[setLevel][1]}
+        <span className="rounded-md bg-slate-200 px-2 py-0.5 font-mono text-xs font-bold tabular-nums text-slate-800 dark:bg-white/10 dark:text-slate-100">
+          Games {state.score[setLevel][0]}–{state.score[setLevel][1]}
         </span>
       )}
-      {env.unitScores.length > 0 && (
-        <span className="font-mono tabular-nums">
-          {env.unitScores.map((u) => `${u[0]}–${u[1]}`).join('  ·  ')}
+      {env.unitScores.map((u, i) => (
+        <span key={i} className="rounded-md bg-slate-200 px-2 py-0.5 font-mono text-xs font-bold tabular-nums text-slate-800 dark:bg-white/10 dark:text-slate-100">
+          {u[0]}–{u[1]}
         </span>
-      )}
+      ))}
     </div>
   );
 }

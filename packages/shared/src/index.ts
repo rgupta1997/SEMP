@@ -20,6 +20,7 @@ export * from './event-templates.js';
 export * from './tie.js';
 export * from './played-contests.js';
 export * from './insights.js';
+export * from './platform.js';
 export * from './tie-templates.js';
 export * from './demo-templates.js';
 export * from './championship-templates.js';

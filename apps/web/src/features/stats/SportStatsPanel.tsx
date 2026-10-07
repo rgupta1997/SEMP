@@ -144,22 +144,52 @@ function TierRow({ r, ranking }: { r: TierRecord; ranking?: boolean }) {
   );
 }
 
-interface InsightItem { key: string; tone: 'strength' | 'weakness' | 'up' | 'down'; text: string }
+interface InsightItem {
+  key: string; tone: 'strength' | 'weakness' | 'up' | 'down'; text: string;
+  /** The counts behind it and the rule that made it a strength, a weakness or a trend. */
+  evidence?: { facts: Array<{ label: string; value: string }>; rule: string };
+  /** Based on little data - shown, but marked as an early sign. */
+  early?: boolean;
+}
+
+/** A small tag on an insight built on little data, so it is read as a hint, not a verdict. */
+const EarlySign = () => (
+  <span title="Based on only a little data so far - it may change as more matches are played"
+    style={{ marginLeft: 6, padding: '0 5px', borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--ink-4)', border: '1px solid var(--line)', whiteSpace: 'nowrap' }}>
+    early sign
+  </span>
+);
 interface InsightReport {
   enoughData: boolean;
   strengths: InsightItem[]; weaknesses: InsightItem[]; trends: InsightItem[];
   form: Array<'W' | 'L' | 'D'>;
 }
 
-/** Strengths, things to work on and trends, in plain words - what the numbers mean. */
-function InsightsCard({ userId, sportId }: { userId?: string; sportId: string }) {
+/**
+ * Strengths, things to work on and trends, in plain words - what the numbers mean.
+ * The card FLIPS to show how each one was worked out: the counts behind it and the
+ * rule applied, so nobody has to take an insight on trust.
+ */
+function InsightsCard({ userId, sportId, view }: { userId?: string; sportId: string; view: PlayView }) {
   const base = userId ? `/people/${userId}/sport-insights` : '/me/sport-insights';
-  const { data } = useApi<InsightReport | null>(`${base}?sport=${sportId}`);
+  // Follows the All / Singles / Doubles switch: a format's tab reads that format only.
+  const { data } = useApi<InsightReport | null>(`${base}?sport=${sportId}${view === 'all' ? '' : `&position=${view}`}`);
+  const [face, setFace] = useState<'front' | 'back'>('front');
+  const [angle, setAngle] = useState(0);
+  // A two-step turn - to edge-on, swap the face, back to flat - so the card takes the
+  // height of whichever side is showing rather than the taller of the two.
+  const flip = () => {
+    const swap = () => setFace((f) => (f === 'front' ? 'back' : 'front'));
+    const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reduced) { swap(); return; }
+    setAngle(90);
+    window.setTimeout(() => { swap(); setAngle(0); }, 180);
+  };
   if (!data) return null;
   if (!data.enoughData) {
     return (
       <div style={{ fontSize: 12.5, color: 'var(--ink-4)', marginBottom: 12 }}>
-        Insights appear after a few more results.
+        Insights appear after a few more {view === 'all' ? '' : `${view} `}results.
       </div>
     );
   }
@@ -170,27 +200,98 @@ function InsightsCard({ userId, sportId }: { userId?: string; sportId: string })
         {items.map((i) => (
           <div key={i.key} style={{ display: 'flex', gap: 6, fontSize: 13, lineHeight: 1.45, marginBottom: 3 }}>
             <span style={{ color: colour(i), fontWeight: 700 }}>{mark(i)}</span>
-            <span>{i.text}</span>
+            <span>{i.text}{i.early && <EarlySign />}</span>
           </div>
         ))}
       </div>
     );
   const good = 'var(--success, #059669)';
   const bad = 'var(--danger, #e11d48)';
-  return (
-    <div style={{ border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px', marginBottom: 12, display: 'grid', gap: 10 }}>
-      {data.form.length > 0 && (
-        <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
-          Last {data.form.length}:{' '}
-          {data.form.map((r, n) => (
-            <b key={n} style={{ color: r === 'W' ? good : r === 'L' ? bad : 'var(--ink-4)', marginRight: 4 }}>{r}</b>
-          ))}
-        </div>
-      )}
+  const markOf = (i: InsightItem) => (i.tone === 'strength' ? '✓' : i.tone === 'weakness' ? '!' : i.tone === 'up' ? '▲' : '▼');
+  const colourOf = (i: InsightItem) => (i.tone === 'strength' || i.tone === 'up' ? good : bad);
+  const flipButton = (label: string) => (
+    <button
+      type="button"
+      onClick={flip}
+      style={{ cursor: 'pointer', background: 'none', border: 'none', padding: 0, fontSize: 12.5, fontWeight: 600, color: 'var(--brand)', whiteSpace: 'nowrap' }}
+    >
+      {label}
+    </button>
+  );
+
+  const front = (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        {data.form.length > 0 ? (
+          <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
+            Last {data.form.length}:{' '}
+            {data.form.map((r, n) => (
+              <b key={n} style={{ color: r === 'W' ? good : r === 'L' ? bad : 'var(--ink-4)', marginRight: 4 }}>{r}</b>
+            ))}
+          </div>
+        ) : <span />}
+        {flipButton('How is this worked out? ↻')}
+      </div>
       <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
         {block('Strengths', data.strengths, () => '✓', () => good)}
         {block('Work on', data.weaknesses, () => '!', () => bad)}
         {block('Trend', data.trends, (i) => (i.tone === 'up' ? '▲' : '▼'), (i) => (i.tone === 'up' ? good : bad))}
+      </div>
+    </>
+  );
+
+  // The back: each insight with its counts and its rule.
+  const all = [...data.strengths, ...data.weaknesses, ...data.trends];
+  const back = (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+          How these are worked out
+        </div>
+        {flipButton('← Back to insights')}
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--ink-4)', lineHeight: 1.5 }}>
+        Counted from the points recorded by the scorer in locked matches. The figures are exact counts;
+        whether one is called a strength or something to work on follows the rule shown under it.
+        Where enough other players have played, you are compared with what is typical for them.
+        Pressure figures come from singles when there is enough - in doubles they belong to the pair.
+        An &ldquo;early sign&rdquo; is based on only a little data so far.
+      </div>
+      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+        {all.map((i) => (
+          <div key={`${i.tone}-${i.key}`} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', display: 'grid', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 6, fontSize: 13, fontWeight: 600, lineHeight: 1.4 }}>
+              <span style={{ color: colourOf(i), fontWeight: 700 }}>{markOf(i)}</span>
+              <span>{i.text}{i.early && <EarlySign />}</span>
+            </div>
+            {i.evidence && (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 10, rowGap: 2, fontSize: 12 }}>
+                  {i.evidence.facts.map((f) => (
+                    <div key={f.label} style={{ display: 'contents' }}>
+                      <span style={{ color: 'var(--ink-4)' }}>{f.label}</span>
+                      <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-2, inherit)' }}>{f.value}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--ink-4)', fontStyle: 'italic' }}>Rule: {i.evidence.rule}</div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+
+  return (
+    <div style={{ perspective: 1200, marginBottom: 12 }}>
+      <div
+        style={{
+          border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px', display: 'grid', gap: 10,
+          transform: `rotateY(${angle}deg)`, transition: 'transform 180ms ease-in-out',
+        }}
+      >
+        {face === 'front' ? front : back}
       </div>
     </div>
   );
@@ -275,8 +376,6 @@ function SportCard({ s, userId }: { s: SportRecord; userId?: string }) {
         }
       />
       <CardBody>
-        {/* What the numbers mean, before the numbers - racquet sports only (the API says). */}
-        {!ranking && <InsightsCard userId={userId} sportId={s.sportId} />}
         {positions.length > 0 && (
           <div style={{ display: 'inline-flex', gap: 2, padding: 2, marginBottom: 10, borderRadius: 8, background: 'var(--line)' }}>
             {(['all', ...positions.map((p) => p.position)] as PlayView[]).map((v) => (
@@ -295,6 +394,10 @@ function SportCard({ s, userId }: { s: SportRecord; userId?: string }) {
             ))}
           </div>
         )}
+
+        {/* What the numbers mean, before the numbers - under the switch, which it follows.
+            Racquet sports only (the API says). */}
+        {!ranking && <InsightsCard userId={userId} sportId={s.sportId} view={view} />}
 
         {/* The combined record leads, because it is the number somebody came for. */}
         <div style={{ fontSize: 15.5 }}><Record r={shown.overall} ranking={ranking} /></div>

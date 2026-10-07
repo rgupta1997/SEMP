@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { playerRelationsFor, sportRecordsFor, sportStatsFilterOptions } from './sport-stats.service.js';
-import { sportInsightsFor } from './insights.service.js';
+import { sportInsightsFor, type InsightPosition } from './insights.service.js';
 import type { Prisma } from '../../infra/prisma.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -264,16 +264,20 @@ export function makeRecordsRouter(prisma: Prisma): Router {
     res.json(await playerRelationsFor(prisma, req.params.userId, sport, org));
   }));
 
-  /** Plain-language strengths, weaknesses and trends in one sport: `?sport=` (required). */
+  /**
+   * Plain-language strengths, weaknesses and trends in one sport: `?sport=` (required),
+   * `?position=singles|doubles` to read one format only (the card's switch).
+   */
+  const positionOf = (q: unknown): InsightPosition | undefined => (q === 'singles' || q === 'doubles' ? q : undefined);
   router.get('/people/:userId/sport-insights', asyncHandler(async (req, res) => {
     await authorize(req.user!.id, !!req.user!.isSuperAdmin, req.params.userId);
     const sport = typeof req.query.sport === 'string' ? req.query.sport : null;
-    res.json(sport ? await sportInsightsFor(prisma, req.params.userId, sport) : null);
+    res.json(sport ? await sportInsightsFor(prisma, req.params.userId, sport, positionOf(req.query.position)) : null);
   }));
 
   router.get('/me/sport-insights', asyncHandler(async (req, res) => {
     const sport = typeof req.query.sport === 'string' ? req.query.sport : null;
-    res.json(sport ? await sportInsightsFor(prisma, req.user!.id, sport) : null);
+    res.json(sport ? await sportInsightsFor(prisma, req.user!.id, sport, positionOf(req.query.position)) : null);
   }));
 
   router.get('/me/sport-relations', asyncHandler(async (req, res) => {

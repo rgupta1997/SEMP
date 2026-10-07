@@ -58,11 +58,39 @@ describe('racquetInsights', () => {
     expect(r.strengths).toEqual([]);
   });
 
-  it('names a serve stronger than the receive, and the receive as the weakness', () => {
+  // Serve 63%, receive 33%: a 30-point gap.
+  const field = (typical: number, players = 8) => ({ field: { gap: { typical, players } } });
+
+  it('says nothing about serve vs receive without other players to compare the gap with', () => {
     const r = racquetInsights(base);
-    expect(r.strengths.map((i) => i.key)).toContain('serve');
-    expect(r.weaknesses.map((i) => i.key)).toContain('receive');
-    expect(r.weaknesses.find((i) => i.key === 'receive')!.text).toContain('33%');
+    expect([...r.strengths, ...r.weaknesses].map((i) => i.key)).not.toContain('receive');
+  });
+
+  it('a gap that is normal for the sport is not a weakness', () => {
+    const r = racquetInsights({ ...base, ...field(28) });
+    expect(r.weaknesses.map((i) => i.key)).not.toContain('receive');
+  });
+
+  it('a gap well beyond the typical one is named, with the typical gap as evidence', () => {
+    const r = racquetInsights({ ...base, ...field(14) });
+    const recv = r.weaknesses.find((i) => i.key === 'receive')!;
+    expect(recv.text).toContain('most players drop about 14');
+    expect(recv.evidence!.facts.map((f) => f.value)).toEqual(expect.arrayContaining([
+      '63 of 100 points (63%)', '33 of 100 points (33%)', '+14 points, across 8 other players',
+    ]));
+  });
+
+  it('a gap well below the typical one makes a strong receiver', () => {
+    const r = racquetInsights({ ...base, career: { ...base.career, return_points_won: 60 }, ...field(14) });
+    expect(r.strengths.find((i) => i.key === 'receive')!.text).toContain('A strong receiver');
+  });
+
+  it('every insight carries its counts and its rule', () => {
+    const r = racquetInsights({ ...base, ...field(14) });
+    for (const i of [...r.strengths, ...r.weaknesses, ...r.trends]) {
+      expect(i.evidence?.facts.length).toBeGreaterThan(0);
+      expect(i.evidence?.rule).toBeTruthy();
+    }
   });
 
   it('reads pressure: weak at deuce, strong in deciders', () => {
@@ -84,6 +112,7 @@ describe('racquetInsights', () => {
       recent: { service_points_played: 40, service_points_won: 20 },
       earlier: { service_points_played: 60, service_points_won: 43 },
       results: ['lost', 'lost', 'lost', 'won', 'won'],
+      field: { percentiles: { service_win_pct: 82 }, sizes: { service_win_pct: 6 } },
     });
     const serve = r.trends.find((t) => t.key === 'serve')!;
     expect(serve).toMatchObject({ tone: 'down' });
@@ -92,8 +121,15 @@ describe('racquetInsights', () => {
   });
 
   it('uses other players as the yardstick when given', () => {
-    const r = racquetInsights({ ...base, percentiles: { service_win_pct: 82 } });
-    expect(r.strengths.find((i) => i.key === 'serve')!.text).toContain('better than 82% of players');
+    const r = racquetInsights({ ...base, field: { percentiles: { service_win_pct: 82 }, sizes: { service_win_pct: 6 } } });
+    const serve = r.strengths.find((i) => i.key === 'serve')!;
+    expect(serve.text).toContain('better than 82% of players');
+    expect(serve.evidence!.facts.find((f) => f.label === 'Compared with')!.value).toBe('Above 5 of 6 other players (82%)');
+  });
+
+  it('makes no comparison with too few other players', () => {
+    const r = racquetInsights({ ...base, field: { percentiles: { service_win_pct: 90 }, sizes: { service_win_pct: 3 } } });
+    expect(r.strengths.map((i) => i.key)).not.toContain('serve');
   });
 
   it('names a winning partnership and a rival never beaten', () => {
@@ -107,20 +143,35 @@ describe('racquetInsights', () => {
   });
 
   it('never calls a serve strong when most players serve better', () => {
-    const r = racquetInsights({ ...base, percentiles: { service_win_pct: 10, return_win_pct: 5 } });
+    const r = racquetInsights({ ...base, field: { percentiles: { service_win_pct: 10, return_win_pct: 5 }, sizes: { service_win_pct: 6, return_win_pct: 6 } } });
     expect(r.strengths.map((i) => i.key)).not.toContain('serve');
     expect(r.weaknesses.find((i) => i.key === 'serve')!.text).toContain('lower than most players');
   });
 
   it('never lists the same thing as a strength and a weakness', () => {
-    // Receive is 30 below serve, but better than most players' - so not a weakness.
-    const r = racquetInsights({ ...base, percentiles: { service_win_pct: 90, return_win_pct: 85 } });
+    // An unusual gap, but a receive better than most players' - so not a weakness.
+    const r = racquetInsights({
+      ...base,
+      field: { percentiles: { service_win_pct: 90, return_win_pct: 85 }, sizes: { service_win_pct: 6, return_win_pct: 6 }, gap: { typical: 14, players: 6 } },
+    });
     expect(r.weaknesses.map((i) => i.key)).not.toContain('receive');
     expect(r.strengths.map((i) => i.key)).toEqual(expect.arrayContaining(['serve', 'receive']));
   });
 
-  it('says "every other player" at the top, and nothing at the bottom', () => {
-    expect(racquetInsights({ ...base, percentiles: { service_win_pct: 100 } }).strengths[0].text).toContain('better than every other player');
+  it('says "all other players" at the top', () => {
+    const r = racquetInsights({ ...base, field: { percentiles: { service_win_pct: 100 }, sizes: { service_win_pct: 6 } } });
+    expect(r.strengths.find((i) => i.key === 'serve')!.text).toContain('better than all other players');
+  });
+
+  it('names who the comparison is with', () => {
+    const r = racquetInsights({
+      ...base,
+      field: { percentiles: { service_win_pct: 82 }, sizes: { service_win_pct: 6 }, group: 'table tennis players on Sportagon' },
+    });
+    const serve = r.strengths.find((i) => i.key === 'serve')!;
+    expect(serve.text).toContain('better than 82% of table tennis players on Sportagon');
+    expect(serve.evidence!.facts.find((f) => f.label === 'Compared with')!.value)
+      .toBe('Above 5 of 6 other table tennis players on Sportagon (82%)');
   });
 
   it('a partnership is not crowded out by the other strengths', () => {
@@ -130,6 +181,37 @@ describe('racquetInsights', () => {
       partners: [{ name: 'Neha', played: 5, won: 4, lost: 1 }],
     });
     expect(r.strengths[0].key).toBe('partner');
+  });
+
+  it('judges pressure against other players when there are enough of them', () => {
+    // Converts 58%: below a fixed 65% line, but normal where players typically convert 60%.
+    const gp = { ...base.career, game_points_played: 69, game_points_won: 40 };
+    const fixed = racquetInsights({ ...base, career: gp });
+    expect(fixed.weaknesses.find((i) => i.key === 'closing')!.evidence!.rule).toContain('too few other players');
+    const relative = racquetInsights({ ...base, career: gp, field: { typical: { game_point_conversion: { pct: 60, players: 9 } } } });
+    expect(relative.weaknesses.map((i) => i.key)).not.toContain('closing');
+    // ...and named once it is 10+ points below what others manage.
+    const low = racquetInsights({ ...base, career: gp, field: { typical: { game_point_conversion: { pct: 72, players: 9 } } } });
+    const closing = low.weaknesses.find((i) => i.key === 'closing')!;
+    expect(closing.evidence!.facts.find((f) => f.label === 'Typical')!.value).toBe('72% across 9 other players');
+  });
+
+  it('pressure comes from singles, and a doubles source is said to be shared', () => {
+    const r = racquetInsights({
+      ...base,
+      pressure: { bag: { deciders_won: 3, deciders_lost: 0, comeback_games: 2 }, matches: 6, pair: true },
+    });
+    expect(r.strengths.find((i) => i.key === 'comebacks')!.evidence!.facts.find((f) => f.label === 'From')!.value)
+      .toBe('6 doubles matches (shared with your partners)');
+    expect(r.strengths.find((i) => i.key === 'deciders')).toBeDefined();
+  });
+
+  it('marks an insight built on little data as an early sign', () => {
+    // 2 deciding games is an early sign; the base player's 4 (3 won, 1 lost) is enough.
+    const early = racquetInsights({ ...base, career: { ...base.career, deciders_won: 2, deciders_lost: 0 } });
+    expect(early.strengths.find((i) => i.key === 'deciders')!.early).toBe(true);
+    const settled = racquetInsights(base);
+    expect(settled.strengths.find((i) => i.key === 'deciders')!.early).toBeUndefined();
   });
 
   it('keeps each list short', () => {

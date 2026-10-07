@@ -3,10 +3,12 @@
 // a root-absolute '/assets/...' would resolve against the marketing site at the
 // domain root instead - every logo in the app silently becoming a broken image.
 // BASE_URL already ends in a slash.
+import { PLATFORM_NAME } from '@semp/shared';
+
 const base = import.meta.env.BASE_URL;
 
 export const BRAND = {
-  name: 'Sportagon',
+  name: PLATFORM_NAME,
   productBadge: 'EOS',
   logo: {
     blue:  `${base}assets/sportagon-logo-blue.png`,
