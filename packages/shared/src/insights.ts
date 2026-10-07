@@ -42,7 +42,10 @@ export interface InsightPerson {
   lost: number;
 }
 
-export type InsightRate = 'service_win_pct' | 'return_win_pct' | 'point_win_pct';
+export type InsightRate =
+  | 'service_win_pct' | 'return_win_pct' | 'point_win_pct'
+  // Sport-specific: tennis service / return games, pickleball side-outs.
+  | 'service_games_held_pct' | 'return_games_won_pct' | 'side_out_pct';
 
 /** What other players in the sport look like, for comparisons that are fair to the sport. */
 export interface InsightField {
@@ -108,10 +111,13 @@ export const INSIGHT_RULES = {
   minDeucePoints: 4,
   minGamePoints: 5,
   minExpeditePoints: 10,
+  minServiceGames: 10,    // tennis service / return games behind a hold or break %
+  minServiceTurns: 10,    // pickleball opponents' service turns behind a side-out %
   gapPp: 10,              // a serve-receive gap this far from the typical one is worth naming
   minFieldPlayers: 5,     // others needed before any comparison with them is made
   trendPp: 8,             // recent vs earlier change worth naming
   minRecentMatches: 3,
+  minEarlierMatches: 3,   // one earlier match is too thin a baseline for a trend
   recentMatches: 5,
   strongPercentile: 70,
   weakPercentile: 30,
@@ -128,6 +134,7 @@ export const INSIGHT_RULES = {
   earlyPoints: 60,
   earlyGamePoints: 15,
   earlyDeucePoints: 10,
+  earlyGames: 30,
   earlyDeciders: 4,
   earlyComebacks: 4,
 } as const;
@@ -188,6 +195,61 @@ export function racquetInsights(input: InsightInput): InsightReport {
   const better = betterThan(group);
   const ranked = rankedAmong(group);
 
+  // Pressure figures, return games and side-outs are the PAIR's in doubles, so singles
+  // is the source whenever there is enough of it; doubles-only players are told the
+  // figures are shared with partners.
+  const pressure = input.pressure ?? { bag: career, matches: input.careerMatches, pair: false };
+  const P = pressure.bag;
+  const you = pressure.pair ? 'you and your partners' : 'you';
+  const You = pressure.pair ? 'You and your partners' : 'You';
+  const pFrom = {
+    label: 'From',
+    value: input.pressure
+      ? `${pressure.matches} ${pressure.pair ? 'doubles' : 'singles'} match${pressure.matches === 1 ? '' : 'es'}${pressure.pair ? ' (shared with your partners)' : ''}`
+      : from.value,
+  };
+
+  // ---- Sport-specific: tennis hold / break, pickleball side-outs ------------------
+  // Only sports that record these have them, so no sport check is needed. They share
+  // the 'serve' / 'receive' keys and run first: in tennis, holding serve says more than
+  // serve points, and the card should not say the same thing twice.
+  const vsFieldUnits = (o: {
+    key: 'serve' | 'receive'; r: Rate | null; min: number; which: InsightRate; noun: string; label: string; source: typeof from;
+    strong: (pct: number, better: string) => string; weak: (pct: number) => string;
+  }) => {
+    const q = p[o.which];
+    const size = n[o.which] ?? 0;
+    if (!o.r || q === undefined || size < R.minFieldPlayers) return;
+    const facts = [{ label: o.label, value: counted(o.r, o.noun) }, { label: 'Compared with', value: ranked(q, size) }, o.source];
+    const early = o.r.of < R.earlyGames;
+    if (q >= R.strongPercentile) {
+      add('strength', o.key, o.strong(o.r.pct, better(q)),
+        { facts, rule: `A strength when this is in the top ${100 - R.strongPercentile}% of players with ${o.min}+ ${o.noun}.` }, early);
+    } else if (q <= R.weakPercentile) {
+      add('weakness', o.key, o.weak(o.r.pct),
+        { facts, rule: `Flagged when this is in the bottom ${R.weakPercentile}% of players with ${o.min}+ ${o.noun}.` }, early);
+    }
+  };
+  // Holding is the server's own; breaking and siding out belong to the pair in doubles.
+  vsFieldUnits({
+    key: 'serve', which: 'service_games_held_pct', noun: 'service games', label: 'Service games held', source: from,
+    min: R.minServiceGames, r: rate(career, 'service_games_won', 'service_games_played', R.minServiceGames),
+    strong: (pct, b) => `Hard to break: you hold ${pct}% of your service games${b}.`,
+    weak: (pct) => `Holding serve: you hold ${pct}% of your service games - lower than most ${group}.`,
+  });
+  vsFieldUnits({
+    key: 'receive', which: 'return_games_won_pct', noun: 'return games', label: 'Return games won', source: pFrom,
+    min: R.minServiceGames, r: rate(P, 'return_games_won', 'return_games_played', R.minServiceGames),
+    strong: (pct, b) => `A breaker: ${you} win ${pct}% of return games${b}.`,
+    weak: (pct) => `Breaking serve: ${you} win ${pct}% of return games - lower than most ${group}.`,
+  });
+  vsFieldUnits({
+    key: 'receive', which: 'side_out_pct', noun: 'service turns faced', label: 'Side-outs won', source: pFrom,
+    min: R.minServiceTurns, r: rate(P, 'side_outs_won', 'service_turns_faced', R.minServiceTurns),
+    strong: (pct, b) => `Quick to win the serve back: ${you} side out on ${pct}% of the other side's service turns${b}.`,
+    weak: (pct) => `Winning the serve back: ${you} side out on ${pct}% of the other side's service turns - lower than most ${group}.`,
+  });
+
   // ---- Serve and receive -------------------------------------------------------
   const serve = rate(career, 'service_points_won', 'service_points_played', R.minPoints);
   const recv = rate(career, 'return_points_won', 'return_points_played', R.minPoints);
@@ -245,19 +307,6 @@ export function racquetInsights(input: InsightInput): InsightReport {
   }
 
   // ---- Pressure -----------------------------------------------------------------
-  // In doubles these are the PAIR's figures, so singles is the source whenever there is
-  // enough of it; doubles-only players are told the figures are shared with partners.
-  const pressure = input.pressure ?? { bag: career, matches: input.careerMatches, pair: false };
-  const P = pressure.bag;
-  const you = pressure.pair ? 'you and your partners' : 'you';
-  const You = pressure.pair ? 'You and your partners' : 'You';
-  const pFrom = {
-    label: 'From',
-    value: input.pressure
-      ? `${pressure.matches} ${pressure.pair ? 'doubles' : 'singles'} match${pressure.matches === 1 ? '' : 'es'}${pressure.pair ? ' (shared with your partners)' : ''}`
-      : from.value,
-  };
-
   /**
    * A pressure rate judged against OTHER players when there are enough of them - "low"
    * then means low for the sport - and against a fixed line otherwise. The evidence
@@ -373,22 +422,21 @@ export function racquetInsights(input: InsightInput): InsightReport {
   }
 
   // ---- Trends: the last few matches against the ones before them -----------------
-  if (input.recentMatches >= R.minRecentMatches && input.careerMatches > input.recentMatches) {
-    const before = input.careerMatches - input.recentMatches;
+  const before = input.careerMatches - input.recentMatches;
+  if (input.recentMatches >= R.minRecentMatches && before >= R.minEarlierMatches) {
     const trend = (key: string, label: string, now: Rate | null, then: Rate | null) => {
       if (!now || !then || Math.abs(now.pct - then.pct) < R.trendPp) return;
       const up = now.pct > then.pct;
       out.trends.push({
         key, tone: up ? 'up' : 'down',
-        // Thin on either side of the comparison: few points now, or few matches before.
-        ...(now.of < R.earlyPoints || before < R.minRecentMatches ? { early: true } : {}),
+        ...(now.of < R.earlyPoints ? { early: true } : {}),
         text: `${label} ${up ? 'up' : 'down'}: ${now.pct}% in your last ${input.recentMatches} matches, ${then.pct}% before that.`,
         evidence: {
           facts: [
             { label: `Last ${input.recentMatches} matches`, value: counted(now) },
             { label: `The ${before} before`, value: counted(then) },
           ],
-          rule: `Shown when the change is ${R.trendPp}+ points, comparing your last ${R.recentMatches} matches with the ones before them.`,
+          rule: `Shown when the change is ${R.trendPp}+ points, comparing your last ${R.recentMatches} matches with the ones before them (at least ${R.minEarlierMatches}).`,
         },
       });
     };

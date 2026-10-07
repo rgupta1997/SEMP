@@ -2071,6 +2071,9 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
       </Card>
 
       {(!completed || editing) && (
+        <>
+        {/* The rubbers and the tie's controls side by side; the rubber being scored goes
+            underneath at the full width - the console needs the room. */}
         <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
           <div className="space-y-5">
             <Card>
@@ -2101,9 +2104,26 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
                 })}
               </CardBody>
             </Card>
+          </div>
+
+          <div className="space-y-5">
+            <Card>
+              <CardHeader title="Tie control" />
+              <CardBody className="space-y-2">
+                {!live_ && !editing && <Button className="w-full justify-start" disabled={submitting} onClick={goLive}>Start tie (go live)</Button>}
+                <Button className="w-full justify-start" disabled={submitting} onClick={signOff}>✍ End tie &amp; sign off</Button>
+                {!decided && <p className="px-1 text-xs text-slate-400 dark:text-slate-500">Record rubber results until one side reaches {target}.</p>}
+                <WalkoverButton fixtureId={fixtureId} homeName={homeName} awayName={awayName} homeOrg={homeOrg} awayOrg={awayOrg} homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id} invalidate={invalidate} onDone={onDone} />
+                {SECONDARY.map((s) => (
+                  <SecondaryStatus key={s.status} fixtureId={fixtureId} status={s.status} label={s.label} variant={s.variant} invalidate={invalidate} onDone={onDone} />
+                ))}
+              </CardBody>
+            </Card>
+          </div>
+        </div>
 
             {active && (
-              <Card>
+              <Card className="mt-5">
                 <CardHeader title={active.label} subtitle={active.status === 'dead' ? 'Skipped (dead rubber)' : active.winner ? `${active.winner === 'A' ? homeName : awayName} won this rubber` : racquet && mode === 'detailed' ? 'Point by point' : rdef.archetype === 'time' ? 'Pick the winner of this rubber.' : `${rdef.segLabel} ${Math.min(active.state.seg, rdef.segMax)} of ${rdef.segMax}`} />
                 <CardBody className="space-y-4">
                   {active.status === 'dead' ? (
@@ -2221,23 +2241,7 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
                 </CardBody>
               </Card>
             )}
-          </div>
-
-          <div className="space-y-5">
-            <Card>
-              <CardHeader title="Tie control" />
-              <CardBody className="space-y-2">
-                {!live_ && !editing && <Button className="w-full justify-start" disabled={submitting} onClick={goLive}>Start tie (go live)</Button>}
-                <Button className="w-full justify-start" disabled={submitting} onClick={signOff}>✍ End tie &amp; sign off</Button>
-                {!decided && <p className="px-1 text-xs text-slate-400 dark:text-slate-500">Record rubber results until one side reaches {target}.</p>}
-                <WalkoverButton fixtureId={fixtureId} homeName={homeName} awayName={awayName} homeOrg={homeOrg} awayOrg={awayOrg} homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id} invalidate={invalidate} onDone={onDone} />
-                {SECONDARY.map((s) => (
-                  <SecondaryStatus key={s.status} fixtureId={fixtureId} status={s.status} label={s.label} variant={s.variant} invalidate={invalidate} onDone={onDone} />
-                ))}
-              </CardBody>
-            </Card>
-          </div>
-        </div>
+        </>
       )}
 
       {completed && !editing && (

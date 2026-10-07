@@ -106,6 +106,44 @@ describe('racquetInsights', () => {
     expect(r.form).toEqual(['W', 'W', 'W', 'L', 'W']);
   });
 
+  describe('sport-specific', () => {
+    const ranked = (key: string, pct: number) => ({ field: { percentiles: { [key]: pct }, sizes: { [key]: 8 }, group: 'tennis players on Sportagon' } });
+    const tennis = { ...base, career: { ...base.career, service_games_played: 40, service_games_won: 34, return_games_played: 40, return_games_won: 6 } };
+
+    it('names tennis hold % in place of serve points, against other players', () => {
+      const r = racquetInsights({ ...tennis, field: { ...ranked('service_games_held_pct', 88).field, percentiles: { service_games_held_pct: 88, service_win_pct: 90 }, sizes: { service_games_held_pct: 8, service_win_pct: 8 } } });
+      const serve = r.strengths.filter((i) => i.key === 'serve');
+      expect(serve).toHaveLength(1);
+      expect(serve[0].text).toBe('Hard to break: you hold 85% of your service games - better than 88% of tennis players on Sportagon.');
+      expect(serve[0].evidence!.facts[0].value).toBe('34 of 40 service games (85%)');
+    });
+
+    it('flags a low break %, worded as the pair\'s in doubles', () => {
+      const r = racquetInsights({ ...tennis, ...ranked('return_games_won_pct', 20), pressure: { bag: tennis.career, matches: 6, pair: true } });
+      expect(r.weaknesses.find((i) => i.key === 'receive')!.text).toBe('Breaking serve: you and your partners win 15% of return games - lower than most tennis players on Sportagon.');
+    });
+
+    it('reads pickleball side-outs as the receiving skill', () => {
+      const pb = { ...base, career: { ...base.career, side_outs_won: 30, service_turns_faced: 50 } };
+      const r = racquetInsights({ ...pb, ...ranked('side_out_pct', 80) });
+      expect(r.strengths.find((i) => i.key === 'receive')!.text).toContain('side out on 60% of the other side\'s service turns');
+    });
+
+    it('says nothing with too few games or too few other players', () => {
+      const thin = { ...base, career: { ...base.career, service_games_played: 8, service_games_won: 8 } };
+      expect(racquetInsights({ ...thin, ...ranked('service_games_held_pct', 95) }).strengths.map((i) => i.text).join()).not.toContain('hold');
+      const r = racquetInsights({ ...tennis, field: { percentiles: { service_games_held_pct: 95 }, sizes: { service_games_held_pct: 4 } } });
+      expect(r.strengths.map((i) => i.text).join()).not.toContain('hold');
+    });
+  });
+
+  it('needs 3 earlier matches before naming a trend', () => {
+    const keys = (careerMatches: number) => racquetInsights({ ...base, careerMatches }).trends.map((t) => t.key);
+    expect(keys(6)).not.toContain('serve');
+    expect(keys(7)).not.toContain('serve');
+    expect(keys(8)).toContain('serve');
+  });
+
   it('a slump is measured against the matches before it, and career strengths stay', () => {
     const r = racquetInsights({
       ...base,

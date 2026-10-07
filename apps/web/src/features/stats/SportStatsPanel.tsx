@@ -521,14 +521,14 @@ export function SportStatsPanel({ userId }: { userId?: string }) {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <label style={{ display: 'grid', gap: 3, minWidth: 180 }}>
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>Sport</span>
-          <Select value={sportId} onChange={(e) => { setSportId(e.target.value); setDisciplineId(''); }}>
+          <Select className="w-full" value={sportId} onChange={(e) => { setSportId(e.target.value); setDisciplineId(''); }}>
             <option value="">All sports</option>
             {[...data.filters].sort((a, b) => a.sport.localeCompare(b.sport)).map((f) => <option key={f.sportId} value={f.sportId}>{f.sport}</option>)}
           </Select>
         </label>
         <label style={{ display: 'grid', gap: 3, minWidth: 200 }}>
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>Discipline</span>
-          <Select value={disciplineId} onChange={(e) => setDisciplineId(e.target.value)} disabled={!disciplines.length}>
+          <Select className="w-full" value={disciplineId} onChange={(e) => setDisciplineId(e.target.value)} disabled={!disciplines.length}>
             <option value="">All disciplines</option>
             {disciplines.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
           </Select>

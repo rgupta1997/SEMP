@@ -1,5 +1,5 @@
 import {
-  INSIGHT_RULES, PLATFORM_NAME, canonicalRacquetSport, foldCareerStats, racquetInsights, statSpecFor,
+  INSIGHT_RULES, INSIGHTS_ENABLED_SETTING, PLATFORM_NAME, canonicalRacquetSport, foldCareerStats, racquetInsights, statSpecFor,
   type InsightField, type InsightRate, type InsightReport, type StatBag, type TypicalKey,
 } from '@semp/shared';
 import { Prisma } from '@prisma/client';
@@ -14,14 +14,29 @@ import { playerRelationsFor } from './sport-stats.service.js';
 // enough points in the sport.
 // ============================================================================
 
-const RATES: Array<{ key: InsightRate; won: string; of: string | [string, string] }> = [
-  { key: 'service_win_pct', won: 'service_points_won', of: 'service_points_played' },
-  { key: 'return_win_pct', won: 'return_points_won', of: 'return_points_played' },
-  { key: 'point_win_pct', won: 'points_won', of: ['points_won', 'points_lost'] },
+// `team`: a pair figure in doubles, so the player's side is read from the same bag the
+// insight uses (singles first) rather than the career mix.
+const RATES: Array<{ key: InsightRate; won: string; of: string | [string, string]; min: number; team?: boolean }> = [
+  { key: 'service_win_pct', won: 'service_points_won', of: 'service_points_played', min: INSIGHT_RULES.minPoints },
+  { key: 'return_win_pct', won: 'return_points_won', of: 'return_points_played', min: INSIGHT_RULES.minPoints },
+  { key: 'point_win_pct', won: 'points_won', of: ['points_won', 'points_lost'], min: INSIGHT_RULES.minPoints },
+  // Tennis and pickleball only - other sports never record these, so nobody qualifies.
+  { key: 'service_games_held_pct', won: 'service_games_won', of: 'service_games_played', min: INSIGHT_RULES.minServiceGames },
+  { key: 'return_games_won_pct', won: 'return_games_won', of: 'return_games_played', min: INSIGHT_RULES.minServiceGames, team: true },
+  { key: 'side_out_pct', won: 'side_outs_won', of: 'service_turns_faced', min: INSIGHT_RULES.minServiceTurns, team: true },
 ];
 
 const denominator = (bag: StatBag, of: string | [string, string]) =>
   typeof of === 'string' ? (bag[of] ?? 0) : (bag[of[0]] ?? 0) + (bag[of[1]] ?? 0);
+
+/**
+ * Whether the super admin has player insights switched on. A missing row is ON - the
+ * feature ships enabled - and anything but an explicit `false` reads as on.
+ */
+export async function insightsEnabled(db: Db): Promise<boolean> {
+  const row = await db.platform_settings.findUnique({ where: { key: INSIGHTS_ENABLED_SETTING }, select: { value: true } });
+  return row?.value !== false;
+}
 
 /** Singles or doubles only - the card follows the All / Singles / Doubles switch. */
 export type InsightPosition = 'singles' | 'doubles';
@@ -102,7 +117,7 @@ export async function sportInsightsFor(
     opponents: position === 'doubles' ? [] : relations.opponents
       .filter((o) => o.position === 'singles').map((o) => ({ ...o, name: o.names.join(' / ') })),
     field: {
-      ...(await fieldFor(db, userId, sportId, career, position)),
+      ...(await fieldFor(db, userId, sportId, career, pressure?.bag ?? career, position)),
       // Said in every comparison: the whole platform, not the player's own organisation.
       group: `${position ? `${position} ` : ''}${(sport?.name ?? 'other').toLowerCase()} players on ${PLATFORM_NAME}`,
     },
@@ -117,7 +132,7 @@ export async function sportInsightsFor(
  * not set the bar.
  */
 async function fieldFor(
-  db: Db, userId: string, sportId: string, mine: StatBag, position?: InsightPosition,
+  db: Db, userId: string, sportId: string, mine: StatBag, mineTeam: StatBag, position?: InsightPosition,
 ): Promise<InsightField> {
   // Like for like: on a format's tab, only other players' matches in that format.
   const onlyLines = position ? Prisma.sql`and p.position = ${position}` : Prisma.empty;
@@ -134,21 +149,28 @@ async function fieldFor(
       sum(coalesce((p.stats->>'game_points_saved')::int, 0))::int as game_points_saved,
       sum(coalesce((p.stats->>'game_points_faced')::int, 0))::int as game_points_faced,
       sum(coalesce((p.stats->>'deuce_points_won')::int, 0))::int as deuce_points_won,
-      sum(coalesce((p.stats->>'deuce_points_played')::int, 0))::int as deuce_points_played
+      sum(coalesce((p.stats->>'deuce_points_played')::int, 0))::int as deuce_points_played,
+      sum(coalesce((p.stats->>'service_games_won')::int, 0))::int as service_games_won,
+      sum(coalesce((p.stats->>'service_games_played')::int, 0))::int as service_games_played,
+      sum(coalesce((p.stats->>'return_games_won')::int, 0))::int as return_games_won,
+      sum(coalesce((p.stats->>'return_games_played')::int, 0))::int as return_games_played,
+      sum(coalesce((p.stats->>'side_outs_won')::int, 0))::int as side_outs_won,
+      sum(coalesce((p.stats->>'service_turns_faced')::int, 0))::int as service_turns_faced
     from player_match_stats p
     where p.sport_id = ${sportId}::uuid and p.played = true and p.superseded_at is null
       and p.user_id <> ${userId}::uuid ${onlyLines}
     group by p.user_id`;
 
-  const enough = (o: Record<string, number>, of: string | [string, string]) => denominator(o, of) >= INSIGHT_RULES.minPoints;
+  const enough = (o: Record<string, number>, of: string | [string, string], min: number = INSIGHT_RULES.minPoints) => denominator(o, of) >= min;
   const ratio = (o: Record<string, number>, won: string, of: string | [string, string]) => (o[won] ?? 0) / denominator(o, of);
 
   const percentiles: Partial<Record<InsightRate, number>> = {};
   const sizes: Partial<Record<InsightRate, number>> = {};
   for (const r of RATES) {
-    if (!enough(mine, r.of)) continue;
-    const my = ratio(mine, r.won, r.of);
-    const field = others.filter((o) => enough(o, r.of)).map((o) => ratio(o, r.won, r.of));
+    const bag = r.team ? mineTeam : mine;
+    if (!enough(bag, r.of, r.min)) continue;
+    const my = ratio(bag, r.won, r.of);
+    const field = others.filter((o) => enough(o, r.of, r.min)).map((o) => ratio(o, r.won, r.of));
     // Too few others to call it a comparison.
     if (field.length < INSIGHT_RULES.minFieldPlayers) continue;
     const below = field.filter((v) => v < my).length;

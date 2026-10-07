@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { playerRelationsFor, sportRecordsFor, sportStatsFilterOptions } from './sport-stats.service.js';
-import { sportInsightsFor, type InsightPosition } from './insights.service.js';
+import { insightsEnabled, sportInsightsFor, type InsightPosition } from './insights.service.js';
 import type { Prisma } from '../../infra/prisma.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -269,15 +269,19 @@ export function makeRecordsRouter(prisma: Prisma): Router {
    * `?position=singles|doubles` to read one format only (the card's switch).
    */
   const positionOf = (q: unknown): InsightPosition | undefined => (q === 'singles' || q === 'doubles' ? q : undefined);
+  // Switched off by a super admin: nothing is computed and nothing is sent, so the card
+  // is genuinely off rather than hidden. The stats themselves are untouched.
   router.get('/people/:userId/sport-insights', asyncHandler(async (req, res) => {
     await authorize(req.user!.id, !!req.user!.isSuperAdmin, req.params.userId);
     const sport = typeof req.query.sport === 'string' ? req.query.sport : null;
-    res.json(sport ? await sportInsightsFor(prisma, req.params.userId, sport, positionOf(req.query.position)) : null);
+    if (!sport || !(await insightsEnabled(prisma))) { res.json(null); return; }
+    res.json(await sportInsightsFor(prisma, req.params.userId, sport, positionOf(req.query.position)));
   }));
 
   router.get('/me/sport-insights', asyncHandler(async (req, res) => {
     const sport = typeof req.query.sport === 'string' ? req.query.sport : null;
-    res.json(sport ? await sportInsightsFor(prisma, req.user!.id, sport, positionOf(req.query.position)) : null);
+    if (!sport || !(await insightsEnabled(prisma))) { res.json(null); return; }
+    res.json(await sportInsightsFor(prisma, req.user!.id, sport, positionOf(req.query.position)));
   }));
 
   router.get('/me/sport-relations', asyncHandler(async (req, res) => {
