@@ -106,6 +106,32 @@ describe('racquetInsights', () => {
     expect(r.weaknesses.some((i) => i.text.includes('Rohit'))).toBe(true);
   });
 
+  it('never calls a serve strong when most players serve better', () => {
+    const r = racquetInsights({ ...base, percentiles: { service_win_pct: 10, return_win_pct: 5 } });
+    expect(r.strengths.map((i) => i.key)).not.toContain('serve');
+    expect(r.weaknesses.find((i) => i.key === 'serve')!.text).toContain('lower than most players');
+  });
+
+  it('never lists the same thing as a strength and a weakness', () => {
+    // Receive is 30 below serve, but better than most players' - so not a weakness.
+    const r = racquetInsights({ ...base, percentiles: { service_win_pct: 90, return_win_pct: 85 } });
+    expect(r.weaknesses.map((i) => i.key)).not.toContain('receive');
+    expect(r.strengths.map((i) => i.key)).toEqual(expect.arrayContaining(['serve', 'receive']));
+  });
+
+  it('says "every other player" at the top, and nothing at the bottom', () => {
+    expect(racquetInsights({ ...base, percentiles: { service_win_pct: 100 } }).strengths[0].text).toContain('better than every other player');
+  });
+
+  it('a partnership is not crowded out by the other strengths', () => {
+    const r = racquetInsights({
+      ...base,
+      career: { ...base.career, comeback_games: 4, match_points_saved: 3, game_points_saved: 9, game_points_faced: 10 },
+      partners: [{ name: 'Neha', played: 5, won: 4, lost: 1 }],
+    });
+    expect(r.strengths[0].key).toBe('partner');
+  });
+
   it('keeps each list short', () => {
     const r = racquetInsights({ ...base, partners: [{ name: 'N', played: 9, won: 9, lost: 0 }], career: { ...base.career, comeback_games: 4, match_points_saved: 3 } });
     expect(r.strengths.length).toBeLessThanOrEqual(3);

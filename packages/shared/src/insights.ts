@@ -90,7 +90,23 @@ function pointPct(bag: StatBag, min: number): number | null {
   return w + l >= min ? Math.round((w / (w + l)) * 100) : null;
 }
 
-const better = (p?: number) => (p !== undefined ? ` - better than ${p}% of players` : '');
+// Only ever said of a strength, so a below-the-middle figure is left unsaid.
+const better = (p?: number) =>
+  p === undefined || p < 50 ? '' : p >= 100 ? ' - better than every other player' : ` - better than ${p}% of players`;
+
+/**
+ * Which insights win the few places on each list. People and format come first: they
+ * are the most personal, and they used to be found last and cut by the cap.
+ */
+const PRIORITY: Record<'strength' | 'weakness', string[]> = {
+  strength: ['partner', 'format', 'serve', 'receive', 'points', 'deciders', 'closing', 'saving', 'deuce', 'comebacks', 'mp_saved', 'expedite'],
+  weakness: ['rival', 'serve', 'receive', 'deciders', 'closing', 'deuce', 'expedite'],
+};
+const byPriority = (tone: 'strength' | 'weakness') => (a: Insight, b: Insight) => {
+  const order = PRIORITY[tone];
+  const at = (k: string) => (order.indexOf(k) < 0 ? order.length : order.indexOf(k));
+  return at(a.key) - at(b.key);
+};
 
 export function racquetInsights(input: InsightInput): InsightReport {
   const { career, recent } = input;
@@ -100,21 +116,28 @@ export function racquetInsights(input: InsightInput): InsightReport {
   const out: InsightReport = { enoughData, strengths: [], weaknesses: [], trends: [], form, streak };
   if (!enoughData) return out;
 
+  // One thing is never both a strength and a weakness: the first verdict on a key stands.
   const add = (tone: 'strength' | 'weakness', key: string, text: string) => {
     const list = tone === 'strength' ? out.strengths : out.weaknesses;
-    if (!list.some((i) => i.key === key)) list.push({ key, tone, text });
+    const other = tone === 'strength' ? out.weaknesses : out.strengths;
+    if (!list.some((i) => i.key === key) && !other.some((i) => i.key === key)) list.push({ key, tone, text });
   };
   const p = input.percentiles ?? {};
+  // Compared with other players, where that comparison exists: in the bottom or top half.
+  const notBelowField = (q?: number) => q === undefined || q >= 50;
+  const notAboveField = (q?: number) => q === undefined || q < 50;
 
-  // Serve and receive: against each other first, then against everybody else.
+  // Serve and receive: against each other first, then against everybody else. The
+  // first is only a player against themselves, so it never contradicts the field - a
+  // serve better than your receive but worse than most players' is not "strong".
   const serve = pct(career, 'service_points_won', 'service_points_played', R.minPoints);
   const recv = pct(career, 'return_points_won', 'return_points_played', R.minPoints);
   if (serve !== null && recv !== null && serve - recv >= R.gapPp) {
-    add('strength', 'serve', `Strong server: you win ${serve}% of points on your serve${better(p.service_win_pct)}.`);
-    add('weakness', 'receive', `Receiving: you win ${recv}% of points when receiving, ${serve - recv} points below your serve.`);
+    if (notBelowField(p.service_win_pct)) add('strength', 'serve', `Strong server: you win ${serve}% of points on your serve${better(p.service_win_pct)}.`);
+    if (notAboveField(p.return_win_pct)) add('weakness', 'receive', `Receiving: you win ${recv}% of points when receiving, ${serve - recv} points below your serve.`);
   } else if (serve !== null && recv !== null && recv - serve >= R.gapPp) {
-    add('strength', 'receive', `Strong receiver: you win ${recv}% of points when receiving${better(p.return_win_pct)}.`);
-    add('weakness', 'serve', `Your serve: you win ${serve}% of points on it, ${recv - serve} points below your receive.`);
+    if (notBelowField(p.return_win_pct)) add('strength', 'receive', `Strong receiver: you win ${recv}% of points when receiving${better(p.return_win_pct)}.`);
+    if (notAboveField(p.service_win_pct)) add('weakness', 'serve', `Your serve: you win ${serve}% of points on it, ${recv - serve} points below your receive.`);
   }
   if (serve !== null && (p.service_win_pct ?? 50) >= R.strongPercentile) add('strength', 'serve', `Strong server: ${serve}% of points won on your serve${better(p.service_win_pct)}.`);
   if (serve !== null && (p.service_win_pct ?? 50) <= R.weakPercentile) add('weakness', 'serve', `Your serve wins ${serve}% of points - lower than most players.`);
@@ -193,8 +216,8 @@ export function racquetInsights(input: InsightInput): InsightReport {
       : { key: 'streak', tone: 'down', text: `${streak.length} defeats in a row - worth a look at the weaknesses below.` });
   }
 
-  out.strengths = out.strengths.slice(0, R.maxPerList);
-  out.weaknesses = out.weaknesses.slice(0, R.maxPerList);
+  out.strengths = out.strengths.sort(byPriority('strength')).slice(0, R.maxPerList);
+  out.weaknesses = out.weaknesses.sort(byPriority('weakness')).slice(0, R.maxPerList);
   out.trends = out.trends.slice(0, R.maxPerList);
   return out;
 }

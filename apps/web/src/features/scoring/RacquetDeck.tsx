@@ -308,8 +308,10 @@ export function RacquetDeck(p: RacquetDeckProps) {
           {/* The serving side's score is always called first - labelled rather than
               reordered, so the call reads correctly for anyone announcing it courtside. */}
           {call && !state.ended && (
-            <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500" title="Score as called: server's score first">
-              Call <span className="font-mono font-semibold tabular-nums text-slate-700 dark:text-slate-200">{call}</span>
+            <div className="mt-1.5" title="Score as called: server's score first">
+              {/* Read aloud before every serve, so it is sized to be read from arm's length. */}
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Call</div>
+              <div className="font-mono text-2xl font-bold tabular-nums text-slate-800 dark:text-slate-100">{call}</div>
             </div>
           )}
         </div>
@@ -437,30 +439,50 @@ export function RacquetDeck(p: RacquetDeckProps) {
           <Button size="sm" variant="subtle" onClick={() => setTimeoutEnded(log.length - 1)}>End timeout</Button>
         </div>
       )}
-      {toLeft && toRules && !state.ended && !needsSetup && (
-        <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-xs text-slate-500 dark:text-slate-400">
-          <span className="font-semibold uppercase tracking-wide text-[10.5px]">
-            Timeouts {toRules.perGame != null ? `per ${lv.label.toLowerCase()}` : 'per match'}
-          </span>
-          {([leftSide, rightSide] as Side[]).map((side) => {
-            const allowed = (toRules.perGame ?? toRules.perMatch)!;
-            return (
-              <span key={side} className="flex items-center gap-1.5">
-                <span>{nameOf(side)}</span>
-                <span aria-label={`${toLeft[side]} of ${allowed} left`} className="tracking-widest">
-                  {'●'.repeat(toLeft[side])}{'○'.repeat(Math.max(0, allowed - toLeft[side]))}
-                </span>
-                <Button size="sm" variant="subtle" disabled={p.disabled}
-                  title={toLeft[side] === 0 ? 'None left - another would be a technical warning' : undefined}
-                  className={toLeft[side] === 0 ? 'opacity-50' : undefined}
-                  onClick={() => callTimeout(side)}>
-                  Timeout
-                </Button>
-              </span>
-            );
-          })}
-        </div>
-      )}
+      {/* One card per side, under that side's score panel: dots for what is left, then the button. */}
+      {toLeft && toRules && !state.ended && !needsSetup && (() => {
+        const allowed = (toRules.perGame ?? toRules.perMatch)!;
+        const per = toRules.perGame != null ? lv.label.toLowerCase() : 'match';
+        return (
+          <div className="grid grid-cols-2 gap-2">
+            {([leftSide, rightSide] as Side[]).map((side) => {
+              const left = toLeft[side];
+              return (
+                <div key={side} className={cn(
+                  'flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-800',
+                  side === rightSide && 'flex-row-reverse text-right',
+                )}>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                      Timeouts · {nameOf(side)}
+                    </div>
+                    <div className={cn('mt-1 flex items-center gap-1.5', side === rightSide && 'justify-end')}
+                      aria-label={`${left} of ${allowed} timeouts left this ${per}`}>
+                      {Array.from({ length: allowed }, (_, i) => (
+                        <span key={i} className={cn(
+                          'inline-block h-3.5 w-3.5 rounded-full border-2',
+                          i < left
+                            ? 'border-violet-500 bg-violet-500'
+                            : 'border-slate-300 bg-transparent dark:border-slate-600',
+                        )} />
+                      ))}
+                      <span className="ml-1 text-xs text-slate-500 dark:text-slate-400">
+                        {left} left{left === 0 ? '' : ` this ${per}`}
+                      </span>
+                    </div>
+                  </div>
+                  <Button size="sm" variant={left === 0 ? 'subtle' : 'outline'} disabled={p.disabled}
+                    title={left === 0 ? 'None left - another would be a technical warning' : undefined}
+                    className={cn('shrink-0', left === 0 && 'opacity-50')}
+                    onClick={() => callTimeout(side)}>
+                    Timeout
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* ── The two buttons that matter ───────────────────────────────────── */}
       {state.ended && !rescoring ? (
