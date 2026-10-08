@@ -777,15 +777,15 @@ function CustomPointsPanel({ fixture, fixtureId, invalidate }: { fixture: any; f
       <CardHeader title="Championship points" subtitle="This championship awards custom points - enter the points each side earns from this result. They feed the standings." />
       <CardBody>
         <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-3">
-          <label className="block">
-            <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</span>
-            <span className="mb-1.5 block h-3.5 text-[11px] font-normal text-slate-400 dark:text-slate-500">{homeOrg}</span>
+          <label className="block min-w-0">
+            <span className="block truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</span>
+            <span className="mb-1.5 block h-3.5 truncate text-[11px] font-normal text-slate-400 dark:text-slate-500">{homeOrg}</span>
             <Input type="number" min={0} value={home} onChange={(e) => setHome(e.target.value)} className="text-center text-lg font-bold" />
           </label>
           <span className="pb-2 text-sm font-semibold text-slate-400 dark:text-slate-500">pts</span>
-          <label className="block">
-            <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</span>
-            <span className="mb-1.5 block h-3.5 text-[11px] font-normal text-slate-400 dark:text-slate-500">{awayOrg}</span>
+          <label className="block min-w-0">
+            <span className="block truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</span>
+            <span className="mb-1.5 block h-3.5 truncate text-[11px] font-normal text-slate-400 dark:text-slate-500">{awayOrg}</span>
             <Input type="number" min={0} value={away} onChange={(e) => setAway(e.target.value)} className="text-center text-lg font-bold" />
           </label>
         </div>
@@ -2836,7 +2836,7 @@ function CricketQuickResult({ state, homeName, awayName, homeOrg, awayOrg, curre
           <CricketSideInputs name={awayName} org={awayOrg} runs={rB} wkt={wB} overs={oB} onRuns={setRB} onWkt={setWB} onOvers={setOB} />
         </div>
         <Field label="Winner">
-          <Select value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
+          <Select className="w-full" value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
             <option value="auto">Auto (from runs)</option>
             <option value="home">{homeName}</option>
             <option value="away">{awayName}</option>
@@ -2885,7 +2885,7 @@ function DirectResult({ def, homeName, awayName, homeOrg, awayOrg, initialA, ini
         </div>
         <div className="text-[10px] uppercase tracking-wide text-slate-400">{unit}</div>
         <Field label="Winner">
-          <Select value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
+          <Select className="w-full" value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
             <option value="auto">Auto (from score)</option>
             <option value="home">{homeName}</option>
             <option value="away">{awayName}</option>
@@ -3060,15 +3060,15 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone }: { f
       <CardBody>
         {hint && <p className="mb-3 rounded-lg bg-brand-50 px-3 py-2 text-xs text-slate-600 dark:bg-brand-500/10 dark:text-slate-300">{hint}</p>}
         <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-3">
-          <label className="block">
-            <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</span>
-            <span className="mb-1.5 block h-3.5 text-[11px] font-normal text-slate-400 dark:text-slate-500">{homeOrg}</span>
+          <label className="block min-w-0">
+            <span className="block truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{homeName}</span>
+            <span className="mb-1.5 block h-3.5 truncate text-[11px] font-normal text-slate-400 dark:text-slate-500">{homeOrg}</span>
             <Input type="number" min={0} value={home} onChange={(e) => setHome(onlyDigits(e.target.value))} className="text-center text-lg font-bold" />
           </label>
           <span className="pb-2 text-lg font-black text-slate-400 dark:text-slate-500">:</span>
-          <label className="block">
-            <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</span>
-            <span className="mb-1.5 block h-3.5 text-[11px] font-normal text-slate-400 dark:text-slate-500">{awayOrg}</span>
+          <label className="block min-w-0">
+            <span className="block truncate text-xs font-semibold text-slate-600 dark:text-slate-300">{awayName}</span>
+            <span className="mb-1.5 block h-3.5 truncate text-[11px] font-normal text-slate-400 dark:text-slate-500">{awayOrg}</span>
             <Input type="number" min={0} value={away} onChange={(e) => setAway(onlyDigits(e.target.value))} className="text-center text-lg font-bold" />
           </label>
         </div>
@@ -3079,7 +3079,7 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone }: { f
         )}
         <div className="mt-3">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Winner</span>
-          <Select value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
+          <Select className="w-full" value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
             <option value="auto">Auto (higher score) - {winnerLabel}</option>
             <option value="home">{homeName}</option>
             <option value="away">{awayName}</option>
@@ -3167,7 +3167,7 @@ function CricketManualResult({ fixture, fixtureId, live, invalidate, onDone }:
         </div>
         <div className="mt-3">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Winner</span>
-          <Select value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
+          <Select className="w-full" value={winner} onChange={(e) => setWinner(e.target.value as 'auto' | 'home' | 'away' | 'draw')}>
             <option value="auto">Auto (higher runs) - {winnerLabel}</option>
             <option value="home">{homeName}</option>
             <option value="away">{awayName}</option>

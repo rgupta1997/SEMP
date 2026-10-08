@@ -335,9 +335,11 @@ export function RacquetDeck(p: RacquetDeckProps) {
           A courtside board in the page's theme. Each side wears its own colour; the
           serving side is outlined in it. */}
       <div className="overflow-hidden rounded-2xl bg-gradient-to-b from-slate-50 to-slate-100 p-3 text-slate-900 ring-1 ring-slate-200 sm:p-4 dark:from-slate-900 dark:to-slate-950 dark:text-white dark:ring-white/10">
-        <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2 sm:gap-4">
+        {/* Phones: the heading and call run across the top and the two sides share the
+            row below, so neither side is squeezed by the middle column. */}
+        <div className="grid grid-cols-2 items-stretch gap-2 sm:grid-cols-[1fr_auto_1fr] sm:gap-4">
           {panel(leftSide)}
-          <div className="flex min-w-[6.5rem] flex-col items-center justify-center gap-2 text-center">
+          <div className="order-first col-span-2 flex flex-col items-center justify-center gap-2 text-center sm:order-none sm:col-span-1 sm:min-w-[6.5rem]">
             <div className="rounded-full bg-slate-200 px-3 py-1 font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-slate-700 dark:bg-white/10 dark:text-slate-200">
               {heading}
             </div>
@@ -354,7 +356,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
               </div>
             )}
             {/* Games already played: "21-15", "18-21". */}
-            <UnitStrip format={format} state={state} env={env} />
+            <UnitStrip format={format} state={state} env={env} order={[leftSide, rightSide]} accentOf={accentOf} />
           </div>
           {panel(rightSide)}
         </div>
@@ -836,7 +838,7 @@ function ScoreSide({ name, org, points, serving, cue, units, cards, align, accen
   return (
     // The serving side is outlined in its own colour - plain, no glow.
     <div className={cn(
-      'relative min-w-0 rounded-xl border-2 bg-white px-4 py-3 transition dark:bg-white/[0.03]',
+      'relative min-w-0 rounded-xl border-2 bg-white px-3 py-3 transition sm:px-4 dark:bg-white/[0.03]',
       serving ? accent.border : 'border-slate-200 dark:border-transparent',
       right && 'text-right',
     )}>
@@ -1042,23 +1044,37 @@ function StartPanel({ format, pairing, doubles, firstServer, order, nameOf, play
   );
 }
 
-function UnitStrip({ format, state, env }:
-  { format: ScoringFormat; state: KernelState; env: ReturnType<typeof resultEnvelope> }) {
+function UnitStrip({ format, state, env, order, accentOf }: {
+  format: ScoringFormat; state: KernelState; env: ReturnType<typeof resultEnvelope>;
+  order: [Side, Side]; accentOf: (s: Side) => Accent;
+}) {
+  // Read in board order and in each side's colour, so "4-2" says who has the 4 even
+  // after the ends change.
+  const pair = (u: readonly number[]) => (
+    <>
+      <span className={accentOf(order[0]).text}>{u[order[0] === 'A' ? 0 : 1]}</span>
+      –
+      <span className={accentOf(order[1]).text}>{u[order[1] === 'A' ? 0 : 1]}</span>
+    </>
+  );
   // Units won now sits beside each side's points; this strip carries the history.
   const top = format.levels.length - 1;
   const setLevel = format.levels.findIndex((l) => l.key === 'set');
-  // Sits on the scoreboard: one chip per finished unit.
-  if (!(setLevel > 0 && setLevel < top) && env.unitScores.length === 0) return null;
+  const hasSets = setLevel > 0 && setLevel < top;
+  // One chip per finished unit. With sets (tennis) that is each set's games - the
+  // points of every game would be a dozen chips a set and squeeze the board.
+  const done = hasSets ? state.finished.filter((u) => u.level === setLevel).map((u) => u.score) : env.unitScores;
+  if (!hasSets && done.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center justify-center gap-1">
-      {setLevel > 0 && setLevel < top && (
+      {hasSets && (
         <span className="rounded-md bg-slate-200 px-2 py-0.5 font-mono text-xs font-bold tabular-nums text-slate-800 dark:bg-white/10 dark:text-slate-100">
-          Games {state.score[setLevel][0]}–{state.score[setLevel][1]}
+          Games {pair(state.score[setLevel])}
         </span>
       )}
-      {env.unitScores.map((u, i) => (
+      {done.map((u, i) => (
         <span key={i} className="rounded-md bg-slate-200 px-2 py-0.5 font-mono text-xs font-bold tabular-nums text-slate-800 dark:bg-white/10 dark:text-slate-100">
-          {u[0]}–{u[1]}
+          {pair(u)}
         </span>
       ))}
     </div>
