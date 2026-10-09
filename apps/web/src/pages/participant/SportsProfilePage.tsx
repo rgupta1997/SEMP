@@ -82,7 +82,7 @@ const cardStyle: React.CSSProperties = {
   background: 'var(--surface-1)', border: '1px solid var(--line)', borderRadius: 14, padding: 20,
 };
 const rowStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 12, padding: '11px 0', borderTop: '1px solid #EFF2F7',
+  display: 'flex', alignItems: 'center', gap: 12, padding: '11px 0', borderTop: '1px solid var(--line)',
 };
 const emptyStyle: React.CSSProperties = { margin: 0, fontSize: 13.5, color: 'var(--faint)' };
 
@@ -212,7 +212,7 @@ function CertificateRow({ c }: { c: CertRow }) {
   };
 
   return (
-    <div style={{ borderTop: '1px solid #EFF2F7' }}>
+    <div style={{ borderTop: '1px solid var(--line)' }}>
       <div style={{ ...rowStyle, borderTop: 'none', flexWrap: 'wrap' }}>
         <span style={{ flex: '1 1 200px', minWidth: 0 }}>
           <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: 'var(--ink-2)' }}>
@@ -564,8 +564,8 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
                 display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
                 padding: '8px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600,
                 border: `1px solid ${id.privacy.public_profile ? 'var(--ok-ink)' : 'var(--line-2)'}`,
-                background: id.privacy.public_profile ? 'var(--ok-soft)' : '#fff',
-                color: id.privacy.public_profile ? '#1E6E45' : 'var(--ink-4)',
+                background: id.privacy.public_profile ? 'var(--ok-soft)' : 'var(--surface-1)',
+                color: id.privacy.public_profile ? 'var(--ok-ink)' : 'var(--ink-4)',
               }}>
                 <span aria-hidden style={{
                   width: 30, height: 16, borderRadius: 999, position: 'relative',
@@ -586,7 +586,7 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
               <button onClick={togglePublicStats} disabled={statsBusy} style={{
                 display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
                 border: 'none', background: 'none', padding: 0,
-                fontSize: 11.5, color: id.privacy.public_stats ? '#1E6E45' : 'var(--muted)',
+                fontSize: 11.5, color: id.privacy.public_stats ? 'var(--ok-ink)' : 'var(--muted)',
               }}>
                 <span aria-hidden style={{
                   width: 24, height: 13, borderRadius: 999, position: 'relative', flexShrink: 0,
@@ -644,7 +644,7 @@ function VerifiedRecordsNotice({ visible }: { visible: boolean }) {
     }}>
       <ShieldCheck size={17} style={{ flex: '0 0 auto', color: 'var(--ok-ink)', marginTop: 1 }} />
       <div>
-        <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1E6E45' }}>Verified records are always visible</div>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ok-ink)' }}>Verified records are always visible</div>
         <div style={{ fontSize: 12.5, color: '#33604A', marginTop: 2, lineHeight: 1.55 }}>
           Results written by a locked scorecard cannot be edited or hidden — not by you, and not by the
           institution that issued them. That is what makes them worth something.
@@ -699,7 +699,7 @@ export function SportsProfilePage() {
                 display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
                 padding: '7px 13px', borderRadius: 999, fontSize: 13.5, fontWeight: 600,
                 border: `1px solid ${isActive ? 'var(--brand)' : 'var(--line)'}`,
-                background: isActive ? 'var(--brand)' : '#fff',
+                background: isActive ? 'var(--brand)' : 'var(--surface-1)',
                 color: isActive ? '#fff' : 'var(--ink-4)',
               }}>
               {t.label}

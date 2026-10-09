@@ -562,7 +562,8 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
   );
   const [editing, setEditing] = useState<any | null>(null);
   const [creating, setCreating] = useState(false);
-  const [view, setView] = useState<'list' | 'visual'>('visual');
+  // List first: it is where fixtures are scored and edited; the bracket / grid is a view.
+  const [view, setView] = useState<'list' | 'visual'>('list');
   // The format is settled BEFORE the draw generates, so every fixture resolves a
   // real format from the moment it exists. Racquet sports only - everything else
   // generates straight away, exactly as before.
@@ -688,7 +689,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
               size="sm"
               value={view}
               onChange={setView}
-              options={[{ value: 'visual', label: visualLabel }, { value: 'list', label: 'List' }]}
+              options={[{ value: 'list', label: 'List' }, { value: 'visual', label: visualLabel }]}
             />
           )}
           {/* Editing the format AFTER generation. It was only reachable from the
@@ -1001,8 +1002,11 @@ export function SchedulePage() {
   const sportOptions = [...new Map(tsports.map((ts: any) => [ts.sport_id, sportName(ts.sport_id)])).entries()]
     .map(([id, name]) => ({ id, name }))
     .sort((a, b) => a.name.localeCompare(b.name));
+  // Only when there is a choice: a championship with one tournament (usually named like
+  // the championship) showed a dropdown that looked like an event switcher and did nothing.
+  // With it hidden, the page falls back to that one tournament (`active` above).
   const { sportId } = usePageFilters({
-    tournaments: topView === 'manage' && tournamentOptions.length ? tournamentOptions : undefined,
+    tournaments: topView === 'manage' && tournamentOptions.length > 1 ? tournamentOptions : undefined,
     tournamentRequired: true,
     sports: sportOptions.length ? sportOptions : undefined,
   });

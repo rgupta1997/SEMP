@@ -368,6 +368,25 @@ describe('tennis serving', () => {
     expect(st([flip, ...set1]).state.serve.receiveFlip).toBeUndefined();
   });
 
+  it('each pair can name a different first server at the start of a set', () => {
+    const pair = { A: ['a1', 'a2'], B: ['b1', 'b2'] };
+    const server = (log: RallyLog) => resolveServer(f, st(log).state, pair).server;
+    const game = rallies('AAAA'); // one game, A winning every point
+    // Set 1, listed order: a1, b1, a2, b2. A names a2, B names b2.
+    const swapA: RallyEvent = { t: 'switchPairServer', side: 'A' };
+    const swapB: RallyEvent = { t: 'switchPairServer', side: 'B' };
+    expect([server([swapA]), server([swapA, swapB, ...game])]).toEqual(['a2', 'b2']);
+    expect(server([swapA, swapB, ...game, ...game])).toBe('a1');
+    // B may still name theirs before their first service game, but not after it.
+    expect(server([...game, swapB])).toBe('b2');
+    // Game 4 is B's second: b2 in the listed order, and too late to change it.
+    expect(server([...game, ...game, ...game, swapB])).toBe('b2');
+    // A new set goes back to the listed order, ready to be chosen again.
+    const set1 = Array.from({ length: 6 }, () => game).flat();
+    expect(st([swapA, ...set1]).state.serve.pairFlip).toBeUndefined();
+    expect(server([...set1, swapB, ...game])).toBe('b2');
+  });
+
   it('personal receive points in tennis doubles go to the player in that court', () => {
     const pair = { A: ['a1', 'a2'], B: ['b1', 'b2'] };
     const { players } = deriveRacquetStats(f, rallies('AAAA'), { pairing: pair, firstServer: 'A' });

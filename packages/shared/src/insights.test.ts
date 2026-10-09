@@ -76,7 +76,7 @@ describe('racquetInsights', () => {
     const recv = r.weaknesses.find((i) => i.key === 'receive')!;
     expect(recv.text).toContain('most players drop about 14');
     expect(recv.evidence!.facts.map((f) => f.value)).toEqual(expect.arrayContaining([
-      '63 of 100 points (63%)', '33 of 100 points (33%)', '+14 points, across 8 other players',
+      '63 of 100 points (63%)', '33 of 100 points (33%)', '+14: the middle figure among 8 other players',
     ]));
   });
 
@@ -231,7 +231,9 @@ describe('racquetInsights', () => {
     // ...and named once it is 10+ points below what others manage.
     const low = racquetInsights({ ...base, career: gp, field: { typical: { game_point_conversion: { pct: 72, players: 9 } } } });
     const closing = low.weaknesses.find((i) => i.key === 'closing')!;
-    expect(closing.evidence!.facts.find((f) => f.label === 'Typical')!.value).toBe('72% across 9 other players');
+    expect(closing.evidence!.facts.find((f) => f.label === 'Typical')!.value).toBe('72%: the middle figure among 9 other players');
+    // The rule names the line itself, in percentage points - not "10+ points".
+    expect(closing.evidence!.rule).toBe('Flagged at 62% or less: at least 10 percentage points below the typical 72%.');
   });
 
   it('pressure comes from singles, and a doubles source is said to be shared', () => {

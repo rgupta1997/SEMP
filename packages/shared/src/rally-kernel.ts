@@ -656,7 +656,8 @@ function resetForNewUnit(format: ScoringFormat, state: KernelState, unitWinnerSi
     openingTurn: opensSpecially(spec),
     // Table tennis keeps it: with the same partner serving first, the receiver is the one
     // who served to them last game. Badminton starts each game from the listed order.
-    ...(state.serve.pairFlip && spec.resolver === 'ttPairCycle' ? { pairFlip: state.serve.pairFlip } : {}),
+    // Tennis keeps it for the set: it is the pair's serving order, chosen at the set start.
+    ...(state.serve.pairFlip && (spec.resolver === 'ttPairCycle' || spec.resolver === 'tennisGameLocked') ? { pairFlip: state.serve.pairFlip } : {}),
     // Tennis receivers hold their courts for the set; the cascade clears this at a new set.
     ...(state.serve.receiveFlip ? { receiveFlip: state.serve.receiveFlip } : {}),
   };
@@ -713,8 +714,12 @@ function cascade(format: ScoringFormat, state: KernelState, from: number, forced
     if (state.pointLevel > 0) state.score[state.pointLevel] = [0, 0];
     resetForNewUnit(format, state, w, nextServer);
     nextServer ??= state.serve.side;
-    // A new set: each doubles pair chooses its receiving courts again.
-    if (i >= 1) delete state.serve.receiveFlip;
+    // A new set: each doubles pair chooses its receiving courts again - and in tennis its
+    // serving order too (ITF rule 14), starting from the listed order.
+    if (i >= 1) {
+      delete state.serve.receiveFlip;
+      if (serveSpecFor(format, effectiveLevel(format, state, state.pointLevel)).resolver === 'tennisGameLocked') delete state.serve.pairFlip;
+    }
     i += 1;
   }
   return won;
@@ -927,6 +932,13 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
         flipPair(sv, ev.side);
         // The new right-court player of the serving pair opens the game.
         if (ev.side === sv.side) sv.turnLead = rightIndex(sv, sv.side);
+      } else if (spec.resolver === 'tennisGameLocked' && ev.side && state.pointLevel === 0) {
+        // Tennis doubles: a pair names its first server for the set before it first serves
+        // in it - game 1 for the pair serving first, game 1 or 2 for the other.
+        const games = state.score[1] ?? [0, 0];
+        const played = games[0] + games[1];
+        if (format.levels.length < 3 || !(played === 0 || (played === 1 && ev.side === sv.side))) return { state: prev, effect: base };
+        flipPair(sv, ev.side);
       } else if (spec.resolver === 'squashHandOut' && ev.side) {
         // Squash doubles: a team's other partner serves first in this game (rule 5.6
         // names only the team, so the scorer can say which of them).

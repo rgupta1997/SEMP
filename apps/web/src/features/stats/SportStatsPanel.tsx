@@ -117,10 +117,12 @@ function Metrics({ metrics, dense }: { metrics: Metric[]; dense?: boolean }) {
       background: 'var(--line)', border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden',
     }}>
       {shown.map((m) => (
-        <div key={m.key} style={{ background: 'var(--bg-1, #fff)', padding: '8px 10px' }}>
+        // --surface-1 flips with the theme; the old --bg-1 never existed, so tiles stayed
+        // white in dark mode under light ink.
+        <div key={m.key} style={{ background: 'var(--surface-1)', padding: '8px 10px' }}>
           <div style={{
             fontSize: 17, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
-            color: m.higherIsBetter === false ? 'var(--ink-3)' : 'var(--ink-1)',
+            color: m.higherIsBetter === false ? 'var(--ink-3)' : 'var(--ink)',
           }}>{fmt(m)}</div>
           <div style={{ fontSize: 11, color: 'var(--ink-4)', lineHeight: 1.3 }}>{m.label}</div>
         </div>
@@ -385,8 +387,8 @@ function SportCard({ s, userId }: { s: SportRecord; userId?: string }) {
                 style={{
                   cursor: 'pointer', border: 'none', borderRadius: 6, padding: '4px 12px',
                   fontSize: 12.5, fontWeight: 600,
-                  background: view === v ? 'var(--bg-1, #fff)' : 'transparent',
-                  color: view === v ? 'var(--ink-1)' : 'var(--ink-4)',
+                  background: view === v ? 'var(--surface-1)' : 'transparent',
+                  color: view === v ? 'var(--ink)' : 'var(--ink-4)',
                 }}
               >
                 {v === 'all' ? 'All' : v === 'singles' ? 'Singles' : 'Doubles'}

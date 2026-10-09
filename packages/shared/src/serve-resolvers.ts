@@ -192,7 +192,8 @@ function tennisGameLocked(state: KernelState, pair: Pairing, format: ScoringForm
   // Inside a tie-break the rotation carries on by serving TURN (one serve, then two):
   // a1, b1-b1, a2-a2, b2-b2... `turns` is 0 in an ordinary game, so this adds nothing there.
   const ownTurn = Math.floor(gamesPlayed / 2) + Math.floor(state.serve.turns / 2);
-  const start = (side === 'A' ? nom?.A : nom?.B) ?? 0;
+  // The pair's first server this set: the listed order, flipped if they chose the other.
+  const start = ((side === 'A' ? nom?.A : nom?.B) ?? 0) + (state.serve.pairFlip?.[side] ? 1 : 0);
   const server = people[(start + ownTurn) % people.length];
   // Each receiving pair keeps one player in the deuce (right) court for the whole set,
   // so the receiver is whoever stands in the court this point is served to.

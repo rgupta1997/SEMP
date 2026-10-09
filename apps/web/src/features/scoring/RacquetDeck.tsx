@@ -115,6 +115,11 @@ export function RacquetDeck(p: RacquetDeckProps) {
   const serveTurn = (() => {
     if (state.ended || serve.movement !== 'everyN') return null;
     const every = serveEveryNow(format, serve, state);
+    // A tennis tie-break opens with a single serve, then two each: say so, or the
+    // opening point reads as "one serve each" for the whole tie-break.
+    if (state.serve.openingTurn && serve.firstTurnEvery !== undefined && serve.firstTurnEvery !== serve.every) {
+      return `${serve.firstTurnEvery === 1 ? 'one serve' : `${serve.firstTurnEvery} serves`} - then ${serve.every} each`;
+    }
     return every === 1 ? 'one serve each' : `serve ${state.serve.turnCount + 1} of ${every}`;
   })();
 
@@ -187,7 +192,36 @@ export function RacquetDeck(p: RacquetDeckProps) {
 
   const label = (n: number) => pointLabel(lv, n);
 
-  const resolved = p.pairing ? resolveServer(format, state, p.pairing) : null;
+  // What the rally button shows. Counted scores read "+1"; a labelled score (tennis
+  // 15/30/40) reads what the tap makes it - "+1" on a love-15 point is wrong.
+  const tapShows = (side: Side): string => {
+    if (!lv.pointLabels || state.ended) return '+1';
+    const r = step(format, state, { t: 'point', side });
+    const won = r.effect.unitsWon;
+    if (won.length) return won[won.length - 1].label;
+    const sc = r.state.score[r.state.pointLevel];
+    const mine = sc[side === 'A' ? 0 : 1];
+    // 40-40: deuce, or under no-ad scoring the deciding point.
+    if (sc[0] === sc[1] && mine >= lv.pointLabels.length - 2) return lv.winBy > 1 ? 'Deuce' : `→ ${label(mine)}`;
+    return `→ ${label(mine)}`;
+  };
+
+  // Tennis doubles deuce-court picks in the start panel, by name. Held here, not in the
+  // log, until Start match - but the serve line previews them so it names the right receiver.
+  const [setupDeuce, setSetupDeuce] = useState<Partial<Record<Side, string>>>({});
+  const setupFlips = (['A', 'B'] as Side[]).filter((s) => {
+    const people = p.pairing?.[s];
+    return !!people && people.length > 1 && !!setupDeuce[s] && setupDeuce[s] !== people[0];
+  });
+  // Squash: the first server picks a box before the first serve (WSF 5.7). Same idea -
+  // held until Start match, previewed on the serve line meanwhile.
+  const [setupBox, setSetupBox] = useState<'right' | 'left'>('right');
+  const boxChoice = serve.courtModel === 'handAlternate';
+  let previewState: KernelState = needsSetup && setupFlips.length
+    ? { ...state, serve: { ...state.serve, receiveFlip: Object.fromEntries(setupFlips.map((s) => [s, true])) } }
+    : state;
+  if (needsSetup && boxChoice && setupBox === 'left') previewState = step(format, previewState, { t: 'switchBox' }).state;
+  const resolved = p.pairing ? resolveServer(format, previewState, p.pairing) : null;
   const pairCycle = serve.resolver === 'ttPairCycle';
   // Tennis: first and second serve.
   const twoServes = serve.resolver === 'tennisGameLocked' && serve.movement !== 'none';
@@ -196,12 +230,12 @@ export function RacquetDeck(p: RacquetDeckProps) {
   // squash doubles at the start of each game (the right side).
   const setGames = state.score[1] ?? [0, 0];
   const gameStart = state.unitPoints === 0 && state.serve.turns === 0 && state.serve.turnCount === 0;
-  const chooseReceivers = doubles && !!p.pairing && !state.ended && (
+  // Tennis: the first set is asked in the start panel, so this prompt covers sets 2+ -
+  // and set 1 too when the start panel is not shown.
+  const firstSet = serve.resolver === 'tennisGameLocked' && !state.finished.some((u) => u.level === 1);
+  const chooseReceivers = doubles && !!p.pairing && !state.ended && !(firstSet && p.onFirstServerChange) && (
     (serve.resolver === 'tennisGameLocked' && state.pointLevel === 0 && state.unitPoints === 0 && setGames[0] + setGames[1] === 0)
     || (serve.resolver === 'squashHandOut' && gameStart));
-  const receiverQuestion = (team: string) => (serve.resolver === 'squashHandOut'
-    ? `Who receives on the right side for ${team} this game?`
-    : `Who receives in the deuce court for ${team} this set?`);
   // Pairs that hold courts and swap on scoring their own serve: badminton and pickleball.
   const bwfPairs = serve.resolver === 'bwfSingleServer' || serve.resolver === 'pickleballTwoServer';
   // Squash doubles: four servers in rotation, receivers keeping a side.
@@ -210,6 +244,16 @@ export function RacquetDeck(p: RacquetDeckProps) {
   const choosePairServer = (pairCycle || bwfPairs || squashPairs) && doubles && !!p.pairing && !state.ended
     && state.finished.some((u) => u.level === 0)
     && state.unitPoints === 0 && state.serve.turns === 0 && state.serve.turnCount === 0;
+  // The between-games choices close on "Start set / game", like the start panel, or on
+  // the first point. Keyed by units finished, so the next set or game asks afresh.
+  const [choicesClosedAt, setChoicesClosedAt] = useState<number | null>(null);
+  const choicesOpen = choicesClosedAt !== state.finished.length;
+  const closeChoices = () => setChoicesClosedAt(state.finished.length);
+  // "Start set 2" / "Start game 3": the unit about to begin, counted from the level above.
+  const startLabel = (unitLevel: number) => {
+    const above = state.score[unitLevel + 1] ?? [0, 0];
+    return `Start ${format.levels[unitLevel]?.label.toLowerCase() ?? 'game'} ${above[0] + above[1] + 1}`;
+  };
   const call = serve.movement === 'none' ? null : serveCall(format, state, doubles);
   // Two kinds of change: mid-game (the decider midpoint) and after a finished game.
   // Read off the last PLAYED event, so pausing the clock does not hide the prompt.
@@ -272,7 +316,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
     <ScoreSide
       key={side}
       name={nameOf(side)} org={subOf(side)}
-      points={label(state.score[state.pointLevel][side === 'A' ? 0 : 1])}
+      points={pointPair(lv, state.score[state.pointLevel])[side === 'A' ? 0 : 1]}
       serving={serve.movement !== 'none' && !state.ended && state.serve.side === side}
       cue={pointCue(side)}
       units={multiUnit ? { label: `${unitLabel}s`, won: state.score[top][side === 'A' ? 0 : 1], needed: format.levels[top].target } : null}
@@ -370,18 +414,29 @@ export function RacquetDeck(p: RacquetDeckProps) {
                 <> to <span className="font-bold text-slate-900 dark:text-white">{resolved.receiver}</span></>
               )}
             </span>
-            {resolved?.courtHalf && !pairCycle && (
+            {/* Squash: the server picks the box at the start of each hand, then alternates -
+                so at a hand's first serve the box is a two-way switch, otherwise a label. */}
+            {resolved?.courtHalf && !pairCycle && (squashPairs && state.serve.turnCount === 0 && !needsSetup ? (
+              <span className="inline-flex overflow-hidden rounded-lg border border-slate-300 dark:border-slate-700" role="group" aria-label="Service box">
+                {(['left', 'right'] as const).map((b) => (
+                  <button key={b} type="button" disabled={p.disabled}
+                    aria-pressed={resolved.courtHalf === b}
+                    onClick={() => { if (resolved.courtHalf !== b) push({ t: 'switchBox' }); }}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold uppercase tracking-wider transition',
+                      resolved.courtHalf === b
+                        ? 'bg-amber-400 text-slate-950'
+                        : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10',
+                    )}>
+                    {b} box
+                  </button>
+                ))}
+              </span>
+            ) : (
               <span className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 <CourtHalf half={resolved.courtHalf} /> {resolved.courtHalf} {squashPairs ? 'box' : 'court'}
               </span>
-            )}
-            {/* Squash: the server picks the box at the start of each hand, then alternates. */}
-            {squashPairs && state.serve.turnCount === 0 && !needsSetup && (
-              <button type="button" disabled={p.disabled} onClick={() => push({ t: 'switchBox' })}
-                className="text-xs font-semibold text-brand-600 underline underline-offset-2 dark:text-brand-400">
-                Serve from the {resolved?.courtHalf === 'left' ? 'right' : 'left'} box
-              </button>
-            )}
+            ))}
             {serve.movement === 'handOut' && doubles && (
               <span className="rounded-md bg-slate-200 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-slate-800 dark:bg-white/10 dark:text-white">Server {state.serve.serverNo}</span>
             )}
@@ -481,66 +536,49 @@ export function RacquetDeck(p: RacquetDeckProps) {
         </div>
       )}
 
-      {/* Tennis doubles, at the start of each set: each pair keeps one player in the deuce
-          court and one in the ad court for the whole set. */}
-      {chooseReceivers && !needsSetup && (
-        <div className="grid gap-1.5">
-          {([leftSide, rightSide] as Side[]).filter((side) => (p.pairing![side]?.length ?? 0) > 1).map((side) => {
-            const deuce = p.pairing![side][state.serve.receiveFlip?.[side] ? 1 : 0];
-            return (
-              <div key={side} className="flex flex-wrap items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                <span>{receiverQuestion(nameOf(side))}</span>
-                {/* Alphabetical, so picking moves only the highlight. */}
-                {[...p.pairing![side]].sort((a, b) => a.localeCompare(b)).map((name) => (
-                  <button key={name} type="button" disabled={p.disabled}
-                    className={cn(
-                      'rounded-lg border-2 px-3 py-1 text-sm font-semibold transition',
-                      name === deuce
-                        ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300'
-                        : 'border-slate-200 text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:text-slate-200',
-                    )}
-                    onClick={() => { if (name !== deuce) push({ t: 'switchReceiver', side }); }}>
-                    {name}
-                  </button>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {/* Tennis doubles, at the start of each set: each pair names its first server (ITF
+          rule 14) and keeps one player in the deuce court for the whole set. Squash doubles,
+          each game: who receives on the right. */}
+      {chooseReceivers && choicesOpen && !needsSetup && (() => {
+        const pairs = ([leftSide, rightSide] as Side[]).filter((side) => (p.pairing![side]?.length ?? 0) > 1);
+        const tennisSet = serve.resolver === 'tennisGameLocked';
+        return (
+          <ChoicePanel title={tennisSet ? 'Start of the set' : `Start of the ${lv.label.toLowerCase()}`}
+            note={tennisSet ? 'pairs can change these at the start of each set' : undefined}
+            action={choosePairServer ? undefined : { label: startLabel(tennisSet ? 1 : 0), onClick: closeChoices }}>
+            {tennisSet && <ChoiceHeading>Serves first</ChoiceHeading>}
+            {tennisSet && pairs.map((side) => (
+              <PickRow key={`srv-${side}`} label={nameOf(side)} options={p.pairing![side]} disabled={p.disabled}
+                current={p.pairing![side][state.serve.pairFlip?.[side] ? 1 : 0]}
+                onPick={() => push({ t: 'switchPairServer', side })} />
+            ))}
+            <ChoiceHeading>{tennisSet ? 'Returns from the deuce (right) court' : 'Receives on the right side'}</ChoiceHeading>
+            {pairs.map((side) => (
+              <PickRow key={`rcv-${side}`} label={nameOf(side)} options={p.pairing![side]} disabled={p.disabled}
+                current={p.pairing![side][state.serve.receiveFlip?.[side] ? 1 : 0]}
+                onPick={() => push({ t: 'switchReceiver', side })} />
+            ))}
+          </ChoicePanel>
+        );
+      })()}
 
       {/* Games 2+, at 0-0. Table tennis: the serving pair picks, the receiver follows
           (ITTF 2.13.5). Badminton: each pair picks who starts in the right court. */}
-      {choosePairServer && (() => {
+      {choosePairServer && choicesOpen && (() => {
         const servingSide = state.serve.side;
         const receivingSide: Side = servingSide === 'A' ? 'B' : 'A';
-        const picker = (side: Side, question: string, current: string | null | undefined) => (
-          <div key={side} className="flex flex-wrap items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span>{question}</span>
-            {/* Alphabetical, so picking moves only the highlight. */}
-            {[...p.pairing![side]].sort((a, b) => a.localeCompare(b)).map((name) => (
-              <button key={name} type="button" disabled={p.disabled}
-                className={cn(
-                  'rounded-lg border-2 px-3 py-1 text-sm font-semibold transition',
-                  name === current
-                    ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300'
-                    : 'border-slate-200 text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:text-slate-200',
-                )}
-                onClick={() => {
-                  if (name !== current) push(bwfPairs || squashPairs ? { t: 'switchPairServer', side } : { t: 'switchPairServer' });
-                }}>
-                {name}
-              </button>
-            ))}
-          </div>
-        );
-        const unit = lv.label.toLowerCase();
         return (
-          <div className="grid gap-1.5">
-            {picker(servingSide, `Who serves first for ${nameOf(servingSide)} this ${unit}?`, resolved?.server)}
-            {bwfPairs && p.pairing![receivingSide].length > 1
-              && picker(receivingSide, `Who receives first for ${nameOf(receivingSide)}?`, resolved?.receiver)}
-          </div>
+          <ChoicePanel title={`Start of the ${lv.label.toLowerCase()}`}
+            action={{ label: startLabel(0), onClick: closeChoices }}>
+            <PickRow label={`${nameOf(servingSide)} - serves first`} options={p.pairing![servingSide]} disabled={p.disabled}
+              current={resolved?.server}
+              onPick={() => push(bwfPairs || squashPairs ? { t: 'switchPairServer', side: servingSide } : { t: 'switchPairServer' })} />
+            {bwfPairs && p.pairing![receivingSide].length > 1 && (
+              <PickRow label={`${nameOf(receivingSide)} - receives first`} options={p.pairing![receivingSide]} disabled={p.disabled}
+                current={resolved?.receiver}
+                onPick={() => push({ t: 'switchPairServer', side: receivingSide })} />
+            )}
+          </ChoicePanel>
         );
       })()}
 
@@ -657,7 +695,21 @@ export function RacquetDeck(p: RacquetDeckProps) {
           format={format} pairing={p.pairing} doubles={doubles} firstServer={firstServer}
           order={[leftSide, rightSide]} nameOf={nameOf} playersOf={(s) => playersOf(s)?.join(' / ')}
           onFirstServerChange={p.onFirstServerChange!} onSwapPair={p.onSwapPair}
-          onStart={() => setStarted(true)}
+          deuce={setupDeuce} onDeuceChange={(side, name) => setSetupDeuce((d) => ({ ...d, [side]: name }))}
+          box={boxChoice ? setupBox : undefined} onBoxChange={setSetupBox}
+          onStart={() => {
+            setStarted(true);
+            const swapReceivers = setupFlips.filter(() => serve.resolver === 'tennisGameLocked' && doubles);
+            const leftBox = boxChoice && setupBox === 'left';
+            if ((!swapReceivers.length && !leftBox) || p.disabled) return;
+            const at = new Date().toISOString();
+            const next = [
+              ...log,
+              ...swapReceivers.map((side) => ({ t: 'switchReceiver', side, at }) as RallyEvent),
+              ...(leftBox ? [{ t: 'switchBox', at } as RallyEvent] : []),
+            ];
+            p.onChange(next, foldRally(format, next, firstServer).state);
+          }}
         />
       ) : (
         <div className="grid gap-3">
@@ -705,6 +757,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
               players={playersOf(side)?.join(' / ')}
               hint={state.ended ? 'undo a point first' : serve.pointScoring === 'serverOnly' && state.serve.side !== side ? 'wins the serve' : 'won the rally'}
               accent={accentOf(side)}
+              big={tapShows(side)}
               serving={serve.movement !== 'none' && state.serve.side === side}
               disabled={p.disabled || p.busy || state.ended}
               onClick={() => push({ t: 'point', side })}
@@ -728,21 +781,24 @@ export function RacquetDeck(p: RacquetDeckProps) {
       )}
 
       {/* ── Corrections ───────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-900/60">
-        <Button variant="outline" disabled={!log.length || p.disabled} onClick={undo} className="gap-1.5">
+      {/* Phones: a 2x2 grid of equal buttons, the match-ending one across the bottom. */}
+      <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 sm:flex sm:flex-wrap sm:items-center dark:border-slate-800 dark:bg-slate-900/60">
+        <Button variant="outline" disabled={!log.length || p.disabled} onClick={undo} className="w-full gap-1.5 sm:w-auto">
           <Undo2 className="h-4 w-4" /> Undo
         </Button>
         {format.letsEnabled && (!state.ended || rescoring) && (
-          <Button variant="subtle" disabled={p.disabled} onClick={() => push({ t: 'let' })} className="gap-1.5"
+          <Button variant="subtle" disabled={p.disabled} onClick={() => push({ t: 'let' })} className="w-full gap-1.5 sm:w-auto"
             title="Replay the rally - no point to anyone">
             <RotateCcw className="h-4 w-4" /> Let
           </Button>
         )}
-        <Button variant={showTools ? 'outline' : 'subtle'} onClick={() => setShowTools((v) => !v)} className="gap-1.5">
+        <Button variant={showTools ? 'outline' : 'subtle'} onClick={() => setShowTools((v) => !v)} className="w-full gap-1.5 sm:w-auto">
           <SlidersHorizontal className="h-4 w-4" /> {showTools ? 'Hide corrections' : 'Corrections'}
         </Button>
         <Button variant="subtle" title="Mirror the screen to match the court after a change of ends"
-          onClick={() => setFlipped((f) => !f)} className="gap-1.5">
+          onClick={() => setFlipped((f) => !f)}
+          // Without Let there are three buttons; Swap sides fills its row rather than leave a gap.
+          className={cn('w-full gap-1.5 sm:w-auto', !(format.letsEnabled && (!state.ended || rescoring)) && 'col-span-2')}>
           <ArrowLeftRight className="h-4 w-4" /> Swap sides
         </Button>
         {/* SIGNING OFF ALWAYS REACHABLE - BUT NEVER SILENTLY AS A 0-0 DRAW.
@@ -755,13 +811,13 @@ export function RacquetDeck(p: RacquetDeckProps) {
             confirms the real result in one tap. Before that it asks HOW the match
             ended and records that reason - so an outcome is always deliberate. */}
         {state.ended ? (
-          <Button className="ml-auto gap-1.5" disabled={p.disabled || p.busy}
+          <Button className="col-span-2 w-full gap-1.5 sm:ml-auto sm:w-auto" disabled={p.disabled || p.busy}
             onClick={() => { setRescoring(false); p.onSignOff(log, state); }}>
             <CheckCircle2 className="h-4 w-4" /> Confirm result
           </Button>
         ) : (
           <Button
-            variant="outline" className="ml-auto gap-1.5"
+            variant="outline" className="col-span-2 w-full gap-1.5 sm:ml-auto sm:w-auto"
             disabled={p.disabled || p.busy}
             onClick={() => setFinishing((v) => !v)}
           >
@@ -933,8 +989,8 @@ function CardBadges({ cards }: { cards: CardTally }) {
  * phone, one-handed - and deliberately labelled "won the rally", because under
  * serverOnly scoring a receiver's rally win is a side-out and scores nothing.
  */
-function RallyButton({ label, players, hint, accent, serving, disabled, onClick, qa }:
-  { label: string; players?: string; hint: string; accent: Accent; serving: boolean; disabled?: boolean; onClick: () => void; qa?: string }) {
+function RallyButton({ label, players, hint, big, accent, serving, disabled, onClick, qa }:
+  { label: string; players?: string; hint: string; big: string; accent: Accent; serving: boolean; disabled?: boolean; onClick: () => void; qa?: string }) {
   return (
     <button
       type="button"
@@ -954,7 +1010,7 @@ function RallyButton({ label, players, hint, accent, serving, disabled, onClick,
         </span>
       )}
       {/* Under side-out scoring the receiver's rally wins the serve, not a point. */}
-      <span className="text-3xl font-black leading-none">{hint === 'wins the serve' ? 'Side-out' : '+1'}</span>
+      <span className="text-3xl font-black leading-none">{hint === 'wins the serve' ? 'Side-out' : big}</span>
       <span className="line-clamp-2 text-center text-base font-bold sm:text-lg">{label}</span>
       {players && <span className="line-clamp-1 text-center text-xs text-white/80 sm:text-sm">{players}</span>}
       <span className="text-[11px] font-semibold uppercase tracking-wider text-white/70">{hint}</span>
@@ -978,71 +1034,151 @@ function minutes(ms: number): string {
  * listed player as its first server (or first receiver), so choosing a partner here
  * just reorders the pair.
  */
-function StartPanel({ format, pairing, doubles, firstServer, order, nameOf, playersOf, onFirstServerChange, onSwapPair, onStart }: {
+function StartPanel({ format, pairing, doubles, firstServer, order, nameOf, playersOf, onFirstServerChange, onSwapPair, deuce, onDeuceChange, box, onBoxChange, onStart }: {
   format: ScoringFormat; pairing?: Pairing; doubles: boolean; firstServer: Side; order: [Side, Side];
   nameOf: (s: Side) => string; playersOf: (s: Side) => string | undefined;
-  onFirstServerChange: (s: Side) => void; onSwapPair?: (s: Side) => void; onStart: () => void;
+  onFirstServerChange: (s: Side) => void; onSwapPair?: (s: Side) => void;
+  /** Tennis doubles: who receives in the deuce court in set 1, by name. */
+  deuce: Partial<Record<Side, string>>; onDeuceChange: (side: Side, name: string) => void;
+  /** Squash: the box the first serve goes from. Absent for sports without a box choice. */
+  box?: 'right' | 'left'; onBoxChange: (b: 'right' | 'left') => void;
+  onStart: () => void;
 }) {
   const receiving: Side = firstServer === 'A' ? 'B' : 'A';
   // Tennis rotates servers by game, so the other pair's first player serves THEIR first game.
   const tennis = serveSpecFor(format, format.levels[0]).resolver === 'tennisGameLocked';
+  // By name, so reordering a pair's servers above does not move a pick. Unset = the
+  // default (the first server).
+  const deuceOf = (side: Side) => deuce[side] ?? pairing?.[side]?.[0];
+  // Compact on purpose: every choice has to fit on one screen, so a scorer settles the
+  // serve without scrolling. One row per question - label left, two buttons right.
   const choice = (selected: boolean) => cn(
-    'relative rounded-xl border-2 px-4 py-3.5 text-base font-bold transition',
+    'min-w-0 rounded-lg border-2 px-3 py-1.5 text-sm font-semibold transition',
     selected
-      ? 'border-emerald-500 bg-emerald-50 text-emerald-800 shadow-[0_0_0_4px_rgba(16,185,129,0.15)] dark:bg-emerald-500/10 dark:text-emerald-300'
+      ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300'
       : 'border-slate-200 text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:text-slate-200',
   );
-  const pairPicker = (side: Side, question: string) => {
-    const people = pairing?.[side] ?? [];
-    if (people.length < 2 || !onSwapPair) return null;
-    // Choosing reorders the pair (first = first server), but the buttons stay put:
-    // shown alphabetically, with only the highlight moving to the one picked.
-    const shown = [...people].sort((a, b) => a.localeCompare(b));
-    return (
-      <div className="grid gap-2">
-        <div className="text-sm font-semibold text-slate-600 dark:text-slate-300">{question}</div>
-        <div className="grid grid-cols-2 gap-2">
-          {shown.map((name) => (
-            <button key={name} type="button" className={choice(name === people[0])}
-              onClick={() => { if (name !== people[0]) onSwapPair(side); }}>
-              {name}
-            </button>
-          ))}
-        </div>
-      </div>
-    );
-  };
+  const row = (key: string, label: React.ReactNode, buttons: React.ReactNode) => (
+    <div key={key} className="grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] sm:items-center sm:gap-4">
+      <div className="text-sm text-slate-600 dark:text-slate-300">{label}</div>
+      <div className="grid grid-cols-2 gap-2">{buttons}</div>
+    </div>
+  );
+  // Choosing reorders or marks a player, but the buttons stay put: shown alphabetically,
+  // with only the highlight moving to the one picked.
+  const partners = (side: Side, picked: string | undefined, pick: (name: string) => void) =>
+    [...(pairing?.[side] ?? [])].sort((a, b) => a.localeCompare(b)).map((name) => (
+      <button key={name} type="button" className={cn(choice(name === picked), 'truncate')} onClick={() => pick(name)}>
+        {name}
+      </button>
+    ));
+  const pairs = doubles && !!onSwapPair && order.every((s) => (pairing?.[s]?.length ?? 0) > 1);
+  const heading = (text: string, note?: string) => (
+    <div className="flex flex-wrap items-baseline gap-x-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+      <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">{text}</span>
+      {note && <span className="text-xs text-slate-400 dark:text-slate-500">{note}</span>}
+    </div>
+  );
+  const serverOf = (side: Side) => (side === firstServer ? `${nameOf(side)} serves first` : `${nameOf(side)}'s first server`);
+
   return (
-    <Card className="grid gap-4 p-5">
+    <Card className="grid gap-3 p-4">
       <div>
         <div className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-400">Before the first point</div>
-        <div className="mt-0.5 text-lg font-bold text-slate-900 dark:text-slate-50">Set up the serve</div>
+        <div className="text-base font-bold text-slate-900 dark:text-slate-50">Set up the serve</div>
       </div>
-      <div className="grid gap-2">
-        <div className="text-sm font-semibold text-slate-600 dark:text-slate-300">Who serves first? (after the toss)</div>
-        <div className="grid grid-cols-2 gap-2">
-          {order.map((side) => (
-            <button key={side} type="button" className={choice(firstServer === side)}
-              onClick={() => onFirstServerChange(side)}>
-              {nameOf(side)}
-              {playersOf(side) && (
-                <span className="mt-0.5 block text-sm font-normal text-slate-500 dark:text-slate-400">
-                  {/* Alphabetical, like the partner buttons below, so picking a server moves nothing. */}
-                  {playersOf(side)!.split(' / ').sort((a, b) => a.localeCompare(b)).join(' / ')}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-      {doubles && pairPicker(firstServer, `Who serves first for ${nameOf(firstServer)}?`)}
-      {doubles && pairPicker(receiving, tennis
-        ? `Who serves first for ${nameOf(receiving)} (their first service game)?`
-        : `Who receives first for ${nameOf(receiving)}?`)}
-      <Button onClick={onStart} className="h-12 text-base font-bold">Start match</Button>
+
+      {row('first', 'Who serves first? (after the toss)', order.map((side) => (
+        <button key={side} type="button" className={cn(choice(firstServer === side), 'text-left')}
+          onClick={() => onFirstServerChange(side)}>
+          <span className="block truncate">{nameOf(side)}</span>
+          {playersOf(side) && (
+            <span className="block truncate text-xs font-normal text-slate-500 dark:text-slate-400">
+              {/* Alphabetical, like the partner buttons, so picking a server moves nothing. */}
+              {playersOf(side)!.split(' / ').sort((a, b) => a.localeCompare(b)).join(' / ')}
+            </span>
+          )}
+        </button>
+      )))}
+
+      {box && row('box', 'Serves from', (['left', 'right'] as const).map((b) => (
+        <button key={b} type="button" className={cn(choice(box === b), 'inline-flex items-center justify-center gap-2')}
+          onClick={() => onBoxChange(b)}>
+          <CourtHalf half={b} /> {b === 'right' ? 'Right box' : 'Left box'}
+        </button>
+      )))}
+
+      {pairs && (
+        <>
+          {heading('Serving order', tennis ? 'who serves each pair\'s first service game' : undefined)}
+          {[firstServer, receiving].map((side) => row(`srv-${side}`,
+            tennis || side === firstServer ? serverOf(side) : `${nameOf(side)} receives first`,
+            partners(side, pairing![side][0], (name) => { if (name !== pairing![side][0]) onSwapPair!(side); })))}
+        </>
+      )}
+
+      {pairs && tennis && (
+        <>
+          {heading('Returns from the deuce (right) court', 'pairs can change this each set')}
+          {order.map((side) => row(`rcv-${side}`, nameOf(side),
+            partners(side, deuceOf(side), (name) => onDeuceChange(side, name))))}
+        </>
+      )}
+
+      <Button
+        onClick={onStart}
+        className="mt-1 h-11 text-base font-bold">Start match</Button>
     </Card>
   );
 }
+
+/** A between-games choice box: labels in one column, buttons lined up in the other. */
+function ChoicePanel({ title, note, action, children }: {
+  title: string; note?: string; action?: { label: string; onClick: () => void }; children: React.ReactNode;
+}) {
+  return (
+    <div className="grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <span className="text-sm font-bold text-slate-900 dark:text-slate-100">{title}</span>
+        {note && <span className="text-xs text-slate-500 dark:text-slate-400">{note}</span>}
+      </div>
+      {children}
+      {/* Says the choices are done - the first point would close the panel too. */}
+      {action && <Button onClick={action.onClick} className="mt-1 h-11 text-base font-bold">{action.label}</Button>}
+    </div>
+  );
+}
+
+function ChoiceHeading({ children }: { children: React.ReactNode }) {
+  return <div className="pt-1 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">{children}</div>;
+}
+
+/** One pair's choice: its name, then its two players as equal buttons. */
+function PickRow({ label, options, current, disabled, onPick }: {
+  label: string; options: string[]; current: string | null | undefined; disabled?: boolean; onPick: () => void;
+}) {
+  return (
+    <div className="grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] sm:items-center sm:gap-4">
+      <div className="truncate text-sm text-slate-600 dark:text-slate-300">{label}</div>
+      <div className="grid grid-cols-2 gap-2">
+        {/* Alphabetical, so picking moves only the highlight. */}
+        {[...options].sort((a, b) => a.localeCompare(b)).map((name) => (
+          <button key={name} type="button" disabled={disabled}
+            className={cn(
+              'min-w-0 truncate rounded-lg border-2 px-3 py-1.5 text-sm font-semibold transition',
+              name === current
+                ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300'
+                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:bg-transparent dark:text-slate-200',
+            )}
+            onClick={() => { if (name !== current) onPick(); }}>
+            {name}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 
 function UnitStrip({ format, state, env, order, accentOf }: {
   format: ScoringFormat; state: KernelState; env: ReturnType<typeof resultEnvelope>;
@@ -1290,6 +1426,20 @@ function pointLabel(lv: LevelSpec, n: number): string {
   return labels ? (labels[Math.min(n, labels.length - 1)] ?? String(n)) : String(n);
 }
 
+/**
+ * Both sides' points as shown. Past deuce the kernel keeps counting (4-4, 5-4), so a
+ * labelled score reads relative: level is 40-40, one ahead is AD-40 - never AD-AD.
+ */
+function pointPair(lv: LevelSpec, sc: readonly number[]): [string, string] {
+  const labels = lv.pointLabels;
+  const forty = labels ? labels.length - 2 : 0;
+  if (labels && sc[0] >= forty && sc[1] >= forty && sc[0] + sc[1] > forty * 2) {
+    if (sc[0] === sc[1]) return [labels[forty], labels[forty]];
+    return sc[0] > sc[1] ? [labels[forty + 1], labels[forty]] : [labels[forty], labels[forty + 1]];
+  }
+  return [pointLabel(lv, sc[0]), pointLabel(lv, sc[1])];
+}
+
 /** The point log, newest first, with the score after each point and who served it. */
 function Timeline({ format, log, firstServer, homeName, awayName }:
   { format: ScoringFormat; log: RallyLog; firstServer: Side; homeName: string; awayName: string }) {
@@ -1300,39 +1450,48 @@ function Timeline({ format, log, firstServer, homeName, awayName }:
       const r = step(format, s, ev);
       s = r.state;
       const lvl = effectiveLevel(format, s, s.pointLevel);
-      const sc = s.score[s.pointLevel];
-      return { t: r.effect, score: `${pointLabel(lvl, sc[0])}–${pointLabel(lvl, sc[1])}` };
+      const [a, b] = pointPair(lvl, s.score[s.pointLevel]);
+      return { t: r.effect, score: `${a}–${b}` };
     });
   }, [format, log, firstServer]);
   if (!log.length) return null;
   const rows = steps.map((x, i) => ({ ...x, i })).reverse().slice(0, 40);
   const nameOf = (s: Side) => (s === 'A' ? homeName : awayName);
+  // Laid out like the team-sport and cricket logs: a titled card, the entry number in a
+  // narrow muted column, the event in medium weight, the detail muted beside it.
   return (
-    <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-800">
-      <ul className="divide-y divide-slate-100 text-xs dark:divide-slate-800">
+    <Card className="grid gap-2 p-3">
+      <h3 className="text-sm font-semibold">What has been recorded</h3>
+      <ol className="max-h-64 divide-y divide-slate-100 overflow-y-auto text-sm dark:divide-slate-800">
         {rows.map(({ t, i, score }) => (
-          <li key={i} className="flex items-baseline gap-2 px-3 py-1.5">
-            <span className="w-8 shrink-0 font-mono tabular-nums text-slate-400 dark:text-slate-500">{i + 1}</span>
-            <span className="min-w-0 flex-1 text-slate-600 dark:text-slate-300">
-              {describe(t, nameOf, format.sport)}
+          <li key={i} className="flex items-baseline gap-2 py-1.5">
+            <span className="w-8 shrink-0 text-right font-mono text-[10px] tabular-nums text-slate-400 dark:text-slate-500">{i + 1}</span>
+            <span className="min-w-0 flex-1">
+              <span className="font-medium text-slate-800 dark:text-slate-100">{describe(t, nameOf, format.sport)}</span>
               {t.event.t === 'point' && t.serverSide && (
-                <span className="ml-1.5 text-slate-400 dark:text-slate-500">· {nameOf(t.serverSide)} served</span>
+                <span className="text-slate-400 dark:text-slate-500"> · {nameOf(t.serverSide)} served</span>
               )}
             </span>
-            {/* A unit-winning point resets the score, so its row shows the unit tag instead. */}
-            {!t.unitsWon.length && (['point', 'penalty', 'adjust'].includes(t.event.t) || (t.event.t === 'fault' && t.scored)) && (
-              <span className="shrink-0 font-mono tabular-nums font-semibold text-slate-700 dark:text-slate-200">{score}</span>
+            {/* Deuce and advantage are what a scorer checks the log for - amber, as on the board. */}
+            {t.atDeuce && (
+              <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">Deuce</span>
             )}
-            {t.atDeuce && <span className="shrink-0 text-[10px] uppercase text-amber-600 dark:text-amber-400">deuce</span>}
-            {t.unitsWon.map((u) => (
-              <span key={u.level} className="shrink-0 font-mono text-[10px] text-emerald-600 dark:text-emerald-400">
-                {u.label} {u.score[0]}–{u.score[1]}
+            {/* A unit-winning point resets the score, so its row shows the unit won instead. */}
+            {!t.unitsWon.length && (['point', 'penalty', 'adjust'].includes(t.event.t) || (t.event.t === 'fault' && t.scored)) && (
+              <span className={cn(
+                'shrink-0 font-mono text-xs font-semibold tabular-nums',
+                /AD/.test(score) || t.atDeuce ? 'text-amber-600 dark:text-amber-300' : 'text-slate-700 dark:text-slate-200',
+              )}>{score}</span>
+            )}
+            {t.unitsWon.length > 0 && (
+              <span className="shrink-0 font-mono text-xs font-semibold tabular-nums text-brand-600 dark:text-brand-400">
+                {t.unitsWon.map((u) => `${u.label} ${u.score[0]}–${u.score[1]}`).join(' · ')}
               </span>
-            ))}
+            )}
           </li>
         ))}
-      </ul>
-    </div>
+      </ol>
+    </Card>
   );
 }
 

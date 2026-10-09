@@ -150,6 +150,7 @@ function rate(bag: StatBag, won: string, of: string | [string, string], min: num
 }
 const POINTS: [string, string] = ['points_won', 'points_lost'];
 const counted = (r: Rate, noun = 'points') => `${r.won} of ${r.of} ${noun} (${r.pct}%)`;
+const signed = (n: number) => `${n > 0 ? '+' : ''}${n}`;
 
 // Only ever said of a strength, so a below-the-middle figure is left unsaid.
 const betterThan = (group: string) => (p?: number) =>
@@ -285,11 +286,11 @@ export function racquetInsights(input: InsightInput): InsightReport {
     const facts = [
       { label: 'Won on your serve', value: counted(serve) },
       { label: 'Won when receiving', value: counted(recv) },
-      { label: 'Your gap', value: `${mine > 0 ? '+' : ''}${mine} points (serve minus receive)` },
-      { label: 'Typical gap', value: `${gap.typical > 0 ? '+' : ''}${gap.typical} points, across ${gap.players} other ${group}` },
+      { label: 'Your gap', value: `${signed(mine)} percentage points (serve minus receive)` },
+      { label: 'Typical gap', value: `${signed(gap.typical)}: the middle figure among ${gap.players} other ${group}` },
       from,
     ];
-    const rule = `Named when your serve-receive gap is ${R.gapPp}+ points away from the typical gap of other players.`;
+    const rule = `Named when your gap is at least ${R.gapPp} percentage points wider or narrower than the typical ${signed(gap.typical)} - so ${signed(gap.typical + R.gapPp)} or more, or ${signed(gap.typical - R.gapPp)} or less.`;
     const early = Math.min(serve.of, recv.of) < R.earlyPoints;
     if (mine - gap.typical >= R.gapPp) {
       add('weakness', 'receive', `Receiving is your weak spot: you win ${mine} points fewer receiving than serving, where most players drop about ${gap.typical}.`, { facts, rule }, early);
@@ -323,14 +324,16 @@ export function racquetInsights(input: InsightInput): InsightReport {
     const relative = !!t && t.players >= R.minFieldPlayers;
     const facts = [
       { label: opts.label, value: counted(r, opts.noun) },
-      ...(relative ? [{ label: 'Typical', value: `${t!.pct}% across ${t!.players} other ${group}` }] : []),
+      // "The middle figure", not "47% of players": the typical value is a median rate.
+      ...(relative ? [{ label: 'Typical', value: `${t!.pct}%: the middle figure among ${t!.players} other ${group}` }] : []),
       pFrom,
     ];
     const high = relative ? r.pct >= t!.pct + R.relativePp : opts.fixed.high !== undefined && r.pct >= opts.fixed.high;
     const low = relative ? r.pct <= t!.pct - R.relativePp : opts.fixed.low !== undefined && r.pct <= opts.fixed.low;
+    // The line itself is spelled out (57% or more), so "10 points" cannot be read as 10 game points.
     const rule = (dir: 'above' | 'below', fixedLine?: number) => (relative
-      ? `Named when you are ${R.relativePp}+ points ${dir} the typical ${t!.pct}% of other players.`
-      : `Named at ${fixedLine}% or ${dir === 'above' ? 'more' : 'less'} (too few other players to compare with yet).`);
+      ? `${dir === 'above' ? 'A strength' : 'Flagged'} at ${dir === 'above' ? Math.min(100, t!.pct + R.relativePp) : Math.max(0, t!.pct - R.relativePp)}% or ${dir === 'above' ? 'more' : 'less'}: at least ${R.relativePp} percentage points ${dir} the typical ${t!.pct}%.`
+      : `${dir === 'above' ? 'A strength' : 'Flagged'} at ${fixedLine}% or ${dir === 'above' ? 'more' : 'less'} (too few other players to compare with yet).`);
     if (high && opts.strong) add('strength', opts.key, opts.strong, { facts, rule: rule('above', opts.fixed.high) }, opts.early);
     if (low && opts.weak) add('weakness', opts.key, opts.weak, { facts, rule: rule('below', opts.fixed.low) }, opts.early);
   };
@@ -395,7 +398,7 @@ export function racquetInsights(input: InsightInput): InsightReport {
     const dp = Math.round((d.won / d.played) * 100);
     const evidence = {
       facts: [{ label: 'Singles', value: `${s.won} won of ${s.played} (${sp}%)` }, { label: 'Doubles', value: `${d.won} won of ${d.played} (${dp}%)` }],
-      rule: `Named when one win rate is ${R.splitGapPp}+ points higher, with ${R.minSplitMatches}+ matches of each.`,
+      rule: `Named when one win rate is ${R.splitGapPp}+ percentage points higher, with ${R.minSplitMatches}+ matches of each.`,
     };
     if (sp - dp >= R.splitGapPp) add('strength', 'format', `Singles is your game: ${sp}% won, against ${dp}% in doubles.`, evidence);
     if (dp - sp >= R.splitGapPp) add('strength', 'format', `Doubles is your game: ${dp}% won, against ${sp}% in singles.`, evidence);
@@ -436,7 +439,7 @@ export function racquetInsights(input: InsightInput): InsightReport {
             { label: `Last ${input.recentMatches} matches`, value: counted(now) },
             { label: `The ${before} before`, value: counted(then) },
           ],
-          rule: `Shown when the change is ${R.trendPp}+ points, comparing your last ${R.recentMatches} matches with the ones before them (at least ${R.minEarlierMatches}).`,
+          rule: `Shown when the change is ${R.trendPp}+ percentage points, comparing your last ${R.recentMatches} matches with the ones before them (at least ${R.minEarlierMatches}).`,
         },
       });
     };
