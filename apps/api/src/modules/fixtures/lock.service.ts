@@ -1,7 +1,6 @@
 import type { Request } from 'express';
 import { formatPoints } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
-import { TRANSACTION_TIMEOUT_MS } from '../../infra/transaction.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { friendlyError } from '../../http/middleware/error.js';
 import { audit, auditSystem, AUDIT_ACTIONS } from '../iam/audit.service.js';
@@ -32,7 +31,7 @@ import { resolveFixtureParticipants, type FixtureParticipants } from './particip
  * it: a lock legitimately does a lot, and it must not be cut off part-way on a slow
  * connection. Still well inside the API's own request ceiling.
  */
-const LOCK_TX = { timeout: TRANSACTION_TIMEOUT_MS, maxWait: 10_000 } as const;
+const LOCK_TX = { timeout: 25_000, maxWait: 10_000 } as const;
 import { refreshCareerStatsForFixture } from '../records/career-stats.service.js';
 
 // The scorecard state machine - the spine of every "verified" claim in the product.
