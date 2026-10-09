@@ -316,3 +316,43 @@ with the same runner; all four statements succeeded.
 Adds `pair_service_points_won` and `pair_return_points_won` to `racquet_match_lines`,
 integer default 0, beside the existing pair played counts. Applied with the same
 runner; both statements succeeded.
+
+## Applied 2026-10-09 — `20261009000000_fixture_half_point_scores`
+
+Widens `fixtures.home_score` / `away_score` from integer to double precision so chess can
+store halves (½-½ games, 2½-1½ team matches). Every existing value stays a whole number;
+no data changes. Applied with the same runner, and the column type was read back as
+`double precision`. Prisma's `fixtures.home_score/away_score` are `Float?` to match - the
+API must not deploy against a database without this migration.
+
+Applied to the **dev** Supabase database only. **Not applied to prod** (the RDS
+database) - that needs the owner's go-ahead before the API deploys there.
+
+## Applied 2026-10-09 (dev only) — `20261009000004_tennis_love_holds_bagels`
+
+Adds `love_holds`, `bagels` and `won_from_set_down` to `racquet_match_lines` (integer,
+default 0). Tie-break / set / games / deciding-set win % are derived from counters already
+stored and need no columns. Applied with the same runner; all three statements succeeded.
+
+## Applied 2026-10-09 (dev only) — `20261009000003_break_points_faced`
+
+Adds `racquet_match_lines.break_points_faced` (integer, default 0): break points against
+a player on their own serve, so "break points saved %" can be worked out. Two attempts
+failed intermittently (the API was running); the third succeeded and the column was
+read back as present.
+
+## Applied 2026-10-09 (dev only) — `20261009000002_draw_scoring_preset_key`
+
+Adds `tournament_disciplines.scoring_preset_key varchar(60)`. A draw's default format
+could only be a saved row (`scoring_format_id`), so choosing any BUILT-IN preset saved
+null and every match played the sport default - in every sport. The preset's key is
+stored here instead; a saved format still wins. The first attempt failed on a lock (the
+API was running); the re-run succeeded.
+
+## Applied 2026-10-09 (dev only) — `20261009000001_chess_game_stats`
+
+Adds sixteen integer counters (default 0) to `board_match_lines` for chess per game:
+games, wins/draws/losses, points (doubled) and points available, the same split by white
+and black, and wins by checkmate / resignation / time plus draws by agreement. Applied to
+the dev Supabase database with the same runner; all sixteen statements succeeded. **Not
+applied to prod** - pending the owner's go-ahead.

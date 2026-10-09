@@ -7,6 +7,7 @@
 import type { ContestSpec, RubberSpec, TieSpec } from './scoring.js';
 import type { RallyLog } from './rally-kernel.js';
 import type { ScoringFormat } from './scoring-rules.js';
+import { CHESS_ENDINGS, type ChessEnding } from './chess.js';
 
 // Snapshot of one contest (a single match, or one rubber of a tie). Structurally the
 // state the web engine's reducer operates on; hydrate() tolerates partial persists.
@@ -46,6 +47,10 @@ export interface RubberInstance {
   label: string;
   state: MatchState;       // the rubber's own contest state
   winner: 'A' | 'B' | null;
+  /** Completed with no winner: a drawn chess board, worth ½ each (spec.boardPoints). */
+  drawn?: boolean;
+  /** Chess: how the board's game ended (checkmate, agreement...). Optional. */
+  ending?: ChessEnding;
   status: RubberStatus;
   /** Players named for this rubber. Absent: not named yet, or skipped. */
   lineup?: RubberLineup;
@@ -103,6 +108,8 @@ export function resolveMatchLineup(
 export interface TieState {
   activeRubber: number;
   rubbers: RubberInstance[];
+  /** Chess: the side with white on board 1; colours then alternate down the boards. */
+  firstWhite?: 'A' | 'B';
 }
 
 // A rubber's contest spec drives reduce/headline/subLine in the console.
@@ -111,8 +118,13 @@ export function rubberDef(spec: TieSpec, index: number): ContestSpec {
 }
 
 // Rubbers needed to clinch: explicit `target`, else a simple majority of the rubbers.
+// On board points it is just over half the points: 2½ of 4 boards, 3 of 5.
 export function tieTarget(spec: TieSpec): number {
   if (spec.target) return spec.target;
+  if (spec.boardPoints) {
+    const n = spec.rubbers.length;
+    return n % 2 === 0 ? n / 2 + 0.5 : (n + 1) / 2;
+  }
   return Math.floor(spec.rubbers.length / 2) + 1;
 }
 
@@ -140,6 +152,8 @@ export function hydrateTie(raw: any, spec: TieSpec): TieState {
         label: r.label,
         state: hydrate(rr.state),
         winner: rr.winner === 'A' || rr.winner === 'B' ? rr.winner : null,
+        ...(rr.drawn === true && status === 'completed' && !(rr.winner === 'A' || rr.winner === 'B') ? { drawn: true } : {}),
+        ...(typeof rr.ending === 'string' && rr.ending in CHESS_ENDINGS ? { ending: rr.ending as ChessEnding } : {}),
         status,
         ...(lineup ? { lineup } : {}),
         ...(rr.lineupSkipped === true ? { lineupSkipped: true } : {}),
@@ -152,6 +166,7 @@ export function hydrateTie(raw: any, spec: TieSpec): TieState {
     });
     if (typeof raw.activeRubber === 'number') base.activeRubber = Math.min(Math.max(0, raw.activeRubber), spec.rubbers.length - 1);
   }
+  if (raw?.firstWhite === 'A' || raw?.firstWhite === 'B') base.firstWhite = raw.firstWhite;
   // Land on something PLAYABLE. A persisted pointer can name a rubber that has since
   // been completed or skipped - a stale snapshot, a hand-edited live_state, a tie
   // reopened from another device - and a console pointed at a finished contest shows
@@ -174,8 +189,19 @@ export function rubbersWon(state: TieState): { a: number; b: number } {
   return { a, b };
 }
 
-export function tieWinner(spec: TieSpec, state: TieState): 'A' | 'B' | null {
+/**
+ * The tie's score: rubbers won, or on board points (chess) a win is 1 and a drawn
+ * board ½ each - 2½-1½, the score a chess team match is reported as.
+ */
+export function tieScore(spec: TieSpec, state: TieState): { a: number; b: number } {
   const { a, b } = rubbersWon(state);
+  if (!spec.boardPoints) return { a, b };
+  const drawn = state.rubbers.filter((r) => r.drawn).length;
+  return { a: a + drawn / 2, b: b + drawn / 2 };
+}
+
+export function tieWinner(spec: TieSpec, state: TieState): 'A' | 'B' | null {
+  const { a, b } = tieScore(spec, state);
   const t = tieTarget(spec);
   if (a >= t) return 'A';
   if (b >= t) return 'B';
@@ -216,13 +242,25 @@ export function applyDead(spec: TieSpec, state: TieState): TieState {
   if (!spec.skipDeadRubbers || !tieWinner(spec, state)) return state;
   return {
     ...state,
-    rubbers: state.rubbers.map((r) => (r.winner === null && r.status !== 'dead' ? { ...r, status: 'dead' as RubberStatus } : r)),
+    rubbers: state.rubbers.map((r) => (r.winner === null && !r.drawn && r.status !== 'dead' ? { ...r, status: 'dead' as RubberStatus } : r)),
   };
 }
 
-// Record a rubber's winner, then advance the active pointer to the next playable rubber.
-export function decideRubber(spec: TieSpec, state: TieState, index: number, winner: 'A' | 'B'): TieState {
-  const rubbers = state.rubbers.map((r, i) => (i === index ? { ...r, winner, status: 'completed' as RubberStatus } : r));
+// Record a rubber's result - a winner, or on board points a draw - then advance the
+// active pointer to the next playable rubber.
+export function decideRubber(spec: TieSpec, state: TieState, index: number, winner: 'A' | 'B' | 'draw'): TieState {
+  const result = winner === 'draw'
+    ? (spec.boardPoints ? { winner: null, drawn: true } : null)
+    : { winner, drawn: undefined };
+  if (!result) return state;
+  const rubbers = state.rubbers.map((r, i) => {
+    if (i !== index) return r;
+    const next: RubberInstance = { ...r, ...result, status: 'completed' as RubberStatus };
+    if (!next.drawn) delete next.drawn;
+    // An ending belongs to its result: a changed result is asked again.
+    if (r.winner !== next.winner || !!r.drawn !== !!next.drawn) delete next.ending;
+    return next;
+  });
   let next: TieState = { ...state, rubbers };
   next = applyDead(spec, next);
   const upcoming = next.rubbers.findIndex((r) => r.status === 'pending' || r.status === 'live');
@@ -238,6 +276,8 @@ export function reopenRubber(spec: TieSpec, state: TieState, index: number, rese
   const rubbers = state.rubbers.map((r, i) => {
     if (i === index) {
       const reopened: RubberInstance = { ...r, winner: null, status: 'live', state: resetState ? initState() : r.state };
+      delete reopened.drawn;
+      delete reopened.ending;
       // A fresh re-score clears the points and their frozen rules; who played stays.
       if (resetState) { delete reopened.rally; delete reopened.format; delete reopened.firstServer; }
       return reopened;

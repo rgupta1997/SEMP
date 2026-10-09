@@ -2,7 +2,8 @@ import { useMemo } from 'react';
 import { cn } from './ui';
 import type { BracketFixture } from './Bracket';
 import { describeSlot, describeTieBlocked, isTieBlockedFor } from '../lib/stageTree';
-
+import { formatPoints } from '@semp/shared';
+
 // Short column code for a team: initials of up to 3 words, else first 3 chars.
 function shortCode(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -54,7 +55,7 @@ function ResultCell({ fixture, teamId, opponentId, onSelect }:
     else tone = 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'; // draw
   }
 
-  const label = hasScore ? `${rowScore}–${oppScore}` : live ? 'live' : '·';
+  const label = hasScore ? `${formatPoints(rowScore)}–${formatPoints(oppScore)}` : live ? 'live' : '·';
   const clickable = !!onSelect;
 
   return (

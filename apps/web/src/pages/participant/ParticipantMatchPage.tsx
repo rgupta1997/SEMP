@@ -5,7 +5,8 @@ import { titleCase } from '../../lib/format';
 import { BackButton, Card, CardBody, CardHeader, EmptyState, Spinner, StatusBadge } from '../../components/ui';
 import { ResultBadge } from '../../components/participant/ResultBadge';
 import type { MatchResult } from '../../components/participant/types';
-
+import { formatPoints } from '@semp/shared';
+
 interface MatchDetail {
   fixture: {
     id: string;
@@ -95,9 +96,9 @@ export function ParticipantMatchPage() {
               {f.my_team.organization && <div className="text-xs text-slate-400 dark:text-slate-500">{f.my_team.organization}</div>}
             </div>
             <div className="flex items-center gap-3 text-3xl font-black tabular-nums text-slate-900 dark:text-slate-100">
-              <span>{f.my_score ?? '–'}</span>
+              <span>{f.my_score != null ? formatPoints(f.my_score) : '–'}</span>
               <span className="text-slate-300 dark:text-slate-600">:</span>
-              <span>{f.opp_score ?? '–'}</span>
+              <span>{f.opp_score != null ? formatPoints(f.opp_score) : '–'}</span>
             </div>
             <div className="flex-1 text-left">
               <div className="font-bold text-slate-900 dark:text-slate-100">{f.opponent?.name ?? 'TBD'}</div>

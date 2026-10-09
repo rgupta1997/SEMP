@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { EARLY_END_LABEL, earlyEndOf } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
@@ -823,7 +823,7 @@ export function ResultsPage() {
                                   won ? 'font-extrabold text-slate-900 dark:text-slate-50' : 'font-bold text-slate-700 dark:text-slate-300',
                                 )}
                               >
-                                {scored ? score : <span className="text-slate-300 dark:text-slate-600">·</span>}
+                                {scored ? formatPoints(score) : <span className="text-slate-300 dark:text-slate-600">·</span>}
                                 {earlyNote(won)}
                               </span>
                             </div>
@@ -871,7 +871,7 @@ export function ResultsPage() {
                             <TeamChip team={f.home} winner={f.winner_team_id != null && f.winner_team_id === f.home?.id} />
                           </div>
                           <span className="flex w-16 shrink-0 flex-col items-center whitespace-nowrap text-center text-lg font-bold tabular-nums text-slate-800 dark:text-slate-100">
-                            {scored ? `${f.home_score}–${f.away_score}` : <span className="text-slate-300 dark:text-slate-600">··</span>}
+                            {scored ? `${formatPoints(f.home_score)}–${formatPoints(f.away_score)}` : <span className="text-slate-300 dark:text-slate-600">··</span>}
                             {early && scored && (
                               <span className="text-[10px] font-semibold leading-3 text-amber-600 dark:text-amber-400"
                                 title={`${teamLabel(homeWon ? f.away : f.home)} ${early === 'retired' ? 'retired' : early}`}>

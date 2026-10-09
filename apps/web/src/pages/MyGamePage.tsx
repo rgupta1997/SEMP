@@ -3,7 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../lib/hooks';
 import { useAuth } from '../lib/auth';
 import { Spinner } from '../components/ui';
-
+import { formatPoints } from '@semp/shared';
+
 // My Game - the personal context's landing screen (PG-10, F-040..F-044).
 //
 // Laid out as the prototype has it: a brand-filled next-fixture hero beside the
@@ -227,11 +228,11 @@ export function MyGamePage() {
                 style={{ cursor: 'pointer', padding: '11px 12px', borderRadius: 10, background: C.blue50, marginBottom: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: POP, fontWeight: 700, fontSize: 13.5 }}>
                   <span>{g.my_team?.name ?? 'My team'}</span>
-                  <span style={{ fontFamily: MONO, color: C.blue }}>{g.my_score ?? '–'}</span>
+                  <span style={{ fontFamily: MONO, color: C.blue }}>{g.my_score != null ? formatPoints(g.my_score) : '–'}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: POP, fontWeight: 700, fontSize: 13.5, color: C.fg3, marginTop: 4 }}>
                   <span>{g.opponent?.name ?? 'TBC'}</span>
-                  <span style={{ fontFamily: MONO }}>{g.opp_score ?? '–'}</span>
+                  <span style={{ fontFamily: MONO }}>{g.opp_score != null ? formatPoints(g.opp_score) : '–'}</span>
                 </div>
                 <div style={{ fontSize: 11.5, color: C.fg4, marginTop: 6 }}>{[g.sport, g.championship?.name].filter(Boolean).join(' · ')}</div>
               </div>
@@ -313,7 +314,7 @@ export function MyGamePage() {
                   color: won ? C.ok : lost ? C.bad : C.fg3,
                 }}>{(r.result ?? 'played').toUpperCase()}</span>
                 <span style={{ fontFamily: MONO, fontSize: 13, color: C.navy, minWidth: 62 }}>
-                  {r.my_score ?? '–'} · {r.opp_score ?? '–'}
+                  {r.my_score != null ? formatPoints(r.my_score) : '–'} · {r.opp_score != null ? formatPoints(r.opp_score) : '–'}
                 </span>
                 <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: C.fg2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {r.my_team?.name} vs {r.opponent?.name ?? 'TBC'}

@@ -1,5 +1,6 @@
 import { foldRally, resultEnvelope, type RallyLog } from './rally-kernel.js';
 import { canonicalRacquetSport } from './racquet-presets.js';
+import { CHESS_ENDINGS, isChessSport, whiteOnBoard, type ChessEnding } from './chess.js';
 import type { ScoringFormat, Side } from './scoring-rules.js';
 import { playersPerSide, readLineup, resolveMatchLineup, type RubberLineup } from './tie.js';
 
@@ -21,8 +22,16 @@ export interface PlayedContest {
   rubberLabel: string | null;
   /** User ids per side, in nominated order. */
   lineup: RubberLineup;
-  /** The contest's winner; null while undecided. */
+  /** The contest's winner; null while undecided or drawn. */
   winner: Side | null;
+  /** Finished level - a drawn chess board. */
+  drawn?: boolean;
+  /** 1-based position of the rubber in the tie: a chess board number. */
+  order?: number;
+  /** Chess: the side with the white pieces in this contest, when it was recorded. */
+  white?: Side;
+  /** Chess: how the game ended, when the scorer said. */
+  ending?: ChessEnding;
   log: RallyLog;
   /** The rules it was played under, when it was scored point by point. */
   format: ScoringFormat | null;
@@ -64,7 +73,7 @@ export function playedContests(input: {
     const touched = rubbers.some((r) => readLineup(r?.lineup) || r?.lineupSkipped === true);
     if (!touched) return { kind: 'legacy' };
     const contests: PlayedContest[] = [];
-    for (const r of rubbers) {
+    for (const [i, r] of rubbers.entries()) {
       const lineup = readLineup(r?.lineup);
       if (!lineup || r?.status === 'dead') continue;
       const format = r?.format && typeof r.format === 'object' ? (r.format as ScoringFormat) : null;
@@ -75,6 +84,12 @@ export function playedContests(input: {
         rubberLabel: typeof r?.label === 'string' ? r.label : null,
         lineup,
         winner: side(r?.winner),
+        ...(r?.drawn === true && !side(r?.winner) ? { drawn: true } : {}),
+        order: i + 1,
+        // Chess colours: the home side has white on board 1 unless the tie says otherwise.
+        ...(side(ls.tie?.firstWhite) || isChessSport(input.sportName)
+          ? { white: whiteOnBoard(side(ls.tie?.firstWhite) ?? 'A', i) } : {}),
+        ...(typeof r?.ending === 'string' && r.ending in CHESS_ENDINGS ? { ending: r.ending as ChessEnding } : {}),
         log,
         format,
         firstServer,

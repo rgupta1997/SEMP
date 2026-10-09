@@ -44,7 +44,8 @@ export interface StatMetric {
   per?: number | 'value';
   /** `derived` source: computed from other metrics at rollup time. */
   /** `per`: a plain average, x / y to one decimal (not a percentage). */
-  formula?: { op: 'ratio' | 'sum' | 'diff' | 'per'; of: [string, string] };
+  /** `share`: a as a % of a + b - won of played, from a won and a lost counter. */
+  formula?: { op: 'ratio' | 'sum' | 'diff' | 'per' | 'share'; of: [string, string] };
   aggregate: MetricAggregate;
   /** `rate` aggregate: numerator and denominator metric keys. */
   rateOf?: [string, string];
@@ -130,6 +131,12 @@ const rally = (
 
 const rate = (key: string, label: string, short: string, of: [string, string], headline = false): StatMetric => ({
   key, label, short, source: 'derived', aggregate: 'rate', rateOf: of,
+  higherIsBetter: true, percent: true, headline,
+});
+
+/** Won as a % of won + lost - for counters kept as a won/lost pair with no "played". */
+const share = (key: string, label: string, short: string, of: [won: string, lost: string], headline = false): StatMetric => ({
+  key, label, short, source: 'derived', aggregate: 'sum', formula: { op: 'share', of },
   higherIsBetter: true, percent: true, headline,
 });
 
@@ -249,10 +256,28 @@ const TENNIS_EXTRA: StatMetric[] = [
   rally('break_points_played', 'Break points', 'BP'),
   rally('break_points_saved', 'Break points saved', 'BPS'),
   rate('break_point_pct', 'Break point conversion', 'BP%', ['break_points_won', 'break_points_played']),
+  // Break points against you on your own serve - what "saved %" is measured against.
+  rally('break_points_faced', 'Break points faced', 'BPF', { hidden: true }),
+  rate('break_point_save_pct', 'Break points saved %', 'BPS%', ['break_points_saved', 'break_points_faced']),
   rally('tiebreaks_won', 'Tie-breaks won', 'TBW'),
   rally('tiebreaks_lost', 'Tie-breaks lost', 'TBL', { higherIsBetter: false }),
+  share('tiebreak_win_pct', 'Tie-break win %', 'TB%', ['tiebreaks_won', 'tiebreaks_lost']),
   rally('sets_won', 'Sets won', 'SW'),
   rally('sets_lost', 'Sets lost', 'SL', { higherIsBetter: false }),
+  share('set_win_pct', 'Set win %', 'Set%', ['sets_won', 'sets_lost'], true),
+  share('game_win_pct', 'Games won %', 'G%', ['games_won', 'games_lost']),
+  // The deciding set (one set all, or two all).
+  share('decider_win_pct', 'Deciding-set win %', 'Dec%', ['deciders_won', 'deciders_lost']),
+  rally('love_holds', 'Love holds', 'LH'),
+  // "To love", not "6-0": a short set (Fast4) is won 4-0.
+  rally('bagels', 'Bagels (sets won to love)', 'Bgl'),
+  rally('won_from_set_down', 'Won from a set down', 'WSD'),
+];
+
+/** Racquet metrics that never apply to tennis - side-out scoring and the TT expedite. */
+const NOT_TENNIS = [
+  'side_outs_won', 'side_out_pct', 'points_per_service_turn',
+  'expedite_matches', 'expedite_wins', 'expedite_point_win_pct', 'expedite_return_wins', 'expedite_return_losses',
 ];
 
 /** A "pickle": a game won with the opponents still on 0 - pickleball's own word for it. */
@@ -273,18 +298,26 @@ const OPTIONAL_SHOT_METRICS: StatMetric[] = [
   rally('unforced_errors', 'Unforced errors', 'UE', { source: 'event', fromEvents: ['error'], per: 1, higherIsBetter: false }),
 ];
 
-const racquetSpec = (sport: string, extra: StatMetric[] = [], positions?: string[]): SportStatSpec => ({
+/**
+ * `labels`: a shared metric said the sport's way - tennis wins in straight SETS.
+ * `hide`: shared metrics the sport never produces, kept off its stat tiles.
+ */
+const racquetSpec = (
+  sport: string, extra: StatMetric[] = [], labels: Record<string, string> = {}, hide: string[] = [],
+): SportStatSpec => ({
   sport,
   family: 'racquet',
-  metrics: [...RACQUET_CORE, ...OPTIONAL_SHOT_METRICS, ...extra],
+  metrics: [...RACQUET_CORE, ...OPTIONAL_SHOT_METRICS, ...extra]
+    .map((m) => (labels[m.key] ? { ...m, label: labels[m.key] } : m))
+    .map((m) => (hide.includes(m.key) ? { ...m, hidden: true } : m)),
   events: RACQUET_EVENTS,
-  positions: positions ?? ['singles', 'doubles', 'mixed doubles'],
+  positions: ['singles', 'doubles', 'mixed doubles'],
 });
 
 export const RACQUET_STAT_SPECS: SportStatSpec[] = [
   racquetSpec('table tennis'),
   racquetSpec('badminton'),
-  racquetSpec('tennis', TENNIS_EXTRA),
+  racquetSpec('tennis', TENNIS_EXTRA, { whitewashes: 'Straight-sets wins' }, NOT_TENNIS),
   racquetSpec('pickleball', PICKLEBALL_EXTRA),
   racquetSpec('squash'),
 ];
@@ -461,10 +494,31 @@ const CHESS_METRICS: StatMetric[] = [
   ...UNIVERSAL,
   // Half points are why the result union had to allow a draw: a drawn board is the
   // normal case in chess, not an edge one. Stored doubled so it stays an integer.
-  rally('result_points_x2', 'Result points (×2)', 'Pts2', { headline: true }),
-  rally('as_white', 'Games as white', 'W'),
-  rally('as_black', 'Games as black', 'B'),
+  rally('result_points_x2', 'Result points (×2)', 'Pts2', { hidden: true }),
+  rally('as_white', 'Games as white', 'W', { hidden: true }),
+  rally('as_black', 'Games as black', 'B', { hidden: true }),
   count('board_no', 'Board', 'Bd', { source: 'entry', aggregate: 'min' }),
+  // Per GAME, not per match: a three-game match is three results. Points doubled.
+  rally('chess_games', 'Games', 'G', { headline: true }),
+  rally('chess_wins', 'Games won', 'GW'),
+  rally('chess_draws', 'Games drawn', 'GD'),
+  rally('chess_losses', 'Games lost', 'GL', { higherIsBetter: false }),
+  rally('chess_points_x2', 'Points (×2)', 'P2', { hidden: true }),
+  rally('chess_points_max_x2', 'Points available (×2)', 'PA2', { hidden: true }),
+  rate('chess_score_pct', 'Score %', 'Sc%', ['chess_points_x2', 'chess_points_max_x2'], true),
+  rate('chess_draw_pct', 'Draw %', 'D%', ['chess_draws', 'chess_games']),
+  rally('white_games', 'Games with white', 'GWh'),
+  rally('white_points_x2', 'Points with white (×2)', 'PWh2', { hidden: true }),
+  rally('white_points_max_x2', 'Points available with white (×2)', 'AWh2', { hidden: true }),
+  rate('white_score_pct', 'Score % with white', 'Wh%', ['white_points_x2', 'white_points_max_x2'], true),
+  rally('black_games', 'Games with black', 'GBk'),
+  rally('black_points_x2', 'Points with black (×2)', 'PBk2', { hidden: true }),
+  rally('black_points_max_x2', 'Points available with black (×2)', 'ABk2', { hidden: true }),
+  rate('black_score_pct', 'Score % with black', 'Bk%', ['black_points_x2', 'black_points_max_x2'], true),
+  rally('wins_by_checkmate', 'Wins by checkmate', 'Mate'),
+  rally('wins_by_resignation', 'Wins by resignation', 'Res'),
+  rally('wins_on_time', 'Wins on time', 'Time'),
+  rally('draws_by_agreement', 'Draws by agreement', 'Agr'),
 ];
 
 // ---- combat & strength -----------------------------------------------------
@@ -639,6 +693,8 @@ export function deriveRacquetStats(
   let state: KernelState = initKernel(format, first);
   let streak: Record<Side, number> = { A: 0, B: 0 };
   let firstUnitWinner: Side | null = null;
+  /** Tennis: who took the first set, for "won from a set down". */
+  let firstSetWinner: Side | null = null;
   let personalReturns = false;
   let expediteSeen = false;
   // Biggest deficit each side has faced in the game under way (for comeback games).
@@ -751,6 +807,7 @@ export function deriveRacquetStats(
 
       if (bpSide) {
         bump(sides[bpSide], 'break_points_played');
+        if (serverSide) bump(sides[serverSide], 'break_points_faced');
         if (w === bpSide) bump(sides[bpSide], 'break_points_won');
         else if (serverSide) bump(sides[serverSide], 'break_points_saved');
       }
@@ -833,9 +890,12 @@ export function deriveRacquetStats(
         if (spec.movement === 'perUnit' && !isTiebreak && serverSide && !u.awarded) {
           const rec: Side = serverSide === 'A' ? 'B' : 'A';
           const held = w === serverSide;
+          // A love hold: the receiver did not win a point of it.
+          const loveHold = held && u.score[rec === 'A' ? 0 : 1] === 0;
           for (const b of server ? [sides[serverSide], personBag(server)] : [sides[serverSide]]) {
             bump(b, 'service_games_played');
             if (held) bump(b, 'service_games_won');
+            if (loveHold) bump(b, 'love_holds');
           }
           bump(sides[rec], 'return_games_played');
           if (!held) bump(sides[rec], 'return_games_won');
@@ -851,6 +911,10 @@ export function deriveRacquetStats(
       } else if (format.levels[u.level]?.key === 'set') {
         bump(sides[w], 'sets_won');
         bump(sides[l], 'sets_lost');
+        // A bagel: a set won with the opponent on no games. Not a match tie-break played
+        // as the deciding set - its score is points (10-0), not games.
+        if (!u.awarded && before.pointLevel === 0 && u.score[l === 'A' ? 0 : 1] === 0) bump(sides[w], 'bagels');
+        if (firstSetWinner === null) firstSetWinner = w;
       }
     }
     void wasDecider;
@@ -872,7 +936,18 @@ export function deriveRacquetStats(
     bump(sides[l], 'losses');
     // Won after dropping the opening game.
     if (firstUnitWinner && firstUnitWinner !== w) bump(sides[w], 'comeback_wins');
-    if (firstUnitWinner === w && (sides[w].games_lost ?? 0) === 0) bump(sides[w], 'whitewashes');
+    // Tennis's real comeback: lost the first set, won the match.
+    if (firstSetWinner && firstSetWinner !== w) bump(sides[w], 'won_from_set_down');
+    // Without dropping a unit. With sets (tennis) that is a SET - winning 6-0 6-0 is not
+    // the bar; 6-4 6-4 is a straight-sets win. Elsewhere it is a game (3-0 in games).
+    const withSets = format.levels.some((lv, i) => i > 0 && i < format.levels.length - 1 && lv.key === 'set');
+    // A one-set match (pro set, single set) has no "straight sets": every win would count.
+    const setsToWin = format.levels[format.levels.length - 1]?.target ?? 1;
+    if (withSets
+      ? setsToWin > 1 && (sides[w].sets_lost ?? 0) === 0
+      : firstUnitWinner === w && (sides[w].games_lost ?? 0) === 0) {
+      bump(sides[w], 'whitewashes');
+    }
   }
 
   // In doubles a player who never served (or never received) has 0 of their own,
@@ -889,8 +964,10 @@ export function deriveRacquetStats(
       const b = personBag(id);
       b.service_points_played ??= 0;
       b.service_points_won ??= 0;
-      // A partner who never served a tennis game has none held - not the pair's figure.
-      if (sides[side].service_games_played !== undefined) { b.service_games_played ??= 0; b.service_games_won ??= 0; }
+      // Every tally counted on the SERVER personally starts at 0 for each partner, so one
+      // who never aced, faulted or held to love has none - not the pair's figure, which
+      // put the pair's aces (and double faults) in BOTH careers.
+      for (const k of PERSONAL_SERVE_KEYS) if (sides[side][k] !== undefined) b[k] ??= 0;
       if (personalReturns) { b.return_points_played ??= 0; b.return_points_won ??= 0; }
       if (expediteSeen) b.expedite_return_losses ??= 0;
     }
@@ -898,6 +975,14 @@ export function deriveRacquetStats(
 
   return { sides, players: attribute(sides, perPerson, opts.pairing) };
 }
+
+/** Tallies kept per SERVER in doubles (each is also bumped on the person who served). */
+const PERSONAL_SERVE_KEYS = [
+  'service_games_played', 'service_games_won', 'love_holds',
+  'aces', 'faults', 'double_faults',
+  'serve_points_tracked', 'first_serves_in', 'first_serve_points_won',
+  'second_serve_points_played', 'second_serve_points_won',
+] as const;
 
 /** A game won after trailing by this many points in it counts as won from behind. */
 export const COMEBACK_GAME_DEFICIT = 3;
@@ -1011,6 +1096,7 @@ export function foldCareerStats(spec: SportStatSpec, lines: StatBag[]): StatBag 
       else if (m.formula.op === 'sum') out[m.key] = a + b;
       else if (m.formula.op === 'ratio' && b > 0) out[m.key] = Math.round((a / b) * 1000) / 10;
       else if (m.formula.op === 'per' && b > 0) out[m.key] = Math.round((a / b) * 10) / 10;
+      else if (m.formula.op === 'share' && a + b > 0) out[m.key] = Math.round((a / (a + b)) * 1000) / 10;
     }
   }
   return out;

@@ -1,4 +1,5 @@
 import type { Request } from 'express';
+import { formatPoints } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
 import { TRANSACTION_TIMEOUT_MS } from '../../infra/transaction.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
@@ -393,7 +394,7 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
     summary: lockSummary,
     diff: {
       scorecard_status: { from: fromStatus, to: 'locked' },
-      result: { from: null, to: `${fx.home_score ?? '-'}-${fx.away_score ?? '-'}` },
+      result: { from: null, to: `${fx.home_score != null ? formatPoints(fx.home_score) : '-'}-${fx.away_score != null ? formatPoints(fx.away_score) : '-'}` },
       lock_version: { from: fx.lock_version, to: fx.lock_version },
       participants: { from: null, to: participants.resolved.length },
       unmatched_competitors: { from: null, to: participants.unmatched.length },
@@ -479,7 +480,7 @@ async function notifyParticipants(
 ): Promise<void> {
   if (participants.resolved.length === 0) return;
   const score = fixture.home_score != null && fixture.away_score != null
-    ? ` Final score ${fixture.home_score}-${fixture.away_score}.`
+    ? ` Final score ${formatPoints(fixture.home_score)}-${formatPoints(fixture.away_score)}.`
     : '';
   try {
     for (const p of participants.resolved) {

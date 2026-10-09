@@ -110,6 +110,8 @@ export interface TieSpec {
   target?: number;             // explicit clinch count (overrides majority maths)
   skipDeadRubbers: boolean;    // once decided, remaining rubbers are not played (knockout / default)
   skipDeadInGroups?: boolean;  // the same, for league and group rounds; omitted = as skipDeadRubbers
+  /** Chess: a rubber (board) may be drawn for ½ each, and the tie is won on points. */
+  boardPoints?: boolean;
   rubbers: RubberSpec[];       // ordered
 }
 
@@ -153,6 +155,7 @@ export const tieSpecSchema: z.ZodType<TieSpec> = z.object({
   target: z.number().int().positive().optional(),
   skipDeadRubbers: z.boolean(),
   skipDeadInGroups: z.boolean().optional(),
+  boardPoints: z.boolean().optional(),
   rubbers: z.array(rubberSpecSchema).min(1),
 });
 

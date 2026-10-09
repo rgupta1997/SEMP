@@ -55,12 +55,14 @@ const TIE_TEMPLATES: Record<string, FormatTemplate> = {
     { key: 'xd', label: 'Mixed Doubles', contest: decide('Frame') },
     { key: 'md', label: 'Men Doubles', contest: decide('Frame') },
   ]),
+  // Olympiad style: a board may be drawn (½ each), the match is won on board points
+  // (2½-1½), and every board is played - board points also order the standings.
   chess: tie('manual', [
     { key: 'b1', label: 'Board 1', contest: decide('Board') },
     { key: 'b2', label: 'Board 2', contest: decide('Board') },
     { key: 'b3', label: 'Board 3', contest: decide('Board') },
     { key: 'b4', label: 'Board 4', contest: decide('Board') },
-  ]),
+  ], { boardPoints: true, skipDeadRubbers: false }),
 };
 
 // The seeded tie template for a sport, if one exists (drives the "Team tie" option in

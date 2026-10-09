@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  describeCricketFormat, formatLength, isCricketFormat, isPeriodShaped, knobModelFor, parseRoundFormats,
+  describeCricketFormat, describeTimeControl, formatLength, isChessSport, isCricketFormat, isPeriodShaped, knobModelFor, parseRoundFormats,
   pluralizePeriodLabel, resolveRounds, whyNotEditable,
   type AnyKnobSpec, type AnyKnobs, type MatchFormat, type RoundFormatRule,
 } from '@semp/shared';
@@ -28,7 +28,9 @@ interface ShelfResponse {
   presets: MatchFormat[];
   saved: SavedFormat[];
   /** What this draw is set to right now, so edit mode opens on the truth. */
-  current?: { formatId: string | null; roundFormats: unknown };
+  current?: { formatId: string | null; presetKey?: string | null; roundFormats: unknown };
+  /** What the draw plays with nothing chosen, when that is not the first preset (Rapid / Blitz chess). */
+  defaultPresetKey?: string | null;
   /** The rounds this draw HAS, or will have once generated. Never a guess. */
   rounds?: Array<{ round: string; matches: number; stageSequence: number }>;
   entrants?: number;
@@ -61,6 +63,25 @@ export function describeFormat(f: MatchFormat): string {
   const inner = f.levels[0];
   const top = f.levels[f.levels.length - 1];
   const bits: string[] = [];
+  // Game inside set inside match (tennis): "games to 4" read the 4 POINTS of a game as
+  // games. Describe the set and the match instead.
+  if (f.levels.length >= 3) {
+    const set = f.levels[1];
+    const sets = top.target * 2 - 1;
+    bits.push(sets === 1 ? 'one set' : `best of ${sets} sets`);
+    bits.push(`sets to ${set.target}`);
+    bits.push(set.substitute ? `tie-break at ${set.substitute.atUnits}-${set.substitute.atUnits}` : 'advantage sets');
+    if (inner.winBy === 1) bits.push('no-ad');
+    return bits.join(' · ');
+  }
+  // Chess has no target or margin to describe: how many games, and the clock.
+  if (isChessSport(f.sport)) {
+    const games = top !== inner ? top.target * 2 - 1 : 1;
+    bits.push(games === 1 ? 'single game' : `${games}-game match`);
+    const tc = describeTimeControl(f.rulesSheet?.timeControl);
+    if (tc) bits.push(tc);
+    return bits.join(' · ');
+  }
   // Period-shaped (kho-kho, kabaddi, football...): a period ends on the clock,
   // not at a score, and the match is won on total score, not games. Reading it
   // through the "best of N, target M, sudden death" phrasing below produced
@@ -138,7 +159,11 @@ export function FormatPicker(p: FormatPickerProps) {
   // The draw's own format wins over the first preset, so opening Format on a draw
   // already running "Our house rules" shows that - not ITTF Standard.
   const currentSaved = data?.saved?.find((x) => x.id === data?.current?.formatId) ?? null;
-  const effective = chosen?.format ?? currentSaved?.config ?? data?.presets?.[0] ?? null;
+  // A built-in preset the draw already plays under is the current choice too.
+  const currentPreset = data?.presets?.find((f) => !!data?.current?.presetKey && f.presetKey === data.current.presetKey) ?? null;
+  // Nothing chosen: the format the draw really plays, which for a Rapid / Blitz chess draw is not the first preset.
+  const defaultPreset = data?.presets?.find((f) => !!data?.defaultPresetKey && f.presetKey === data.defaultPresetKey) ?? null;
+  const effective = chosen?.format ?? currentSaved?.config ?? currentPreset ?? defaultPreset ?? data?.presets?.[0] ?? null;
   const effectiveId = chosen ? chosen.id : currentSaved?.id ?? null;
 
   const applyAndGenerate = async () => {
@@ -160,7 +185,9 @@ export function FormatPicker(p: FormatPickerProps) {
       // format from the moment it exists.
       if (editing || chosen?.id !== undefined || roundRules.length) {
         await api('PATCH', `/tournament-disciplines/${p.tournamentDisciplineId}/scoring-format`, {
-          ...(chosen ? { scoringFormatId: chosen.id } : {}),
+          // A built-in preset has no saved id, so it is sent by key - sending only the
+          // null id is what made every built-in pick fall back to the sport default.
+          ...(chosen ? { scoringFormatId: chosen.id, presetKey: chosen.id ? null : chosen.format.presetKey ?? null } : {}),
           roundFormats: roundRules,
         });
       }
@@ -609,7 +636,8 @@ function RoundFormatTable({ rounds, entrants, options, drawFormatId, drawFormat,
   // What each round resolves to right now, so the table shows the whole picture.
   const resolved = resolveRounds(
     rounds.map((r) => ({ round: r.round, matches: r.matches, stageSequence: r.stageSequence })),
-    { round_formats: rules, scoring_format_id: drawFormatId ?? undefined },
+    // A built-in draw default has no id - its key stands in, as the console reads it.
+    { round_formats: rules, scoring_format_id: drawFormatId ?? undefined, scoring_preset_key: drawFormatId ? null : drawFormat?.presetKey ?? null },
     options.filter((o) => o.id).map((o) => ({ id: o.id as string, config: o.format, name: o.label })),
   );
 

@@ -89,6 +89,12 @@ export interface LadderFixture {
 
 export interface LadderDraw {
   scoring_format_id?: string | null;
+  /**
+   * A BUILT-IN preset chosen as the draw default. Built-ins have no saved row and so
+   * no id - without this, picking "Best of 3 games" saved nothing and every match
+   * quietly played the sport default.
+   */
+  scoring_preset_key?: string | null;
   round_formats?: unknown;
   /** Sport name, for the built-in default at the bottom of the ladder. */
   sport?: string | null;
@@ -211,9 +217,13 @@ export function walkLadder<F extends MatchFormat>(
     }
   }
 
-  // 4 / the draw.
+  // 4 / the draw: a saved format, or a built-in preset chosen by key.
   const onDraw = pick(draw.scoring_format_id, 'draw');
   if (onDraw) return onDraw;
+  if (draw.scoring_preset_key) {
+    const preset = family.preset(draw.scoring_preset_key);
+    if (preset) return found(preset, 'draw', null);
+  }
 
   // 1 / the built-in default. It must be a REAL, correct format - which is exactly
   // what the platform lacked before this kernel: an unconfigured sport fell through

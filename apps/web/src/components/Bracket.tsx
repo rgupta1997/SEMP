@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
-import { EARLY_END_LABEL, earlyEndOf } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints } from '@semp/shared';
 import { cn, StatusBadge } from './ui';
 import { fmtDateTime } from '../lib/hooks';
 import { describeSlot, describeTieBlocked, isTieBlockedFor } from '../lib/stageTree';
-
+
 // A fixture as returned by GET /tournament-disciplines/:id/fixtures. Only the
 // fields the bracket needs are typed; the rest are passed straight through.
 export interface BracketFixture {
@@ -83,7 +83,7 @@ function TeamRow({ name, org, score, isWinner, decided, warning, note }:
         <span className="tnum tabular-nums text-sm">
           {/* Retired / DSQ / conceded: marked on the side that stopped. */}
           {note && <span className="mr-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">{note}</span>}
-          {score}
+          {formatPoints(score)}
         </span>
       )}
     </div>

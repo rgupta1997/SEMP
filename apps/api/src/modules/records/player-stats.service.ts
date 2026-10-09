@@ -1,6 +1,6 @@
 import {
-  canonicalRacquetSport, competitionTier, cricketCareerBag, deriveRacquetStats,
-  deriveTeamStats, effectiveEventSpec, eventTemplateFor, foldCricketCareer, isCricketSport,
+  canonicalRacquetSport, chessLineStats, competitionTier, cricketCareerBag, deriveRacquetStats, type ChessGame,
+  deriveTeamStats, effectiveEventSpec, eventTemplateFor, foldCricketCareer, isChessSport, isCricketSport,
   parseStoredFormat, playedContests, rankSubEvent, resolveFormat, seatIn, statSpecFor,
   type PlayedContest,
   type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
@@ -234,7 +234,7 @@ export async function buildPlayerStatRows(
   });
   if (played.kind === 'contests') {
     return contestRows(fx, played.contests, people, sideOf, {
-      sportId, occurred, racquet: !!canonical,
+      sportId, occurred, racquet: !!canonical, chess: isChessSport(sportName),
       singleOutcome: (side) => outcomeForFixture(fx, side),
     });
   }
@@ -274,6 +274,26 @@ export async function buildPlayerStatRows(
       roster: people.map((p) => ({ userId: p.user_id, side: sideOf.get(p.user_id)! })),
     });
     statOf = (userId) => derived.players.find((x) => x.userId === userId)?.stats ?? {};
+    // Chess: every game of the match, each with its colour and ending - so a three-game
+    // match is three results in the career, not one. The line's single `colour` is
+    // only set for a one-game match, where there is one colour to name.
+    const raw = (fx.live_state as { chess?: { games?: unknown } } | null)?.chess?.games;
+    const games = isChessSport(sportName) && Array.isArray(raw)
+      ? (raw as ChessGame[]).filter((g) => g && (g.result === 'A' || g.result === 'B' || g.result === 'draw'))
+      : [];
+    if (games.length) {
+      const base = statOf;
+      const white = games.length === 1 ? games[0].white : null;
+      statOf = (userId) => {
+        const side = sideOf.get(userId);
+        if (!side) return base(userId);
+        return {
+          ...base(userId),
+          ...chessLineStats(games, side),
+          ...(white === 'A' || white === 'B' ? { [side === white ? 'as_white' : 'as_black']: 1 } : {}),
+        };
+      };
+    }
   }
 
   const outcomeFor = (side: Side) => outcomeForFixture(fx, side);
@@ -341,8 +361,21 @@ function contestRows(
   contests: PlayedContest[],
   people: FixtureParticipants['resolved'],
   sideOf: Map<string, Side>,
-  opts: { sportId: string | null; occurred: Date; racquet: boolean; singleOutcome: (side: Side) => 'won' | 'lost' | 'drew' | null },
+  opts: { sportId: string | null; occurred: Date; racquet: boolean; chess?: boolean; singleOutcome: (side: Side) => 'won' | 'lost' | 'drew' | null },
 ): PlayerStatRow[] {
+  // A chess board's line IS its result: half-points doubled (2 win, 1 draw, 0 loss),
+  // the board it was played on, and the colour when the tie recorded one.
+  const chessStats = (c: PlayedContest, side: Side): Record<string, number> => {
+    const won = c.winner === side;
+    // A board is one game: the same per-game counters a single match writes.
+    const stats: Record<string, number> = {
+      result_points_x2: c.drawn ? 1 : won ? 2 : 0,
+      ...chessLineStats([{ result: c.drawn ? 'draw' : c.winner!, white: c.white, ending: c.ending }], side),
+    };
+    if (c.order) stats.board_no = c.order;
+    if (c.white) stats[c.white === side ? 'as_white' : 'as_black'] = 1;
+    return stats;
+  };
   const byUser = new Map(people.map((p) => [p.user_id, p]));
   const rows: PlayerStatRow[] = [];
   const playedSomething = new Set<string>();
@@ -372,8 +405,10 @@ function contestRows(
         played: true,
         outcome: c.rubberKey === null
           ? opts.singleOutcome(seat.side)
-          : c.winner ? (c.winner === seat.side ? 'won' : 'lost') : null,
-        stats: derived?.players.find((x) => x.userId === userId)?.stats ?? {},
+          : c.winner ? (c.winner === seat.side ? 'won' : 'lost') : c.drawn ? 'drew' : null,
+        stats: opts.chess && (c.winner || c.drawn)
+          ? chessStats(c, seat.side)
+          : derived?.players.find((x) => x.userId === userId)?.stats ?? {},
         occurred_on: opts.occurred,
         lock_version: fx.lock_version,
       });

@@ -86,7 +86,8 @@ function MatchRulesFields({
 }) {
   const { data } = useApi<{
     saved: Array<{ id: string; name: string; config: any }>;
-    current?: { formatId: string | null; roundFormats: unknown };
+    current?: { formatId: string | null; presetKey?: string | null; roundFormats: unknown };
+    defaultPresetKey?: string | null;
     supported?: boolean;
   }>(`/tournament-disciplines/${tdId}/scoring-formats`);
 
@@ -99,6 +100,8 @@ function MatchRulesFields({
       { ...(fixture ?? {}), format_overrides: null },
       {
         scoring_format_id: data.current?.formatId ?? null,
+        // Nothing chosen: the discipline's own default (Rapid / Blitz chess), as the console plays it.
+        scoring_preset_key: data.current?.presetKey ?? (data.current?.formatId ? null : data.defaultPresetKey ?? null),
         round_formats: data.current?.roundFormats,
         sport: sportName ?? null,
       },
@@ -171,7 +174,7 @@ function MatchFormatField({ fixture, tdId, value, onChange }: {
   const { data } = useApi<{
     presets: any[];
     saved: Array<{ id: string; name: string; config: any }>;
-    current?: { formatId: string | null; roundFormats: unknown };
+    current?: { formatId: string | null; presetKey?: string | null; roundFormats: unknown };
     supported?: boolean;
   }>(`/tournament-disciplines/${tdId}/scoring-formats`);
   if (!data?.supported) return null;

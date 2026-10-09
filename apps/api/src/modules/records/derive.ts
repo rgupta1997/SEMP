@@ -1,6 +1,6 @@
 import {
   PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor, playedContests, seatIn,
-  earlyEndOf, type EarlyEnd, type PlayedContest,
+  earlyEndOf, formatPoints, type EarlyEnd, type PlayedContest,
   type AchievementKind, type EventSpec, type EventState, type FormatTemplate,
   type LifetimeEntryKind, type Medal, type StandingsPlacement,
 } from '@semp/shared';
@@ -562,7 +562,7 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
           ? (p.team_id === fx.home_team_id ? fx.away_team_name : fx.home_team_name)
           : null,
         outcome,
-        score: fx.home_score != null && fx.away_score != null ? `${fx.home_score}-${fx.away_score}` : null,
+        score: fx.home_score != null && fx.away_score != null ? `${formatPoints(fx.home_score)}-${formatPoints(fx.away_score)}` : null,
         round: fx.round,
         sport: fx.sport_name,
         discipline: fx.discipline_name,
@@ -605,14 +605,14 @@ function contestEntries(
       const teamId = seat.side === 'A' ? fx.home_team_id : fx.away_team_id;
       const outcome = c.rubberKey === null
         ? outcomeFor(fx, teamId)
-        : c.winner ? (c.winner === seat.side ? 'won' : 'lost') : null;
+        : c.winner ? (c.winner === seat.side ? 'won' : 'lost') : c.drawn ? 'drew' : null;
       const decided = outcome != null || fx.status === 'walkover' || fx.status === 'bye';
       const chips = chipped.has(userId) ? [] : (chipsByUser.get(userId) ?? []);
       chipped.add(userId);
       const base = entryTitle(fx, teamId);
-      // A rubber's own result replaces the tie's in its title.
+      // A rubber's own result replaces the tie's in its title - a drawn chess board included.
       const title = c.rubberLabel
-        ? `${c.rubberLabel}: ${base.replace(/ — (Won|Lost|Drew)$/, '')}${outcome ? ` — ${outcome === 'won' ? 'Won' : 'Lost'}` : ''}`
+        ? `${c.rubberLabel}: ${base.replace(/ — (Won|Lost|Drew)$/, '')}${outcome ? ` — ${outcome === 'won' ? 'Won' : outcome === 'drew' ? 'Drew' : 'Lost'}` : ''}`
         : base;
       entries.push({
         user_id: userId,
@@ -625,7 +625,7 @@ function contestEntries(
           team_name: teamId ? (teamId === fx.home_team_id ? fx.home_team_name : fx.away_team_name) : null,
           opponent_name: teamId === fx.home_team_id ? fx.away_team_name : fx.home_team_name,
           outcome,
-          score: c.score ? `${c.score[0]}-${c.score[1]}` : (fx.home_score != null && fx.away_score != null ? `${fx.home_score}-${fx.away_score}` : null),
+          score: c.score ? `${c.score[0]}-${c.score[1]}` : (fx.home_score != null && fx.away_score != null ? `${formatPoints(fx.home_score)}-${formatPoints(fx.away_score)}` : null),
           round: fx.round,
           sport: fx.sport_name,
           discipline: fx.discipline_name,
@@ -641,7 +641,7 @@ function contestEntries(
           ...(c.rubberKey !== null ? {
             rubber_key: c.rubberKey,
             rubber_label: c.rubberLabel,
-            tie_score: fx.home_score != null && fx.away_score != null ? `${fx.home_score}-${fx.away_score}` : null,
+            tie_score: fx.home_score != null && fx.away_score != null ? `${formatPoints(fx.home_score)}-${formatPoints(fx.away_score)}` : null,
           } : {}),
         },
       });

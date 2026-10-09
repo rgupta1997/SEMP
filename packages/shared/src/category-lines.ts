@@ -44,6 +44,13 @@ type Mapping = string | BoolMapping;
 
 const bool = (column: string): BoolMapping => ({ column, boolean: true });
 
+/** Chess per-game counters: metric key and board_match_lines column are the same name. */
+export const CHESS_GAME_COLUMNS = [
+  'chess_games', 'chess_wins', 'chess_draws', 'chess_losses', 'chess_points_x2', 'chess_points_max_x2',
+  'white_games', 'white_points_x2', 'white_points_max_x2', 'black_games', 'black_points_x2', 'black_points_max_x2',
+  'wins_by_checkmate', 'wins_by_resignation', 'wins_on_time', 'draws_by_agreement',
+] as const;
+
 /**
  * metric key → column, per family. Every non-derived registry metric appears here
  * or in SPINE_METRICS; the test enforces it.
@@ -78,7 +85,8 @@ export const COLUMN_MAP: Record<Exclude<StatFamily, 'measured' | 'cricket'>, Rec
     return_games_played: 'return_games_played', return_games_won: 'return_games_won',
     winners: 'winners', unforced_errors: 'unforced_errors', lets: 'lets',
     break_points_played: 'break_points_played', break_points_won: 'break_points_won',
-    break_points_saved: 'break_points_saved',
+    break_points_saved: 'break_points_saved', break_points_faced: 'break_points_faced',
+    love_holds: 'love_holds', bagels: 'bagels', won_from_set_down: 'won_from_set_down',
     // Per-match facts; the career numbers are counts of these rows.
     comeback_wins: bool('comeback_win'),
     retirements: bool('retired'),
@@ -118,6 +126,8 @@ export const COLUMN_MAP: Record<Exclude<StatFamily, 'measured' | 'cricket'>, Rec
     result_points_x2: 'result_points_x2', board_no: 'board_no',
     // as_white / as_black are career counts over the `colour` this match records.
     as_white: bool('colour_is_white'), as_black: bool('colour_is_black'),
+    // Chess per game - a match line holds every game in it, so colour splits add up.
+    ...Object.fromEntries(CHESS_GAME_COLUMNS.map((c) => [c, c])),
   },
   combat: {
     minutes: 'minutes',

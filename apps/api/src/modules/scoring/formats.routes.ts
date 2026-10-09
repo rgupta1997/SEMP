@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   matchPresetsFor, isScoredSport, predictKnockoutRounds, matchFormatSchema, roundFormatsSchema,
+  chessPresetForDiscipline, isChessSport,
 } from '@semp/shared';
 import { z } from 'zod';
 import type { Prisma } from '../../infra/prisma.js';
@@ -49,6 +50,8 @@ const saveFormatSchema = z.object({
 const drawFormatSchema = z.object({
   /** null clears the draw default and falls back to the sport default. */
   scoringFormatId: z.string().uuid().nullable().optional(),
+  /** A built-in preset as the draw default - it has no saved row, so it goes by key. */
+  presetKey: z.string().max(60).nullable().optional(),
   roundFormats: roundFormatsSchema.optional(),
 });
 
@@ -87,11 +90,18 @@ export function makeScoringFormatsRouter(prisma: Prisma): Router {
       where: { id: req.params.id },
       select: {
         format_config: true,
+        disciplines: { select: { name: true } },
         tournament_sports: { select: { sport_id: true, sports: { select: { name: true } } } },
       },
     });
     if (!td) throw new NotFoundError('Tournament discipline');
     const sportName = td.tournament_sports?.sports?.name ?? null;
+    // What the draw plays with nothing chosen. Usually the sport's first preset, but a
+    // Rapid or Blitz chess draw plays at its own pace - the console does the same, and
+    // the picker must not show 90+30 for a draw that is scored 3+2.
+    const defaultPresetKey = isChessSport(sportName)
+      ? chessPresetForDiscipline(td.disciplines?.name)?.presetKey ?? null
+      : null;
     const sportId = td.tournament_sports?.sport_id ?? null;
     const orgId = await hostOrgOfDraw(req.params.id);
 
@@ -114,12 +124,12 @@ export function makeScoringFormatsRouter(prisma: Prisma): Router {
     // What this draw is CURRENTLY set to, and its per-round overrides. Without
     // these the edit dialog opened showing the first preset, so a draw already
     // running a saved custom format looked as though it had lost it.
-    let current: { formatId: string | null; roundFormats: unknown } = { formatId: null, roundFormats: [] };
+    let current: { formatId: string | null; presetKey: string | null; roundFormats: unknown } = { formatId: null, presetKey: null, roundFormats: [] };
     try {
-      const rows = await prisma.$queryRaw<Array<{ scoring_format_id: string | null; round_formats: unknown }>>`
-        select scoring_format_id, round_formats
+      const rows = await prisma.$queryRaw<Array<{ scoring_format_id: string | null; scoring_preset_key: string | null; round_formats: unknown }>>`
+        select scoring_format_id, scoring_preset_key, round_formats
         from tournament_disciplines where id = ${req.params.id}::uuid`;
-      if (rows[0]) current = { formatId: rows[0].scoring_format_id, roundFormats: rows[0].round_formats ?? [] };
+      if (rows[0]) current = { formatId: rows[0].scoring_format_id, presetKey: rows[0].scoring_preset_key, roundFormats: rows[0].round_formats ?? [] };
     } catch {
       // Columns not migrated yet - the shelf still works, nothing is selected.
     }
@@ -177,6 +187,7 @@ export function makeScoringFormatsRouter(prisma: Prisma): Router {
       presets: matchPresetsFor(sportName),
       saved,
       current,
+      defaultPresetKey,
       rounds,
       entrants,
       generated: rounds.length > 0 && entrants >= 0,
@@ -275,10 +286,24 @@ function isUniqueViolation(e: unknown): boolean {
     validateBody(drawFormatSchema),
     asyncHandler(async (req, res) => {
       const b = req.body as z.infer<typeof drawFormatSchema>;
-      if (b.scoringFormatId !== undefined) {
+      // One draw default: a saved format OR a built-in preset, so setting either clears the other.
+      if (b.scoringFormatId !== undefined || b.presetKey !== undefined) {
+        const presetKey = b.scoringFormatId ? null : (b.presetKey ?? null);
+        if (presetKey) {
+          // One of THIS sport's presets - keys are unique across sports, so a table
+          // tennis key on a chess draw would otherwise resolve to table tennis rules.
+          const sport = (await prisma.tournament_disciplines.findUnique({
+            where: { id: req.params.id },
+            select: { tournament_sports: { select: { sports: { select: { name: true } } } } },
+          }))?.tournament_sports?.sports?.name ?? null;
+          if (!matchPresetsFor(sport).some((p) => p.presetKey === presetKey)) {
+            throw new BusinessRuleError(`"${presetKey}" is not a built-in format for ${sport ?? 'this sport'}`);
+          }
+        }
         await prisma.$executeRaw`
           update tournament_disciplines
-          set scoring_format_id = ${b.scoringFormatId}::uuid
+          set scoring_format_id = ${b.scoringFormatId ?? null}::uuid,
+              scoring_preset_key = ${presetKey}
           where id = ${req.params.id}::uuid`;
       }
       if (b.roundFormats !== undefined) {

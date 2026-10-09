@@ -282,6 +282,92 @@ describe('tennis serving', () => {
     expect(st([...sixAll, ...rallies('AAAAAAA')]).state.serve.side).toBe('B');
   });
 
+  it('a straight-sets win is two sets to love, not a match without a game lost', () => {
+    // B holds the opening game, then A takes the next six: 6-1, twice.
+    const set61 = [...rallies('BBBB'), ...Array.from({ length: 6 }, () => rallies('AAAA')).flat()];
+    const { sides } = deriveRacquetStats(f, [...set61, ...set61], { firstServer: 'A' });
+    expect(sides.A.games_lost).toBe(2);
+    expect(sides.A.whitewashes).toBe(1);
+    expect(statSpecFor('tennis')!.metrics.find((m) => m.key === 'whitewashes')!.label).toBe('Straight-sets wins');
+    expect(statSpecFor('table tennis')!.metrics.find((m) => m.key === 'whitewashes')!.label).toBe('Straight-games wins');
+  });
+
+  it('love holds, bagels, a win from a set down and the won/lost rates', () => {
+    const game = (s: 'A' | 'B') => rallies(s.repeat(4));
+    // Set 1 to B 6-0 (A's holds broken every time), then A 6-0, 6-0: won from a set down.
+    const setTo = (s: 'A' | 'B') => Array.from({ length: 6 }, () => game(s)).flat();
+    const { sides } = deriveRacquetStats(f, [...setTo('B'), ...setTo('A'), ...setTo('A')], { firstServer: 'A' });
+    expect(sides.A).toMatchObject({ won_from_set_down: 1, bagels: 2, sets_won: 2, sets_lost: 1 });
+    expect(sides.B).toMatchObject({ bagels: 1 });
+    expect(sides.A.love_holds).toBeGreaterThan(0);
+    const career = foldCareerStats(statSpecFor('tennis')!, [sides.A]);
+    expect(career).toMatchObject({ set_win_pct: 66.7, game_win_pct: 66.7, decider_win_pct: 100 });
+  });
+
+  it('a match tie-break won 10-0 is not a bagel, and a one-set win is not "straight sets"', () => {
+    const short = fmtOf('itf_short_sets_bo3');
+    const set41 = (w: 'A' | 'B') => {
+      const l = w === 'A' ? 'B' : 'A';
+      return [...rallies(l.repeat(4)), ...Array.from({ length: 4 }, () => rallies(w.repeat(4))).flat()];
+    };
+    const tbTo10 = rallies('A'.repeat(10));
+    const s = deriveRacquetStats(short, [...set41('A'), ...set41('B'), ...tbTo10], { firstServer: 'A' }).sides;
+    expect(s.A.wins).toBe(1);
+    expect(s.A.bagels ?? 0).toBe(0);
+
+    const proSet = fmtOf('pro_set_8');
+    const eightLove = Array.from({ length: 8 }, () => rallies('AAAA')).flat();
+    const p = deriveRacquetStats(proSet, eightLove, { firstServer: 'A' }).sides;
+    expect(p.A.wins).toBe(1);
+    expect(p.A.whitewashes ?? 0).toBe(0);
+    expect(statSpecFor('tennis')!.metrics.find((m) => m.key === 'bagels')!.label).toBe('Bagels (sets won to love)');
+  });
+
+  it('tennis tiles leave out the side-out and expedite stats it never produces', () => {
+    const hidden = new Set(statSpecFor('tennis')!.metrics.filter((m) => m.hidden).map((m) => m.key));
+    expect(['side_out_pct', 'points_per_service_turn', 'expedite_matches'].every((k) => hidden.has(k))).toBe(true);
+    expect(statSpecFor('table tennis')!.metrics.find((m) => m.key === 'expedite_matches')!.hidden).toBeFalsy();
+  });
+
+  it('doubles: aces and double faults stay with the partner who served them', () => {
+    const pair = { A: ['a1', 'a2'], B: ['b1', 'b2'] };
+    const ace = { t: 'point', side: 'A', kind: 'ace' } as RallyEvent;
+    const fault = { t: 'fault', side: 'A' } as RallyEvent;
+    // a1 holds game 1 with four aces; b1 holds game 2; a2 double-faults in game 3 and is broken.
+    const log: RallyLog = [ace, ace, ace, ace, ...rallies('BBBB'), fault, fault, ...rallies('BBB')];
+    const { players } = deriveRacquetStats(f, log, { pairing: pair, firstServer: 'A' });
+    const of = (id: string) => players.find((x) => x.userId === id)!.stats;
+    expect(of('a1')).toMatchObject({ aces: 4, love_holds: 1 });
+    expect(of('a1').double_faults ?? 0).toBe(0);
+    expect(of('a2')).toMatchObject({ double_faults: 1 });
+    expect(of('a2').aces ?? 0).toBe(0);
+    expect(of('a2').love_holds ?? 0).toBe(0);
+  });
+
+  it('doubles: pairs choose again before a deciding match tie-break', () => {
+    const tb = fmtOf('no_ad_match_tb_bo3');
+    const pair = { A: ['a1', 'a2'], B: ['b1', 'b2'] };
+    const setTo = (s: 'A' | 'B') => Array.from({ length: 6 }, () => rallies(s.repeat(4))).flat();
+    const oneAll = foldRally(tb, [...setTo('A'), ...setTo('B')], 'A').state;
+    expect(oneAll.pointLevel).toBeGreaterThan(0); // the match tie-break runs a level up
+    const who = (s: KernelState) => resolveServer(tb, s, pair);
+    const swapped = step(tb, oneAll, { t: 'switchPairServer', side: who(oneAll).server === 'a1' || who(oneAll).server === 'a2' ? 'A' : 'B' }).state;
+    expect(who(swapped).server).not.toBe(who(oneAll).server);
+    const rec = step(tb, oneAll, { t: 'switchReceiver', side: oneAll.serve.side === 'A' ? 'B' : 'A' }).state;
+    expect(who(rec).receiver).not.toBe(who(oneAll).receiver);
+    // ...but not once the tie-break is under way.
+    const underway = step(tb, oneAll, { t: 'point', side: 'A' }).state;
+    expect(step(tb, underway, { t: 'switchReceiver', side: 'B' }).state).toBe(underway);
+  });
+
+  it('break points faced on your own serve make "saved %" measurable', () => {
+    // A serves game 1, goes 0-40 down (three break points), then wins five in a row.
+    const { sides } = deriveRacquetStats(f, rallies('BBBAAAAA'), { firstServer: 'A' });
+    expect(sides.A).toMatchObject({ break_points_faced: 3, break_points_saved: 3, service_games_won: 1 });
+    expect(sides.B).toMatchObject({ break_points_played: 3 });
+    expect(foldCareerStats(statSpecFor('tennis')!, [sides.A]).break_point_save_pct).toBe(100);
+  });
+
   it('a set won in an ordinary game hands the serve on once, not twice', () => {
     // Set 1 to A 6-4: B served game 10, so A opens set 2.
     const holds = Array.from({ length: 8 }, (_, g) => rallies((g % 2 === 0 ? 'A' : 'B').repeat(4))).flat();

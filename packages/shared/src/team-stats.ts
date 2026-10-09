@@ -178,8 +178,12 @@ export function deriveTeamStats(
           // `boards_won`, and the mapping in category-lines.ts folds carrom boards
           // and snooker frames into that one pair. Emitting the column name here
           // meant the value arrived unmapped and was dropped.
-          put(bag, 'boards_won', mine);
-          put(bag, 'boards_lost', theirs);
+          // Chess scores in halves (1½-½), which an integer boards column cannot hold;
+          // its result is the point below instead.
+          if (spec.sport !== 'chess') {
+            put(bag, 'boards_won', mine);
+            put(bag, 'boards_lost', theirs);
+          }
           // Chess reports a result as a POINT, and a draw is half of one. Doubled so
           // the half stays an integer: 2 win, 1 draw, 0 loss - which is exactly how a
           // chess tournament table is built.

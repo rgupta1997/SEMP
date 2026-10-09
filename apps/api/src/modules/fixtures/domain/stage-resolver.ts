@@ -1,4 +1,4 @@
-import { contingentKey, stageConfigSchema, type StandingsTiebreaker } from '@semp/shared';
+import { contingentKey, isChessSport, stageConfigSchema, type StandingsTiebreaker } from '@semp/shared';
 import type { Prisma } from '../../../infra/prisma.js';
 import { resolveRuleForDraw } from '../../standings/standings.service.js';
 import { advanceInBracket } from '../bracket.js';
@@ -63,7 +63,8 @@ export async function resolveStageAdvancement(prisma: Prisma, tournamentDiscipli
       where: { id: tournamentDisciplineId },
       select: {
         format_config: true, discipline_id: true, format_id: true,
-        tournament_sports: { select: { format_id: true, tournaments: { select: { championship_id: true } } } },
+        disciplines: { select: { entry_type: true } },
+        tournament_sports: { select: { format_id: true, sports: { select: { name: true } }, tournaments: { select: { championship_id: true } } } },
       },
     });
     if (!td) return;
@@ -73,7 +74,8 @@ export async function resolveStageAdvancement(prisma: Prisma, tournamentDiscipli
     const championshipId = td.tournament_sports?.tournaments?.championship_id;
     if (!championshipId) return;
     const formatId = td.format_id ?? td.tournament_sports?.format_id ?? null;
-    const rule = await resolveRuleForDraw(prisma, championshipId, td.discipline_id ?? null, formatId);
+    const chess = isChessSport(td.tournament_sports?.sports?.name) ? { team: td.disciplines?.entry_type === 'team' } : undefined;
+    const rule = await resolveRuleForDraw(prisma, championshipId, td.discipline_id ?? null, formatId, chess);
 
     const tree = assignStageSequence(parsed.data.root);
     // Single-stage draw (no branches beyond the root) - nothing to resolve, even

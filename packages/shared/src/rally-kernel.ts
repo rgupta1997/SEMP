@@ -827,7 +827,10 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       // Tennis: only at the very start of a set. Squash doubles: at the start of any game
       // (WSF doubles rule 5.10 - partners may change receiving sides for a new game).
       const games = state.score[1] ?? [0, 0];
-      const atSetStart = state.pointLevel === 0 && state.unitPoints === 0 && games[0] + games[1] === 0;
+      // A match tie-break played as the deciding set is a set start too (ITF rule 14):
+      // it runs one level up, so it is caught before its first point rather than at 0-0 games.
+      const atSetStart = state.unitPoints === 0
+        && (state.pointLevel === 0 ? games[0] + games[1] === 0 : state.serve.turns === 0 && state.serve.turnCount === 0);
       const atGameStart = state.unitPoints === 0 && state.serve.turns === 0 && state.serve.turnCount === 0;
       const allowed = (spec.resolver === 'tennisGameLocked' && atSetStart) || (spec.resolver === 'squashHandOut' && atGameStart);
       if (!allowed) return { state: prev, effect: base };
@@ -932,6 +935,10 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
         flipPair(sv, ev.side);
         // The new right-court player of the serving pair opens the game.
         if (ev.side === sv.side) sv.turnLead = rightIndex(sv, sv.side);
+      } else if (spec.resolver === 'tennisGameLocked' && ev.side && state.pointLevel > 0) {
+        // A match tie-break as the deciding set: both pairs name their first server before
+        // its first point (the guard above has already checked no point is played).
+        flipPair(sv, ev.side);
       } else if (spec.resolver === 'tennisGameLocked' && ev.side && state.pointLevel === 0) {
         // Tennis doubles: a pair names its first server for the set before it first serves
         // in it - game 1 for the pair serving first, game 1 or 2 for the other.

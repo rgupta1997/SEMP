@@ -1,5 +1,6 @@
 import { isPeriodShaped, pluralizePeriodLabel } from './match-format.js';
 import { expediteConfig, ITTF_EXPEDITE } from './rally-kernel.js';
+import { isChessSport } from './chess.js';
 import type {
   CapAction, CapTieRule, ChangeEndsRule, LevelSpec, OfficiatingMode,
   ScoringFormat, ServeMovement, PointScoring,
@@ -103,7 +104,19 @@ export interface FormatKnobs {
    * generic "4 periods" that means nothing extra to whoever set this up.
    */
   periodLabel: string;
+
+  /**
+   * Read-only. A chess format: nothing is counted in a game, so the editor offers the
+   * games in the match, the time control and how it is run - not targets or serves.
+   */
+  chess: boolean;
+  /** Chess: minutes each on the clock, and seconds added per move (FIDE "90+30"). */
+  timeBaseMinutes: number;
+  timeIncrementSeconds: number;
 }
+
+/** The only knobs a chess format has; everything else describes a game it does not play. */
+const CHESS_KNOBS = new Set<keyof FormatKnobs>(['unitsToWin', 'timeBaseMinutes', 'timeIncrementSeconds', 'officiatingMode', 'drawsAllowed']);
 
 /** UI metadata for one knob. Rendering is generic; this is what makes it legible. */
 export interface KnobSpec {
@@ -171,6 +184,12 @@ export const KNOB_SPECS: KnobSpec[] = [
     applies: (k) => !k.periodShaped && k.unitsToWin > 1 },
   { key: 'deciderTarget', label: 'Deciding game target', group: 'shape', type: 'int', min: 1, max: 99,
     applies: (k) => !k.periodShaped && k.unitsToWin > 1 && k.deciderEnabled },
+  { key: 'timeBaseMinutes', label: 'Minutes each', group: 'shape', type: 'int', min: 1, max: 300,
+    hint: 'Each player\'s time on the clock. Classical 90, rapid 15, blitz 3.',
+    applies: (k) => k.chess },
+  { key: 'timeIncrementSeconds', label: 'Seconds added per move', group: 'shape', type: 'int', min: 0, max: 120,
+    hint: 'The increment: 30 for classical, 10 for rapid, 2 for blitz. 0 for none.',
+    applies: (k) => k.chess },
   { key: 'handicapEnabled', label: 'Handicap start', group: 'shape', type: 'bool',
     hint: 'One side begins every game on a head start.',
     applies: (k) => !k.periodShaped },
@@ -318,7 +337,13 @@ export const KNOB_GROUPS: Array<{ key: KnobSpec['group']; label: string }> = [
 
 /** The knobs that apply to this particular set of values, in display order. */
 export function knobsFor(k: FormatKnobs): KnobSpec[] {
-  return KNOB_SPECS.filter((s) => !s.applies || s.applies(k));
+  return KNOB_SPECS.filter((s) => (!k.chess || CHESS_KNOBS.has(s.key)) && (!s.applies || s.applies(k)));
+}
+
+/** "90+30" -> [90, 30]; anything else -> the classical default. */
+function readTimeControl(tc: unknown): [number, number] {
+  const m = typeof tc === 'string' ? /^\s*(\d+)\s*\+\s*(\d+)\s*$/.exec(tc) : null;
+  return m ? [Number(m[1]), Number(m[2])] : [90, 30];
 }
 
 // ---- read ------------------------------------------------------------------
@@ -393,6 +418,10 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
 
     periodShaped: isPeriodShaped(f),
     periodLabel: inner.label || 'period',
+
+    chess: isChessSport(f.sport),
+    timeBaseMinutes: readTimeControl(f.rulesSheet?.timeControl)[0],
+    timeIncrementSeconds: readTimeControl(f.rulesSheet?.timeControl)[1],
   };
 }
 
@@ -517,12 +546,21 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
       }
       : null,
     endStates: { ...f.endStates, drawsAllowed: k.drawsAllowed },
+    // Chess keeps its time control on the rules sheet - shown to the arbiter, not enforced.
+    ...(k.chess
+      ? { rulesSheet: { ...(f.rulesSheet ?? {}), timeControl: `${Math.max(1, k.timeBaseMinutes)}+${Math.max(0, k.timeIncrementSeconds)}` } }
+      : {}),
   };
 }
 
 /** One line describing what a format does, for a list row. */
 export function describeKnobs(k: FormatKnobs): string {
   const bits: string[] = [];
+  // Chess: how many games, and the clock - there is no target score to describe.
+  if (k.chess) {
+    const games = k.unitsToWin * 2 - 1;
+    return [games === 1 ? 'single game' : `${games}-game match`, `${k.timeBaseMinutes}+${k.timeIncrementSeconds}`].join(' · ');
+  }
   // Period-shaped (kho-kho, kabaddi...): there is no game to win and no
   // decider, just a fixed number of periods and a clock - "best of 7 to 1"
   // for a format that plays a fixed 4 turns decided on total score was

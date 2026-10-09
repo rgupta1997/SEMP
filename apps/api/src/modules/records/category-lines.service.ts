@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { toCategoryRow, type CategoryRow, type StatBag } from '@semp/shared';
+import { CHESS_GAME_COLUMNS, toCategoryRow, type CategoryRow, type StatBag } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
 
 // ============================================================================
@@ -42,7 +42,7 @@ const ALLOWED = new Set([
   'serve_points_tracked', 'first_serve_points_won', 'second_serve_points_played', 'second_serve_points_won',
   'service_games_played', 'service_games_won', 'return_games_played', 'return_games_won',
   'winners', 'unforced_errors', 'lets', 'break_points_played', 'break_points_won',
-  'break_points_saved', 'retired', 'walkover_received', 'whitewash',
+  'break_points_saved', 'break_points_faced', 'love_holds', 'bagels', 'won_from_set_down', 'retired', 'walkover_received', 'whitewash',
   // invasion
   'goals', 'assists', 'own_goals', 'shots', 'saves', 'clean_sheet', 'yellows', 'reds',
   'pens_scored', 'pens_missed', 'points_scored', 'fg_1', 'fg_2', 'fg_3', 'rebounds',
@@ -55,7 +55,7 @@ const ALLOWED = new Set([
   'kills', 'digs', 'service_errors', 'attack_errors', 'reception_errors', 'sets_played',
   // board
   'units_won', 'units_lost', 'queens', 'coins', 'highest_break', 'breaks_50',
-  'centuries', 'result_points_x2', 'colour', 'board_no', 'opponent_user_id',
+  'centuries', 'result_points_x2', 'colour', 'board_no', 'opponent_user_id', ...CHESS_GAME_COLUMNS,
   // combat
   'weight_class', 'side_used', 'bouts', 'rounds_won', 'rounds_lost',
   'touches_for', 'touches_against', 'win_by', 'penalties', 'stoppages',

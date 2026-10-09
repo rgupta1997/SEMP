@@ -3,6 +3,7 @@ import {
   applyKnobs, describeKnobs, isEditable, knobsFor, readKnobs, KNOB_SPECS,
 } from './format-knobs.js';
 import { presetByKey } from './racquet-presets.js';
+import { teamPresetsFor } from './team-presets.js';
 import { scoringFormatSchema, type Side } from './scoring-rules.js';
 import { foldRally, initKernel, step, type RallyEvent, type RallyLog } from './rally-kernel.js';
 
@@ -208,6 +209,26 @@ describe('formats the flat knobs cannot describe', () => {
     for (const key of ['ittf_bo5_11', 'bwf_official_3x21', 'pars11_bo3', 'usap_single_game_15']) {
       expect(isEditable(fmt(key)), key).toBe(true);
     }
+  });
+});
+
+describe('chess formats in the editor', () => {
+  const blitz = teamPresetsFor('chess').find((f) => f.presetKey === 'blitz_bo5')!;
+
+  it('offers the games, the time control and how it is run - nothing about targets or serves', () => {
+    const keys = knobsFor(readKnobs(blitz)).map((s) => s.key);
+    expect(keys).toEqual(expect.arrayContaining(['unitsToWin', 'timeBaseMinutes', 'timeIncrementSeconds', 'drawsAllowed']));
+    expect(keys).not.toContain('target');
+    expect(keys).not.toContain('movement');
+    expect(keys).not.toContain('changeEnds');
+  });
+
+  it('reads and writes the time control on the rules sheet', () => {
+    const k = readKnobs(blitz);
+    expect([k.timeBaseMinutes, k.timeIncrementSeconds]).toEqual([3, 2]);
+    const rapid = applyKnobs(blitz, { ...k, timeBaseMinutes: 15, timeIncrementSeconds: 10 });
+    expect(rapid.rulesSheet?.timeControl).toBe('15+10');
+    expect(describeKnobs(readKnobs(rapid))).toBe('5-game match · 15+10');
   });
 });
 

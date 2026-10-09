@@ -234,7 +234,9 @@ export function RacquetDeck(p: RacquetDeckProps) {
   // and set 1 too when the start panel is not shown.
   const firstSet = serve.resolver === 'tennisGameLocked' && !state.finished.some((u) => u.level === 1);
   const chooseReceivers = doubles && !!p.pairing && !state.ended && !(firstSet && p.onFirstServerChange) && (
-    (serve.resolver === 'tennisGameLocked' && state.pointLevel === 0 && state.unitPoints === 0 && setGames[0] + setGames[1] === 0)
+    // A set's first point - or a deciding match tie-break's, which runs a level up.
+    (serve.resolver === 'tennisGameLocked' && state.unitPoints === 0
+      && (state.pointLevel === 0 ? setGames[0] + setGames[1] === 0 : state.serve.turns === 0 && state.serve.turnCount === 0))
     || (serve.resolver === 'squashHandOut' && gameStart));
   // Pairs that hold courts and swap on scoring their own serve: badminton and pickleball.
   const bwfPairs = serve.resolver === 'bwfSingleServer' || serve.resolver === 'pickleballTwoServer';
@@ -251,6 +253,8 @@ export function RacquetDeck(p: RacquetDeckProps) {
   const closeChoices = () => setChoicesClosedAt(state.finished.length);
   // "Start set 2" / "Start game 3": the unit about to begin, counted from the level above.
   const startLabel = (unitLevel: number) => {
+    // A deciding match tie-break is played in place of the set - say which.
+    if (state.pointLevel > 0) return 'Start the match tie-break';
     const above = state.score[unitLevel + 1] ?? [0, 0];
     return `Start ${format.levels[unitLevel]?.label.toLowerCase() ?? 'game'} ${above[0] + above[1] + 1}`;
   };

@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Calendar, Flag } from 'lucide-react';
-import { EARLY_END_LABEL, earlyEndOf } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints } from '@semp/shared';
 import { useApi, fmtDateTime } from '../../lib/hooks';
 import { Badge, Card, EmptyState, ListToolbar, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
-
+
 // A flattened fixture from GET /championships/:id/fixtures.
 interface TeamRef {
   id: string;
@@ -163,7 +163,7 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
                       <TeamName team={f.home} align="right" won={homeWon} />
                       <span className="flex min-w-[3.5ch] flex-col items-center self-start pt-0.5 text-center font-bold tabular-nums text-slate-800 dark:text-slate-100">
                         {scored
-                          ? `${f.home_score}–${f.away_score}`
+                          ? `${formatPoints(f.home_score)}–${formatPoints(f.away_score)}`
                           : <span className="text-slate-300 dark:text-slate-600">v</span>}
                         {/* Stopped early: an unfinished score must not read as a match played out. */}
                         {scored && early && (

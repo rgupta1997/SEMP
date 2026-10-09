@@ -127,8 +127,8 @@ model fixtures {
   notes                                String?
   created_at                           DateTime               @default(now()) @db.Timestamptz(6)
   updated_at                           DateTime               @default(now()) @db.Timestamptz(6)
-  home_score                           Int?
-  away_score                           Int?
+  home_score                           Float?
+  away_score                           Float?
   winner_team_id                       String?                @db.Uuid
   live_state                           Json                   @default("{}")
   live_log                             Json                   @default("[]")
@@ -402,6 +402,7 @@ model tournament_disciplines {
   display_order       Int                 @default(0)
   created_at          DateTime            @default(now()) @db.Timestamptz(6)
   scoring_format_id   String?             @db.Uuid
+  scoring_preset_key  String?             @db.VarChar(60)
   round_formats       Json                @default("[]")
   fixtures            fixtures[]
   team_entries        team_entries[]
@@ -1525,6 +1526,22 @@ model board_match_lines {
   created_at         DateTime           @default(now()) @db.Timestamptz(6)
   minutes            Int?
   opponent_user_id   String?            @db.Uuid
+  chess_games         Int                @default(0)
+  chess_wins          Int                @default(0)
+  chess_draws         Int                @default(0)
+  chess_losses        Int                @default(0)
+  chess_points_x2     Int                @default(0)
+  chess_points_max_x2 Int                @default(0)
+  white_games         Int                @default(0)
+  white_points_x2     Int                @default(0)
+  white_points_max_x2 Int                @default(0)
+  black_games         Int                @default(0)
+  black_points_x2     Int                @default(0)
+  black_points_max_x2 Int                @default(0)
+  wins_by_checkmate   Int                @default(0)
+  wins_by_resignation Int                @default(0)
+  wins_on_time        Int                @default(0)
+  draws_by_agreement  Int                @default(0)
   player_match_stats player_match_stats @relation(fields: [line_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users              users?             @relation(fields: [opponent_user_id], references: [id], onUpdate: NoAction)
 
@@ -1759,6 +1776,10 @@ model racquet_match_lines {
   break_points_played   Int                @default(0)
   break_points_won      Int                @default(0)
   break_points_saved    Int                @default(0)
+  break_points_faced    Int                @default(0)
+  love_holds            Int                @default(0)
+  bagels                Int                @default(0)
+  won_from_set_down     Int                @default(0)
   lets                  Int                @default(0)
   created_at            DateTime           @default(now()) @db.Timestamptz(6)
   deciders_lost         Int                @default(0)

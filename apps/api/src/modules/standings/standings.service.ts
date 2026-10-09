@@ -1,4 +1,4 @@
-import { DEFAULT_STANDINGS_RULE, standingsRuleSchema, type StandingsRule, type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker } from '@semp/shared';
+import { DEFAULT_STANDINGS_RULE, chessStandingsRule, formatPoints, standingsRuleSchema, type StandingsRule, type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
 import { contingentKey, type ContingentRef } from '@semp/shared';
 import { accumulate, rankBy, runScheme, type EntityTally, type SchemeFixture } from './domain/schemes.js';
@@ -28,6 +28,8 @@ function parseRule(config: unknown): StandingsRule {
 // scoring endpoint (which needs a ranking rule's place points).
 export async function resolveRuleForDraw(
   prisma: Db, championshipId: string, disciplineId: string | null, formatId: string | null,
+  /** A chess draw ranks by chess points unless the organiser set a rule for it. */
+  chess?: { team: boolean },
 ): Promise<StandingsRule> {
   const ruleRows = await prisma.standings_rules.findMany({ where: { championship_id: championshipId } });
   const byDiscipline = new Map<string, StandingsRule>();
@@ -42,6 +44,9 @@ export async function resolveRuleForDraw(
   return (
     (disciplineId ? byDiscipline.get(disciplineId) : undefined) ??
     (formatId ? byFormat.get(formatId) : undefined) ??
+    // Ahead of the championship default: that one is set for the points table across
+    // sports, and 3/1/0 makes a chess draw a third of a win instead of half.
+    (chess ? chessStandingsRule(chess.team) : undefined) ??
     championshipRule ?? DEFAULT_STANDINGS_RULE
   );
 }
@@ -460,7 +465,7 @@ export async function readStandingsBreakdown(
       const opponent = f.status === 'bye' ? 'Bye' : (oppName ?? 'TBD');
       const myScore = isHome ? f.home_score : f.away_score;
       const oppScore = isHome ? f.away_score : f.home_score;
-      const score = myScore != null && oppScore != null ? `${myScore}–${oppScore}` : null;
+      const score = myScore != null && oppScore != null ? `${formatPoints(myScore)}–${formatPoints(oppScore)}` : null;
 
       let result: BreakdownMatch['result'];
       let points: number | null = null;

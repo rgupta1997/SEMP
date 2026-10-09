@@ -3,7 +3,7 @@ import {
   formatIdsForDraw, matchRoundRule, parseRoundFormats, predictKnockoutRounds,
   resolveFormat, resolveRounds, type LadderFormatRow,
 } from './format-ladder.js';
-import { presetByKey } from './racquet-presets.js';
+import { allPresets, presetByKey } from './racquet-presets.js';
 
 const sprint = presetByKey('sprint_9_serve3')!;
 const ittf = presetByKey('ittf_bo5_11')!;
@@ -27,6 +27,20 @@ describe('the resolution ladder', () => {
     const r = resolveFormat({}, { sport: 'table tennis', scoring_format_id: 'f-sprint' }, rows);
     expect(r.layer).toBe('draw');
     expect(r.format?.presetKey).toBe('sprint_9_serve3');
+  });
+
+  it('a built-in preset chosen for the draw is used - it has no saved row to point at', () => {
+    const r = resolveFormat({}, { sport: 'chess', scoring_preset_key: 'blitz_bo5' }, []);
+    expect(r.layer).toBe('draw');
+    expect(r.format?.presetKey).toBe('blitz_bo5');
+    // A saved format on the draw still wins over a preset key.
+    expect(resolveFormat({}, { sport: 'table tennis', scoring_format_id: 'f-sprint', scoring_preset_key: 'ittf_bo7_11' }, rows).format?.presetKey)
+      .toBe('sprint_9_serve3');
+  });
+
+  it('preset keys are unique across sports, so a key alone names one format', () => {
+    const keys = allPresets().map((p) => p.presetKey);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 
   it('prefers the fixture over everything configurable', () => {

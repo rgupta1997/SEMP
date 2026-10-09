@@ -28,6 +28,7 @@ import {
   retractScorecard, submitScorecard, unlockScorecard,
 } from './lock.service.js';
 import { assignMatchNos, championshipOfDiscipline } from './match-no.js';
+import { assertScoreShape } from './score-shape.js';
 // A match can only be recorded once its championship is under way. Resolves the
 // owning championship from the fixture's draw and blocks scoring while it's still
 // in draft or registration - nothing should be played before the event starts.
@@ -447,6 +448,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     await assertNotLocked(prisma, req.params.id);
     await assertChampionshipStarted(prisma, req.params.id);
     const b = req.body ?? {};
+    await assertScoreShape(prisma, b, { fixtureId: req.params.id });
     // Only touch fields that were actually sent, so a status-only change (e.g.
     // walkover/postpone/cancel) doesn't clobber the score or live snapshot.
     const data: Record<string, unknown> = {};
@@ -715,6 +717,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     await assertChampionshipStarted(prisma, req.params.id);
     const fixture = await prisma.fixtures.findUnique({ where: { id: req.params.id } });
     if (!fixture) throw new NotFoundError('Fixture');
+    await assertScoreShape(prisma, req.body, { fixtureId: req.params.id });
 
     // A TBD slot can't be played - both teams must be set before recording a result.
     const resultStatus = req.body.status ?? 'completed';
@@ -992,6 +995,14 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     next();
   });
 
+  // The generic editor can set scores too, so halves are held to chess here as well.
+  const scoreShape: RequestHandler = asyncHandler(async (req, _res, next) => {
+    await assertScoreShape(prisma, req.body, req.params.id
+      ? { fixtureId: req.params.id }
+      : { tournamentDisciplineId: req.body?.tournament_discipline_id });
+    next();
+  });
+
   // Manual edits through the generic editor (schedule/venue/opponent/cancel) - the
   // one PATCH path that isn't a bespoke route above, so it's the only place these
   // four can actually change. Only fires on a genuine change, never on an
@@ -1033,8 +1044,8 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     updateSchema: updateFixtureSchema,
     listFilters: ['tournament_discipline_id'],
     orderBy: [{ pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
-    createGuards: [crudGuard],
-    writeGuards: [crudGuard, notLocked],
+    createGuards: [crudGuard, scoreShape],
+    writeGuards: [crudGuard, notLocked, scoreShape],
     afterUpdate: notifyFixtureFieldChanges,
     // Clearing the per-match rules means SQL NULL, and Prisma will not take a plain
     // `null` for a nullable Json column - it wants DbNull, which the shared schema
