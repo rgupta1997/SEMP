@@ -1,6 +1,6 @@
 import {
   CRICKET_CAREER_METRICS, COMPETITION_TIERS, TIER_META, isCricketSport, statSpecFor,
-  type CompetitionTier,
+  type CompetitionTier, type MatchPosition,
 } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
 
@@ -87,7 +87,7 @@ export interface DisciplineRecord {
 }
 
 export interface PositionRecord {
-  position: 'singles' | 'doubles';
+  position: MatchPosition;
   overall: TierRecord;
   tiers: TierRecord[];
 }
@@ -395,7 +395,7 @@ export interface PersonRecord {
 
 /** One opposing side - a player in singles, a pair in doubles - and the record against it. */
 export interface OpponentRecord {
-  position: 'singles' | 'doubles';
+  position: MatchPosition;
   userIds: string[];
   names: string[];
   /** Doubles: who they partnered in these matches. */

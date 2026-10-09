@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import type { CapabilityKey } from '@semp/entitlements';
 import { useAuth } from './auth';
 import { useApi } from './hooks';
-import { membershipRoleCode } from '@semp/shared';
+import { membershipRoleCode, TBD_LABEL } from '@semp/shared';
 import { themeOf } from './tenant-theme';
 import { EVENT_ROLE_CODES, landingFor, type ContextKind, type NavFacts, type WorkspaceContext } from './workspace';
 
@@ -196,8 +196,8 @@ export function useWorkspace() {
         return !!(f.teams_fixtures_home_team_idToteams || f.teams_fixtures_away_team_idToteams);
       })
       .map((f) => {
-        const home = f.teams_fixtures_home_team_idToteams?.name ?? 'TBD';
-        const away = f.teams_fixtures_away_team_idToteams?.name ?? 'TBD';
+        const home = f.teams_fixtures_home_team_idToteams?.name ?? TBD_LABEL;
+        const away = f.teams_fixtures_away_team_idToteams?.name ?? TBD_LABEL;
         const sport = f.tournament_disciplines?.tournament_sports?.sports?.name;
         const when = f.scheduled_at
           ? new Date(f.scheduled_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })

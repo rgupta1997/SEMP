@@ -3,6 +3,7 @@ import { canonicalRacquetSport } from './racquet-presets.js';
 import { CHESS_ENDINGS, isChessSport, whiteOnBoard, type ChessEnding } from './chess.js';
 import type { ScoringFormat, Side } from './scoring-rules.js';
 import { playersPerSide, readLineup, resolveMatchLineup, type RubberLineup } from './tie.js';
+import type { MatchPosition } from './enums.js';
 
 // ============================================================================
 // Who played what, in one locked fixture.
@@ -118,7 +119,7 @@ export function playedContests(input: {
 
 /** One player's view of a contest: their side, partner and opponents. */
 export function seatIn(contest: PlayedContest, userId: string): {
-  side: Side; partner: string | null; opponents: string[]; position: 'singles' | 'doubles';
+  side: Side; partner: string | null; opponents: string[]; position: MatchPosition;
 } | null {
   const s: Side | null = contest.lineup.A.includes(userId) ? 'A' : contest.lineup.B.includes(userId) ? 'B' : null;
   if (!s) return null;

@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Pencil, Trash2 } from 'lucide-react';
-import { FIXTURE_STATUS, inheritedOverrides, resolveFormat } from '@semp/shared';
+import { FIXTURE_STATUS, inheritedOverrides, resolveFormat, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { ARCHIVED_READ_ONLY_MESSAGE, isRankingSport, isScoredSport } from '@semp/shared';
@@ -361,9 +361,9 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
           {fixture.match_no != null && <span className="text-blue-400/80">· MATCH-{fixture.match_no}</span>}
         </div>
         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
-          <span className="truncate text-lg font-bold text-white">{teamName(homeId) || 'TBD'}</span>
+          <span className="truncate text-lg font-bold text-white">{teamName(homeId) || TBD_LABEL}</span>
           <span className="shrink-0 rounded-full border border-white/25 px-2 py-0.5 text-[10px] font-bold text-white/80">VS</span>
-          <span className="truncate text-lg font-bold text-white">{teamName(awayId) || 'TBD'}</span>
+          <span className="truncate text-lg font-bold text-white">{teamName(awayId) || TBD_LABEL}</span>
         </div>
         {metaLine && <div className="mt-0.5 truncate text-xs text-blue-100/80">{metaLine}</div>}
       </div>
@@ -800,7 +800,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
                       {f.home_team_id ? teamName(f.home_team_id) : (
                         isTieBlockedFor(f.home_slot_label, f.live_state?.tie_blocked)
                           ? `⚠ ${describeTieBlocked(f.live_state?.tie_blocked)}`
-                          : (describeSlot(f.home_slot_label) ?? 'TBD')
+                          : (describeSlot(f.home_slot_label) ?? TBD_LABEL)
                       )}
                     </span>
                     {teamOrg(f.home_team_id) && <span className="text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{teamOrg(f.home_team_id)}</span>}
@@ -811,7 +811,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
                       {f.away_team_id ? teamName(f.away_team_id) : (
                         isTieBlockedFor(f.away_slot_label, f.live_state?.tie_blocked)
                           ? `⚠ ${describeTieBlocked(f.live_state?.tie_blocked)}`
-                          : (describeSlot(f.away_slot_label) ?? 'TBD')
+                          : (describeSlot(f.away_slot_label) ?? TBD_LABEL)
                       )}
                     </span>
                     {teamOrg(f.away_team_id) && <span className="text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{teamOrg(f.away_team_id)}</span>}
@@ -971,7 +971,7 @@ export function SchedulePage() {
   const { data: formats = [] } = useApi<any[]>('/tournament-formats');
 
   const sportName = (id: string) => sports.find((s) => s.id === id)?.name ?? 'Sport';
-  const teamName = (id: string | null) => (id ? teams.find((t) => t.id === id)?.name ?? 'TBD' : 'TBD');
+  const teamName = (id: string | null) => (id ? teams.find((t) => t.id === id)?.name ?? TBD_LABEL : TBD_LABEL);
   // Organization sub-heading for a team (short name preferred), '' when unaffiliated -
   // shown under the team name on the bracket / grid / list so same-named draws read apart.
   const teamOrg = (id: string | null) => {

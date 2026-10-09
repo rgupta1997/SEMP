@@ -5,7 +5,7 @@ import { titleCase } from '../../lib/format';
 import { BackButton, Card, CardBody, CardHeader, EmptyState, Spinner, StatusBadge } from '../../components/ui';
 import { ResultBadge } from '../../components/participant/ResultBadge';
 import type { MatchResult } from '../../components/participant/types';
-import { formatPoints } from '@semp/shared';
+import { formatPoints, TBD_LABEL, type MatchOutcome } from '@semp/shared';
 
 interface MatchDetail {
   fixture: {
@@ -41,7 +41,7 @@ interface MatchDetail {
    */
   my_stats?: {
     played: boolean;
-    outcome: 'won' | 'lost' | 'drew' | null;
+    outcome: MatchOutcome | null;
     position: string | null;
     /** False while the result can still change - said out loud, not implied. */
     official: boolean;
@@ -101,7 +101,7 @@ export function ParticipantMatchPage() {
               <span>{f.opp_score != null ? formatPoints(f.opp_score) : '–'}</span>
             </div>
             <div className="flex-1 text-left">
-              <div className="font-bold text-slate-900 dark:text-slate-100">{f.opponent?.name ?? 'TBD'}</div>
+              <div className="font-bold text-slate-900 dark:text-slate-100">{f.opponent?.name ?? TBD_LABEL}</div>
               {f.opponent?.organization && <div className="text-xs text-slate-400 dark:text-slate-500">{f.opponent.organization}</div>}
             </div>
           </div>

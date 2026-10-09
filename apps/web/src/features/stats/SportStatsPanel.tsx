@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { isRankingSport } from '@semp/shared';
+import { isRankingSport, type MatchPosition } from '@semp/shared';
 import { useApi } from '../../lib/hooks';
 import { Card, CardBody, CardHeader, EmptyState, Select, Spinner } from '../../components/ui';
 
@@ -46,7 +46,7 @@ interface DisciplineRecord {
   rubbers?: Array<{ label: string; played: number; won: number; lost: number }>;
 }
 interface PositionRecord {
-  position: 'singles' | 'doubles';
+  position: MatchPosition;
   overall: TierRecord; tiers: TierRecord[];
 }
 interface SportRecord {
@@ -59,7 +59,7 @@ interface SportRecord {
 interface PersonRecord { userId: string; name: string; played: number; won: number; lost: number }
 /** One opposing side: a player in singles, a pair in doubles. */
 interface OpponentRecord {
-  position: 'singles' | 'doubles'; userIds: string[]; names: string[];
+  position: MatchPosition; userIds: string[]; names: string[];
   partnerId: string | null; partnerName: string | null;
   played: number; won: number; lost: number;
 }
@@ -317,7 +317,7 @@ function PeopleSection({ userId, sportId, view }: { userId?: string; sportId: st
   );
   // Each match is one row, so the rows add up to the matches played. A doubles row
   // names both pairs: "with Aman knights vs Aman devils / Aman Player 1".
-  const opponents = (position: 'singles' | 'doubles') => {
+  const opponents = (position: MatchPosition) => {
     const rows = data?.opponents.filter((o) => o.position === position) ?? [];
     if (!rows.length) return null;
     return (
@@ -356,7 +356,7 @@ function PeopleSection({ userId, sportId, view }: { userId?: string; sportId: st
   );
 }
 
-type PlayView = 'all' | 'singles' | 'doubles';
+type PlayView = 'all' | MatchPosition;
 
 function SportCard({ s, userId }: { s: SportRecord; userId?: string }) {
   const [open, setOpen] = useState(false);

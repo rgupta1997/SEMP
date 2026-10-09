@@ -1,4 +1,4 @@
-import { lineFamilyFor, isCricketSport } from '@semp/shared';
+import { lineFamilyFor, isCricketSport, type MatchOutcome } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
 
 // ============================================================================
@@ -24,7 +24,7 @@ export interface StatGroup { title: string; items: StatItem[] }
 export interface MyMatchStats {
   /** True when this person was on the team sheet for this fixture. */
   played: boolean;
-  outcome: 'won' | 'lost' | 'drew' | null;
+  outcome: MatchOutcome | null;
   /** singles / doubles for a racquet rubber; a position for a team sport. */
   position: string | null;
   /** Whether the numbers below are final. An unlocked result can still change. */

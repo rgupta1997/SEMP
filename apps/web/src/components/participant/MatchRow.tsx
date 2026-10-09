@@ -3,7 +3,7 @@ import { fmtDateTime } from '../../lib/hooks';
 import { cn } from '../ui';
 import { ResultBadge } from './ResultBadge';
 import type { MatchSummary } from './types';
-import { formatPoints } from '@semp/shared';
+import { formatPoints, TBD_LABEL } from '@semp/shared';
 
 // One match as a clickable card - stacks cleanly on mobile, row-like on desktop.
 // `showEvent` adds the championship name (used on the cross-championship dashboard/list).
@@ -14,7 +14,7 @@ export function MatchRow({ match, showEvent = true }: { match: MatchSummary; sho
     .filter(Boolean)
     .join(' · ');
   const myName = match.my_team?.name ?? 'Your team';
-  const oppName = match.opponent?.name ?? 'TBD';
+  const oppName = match.opponent?.name ?? TBD_LABEL;
   const won = match.result === 'won';
   const lost = match.result === 'lost';
 

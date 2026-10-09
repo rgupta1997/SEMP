@@ -1,8 +1,9 @@
+import { TBD_LABEL } from '@semp/shared';
 // Shared shape helpers for the deeply-nested fixture rows returned by
 // GET /me/officiating, so the Official screens read cleanly.
 export function homeTeam(f: any) { return f.teams_fixtures_home_team_idToteams; }
 export function awayTeam(f: any) { return f.teams_fixtures_away_team_idToteams; }
-export function teamLabel(t: any): string { return t?.name ?? t?.organizations?.name ?? 'TBD'; }
+export function teamLabel(t: any): string { return t?.name ?? t?.organizations?.name ?? TBD_LABEL; }
 // Ranking events (powerlifting/swimming/athletics) have no head-to-head matchup -
 // every competitor is ranked together - so the generator emits one team-less fixture
 // with round 'Event'. There's no opponent to decide, so showing "TBD vs TBD" is wrong;

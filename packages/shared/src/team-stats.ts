@@ -1,5 +1,6 @@
 import type { RallyEvent, RallyLog } from './rally-kernel.js';
 import type { Side } from './scoring-rules.js';
+import { isChessSport } from './chess.js';
 import { statSpecFor, type SportStatSpec, type StatBag, type StatEventSpec } from './stat-registry.js';
 
 // ============================================================================
@@ -187,7 +188,7 @@ export function deriveTeamStats(
           // Chess reports a result as a POINT, and a draw is half of one. Doubled so
           // the half stays an integer: 2 win, 1 draw, 0 loss - which is exactly how a
           // chess tournament table is built.
-          if (spec.sport === 'chess') {
+          if (isChessSport(spec.sport)) {
             const won = winner ? (winner === side) : mine > theirs;
             const drawn = !winner && mine === theirs;
             put(bag, 'result_points_x2', drawn ? 1 : won ? 2 : 0);

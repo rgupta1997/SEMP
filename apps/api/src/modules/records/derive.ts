@@ -2,7 +2,7 @@ import {
   PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor, playedContests, seatIn,
   earlyEndOf, formatPoints, type EarlyEnd, type PlayedContest,
   type AchievementKind, type EventSpec, type EventState, type FormatTemplate,
-  type LifetimeEntryKind, type Medal, type StandingsPlacement,
+  type LifetimeEntryKind, type MatchOutcome, type Medal, type StandingsPlacement,
 } from '@semp/shared';
 
 // What a locked result MEANS - as pure functions, with no database anywhere in
@@ -259,7 +259,7 @@ function ordinal(n: number): string {
 // the derivation
 // ---------------------------------------------------------------------------
 
-const outcomeFor = (fx: DerivableFixture, teamId: string | null): 'won' | 'lost' | 'drew' | null => {
+const outcomeFor = (fx: DerivableFixture, teamId: string | null): MatchOutcome | null => {
   if (!teamId || !fx.home_team_id || !fx.away_team_id) return null;
   if (fx.winner_team_id) return fx.winner_team_id === teamId ? 'won' : 'lost';
   if (fx.home_score != null && fx.away_score != null && fx.home_score === fx.away_score) return 'drew';

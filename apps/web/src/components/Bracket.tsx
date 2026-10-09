@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints, TBD_LABEL } from '@semp/shared';
 import { cn, StatusBadge } from './ui';
 import { fmtDateTime } from '../lib/hooks';
 import { describeSlot, describeTieBlocked, isTieBlockedFor } from '../lib/stageTree';
@@ -102,8 +102,8 @@ function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect, onScore }:
   // resolved yet" - show what it's waiting on (e.g. "1st in Pool A"), or - if the
   // producing pool finished tied with no way to break it automatically - a warning
   // instead, so the organiser knows this slot needs their attention.
-  const home = fixture.home_team_id ? teamName(fixture.home_team_id) : (homeTieMsg ?? describeSlot(fixture.home_slot_label) ?? 'TBD');
-  const away = isBye ? 'Bye' : fixture.away_team_id ? teamName(fixture.away_team_id) : (awayTieMsg ?? describeSlot(fixture.away_slot_label) ?? 'TBD');
+  const home = fixture.home_team_id ? teamName(fixture.home_team_id) : (homeTieMsg ?? describeSlot(fixture.home_slot_label) ?? TBD_LABEL);
+  const away = isBye ? 'Bye' : fixture.away_team_id ? teamName(fixture.away_team_id) : (awayTieMsg ?? describeSlot(fixture.away_slot_label) ?? TBD_LABEL);
   const homeOrg = teamOrg?.(fixture.home_team_id) ?? '';
   const awayOrg = isBye ? '' : teamOrg?.(fixture.away_team_id) ?? '';
   // Any match can be opened to edit - a real match to schedule it (even a later-round

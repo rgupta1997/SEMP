@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react';
 import { fmtDate, fmtDateTime } from '../lib/hooks';
 import { Badge, Button, EmptyState, Field, Modal, Segmented, Select, cn, toast } from './ui';
+import { TBD_LABEL } from '@semp/shared';
 
 export interface DisciplineRow {
   id: string;            // tournament_discipline_id
@@ -53,7 +54,7 @@ const hhmm = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const fixtureDuration = (f: GridFixture) => (f.duration_minutes && f.duration_minutes > 0 ? f.duration_minutes : DEFAULT_DURATION);
 
 function matchLabel(f: GridFixture): string {
-  if (f.home || f.away) return `${f.home?.name ?? 'TBD'} v ${f.away?.name ?? 'TBD'}`;
+  if (f.home || f.away) return `${f.home?.name ?? TBD_LABEL} v ${f.away?.name ?? TBD_LABEL}`;
   return f.round || 'Match';
 }
 
@@ -61,7 +62,7 @@ function matchLabel(f: GridFixture): string {
 // hover tooltip tells apart same-named teams (e.g. several "Badminton (Mixed)"
 // draws) by org. Native title tooltips are plain text, so org reads inline here.
 function teamLabelWithOrg(t?: TimelineTeam | null): string {
-  const name = t?.name ?? 'TBD';
+  const name = t?.name ?? TBD_LABEL;
   const org = teamOrg(t);
   return org ? `${name} (${org})` : name;
 }
@@ -75,7 +76,7 @@ function matchLabelWithOrg(f: GridFixture): string {
 function TeamWithOrg({ team }: { team?: TimelineTeam | null }) {
   return (
     <span className="inline-flex flex-col">
-      <span className="leading-tight">{team?.name ?? 'TBD'}</span>
+      <span className="leading-tight">{team?.name ?? TBD_LABEL}</span>
       {teamOrg(team) && <span className="text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{teamOrg(team)}</span>}
     </span>
   );

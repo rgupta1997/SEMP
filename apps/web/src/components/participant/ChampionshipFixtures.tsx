@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Calendar, Flag } from 'lucide-react';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints, TBD_LABEL } from '@semp/shared';
 import { useApi, fmtDateTime } from '../../lib/hooks';
 import { Badge, Card, EmptyState, ListToolbar, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
 
@@ -29,7 +29,7 @@ interface FixtureRow {
 // a running score appears here (marked LIVE) instead of only on the Schedule.
 const RESULT_STATUSES = new Set(['live', 'completed', 'walkover', 'bye', 'cancelled']);
 
-function teamLabel(t: TeamRef | null) { return t?.name ?? 'TBD'; }
+function teamLabel(t: TeamRef | null) { return t?.name ?? TBD_LABEL; }
 // Who a squad plays for: its campus or batch first, its organisation otherwise.
 // Reading the organisation alone put the same name under both sides of every match
 // in an internal championship.

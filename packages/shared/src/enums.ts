@@ -20,6 +20,17 @@ export const FIXTURE_STATUS = [
 ] as const;
 export type FixtureStatus = (typeof FIXTURE_STATUS)[number];
 
+/** A player's (or side's) result in one match, as records and stat lines store it. */
+export const MATCH_OUTCOME = ['won', 'lost', 'drew'] as const;
+export type MatchOutcome = (typeof MATCH_OUTCOME)[number];
+export const isMatchOutcome = (v: unknown): v is MatchOutcome => (MATCH_OUTCOME as readonly unknown[]).includes(v);
+
+/** How many played a contest on each side - a racquet rubber, a career split. */
+export const MATCH_POSITION = ['singles', 'doubles'] as const;
+export type MatchPosition = (typeof MATCH_POSITION)[number];
+
+/** Shown wherever a fixture's side is not decided yet. */
+export const TBD_LABEL = 'TBD';
 
 export const GROUND_TYPE = ['court', 'field', 'pool', 'track', 'ring', 'table'] as const;
 export type GroundType = (typeof GROUND_TYPE)[number];

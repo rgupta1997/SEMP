@@ -4,12 +4,11 @@ import {
   parseStoredFormat, playedContests, rankSubEvent, resolveFormat, seatIn, statSpecFor,
   type PlayedContest,
   type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
-  type FormatTemplate, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
+  type FormatTemplate, type MatchOutcome, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
 import { writeCategoryLines, type CategoryLineInput } from './category-lines.service.js';
 import type { FixtureParticipants } from '../fixtures/participants.js';
-
 // ============================================================================
 // Player match statistics.
 //
@@ -66,7 +65,7 @@ export interface PlayerStatRow {
   position: string | null;
   role: string;
   played: boolean;
-  outcome: 'won' | 'lost' | 'drew' | null;
+  outcome: MatchOutcome | null;
   stats: Record<string, number>;
   occurred_on: Date;
   lock_version: number;
@@ -340,7 +339,7 @@ export async function buildPlayerStatRows(
 }
 
 /** The fixture's result for one side. Prefers the persisted winner; falls back to the score. */
-function outcomeForFixture(fx: StatFixture, side: Side): 'won' | 'lost' | 'drew' | null {
+function outcomeForFixture(fx: StatFixture, side: Side): MatchOutcome | null {
   const teamId = side === 'A' ? fx.home_team_id : fx.away_team_id;
   if (fx.winner_team_id) return fx.winner_team_id === teamId ? 'won' : 'lost';
   if (fx.home_score != null && fx.away_score != null) {
@@ -361,7 +360,7 @@ function contestRows(
   contests: PlayedContest[],
   people: FixtureParticipants['resolved'],
   sideOf: Map<string, Side>,
-  opts: { sportId: string | null; occurred: Date; racquet: boolean; chess?: boolean; singleOutcome: (side: Side) => 'won' | 'lost' | 'drew' | null },
+  opts: { sportId: string | null; occurred: Date; racquet: boolean; chess?: boolean; singleOutcome: (side: Side) => MatchOutcome | null },
 ): PlayerStatRow[] {
   // A chess board's line IS its result: half-points doubled (2 win, 1 draw, 0 loss),
   // the board it was played on, and the colour when the tie recorded one.

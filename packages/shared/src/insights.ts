@@ -1,4 +1,5 @@
 import type { StatBag } from './stat-registry.js';
+import type { MatchOutcome } from './enums.js';
 
 // ============================================================================
 // Plain-language insights from a player's racquet numbers.
@@ -78,7 +79,7 @@ export interface InsightInput {
   recentMatches: number;
   careerMatches: number;
   /** Results, newest first, including ones entered as a final score only. */
-  results: Array<'won' | 'lost' | 'drew'>;
+  results: Array<MatchOutcome>;
   singles?: { played: number; won: number };
   doubles?: { played: number; won: number };
   partners?: InsightPerson[];
@@ -468,7 +469,7 @@ export function racquetInsights(input: InsightInput): InsightReport {
 }
 
 /** The run of identical results at the newest end; a draw ends it. */
-function streakOf(results: Array<'won' | 'lost' | 'drew'>): InsightReport['streak'] {
+function streakOf(results: Array<MatchOutcome>): InsightReport['streak'] {
   const first = results[0];
   if (first !== 'won' && first !== 'lost') return null;
   let n = 0;

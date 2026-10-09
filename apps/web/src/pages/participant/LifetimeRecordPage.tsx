@@ -6,6 +6,7 @@ import { titleCase } from '../../lib/format';
 import {
   Badge, Button, Card, CardBody, CardHeader, EmptyState, Pagination, Spinner, StatCard, cn,
 } from '../../components/ui';
+import { type MatchOutcome, type MatchPosition } from '@semp/shared';
 
 // The lifetime record (J4-E2) - a player's permanent, verified sporting history.
 //
@@ -31,11 +32,11 @@ interface TimelineEntry {
   fixture_id: string | null;
   detail: {
     role?: string; team_name?: string | null; opponent_name?: string | null;
-    outcome?: 'won' | 'lost' | 'drew' | null; score?: string | null; round?: string | null;
+    outcome?: MatchOutcome | null; score?: string | null; round?: string | null;
     sport?: string | null; discipline?: string | null; championship_name?: string | null;
     chips?: Chip[];
     /** Set where the match named its players (a lineup, or a tie's rubber). */
-    position?: 'singles' | 'doubles'; partner_name?: string | null; opponent_names?: string[];
+    position?: MatchPosition; partner_name?: string | null; opponent_names?: string[];
     rubber_label?: string | null; tie_score?: string | null;
   } | null;
 }

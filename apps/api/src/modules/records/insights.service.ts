@@ -1,6 +1,6 @@
 import {
-  INSIGHT_RULES, INSIGHTS_ENABLED_SETTING, PLATFORM_NAME, canonicalRacquetSport, foldCareerStats, racquetInsights, statSpecFor,
-  type InsightField, type InsightRate, type InsightReport, type StatBag, type TypicalKey,
+  INSIGHT_RULES, INSIGHTS_ENABLED_SETTING, PLATFORM_NAME, canonicalRacquetSport, foldCareerStats, isMatchOutcome, racquetInsights, statSpecFor,
+  type InsightField, type InsightRate, type InsightReport, type MatchOutcome, type MatchPosition, type StatBag, type TypicalKey,
 } from '@semp/shared';
 import { Prisma } from '@prisma/client';
 import type { Db } from '../../infra/prisma.js';
@@ -39,7 +39,7 @@ export async function insightsEnabled(db: Db): Promise<boolean> {
 }
 
 /** Singles or doubles only - the card follows the All / Singles / Doubles switch. */
-export type InsightPosition = 'singles' | 'doubles';
+export type InsightPosition = MatchPosition;
 
 export async function sportInsightsFor(
   db: Db, userId: string, sportId: string, position?: InsightPosition,
@@ -106,7 +106,7 @@ export async function sportInsightsFor(
     careerMatches: bags.length,
     results: results
       .map((r) => r.outcome)
-      .filter((o): o is 'won' | 'lost' | 'drew' => o === 'won' || o === 'lost' || o === 'drew'),
+      .filter(isMatchOutcome),
     // "Singles is your game" compares the two formats, so it only belongs on All.
     ...(position ? {} : {
       singles: positions.find((p) => p.position === 'singles'),

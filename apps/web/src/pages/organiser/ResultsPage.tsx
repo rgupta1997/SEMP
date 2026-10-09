@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
@@ -479,7 +479,7 @@ export function ResultsPage() {
   }, [visibleRows, sortRows]);
 
   const matchLabel = (f: ResultRow) =>
-    (f.home || f.away) ? `${teamLabel(f.home) || 'TBD'} vs ${teamLabel(f.away) || 'TBD'}` : (f.discipline ?? f.sport ?? 'This event');
+    (f.home || f.away) ? `${teamLabel(f.home) || TBD_LABEL} vs ${teamLabel(f.away) || TBD_LABEL}` : (f.discipline ?? f.sport ?? 'This event');
 
   const lockOne = async (f: ResultRow) => {
     const ok = await confirmDialog({
@@ -815,7 +815,7 @@ export function ResultsPage() {
                                     less information than the full name AND worse
                                     looking. The short name stays the fallback for a
                                     squad that has no full name to show. */}
-                                {side ? (teamLabel(side) || teamShort(side)) : 'TBD'}
+                                {side ? (teamLabel(side) || teamShort(side)) : TBD_LABEL}
                               </span>
                               <span
                                 className={cn(
