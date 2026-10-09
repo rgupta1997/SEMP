@@ -11,10 +11,8 @@ import { requireSuperAdmin } from '../../http/middleware/auth.js';
 import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
 
 // Platform-wide switches, super-admin only.
-//   - Plans: off, every tenant resolves to the top tier and the Billing tab is hidden;
-//     on, the saved plans apply again untouched - see resolve.ts in @semp/entitlements.
-//   - Player insights: the insights card on career stats. Off, the API sends none and
-//     the stats page shows only the tiles and filters; on (the default), it is back.
+//   - Plans: off, every tenant resolves to the top tier (see resolve.ts in @semp/entitlements).
+//   - Player insights (default on): off, the API sends no insights card on career stats.
 export function makePlatformSettingsRouter(prisma: Prisma): Router {
   const router = Router();
 

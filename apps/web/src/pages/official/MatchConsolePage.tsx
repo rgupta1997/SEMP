@@ -1407,10 +1407,7 @@ function rallyTimeline(format: any, log: RallyLog, firstServer: Side, homeName: 
  * half ends on a whistle rather than a score and a goal belongs to a person.
  */
 /* ----------------------------- Chess console ----------------------------- */
-/**
- * A single chess match: each game's result (1-0, ½-½, 0-1), who had white and how it
- * ended. The headline is the game points - 2½-½ - which is why fixture scores hold halves.
- */
+/** The headline is game points (2½-½), which is why fixture scores hold halves. */
 function ChessConsole({ fixture, fixtureId, live, invalidate, onDone }:
   { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
   const td = fixture?.tournament_disciplines ?? {};
@@ -2022,9 +2019,8 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
     const w = tieWinner(spec, next);
     const winner_team_id = done ? (w === 'A' ? fixture.home_team_id : w === 'B' ? fixture.away_team_id : null) : null;
     persist.mutate(
-      // Other keys of live_state (a stage's tie_blocked note) are kept, not dropped.
-      // Chess: the home side has white on board 1 unless the scorer said otherwise (FIDE's
-      // "team named first"). Saved, so colour stats do not depend on a tap that was never made.
+      // Keep other live_state keys (tie_blocked). Chess: home has white on board 1 by default
+      // (FIDE "team named first"), saved so colour stats don't depend on a tap never made.
       { live_state: { ...(live?.live_state ?? {}), tie: spec.boardPoints && !next.firstWhite ? { ...next, firstWhite: 'A' } : next, tieSpec: spec }, live_log: buildLog(next), home_score: a, away_score: b, status: st, winner_team_id },
       { onSuccess, onError: (e: any) => { onErr?.(); toast.error(e.message); } },
     );

@@ -3,7 +3,7 @@ import { Calendar, Flag } from 'lucide-react';
 import { EARLY_END_LABEL, earlyEndOf, formatPoints, TBD_LABEL } from '@semp/shared';
 import { useApi, fmtDateTime } from '../../lib/hooks';
 import { Badge, Card, EmptyState, ListToolbar, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
-
+
 // A flattened fixture from GET /championships/:id/fixtures.
 interface TeamRef {
   id: string;
@@ -30,17 +30,14 @@ interface FixtureRow {
 const RESULT_STATUSES = new Set(['live', 'completed', 'walkover', 'bye', 'cancelled']);
 
 function teamLabel(t: TeamRef | null) { return t?.name ?? TBD_LABEL; }
-// Who a squad plays for: its campus or batch first, its organisation otherwise.
-// Reading the organisation alone put the same name under both sides of every match
-// in an internal championship.
+// Campus or batch first, organisation otherwise - the org alone showed the same
+// name on both sides of every match in an internal championship.
 function orgLabel(t: TeamRef | null) {
   return t?.org_units?.name || t?.organizations?.short_name || t?.organizations?.name || '';
 }
 
-// Ranking events (powerlifting/swimming/athletics) have no head-to-head matchup -
-// everyone competes for a single ranking - so the generator emits one team-less
-// fixture with round 'Event'. Showing "TBD v TBD" there is wrong: there's no
-// opponent to decide. We show the discipline name + a Ranking event tag instead.
+// Ranking events (powerlifting/swimming/athletics) get one team-less 'Event' fixture
+// with no opponent to decide, so show the discipline + a Ranking tag, not "TBD v TBD".
 function isRankingEvent(f: FixtureRow) { return f.round === 'Event' && !f.home && !f.away; }
 
 // Team name with its organization as a sub-heading underneath, so teams are
@@ -54,10 +51,8 @@ function TeamName({ team, align, won }: { team: TeamRef | null; align: 'left' | 
   );
 }
 
-// Read-only, whole-championship fixtures for the participant view - the same
-// schedule / results a spectator sees from Discover, so players can follow every
-// match (not just their own). `schedule` is the full fixture list (upcoming +
-// concluded); `results` narrows to matches that have concluded.
+// Whole-championship fixtures (as spectators see them) so players can follow every
+// match, not just their own. `results` narrows `schedule` to concluded matches.
 export function ChampionshipFixtures({ championshipId, mode, apiBase }: { championshipId: string; mode: 'schedule' | 'results'; apiBase?: string }) {
   const base = apiBase ?? `/championships/${championshipId}`;
   const { data: all = [], isLoading } = useApi<FixtureRow[]>(`${base}/fixtures`);

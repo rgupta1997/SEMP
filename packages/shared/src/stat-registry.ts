@@ -817,9 +817,8 @@ export function deriveRacquetStats(
       if (streak[w] > (sides[w].longest_streak ?? 0)) sides[w].longest_streak = streak[w];
     }
 
-    // Service / return split, per RALLY. Under side-out scoring a receiver's rally win
-    // scores nothing but still wins the serve back, so counting only scored points made
-    // serving 100% and receiving 0% by construction.
+    // Service / return split, per RALLY: under side-out scoring a receiver's rally win
+    // scores nothing but wins the serve back, so scored points alone read 100% / 0%.
     const rallyWinner: Side | null = ev.t === 'point' ? ((ev.pts ?? 1) > 0 ? ev.side : null) : eff.scored;
     if (rallyWinner && serverSide) {
       const rec: Side = serverSide === 'A' ? 'B' : 'A';
@@ -964,9 +963,8 @@ export function deriveRacquetStats(
       const b = personBag(id);
       b.service_points_played ??= 0;
       b.service_points_won ??= 0;
-      // Every tally counted on the SERVER personally starts at 0 for each partner, so one
-      // who never aced, faulted or held to love has none - not the pair's figure, which
-      // put the pair's aces (and double faults) in BOTH careers.
+      // Server-personal tallies start at 0 per partner, so a career gets only its own aces
+      // and faults - not the pair's, which would land in both careers.
       for (const k of PERSONAL_SERVE_KEYS) if (sides[side][k] !== undefined) b[k] ??= 0;
       if (personalReturns) { b.return_points_played ??= 0; b.return_points_won ??= 0; }
       if (expediteSeen) b.expedite_return_losses ??= 0;

@@ -408,9 +408,7 @@ export interface OpponentRecord {
 
 /**
  * Who a person has played WITH (partners) and AGAINST (head-to-head), in one sport.
- *
- * Head-to-head is keyed by the opposing SIDE - a doubles pair is one opponent - so
- * every match appears exactly once and the rows add up to the matches played.
+ * Head-to-head is keyed by the opposing SIDE, so each match appears once and rows sum to matches played.
  */
 export async function playerRelationsFor(
   db: Db, userId: string, sportId: string | null, organizationId?: string | null,
@@ -431,9 +429,8 @@ export async function playerRelationsFor(
     group by p.partner_user_id, u.name
     order by played desc, won desc
     limit 20`;
-  // The opposing side, in a stable order, so the same pair groups together whoever
-  // was listed first.
-  // Doubles rows are keyed by partner too: "with X vs Y / Z" is one line per pairing.
+  // Opposing side in a stable order, so a pair groups together whoever was listed first;
+  // doubles rows are also keyed by partner ("with X vs Y / Z").
   const sides = await db.$queryRaw<Array<{ position: string | null; ids: string[]; partner: string | null; played: number; won: number; lost: number }>>`
     select p.position, o.ids, p.partner_user_id::text as partner,
            count(*)::int as played,

@@ -90,9 +90,8 @@ export interface LadderFixture {
 export interface LadderDraw {
   scoring_format_id?: string | null;
   /**
-   * A BUILT-IN preset chosen as the draw default. Built-ins have no saved row and so
-   * no id - without this, picking "Best of 3 games" saved nothing and every match
-   * quietly played the sport default.
+   * A BUILT-IN preset chosen as the draw default. Built-ins have no saved row or id,
+   * so this key is the only record of the choice.
    */
   scoring_preset_key?: string | null;
   round_formats?: unknown;

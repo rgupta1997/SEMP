@@ -3,12 +3,9 @@ import type { Db } from '../../infra/prisma.js';
 import { BusinessRuleError } from '../../shared/errors.js';
 
 // ============================================================================
-// Halves are a chess score, not a general one.
-//
-// The fixture score columns hold decimals so chess can store 2½-1½, and the shared
-// schema allows steps of 0.5 because it cannot know the sport. Every other sport
-// still scores in whole numbers - a 2.5 on a boxing bout would reach an integer stat
-// column (rounds won) and fail the write - so the sport is checked here, where it is known.
+// Halves are a chess score only. The score columns are decimal and the shared schema
+// allows 0.5 steps (it cannot know the sport), but any other sport's 2.5 would fail
+// its integer stat columns - so the sport is checked here, where it is known.
 // ============================================================================
 
 const isHalf = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && !Number.isInteger(v);

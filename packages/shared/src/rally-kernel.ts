@@ -442,9 +442,8 @@ export function expediteConfig(format: ScoringFormat): ExpediteConfig | null {
 // ---- misconduct wording ------------------------------------------------------
 
 /**
- * What each sport calls the three misconduct steps the console records: a warning
- * (`card` event), a point to the opponent (`penalty` with card 'red'), and removal
- * (`end` with reason 'disqualified'). Pickleball uses no cards.
+ * What each sport calls the console's three misconduct steps (warning, penalty point,
+ * removal - see the `card` event). Pickleball uses no cards.
  */
 export function misconductTerms(sport?: string | null): { warning: string; foul: string; removal: string } {
   switch ((sport ?? '').toLowerCase()) {
@@ -639,8 +638,7 @@ function serveForNextUnit(spec: ServeSpec, state: KernelState, unitWinnerSide: S
 
 /**
  * `nextSide`: who serves next, already decided by the unit that just finished. When a
- * point ends a game AND the set, the set's reset must not decide again - it alternated
- * a second time and handed the opening game of the next set to the wrong player.
+ * point ends a game AND the set, the set's reset must not decide (alternate) again.
  */
 function resetForNewUnit(format: ScoringFormat, state: KernelState, unitWinnerSide: Side, nextSide?: Side): void {
   const lv = effectiveLevel(format, state, state.pointLevel);
@@ -1259,10 +1257,8 @@ export interface ResultEnvelope {
 }
 
 /**
- * Do the players change ends now that these units have finished?
- *
- * Kept apart from `switchEnds`, which means a change DURING a unit (the decider
- * midpoint) and is persisted per rally. Between-unit changes are a console prompt.
+ * Do the players change ends now that these units have finished? Separate from `switchEnds`
+ * (a mid-unit change, persisted per rally); between-unit changes are only a console prompt.
  * Tennis changes when the games played in the set are odd; a finished set counts its own total.
  */
 export function changesEndsAfterUnit(format: ScoringFormat, state: KernelState, won: FinishedUnit[]): boolean {

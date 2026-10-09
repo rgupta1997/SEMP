@@ -3,11 +3,8 @@ import type { RubberLineup } from '@semp/shared';
 import { Button, Card, cn } from '../../components/ui';
 
 // ============================================================================
-// "Who is playing?" - names the players of one match or one rubber of a tie.
-//
-// Careers are built from this: only the people named here get the result and the
-// stats. Picking is a tap from each side's own roster, never typing. Skipping is
-// allowed - the result still counts for the team, just for nobody individually.
+// "Who is playing?" - careers are built from this: only players named here get the
+// result and stats. Skipping is allowed; the result then counts for the team alone.
 // ============================================================================
 
 export interface LineupPerson { id: string; name: string }

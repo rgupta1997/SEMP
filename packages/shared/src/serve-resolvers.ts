@@ -155,11 +155,8 @@ function ttPairCycle(state: KernelState, pair: Pairing, format: ScoringFormat): 
   if (!isDoubles(people)) {
     return { server: people[0] ?? null, receiver: pair[other(side)][0] ?? null, courtHalf: null };
   }
-  // Which serving turn we are in, counted by the kernel as the serve changes hands -
-  // so the one-serve-each phase (10-10, expedite) keeps the rotation, which dividing
-  // points by the base `every` did not. Both sides alternate, so a side's own turn is half.
-  // A flipped side starts from its second-listed partner (a new first server, or the
-  // decider's switch at 5); the cycle and "receiver serves next" are unchanged.
+  // Count serving turns (not points / `every`) so the one-serve-each phase (10-10, expedite)
+  // keeps the rotation; a flipped side starts from its second-listed partner.
   const flip = (s: Side) => (state.serve.pairFlip?.[s] ? 1 : 0);
   const ownBlock = Math.floor(state.serve.turns / 2);
   const server = people[(ownBlock + flip(side)) % 2];

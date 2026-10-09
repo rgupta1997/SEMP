@@ -4,14 +4,12 @@ import type { MatchOutcome } from './enums.js';
 // ============================================================================
 // Plain-language insights from a player's racquet numbers.
 //
-// A grid of twenty figures does not tell anyone what to work on. This turns them
-// into a few sentences - strengths, weaknesses, trends - by comparing the player
+// Turns the figures into a few strengths, weaknesses and trends by comparing the player
 // with their own recent matches and with other players. Pure: the API gathers the
 // numbers, this decides what they mean, and the thresholds live in one place.
 //
-// Every insight carries its EVIDENCE: the counts behind it and the rule that made
-// it a strength or a weakness, so a player (or a coach, or a client) can check the
-// claim rather than take it on trust.
+// Every insight carries its EVIDENCE (the counts and the rule applied), so the claim
+// can be checked rather than taken on trust.
 // ============================================================================
 
 export type InsightTone = 'strength' | 'weakness' | 'up' | 'down';
@@ -55,9 +53,8 @@ export interface InsightField {
   /** How many other players each percentile was measured against. */
   sizes?: Partial<Record<InsightRate, number>>;
   /**
-   * The typical serve-minus-receive gap among other players (median, in points of
-   * percentage) and how many players it comes from. In table tennis nearly everyone
-   * wins more on serve; this is what "more than usual" is measured against.
+   * Median serve-minus-receive gap among other players (percentage points) and how many
+   * it comes from - the yardstick for "more than usual", since most win more on serve.
    */
   gap?: { typical: number; players: number };
   /** The typical (median) pressure rates among other players, and how many players each is from. */
@@ -86,10 +83,8 @@ export interface InsightInput {
   opponents?: InsightPerson[];
   field?: InsightField;
   /**
-   * Where pressure figures (deuce, game points, deciders, comebacks) come from. In
-   * doubles they belong to the pair, so singles is used whenever there is enough of
-   * it; `pair` says the figures are a doubles pair's, and the wording says so.
-   * Absent: the career bag, worded as the player's own.
+   * Where pressure figures come from: they belong to the pair in doubles, so singles is
+   * used when there is enough. `pair` marks a doubles pair's figures; absent, the career bag.
    */
   pressure?: { bag: StatBag; matches: number; pair: boolean };
 }
@@ -162,7 +157,7 @@ const rankedAmong = (group: string) => (p: number, n: number) => `Above ${Math.r
 
 /**
  * Which insights win the few places on each list. People and format come first: they
- * are the most personal, and they used to be found last and cut by the cap.
+ * are the most personal, and would otherwise be cut by the cap.
  */
 const PRIORITY: Record<'strength' | 'weakness', string[]> = {
   strength: ['partner', 'format', 'serve', 'receive', 'points', 'deciders', 'closing', 'saving', 'deuce', 'comebacks', 'mp_saved', 'expedite'],
@@ -197,9 +192,8 @@ export function racquetInsights(input: InsightInput): InsightReport {
   const better = betterThan(group);
   const ranked = rankedAmong(group);
 
-  // Pressure figures, return games and side-outs are the PAIR's in doubles, so singles
-  // is the source whenever there is enough of it; doubles-only players are told the
-  // figures are shared with partners.
+  // Pressure, return games and side-outs are the PAIR's in doubles, so singles is the
+  // source when there is enough; doubles-only players are told the figures are shared.
   const pressure = input.pressure ?? { bag: career, matches: input.careerMatches, pair: false };
   const P = pressure.bag;
   const you = pressure.pair ? 'you and your partners' : 'you';
@@ -212,9 +206,8 @@ export function racquetInsights(input: InsightInput): InsightReport {
   };
 
   // ---- Sport-specific: tennis hold / break, pickleball side-outs ------------------
-  // Only sports that record these have them, so no sport check is needed. They share
-  // the 'serve' / 'receive' keys and run first: in tennis, holding serve says more than
-  // serve points, and the card should not say the same thing twice.
+  // No sport check: only sports that record these have them. They share the 'serve' /
+  // 'receive' keys and run first, since holding serve says more than serve points.
   const vsFieldUnits = (o: {
     key: 'serve' | 'receive'; r: Rate | null; min: number; which: InsightRate; noun: string; label: string; source: typeof from;
     strong: (pct: number, better: string) => string; weak: (pct: number) => string;
@@ -278,9 +271,8 @@ export function racquetInsights(input: InsightInput): InsightReport {
   vsField('serve', serve, 'service_win_pct', 'on your serve');
   vsField('receive', recv, 'return_win_pct', 'when receiving');
 
-  // Serve against receive, measured against the gap OTHER players have. Most players
-  // win more on serve (in table tennis by a wide margin), so a gap is only worth naming
-  // when it is unusual - comparing a player with themselves told everybody the same thing.
+  // Serve vs receive, judged against OTHER players' gap: nearly everyone wins more on
+  // serve, so only an unusual gap is worth naming.
   const gap = input.field?.gap;
   if (serve && recv && gap && gap.players >= R.minFieldPlayers) {
     const mine = serve.pct - recv.pct;
@@ -310,9 +302,8 @@ export function racquetInsights(input: InsightInput): InsightReport {
 
   // ---- Pressure -----------------------------------------------------------------
   /**
-   * A pressure rate judged against OTHER players when there are enough of them - "low"
-   * then means low for the sport - and against a fixed line otherwise. The evidence
-   * says which yardstick was used.
+   * A pressure rate judged against OTHER players when there are enough ("low" = low for
+   * the sport), else against a fixed line; the evidence says which yardstick was used.
    */
   const pressureRate = (opts: {
     key: string; r: Rate | null; typicalKey: TypicalKey; label: string; noun: string; early: boolean;

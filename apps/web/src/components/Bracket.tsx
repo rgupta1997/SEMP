@@ -3,7 +3,7 @@ import { EARLY_END_LABEL, earlyEndOf, formatPoints, TBD_LABEL } from '@semp/shar
 import { cn, StatusBadge } from './ui';
 import { fmtDateTime } from '../lib/hooks';
 import { describeSlot, describeTieBlocked, isTieBlockedFor } from '../lib/stageTree';
-
+
 // A fixture as returned by GET /tournament-disciplines/:id/fixtures. Only the
 // fields the bracket needs are typed; the rest are passed straight through.
 export interface BracketFixture {
@@ -12,14 +12,12 @@ export interface BracketFixture {
   bracket_position: number | null;
   home_team_id: string | null;
   away_team_id: string | null;
-  // Present once a discipline uses the stage-config wizard: a placeholder ("A1",
-  // "L3") for a side not yet resolved to a real team. Null/absent once resolved,
-  // or on any single-stage discipline.
+  // Stage-config placeholder ("A1", "L3") for a side not yet resolved to a team;
+  // null once resolved or on single-stage disciplines.
   home_slot_label?: string | null;
   away_slot_label?: string | null;
-  // Set by stage-resolver.ts when the pool feeding this slot finished but ended in
-  // a tie it can't break automatically - the slot is stuck until an organiser
-  // intervenes (e.g. editing a result to break the tie).
+  // Set by stage-resolver.ts when the feeding pool ended in an unbreakable tie;
+  // the slot stays stuck until an organiser intervenes.
   live_state?: { tie_blocked?: { pool: number; rank: number }; rally?: unknown } | null;
   home_score?: number | null;
   away_score?: number | null;
@@ -39,10 +37,8 @@ const ROW_GAP = 22;  // vertical gap between first-round matches
 const COL_GAP = 52;  // horizontal gap between rounds (room for connectors)
 const HEADER_H = 28; // round-label band above the columns
 
-// Display label for a fixture status. A 'scheduled' fixture just means the
-// teams are paired (no time set yet), so it reads as "matched" - this also
-// avoids clashing with the "Schedule" action button. Other statuses fall
-// through to StatusBadge's default rendering.
+// 'scheduled' only means paired (no time yet), so it reads "Matched" and doesn't
+// clash with the "Schedule" button. Other statuses use StatusBadge's default.
 export function fixtureStatusLabel(status?: string | null): string | undefined {
   return status === 'scheduled' ? 'Matched' : undefined;
 }
@@ -97,11 +93,8 @@ function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect, onScore }:
   const tieBlocked = fixture.live_state?.tie_blocked ?? null;
   const homeTieMsg = !fixture.home_team_id && isTieBlockedFor(fixture.home_slot_label, tieBlocked) ? describeTieBlocked(tieBlocked) : null;
   const awayTieMsg = !fixture.away_team_id && isTieBlockedFor(fixture.away_slot_label, tieBlocked) ? describeTieBlocked(tieBlocked) : null;
-  // A null team id normally means "TBD" (an unplayed round-1 bracket slot on a
-  // single-stage draw). On a stage-config draw it more specifically means "not
-  // resolved yet" - show what it's waiting on (e.g. "1st in Pool A"), or - if the
-  // producing pool finished tied with no way to break it automatically - a warning
-  // instead, so the organiser knows this slot needs their attention.
+  // On a stage-config draw a null team means "not resolved yet": show what it waits on
+  // ("1st in Pool A"), or a warning if the feeding pool is stuck tied and needs the organiser.
   const home = fixture.home_team_id ? teamName(fixture.home_team_id) : (homeTieMsg ?? describeSlot(fixture.home_slot_label) ?? TBD_LABEL);
   const away = isBye ? 'Bye' : fixture.away_team_id ? teamName(fixture.away_team_id) : (awayTieMsg ?? describeSlot(fixture.away_slot_label) ?? TBD_LABEL);
   const homeOrg = teamOrg?.(fixture.home_team_id) ?? '';
@@ -179,11 +172,8 @@ function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect, onScore }:
   );
 }
 
-// Renders a single-elimination knockout draw as a left-to-right bracket tree.
-// Expects the perfect-binary-tree layout the knockout generator produces
-// (every round has half the matches of the previous one), keyed by
-// bracket_position. Matches without a bracket_position (e.g. a 3rd-place
-// playoff) are rendered separately below the tree.
+// Expects the generator's perfect-binary-tree layout keyed by bracket_position;
+// matches without one (e.g. a 3rd-place playoff) render below the tree.
 export function Bracket({ fixtures, teamName, teamOrg, onSelect, onScore }:
   { fixtures: BracketFixture[]; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; onSelect?: (f: BracketFixture) => void; onScore?: (f: BracketFixture) => void }) {
   const { rounds, extras, centers, width, height } = useMemo(() => {

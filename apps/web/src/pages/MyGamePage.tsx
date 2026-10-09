@@ -4,15 +4,9 @@ import { useApi } from '../lib/hooks';
 import { useAuth } from '../lib/auth';
 import { Spinner } from '../components/ui';
 import { formatPoints } from '@semp/shared';
-
-// My Game - the personal context's landing screen (PG-10, F-040..F-044).
-//
-// Laid out as the prototype has it: a brand-filled next-fixture hero beside the
-// activity strip, then live / pending / teams across, then recent results.
-//
-// The empty states carry weight here. This is the first screen after signing in, and
-// a new account has no fixtures, no teams and no record - so "nothing yet" has to
-// read as a beginning rather than as a broken page.
+
+// My Game - personal landing screen (PG-10, F-040..F-044). A new account lands here with
+// nothing, so empty states must read as a beginning, not a broken page.
 
 interface Match {
   id: string; round: string | null; status: string; scheduled_at: string | null;
@@ -36,10 +30,8 @@ interface Home {
 
 const C = {
   blue: 'var(--brand)', blue50: 'var(--brand-tint)', navy: 'var(--ink)',
-  // The accent ON the brand-coloured hero. It was Sportagon's teal, which left a
-  // maroon institution with a teal eyebrow and a teal hexagon on their own band -
-  // the theme applied to the panel and not to what sits on it. A light step of the
-  // same ramp instead, so it is their colour and the contrast is guaranteed.
+  // Accent on the brand hero: a light step of the brand's own ramp (not Sportagon teal),
+  // so it matches the institution and contrast is guaranteed.
   teal: 'var(--on-brand)',
   line: 'var(--line)', line2: 'var(--line-2)', fg2: 'var(--ink-2)', fg3: 'var(--ink-4)', fg4: 'var(--muted)',
   faint: 'var(--faint)', ground: 'var(--surface-2)', surface: 'var(--surface-3)',
@@ -57,12 +49,7 @@ const cardTitle: React.CSSProperties = { fontFamily: POP, fontWeight: 800, fontS
 
 const initials = (s: string | null) => (s ?? '?').split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 
-// Every list on this page - live matches, pending actions, teams, results - can
-// grow without bound (a busy account really can have a dozen live matches at
-// once), and this is the first screen after signing in. A card that stretches to
-// fit all of them pushes everything below it off-screen instead of staying a
-// fixed-height overview - so each is capped and reveals the rest a click away,
-// the same trade the rest of the product makes for any list that can grow.
+// Lists here grow without bound; cap each so this first screen stays a fixed-height overview.
 const ROW_LIMIT = 5;
 
 /** "View more (N)" / "View less" - only rendered once there's actually a rest to reveal. */

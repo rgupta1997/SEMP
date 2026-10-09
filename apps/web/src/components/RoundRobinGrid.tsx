@@ -3,7 +3,7 @@ import { cn } from './ui';
 import type { BracketFixture } from './Bracket';
 import { describeSlot, describeTieBlocked, isTieBlockedFor } from '../lib/stageTree';
 import { formatPoints } from '@semp/shared';
-
+
 // Short column code for a team: initials of up to 3 words, else first 3 chars.
 function shortCode(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -11,12 +11,8 @@ function shortCode(name: string): string {
   return name.slice(0, 3).toUpperCase();
 }
 
-// A crosstable participant key is either a real team_id, or - on a chained
-// group→group→knockout draw whose inner pool hasn't resolved yet - the raw slot
-// label ("A1") standing in for it. Resolves either into a display name/org and a
-// compact column code, without ever dropping the unresolved side from the grid.
-// `tieBlocked` (looked up by the caller from any fixture referencing this same
-// label) overrides the name with a warning once the producing pool is stuck tied.
+// Key is a team_id or, on a chained draw with an unresolved inner pool, a slot label
+// ("A1") - never dropped from the grid. `tieBlocked` swaps the name for a warning.
 function resolveEntrant(
   key: string, teamName: (id: string | null) => string, teamOrg?: (id: string | null) => string,
   tieBlocked?: { pool: number; rank: number } | null,
@@ -41,9 +37,8 @@ function ResultCell({ fixture, teamId, opponentId, onSelect }:
   const live = fixture.status === 'live';
   const hasScore = fixture.home_score != null && fixture.away_score != null;
 
-  // Orient scores to the row team, regardless of which side it played on. teamId
-  // may be a slot label (unresolved side) rather than a real team_id - matching on
-  // either is safe since the two id spaces never collide (real ids are uuids).
+  // teamId may be a slot label rather than a team_id - safe to match on either,
+  // since real ids are uuids and never collide with labels.
   const rowIsHome = fixture.home_team_id === teamId || fixture.home_slot_label === teamId;
   const rowScore = rowIsHome ? fixture.home_score : fixture.away_score;
   const oppScore = rowIsHome ? fixture.away_score : fixture.home_score;
@@ -80,9 +75,7 @@ function Crosstable({ fixtures, teamName, teamOrg, onSelect, caption }:
     const ids: string[] = [];
     const seen = new Set<string>();
     for (const f of fixtures) {
-      // Fall back to the slot label when a side isn't resolved to a real team yet
-      // (a chained group→group→knockout draw whose inner pool is still pending) -
-      // otherwise that side would be silently dropped from the grid entirely.
+      // Fall back to the slot label for an unresolved side, else it's dropped from the grid.
       for (const id of [f.home_team_id ?? f.home_slot_label, f.away_team_id ?? f.away_slot_label]) {
         if (id && !seen.has(id)) { seen.add(id); ids.push(id); }
       }
@@ -97,9 +90,8 @@ function Crosstable({ fixtures, teamName, teamOrg, onSelect, caption }:
     return { teamIds: ids, lookup };
   }, [fixtures, teamName, teamOrg]);
 
-  // A slot label's tie-blocked state is a property of the pool that produces it, not
-  // of any one downstream fixture - so any fixture in this set that references the
-  // label carries the same flag. Looked up once here rather than per-cell.
+  // Tie-blocked belongs to the producing pool, so any fixture referencing the label
+  // carries the same flag - looked up once here rather than per-cell.
   const tieBlockedByLabel = useMemo(() => {
     const m = new Map<string, { pool: number; rank: number }>();
     for (const f of fixtures) {
@@ -147,9 +139,8 @@ function Crosstable({ fixtures, teamName, teamOrg, onSelect, caption }:
                 ) : (
                   <ResultCell
                     key={colId}
-                    // The same match lives in both mirrored cells, so accept it
-                    // played in either direction (single round-robin only seeds
-                    // one of the two).
+                    // Mirrored cells share a match; single round-robin seeds only
+                    // one direction, so accept either.
                     fixture={lookup.get(`${rowId}|${colId}`) ?? lookup.get(`${colId}|${rowId}`)}
                     teamId={rowId}
                     opponentId={colId}
@@ -166,9 +157,8 @@ function Crosstable({ fixtures, teamName, teamOrg, onSelect, caption }:
   );
 }
 
-// Graphical view for round-robin / league / group draws: a results crosstable
-// (each cell = the match between the row's home team and the column's away
-// team, coloured by result). Group/pool draws render one table per pool.
+// Results crosstable for round-robin / league / group draws (row = home, column = away);
+// group draws render one table per pool.
 export function RoundRobinGrid({ fixtures, teamName, teamOrg, onSelect }:
   { fixtures: BracketFixture[]; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; onSelect?: (f: BracketFixture) => void }) {
   const pools = useMemo(() => {

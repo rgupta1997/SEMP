@@ -26,11 +26,9 @@ import {
 //    each fixture writes only the outcome it settled: the final decides gold and
 //    silver, and every other knockout round records the player it ELIMINATED.
 //
-// 2. THE TIMELINE IS ONE ENTRY PER PERSON PER CONTEST THEY PLAYED - per fixture,
-//    except a team tie, where each rubber a player played is its own entry (see
-//    `playedContests`). Medals, placements and awards ride on the first entry as
-//    chips rather than as extra rows (J4-E2-S1). The countable, queryable copies
-//    live in `achievements`, which is what a report groups by.
+// 2. THE TIMELINE IS ONE ENTRY PER PERSON PER CONTEST THEY PLAYED - per fixture, or
+//    per rubber in a team tie (see `playedContests`). Medals, placements and awards ride
+//    on the first entry as chips (J4-E2-S1); the queryable copies live in `achievements`.
 
 // ---------------------------------------------------------------------------
 // inputs
@@ -527,9 +525,8 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
   }
 
   // ---- 4 · the timeline -----------------------------------------------------
-  // Where we know who played (a named racquet match, or the rubbers of a tie), each
-  // player gets one entry per contest THEY played, with its own result. Otherwise
-  // it is one entry per squad member, as it always was.
+  // Where we know who played (named racquet match, tie rubbers): one entry per contest
+  // each player played. Otherwise one entry per squad member.
   const played = playedContests({
     liveState: fx.live_state,
     sportName: fx.sport_name,
@@ -579,11 +576,9 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
 }
 
 /**
- * Timeline entries from contests: one per player per contest they played.
- *
- * A tie's titles carry the rubber ("Men's Singles: IIMB vs IIMA — Won"), which is also
- * what keeps two rubbers by one player apart under the (user, fixture, kind, title)
- * unique index. Chips ride on a player's first entry only, so a medal shows once.
+ * Timeline entries from contests: one per player per contest they played. A tie's title
+ * names the rubber, which keeps one player's two rubbers apart under the (user, fixture,
+ * kind, title) unique index. Chips ride on the first entry only, so a medal shows once.
  */
 function contestEntries(
   fx: DerivableFixture,

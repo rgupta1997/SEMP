@@ -1005,9 +1005,8 @@ export function SchedulePage() {
   const sportOptions = [...new Map(tsports.map((ts: any) => [ts.sport_id, sportName(ts.sport_id)])).entries()]
     .map(([id, name]) => ({ id, name }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  // Only when there is a choice: a championship with one tournament (usually named like
-  // the championship) showed a dropdown that looked like an event switcher and did nothing.
-  // With it hidden, the page falls back to that one tournament (`active` above).
+  // Only when there's a choice - a lone tournament's dropdown looked like a dead event
+  // switcher. Hidden, the page falls back to that tournament (`active` above).
   const { sportId } = usePageFilters({
     tournaments: topView === 'manage' && tournamentOptions.length > 1 ? tournamentOptions : undefined,
     tournamentRequired: true,

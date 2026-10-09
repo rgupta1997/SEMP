@@ -7,11 +7,8 @@ import type { Db } from '../../infra/prisma.js';
 import { playerRelationsFor } from './sport-stats.service.js';
 
 // ============================================================================
-// A player's insights in one sport: gathers the numbers racquetInsights reads.
-//
-// Career and recent come from the stat lines (matches scored point by point), results
-// from the timeline (every result), and the yardstick from every other player with
-// enough points in the sport.
+// A player's insights in one sport: gathers the numbers racquetInsights reads. Career and
+// recent from stat lines, results from the timeline, the yardstick from other players.
 // ============================================================================
 
 // `team`: a pair figure in doubles, so the player's side is read from the same bag the
@@ -29,10 +26,7 @@ const RATES: Array<{ key: InsightRate; won: string; of: string | [string, string
 const denominator = (bag: StatBag, of: string | [string, string]) =>
   typeof of === 'string' ? (bag[of] ?? 0) : (bag[of[0]] ?? 0) + (bag[of[1]] ?? 0);
 
-/**
- * Whether the super admin has player insights switched on. A missing row is ON - the
- * feature ships enabled - and anything but an explicit `false` reads as on.
- */
+/** Whether player insights are on. It ships enabled: a missing row or anything but `false` is ON. */
 export async function insightsEnabled(db: Db): Promise<boolean> {
   const row = await db.platform_settings.findUnique({ where: { key: INSIGHTS_ENABLED_SETTING }, select: { value: true } });
   return row?.value !== false;
@@ -82,9 +76,8 @@ export async function sportInsightsFor(
   const earlier = foldCareerStats(spec, bags.slice(recentCount));
   const relations = await playerRelationsFor(db, userId, sportId);
 
-  // Pressure figures (deuce, game points, deciders) belong to the PAIR in doubles. On a
-  // format's own tab they are that format's; on All they come from the format the player
-  // plays MOST - a doubles specialist with three singles matches is read from doubles.
+  // Pressure figures belong to the PAIR in doubles, so on All they come from the format
+  // the player plays most; on a format's own tab, from that format.
   const singles = lines.filter((l) => l.position === 'singles').map((l) => (l.stats ?? {}) as StatBag);
   const doubles = lines.filter((l) => l.position === 'doubles').map((l) => (l.stats ?? {}) as StatBag);
   const fromSingles = { bag: foldCareerStats(spec, singles), matches: singles.length, pair: false };
@@ -126,10 +119,8 @@ export async function sportInsightsFor(
 }
 
 /**
- * How this player compares with everyone else in the sport: where each rate sits
- * (0-100), how many players that is measured against, and the typical gap between
- * serve and receive. Only players with enough points count, so one lucky match does
- * not set the bar.
+ * Where each rate sits (0-100) among other players in the sport, how many that is, and the
+ * typical serve-receive gap. Only players with enough points count, so one lucky match can't set the bar.
  */
 async function fieldFor(
   db: Db, userId: string, sportId: string, mine: StatBag, mineTeam: StatBag, position?: InsightPosition,

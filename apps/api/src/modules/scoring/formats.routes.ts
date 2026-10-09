@@ -96,9 +96,8 @@ export function makeScoringFormatsRouter(prisma: Prisma): Router {
     });
     if (!td) throw new NotFoundError('Tournament discipline');
     const sportName = td.tournament_sports?.sports?.name ?? null;
-    // What the draw plays with nothing chosen. Usually the sport's first preset, but a
-    // Rapid or Blitz chess draw plays at its own pace - the console does the same, and
-    // the picker must not show 90+30 for a draw that is scored 3+2.
+    // Default when nothing is chosen: the sport's first preset, except a Rapid/Blitz chess
+    // draw uses its own pace (as the console does), so the picker never shows 90+30 for 3+2.
     const defaultPresetKey = isChessSport(sportName)
       ? chessPresetForDiscipline(td.disciplines?.name)?.presetKey ?? null
       : null;

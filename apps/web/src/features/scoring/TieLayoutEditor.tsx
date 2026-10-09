@@ -3,12 +3,8 @@ import { buildTieSpec, tieLayoutsFor, type TieRubberDraft, type TieSpec } from '
 import { Button, Input, Select, cn } from '../../components/ui';
 
 // ============================================================================
-// The rubbers a team tie is made of, per draw.
-//
-// Events play their own team formats - a corporate three-rubber tie, five singles -
-// so the organiser picks a ready-made layout or builds one. How each rubber is SCORED
-// still comes from the sport and the draw's scoring format; this only says which
-// rubbers there are and how the tie is won.
+// Per-draw tie layout (which rubbers, how the tie is won) since events play their own
+// team formats. How each rubber is SCORED still comes from the sport and draw format.
 // ============================================================================
 
 export interface TieLayoutValue {
@@ -30,9 +26,8 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
       ? stored.rubbers.map((r) => ({ label: r.label, size: r.size ?? (/doubles/i.test(r.label) ? 2 : 1) }))
       : layouts[0]?.rubbers ?? [{ label: 'Singles', size: 1 }]);
   const [target, setTarget] = useState<number>(stored?.winBy === 'count' ? stored.target ?? 0 : 0);
-  // Dead rubbers. The sport standard stops once decided in every round; picking a
-  // layout suggests playing league / group rubbers out, because rubbers won can decide
-  // a table. A layout saved before this split keeps its single setting for both.
+  // Dead rubbers: the sport standard skips them everywhere; a picked layout suggests playing
+  // group rubbers out (rubbers won can decide a table). Pre-split layouts use one setting for both.
   const [skipKnockout, setSkipKnockout] = useState(stored?.skipDeadRubbers ?? true);
   const [skipGroups, setSkipGroups] = useState(stored ? (stored.skipDeadInGroups ?? stored.skipDeadRubbers) : true);
   const [preset, setPreset] = useState<string>(stored ? 'custom' : 'standard');

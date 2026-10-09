@@ -167,11 +167,7 @@ interface InsightReport {
   form: Array<'W' | 'L' | 'D'>;
 }
 
-/**
- * Strengths, things to work on and trends, in plain words - what the numbers mean.
- * The card FLIPS to show how each one was worked out: the counts behind it and the
- * rule applied, so nobody has to take an insight on trust.
- */
+/** Plain-word insights; the card flips to show the counts and rule behind each, so none is taken on trust. */
 function InsightsCard({ userId, sportId, view }: { userId?: string; sportId: string; view: PlayView }) {
   const base = userId ? `/people/${userId}/sport-insights` : '/me/sport-insights';
   // Follows the All / Singles / Doubles switch: a format's tab reads that format only.

@@ -3,10 +3,9 @@ import type { Side } from './scoring-rules.js';
 // ============================================================================
 // Chess results (FIDE Laws of Chess, art. 5 and 6; Olympiad / team match rules).
 //
-// Nothing is counted during a chess game: only its result. A game is worth one point -
-// 1-0, ½-½ or 0-1 - and a match or a team match is the sum of its games' points.
-// Draws are the normal case, not an edge one, which is why every total here can hold
-// a half. Stored as plain numbers (1.5); `formatPoints` writes them the chess way (1½).
+// Only results count: a game is worth one point (1-0, ½-½, 0-1) and a match or team
+// match is the sum of its games. Draws are normal, so every total can hold a half;
+// stored as 1.5, written 1½ by `formatPoints`.
 // ============================================================================
 
 export const CHESS_SPORT = 'chess';
@@ -89,9 +88,8 @@ const ENDING_STAT: Partial<Record<ChessEnding, string>> = {
 
 /**
  * One player's counters from a match's games. Points are doubled so a half stays an
- * integer; the `_max_x2` counters (2 a game) are what score % is measured against, so
- * "score with white" means points won of points available with white.
- * A game with no recorded colour still counts - just not in either colour.
+ * integer; `_max_x2` (2 a game) is the score % denominator. A game with no recorded
+ * colour still counts, just not in either colour.
  */
 export function chessLineStats(
   games: Array<{ result: ChessResult; white?: Side | null; ending?: ChessEnding }>,

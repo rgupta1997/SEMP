@@ -69,9 +69,8 @@ export function PlatformPlansPage() {
 }
 
 /**
- * The player insights card on career stats. Off, the API sends no insights and the
- * stats page is the tiles and filters alone; on, the card is back. Nothing is deleted
- * either way - insights are worked out from the stats each time they are shown.
+ * Toggles the career-stats insights card. Nothing is deleted when off - insights are
+ * computed from the stats each time they are shown.
  */
 function InsightsSwitch({ data }: { data: PlanSettings }) {
   const save = useApiMutation(

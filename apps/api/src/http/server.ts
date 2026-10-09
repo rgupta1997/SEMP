@@ -135,9 +135,8 @@ export function buildApp(prisma: Prisma) {
     name: 'Sport', createSchema: createSportSchema, updateSchema: updateSportSchema,
     orderBy: { name: 'asc' }, writeGuards: [requireSuperAdmin],
   }));
-  // DISCIPLINES: the platform catalogue (championship_id null) plus each event's own.
-  // An organiser's custom discipline belongs to their event and is offered only there,
-  // so one event's "Veterans 40+ Singles" never appears in anybody else's list.
+  // DISCIPLINES: the platform catalogue (championship_id null) plus each event's own;
+  // an organiser's custom discipline is offered only in its own event.
   const eventOfDiscipline = async (id: string) =>
     (await prisma.disciplines.findUnique({ where: { id }, select: { championship_id: true } }))?.championship_id ?? null;
   const eventManager = guards.championshipCrudGuard({

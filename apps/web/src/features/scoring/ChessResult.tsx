@@ -37,10 +37,8 @@ export function chessGamesIn(format: { levels: Array<{ target: number }> } | nul
 
 
 /**
- * A chess match: one or more games, each won, drawn or lost - nothing is counted during
- * play. Each game records who had white and, optionally, how it ended. The match total
- * is the sum of the games' points (2½–½), and a level match can be settled by the
- * organiser's tie-break without changing the points.
+ * Chess records only each game's result (nothing counted in play); the match total is the
+ * sum of game points (2½–½), and a level match is settled by tie-break without changing points.
  */
 export function ChessResult({ homeName, awayName, gamesInMatch, timeControl, initial, disabled, busy, onSave }: {
   homeName: string; awayName: string;
@@ -58,9 +56,8 @@ export function ChessResult({ homeName, awayName, gamesInMatch, timeControl, ini
   const seeded = useRef(false);
   /** The scorer has changed something here: from then on this screen owns the state. */
   const edited = useRef(false);
-  // The saved state arrives after the first render: adopt it once, and never once the
-  // scorer has tapped. Each save also echoes back through `initial`; adopting that echo
-  // dropped any tap made while the save was out, and the next save wiped it from the server.
+  // Adopt the saved state once, never after a tap: each save echoes back through `initial`,
+  // and adopting that echo dropped taps made mid-save (the next save then wiped them).
   useEffect(() => {
     if (seeded.current || edited.current) return;
     if (initial.games.length || initial.firstWhite !== 'A') { setState(initial); seeded.current = true; }
@@ -250,10 +247,7 @@ export function ChessResult({ homeName, awayName, gamesInMatch, timeControl, ini
   );
 }
 
-/**
- * How a game ended, as chips rather than a dropdown nobody opens: the endings that fit
- * the result, one tap to pick, tap again to clear. Optional - the result is what scores.
- */
+/** Game endings as chips, since nobody opens a dropdown. Optional - the result is what scores. */
 export function EndingChips({ result, value, disabled, onChange }: {
   result: Result; value?: ChessEnding; disabled?: boolean; onChange: (e: ChessEnding | undefined) => void;
 }) {

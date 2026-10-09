@@ -212,10 +212,8 @@ let refresh: ((keys: string[]) => void) | null = null;
 export function setRefresher(fn: (keys: string[]) => void): void { refresh = fn; }
 
 /**
- * Told the body the server just acknowledged, so the app's cached copy of the match
- * can be brought up to it. Without this, leaving the console mid-save and coming back
- * found the outbox already cleared and the cache still holding the score from BEFORE
- * the last tap - the console reopened a point behind the server.
+ * Brings the cached match up to each acknowledged body; otherwise leaving mid-save found the
+ * outbox cleared but the cache from before the last tap, reopening a point behind the server.
  */
 let onAcknowledged: ((fixtureId: string, body: Record<string, unknown>) => void) | null = null;
 export function setAcknowledgedHandler(fn: (fixtureId: string, body: Record<string, unknown>) => void): void { onAcknowledged = fn; }

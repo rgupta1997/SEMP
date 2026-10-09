@@ -92,11 +92,8 @@ export function tieForRound(spec: TieSpec, round?: string | null): TieSpec {
 }
 
 // ---- organiser layouts --------------------------------------------------------
-//
-// Events play their own team formats - a corporate 3-rubber tie, a Swaythling-style
-// five singles - so the rubbers are the organiser's to choose. A layout is just a
-// list of rubbers; how each rubber is SCORED still comes from the sport (racquet
-// rubbers use the draw's scoring format).
+// The organiser chooses the rubbers; how each rubber is SCORED still comes from the
+// sport (racquet rubbers use the draw's scoring format).
 
 /** One rubber as an organiser describes it. */
 export interface TieRubberDraft {

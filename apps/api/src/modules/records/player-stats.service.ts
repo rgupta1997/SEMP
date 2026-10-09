@@ -273,9 +273,8 @@ export async function buildPlayerStatRows(
       roster: people.map((p) => ({ userId: p.user_id, side: sideOf.get(p.user_id)! })),
     });
     statOf = (userId) => derived.players.find((x) => x.userId === userId)?.stats ?? {};
-    // Chess: every game of the match, each with its colour and ending - so a three-game
-    // match is three results in the career, not one. The line's single `colour` is
-    // only set for a one-game match, where there is one colour to name.
+    // Chess: one career result per game (with its colour and ending), not per match.
+    // The line's single `colour` is set only for a one-game match.
     const raw = (fx.live_state as { chess?: { games?: unknown } } | null)?.chess?.games;
     const games = isChessSport(sportName) && Array.isArray(raw)
       ? (raw as ChessGame[]).filter((g) => g && (g.result === 'A' || g.result === 'B' || g.result === 'draw'))
@@ -351,9 +350,8 @@ function outcomeForFixture(fx: StatFixture, side: Side): MatchOutcome | null {
 }
 
 /**
- * One line per player per contest they played, plus a bare "did not play" line for
- * the rest of the squad. A tie rubber carries its key, so a player in two rubbers has
- * two lines - the (fixture, user, rubber) unique index was built for exactly this.
+ * One line per player per contest played, plus a "did not play" line for the rest of the
+ * squad. Rubber lines carry their key, per the (fixture, user, rubber) unique index.
  */
 function contestRows(
   fx: StatFixture,

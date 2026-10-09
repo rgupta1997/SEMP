@@ -6,7 +6,7 @@ import { BackButton, Card, CardBody, CardHeader, EmptyState, Spinner, StatusBadg
 import { ResultBadge } from '../../components/participant/ResultBadge';
 import type { MatchResult } from '../../components/participant/types';
 import { formatPoints, TBD_LABEL, type MatchOutcome } from '@semp/shared';
-
+
 interface MatchDetail {
   fixture: {
     id: string;
@@ -32,12 +32,8 @@ interface MatchDetail {
     teammates: { name: string; phone: string | null; role: string; jersey_number: number | null }[];
   };
   /**
-   * The player's OWN numbers for this match.
-   *
-   * Null when they were not part of it. `played: false` means they were named in
-   * the squad but did not take part - a different thing from having played and
-   * scored nothing, and a profile that conflated the two would put a duck on
-   * somebody who never batted.
+   * The player's own numbers; null if not in the match. `played: false` = named but didn't
+   * take part, distinct from scoring nothing (no duck for someone who never batted).
    */
   my_stats?: {
     played: boolean;
@@ -156,14 +152,8 @@ export function ParticipantMatchPage() {
 }
 
 /**
- * The player's own statistics for this match.
- *
- * Rendered from whatever the API sends rather than from a per-sport layout: the
- * server already knows that cricket is three groups and a table-tennis rubber is
- * one, so this component stays the same shape for all twenty-seven sports.
- *
- * Absent for a sport that records no individual detail, which is honest - an empty
- * card headed "Your statistics" reads as something broken.
+ * Rendered from the API's groups, not a per-sport layout, so one shape fits every sport.
+ * Absent when the sport records no individual detail - an empty card would read as broken.
  */
 function MyStatsCard({ stats }: { stats?: MatchDetail['my_stats'] }) {
   if (!stats) return null;

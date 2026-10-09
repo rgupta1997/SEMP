@@ -870,8 +870,7 @@ function Badge({ tone, children }: { tone: 'amber' | 'slate'; children: React.Re
 }
 
 /**
- * Each side keeps one colour everywhere on the console - its half of the scoreboard,
- * its rally button - so a scorer glancing up finds "their" side by colour, not text.
+ * One colour per side across the console so a scorer finds their side at a glance.
  * Static class strings, so Tailwind keeps them.
  */
 const ACCENT = {
@@ -1034,9 +1033,8 @@ function minutes(ms: number): string {
 }
 
 /**
- * Settles the serve before the first rally. Each serve resolver treats a pair's first
- * listed player as its first server (or first receiver), so choosing a partner here
- * just reorders the pair.
+ * Serve resolvers treat a pair's first listed player as first server (or receiver),
+ * so choosing a partner here just reorders the pair.
  */
 function StartPanel({ format, pairing, doubles, firstServer, order, nameOf, playersOf, onFirstServerChange, onSwapPair, deuce, onDeuceChange, box, onBoxChange, onStart }: {
   format: ScoringFormat; pairing?: Pairing; doubles: boolean; firstServer: Side; order: [Side, Side];
