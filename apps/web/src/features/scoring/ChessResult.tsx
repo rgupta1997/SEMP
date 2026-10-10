@@ -40,10 +40,12 @@ export function chessGamesIn(format: { levels: Array<{ target: number }> } | nul
  * Chess records only each game's result (nothing counted in play); the match total is the
  * sum of game points (2½–½), and a level match is settled by tie-break without changing points.
  */
-export function ChessResult({ homeName, awayName, gamesInMatch, timeControl, initial, disabled, busy, onSave }: {
+export function ChessResult({ homeName, awayName, gamesInMatch, needsWinner, timeControl, initial, disabled, busy, onSave }: {
   homeName: string; awayName: string;
   /** From the draw's format: 1 for a single game, 3 for "best of 3" and so on. */
   gamesInMatch: number;
+  /** A knockout match: a level result must be settled on tie-break before sign-off. */
+  needsWinner?: boolean;
   /** The format's time control, worded - "90 min + 30 s a move". Shown, not enforced. */
   timeControl?: string | null;
   initial: ChessState;
@@ -102,6 +104,7 @@ export function ChessResult({ homeName, awayName, gamesInMatch, timeControl, ini
     if (!outcome.decided) { toast.error('Record every game first.'); return; }
     const [a, b] = outcome.points;
     const drawnMatch = outcome.drawn && !state.tiebreakWinner;
+    if (drawnMatch && needsWinner) { toast.error('This is a knockout match - record who won the tie-break.'); return; }
     const ok = await confirmDialog({
       title: drawnMatch ? 'Confirm a drawn match' : 'Confirm final result',
       confirmLabel: drawnMatch ? 'Sign off as a draw' : 'Sign off',
@@ -121,7 +124,9 @@ export function ChessResult({ homeName, awayName, gamesInMatch, timeControl, ini
   const status = busy
     ? 'Saving… the buttons unlock when the server confirms'
     : outcome.decided
-    ? (outcome.drawn && !state.tiebreakWinner ? 'Match drawn - ready to confirm' : 'Match decided - ready to confirm')
+    ? (outcome.drawn && !state.tiebreakWinner
+      ? (needsWinner ? 'Level - record the tie-break winner' : 'Match drawn - ready to confirm')
+      : 'Match decided - ready to confirm')
     : state.games.length === 0
       ? 'Record the result when the game ends'
       : `Game ${state.games.length + 1} of ${gamesInMatch} to play`;
@@ -215,12 +220,17 @@ export function ChessResult({ homeName, awayName, gamesInMatch, timeControl, ini
           })}
         </ol>
 
-        {outcome.drawn && gamesInMatch > 1 && (
+        {outcome.drawn && (
           <div className="grid gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-500/40 dark:bg-amber-500/10">
-            <span className="font-semibold text-amber-900 dark:text-amber-200">Level after {gamesInMatch} games</span>
-            <span className="text-amber-900/80 dark:text-amber-200/80">Sign off as a draw, or record who won the tie-break (Armageddon, blitz play-off). The points stay {formatPoints(a)}–{formatPoints(b)}.</span>
-            <div className="grid grid-cols-3 gap-2">
-              {([undefined, 'A', 'B'] as Array<Side | undefined>).map((s) => (
+            <span className="font-semibold text-amber-900 dark:text-amber-200">{gamesInMatch > 1 ? `Level after ${gamesInMatch} games` : 'Drawn game'}</span>
+            <span className="text-amber-900/80 dark:text-amber-200/80">
+              {needsWinner
+                ? 'A knockout match needs a winner: record who won the tie-break (Armageddon, blitz play-off).'
+                : 'Sign off as a draw, or record who won the tie-break (Armageddon, blitz play-off).'}
+              {' '}The points stay {formatPoints(a)}–{formatPoints(b)}.
+            </span>
+            <div className={cn('grid gap-2', needsWinner ? 'grid-cols-2' : 'grid-cols-3')}>
+              {((needsWinner ? ['A', 'B'] : [undefined, 'A', 'B']) as Array<Side | undefined>).map((s) => (
                 <button key={s ?? 'none'} type="button" disabled={disabled}
                   className={choiceCls(state.tiebreakWinner === s)}
                   onClick={() => update({ ...state, ...(s ? { tiebreakWinner: s } : { tiebreakWinner: undefined }) })}>

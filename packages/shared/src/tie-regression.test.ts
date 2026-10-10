@@ -287,6 +287,26 @@ describe('3. winning rubbers', () => {
     expect(tieWinner(spec, s)).toBe('B');
     expectTieSound(spec, s, 'decider');
   });
+
+  const playAll = (t: TieSpec, results: Array<'A' | 'B'>) =>
+    results.reduce((s, w, i) => decideRubber(t, s, i, w), initTie(t));
+
+  it('3.7 a target below the majority goes to the bigger score, never to home first', () => {
+    const low: TieSpec = { ...spec, target: 2, skipDeadRubbers: false, skipDeadInGroups: false };
+    expect(tieOutcome(low, playAll(low, ['A', 'A', 'B', 'B', 'B'])).winner).toBe('B');
+  });
+
+  it('3.8 a target above the majority still has a winner once every rubber is played', () => {
+    const high: TieSpec = { ...spec, target: 4, skipDeadRubbers: false, skipDeadInGroups: false };
+    expect(tieOutcome(high, playAll(high, ['A', 'B', 'A', 'B', 'A']))).toMatchObject({ winner: 'A', drawn: false, level: false });
+  });
+
+  it('3.9 a level tie takes a recorded tie-break winner', () => {
+    const even: TieSpec = { ...spec, rubbers: spec.rubbers.slice(0, 4), skipDeadRubbers: false, skipDeadInGroups: false };
+    const s = playAll(even, ['A', 'B', 'A', 'B']);
+    expect(tieOutcome(even, s)).toMatchObject({ winner: null, drawn: true, level: true });
+    expect(tieOutcome(even, { ...s, tiebreakWinner: 'A' })).toMatchObject({ winner: 'A', drawn: false, level: true });
+  });
 });
 
 // ============================================================================

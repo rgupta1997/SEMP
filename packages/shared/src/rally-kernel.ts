@@ -1175,6 +1175,12 @@ function applyCap(format: ScoringFormat, state: KernelState): { unitsWon: Finish
   }
 }
 
+/** Who leads when time is called, by the same comparison the buzzer uses; null when level. */
+export function capLeader(format: ScoringFormat, state: KernelState): Side | null {
+  const [a, b] = isAggregate(format) ? aggregateScore(state) : leadingScore(state, state.pointLevel);
+  return a === b ? null : a > b ? 'A' : 'B';
+}
+
 /** The first level, from the top, where the sides differ - or the live points if none do. */
 function leadingScore(state: KernelState, at: number): Pair {
   for (let i = state.score.length - 1; i > at; i--) {

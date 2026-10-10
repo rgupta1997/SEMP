@@ -1,5 +1,6 @@
 import { foldRally, resultEnvelope, type RallyLog } from './rally-kernel.js';
 import { canonicalRacquetSport } from './racquet-presets.js';
+import { formatForPairing } from './serve-resolvers.js';
 import { CHESS_ENDINGS, isChessSport, whiteOnBoard, type ChessEnding } from './chess.js';
 import type { ScoringFormat, Side } from './scoring-rules.js';
 import { playersPerSide, readLineup, resolveMatchLineup, type RubberLineup } from './tie.js';
@@ -47,9 +48,12 @@ const side = (v: unknown): Side | null => (v === 'A' || v === 'B' ? v : null);
 const logOf = (v: unknown): RallyLog =>
   Array.isArray(v) ? v.filter((e) => !!e && typeof e === 'object' && typeof (e as { t?: unknown }).t === 'string') : [];
 
-function scoreOf(format: ScoringFormat | null, log: RallyLog, firstServer: Side, legacy?: { segsA?: unknown; segsB?: unknown }): [number, number] | null {
+// Read under the lineup's own serve rules, as the console scored it: a tie rubber freezes
+// the doubles format, and a singles side-out rubber folded as doubles gets the wrong score.
+function scoreOf(format: ScoringFormat | null, log: RallyLog, firstServer: Side, lineup: RubberLineup, legacy?: { segsA?: unknown; segsB?: unknown }): [number, number] | null {
   if (format && log.length) {
-    const h = resultEnvelope(format, foldRally(format, log, firstServer).state).headline;
+    const played = formatForPairing(format, lineup);
+    const h = resultEnvelope(played, foldRally(played, log, firstServer).state).headline;
     return [h[0], h[1]];
   }
   const a = Number(legacy?.segsA), b = Number(legacy?.segsB);
@@ -94,7 +98,7 @@ export function playedContests(input: {
         log,
         format,
         firstServer,
-        score: scoreOf(format, log, firstServer, r?.state),
+        score: scoreOf(format, log, firstServer, lineup, r?.state),
       });
     }
     return { kind: 'contests', contests };
@@ -112,7 +116,7 @@ export function playedContests(input: {
     kind: 'contests',
     contests: [{
       rubberKey: null, rubberLabel: null, lineup: who.lineup, winner: input.matchWinner,
-      log, format, firstServer, score: scoreOf(format, log, firstServer),
+      log, format, firstServer, score: scoreOf(format, log, firstServer, who.lineup),
     }],
   };
 }

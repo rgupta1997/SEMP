@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  atAdvantage, changesEndsAfterUnit, effectiveLevel, expediteAllowed, expediteConfig, foldRally, formatForPairing, initKernel, isDecider, rallyTiming,
+  atAdvantage, capLeader, changesEndsAfterUnit, effectiveLevel, expediteAllowed, expediteConfig, foldRally, formatForPairing, initKernel, isDecider, rallyTiming,
   resolveServer, resultEnvelope, serveCall, serveEveryNow, serveSpecFor, setChoiceDue, step, misconductTerms, timeoutRules, timeoutsLeft, unitClock,
   type KernelState, type LevelSpec, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
@@ -42,6 +42,8 @@ export interface RacquetDeckProps {
   firstServer: Side;
   onChange: (log: RallyLog, state: KernelState) => void;
   onSignOff: (log: RallyLog, state: KernelState) => void;
+  /** Abandoned for now: keep the score and mark the fixture postponed. */
+  onSuspend?: (log: RallyLog, state: KernelState) => void;
   onFirstServerChange?: (side: Side) => void;
   /** Swap which partner of a pair is listed first - the first server / first receiver. */
   onSwapPair?: (side: Side) => void;
@@ -835,6 +837,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
           format={format} state={state}
           homeName={homeName} awayName={awayName}
           onEvent={(ev) => { setFinishing(false); push(ev); }}
+          onSuspend={p.onSuspend && (() => { setFinishing(false); p.onSuspend!(log, state); })}
           onCancel={() => setFinishing(false)}
         />
       )}
@@ -1546,24 +1549,29 @@ function describe(t: ReturnType<typeof foldRally>['trace'][number], nameOf: (s: 
  * was never reached. The current score is shown so the choice is made with the
  * actual state in view rather than from memory.
  */
-function FinishPanel({ format, state, homeName, awayName, onEvent, onCancel }: {
+function FinishPanel({ format, state, homeName, awayName, onEvent, onSuspend, onCancel }: {
   format: ScoringFormat; state: KernelState;
   homeName: string; awayName: string;
   onEvent: (e: RallyEvent) => void;
+  /** Stop for now (rain, light) and carry on from this score later. */
+  onSuspend?: () => void;
   onCancel: () => void;
 }) {
   const lv = effectiveLevel(format, state, state.pointLevel);
   const env = resultEnvelope(format, state);
   const nameOf = (s: Side) => (s === 'A' ? homeName : awayName);
   const pts = state.score[state.pointLevel];
-  const level = pts[0] === pts[1];
-  const leader: Side | null = pts[0] === pts[1] ? null : pts[0] > pts[1] ? 'A' : 'B';
+  // Time up goes by sets, then games, then points - a side a game up leads, as the buzzer rules.
+  const leader = capLeader(format, state);
+  const level = leader === null;
+  const drawOnTime = format.clock?.tieRule === 'draw' && format.endStates.drawsAllowed;
+  const [abandoning, setAbandoning] = useState(false);
 
-  const end = async (winner: Side | null, reason: 'retired' | 'walkover' | 'conceded' | 'cap' | 'abandoned', title: string, message: string) => {
+  const end = async (winner: Side | null, reason: 'retired' | 'walkover' | 'conceded' | 'cap' | 'abandoned', title: string, message: string, outcome?: 'void') => {
     const ok = await confirmDialog({ title, message, confirmLabel: 'Record it' });
     if (!ok) return;
-    onEvent(winner === null
-      ? { t: 'end', outcome: 'draw', reason, winner: null }
+    onEvent(outcome ? { t: 'end', outcome, reason, winner: null }
+      : winner === null ? { t: 'end', outcome: 'draw', reason, winner: null }
       : { t: 'end', outcome: 'win', reason, winner });
   };
 
@@ -1611,7 +1619,7 @@ function FinishPanel({ format, state, homeName, awayName, onEvent, onCancel }: {
       {format.clock && (
         <Button size="sm" variant="subtle"
           onClick={() => {
-            if (level && !format.endStates.drawsAllowed) {
+            if (level && !drawOnTime) {
               toast.error('Scores are level and this format does not allow a draw — play the next point.');
               return;
             }
@@ -1619,15 +1627,41 @@ function FinishPanel({ format, state, homeName, awayName, onEvent, onCancel }: {
               level ? 'Record a draw?' : `Time up — ${nameOf(leader!)} leads?`,
               level ? 'The match is recorded as drawn.' : `${nameOf(leader!)} takes the match on the score at the buzzer.`);
           }}>
-          Time up ({format.clock.minutes} min) — {level ? 'record a draw' : `${nameOf(leader ?? 'A')} leads`}
+          Time up ({format.clock.minutes} min) — {level ? 'record a draw' : `${nameOf(leader!)} leads`}
         </Button>
       )}
 
-      <Button size="sm" variant="subtle"
-        onClick={() => end(null, 'abandoned', 'Abandon this match?',
-          'No winner is recorded. The organiser decides what happens to the fixture.')}>
-        Abandoned — no result
-      </Button>
+      {/* Abandoned (rain, light, venue): carry on later from this score, or close it as a
+          no-result where both sides share the points - the organiser's call, not a draw. */}
+      {!abandoning ? (
+        <Button size="sm" variant="subtle" onClick={() => setAbandoning(true)}>
+          Abandoned (rain, light…)
+        </Button>
+      ) : (
+        <div className="grid gap-2 rounded-lg border border-slate-200 p-2 dark:border-slate-700">
+          <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">What happens to this match?</div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {onSuspend && (
+              <Button size="sm" variant="outline"
+                onClick={async () => {
+                  const ok = await confirmDialog({
+                    title: 'Suspend this match?',
+                    message: 'It is marked postponed and the score is kept. Open it again to carry on from here.',
+                    confirmLabel: 'Suspend',
+                  });
+                  if (ok) onSuspend();
+                }}>
+                Suspend — resume later
+              </Button>
+            )}
+            <Button size="sm" variant="outline"
+              onClick={() => end(null, 'abandoned', 'No result — share the points?',
+                'The match is closed with no winner. Both sides get the same points in the table, whatever the score.', 'void')}>
+              No result — share the points
+            </Button>
+          </div>
+        </div>
+      )}
 
       <button type="button" className="text-left text-xs text-slate-400 underline underline-offset-2 dark:text-slate-500"
         onClick={onCancel}>

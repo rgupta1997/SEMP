@@ -32,6 +32,17 @@ export type MatchPosition = (typeof MATCH_POSITION)[number];
 /** Shown wherever a fixture's side is not decided yet. */
 export const TBD_LABEL = 'TBD';
 
+/** An abandoned match recorded as "no result, points shared" - flagged in live_state. */
+export const isNoResult = (liveState: unknown): boolean =>
+  (liveState as { noResult?: unknown } | null)?.noResult === true;
+
+/** The round label the knockout generators give the play-off for third. */
+export const THIRD_PLACE_ROUND = '3rd Place';
+
+/** A bracket match (final and 3rd place included): someone must win, so a level result needs a tie-break. */
+export const isKnockoutFixture = (f: { bracket_position?: number | null; round?: string | null }): boolean =>
+  f.bracket_position != null || f.round === THIRD_PLACE_ROUND;
+
 export const GROUND_TYPE = ['court', 'field', 'pool', 'track', 'ring', 'table'] as const;
 export type GroundType = (typeof GROUND_TYPE)[number];
 

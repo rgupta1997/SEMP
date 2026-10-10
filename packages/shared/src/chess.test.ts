@@ -3,11 +3,12 @@ import { chessLineStats, chessMatchOutcome, describeTimeControl, endingsFor, for
 import { foldCareerStats, statSpecFor } from './stat-registry.js';
 import { toCategoryRow } from './category-lines.js';
 import { chessPresetForDiscipline } from './team-presets.js';
-import { decideRubber, initTie, reopenRubber, tieOutcome, tieScore, tieTarget, tieWinner } from './tie.js';
+import { decideRubber, hydrateTie, initTie, reopenRubber, tieOutcome, tieScore, tieTarget, tieWinner } from './tie.js';
 import { tieTemplateFor } from './tie-templates.js';
 import { playedContests } from './played-contests.js';
 import { chessStandingsRule } from './schemas.js';
 import type { TieSpec } from './scoring.js';
+import { THIRD_PLACE_ROUND, isKnockoutFixture } from './enums.js';
 
 const g = (result: ChessGame['result'], white: ChessGame['white'] = 'A'): ChessGame => ({ white, result });
 
@@ -71,6 +72,44 @@ describe('a chess team match (Olympiad style)', () => {
     s = decideRubber(spec, s, 3, 'B');
     expect(tieScore(spec, s)).toEqual({ a: 2, b: 2 });
     expect(tieOutcome(spec, s)).toMatchObject({ winner: null, drawn: true, decided: true });
+  });
+
+  const level = () => {
+    let s = decideRubber(spec, initTie(spec), 0, 'A');
+    s = decideRubber(spec, s, 1, 'B');
+    s = decideRubber(spec, s, 2, 'draw');
+    return decideRubber(spec, s, 3, 'draw');
+  };
+
+  it('a 2-2 settled on tie-break has a winner; the points stay level', () => {
+    const s = { ...level(), tiebreakWinner: 'B' as const };
+    expect(tieScore(spec, s)).toEqual({ a: 2, b: 2 });
+    expect(tieOutcome(spec, s)).toMatchObject({ winner: 'B', drawn: false, level: true, decided: true });
+    // Survives a reload; changing any board asks the question again.
+    expect(hydrateTie(JSON.parse(JSON.stringify(s)), spec).tiebreakWinner).toBe('B');
+    expect(decideRubber(spec, s, 3, 'draw').tiebreakWinner).toBeUndefined();
+    expect(reopenRubber(spec, s, 3).tiebreakWinner).toBeUndefined();
+  });
+
+  it('a tie-break never overrides a match won on the boards', () => {
+    let s = decideRubber(spec, initTie(spec), 0, 'A');
+    s = decideRubber(spec, s, 1, 'A');
+    s = decideRubber(spec, s, 2, 'A');
+    s = decideRubber(spec, s, 3, 'B');
+    expect(tieOutcome(spec, { ...s, tiebreakWinner: 'B' })).toMatchObject({ winner: 'A', level: false });
+  });
+
+  it('ignores a whole-number target: 2-2 is level and 2½-1½ wins', () => {
+    for (const target of [2, 3]) {
+      const custom = { ...spec, target };
+      expect(tieTarget(custom)).toBe(2.5);
+      expect(tieOutcome(custom, level())).toMatchObject({ winner: null, drawn: true });
+      let s = decideRubber(custom, initTie(custom), 0, 'A');
+      s = decideRubber(custom, s, 1, 'A');
+      s = decideRubber(custom, s, 2, 'draw');
+      s = decideRubber(custom, s, 3, 'B');
+      expect(tieOutcome(custom, s).winner).toBe('A');
+    }
   });
 
   it('2½-1½ wins the match', () => {
@@ -187,5 +226,14 @@ describe('chess standings', () => {
     const team = chessStandingsRule(true);
     expect(solo).toMatchObject({ win: 2, draw: 1, loss: 0 });
     expect(team.tiebreakers.slice(0, 2)).toEqual(['points', 'score_diff']);
+  });
+});
+
+describe('a knockout fixture', () => {
+  it('is any bracket match, the final and the 3rd-place play-off included', () => {
+    expect(isKnockoutFixture({ bracket_position: 3, round: 'QF' })).toBe(true);
+    expect(isKnockoutFixture({ bracket_position: 1, round: 'Final' })).toBe(true);
+    expect(isKnockoutFixture({ bracket_position: null, round: THIRD_PLACE_ROUND })).toBe(true);
+    expect(isKnockoutFixture({ bracket_position: null, round: 'Round 2' })).toBe(false);
   });
 });

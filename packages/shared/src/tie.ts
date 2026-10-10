@@ -110,6 +110,8 @@ export interface TieState {
   rubbers: RubberInstance[];
   /** Chess: the side with white on board 1; colours then alternate down the boards. */
   firstWhite?: 'A' | 'B';
+  /** A level tie settled by the organiser's tie-break (top board, Armageddon). Points stay level. */
+  tiebreakWinner?: 'A' | 'B';
 }
 
 // A rubber's contest spec drives reduce/headline/subLine in the console.
@@ -118,13 +120,14 @@ export function rubberDef(spec: TieSpec, index: number): ContestSpec {
 }
 
 // Rubbers needed to clinch: explicit `target`, else a simple majority of the rubbers.
-// On board points it is just over half the points: 2½ of 4 boards, 3 of 5.
+// On board points it is always just over half the points (2½ of 4, 3 of 5): a whole-number
+// target there either hands a 2-2 to the home side or leaves 2½-1½ undecided.
+export const boardPointsTarget = (boards: number): number =>
+  boards % 2 === 0 ? boards / 2 + 0.5 : (boards + 1) / 2;
+
 export function tieTarget(spec: TieSpec): number {
+  if (spec.boardPoints) return boardPointsTarget(spec.rubbers.length);
   if (spec.target) return spec.target;
-  if (spec.boardPoints) {
-    const n = spec.rubbers.length;
-    return n % 2 === 0 ? n / 2 + 0.5 : (n + 1) / 2;
-  }
   return Math.floor(spec.rubbers.length / 2) + 1;
 }
 
@@ -167,6 +170,7 @@ export function hydrateTie(raw: any, spec: TieSpec): TieState {
     if (typeof raw.activeRubber === 'number') base.activeRubber = Math.min(Math.max(0, raw.activeRubber), spec.rubbers.length - 1);
   }
   if (raw?.firstWhite === 'A' || raw?.firstWhite === 'B') base.firstWhite = raw.firstWhite;
+  if (raw?.tiebreakWinner === 'A' || raw?.tiebreakWinner === 'B') base.tiebreakWinner = raw.tiebreakWinner;
   // Land on something PLAYABLE. A persisted pointer can name a rubber that has since
   // been completed or skipped - a stale snapshot, a hand-edited live_state, a tie
   // reopened from another device - and a console pointed at a finished contest shows
@@ -203,6 +207,8 @@ export function tieScore(spec: TieSpec, state: TieState): { a: number; b: number
 export function tieWinner(spec: TieSpec, state: TieState): 'A' | 'B' | null {
   const { a, b } = tieScore(spec, state);
   const t = tieTarget(spec);
+  // A target below a majority can be passed by both sides: the bigger score wins, not home.
+  if (a >= t && b >= t) return a > b ? 'A' : b > a ? 'B' : null;
   if (a >= t) return 'A';
   if (b >= t) return 'B';
   return null;
@@ -228,12 +234,17 @@ export function playableRubbers(state: TieState): number {
  * the draw that chess has always allowed.
  */
 export function tieOutcome(spec: TieSpec, state: TieState): {
-  winner: 'A' | 'B' | null; drawn: boolean; playable: number; decided: boolean;
+  winner: 'A' | 'B' | null; drawn: boolean; level: boolean; playable: number; decided: boolean;
 } {
-  const winner = tieWinner(spec, state);
   const playable = playableRubbers(state);
-  const drawn = winner === null && playable === 0;
-  return { winner, drawn, playable, decided: winner !== null || drawn };
+  const { a, b } = tieScore(spec, state);
+  // All played and short of a target set above the majority: the bigger score still wins.
+  const onPoints = tieWinner(spec, state) ?? (playable === 0 && a !== b ? (a > b ? 'A' : 'B') : null);
+  // Level with nothing left to play; a recorded tie-break then names the winner.
+  const level = onPoints === null && playable === 0;
+  const winner = onPoints ?? (level ? state.tiebreakWinner ?? null : null);
+  const drawn = level && winner === null;
+  return { winner, drawn, level, playable, decided: winner !== null || drawn };
 }
 
 // Once the tie is decided, mark any unplayed rubbers dead (skipped) when the format
@@ -261,7 +272,9 @@ export function decideRubber(spec: TieSpec, state: TieState, index: number, winn
     if (r.winner !== next.winner || !!r.drawn !== !!next.drawn) delete next.ending;
     return next;
   });
+  // Any changed result re-opens the question of a tie-break.
   let next: TieState = { ...state, rubbers };
+  delete next.tiebreakWinner;
   next = applyDead(spec, next);
   const upcoming = next.rubbers.findIndex((r) => r.status === 'pending' || r.status === 'live');
   if (upcoming >= 0) next.activeRubber = upcoming;
@@ -284,5 +297,6 @@ export function reopenRubber(spec: TieSpec, state: TieState, index: number, rese
     }
     return r.winner === null && r.status === 'dead' ? { ...r, status: 'pending' as RubberStatus } : r;
   });
-  return applyDead(spec, { ...state, activeRubber: index, rubbers });
+  const { tiebreakWinner: _drop, ...rest } = state;
+  return applyDead(spec, { ...rest, activeRubber: index, rubbers });
 }

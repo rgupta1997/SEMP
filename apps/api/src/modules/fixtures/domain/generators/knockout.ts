@@ -1,3 +1,4 @@
+import { THIRD_PLACE_ROUND } from '@semp/shared';
 import { BusinessRuleError } from '../../../../shared/errors.js';
 import type { GeneratedFixture, TeamRef } from './types.js';
 import { nextPowerOfTwo, roundLabel, seedOrder } from './util.js';
@@ -75,7 +76,7 @@ export function generateKnockout(teams: TeamRef[], params: KnockoutParams = {}):
 
   if (params.thirdPlaceMatch) {
     fixtures.push({
-      round: '3rd Place',
+      round: THIRD_PLACE_ROUND,
       poolNumber: null,
       bracketPosition: null,
       homeTeamId: null,

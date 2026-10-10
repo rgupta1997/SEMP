@@ -11,12 +11,12 @@ import {
 } from '../../features/scoring/engine';
 import { resolveTemplate, tieTemplateFor, eventTemplateFor } from '../../features/scoring/templates';
 import {
-  hydrateTie, rubbersWon, tieScore, tieWinner, tieOutcome, tieTarget, rubberDef, decideRubber as decideRubberFn, reopenRubber as reopenRubberFn,
+  hydrateTie, rubbersWon, tieScore, tieOutcome, tieTarget, rubberDef, decideRubber as decideRubberFn, reopenRubber as reopenRubberFn,
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
 import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
-import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, isChessSport, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
+import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, isChessSport, isKnockoutFixture, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
 import type { TieSpec, EventSpec, ScoringMode, KernelState, Pairing, RallyLog, RubberLineup, Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer, hydratePairSwap } from '../../features/scoring/RacquetDeck';
 import { LineupPanel } from '../../features/scoring/LineupPanel';
@@ -1079,7 +1079,7 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
   }
 
   const save = (nextLog: RallyLog, state: KernelState, done: boolean, after?: () => void,
-    lineupOver?: { lineup?: RubberLineup; lineupSkipped: boolean }) => {
+    lineupOver?: { lineup?: RubberLineup; lineupSkipped: boolean }, suspend = false) => {
     const env = resultEnvelope(format, state);
     // A match is only ever completed when the KERNEL says it ended - a target
     // reached by the required margin, a cap, or an explicit end event (retire,
@@ -1091,11 +1091,14 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
     // A walkover from the deck is saved exactly like the Walkover button's: its own
     // status and no scoreline, so the record never shows a match nobody played.
     const walkover = reallyDone && state.reason === 'walkover';
-    const st = walkover
+    // A suspended match is postponed with its score; the next point tapped resumes it.
+    const st = suspend
+      ? 'postponed'
+      : walkover
       ? 'walkover'
       : reallyDone
       ? 'completed'
-      : (status === 'scheduled' || status === 'completed' || status === 'confirmed' ? 'live' : status);
+      : (status === 'scheduled' || status === 'completed' || status === 'confirmed' || status === 'postponed' ? 'live' : status);
     const winner_team_id = !reallyDone || env.winner === null
       ? null
       : env.winner === 'A' ? fixture.home_team_id : fixture.away_team_id;
@@ -1120,6 +1123,8 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
           timing: rallyTiming(format, nextLog, firstServer),
           // Snapshot on first write, then leave alone.
           format: (live?.live_state as any)?.format ?? format,
+          // Abandoned as "no result": standings share the points whatever the score.
+          noResult: reallyDone && state.outcome === 'void',
         },
         live_log: rallyTimeline(format, nextLog, firstServer, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
         home_score: walkover ? null : env.headline[0],
@@ -1194,6 +1199,7 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
         }}
         onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
         onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
+        onSuspend={(nextLog, state) => save(nextLog, state, false, onDone, undefined, true)}
       />
     </div>
   );
@@ -1469,7 +1475,8 @@ function ChessConsole({ fixture, fixtureId, live, invalidate, onDone }:
   };
 
   return (
-    <ChessResult homeName={homeName} awayName={awayName} gamesInMatch={gamesInMatch} timeControl={timeControl} initial={initial}
+    <ChessResult homeName={homeName} awayName={awayName} gamesInMatch={gamesInMatch} needsWinner={isKnockoutFixture(fixture ?? {})}
+      timeControl={timeControl} initial={initial}
       busy={persist.isPending} onSave={save} />
   );
 }
@@ -2016,7 +2023,7 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
 
   const save = (next: TieState, st: string, done = false, onSuccess?: () => void, onErr?: () => void) => {
     const { a, b } = tieScore(spec, next);
-    const w = tieWinner(spec, next);
+    const w = tieOutcome(spec, next).winner;
     const winner_team_id = done ? (w === 'A' ? fixture.home_team_id : w === 'B' ? fixture.away_team_id : null) : null;
     persist.mutate(
       // Keep other live_state keys (tie_blocked). Chess: home has white on board 1 by default
@@ -2092,12 +2099,19 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
   // template is four boards with a majority of three, so 2-2 happens - and asking
   // only `tieWinner` left the official told to "record rubber results until one side
   // reaches 3" with no rubbers left to record, and no way to complete the fixture.
-  const { winner: w, drawn, decided, playable } = tieOutcome(spec, state);
+  const { winner: w, drawn, level, decided, playable } = tieOutcome(spec, state);
   const target = tieTarget(spec);
   // Chess boards, everything else rubbers - said the way the sport says it.
   const unit = spec.boardPoints ? 'board' : 'rubber';
+  const knockout = isKnockoutFixture(fixture ?? {});
+  const setTiebreak = (s: Side | undefined) => {
+    const { tiebreakWinner: _drop, ...rest } = state;
+    const next: TieState = s ? { ...rest, tiebreakWinner: s } : rest;
+    setState(next); save(next, status);
+  };
   const signOff = async () => {
     if (!decided) { toast.error(`The tie isn’t decided yet - record ${unit} results until one side reaches ${formatPoints(target)}.`); return; }
+    if (drawn && knockout) { toast.error('This is a knockout tie - record who won the tie-break before signing off.'); return; }
     // Chess plays every board: the board points are the result the standings rank on,
     // so a 2½-½ lead with a board to go is not a finished match.
     if (spec.boardPoints && playable > 0) {
@@ -2110,7 +2124,7 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
       confirmLabel: drawn ? 'Sign off as a draw' : 'Sign off',
       message: drawn
         ? `${homeName} ${formatPoints(a)} - ${formatPoints(b)} ${awayName}. Every ${unit} has been played and neither side reached ${formatPoints(target)}, so this tie is drawn. Standings will record it as a draw for both sides.`
-        : `${homeName} ${formatPoints(a)} - ${formatPoints(b)} ${awayName}. This completes the tie and updates standings.`,
+        : `${homeName} ${formatPoints(a)} - ${formatPoints(b)} ${awayName}${level && w ? `, ${w === 'A' ? homeName : awayName} on tie-break` : ''}. This completes the tie and updates standings.`,
     });
     if (!ok) return;
     setSubmitting(true);
@@ -2125,8 +2139,10 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
 
   // Games won in a rubber scored on the kernel - "2–1".
   const rubberGames = (r: RubberInstance): string | null => {
-    const fmt = r.format ?? baseFormat?.format;
-    if (!racquet || !fmt || !r.rally?.length) return null;
+    const frozen = r.format ?? baseFormat?.format;
+    if (!racquet || !frozen || !r.rally?.length) return null;
+    // Singles rubbers serve as singles: fold under the lineup's rules, as the deck scored it.
+    const fmt = formatForPairing(frozen, r.lineup);
     const h = resultEnvelope(fmt, foldRally(fmt, r.rally, r.firstServer ?? 'A').state).headline;
     return `${h[0]}–${h[1]}`;
   };
@@ -2162,7 +2178,7 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
               {orgLabel(awayTeam(fixture)) && <div className="text-xs font-normal text-slate-400">{orgLabel(awayTeam(fixture))}</div>}
             </div>
           </div>
-          <div className="mt-2 text-center text-sm text-slate-400">{decided ? (drawn ? 'Tie drawn' : `${w === 'A' ? homeName : awayName} win the tie`) : `${state.rubbers.filter((r) => r.status === 'completed').length} of ${spec.rubbers.length} ${unit}s played`}</div>
+          <div className="mt-2 text-center text-sm text-slate-400">{decided ? (drawn ? 'Tie drawn' : `${w === 'A' ? homeName : awayName} win the tie${level ? ' on tie-break' : ''}`) : `${state.rubbers.filter((r) => r.status === 'completed').length} of ${spec.rubbers.length} ${unit}s played`}</div>
         </div>
       </Card>
 
@@ -2226,6 +2242,22 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
                       ))}
                     </div>
                     <p className="px-1 text-[11px] text-slate-400 dark:text-slate-500">Colours then alternate down the boards.</p>
+                  </div>
+                )}
+                {level && (
+                  <div className="space-y-1.5 rounded-lg border border-amber-300 bg-amber-50 p-2 dark:border-amber-500/40 dark:bg-amber-500/10">
+                    <div className="px-1 text-xs font-semibold text-amber-900 dark:text-amber-200">Level at {formatPoints(a)}–{formatPoints(b)}</div>
+                    <p className="px-1 text-[11px] text-amber-900/80 dark:text-amber-200/80">
+                      {knockout ? 'A knockout tie needs a winner: record who won the tie-break.' : 'Sign off as a draw, or record who won the tie-break.'}
+                    </p>
+                    <div className={cn('grid gap-1.5', knockout ? 'grid-cols-2' : 'grid-cols-3')}>
+                      {((knockout ? ['A', 'B'] : [undefined, 'A', 'B']) as Array<Side | undefined>).map((s) => (
+                        <Button key={s ?? 'none'} size="sm" variant={state.tiebreakWinner === s ? 'primary' : 'outline'} disabled={submitting}
+                          onClick={() => { if (state.tiebreakWinner !== s) setTiebreak(s); }}>
+                          <span className="truncate">{s ? (s === 'A' ? homeName : awayName) : 'Draw'}</span>
+                        </Button>
+                      ))}
+                    </div>
                   </div>
                 )}
                 <Button className="w-full justify-start" disabled={submitting} onClick={signOff}>✍ End tie &amp; sign off</Button>

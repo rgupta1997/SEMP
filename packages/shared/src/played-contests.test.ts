@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { playedContests, seatIn } from './played-contests.js';
 import { presetByKey } from './racquet-presets.js';
-import type { RallyEvent, RallyLog } from './rally-kernel.js';
+import { capLeader, foldRally, resultEnvelope, type RallyEvent, type RallyLog } from './rally-kernel.js';
+import { formatForPairing } from './serve-resolvers.js';
 import { tieTemplateFor } from './tie-templates.js';
 import { decideRubber, hydrateTie, initTie, reopenRubber, resolveMatchLineup } from './tie.js';
 
@@ -80,5 +81,30 @@ describe('playedContests - team tie', () => {
     s = reopenRubber(spec, decideRubber(spec, back, 0, 'B'), 0, true);
     expect(s.rubbers[0].rally).toBeUndefined();
     expect(s.rubbers[0].lineup).toEqual({ A: ['a1'], B: ['b1'] });
+  });
+});
+
+describe('playedContests - a singles rubber in a side-out tie', () => {
+  it('is scored under singles serve rules, as the console played it', () => {
+    const doubles = presetByKey('usap_tournament_bo3_11')!;
+    const singles = formatForPairing(doubles, { A: ['a'], B: ['b'] });
+    // A wins two rallies in three until the singles match ends.
+    const rally: RallyLog = [];
+    for (let i = 0; i < 400 && !foldRally(singles, rally).state.ended; i++) rally.push({ t: 'point', side: i % 3 === 2 ? 'B' : 'A' });
+    const played = resultEnvelope(singles, foldRally(singles, rally).state).headline;
+    const r = playedContests({
+      liveState: { tie: { rubbers: [{ key: 'ms', label: 'MS', lineup: { A: ['a1'], B: ['b1'] }, status: 'completed', winner: 'A', rally, format: doubles, firstServer: 'A' }] } },
+      sportName: 'pickleball', entryType: 'team', roster, matchWinner: null,
+    });
+    expect(r.kind === 'contests' && r.contests[0].score).toEqual([played[0], played[1]]);
+  });
+});
+
+describe('capLeader - who leads when time is called', () => {
+  const P = (side: 'A' | 'B', n: number) => points(side, n);
+  it('a game up leads, whoever leads the game under way', () => {
+    const f = presetByKey('corp_bo3_11_timecap')!;
+    expect(capLeader(f, foldRally(f, [...P('A', 11), ...P('B', 3), ...P('A', 2)]).state)).toBe('A');
+    expect(capLeader(f, foldRally(f, [...P('A', 3), ...P('B', 3)]).state)).toBeNull();
   });
 });

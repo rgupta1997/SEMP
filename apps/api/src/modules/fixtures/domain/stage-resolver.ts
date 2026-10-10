@@ -1,4 +1,4 @@
-import { contingentKey, isChessSport, stageConfigSchema, type StandingsTiebreaker } from '@semp/shared';
+import { contingentKey, isChessSport, isNoResult, stageConfigSchema, type StandingsTiebreaker } from '@semp/shared';
 import type { Prisma } from '../../../infra/prisma.js';
 import { resolveRuleForDraw } from '../../standings/standings.service.js';
 import { advanceInBracket } from '../bracket.js';
@@ -27,6 +27,7 @@ type FixtureRow = {
   winner_team_id: string | null;
   home_score: number | null;
   away_score: number | null;
+  live_state: unknown;
   teams_fixtures_home_team_idToteams: { organization_id: string; org_unit_id: string | null } | null;
   teams_fixtures_away_team_idToteams: { organization_id: string; org_unit_id: string | null } | null;
 };
@@ -52,6 +53,7 @@ function toSchemeFixture(f: FixtureRow): PoolFixture {
     away_entity_id: key(f.teams_fixtures_away_team_idToteams),
     home_score: f.home_score, away_score: f.away_score,
     winner_team_id: f.winner_team_id,
+    no_result: isNoResult(f.live_state),
   };
 }
 
@@ -87,7 +89,7 @@ export async function resolveStageAdvancement(prisma: Prisma, tournamentDiscipli
       select: {
         id: true, stage_sequence: true, pool_number: true, bracket_position: true, round: true, status: true,
         home_team_id: true, away_team_id: true, home_slot_label: true, away_slot_label: true, winner_team_id: true,
-        home_score: true, away_score: true,
+        home_score: true, away_score: true, live_state: true,
         teams_fixtures_home_team_idToteams: { select: { organization_id: true, org_unit_id: true } },
         teams_fixtures_away_team_idToteams: { select: { organization_id: true, org_unit_id: true } },
       },

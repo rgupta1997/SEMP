@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { buildTieSpec, tieLayoutsFor, type TieRubberDraft, type TieSpec } from '@semp/shared';
+import { boardPointsTarget, buildTieSpec, formatPoints, isChessSport, tieLayoutsFor, type TieRubberDraft, type TieSpec } from '@semp/shared';
 import { Button, Input, Select, cn } from '../../components/ui';
 
 // ============================================================================
@@ -75,6 +75,9 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
   };
 
   const majority = Math.floor(rubbers.length / 2) + 1;
+  // Chess is won on board points, always just over half (2½ of 4): there is no target to pick.
+  const chess = isChessSport(sport);
+  const chessTarget = boardPointsTarget(rubbers.length);
 
   return (
     <div className="mb-3 grid gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
@@ -132,12 +135,18 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="grid gap-1 text-xs text-slate-500 dark:text-slate-400">
           Tie is won by
-          <Select value={String(target)} onChange={(e) => { const t = Number(e.target.value); setTarget(t); own(); emit({ target: t, standard: false }); }}>
-            <option value="0">First to {majority} (majority)</option>
-            {Array.from({ length: rubbers.length }, (_, i) => i + 1).filter((n) => n !== majority).map((n) => (
-              <option key={n} value={n}>First to {n}</option>
-            ))}
-          </Select>
+          {chess ? (
+            <span className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-200">
+              First to {formatPoints(chessTarget)} board points
+            </span>
+          ) : (
+            <Select value={String(target)} onChange={(e) => { const t = Number(e.target.value); setTarget(t); own(); emit({ target: t, standard: false }); }}>
+              <option value="0">First to {majority} (majority)</option>
+              {Array.from({ length: rubbers.length }, (_, i) => i + 1).filter((n) => n !== majority).map((n) => (
+                <option key={n} value={n}>First to {n}</option>
+              ))}
+            </Select>
+          )}
         </label>
       </div>
 

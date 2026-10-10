@@ -30,6 +30,8 @@ export interface SchemeFixture {
   // Organiser-entered championship points per side - used only by the 'custom' scheme.
   home_points?: number | null;
   away_points?: number | null;
+  /** Abandoned as "no result": both sides share the draw points, whatever the score. */
+  no_result?: boolean;
 }
 
 export interface EntityTally {
@@ -52,6 +54,11 @@ function emptyTally(entity_id: string): EntityTally {
   return { entity_id, played: 0, won: 0, drawn: 0, lost: 0, points: 0, gf: 0, ga: 0, detail: {} };
 }
 
+// A result that counts: a played match, or a walkover with its winner (a forfeit is a
+// win for one side and a loss for the other; it has no score, so goals are untouched).
+const isResult = (f: SchemeFixture): boolean =>
+  f.status === 'completed' || (f.status === 'walkover' && !!f.winner_team_id);
+
 // Core W/D/L counter shared by every scheme - counts played/won/drawn/lost and
 // goals for/against, and awards `win`/`draw`/`loss` points. Returns a keyed map so
 // callers can layer scheme-specific points on top.
@@ -64,7 +71,7 @@ function leagueTally(fixtures: SchemeFixture[], win: number, draw: number, loss:
   };
 
   for (const f of fixtures) {
-    if (f.status !== 'completed') continue;
+    if (!isResult(f)) continue;
     const home = f.home_entity_id ? ensure(f.home_entity_id) : null;
     const away = f.away_entity_id ? ensure(f.away_entity_id) : null;
     if (!home && !away) continue;
@@ -73,7 +80,8 @@ function leagueTally(fixtures: SchemeFixture[], win: number, draw: number, loss:
     if (home && f.home_score != null) { home.gf += f.home_score; home.ga += f.away_score ?? 0; }
     if (away && f.away_score != null) { away.gf += f.away_score; away.ga += f.home_score ?? 0; }
 
-    const isDraw = f.winner_team_id == null && f.home_score != null && f.away_score != null && f.home_score === f.away_score;
+    const isDraw = f.winner_team_id == null
+      && (f.no_result === true || (f.home_score != null && f.away_score != null && f.home_score === f.away_score));
     if (isDraw) {
       if (home) { home.drawn++; home.points += draw; }
       if (away) { away.drawn++; away.points += draw; }
@@ -172,7 +180,7 @@ function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule,
   // a reached-the-next-stage floor) even though leagueTally ignores them as unplayed.
   const candidates = new Map<string, Set<StandingsPlacement>>();
   for (const f of fixtures) {
-    if (f.status !== 'completed' && f.status !== 'bye') continue;
+    if (!isResult(f) && f.status !== 'bye') continue;
     for (const [teamId, placement] of placementCandidates(f)) {
       let set = candidates.get(teamId);
       if (!set) { set = new Set(); candidates.set(teamId, set); }
@@ -214,7 +222,7 @@ function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule,
 function customScheme(fixtures: SchemeFixture[]): EntityTally[] {
   const table = leagueTally(fixtures, 0, 0, 0);
   for (const f of fixtures) {
-    if (f.status !== 'completed') continue;
+    if (!isResult(f)) continue;
     if (f.home_entity_id && f.home_points != null) { const row = table.get(f.home_entity_id); if (row) row.points += f.home_points; }
     if (f.away_entity_id && f.away_points != null) { const row = table.get(f.away_entity_id); if (row) row.points += f.away_points; }
   }
