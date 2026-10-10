@@ -66,6 +66,7 @@ const FIXTURE = {
   home_team_id: 'tA', away_team_id: 'tB',
   home_score: 3, away_score: 1,
   winner_team_id: 'tA' as string | null,
+  round: null as string | null,
   // Null = not a bracket (a league fixture). A test overrides it to exercise the
   // knockout dead-end guard.
   bracket_position: null as number | null,
@@ -354,12 +355,14 @@ describe('lockScorecard · a knockout match must produce a winner', () => {
     expect(prisma.current.scorecard_status).toBe('locked');
   });
 
-  it('allows a DRAW in the FINAL, which has no next round', async () => {
-    // bracket_position 2 in a 4-team bracket IS the final; computeParentPosition
-    // returns null for it, so there is no empty slot to leave behind.
-    const prisma = fakePrisma({ bracket_position: 2, stage_sequence: 1, winner_team_id: null, home_score: 1, away_score: 1 }, 3);
-    await lockScorecard(prisma, REQ, 'fx1');
-    expect(prisma.current.scorecard_status).toBe('locked');
+  it('refuses a DRAW in the FINAL too - it would crown nobody', async () => {
+    const prisma = fakePrisma({ bracket_position: 2, stage_sequence: 1, round: 'Final', winner_team_id: null, home_score: 1, away_score: 1 }, 3);
+    await expect(lockScorecard(prisma, REQ, 'fx1')).rejects.toThrow(/no winner/i);
+  });
+
+  it('refuses a drawn 3rd-place play-off, which has no bracket position', async () => {
+    const prisma = fakePrisma({ bracket_position: null, round: '3rd Place', winner_team_id: null, home_score: 1, away_score: 1 }, 3);
+    await expect(lockScorecard(prisma, REQ, 'fx1')).rejects.toThrow(/no winner/i);
   });
 
   it('allows a walkover with no winner recorded', async () => {
@@ -369,11 +372,8 @@ describe('lockScorecard · a knockout match must produce a winner', () => {
     expect(prisma.current.scorecard_status).toBe('locked');
   });
 
-  it('does not fire on a bracket that is not a clean power of two', async () => {
-    // computeParentPosition refuses to guess there, so the guard must not either -
-    // it would make such a draw unlockable with no way forward, which is a worse
-    // dead end than the one it is preventing.
-    const prisma = fakePrisma(KO, 4);
+  it('a group or league match may still be drawn', async () => {
+    const prisma = fakePrisma({ ...KO, bracket_position: null, round: 'Round 1' }, 4);
     await lockScorecard(prisma, REQ, 'fx1');
     expect(prisma.current.scorecard_status).toBe('locked');
   });
@@ -542,8 +542,9 @@ describe('lockScorecard · team_eliminated', () => {
     expect(callOfType('team_eliminated')).toBeUndefined();
   });
 
-  it('does not fire on a draw (no winner_team_id), even in a bracket', async () => {
-    const prisma = fakePrisma({ bracket_position: 1, winner_team_id: null });
+  it('does not fire with no winner_team_id, even in a bracket', async () => {
+    // A bracket draw can't be locked any more; a walkover recorded without a winner can.
+    const prisma = fakePrisma({ bracket_position: 1, winner_team_id: null, status: 'walkover' });
     await lockScorecard(prisma, REQ, 'fx1');
     expect(callOfType('team_eliminated')).toBeUndefined();
   });

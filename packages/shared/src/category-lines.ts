@@ -44,6 +44,13 @@ type Mapping = string | BoolMapping;
 
 const bool = (column: string): BoolMapping => ({ column, boolean: true });
 
+/** Chess per-game counters: metric key and board_match_lines column are the same name. */
+export const CHESS_GAME_COLUMNS = [
+  'chess_games', 'chess_wins', 'chess_draws', 'chess_losses', 'chess_points_x2', 'chess_points_max_x2',
+  'white_games', 'white_points_x2', 'white_points_max_x2', 'black_games', 'black_points_x2', 'black_points_max_x2',
+  'wins_by_checkmate', 'wins_by_resignation', 'wins_on_time', 'draws_by_agreement',
+] as const;
+
 /**
  * metric key → column, per family. Every non-derived registry metric appears here
  * or in SPINE_METRICS; the test enforces it.
@@ -53,6 +60,18 @@ export const COLUMN_MAP: Record<Exclude<StatFamily, 'measured' | 'cricket'>, Rec
     points_won: 'points_won', points_lost: 'points_lost',
     service_points_played: 'service_points_played', service_points_won: 'service_points_won',
     return_points_played: 'return_points_played', return_points_won: 'return_points_won',
+    pair_service_points_played: 'pair_service_points_played', pair_return_points_played: 'pair_return_points_played',
+    pair_service_points_won: 'pair_service_points_won', pair_return_points_won: 'pair_return_points_won',
+    side_outs_won: 'side_outs_won', service_turns: 'service_turns', service_turn_points: 'service_turn_points',
+    service_turns_faced: 'service_turns_faced', pickles: 'pickles',
+    expedite_matches: 'expedite_matches', expedite_wins: 'expedite_wins',
+    expedite_points_played: 'expedite_points_played', expedite_points_won: 'expedite_points_won',
+    expedite_return_wins: 'expedite_return_wins', expedite_return_losses: 'expedite_return_losses',
+    game_points_played: 'game_points_played', game_points_won: 'game_points_won',
+    game_points_faced: 'game_points_faced', game_points_saved: 'game_points_saved',
+    match_points_played: 'match_points_played', match_points_won: 'match_points_won',
+    match_points_faced: 'match_points_faced', match_points_saved: 'match_points_saved',
+    comeback_games: 'comeback_games',
     games_won: 'games_won', games_lost: 'games_lost',
     sets_won: 'sets_won', sets_lost: 'sets_lost',
     deciders_won: 'deciders_won', deciders_lost: 'deciders_lost',
@@ -60,9 +79,14 @@ export const COLUMN_MAP: Record<Exclude<StatFamily, 'measured' | 'cricket'>, Rec
     tiebreaks_won: 'tiebreaks_won', tiebreaks_lost: 'tiebreaks_lost',
     longest_streak: 'longest_streak',
     aces: 'aces', double_faults: 'double_faults', first_serves_in: 'first_serves_in',
+    serve_points_tracked: 'serve_points_tracked', first_serve_points_won: 'first_serve_points_won',
+    second_serve_points_played: 'second_serve_points_played', second_serve_points_won: 'second_serve_points_won',
+    service_games_played: 'service_games_played', service_games_won: 'service_games_won',
+    return_games_played: 'return_games_played', return_games_won: 'return_games_won',
     winners: 'winners', unforced_errors: 'unforced_errors', lets: 'lets',
     break_points_played: 'break_points_played', break_points_won: 'break_points_won',
-    break_points_saved: 'break_points_saved',
+    break_points_saved: 'break_points_saved', break_points_faced: 'break_points_faced',
+    love_holds: 'love_holds', bagels: 'bagels', won_from_set_down: 'won_from_set_down',
     // Per-match facts; the career numbers are counts of these rows.
     comeback_wins: bool('comeback_win'),
     retirements: bool('retired'),
@@ -102,6 +126,8 @@ export const COLUMN_MAP: Record<Exclude<StatFamily, 'measured' | 'cricket'>, Rec
     result_points_x2: 'result_points_x2', board_no: 'board_no',
     // as_white / as_black are career counts over the `colour` this match records.
     as_white: bool('colour_is_white'), as_black: bool('colour_is_black'),
+    // Chess per game - a match line holds every game in it, so colour splits add up.
+    ...Object.fromEntries(CHESS_GAME_COLUMNS.map((c) => [c, c])),
   },
   combat: {
     minutes: 'minutes',

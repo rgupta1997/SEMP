@@ -1,6 +1,6 @@
 import {
   CRICKET_CAREER_METRICS, COMPETITION_TIERS, TIER_META, isCricketSport, statSpecFor,
-  type CompetitionTier,
+  type CompetitionTier, type MatchPosition,
 } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
 
@@ -69,9 +69,25 @@ export interface TierRecord {
   metrics: SportStatMetric[];
 }
 
+export interface RubberRecord {
+  /** The rubber's name in the tie - "Men's Singles". */
+  label: string;
+  played: number;
+  won: number;
+  lost: number;
+}
+
 export interface DisciplineRecord {
   disciplineId: string;
   discipline: string;
+  overall: TierRecord;
+  tiers: TierRecord[];
+  /** For a team discipline: the tie rubbers this person played, so "Mixed" reads as what it was. */
+  rubbers?: RubberRecord[];
+}
+
+export interface PositionRecord {
+  position: MatchPosition;
   overall: TierRecord;
   tiers: TierRecord[];
 }
@@ -85,6 +101,8 @@ export interface SportRecord {
   tiers: TierRecord[];
   /** Men's Singles, Men's Doubles - most recently played first. */
   disciplines: DisciplineRecord[];
+  /** Singles and doubles, across every discipline - racquet sports only, when known. */
+  positions: PositionRecord[];
 }
 
 interface Row {
@@ -93,6 +111,7 @@ interface Row {
   discipline_id: string | null;
   discipline: string | null;
   grain: string;
+  position: string | null;
   tier: string;
   played: number; won: number; lost: number; drawn: number;
   gold: number; silver: number; bronze: number; awards: number;
@@ -127,6 +146,7 @@ function metricsFor(sport: string | null, bag: Record<string, unknown>): SportSt
   if (!spec) return [];
   const out: SportStatMetric[] = [];
   for (const m of spec.metrics) {
+    if (m.hidden) continue; // kept only to compute a rate
     const raw = bag[m.key];
     if (typeof raw !== 'number' || !Number.isFinite(raw)) continue;
     // A rate of zero is meaningful (a 0% win rate is a fact); a count of zero is not.
@@ -226,14 +246,14 @@ export async function sportRecordsFor(
   const rows = organizationId
     ? await db.$queryRaw<Row[]>`
       select c.sport_id, s.name as sport, c.discipline_id, d.name as discipline,
-             c.grain, c.tier, c.played, c.won, c.lost, c.drawn,
+             c.grain, c.position, c.tier, c.played, c.won, c.lost, c.drawn,
              c.gold, c.silver, c.bronze, c.awards, c.first_on, c.last_on, c.stats
       from career_stats c
       join sports s on s.id = c.sport_id
       left join disciplines d on d.id = c.discipline_id
       where c.user_id = ${userId}::uuid
         and c.organization_id = ${organizationId}::uuid
-        and c.grain in ('sport', 'discipline')
+        and c.grain in ('sport', 'discipline', 'position')
         and (${sportFilter}::uuid is null or c.sport_id = ${sportFilter}::uuid)
         and (${discFilter}::uuid is null
              or c.discipline_id = ${discFilter}::uuid
@@ -241,7 +261,7 @@ export async function sportRecordsFor(
       order by c.last_on desc nulls last`
     : await db.$queryRaw<Row[]>`
       select c.sport_id, s.name as sport, c.discipline_id, d.name as discipline,
-             c.grain, c.tier,
+             c.grain, c.position, c.tier,
              sum(c.played)::int as played, sum(c.won)::int as won,
              sum(c.lost)::int as lost, sum(c.drawn)::int as drawn,
              sum(c.gold)::int as gold, sum(c.silver)::int as silver,
@@ -255,22 +275,31 @@ export async function sportRecordsFor(
       join sports s on s.id = c.sport_id
       left join disciplines d on d.id = c.discipline_id
       where c.user_id = ${userId}::uuid
-        and c.grain in ('sport', 'discipline')
+        and c.grain in ('sport', 'discipline', 'position')
         and (${sportFilter}::uuid is null or c.sport_id = ${sportFilter}::uuid)
         and (${discFilter}::uuid is null
              or c.discipline_id = ${discFilter}::uuid
              or c.grain = 'sport')
-      group by c.sport_id, s.name, c.discipline_id, d.name, c.grain, c.tier
+      group by c.sport_id, s.name, c.discipline_id, d.name, c.grain, c.position, c.tier
       order by max(c.last_on) desc nulls last`;
 
-  interface Node { sport: string; byTier: Map<string, Row>; discs: Map<string, { name: string; byTier: Map<string, Row>; last: Date | null }> }
+  interface Node {
+    sport: string;
+    byTier: Map<string, Row>;
+    discs: Map<string, { name: string; byTier: Map<string, Row>; last: Date | null }>;
+    positions: Map<string, Map<string, Row>>;
+  }
   const bySport = new Map<string, Node>();
 
   for (const r of rows) {
     const node = bySport.get(r.sport_id)
-      ?? { sport: r.sport ?? 'Sport', byTier: new Map(), discs: new Map() };
+      ?? { sport: r.sport ?? 'Sport', byTier: new Map(), discs: new Map(), positions: new Map() };
     if (r.grain === 'sport') {
       node.byTier.set(r.tier, r);
+    } else if (r.grain === 'position' && r.position) {
+      const p = node.positions.get(r.position) ?? new Map<string, Row>();
+      p.set(r.tier, r);
+      node.positions.set(r.position, p);
     } else if (r.discipline_id) {
       const d = node.discs.get(r.discipline_id)
         ?? { name: r.discipline ?? 'Discipline', byTier: new Map(), last: r.last_on };
@@ -308,9 +337,137 @@ export async function sportRecordsFor(
       .sort((a, b) => (b.last?.getTime() ?? 0) - (a.last?.getTime() ?? 0))
       .map(({ disciplineId, discipline, overall, tiers: t }) => ({ disciplineId, discipline, overall, tiers: t }));
 
-    out.push({ sportId, sport: node.sport, overall: toRecord(all), tiers, disciplines });
+    const positions: PositionRecord[] = (['singles', 'doubles'] as const).flatMap((position) => {
+      const byTier = node.positions.get(position);
+      const s2 = byTier ? split(byTier) : null;
+      return s2?.all ? [{ position, overall: toRecord(s2.all), tiers: s2.tiers }] : [];
+    });
+
+    out.push({ sportId, sport: node.sport, overall: toRecord(all), tiers, disciplines, positions });
+  }
+
+  // Team disciplines say which rubbers were played inside them. Read from the timeline,
+  // which carries the rubber's name on each per-rubber result.
+  const rubbers = await rubbersByDiscipline(db, userId, organizationId ?? null, sportFilter);
+  for (const s of out) {
+    for (const d of s.disciplines) {
+      const list = rubbers.get(d.disciplineId);
+      if (list?.length) d.rubbers = list;
+    }
   }
   return out;
+}
+
+/** Per discipline, the tie rubbers a person played and how each went. */
+async function rubbersByDiscipline(
+  db: Db, userId: string, organizationId: string | null, sportId: string | null,
+): Promise<Map<string, RubberRecord[]>> {
+  const rows = await db.$queryRaw<Array<{ discipline_id: string; label: string; played: number; won: number; lost: number }>>`
+    select td.discipline_id, l.detail->>'rubber_label' as label,
+           count(*)::int as played,
+           count(*) filter (where l.detail->>'outcome' = 'won')::int as won,
+           count(*) filter (where l.detail->>'outcome' = 'lost')::int as lost
+    from lifetime_entries l
+    join fixtures f on f.id = l.fixture_id
+    join tournament_disciplines td on td.id = f.tournament_discipline_id
+    where l.user_id = ${userId}::uuid
+      and l.superseded_at is null
+      and l.detail->>'rubber_label' is not null
+      and td.discipline_id is not null
+      and (${organizationId}::uuid is null or l.organization_id = ${organizationId}::uuid)
+      and (${sportId}::uuid is null or l.sport_id = ${sportId}::uuid)
+    group by td.discipline_id, l.detail->>'rubber_label'
+    order by played desc, label`;
+  const out = new Map<string, RubberRecord[]>();
+  for (const r of rows) {
+    out.set(r.discipline_id, [...(out.get(r.discipline_id) ?? []), { label: r.label, played: r.played, won: r.won, lost: r.lost }]);
+  }
+  return out;
+}
+
+export interface PersonRecord {
+  userId: string;
+  name: string;
+  played: number;
+  won: number;
+  lost: number;
+}
+
+/** One opposing side - a player in singles, a pair in doubles - and the record against it. */
+export interface OpponentRecord {
+  position: MatchPosition;
+  userIds: string[];
+  names: string[];
+  /** Doubles: who they partnered in these matches. */
+  partnerId: string | null;
+  partnerName: string | null;
+  played: number;
+  won: number;
+  lost: number;
+}
+
+/**
+ * Who a person has played WITH (partners) and AGAINST (head-to-head), in one sport.
+ * Head-to-head is keyed by the opposing SIDE, so each match appears once and rows sum to matches played.
+ */
+export async function playerRelationsFor(
+  db: Db, userId: string, sportId: string | null, organizationId?: string | null,
+): Promise<{ partners: PersonRecord[]; opponents: OpponentRecord[] }> {
+  const org = organizationId ?? null;
+  const partners = await db.$queryRaw<Array<{ user_id: string; name: string; played: number; won: number; lost: number }>>`
+    select p.partner_user_id as user_id, u.name,
+           count(*)::int as played,
+           count(*) filter (where p.outcome = 'won')::int as won,
+           count(*) filter (where p.outcome = 'lost')::int as lost
+    from player_match_stats p
+    join users u on u.id = p.partner_user_id
+    where p.user_id = ${userId}::uuid
+      and p.played = true and p.superseded_at is null
+      and p.partner_user_id is not null
+      and (${sportId}::uuid is null or p.sport_id = ${sportId}::uuid)
+      and (${org}::uuid is null or p.organization_id = ${org}::uuid)
+    group by p.partner_user_id, u.name
+    order by played desc, won desc
+    limit 20`;
+  // Opposing side in a stable order, so a pair groups together whoever was listed first;
+  // doubles rows are also keyed by partner ("with X vs Y / Z").
+  const sides = await db.$queryRaw<Array<{ position: string | null; ids: string[]; partner: string | null; played: number; won: number; lost: number }>>`
+    select p.position, o.ids, p.partner_user_id::text as partner,
+           count(*)::int as played,
+           count(*) filter (where p.outcome = 'won')::int as won,
+           count(*) filter (where p.outcome = 'lost')::int as lost
+    from player_match_stats p
+    cross join lateral (
+      select array_agg(x::text order by x) as ids from unnest(p.opponent_user_ids) as x
+    ) o
+    where p.user_id = ${userId}::uuid
+      and p.played = true and p.superseded_at is null
+      and o.ids is not null
+      and (${sportId}::uuid is null or p.sport_id = ${sportId}::uuid)
+      and (${org}::uuid is null or p.organization_id = ${org}::uuid)
+    group by p.position, o.ids, p.partner_user_id
+    order by played desc, won desc
+    limit 30`;
+  const ids = [...new Set(sides.flatMap((s) => (s.partner ? [...s.ids, s.partner] : s.ids)))];
+  const people = ids.length
+    ? await db.$queryRaw<Array<{ id: string; name: string }>>`
+        select id::text, name from users where id = any(${ids}::uuid[])`
+    : [];
+  const nameOf = new Map(people.map((u) => [u.id, u.name]));
+
+  const view = (r: { user_id: string; name: string; played: number; won: number; lost: number }): PersonRecord =>
+    ({ userId: r.user_id, name: r.name, played: r.played, won: r.won, lost: r.lost });
+  return {
+    partners: partners.map(view),
+    opponents: sides.map((s) => ({
+      position: s.position === 'doubles' || s.ids.length > 1 ? 'doubles' : 'singles',
+      userIds: s.ids,
+      names: s.ids.map((id) => nameOf.get(id) ?? '-'),
+      partnerId: s.partner,
+      partnerName: s.partner ? nameOf.get(s.partner) ?? '-' : null,
+      played: s.played, won: s.won, lost: s.lost,
+    })),
+  };
 }
 
 /**

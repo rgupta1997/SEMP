@@ -65,10 +65,11 @@ describe('the facts survive the round trip', () => {
 
   it('records who served each rally, which is the per-person fact in a doubles point', () => {
     const f = fmt('bwf_official_3x21');
-    const rows = rallyLogToRows(f, points('A', 2), { pairing: PAIR, firstServer: 'A' });
-    // Badminton parity: 0-0 is the right court (Ann), 1-0 the left (Amy).
-    expect(rows[0].player_user_id).toBe('ann');
-    expect(rows[1].player_user_id).toBe('amy');
+    const rows = rallyLogToRows(f, [...points('A', 2), ...points('B', 1)], { pairing: PAIR, firstServer: 'A' });
+    // Badminton: Ann serves from the right at 0-0 and keeps serving (from the left) at 1-0
+    // after winning on serve; B's first serve, at 2-1, is from the left court.
+    expect(rows.map((r) => r.player_user_id)).toEqual(['ann', 'ann', 'ann']);
+    expect(rows[2].meta.scoreAfter).toEqual([2, 1]);
   });
 
   it('flags the unit a rally belonged to', () => {
@@ -116,5 +117,28 @@ describe('diffStats', () => {
   it('reports a real drift with both values', () => {
     expect(diffStats({ points_won: 5 }, { points_won: 4 }))
       .toEqual([{ metric: 'points_won', expected: 5, actual: 4 }]);
+  });
+});
+
+describe('expedite survives the row round trip', () => {
+  it('rebuilds the event, including a replayed rally', () => {
+    const f = fmt('ittf_bo5_11');
+    const log: RallyLog = [...points('A', 1), { t: 'expedite', reason: 'time', inRally: true }, ...points('B', 3)];
+    const back = rowsToRallyLog(rallyLogToRows(f, log));
+    expect(back[1]).toEqual({ t: 'expedite', reason: 'time', inRally: true });
+    expect(foldRally(f, back, 'A').state.serve).toEqual(foldRally(f, log, 'A').state.serve);
+  });
+});
+
+describe('tennis serves survive the row round trip', () => {
+  it('rebuilds faults, double faults and aces exactly', () => {
+    const f = fmt('itf_standard_bo3');
+    const log: RallyLog = [
+      { t: 'point', side: 'A', kind: 'ace' }, { t: 'fault', side: 'A' }, { t: 'fault', side: 'A' }, ...points('B', 1),
+    ];
+    const back = rowsToRallyLog(rallyLogToRows(f, log, { firstServer: 'A' }));
+    // The double fault's row is credited to the receiver; the fault is still the server's.
+    expect(back).toEqual(log);
+    expect(foldRally(f, back, 'A').state.score).toEqual(foldRally(f, log, 'A').state.score);
   });
 });

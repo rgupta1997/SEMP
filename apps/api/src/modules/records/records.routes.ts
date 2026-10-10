@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { sportRecordsFor, sportStatsFilterOptions } from './sport-stats.service.js';
+import { playerRelationsFor, sportRecordsFor, sportStatsFilterOptions } from './sport-stats.service.js';
+import { insightsEnabled, sportInsightsFor, type InsightPosition } from './insights.service.js';
 import type { Prisma } from '../../infra/prisma.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -253,6 +254,40 @@ export function makeRecordsRouter(prisma: Prisma): Router {
       sportStatsFilterOptions(prisma, req.user!.id, org),
     ]);
     res.json({ sports, filters: options });
+  }));
+
+  /** Partners and head-to-head in one sport: `?sport=` (required), `?organization=`. */
+  router.get('/people/:userId/sport-relations', asyncHandler(async (req, res) => {
+    await authorize(req.user!.id, !!req.user!.isSuperAdmin, req.params.userId);
+    const sport = typeof req.query.sport === 'string' ? req.query.sport : null;
+    const org = typeof req.query.organization === 'string' ? req.query.organization : null;
+    res.json(await playerRelationsFor(prisma, req.params.userId, sport, org));
+  }));
+
+  /**
+   * Plain-language strengths, weaknesses and trends in one sport: `?sport=` (required),
+   * `?position=singles|doubles` to read one format only (the card's switch).
+   */
+  const positionOf = (q: unknown): InsightPosition | undefined => (q === 'singles' || q === 'doubles' ? q : undefined);
+  // Switched off by a super admin: nothing is computed and nothing is sent, so the card
+  // is genuinely off rather than hidden. The stats themselves are untouched.
+  router.get('/people/:userId/sport-insights', asyncHandler(async (req, res) => {
+    await authorize(req.user!.id, !!req.user!.isSuperAdmin, req.params.userId);
+    const sport = typeof req.query.sport === 'string' ? req.query.sport : null;
+    if (!sport || !(await insightsEnabled(prisma))) { res.json(null); return; }
+    res.json(await sportInsightsFor(prisma, req.params.userId, sport, positionOf(req.query.position)));
+  }));
+
+  router.get('/me/sport-insights', asyncHandler(async (req, res) => {
+    const sport = typeof req.query.sport === 'string' ? req.query.sport : null;
+    if (!sport || !(await insightsEnabled(prisma))) { res.json(null); return; }
+    res.json(await sportInsightsFor(prisma, req.user!.id, sport, positionOf(req.query.position)));
+  }));
+
+  router.get('/me/sport-relations', asyncHandler(async (req, res) => {
+    const sport = typeof req.query.sport === 'string' ? req.query.sport : null;
+    const org = typeof req.query.organization === 'string' ? req.query.organization : null;
+    res.json(await playerRelationsFor(prisma, req.user!.id, sport, org));
   }));
 
   router.get('/people/:userId/career-stats', asyncHandler(async (req, res) => {

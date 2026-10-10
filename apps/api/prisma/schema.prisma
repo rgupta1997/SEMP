@@ -28,6 +28,8 @@ model disciplines {
   squad_min              Int                      @default(1) @db.SmallInt
   squad_max              Int                      @default(15) @db.SmallInt
   display_order          Int                      @default(0)
+  /// null = the platform catalogue; set = a custom discipline of that event only.
+  championship_id        String?                  @db.Uuid
   career_stats           career_stats[]
   sports                 sports                   @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   tournament_disciplines tournament_disciplines[]
@@ -125,8 +127,8 @@ model fixtures {
   notes                                String?
   created_at                           DateTime               @default(now()) @db.Timestamptz(6)
   updated_at                           DateTime               @default(now()) @db.Timestamptz(6)
-  home_score                           Int?
-  away_score                           Int?
+  home_score                           Float?
+  away_score                           Float?
   winner_team_id                       String?                @db.Uuid
   live_state                           Json                   @default("{}")
   live_log                             Json                   @default("[]")
@@ -400,6 +402,7 @@ model tournament_disciplines {
   display_order       Int                 @default(0)
   created_at          DateTime            @default(now()) @db.Timestamptz(6)
   scoring_format_id   String?             @db.Uuid
+  scoring_preset_key  String?             @db.VarChar(60)
   round_formats       Json                @default("[]")
   fixtures            fixtures[]
   team_entries        team_entries[]
@@ -1048,6 +1051,7 @@ model career_stats {
   computed_at     DateTime      @default(now()) @db.Timestamptz(6)
   stats           Json          @default("{}")
   tier            String        @default("all") @db.VarChar(12)
+  position        String?       @db.VarChar(12)
   disciplines     disciplines?  @relation(fields: [discipline_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   sports          sports        @relation(fields: [sport_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -1446,6 +1450,7 @@ model player_match_stats {
   sport_id                                        String?                  @db.Uuid
   rubber_key                                      String?                  @db.VarChar(40)
   partner_user_id                                 String?                  @db.Uuid
+  opponent_user_ids                               String[]                 @db.Uuid
   position                                        String?                  @db.VarChar(24)
   role                                            String                   @default("player") @db.VarChar(16)
   played                                          Boolean                  @default(true)
@@ -1521,6 +1526,22 @@ model board_match_lines {
   created_at         DateTime           @default(now()) @db.Timestamptz(6)
   minutes            Int?
   opponent_user_id   String?            @db.Uuid
+  chess_games         Int                @default(0)
+  chess_wins          Int                @default(0)
+  chess_draws         Int                @default(0)
+  chess_losses        Int                @default(0)
+  chess_points_x2     Int                @default(0)
+  chess_points_max_x2 Int                @default(0)
+  white_games         Int                @default(0)
+  white_points_x2     Int                @default(0)
+  white_points_max_x2 Int                @default(0)
+  black_games         Int                @default(0)
+  black_points_x2     Int                @default(0)
+  black_points_max_x2 Int                @default(0)
+  wins_by_checkmate   Int                @default(0)
+  wins_by_resignation Int                @default(0)
+  wins_on_time        Int                @default(0)
+  draws_by_agreement  Int                @default(0)
   player_match_stats player_match_stats @relation(fields: [line_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users              users?             @relation(fields: [opponent_user_id], references: [id], onUpdate: NoAction)
 
@@ -1710,6 +1731,35 @@ model racquet_match_lines {
   service_points_won    Int                @default(0)
   return_points_played  Int                @default(0)
   return_points_won     Int                @default(0)
+  /// Doubles: the pair's serve / receive points, beside the player's own above.
+  pair_service_points_played Int           @default(0)
+  pair_return_points_played  Int           @default(0)
+  pair_service_points_won    Int           @default(0)
+  pair_return_points_won     Int           @default(0)
+  /// Side-out scoring only: serve won back, service turns, points scored in them.
+  side_outs_won          Int               @default(0)
+  service_turns          Int               @default(0)
+  service_turn_points    Int               @default(0)
+  service_turns_faced    Int               @default(0)
+  /// Pickleball: games won with the opponents on 0.
+  pickles                Int               @default(0)
+  /// Table tennis expedite system; 0 when it never came in.
+  expedite_matches       Int               @default(0)
+  expedite_wins          Int               @default(0)
+  expedite_points_played Int               @default(0)
+  expedite_points_won    Int               @default(0)
+  expedite_return_wins   Int               @default(0)
+  expedite_return_losses Int               @default(0)
+  /// Pressure: game / match points converted and saved, games won from behind.
+  game_points_played     Int               @default(0)
+  game_points_won        Int               @default(0)
+  game_points_faced      Int               @default(0)
+  game_points_saved      Int               @default(0)
+  match_points_played    Int               @default(0)
+  match_points_won       Int               @default(0)
+  match_points_faced     Int               @default(0)
+  match_points_saved     Int               @default(0)
+  comeback_games         Int               @default(0)
   games_won             Int                @default(0)
   games_lost            Int                @default(0)
   sets_won              Int                @default(0)
@@ -1726,10 +1776,24 @@ model racquet_match_lines {
   break_points_played   Int                @default(0)
   break_points_won      Int                @default(0)
   break_points_saved    Int                @default(0)
+  break_points_faced    Int                @default(0)
+  love_holds            Int                @default(0)
+  bagels                Int                @default(0)
+  won_from_set_down     Int                @default(0)
   lets                  Int                @default(0)
   created_at            DateTime           @default(now()) @db.Timestamptz(6)
   deciders_lost         Int                @default(0)
   first_serves_in       Int                @default(0)
+  /// Tennis serves, from matches where the scorer recorded them (Fault / Ace).
+  serve_points_tracked       Int           @default(0)
+  first_serve_points_won     Int           @default(0)
+  second_serve_points_played Int           @default(0)
+  second_serve_points_won    Int           @default(0)
+  /// Tennis service games: held (won your own) and broken (won the receiver's).
+  service_games_played       Int           @default(0)
+  service_games_won          Int           @default(0)
+  return_games_played        Int           @default(0)
+  return_games_won           Int           @default(0)
   winners               Int                @default(0)
   unforced_errors       Int                @default(0)
   retired               Boolean            @default(false)

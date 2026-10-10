@@ -22,7 +22,7 @@ vi.mock('../../lib/api', () => ({
 }));
 vi.mock('../../lib/browserStorage', () => ({ authHeader: () => ({ Authorization: 'Bearer t' }) }));
 
-const { acknowledge, enqueue, flushFixture, getStatus, pendingFixtureIds, readOutbox, stage } =
+const { acknowledge, enqueue, flushFixture, getStatus, pendingFixtureIds, readOutbox, setAcknowledgedHandler, stage } =
   await import('./liveOutbox');
 
 const FX = 'fixture-1';
@@ -72,6 +72,17 @@ describe('the sender', () => {
     expect(patch).toHaveBeenCalledWith('PATCH', `/fixtures/${FX}/live`, { home_score: 3 });
     expect(readOutbox(FX)).toBeNull();
     expect(getStatus(FX).savedAt).not.toBeNull();
+  });
+
+  it('hands the acknowledged body over, so the cached match can be brought up to it', async () => {
+    const seen: Array<[string, Record<string, unknown>]> = [];
+    setAcknowledgedHandler((id, body) => seen.push([id, body]));
+    patch.mockRejectedValueOnce(new Error('offline'));
+    enqueue(FX, { live_state: { rally: [1] } });
+    await flushFixture(FX);
+    expect(seen).toEqual([]); // not on a failed send - the server does not hold it yet
+    await flushFixture(FX);
+    expect(seen).toEqual([[FX, { live_state: { rally: [1] } }]]);
   });
 
   it('KEEPS the entry when the send fails, and reports it unsaved', async () => {

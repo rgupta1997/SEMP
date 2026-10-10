@@ -205,8 +205,20 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
 
         let disciplineId: string | null = null;
         if (discipline) {
-          const foundD = await tx.disciplines.findFirst({ where: { sport_id: sportId, name: { equals: discipline, mode: 'insensitive' } }, select: { id: true } });
-          disciplineId = foundD?.id ?? (summary.disciplines.created++, (await tx.disciplines.create({ data: { sport_id: sportId, name: discipline }, select: { id: true } })).id);
+          // The catalogue or this event's own - never another event's custom discipline.
+          // One the sheet invents belongs to this event only.
+          const foundD = await tx.disciplines.findFirst({
+            where: {
+              sport_id: sportId,
+              name: { equals: discipline, mode: 'insensitive' },
+              OR: [{ championship_id: null }, { championship_id: championshipId }],
+            },
+            orderBy: { championship_id: { sort: 'asc', nulls: 'first' } },
+            select: { id: true },
+          });
+          disciplineId = foundD?.id ?? (summary.disciplines.created++, (await tx.disciplines.create({
+            data: { sport_id: sportId, name: discipline, championship_id: championshipId }, select: { id: true },
+          })).id);
         }
 
         // Composite unique allows multiple NULL discipline_id rows, so resolve null draws via findFirst.

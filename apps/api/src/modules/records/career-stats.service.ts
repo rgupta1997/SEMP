@@ -27,7 +27,8 @@ import { recomputeCareerStatBags } from './player-stats.service.js';
 // compensating delta, nothing to get wrong. Re-locking re-inserts and recomputes.
 // The record is a pure function of the live rows at all times.
 
-export type Grain = 'sport' | 'discipline' | 'format';
+/** 'position' splits a racquet career into singles and doubles. */
+export type Grain = 'sport' | 'discipline' | 'format' | 'position';
 
 /** 'all' is the rollup of the tiers beneath it, stored rather than summed on read. */
 type TierScope = CompetitionTier | 'all';
@@ -36,6 +37,7 @@ interface Bucket {
   sport_id: string;
   discipline_id: string | null;
   format: string | null;
+  position: string | null;
   grain: Grain;
   tier: TierScope;
   played: number; won: number; lost: number; drawn: number;
@@ -43,14 +45,14 @@ interface Bucket {
   first_on: Date | null; last_on: Date | null;
 }
 
-const key = (sportId: string, disciplineId: string | null, format: string | null, tier: TierScope) =>
-  `${sportId}|${disciplineId ?? ''}|${format ?? ''}|${tier}`;
+const key = (sportId: string, disciplineId: string | null, format: string | null, tier: TierScope, position: string | null = null) =>
+  `${sportId}|${disciplineId ?? ''}|${format ?? ''}|${position ?? ''}|${tier}`;
 
 const blank = (
   sport_id: string, discipline_id: string | null, format: string | null,
-  grain: Grain, tier: TierScope,
+  grain: Grain, tier: TierScope, position: string | null = null,
 ): Bucket => ({
-  sport_id, discipline_id, format, grain, tier,
+  sport_id, discipline_id, format, position, grain, tier,
   played: 0, won: 0, lost: 0, drawn: 0, gold: 0, silver: 0, bronze: 0, awards: 0,
   first_on: null, last_on: null,
 });
@@ -127,6 +129,7 @@ export async function recomputeCareerStats(prisma: Prisma, userId: string, organ
     rowSportId: string | null,
     on: Date,
     apply: (b: Bucket) => void,
+    position: string | null = null,
   ) => {
     const shape = fixtureId ? shapeOf.get(fixtureId) : undefined;
     // The row's own sport wins; the fixture's is the fallback for rows that predate
@@ -156,10 +159,22 @@ export async function recomputeCareerStats(prisma: Prisma, userId: string, organ
         span(b, on);
       }
     }
+    // Singles and doubles are different games; a result that says which also files there.
+    if (position) {
+      for (const scope of [tier, 'all'] as TierScope[]) {
+        const k = key(sportId, null, null, scope, position);
+        if (!buckets.has(k)) buckets.set(k, blank(sportId, null, null, 'position', scope, position));
+        const b = buckets.get(k)!;
+        apply(b);
+        span(b, on);
+      }
+    }
   };
 
   for (const e of entries) {
-    const outcome = (e.detail as { outcome?: string } | null)?.outcome;
+    const detail = e.detail as { outcome?: string; position?: string } | null;
+    const outcome = detail?.outcome;
+    const position = detail?.position === 'singles' || detail?.position === 'doubles' ? detail.position : null;
     fold(e.fixture_id, e.sport_id, e.occurred_on, (b) => {
       b.played += 1;
       // `drew` in the record, `drawn` in the table - the record's wording is the
@@ -167,7 +182,7 @@ export async function recomputeCareerStats(prisma: Prisma, userId: string, organ
       if (outcome === 'won') b.won += 1;
       else if (outcome === 'lost') b.lost += 1;
       else if (outcome === 'drew') b.drawn += 1;
-    });
+    }, position);
   }
 
   for (const a of achievements) {

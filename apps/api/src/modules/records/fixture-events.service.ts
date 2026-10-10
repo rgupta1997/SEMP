@@ -1,6 +1,6 @@
 import {
   canonicalRacquetSport, deriveRacquetStats, diffStats, isReconstructable,
-  parseStoredFormat, rallyLogToRows, readFirstServer, readRallyLog, resolveFormat,
+  parseStoredFormat, playedContests, rallyLogToRows, readFirstServer, readRallyLog, resolveFormat,
   rowsToRallyLog, statSpecFor, type Pairing, type ScoringFormat, type Side,
 } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
@@ -37,6 +37,7 @@ interface EventFixture {
   away_team_id: string | null;
   live_state: unknown;
   tournament_disciplines: {
+    disciplines?: { entry_type: string | null } | null;
     tournament_sports: { sports: { name: string } | null } | null;
   } | null;
 }
@@ -44,7 +45,10 @@ interface EventFixture {
 const FIXTURE_SELECT = {
   id: true, home_team_id: true, away_team_id: true, live_state: true,
   tournament_disciplines: {
-    select: { tournament_sports: { select: { sports: { select: { name: true } } } } },
+    select: {
+      disciplines: { select: { entry_type: true } },
+      tournament_sports: { select: { sports: { select: { name: true } } } },
+    },
   },
 } as const;
 
@@ -53,6 +57,12 @@ function formatOf(fx: EventFixture): ScoringFormat | null {
   const sportName = fx.tournament_disciplines?.tournament_sports?.sports?.name ?? null;
   const frozen = parseStoredFormat((fx.live_state as { format?: unknown } | null)?.format);
   return frozen ?? resolveFormat({ frozen_format: frozen }, { sport: sportName }).format;
+}
+
+/** Each side's whole squad, by user id. */
+function pairingOfSquad(fx: EventFixture, participants: FixtureParticipants): Pairing {
+  const side = (teamId: string | null) => participants.resolved.filter((p) => p.team_id && p.team_id === teamId).map((p) => p.user_id);
+  return { A: side(fx.home_team_id), B: side(fx.away_team_id) };
 }
 
 /** Who played for which side, from the participants the lock already resolved. */
@@ -113,6 +123,28 @@ export async function writeFixtureEvents(
 
 /** Racquet family: fold the rally log, which IS the record of what happened. */
 function racquetRows(fx: EventFixture, participants: FixtureParticipants) {
+  // Named players (a lineup, or a tie's rubbers): each contest's own log, with its
+  // own players, under its rubber key. `seq` runs on across rubbers so it stays unique.
+  const roster = pairingOfSquad(fx, participants);
+  const played = playedContests({
+    liveState: fx.live_state,
+    sportName: fx.tournament_disciplines?.tournament_sports?.sports?.name ?? null,
+    entryType: fx.tournament_disciplines?.disciplines?.entry_type ?? null,
+    roster,
+    matchWinner: null,
+  });
+  if (played.kind === 'contests') {
+    const out: ReturnType<typeof rallyLogToRows> = [];
+    for (const c of played.contests) {
+      const format = c.format ?? (c.rubberKey === null ? formatOf(fx) : null);
+      if (!c.log.length || !format) continue;
+      for (const r of rallyLogToRows(format, c.log, { pairing: c.lineup, firstServer: c.firstServer, rubberKey: c.rubberKey })) {
+        out.push({ ...r, seq: out.length });
+      }
+    }
+    return out;
+  }
+
   const log = readRallyLog(fx.live_state);
   const format = formatOf(fx);
   if (!log.length || !format) return [];

@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
@@ -38,6 +39,8 @@ interface ResultRow {
   discipline: string | null;
   home: Side | null;
   away: Side | null;
+  /** The console's working state; read here only for how a match ended. */
+  live_state?: unknown;
 }
 
 interface Side {
@@ -476,7 +479,7 @@ export function ResultsPage() {
   }, [visibleRows, sortRows]);
 
   const matchLabel = (f: ResultRow) =>
-    (f.home || f.away) ? `${teamLabel(f.home) || 'TBD'} vs ${teamLabel(f.away) || 'TBD'}` : (f.discipline ?? f.sport ?? 'This event');
+    (f.home || f.away) ? `${teamLabel(f.home) || TBD_LABEL} vs ${teamLabel(f.away) || TBD_LABEL}` : (f.discipline ?? f.sport ?? 'This event');
 
   const lockOne = async (f: ResultRow) => {
     const ok = await confirmDialog({
@@ -706,6 +709,12 @@ export function ResultsPage() {
                 const scored = !rankingEvent && f.home_score != null && f.away_score != null;
                 const homeWon = f.winner_team_id != null && f.winner_team_id === f.home?.id;
                 const awayWon = f.winner_team_id != null && f.winner_team_id === f.away?.id;
+                // Stopped early (retired / disqualified / conceded): marked beside the side
+                // that stopped, so an unfinished score never reads as a match played out.
+                const early = earlyEndOf(f.live_state);
+                const earlyNote = (won: boolean) => early && scored && !won && (homeWon || awayWon) && (
+                  <span className="ml-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400">({EARLY_END_LABEL[early]})</span>
+                );
                 return (
                   // TWO LAYOUTS, NOT ONE THAT SCROLLS.
                   //
@@ -806,7 +815,7 @@ export function ResultsPage() {
                                     less information than the full name AND worse
                                     looking. The short name stays the fallback for a
                                     squad that has no full name to show. */}
-                                {side ? (teamLabel(side) || teamShort(side)) : 'TBD'}
+                                {side ? (teamLabel(side) || teamShort(side)) : TBD_LABEL}
                               </span>
                               <span
                                 className={cn(
@@ -814,7 +823,8 @@ export function ResultsPage() {
                                   won ? 'font-extrabold text-slate-900 dark:text-slate-50' : 'font-bold text-slate-700 dark:text-slate-300',
                                 )}
                               >
-                                {scored ? score : <span className="text-slate-300 dark:text-slate-600">·</span>}
+                                {scored ? formatPoints(score) : <span className="text-slate-300 dark:text-slate-600">·</span>}
+                                {earlyNote(won)}
                               </span>
                             </div>
                           ))}
@@ -860,8 +870,14 @@ export function ResultsPage() {
                             {f.home && <span className="truncate text-right text-sm font-medium text-slate-700 dark:text-slate-200" title={teamLabel(f.home)}>{teamLabel(f.home)}</span>}
                             <TeamChip team={f.home} winner={f.winner_team_id != null && f.winner_team_id === f.home?.id} />
                           </div>
-                          <span className="w-16 shrink-0 whitespace-nowrap text-center text-lg font-bold tabular-nums text-slate-800 dark:text-slate-100">
-                            {scored ? `${f.home_score}–${f.away_score}` : <span className="text-slate-300 dark:text-slate-600">··</span>}
+                          <span className="flex w-16 shrink-0 flex-col items-center whitespace-nowrap text-center text-lg font-bold tabular-nums text-slate-800 dark:text-slate-100">
+                            {scored ? `${formatPoints(f.home_score)}–${formatPoints(f.away_score)}` : <span className="text-slate-300 dark:text-slate-600">··</span>}
+                            {early && scored && (
+                              <span className="text-[10px] font-semibold leading-3 text-amber-600 dark:text-amber-400"
+                                title={`${teamLabel(homeWon ? f.away : f.home)} ${early === 'retired' ? 'retired' : early}`}>
+                                {EARLY_END_LABEL[early]}
+                              </span>
+                            )}
                           </span>
                           <div className="flex w-36 items-center gap-2 sm:w-52">
                             <TeamChip team={f.away} winner={f.winner_team_id != null && f.winner_team_id === f.away?.id} />

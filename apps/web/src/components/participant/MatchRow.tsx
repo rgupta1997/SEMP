@@ -3,7 +3,8 @@ import { fmtDateTime } from '../../lib/hooks';
 import { cn } from '../ui';
 import { ResultBadge } from './ResultBadge';
 import type { MatchSummary } from './types';
-
+import { formatPoints, TBD_LABEL } from '@semp/shared';
+
 // One match as a clickable card - stacks cleanly on mobile, row-like on desktop.
 // `showEvent` adds the championship name (used on the cross-championship dashboard/list).
 export function MatchRow({ match, showEvent = true }: { match: MatchSummary; showEvent?: boolean }) {
@@ -13,7 +14,7 @@ export function MatchRow({ match, showEvent = true }: { match: MatchSummary; sho
     .filter(Boolean)
     .join(' · ');
   const myName = match.my_team?.name ?? 'Your team';
-  const oppName = match.opponent?.name ?? 'TBD';
+  const oppName = match.opponent?.name ?? TBD_LABEL;
   const won = match.result === 'won';
   const lost = match.result === 'lost';
 
@@ -22,7 +23,7 @@ export function MatchRow({ match, showEvent = true }: { match: MatchSummary; sho
   const teamLine = (name: string, score: number | null, mine: boolean, winner: boolean) => (
     <div className="flex items-center justify-between gap-3">
       <span className={cn('min-w-0 truncate text-sm', winner ? 'font-bold text-slate-900 dark:text-slate-100' : mine ? 'font-semibold text-slate-700 dark:text-slate-300' : 'text-slate-600 dark:text-slate-400')}>{name}</span>
-      {hasScore && <span className={cn('flex-none tabular-nums text-sm', winner ? 'font-bold text-slate-900 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400')}>{score}</span>}
+      {hasScore && <span className={cn('flex-none tabular-nums text-sm', winner ? 'font-bold text-slate-900 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400')}>{formatPoints(score)}</span>}
     </div>
   );
 

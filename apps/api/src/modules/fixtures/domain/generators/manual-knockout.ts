@@ -1,3 +1,4 @@
+import { THIRD_PLACE_ROUND } from '@semp/shared';
 import { BusinessRuleError } from '../../../../shared/errors.js';
 import { roundLabel } from './util.js';
 
@@ -92,7 +93,7 @@ export function generateManualKnockout(
 
   if (params.thirdPlaceMatch) {
     fixtures.push({
-      round: '3rd Place', poolNumber: null, bracketPosition: null,
+      round: THIRD_PLACE_ROUND, poolNumber: null, bracketPosition: null,
       entrantHome: null, entrantAway: null, status: 'scheduled',
     });
   }

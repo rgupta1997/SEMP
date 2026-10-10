@@ -1,5 +1,5 @@
 import { BusinessRuleError } from '../../../shared/errors.js';
-import type { Branch, StageNode } from '@semp/shared';
+import { THIRD_PLACE_ROUND, type Branch, type StageNode } from '@semp/shared';
 import type { GeneratedFixture, TeamRef } from './generators/types.js';
 import { generateGroups } from './generators/groups.js';
 import { generateKnockout } from './generators/knockout.js';
@@ -160,7 +160,7 @@ function generateRawFixturesForNode(node: StageNode, entrants: TeamRef[]): Annot
 // decided. Wire it to loser-of-bracket-position labels (scoped to this stage's own
 // stage_sequence at resolution time - see stage-resolver.ts).
 function wireThirdPlaceIfPresent(fixtures: AnnotatedFixture[]): void {
-  const thirdPlace = fixtures.find((f) => f.round === '3rd Place');
+  const thirdPlace = fixtures.find((f) => f.round === THIRD_PLACE_ROUND);
   if (!thirdPlace) return;
   const sfs = fixtures.filter((f) => f.round === 'SF');
   if (sfs.length !== 2) return; // defensive; always exactly 2 SFs when thirdPlaceMatch is requested on a >=4-team bracket

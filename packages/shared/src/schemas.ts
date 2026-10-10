@@ -329,6 +329,8 @@ export const updateSportSchema = createSportSchema.partial();
 
 export const createDisciplineSchema = z.object({
   sport_id: uuid,
+  /** Set for an organiser's own discipline: it belongs to that event only. */
+  championship_id: uuid.nullable().optional(),
   name: z.string().min(1),
   description: z.string().optional(),
   entry_type: z.enum(ENTRY_TYPE).default('team'),
@@ -336,7 +338,8 @@ export const createDisciplineSchema = z.object({
   squad_max: z.number().int().min(1).default(15),
   display_order: z.number().int().default(0),
 });
-export const updateDisciplineSchema = createDisciplineSchema.partial();
+// Which event a discipline belongs to is fixed at creation - an edit cannot publish it to everyone.
+export const updateDisciplineSchema = createDisciplineSchema.omit({ championship_id: true }).partial();
 
 export const createFormatSchema = z.object({
   name: z.string().min(1),
@@ -744,6 +747,9 @@ export const generateAllStagesSchema = z.object({
   team_ids: z.array(uuid).optional(),
   config: stageConfigSchema,
 });
+// A fixture's score: whole numbers for every sport, plus halves for chess (2½-1½).
+const matchScore = z.number().min(0).multipleOf(0.5);
+
 const fixtureFields = z.object({
   tournament_discipline_id: uuid,
   home_team_id: uuid.nullable().optional(),
@@ -760,8 +766,8 @@ const fixtureFields = z.object({
   status: z.enum(FIXTURE_STATUS).default('scheduled'),
   official_id: uuid.nullable().optional(),
   notes: z.string().optional(),
-  home_score: z.number().int().min(0).nullable().optional(),
-  away_score: z.number().int().min(0).nullable().optional(),
+  home_score: matchScore.nullable().optional(),
+  away_score: matchScore.nullable().optional(),
   winner_team_id: uuid.nullable().optional(),
 });
 // A team can never be scheduled against itself.
@@ -774,8 +780,8 @@ export const updateFixtureSchema = fixtureFields.partial().refine(distinctTeams,
 // Result entry from the official's match console: scores + optional winner +
 // a result note. Winner is derived from scores when omitted.
 export const fixtureResultSchema = z.object({
-  home_score: z.number().int().min(0).nullable().optional(),
-  away_score: z.number().int().min(0).nullable().optional(),
+  home_score: matchScore.nullable().optional(),
+  away_score: matchScore.nullable().optional(),
   winner_team_id: uuid.nullable().optional(),
   status: z.enum(FIXTURE_STATUS).optional(),
   notes: z.string().optional(),
@@ -890,6 +896,18 @@ export const DEFAULT_STANDINGS_RULE: StandingsRule = {
   participation: 0,
   tiebreakers: ['points', 'wins', 'lost'],
 };
+
+/**
+ * A chess draw's own table when the organiser set no rule for it. 2/1/0 orders players
+ * exactly as game points 1/½/0 do (a draw is half a win); for a team event it IS FIDE's
+ * match points, with board points (score difference) as the next tie-break.
+ */
+export function chessStandingsRule(team: boolean): Extract<StandingsRule, { scheme: 'league_points' }> {
+  return {
+    scheme: 'league_points', win: 2, draw: 1, loss: 0, participation: 0,
+    tiebreakers: team ? ['points', 'score_diff', 'wins'] : ['points', 'wins', 'lost'],
+  };
+}
 
 // Upsert one scoping rule. scope_id is required for format/discipline rules and must
 // be empty for the championship default.

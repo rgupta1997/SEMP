@@ -1,4 +1,5 @@
 import type { Request } from 'express';
+import { THIRD_PLACE_ROUND, formatPoints, isKnockoutFixture } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { friendlyError } from '../../http/middleware/error.js';
@@ -7,7 +8,7 @@ import { recomputeStandingsForFixture } from '../standings/standings.service.js'
 import { createNotification } from '../notifications/audience.js';
 import { notify } from '@semp/notifications/server/notify.js';
 import { Rules } from '@semp/notifications/core/rules.js';
-import { advanceWinnerStrict, computeParentPosition } from './bracket.js';
+import { advanceWinnerStrict } from './bracket.js';
 import { deriveAchievements, queueCertificates, writeLifetimeEntries, writeStatLines } from './downstream.js';
 import { resolveFixtureParticipants, type FixtureParticipants } from './participants.js';
 
@@ -126,40 +127,24 @@ function assertLockable(fx: {
  * to notice, unlock, and invent a winner.
  *
  * So it is refused at the point of locking, with a message that says what to do.
- * A draw is still perfectly legal in a league, in a group stage and in the Final of
- * a bracket: the test is not "is this a draw" but "does somebody have to advance
- * from here", which is exactly what `computeParentPosition` answers. It returns null
- * for a league (no bracket position), for a non-power-of-two bracket, and for the
- * final - so none of those are touched.
+ * The Final and the 3rd-place play-off too: a drawn one crowned nobody. Draws stay
+ * legal in leagues and group stages, which have no bracket position.
  */
-async function assertKnockoutHasWinner(tx: Db, fx: {
-  id: string;
-  tournament_discipline_id: string;
+async function assertKnockoutHasWinner(_tx: Db, fx: {
   bracket_position: number | null;
-  stage_sequence: number | null;
+  round: string | null;
   winner_team_id: string | null;
   status: string;
 }): Promise<void> {
   if (fx.winner_team_id) return;
-  if (fx.bracket_position == null) return;
   // A walkover or a bye is decided without play and carries its own winner rules.
   if (fx.status === 'walkover' || fx.status === 'bye') return;
-
-  const sibs = await tx.fixtures.count({
-    where: {
-      tournament_discipline_id: fx.tournament_discipline_id,
-      bracket_position: { not: null },
-      stage_sequence: fx.stage_sequence ?? 1,
-    },
-  });
-  // Same arithmetic the advancement uses, so the guard and the propagation cannot
-  // disagree about whether there is a next round.
-  if (!computeParentPosition(sibs, fx.bracket_position)) return;
-
+  if (!isKnockoutFixture(fx)) return;
+  const final = fx.round === 'Final' || fx.round === THIRD_PLACE_ROUND;
   throw new BusinessRuleError(
     'This is a knockout match, so one side has to go through - but no winner is recorded. '
     + 'Play a decider, or open the scorecard and set the winner, then lock it. '
-    + 'A drawn result here would leave the next round with an empty slot.',
+    + (final ? 'A drawn result here would leave the placings with no winner.' : 'A drawn result here would leave the next round with an empty slot.'),
   );
 }
 
@@ -392,7 +377,7 @@ export async function lockScorecard(prisma: Prisma, req: Request | null, fixture
     summary: lockSummary,
     diff: {
       scorecard_status: { from: fromStatus, to: 'locked' },
-      result: { from: null, to: `${fx.home_score ?? '-'}-${fx.away_score ?? '-'}` },
+      result: { from: null, to: `${fx.home_score != null ? formatPoints(fx.home_score) : '-'}-${fx.away_score != null ? formatPoints(fx.away_score) : '-'}` },
       lock_version: { from: fx.lock_version, to: fx.lock_version },
       participants: { from: null, to: participants.resolved.length },
       unmatched_competitors: { from: null, to: participants.unmatched.length },
@@ -478,7 +463,7 @@ async function notifyParticipants(
 ): Promise<void> {
   if (participants.resolved.length === 0) return;
   const score = fixture.home_score != null && fixture.away_score != null
-    ? ` Final score ${fixture.home_score}-${fixture.away_score}.`
+    ? ` Final score ${formatPoints(fixture.home_score)}-${formatPoints(fixture.away_score)}.`
     : '';
   try {
     for (const p of participants.resolved) {

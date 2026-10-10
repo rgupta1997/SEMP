@@ -23,7 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useQueryClient } from '@tanstack/react-query';
 import {
   enqueue, flushFixture, getStatus, pendingFixtureIds, readOutbox, sendOnExit,
-  setRefreshKeys, setRefresher, subscribeStatus, type SaveStatus,
+  setAcknowledgedHandler, setRefreshKeys, setRefresher, subscribeStatus, type SaveStatus,
 } from './liveOutbox';
 
 /** How often a stuck entry is retried, and how often a running clock re-asserts itself. */
@@ -70,6 +70,15 @@ export function useLiveSave(fixtureId: string, invalidate: (string | null)[] = [
       predicate: (q) => typeof q.queryKey[0] === 'string'
         && ks.some((k) => (q.queryKey[0] as string) === k || (q.queryKey[0] as string).startsWith(k)),
     }));
+    // What the server now holds is exactly what was just sent, so the cached copy of
+    // the match is set to it - reopening the console then starts from the latest tap.
+    setAcknowledgedHandler((id, body) => {
+      qc.setQueryData([`/fixtures/${id}/live`], (old: { live_state?: unknown; live_log?: unknown } | undefined) => ({
+        ...(old ?? {}),
+        ...('live_state' in body ? { live_state: body.live_state } : {}),
+        ...('live_log' in body ? { live_log: body.live_log } : {}),
+      }));
+    });
   }, [qc]);
   useEffect(() => { setRefreshKeys(fixtureId, keys); }, [fixtureId, keys]);
 

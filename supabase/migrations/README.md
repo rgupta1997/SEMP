@@ -248,3 +248,111 @@ organisation carry `archived_with_org`, are skipped by the 90-day event purge, a
 come back when the organisation is retrieved. Verified read-only afterwards: every
 "Aman …" organisation resolves to archive-only with the expected blockers, and none
 is archived.
+
+## Applied 2026-10-04 — `20261004000000_rubber_lineups_head_to_head`
+
+Adds `player_match_stats.opponent_user_ids uuid[]` (GIN index) for head-to-head
+records, and `career_stats.position` with a `'position'` grain for the singles /
+doubles split; `uq_career_stats_grain` widened to include it. Checked first that the
+grain check was named `career_stats_grain_check`. Applied with the same runner; all
+seven statements succeeded. Verified afterwards: both columns present, the grain check
+allows `'position'`, and both indexes exist as written. No data changed.
+
+## Applied 2026-10-05 — `20261005000000_event_scoped_disciplines`
+
+Adds `disciplines.championship_id` (nullable, cascades with the event) and an index.
+Null = the platform catalogue; set = a custom discipline of that event only, offered
+in no other event's setup. Applied with the same runner; both statements succeeded.
+Verified afterwards: the column exists and all 154 existing disciplines are untouched
+(every one still null, i.e. in the catalogue).
+
+## Applied 2026-10-05 — `20261005000001_pair_serve_receive_points`
+
+Adds `racquet_match_lines.pair_service_points_played` and `pair_return_points_played`
+(integer, default 0): a doubles player's pair totals beside their now-personal serve /
+receive points. Applied with the same runner; both statements succeeded. Existing rows
+read 0 until their fixture is locked again.
+
+## Applied 2026-10-05 — `20261005000002_expedite_stats`
+
+Adds six integer counters (default 0) to `racquet_match_lines` for the table tennis
+expedite tiles: `expedite_matches`, `expedite_wins`, `expedite_points_played`,
+`expedite_points_won`, `expedite_return_wins`, `expedite_return_losses`. Applied with
+the same runner; all six statements succeeded.
+
+## Applied 2026-10-05 — `20261005000003_clutch_stats`
+
+Adds nine integer counters (default 0) to `racquet_match_lines` for pressure stats:
+game / match points played, won, faced and saved, and `comeback_games`. Applied with
+the same runner; all nine statements succeeded.
+
+## Applied 2026-10-05 — `20261005000004_side_out_stats`
+
+Adds three integer counters (default 0) to `racquet_match_lines` for side-out scoring:
+`side_outs_won`, `service_turns`, `service_turn_points`. Applied with the same runner;
+all three statements succeeded.
+
+## Applied 2026-10-05 — `20261005000005_side_out_pct_pickles`
+
+Adds `service_turns_faced` (the denominator of side-out %) and `pickles` (pickleball
+games won to 0) to `racquet_match_lines`, integer default 0. Applied with the same
+runner; both statements succeeded.
+
+## Applied 2026-10-07 — `20261007000001_tennis_service_games`
+
+Adds `service_games_played`, `service_games_won`, `return_games_played` and
+`return_games_won` to `racquet_match_lines`, integer default 0, for tennis holds and breaks
+(tie-breaks not counted). Applied with the same runner; all four statements succeeded.
+
+## Applied 2026-10-07 — `20261007000000_tennis_serve_stats`
+
+Adds `serve_points_tracked`, `first_serve_points_won`, `second_serve_points_played` and
+`second_serve_points_won` to `racquet_match_lines`, integer default 0, for tennis first /
+second serve figures (counted only in matches where the scorer recorded serves). Applied
+with the same runner; all four statements succeeded.
+
+## Applied 2026-10-05 — `20261005000006_pair_points_won`
+
+Adds `pair_service_points_won` and `pair_return_points_won` to `racquet_match_lines`,
+integer default 0, beside the existing pair played counts. Applied with the same
+runner; both statements succeeded.
+
+## Applied 2026-10-09 — `20261009000000_fixture_half_point_scores`
+
+Widens `fixtures.home_score` / `away_score` from integer to double precision so chess can
+store halves (½-½ games, 2½-1½ team matches). Every existing value stays a whole number;
+no data changes. Applied with the same runner, and the column type was read back as
+`double precision`. Prisma's `fixtures.home_score/away_score` are `Float?` to match - the
+API must not deploy against a database without this migration.
+
+Applied to the **dev** Supabase database only. **Not applied to prod** (the RDS
+database) - that needs the owner's go-ahead before the API deploys there.
+
+## Applied 2026-10-09 (dev only) — `20261009000004_tennis_love_holds_bagels`
+
+Adds `love_holds`, `bagels` and `won_from_set_down` to `racquet_match_lines` (integer,
+default 0). Tie-break / set / games / deciding-set win % are derived from counters already
+stored and need no columns. Applied with the same runner; all three statements succeeded.
+
+## Applied 2026-10-09 (dev only) — `20261009000003_break_points_faced`
+
+Adds `racquet_match_lines.break_points_faced` (integer, default 0): break points against
+a player on their own serve, so "break points saved %" can be worked out. Two attempts
+failed intermittently (the API was running); the third succeeded and the column was
+read back as present.
+
+## Applied 2026-10-09 (dev only) — `20261009000002_draw_scoring_preset_key`
+
+Adds `tournament_disciplines.scoring_preset_key varchar(60)`. A draw's default format
+could only be a saved row (`scoring_format_id`), so choosing any BUILT-IN preset saved
+null and every match played the sport default - in every sport. The preset's key is
+stored here instead; a saved format still wins. The first attempt failed on a lock (the
+API was running); the re-run succeeded.
+
+## Applied 2026-10-09 (dev only) — `20261009000001_chess_game_stats`
+
+Adds sixteen integer counters (default 0) to `board_match_lines` for chess per game:
+games, wins/draws/losses, points (doubled) and points available, the same split by white
+and black, and wins by checkmate / resignation / time plus draws by agreement. Applied to
+the dev Supabase database with the same runner; all sixteen statements succeeded. **Not
+applied to prod** - pending the owner's go-ahead.

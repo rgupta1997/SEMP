@@ -1,6 +1,6 @@
 import type { ScoringFormat, Side } from './scoring-rules.js';
-import { foldRally, type RallyEvent, type RallyLog } from './rally-kernel.js';
-import { resolveServer, type Pairing } from './serve-resolvers.js';
+import { foldRally, misconductTerms, type RallyEvent, type RallyLog } from './rally-kernel.js';
+import { formatForPairing, resolveServer, type Pairing } from './serve-resolvers.js';
 
 // ============================================================================
 // The rally log as TABLE ROWS, and back again.
@@ -68,6 +68,14 @@ export interface RallyRow {
     unitsWon: Array<{ level: number; key: string; winner: Side; score: [number, number] }>;
     reason?: string;
     by?: string;
+    /** `expedite` only: the ball was in play, so that rally was replayed. */
+    inRally?: boolean;
+    /** Misconduct: a yellow warning, or the red card behind a conduct point. */
+    card?: 'yellow' | 'red';
+    /** A named kind of rally - 'ace', 'expedite_returns'. */
+    kind?: string;
+    /** English squash 8-8 election. */
+    choice?: 'one' | 'two';
   };
 }
 
@@ -76,11 +84,20 @@ const LABELS: Record<string, string> = {
   let: 'Let',
   fault: 'Fault',
   penalty: 'Conduct point',
+  card: 'Yellow card',
+  timeout: 'Timeout',
   awardServe: 'Serve awarded',
   awardUnit: 'Unit awarded',
   adjust: 'Score corrected',
   setServe: 'Serve corrected',
   capFired: 'Time up',
+  expedite: 'Expedite system',
+  switchPairServer: 'Doubles order changed',
+  switchReceiver: 'Receiving courts changed',
+  setChoice: 'Set election at 8-8',
+  switchBox: 'Service box chosen',
+  clockPause: 'Clock paused',
+  clockStart: 'Clock resumed',
   end: 'Match ended',
 };
 
@@ -91,10 +108,12 @@ const LABELS: Record<string, string> = {
  * what makes "points won while serving" a WHERE clause instead of a program.
  */
 export function rallyLogToRows(
-  format: ScoringFormat,
+  played: ScoringFormat,
   log: RallyLog,
   opts: { pairing?: Pairing; firstServer?: Side; rubberKey?: string | null } = {},
 ): RallyRow[] {
+  const format = formatForPairing(played, opts.pairing);
+  const terms = misconductTerms(format.sport);
   const first = opts.firstServer ?? 'A';
   const { trace } = foldRally(format, log, first);
 
@@ -111,12 +130,14 @@ export function rallyLogToRows(
     const next = foldRally(format, log.slice(0, i + 1), first).state;
     state = next;
 
-    const side: Side | null = 'side' in ev && ev.side ? (ev.side as Side) : null;
+    // A warning card names the side it was given against; it scores nothing.
+    const side: Side | null = 'side' in ev && ev.side ? (ev.side as Side) : ev.t === 'card' ? ev.against : null;
+    const card = ev.t === 'card' ? ev.card : ev.t === 'penalty' ? ev.card : undefined;
     rows.push({
       rubber_key: opts.rubberKey ?? null,
       team_side: eff.scored ?? side,
       event_key: ev.t,
-      label: LABELS[ev.t] ?? ev.t,
+      label: card === 'red' ? terms.foul : card === 'yellow' ? terms.warning : LABELS[ev.t] ?? ev.t,
       points: eff.scored ? 1 : 0,
       player_user_id: resolved?.server ?? null,
       second_user_id: resolved?.receiver ?? null,
@@ -137,6 +158,11 @@ export function rallyLogToRows(
         unitsWon: eff.unitsWon.map((u) => ({ level: u.level, key: u.key, winner: u.winner, score: u.score })),
         ...('reason' in ev && ev.reason ? { reason: String(ev.reason) } : {}),
         ...('by' in ev && ev.by ? { by: String(ev.by) } : {}),
+        ...(ev.t === 'expedite' && ev.inRally ? { inRally: true } : {}),
+        ...(card ? { card } : {}),
+        // An ace (or any named kind of rally) survives the round trip through the rows.
+        ...(ev.t === 'point' && ev.kind ? { kind: ev.kind } : {}),
+        ...(ev.t === 'setChoice' ? { choice: ev.choice } : {}),
       },
     });
   });
@@ -161,16 +187,32 @@ export function rowsToRallyLog(rows: Array<Pick<RallyRow, 'event_key' | 'team_si
           // The row's `team_side` is who SCORED, which under server-only scoring is
           // not who won the rally - so a scoreless rally is reconstructed from the
           // server, which is the only side that could have lost it.
-          if (r.meta?.scored) return { t: 'point', side: r.meta.scored };
+          if (r.meta?.scored) return { t: 'point', side: r.meta.scored, ...(r.meta.kind ? { kind: r.meta.kind } : {}) };
           if (r.meta?.serverSide) return { t: 'point', side: r.meta.serverSide === 'A' ? 'B' : 'A' };
           return side ? { t: 'point', side } : null;
         case 'let': return { t: 'let' };
-        case 'fault': return side ? { t: 'fault', side } : null;
-        case 'penalty': return side ? { t: 'penalty', side, reason: r.meta?.reason } : null;
+        // The row's side is who SCORED - the receiver, on a double fault - so the fault is
+        // rebuilt from who was serving.
+        case 'fault': {
+          const by = r.meta?.serverSide ?? side;
+          return by ? { t: 'fault', side: by } : null;
+        }
+        case 'penalty':
+          return side ? { t: 'penalty', side, reason: r.meta?.reason, ...(r.meta?.card === 'red' ? { card: 'red' as const } : {}) } : null;
+        case 'card': return side ? { t: 'card', card: 'yellow', against: side, reason: r.meta?.reason } : null;
+        case 'timeout': return side ? { t: 'timeout', side } : null;
         case 'awardServe': return side ? { t: 'awardServe', side, reason: r.meta?.reason } : null;
         case 'awardUnit': return side ? { t: 'awardUnit', side, reason: r.meta?.reason } : null;
         case 'setServe': return side ? { t: 'setServe', side, serverNo: r.meta?.serverNo, reason: r.meta?.reason } : null;
         case 'capFired': return { t: 'capFired' };
+        case 'expedite':
+          return { t: 'expedite', reason: r.meta?.reason === 'request' ? 'request' : 'time', inRally: !!r.meta?.inRally };
+        case 'switchPairServer': return side ? { t: 'switchPairServer', side } : { t: 'switchPairServer' };
+        case 'switchReceiver': return side ? { t: 'switchReceiver', side } : null;
+        case 'setChoice': return r.meta?.choice === 'one' || r.meta?.choice === 'two' ? { t: 'setChoice', choice: r.meta.choice } : null;
+        case 'switchBox': return { t: 'switchBox' };
+        case 'clockPause': return { t: 'clockPause' };
+        case 'clockStart': return { t: 'clockStart' };
         case 'end':
           return {
             t: 'end',
@@ -224,6 +266,32 @@ export function readRallyLog(liveState: unknown): RallyLog {
   if (!Array.isArray(raw)) return [];
   return raw.filter((e): e is RallyEvent => !!e && typeof e === 'object' && typeof (e as RallyEvent).t === 'string');
 }
+
+/** A match that stopped before the score could finish it. */
+export type EarlyEnd = 'retired' | 'disqualified' | 'conceded';
+
+const EARLY_ENDS: ReadonlySet<string> = new Set<EarlyEnd>(['retired', 'disqualified', 'conceded']);
+
+/**
+ * Why a match ended early, read from its log: the last `end` event, if nothing was
+ * played after it (Rescore drops it). Null for a match played out, or one with no log.
+ */
+export function earlyEndOf(liveState: unknown): EarlyEnd | null {
+  const log = readRallyLog(liveState);
+  for (let i = log.length - 1; i >= 0; i--) {
+    const ev = log[i];
+    if (ev.t === 'end') return EARLY_ENDS.has(ev.reason) ? (ev.reason as EarlyEnd) : null;
+    if (ev.t === 'point' || ev.t === 'penalty') return null;
+  }
+  return null;
+}
+
+/** How a results line marks it: "21-15, 8-3 (ret.)". */
+export const EARLY_END_LABEL: Record<EarlyEnd, string> = {
+  retired: 'ret.',
+  disqualified: 'DSQ',
+  conceded: 'conceded',
+};
 
 /** Who served the first point, as persisted. Defaults to the home side. */
 export function readFirstServer(liveState: unknown): Side {

@@ -12,7 +12,8 @@ import {
 import type { Prisma } from '../infra/prisma.js';
 import { env } from '../config/env.js';
 import { makeCrudRouter } from './crud.js';
-import { makeErrorHandler } from './middleware/error.js';
+import { asyncHandler, makeErrorHandler } from './middleware/error.js';
+import { parsePaging } from './paging.js';
 import { parseAuth, requireAuth, requireSuperAdmin } from './middleware/auth.js';
 import { makeGuards } from './middleware/permissions.js';
 import { makeEntitlementGuards } from './middleware/entitlements.js';
@@ -134,13 +135,42 @@ export function buildApp(prisma: Prisma) {
     name: 'Sport', createSchema: createSportSchema, updateSchema: updateSportSchema,
     orderBy: { name: 'asc' }, writeGuards: [requireSuperAdmin],
   }));
+  // DISCIPLINES: the platform catalogue (championship_id null) plus each event's own;
+  // an organiser's custom discipline is offered only in its own event.
+  const eventOfDiscipline = async (id: string) =>
+    (await prisma.disciplines.findUnique({ where: { id }, select: { championship_id: true } }))?.championship_id ?? null;
+  const eventManager = guards.championshipCrudGuard({
+    body: async (req) => req.body?.championship_id,
+    byId: eventOfDiscipline,
+  });
+  // The catalogue stays super-admin only; an event's own discipline is its organisers'.
+  const disciplineCreateGuard: RequestHandler = (req, res, next) =>
+    (req.body?.championship_id ? eventManager : requireSuperAdmin)(req, res, next);
+  const disciplineWriteGuard: RequestHandler = asyncHandler(async (req, res, next) => {
+    const eventId = await eventOfDiscipline(req.params.id);
+    return (eventId ? eventManager : requireSuperAdmin)(req, res, next);
+  });
+  // `?championship_id=` adds that event's own to the catalogue; a super admin may ask
+  // for `?all=1` to see every event's too.
+  api.get('/disciplines', asyncHandler(async (req, res) => {
+    const sportId = typeof req.query.sport_id === 'string' ? req.query.sport_id : undefined;
+    const eventId = typeof req.query.championship_id === 'string' ? req.query.championship_id : undefined;
+    const everything = req.query.all === '1' && !!req.user?.isSuperAdmin;
+    const { take, skip } = parsePaging(req.query);
+    const rows = await prisma.disciplines.findMany({
+      where: {
+        ...(sportId ? { sport_id: sportId } : {}),
+        ...(everything ? {} : { OR: [{ championship_id: null }, ...(eventId ? [{ championship_id: eventId }] : [])] }),
+      },
+      orderBy: { display_order: 'asc' },
+      take, skip,
+    });
+    res.json(rows);
+  }));
   api.use('/disciplines', makeCrudRouter(prisma.disciplines, {
     name: 'Discipline', createSchema: createDisciplineSchema, updateSchema: updateDisciplineSchema,
     listFilters: ['sport_id'], orderBy: { display_order: 'asc' },
-    // Editing/deleting the master catalogue stays super-admin only, but any authed
-    // organiser may add a new discipline (e.g. an age/gender category) while setting
-    // up their championship - createGuards empty = just the global requireAuth.
-    writeGuards: [requireSuperAdmin], createGuards: [],
+    writeGuards: [disciplineWriteGuard], createGuards: [disciplineCreateGuard],
   }));
   api.use('/tournament-formats', makeCrudRouter(prisma.tournament_formats, {
     name: 'Tournament format', createSchema: createFormatSchema, updateSchema: updateFormatSchema,

@@ -4,7 +4,7 @@ import {
   atAdvantage, effectiveLevel, initKernel, isDecider, serveSpecFor, step,
   type KernelState, type RallyLog,
 } from './rally-kernel.js';
-import { resolveServer, type Pairing, type ServeNomination } from './serve-resolvers.js';
+import { formatForPairing, resolveServer, type Pairing, type ServeNomination } from './serve-resolvers.js';
 
 // ============================================================================
 // The stat registry.
@@ -43,7 +43,9 @@ export interface StatMetric {
   /** +1 per contributing event, or 'value' to sum the event's own magnitude. */
   per?: number | 'value';
   /** `derived` source: computed from other metrics at rollup time. */
-  formula?: { op: 'ratio' | 'sum' | 'diff'; of: [string, string] };
+  /** `per`: a plain average, x / y to one decimal (not a percentage). */
+  /** `share`: a as a % of a + b - won of played, from a won and a lost counter. */
+  formula?: { op: 'ratio' | 'sum' | 'diff' | 'per' | 'share'; of: [string, string] };
   aggregate: MetricAggregate;
   /** `rate` aggregate: numerator and denominator metric keys. */
   rateOf?: [string, string];
@@ -53,6 +55,8 @@ export interface StatMetric {
   higherIsBetter?: boolean;
   /** Percentages render differently from counts. */
   percent?: boolean;
+  /** Stored only to compute a rate; not shown as a tile of its own. */
+  hidden?: boolean;
 }
 
 /**
@@ -130,6 +134,12 @@ const rate = (key: string, label: string, short: string, of: [string, string], h
   higherIsBetter: true, percent: true, headline,
 });
 
+/** Won as a % of won + lost - for counters kept as a won/lost pair with no "played". */
+const share = (key: string, label: string, short: string, of: [won: string, lost: string], headline = false): StatMetric => ({
+  key, label, short, source: 'derived', aggregate: 'sum', formula: { op: 'share', of },
+  higherIsBetter: true, percent: true, headline,
+});
+
 // ============================================================================
 // Racquet metrics: the dividend from the rally kernel.
 // ============================================================================
@@ -145,13 +155,42 @@ const RACQUET_CORE: StatMetric[] = [
   rally('points_lost', 'Points lost', 'PtsL', { higherIsBetter: false }),
   rally('point_diff', 'Point difference', '+/-', { source: 'derived', formula: { op: 'diff', of: ['points_won', 'points_lost'] } }),
 
-  rally('service_points_played', 'Service points', 'SvP'),
-  rally('service_points_won', 'Service points won', 'SvW'),
-  rate('service_win_pct', 'Service win %', 'Sv%', ['service_points_won', 'service_points_played'], true),
+  // Yours in doubles: rallies YOU served, and rallies YOU had to return the serve in.
+  rally('service_points_played', 'Points on your serve', 'SvP'),
+  rally('service_points_won', 'Won on your serve', 'SvW'),
+  rate('service_win_pct', 'Serve win %', 'Sv%', ['service_points_won', 'service_points_played'], true),
 
-  rally('return_points_played', 'Return points', 'RtP'),
-  rally('return_points_won', 'Return points won', 'RtW'),
-  rate('return_win_pct', 'Return win %', 'Rt%', ['return_points_won', 'return_points_played']),
+  rally('return_points_played', 'Points receiving', 'RtP'),
+  rally('return_points_won', 'Won receiving', 'RtW'),
+  rate('return_win_pct', 'Receive win %', 'Rt%', ['return_points_won', 'return_points_played']),
+
+  // Doubles only: the pair's totals, beside the personal ones above.
+  rally('pair_service_points_played', 'Points your pair served', 'PSv'),
+  rally('pair_service_points_won', 'Won when your pair served', 'PSvW'),
+  rate('pair_service_win_pct', 'Pair serve win %', 'PSv%', ['pair_service_points_won', 'pair_service_points_played']),
+  rally('pair_return_points_played', 'Points your pair received', 'PRt'),
+  rally('pair_return_points_won', 'Won when your pair received', 'PRtW'),
+  rate('pair_return_win_pct', 'Pair receive win %', 'PRt%', ['pair_return_points_won', 'pair_return_points_played']),
+
+  // Side-out scoring (traditional pickleball, English squash): only the server scores.
+  rally('side_outs_won', 'Side-outs won', 'SO'),
+  // The opponents' service turns you faced: side-out % is how many of them you ended.
+  rally('service_turns_faced', 'Service turns faced', 'STF', { hidden: true }),
+  rate('side_out_pct', 'Side-out %', 'SO%', ['side_outs_won', 'service_turns_faced']),
+  rally('service_turns', 'Service turns', 'STn', { hidden: true }),
+  rally('service_turn_points', 'Points in service turns', 'STP', { hidden: true }),
+  rally('points_per_service_turn', 'Points per service turn', 'P/T',
+    { source: 'derived', formula: { op: 'per', of: ['service_turn_points', 'service_turns'] } }),
+
+  // Table tennis expedite system - present only for matches it came into.
+  rally('expedite_matches', 'Expedite matches', 'ExM'),
+  rally('expedite_wins', 'Expedite wins', 'ExW'),
+  rally('expedite_points_played', 'Expedite points', 'ExP', { hidden: true }),
+  rally('expedite_points_won', 'Expedite points won', 'ExPW', { hidden: true }),
+  rate('expedite_point_win_pct', 'Expedite point win %', 'Ex%', ['expedite_points_won', 'expedite_points_played']),
+  rally('expedite_return_wins', 'Won by 13 returns', '13W'),
+  // Against the SERVER personally: their opponent survived 13 returns on their serve.
+  rally('expedite_return_losses', 'Lost to 13 returns', '13L', { higherIsBetter: false }),
 
   rally('games_won', 'Games won', 'GW'),
   rally('games_lost', 'Games lost', 'GL', { higherIsBetter: false }),
@@ -160,6 +199,21 @@ const RACQUET_CORE: StatMetric[] = [
   rally('deuce_points_won', 'Deuce points won', 'DcW'),
   rally('deuce_points_played', 'Deuce points', 'DcP'),
   rate('deuce_win_pct', 'Deuce win %', 'Dc%', ['deuce_points_won', 'deuce_points_played']),
+
+  // Pressure: a rally that would win the game (or match) for one side.
+  rally('game_points_played', 'Game points', 'GPP', { hidden: true }),
+  rally('game_points_won', 'Game points converted', 'GPW', { hidden: true }),
+  rate('game_point_conversion_pct', 'Game point conversion %', 'GP%', ['game_points_won', 'game_points_played']),
+  rally('game_points_faced', 'Game points faced', 'GPF', { hidden: true }),
+  rally('game_points_saved', 'Game points saved', 'GPS', { hidden: true }),
+  rate('game_point_save_pct', 'Game point save %', 'GS%', ['game_points_saved', 'game_points_faced']),
+  rally('match_points_played', 'Match points', 'MPP', { hidden: true }),
+  rally('match_points_won', 'Match points converted', 'MPW', { hidden: true }),
+  rate('match_point_conversion_pct', 'Match point conversion %', 'MP%', ['match_points_won', 'match_points_played']),
+  rally('match_points_faced', 'Match points faced', 'MPF', { hidden: true }),
+  rally('match_points_saved', 'Match points saved', 'MPS'),
+  // Won a game after trailing by COMEBACK_GAME_DEFICIT or more in it.
+  rally('comeback_games', 'Games won from behind', 'GFB'),
 
   rally('longest_streak', 'Longest point streak', 'Strk', { aggregate: 'max', headline: true }),
   rally('comeback_wins', 'Comeback wins', 'CB', { headline: true }),
@@ -181,15 +235,54 @@ const RACQUET_CORE: StatMetric[] = [
 
 /** Tennis alone tracks serve outcomes as first-class events - it has two serves. */
 const TENNIS_EXTRA: StatMetric[] = [
-  rally('first_serves_in', 'First serves in', '1stIn'),
+  // First and second serve - counted only in matches where the scorer recorded serves
+  // (Fault / Ace), so `serve_points_tracked` is their own denominator, not every point served.
+  rally('serve_points_tracked', 'Serve points recorded', 'SvR', { hidden: true }),
+  rally('first_serves_in', 'First serves in', '1stIn', { hidden: true }),
+  rate('first_serve_pct', '1st serve in %', '1st%', ['first_serves_in', 'serve_points_tracked'], true),
+  rally('first_serve_points_won', '1st serve points won', '1stW', { hidden: true }),
+  rate('first_serve_win_pct', '1st serve points won %', '1stW%', ['first_serve_points_won', 'first_serves_in']),
+  rally('second_serve_points_played', '2nd serve points', '2ndP', { hidden: true }),
+  rally('second_serve_points_won', '2nd serve points won', '2ndW', { hidden: true }),
+  rate('second_serve_win_pct', '2nd serve points won %', '2ndW%', ['second_serve_points_won', 'second_serve_points_played']),
+  // Service games: held when you win your own, broken when the receiver does.
+  rally('service_games_played', 'Service games', 'SvG', { hidden: true }),
+  rally('service_games_won', 'Service games held', 'Held', { hidden: true }),
+  rate('service_games_held_pct', 'Service games held %', 'Hold%', ['service_games_won', 'service_games_played'], true),
+  rally('return_games_played', 'Return games', 'RtG', { hidden: true }),
+  rally('return_games_won', 'Breaks of serve', 'Brk'),
+  rate('return_games_won_pct', 'Return games won %', 'Brk%', ['return_games_won', 'return_games_played']),
   rally('break_points_won', 'Break points won', 'BPW', { headline: true }),
   rally('break_points_played', 'Break points', 'BP'),
   rally('break_points_saved', 'Break points saved', 'BPS'),
   rate('break_point_pct', 'Break point conversion', 'BP%', ['break_points_won', 'break_points_played']),
+  // Break points against you on your own serve - what "saved %" is measured against.
+  rally('break_points_faced', 'Break points faced', 'BPF', { hidden: true }),
+  rate('break_point_save_pct', 'Break points saved %', 'BPS%', ['break_points_saved', 'break_points_faced']),
   rally('tiebreaks_won', 'Tie-breaks won', 'TBW'),
   rally('tiebreaks_lost', 'Tie-breaks lost', 'TBL', { higherIsBetter: false }),
+  share('tiebreak_win_pct', 'Tie-break win %', 'TB%', ['tiebreaks_won', 'tiebreaks_lost']),
   rally('sets_won', 'Sets won', 'SW'),
   rally('sets_lost', 'Sets lost', 'SL', { higherIsBetter: false }),
+  share('set_win_pct', 'Set win %', 'Set%', ['sets_won', 'sets_lost'], true),
+  share('game_win_pct', 'Games won %', 'G%', ['games_won', 'games_lost']),
+  // The deciding set (one set all, or two all).
+  share('decider_win_pct', 'Deciding-set win %', 'Dec%', ['deciders_won', 'deciders_lost']),
+  rally('love_holds', 'Love holds', 'LH'),
+  // "To love", not "6-0": a short set (Fast4) is won 4-0.
+  rally('bagels', 'Bagels (sets won to love)', 'Bgl'),
+  rally('won_from_set_down', 'Won from a set down', 'WSD'),
+];
+
+/** Racquet metrics that never apply to tennis - side-out scoring and the TT expedite. */
+const NOT_TENNIS = [
+  'side_outs_won', 'side_out_pct', 'points_per_service_turn',
+  'expedite_matches', 'expedite_wins', 'expedite_point_win_pct', 'expedite_return_wins', 'expedite_return_losses',
+];
+
+/** A "pickle": a game won with the opponents still on 0 - pickleball's own word for it. */
+const PICKLEBALL_EXTRA: StatMetric[] = [
+  rally('pickles', 'Pickles (games won to 0)', 'Pkl'),
 ];
 
 /** Explicit taps a keen official can add on top of the free derived set. */
@@ -205,19 +298,27 @@ const OPTIONAL_SHOT_METRICS: StatMetric[] = [
   rally('unforced_errors', 'Unforced errors', 'UE', { source: 'event', fromEvents: ['error'], per: 1, higherIsBetter: false }),
 ];
 
-const racquetSpec = (sport: string, extra: StatMetric[] = [], positions?: string[]): SportStatSpec => ({
+/**
+ * `labels`: a shared metric said the sport's way - tennis wins in straight SETS.
+ * `hide`: shared metrics the sport never produces, kept off its stat tiles.
+ */
+const racquetSpec = (
+  sport: string, extra: StatMetric[] = [], labels: Record<string, string> = {}, hide: string[] = [],
+): SportStatSpec => ({
   sport,
   family: 'racquet',
-  metrics: [...RACQUET_CORE, ...OPTIONAL_SHOT_METRICS, ...extra],
+  metrics: [...RACQUET_CORE, ...OPTIONAL_SHOT_METRICS, ...extra]
+    .map((m) => (labels[m.key] ? { ...m, label: labels[m.key] } : m))
+    .map((m) => (hide.includes(m.key) ? { ...m, hidden: true } : m)),
   events: RACQUET_EVENTS,
-  positions: positions ?? ['singles', 'doubles', 'mixed doubles'],
+  positions: ['singles', 'doubles', 'mixed doubles'],
 });
 
 export const RACQUET_STAT_SPECS: SportStatSpec[] = [
   racquetSpec('table tennis'),
   racquetSpec('badminton'),
-  racquetSpec('tennis', TENNIS_EXTRA),
-  racquetSpec('pickleball'),
+  racquetSpec('tennis', TENNIS_EXTRA, { whitewashes: 'Straight-sets wins' }, NOT_TENNIS),
+  racquetSpec('pickleball', PICKLEBALL_EXTRA),
   racquetSpec('squash'),
 ];
 
@@ -393,10 +494,31 @@ const CHESS_METRICS: StatMetric[] = [
   ...UNIVERSAL,
   // Half points are why the result union had to allow a draw: a drawn board is the
   // normal case in chess, not an edge one. Stored doubled so it stays an integer.
-  rally('result_points_x2', 'Result points (×2)', 'Pts2', { headline: true }),
-  rally('as_white', 'Games as white', 'W'),
-  rally('as_black', 'Games as black', 'B'),
+  rally('result_points_x2', 'Result points (×2)', 'Pts2', { hidden: true }),
+  rally('as_white', 'Games as white', 'W', { hidden: true }),
+  rally('as_black', 'Games as black', 'B', { hidden: true }),
   count('board_no', 'Board', 'Bd', { source: 'entry', aggregate: 'min' }),
+  // Per GAME, not per match: a three-game match is three results. Points doubled.
+  rally('chess_games', 'Games', 'G', { headline: true }),
+  rally('chess_wins', 'Games won', 'GW'),
+  rally('chess_draws', 'Games drawn', 'GD'),
+  rally('chess_losses', 'Games lost', 'GL', { higherIsBetter: false }),
+  rally('chess_points_x2', 'Points (×2)', 'P2', { hidden: true }),
+  rally('chess_points_max_x2', 'Points available (×2)', 'PA2', { hidden: true }),
+  rate('chess_score_pct', 'Score %', 'Sc%', ['chess_points_x2', 'chess_points_max_x2'], true),
+  rate('chess_draw_pct', 'Draw %', 'D%', ['chess_draws', 'chess_games']),
+  rally('white_games', 'Games with white', 'GWh'),
+  rally('white_points_x2', 'Points with white (×2)', 'PWh2', { hidden: true }),
+  rally('white_points_max_x2', 'Points available with white (×2)', 'AWh2', { hidden: true }),
+  rate('white_score_pct', 'Score % with white', 'Wh%', ['white_points_x2', 'white_points_max_x2'], true),
+  rally('black_games', 'Games with black', 'GBk'),
+  rally('black_points_x2', 'Points with black (×2)', 'PBk2', { hidden: true }),
+  rally('black_points_max_x2', 'Points available with black (×2)', 'ABk2', { hidden: true }),
+  rate('black_score_pct', 'Score % with black', 'Bk%', ['black_points_x2', 'black_points_max_x2'], true),
+  rally('wins_by_checkmate', 'Wins by checkmate', 'Mate'),
+  rally('wins_by_resignation', 'Wins by resignation', 'Res'),
+  rally('wins_on_time', 'Wins on time', 'Time'),
+  rally('draws_by_agreement', 'Draws by agreement', 'Agr'),
 ];
 
 // ---- combat & strength -----------------------------------------------------
@@ -551,10 +673,12 @@ interface DeriveOpts {
  * needs the state as it was BEFORE each rally. One pass, full fidelity.
  */
 export function deriveRacquetStats(
-  format: ScoringFormat,
+  played: ScoringFormat,
   log: RallyLog,
   opts: DeriveOpts = {},
 ): DerivedMatchStats {
+  // Folded exactly as the console scored it: singles has one server per turn.
+  const format = formatForPairing(played, opts.pairing);
   const first = opts.firstServer ?? 'A';
   const sides: Record<Side, StatBag> = { A: {}, B: {} };
   // Per-person service tallies. Rally outcomes belong to the SIDE (a doubles point is
@@ -569,6 +693,17 @@ export function deriveRacquetStats(
   let state: KernelState = initKernel(format, first);
   let streak: Record<Side, number> = { A: 0, B: 0 };
   let firstUnitWinner: Side | null = null;
+  /** Tennis: who took the first set, for "won from a set down". */
+  let firstSetWinner: Side | null = null;
+  let personalReturns = false;
+  let expediteSeen = false;
+  // Biggest deficit each side has faced in the game under way (for comeback games).
+  let deficit: Record<Side, number> = { A: 0, B: 0 };
+  const pickleball = (format.sport ?? '').toLowerCase() === 'pickleball';
+  // Serves were recorded (a fault or an ace tapped) - only then are first/second-serve figures honest.
+  const serveDetail = log.some((e) => e.t === 'fault' || (e.t === 'point' && e.kind === 'ace'));
+  // The service turn under way (side-out scoring), to count each turn once.
+  let turn: { side: Side | null; games: number } = { side: null, games: 0 };
 
   for (const ev of log) {
     const before = state;
@@ -578,26 +713,62 @@ export function deriveRacquetStats(
     const wasDecider = isDecider(format, before, before.pointLevel);
     const isTiebreak = lv.key === 'tiebreak';
     const serverSide = spec.movement === 'none' ? null : before.serve.side;
-    const server = opts.pairing ? resolveServer(format, before, opts.pairing, opts.nomination).server : null;
+    const resolved = opts.pairing ? resolveServer(format, before, opts.pairing, opts.nomination) : null;
+    const server = resolved?.server ?? null;
+    // Who had to return the serve - only where the sport's rules name them.
+    const receiver = RECEIVER_RESOLVERS.has(spec.resolver) ? resolved?.receiver ?? null : null;
+    if (receiver) personalReturns = true;
 
     // Break point: the RECEIVER is one point from taking a game the server is serving.
     // Only meaningful where the serve is locked to a unit, i.e. tennis.
     const bpSide = breakPointSide(format, before, lv, spec);
 
+    // Game / match point, from the kernel itself: would winning this rally settle it?
+    const onPoint = ev.t === 'point' && !before.ended ? pressureBefore(format, before) : null;
+
     const r = step(format, before, ev);
     state = r.state;
     const eff = r.effect;
+    const underExpedite = before.expedite;
+    if (state.expedite) expediteSeen = true;
 
     if (ev.t === 'let') { bump(sides.A, 'lets'); bump(sides.B, 'lets'); continue; }
 
+    // A fault that the kernel turned into a point is a double fault: counted, then scored
+    // below like any rally the receiver won. A first-serve fault is only counted.
+    const doubleFault = ev.t === 'fault' && !!eff.scored;
     if (ev.t === 'fault' && serverSide) {
       bump(sides[serverSide], 'faults');
       if (server) bump(personBag(server), 'faults');
-      continue;
+      if (!doubleFault) continue;
+      bump(sides[serverSide], 'double_faults');
+      if (server) bump(personBag(server), 'double_faults');
+    }
+    if (ev.t === 'point' && ev.kind === 'ace' && serverSide) {
+      bump(sides[serverSide], 'aces');
+      if (server) bump(personBag(server), 'aces');
+    }
+
+    // First and second serve. Only where the scorer recorded serves (faults or aces) -
+    // a match tapped as plain rallies would otherwise read as "100% first serves in".
+    if (serveDetail && serverSide && (ev.t === 'point' || doubleFault) && (ev.t !== 'point' || (ev.pts ?? 1) > 0)) {
+      const won = ev.t === 'point' && ev.side === serverSide;
+      const bags = server ? [sides[serverSide], personBag(server)] : [sides[serverSide]];
+      for (const b of bags) {
+        bump(b, 'serve_points_tracked');
+        if (!before.serve.faults && !doubleFault) {
+          bump(b, 'first_serves_in');
+          if (won) bump(b, 'first_serve_points_won');
+        } else {
+          bump(b, 'second_serve_points_played');
+          if (won) bump(b, 'second_serve_points_won');
+        }
+      }
     }
 
     if (ev.t === 'end') {
-      if (ev.reason === 'retired') { bump(sides.A, 'retirements'); bump(sides.B, 'retirements'); }
+      // Only the side that retired - the winner is the other one.
+      if (ev.reason === 'retired' && ev.winner) bump(sides[ev.winner === 'A' ? 'B' : 'A'], 'retirements');
       if (ev.reason === 'walkover' && ev.winner) bump(sides[ev.winner], 'walkovers_received');
       continue;
     }
@@ -614,22 +785,29 @@ export function deriveRacquetStats(
         bump(sides[w], 'deuce_points_won');
       }
 
-      // Service / return split. Under serverOnly scoring a receiver win scores nothing,
-      // so this branch only ever sees rallies that produced a point.
-      if (serverSide) {
-        const rec: Side = serverSide === 'A' ? 'B' : 'A';
-        bump(sides[serverSide], 'service_points_played');
-        bump(sides[rec], 'return_points_played');
-        if (w === serverSide) bump(sides[serverSide], 'service_points_won');
-        else bump(sides[rec], 'return_points_won');
-        if (server) {
-          bump(personBag(server), 'service_points_played');
-          if (w === serverSide) bump(personBag(server), 'service_points_won');
+      // Deficits in the game under way, read after the point lands.
+      const sc = state.score[state.pointLevel];
+      if (!eff.unitsWon.length) {
+        deficit = { A: Math.max(deficit.A, sc[1] - sc[0]), B: Math.max(deficit.B, sc[0] - sc[1]) };
+      }
+
+      if (underExpedite) {
+        bump(sides.A, 'expedite_points_played');
+        bump(sides.B, 'expedite_points_played');
+        bump(sides[w], 'expedite_points_won');
+      }
+      // The receiver survived 13 returns: their point, and a loss on the server's serve.
+      if (ev.t === 'point' && ev.kind === 'expedite_returns') {
+        bump(sides[w], 'expedite_return_wins');
+        if (serverSide && serverSide !== w) {
+          bump(sides[serverSide], 'expedite_return_losses');
+          if (server) bump(personBag(server), 'expedite_return_losses');
         }
       }
 
       if (bpSide) {
         bump(sides[bpSide], 'break_points_played');
+        if (serverSide) bump(sides[serverSide], 'break_points_faced');
         if (w === bpSide) bump(sides[bpSide], 'break_points_won');
         else if (serverSide) bump(sides[serverSide], 'break_points_saved');
       }
@@ -637,6 +815,58 @@ export function deriveRacquetStats(
       streak[w] += 1;
       streak[l] = 0;
       if (streak[w] > (sides[w].longest_streak ?? 0)) sides[w].longest_streak = streak[w];
+    }
+
+    // Service / return split, per RALLY: under side-out scoring a receiver's rally win
+    // scores nothing but wins the serve back, so scored points alone read 100% / 0%.
+    const rallyWinner: Side | null = ev.t === 'point' ? ((ev.pts ?? 1) > 0 ? ev.side : null) : eff.scored;
+    if (rallyWinner && serverSide) {
+      const rec: Side = serverSide === 'A' ? 'B' : 'A';
+      bump(sides[serverSide], 'service_points_played');
+      bump(sides[rec], 'return_points_played');
+      if (rallyWinner === serverSide) bump(sides[serverSide], 'service_points_won');
+      else bump(sides[rec], 'return_points_won');
+      if (server) {
+        bump(personBag(server), 'service_points_played');
+        if (rallyWinner === serverSide) bump(personBag(server), 'service_points_won');
+      }
+      if (receiver) {
+        bump(personBag(receiver), 'return_points_played');
+        if (rallyWinner !== serverSide) bump(personBag(receiver), 'return_points_won');
+      }
+    }
+
+    // Side-out scoring only (only the server scores): service turns, the points scored
+    // in them, and side-outs - winning the serve back. Team figures, like the score.
+    if (rallyWinner && serverSide && spec.pointScoring === 'serverOnly') {
+      const games = before.finished.filter((u) => u.level === 0).length;
+      if (turn.side !== serverSide || turn.games !== games) {
+        bump(sides[serverSide], 'service_turns');
+        bump(sides[serverSide === 'A' ? 'B' : 'A'], 'service_turns_faced');
+        turn = { side: serverSide, games };
+      }
+      if (eff.scored === serverSide) bump(sides[serverSide], 'service_turn_points');
+      if (state.serve.side !== serverSide && !eff.unitsWon.length) bump(sides[state.serve.side], 'side_outs_won');
+    }
+
+    // Game and match points: counted on every rally they were on, scored or not (a
+    // side-out under server-only scoring is a saved game point too).
+    if (onPoint) {
+      const settled = eff.unitsWon.length > 0;
+      for (const s of ['A', 'B'] as Side[]) {
+        const o: Side = s === 'A' ? 'B' : 'A';
+        const kind = onPoint[s];
+        if (!kind) continue;
+        const converted = settled && eff.unitsWon[0].winner === s;
+        bump(sides[s], 'game_points_played');
+        bump(sides[o], 'game_points_faced');
+        if (converted) bump(sides[s], 'game_points_won'); else bump(sides[o], 'game_points_saved');
+        if (kind === 'match') {
+          bump(sides[s], 'match_points_played');
+          bump(sides[o], 'match_points_faced');
+          if (converted && state.ended) bump(sides[s], 'match_points_won'); else bump(sides[o], 'match_points_saved');
+        }
+      }
     }
 
     // A DECIDER IS THE DECIDING UNIT OF THE MATCH, whatever that unit is called.
@@ -654,13 +884,36 @@ export function deriveRacquetStats(
       if (decidedTheMatch) { bump(sides[w], 'deciders_won'); bump(sides[l], 'deciders_lost'); }
       if (u.level === 0) {
         if (isTiebreak) { bump(sides[w], 'tiebreaks_won'); bump(sides[l], 'tiebreaks_lost'); }
+        // Tennis service games: one server for the whole game (not a tie-break). The server
+        // holds by winning it; the receiver breaks. Awarded games were not played out.
+        if (spec.movement === 'perUnit' && !isTiebreak && serverSide && !u.awarded) {
+          const rec: Side = serverSide === 'A' ? 'B' : 'A';
+          const held = w === serverSide;
+          // A love hold: the receiver did not win a point of it.
+          const loveHold = held && u.score[rec === 'A' ? 0 : 1] === 0;
+          for (const b of server ? [sides[serverSide], personBag(server)] : [sides[serverSide]]) {
+            bump(b, 'service_games_played');
+            if (held) bump(b, 'service_games_won');
+            if (loveHold) bump(b, 'love_holds');
+          }
+          bump(sides[rec], 'return_games_played');
+          if (!held) bump(sides[rec], 'return_games_won');
+        }
         bump(sides[w], 'games_won');
         bump(sides[l], 'games_lost');
         if (firstUnitWinner === null) firstUnitWinner = w;
         streak = { A: 0, B: 0 };
+        if (deficit[w] >= COMEBACK_GAME_DEFICIT) bump(sides[w], 'comeback_games');
+        deficit = { A: 0, B: 0 };
+        // Pickleball's "pickle": a played game won with the opponents on 0.
+        if (pickleball && !u.awarded && u.score[l === 'A' ? 0 : 1] === 0) bump(sides[w], 'pickles');
       } else if (format.levels[u.level]?.key === 'set') {
         bump(sides[w], 'sets_won');
         bump(sides[l], 'sets_lost');
+        // A bagel: a set won with the opponent on no games. Not a match tie-break played
+        // as the deciding set - its score is points (10-0), not games.
+        if (!u.awarded && before.pointLevel === 0 && u.score[l === 'A' ? 0 : 1] === 0) bump(sides[w], 'bagels');
+        if (firstSetWinner === null) firstSetWinner = w;
       }
     }
     void wasDecider;
@@ -669,6 +922,11 @@ export function deriveRacquetStats(
   // Match-level outcome.
   bump(sides.A, 'matches');
   bump(sides.B, 'matches');
+  if (expediteSeen) {
+    bump(sides.A, 'expedite_matches');
+    bump(sides.B, 'expedite_matches');
+    if (state.winner) bump(sides[state.winner], 'expedite_wins');
+  }
   if (state.outcome === 'draw') { bump(sides.A, 'draws'); bump(sides.B, 'draws'); }
   else if (state.winner) {
     const w = state.winner;
@@ -677,11 +935,72 @@ export function deriveRacquetStats(
     bump(sides[l], 'losses');
     // Won after dropping the opening game.
     if (firstUnitWinner && firstUnitWinner !== w) bump(sides[w], 'comeback_wins');
-    if (firstUnitWinner === w && (sides[w].games_lost ?? 0) === 0) bump(sides[w], 'whitewashes');
+    // Tennis's real comeback: lost the first set, won the match.
+    if (firstSetWinner && firstSetWinner !== w) bump(sides[w], 'won_from_set_down');
+    // Without dropping a unit. With sets (tennis) that is a SET - winning 6-0 6-0 is not
+    // the bar; 6-4 6-4 is a straight-sets win. Elsewhere it is a game (3-0 in games).
+    const withSets = format.levels.some((lv, i) => i > 0 && i < format.levels.length - 1 && lv.key === 'set');
+    // A one-set match (pro set, single set) has no "straight sets": every win would count.
+    const setsToWin = format.levels[format.levels.length - 1]?.target ?? 1;
+    if (withSets
+      ? setsToWin > 1 && (sides[w].sets_lost ?? 0) === 0
+      : firstUnitWinner === w && (sides[w].games_lost ?? 0) === 0) {
+      bump(sides[w], 'whitewashes');
+    }
+  }
+
+  // In doubles a player who never served (or never received) has 0 of their own,
+  // not their pair's figure - which is what the side-level fallback would give them.
+  for (const side of ['A', 'B'] as Side[]) {
+    const people = opts.pairing?.[side] ?? [];
+    if (people.length < 2) continue;
+    // The pair's totals ride on the side bag, so each partner gets them unchanged.
+    sides[side].pair_service_points_played = sides[side].service_points_played ?? 0;
+    sides[side].pair_service_points_won = sides[side].service_points_won ?? 0;
+    sides[side].pair_return_points_played = sides[side].return_points_played ?? 0;
+    sides[side].pair_return_points_won = sides[side].return_points_won ?? 0;
+    for (const id of people) {
+      const b = personBag(id);
+      b.service_points_played ??= 0;
+      b.service_points_won ??= 0;
+      // Server-personal tallies start at 0 per partner, so a career gets only its own aces
+      // and faults - not the pair's, which would land in both careers.
+      for (const k of PERSONAL_SERVE_KEYS) if (sides[side][k] !== undefined) b[k] ??= 0;
+      if (personalReturns) { b.return_points_played ??= 0; b.return_points_won ??= 0; }
+      if (expediteSeen) b.expedite_return_losses ??= 0;
+    }
   }
 
   return { sides, players: attribute(sides, perPerson, opts.pairing) };
 }
+
+/** Tallies kept per SERVER in doubles (each is also bumped on the person who served). */
+const PERSONAL_SERVE_KEYS = [
+  'service_games_played', 'service_games_won', 'love_holds',
+  'aces', 'faults', 'double_faults',
+  'serve_points_tracked', 'first_serves_in', 'first_serve_points_won',
+  'second_serve_points_played', 'second_serve_points_won',
+] as const;
+
+/** A game won after trailing by this many points in it counts as won from behind. */
+export const COMEBACK_GAME_DEFICIT = 3;
+
+/** For each side: would winning the next rally take the game ('game') or the match ('match')? */
+function pressureBefore(format: ScoringFormat, before: KernelState): Record<Side, 'game' | 'match' | null> {
+  const out: Record<Side, 'game' | 'match' | null> = { A: null, B: null };
+  for (const s of ['A', 'B'] as Side[]) {
+    const r = step(format, before, { t: 'point', side: s });
+    if (!r.effect.unitsWon.length || r.effect.unitsWon[0].winner !== s) continue;
+    out[s] = r.state.ended && r.state.winner === s ? 'match' : 'game';
+  }
+  return out;
+}
+
+/**
+ * Serve resolvers that name the RECEIVER from the rules: the diagonal court, the fixed
+ * TT rotation, and receivers holding a side (tennis for a set, squash for a game).
+ */
+const RECEIVER_RESOLVERS: ReadonlySet<string> = new Set(['bwfSingleServer', 'pickleballTwoServer', 'ttPairCycle', 'tennisGameLocked', 'squashHandOut']);
 
 /**
  * A doubles point is won by the PAIR, so both partners receive the side's rally
@@ -774,6 +1093,8 @@ export function foldCareerStats(spec: SportStatSpec, lines: StatBag[]): StatBag 
       if (m.formula.op === 'diff') out[m.key] = a - b;
       else if (m.formula.op === 'sum') out[m.key] = a + b;
       else if (m.formula.op === 'ratio' && b > 0) out[m.key] = Math.round((a / b) * 1000) / 10;
+      else if (m.formula.op === 'per' && b > 0) out[m.key] = Math.round((a / b) * 10) / 10;
+      else if (m.formula.op === 'share' && a + b > 0) out[m.key] = Math.round((a / (a + b)) * 1000) / 10;
     }
   }
   return out;

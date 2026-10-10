@@ -20,6 +20,28 @@ export const FIXTURE_STATUS = [
 ] as const;
 export type FixtureStatus = (typeof FIXTURE_STATUS)[number];
 
+/** A player's (or side's) result in one match, as records and stat lines store it. */
+export const MATCH_OUTCOME = ['won', 'lost', 'drew'] as const;
+export type MatchOutcome = (typeof MATCH_OUTCOME)[number];
+export const isMatchOutcome = (v: unknown): v is MatchOutcome => (MATCH_OUTCOME as readonly unknown[]).includes(v);
+
+/** How many played a contest on each side - a racquet rubber, a career split. */
+export const MATCH_POSITION = ['singles', 'doubles'] as const;
+export type MatchPosition = (typeof MATCH_POSITION)[number];
+
+/** Shown wherever a fixture's side is not decided yet. */
+export const TBD_LABEL = 'TBD';
+
+/** An abandoned match recorded as "no result, points shared" - flagged in live_state. */
+export const isNoResult = (liveState: unknown): boolean =>
+  (liveState as { noResult?: unknown } | null)?.noResult === true;
+
+/** The round label the knockout generators give the play-off for third. */
+export const THIRD_PLACE_ROUND = '3rd Place';
+
+/** A bracket match (final and 3rd place included): someone must win, so a level result needs a tie-break. */
+export const isKnockoutFixture = (f: { bracket_position?: number | null; round?: string | null }): boolean =>
+  f.bracket_position != null || f.round === THIRD_PLACE_ROUND;
 
 export const GROUND_TYPE = ['court', 'field', 'pool', 'track', 'ring', 'table'] as const;
 export type GroundType = (typeof GROUND_TYPE)[number];

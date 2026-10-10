@@ -1,4 +1,4 @@
-import { DEFAULT_STANDINGS_RULE, standingsRuleSchema, type StandingsRule, type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker } from '@semp/shared';
+import { DEFAULT_STANDINGS_RULE, chessStandingsRule, formatPoints, isChessSport, isNoResult, standingsRuleSchema, type StandingsRule, type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
 import { contingentKey, type ContingentRef } from '@semp/shared';
 import { accumulate, rankBy, runScheme, type EntityTally, type SchemeFixture } from './domain/schemes.js';
@@ -28,6 +28,8 @@ function parseRule(config: unknown): StandingsRule {
 // scoring endpoint (which needs a ranking rule's place points).
 export async function resolveRuleForDraw(
   prisma: Db, championshipId: string, disciplineId: string | null, formatId: string | null,
+  /** A chess draw ranks by chess points unless the organiser set a rule for it. */
+  chess?: { team: boolean },
 ): Promise<StandingsRule> {
   const ruleRows = await prisma.standings_rules.findMany({ where: { championship_id: championshipId } });
   const byDiscipline = new Map<string, StandingsRule>();
@@ -42,8 +44,21 @@ export async function resolveRuleForDraw(
   return (
     (disciplineId ? byDiscipline.get(disciplineId) : undefined) ??
     (formatId ? byFormat.get(formatId) : undefined) ??
+    // Ahead of the championship default: that one is set for the points table across
+    // sports, and 3/1/0 makes a chess draw a third of a win instead of half.
+    (chess ? chessStandingsRule(chess.team) : undefined) ??
     championshipRule ?? DEFAULT_STANDINGS_RULE
   );
+}
+
+/**
+ * The tables' fallback for a draw with no rule of its own. Chess swaps a points-table
+ * default for 2/1/0 (as pool seeding does); a places/medal championship scheme is kept.
+ */
+function fallbackRuleFor(defaultRule: StandingsRule, sportName?: string | null, entryType?: string | null): StandingsRule {
+  return isChessSport(sportName) && defaultRule.scheme === 'league_points'
+    ? chessStandingsRule(entryType === 'team')
+    : defaultRule;
 }
 
 export async function resolveSchemeForDraw(
@@ -115,11 +130,12 @@ export async function recomputeStandings(prisma: Db, championshipId: string): Pr
       id: true,
       discipline_id: true,
       format_id: true,
-      tournament_sports: { select: { sport_id: true, tournament_id: true, format_id: true } },
+      disciplines: { select: { entry_type: true } },
+      tournament_sports: { select: { sport_id: true, tournament_id: true, format_id: true, sports: { select: { name: true } } } },
       fixtures: {
         // Byes are unplayed but advance a team, so the placement scheme credits the
         // floor of the stage they reached - include them alongside completed results.
-        where: { status: { in: ['completed', 'bye'] } },
+        where: { status: { in: ['completed', 'walkover', 'bye'] } },
         select: {
           status: true,
           round: true, home_team_id: true, away_team_id: true,
@@ -161,7 +177,7 @@ export async function recomputeStandings(prisma: Db, championshipId: string): Pr
     const rule =
       (d.discipline_id ? byDiscipline.get(d.discipline_id) : undefined) ??
       (effectiveFormatId ? byFormat.get(effectiveFormatId) : undefined) ??
-      defaultRule;
+      fallbackRuleFor(defaultRule, ts.sports?.name, d.disciplines?.entry_type);
 
     const fixtures: SchemeFixture[] = d.fixtures.map((f) => {
       const cp = (f.live_state as any)?.custom_points ?? null;
@@ -177,6 +193,7 @@ export async function recomputeStandings(prisma: Db, championshipId: string): Pr
         winner_team_id: f.winner_team_id,
         home_points: typeof cp?.home === 'number' ? cp.home : null,
         away_points: typeof cp?.away === 'number' ? cp.away : null,
+        no_result: isNoResult(f.live_state),
       };
     });
 
@@ -384,10 +401,10 @@ export async function readStandingsBreakdown(
       id: true,
       discipline_id: true,
       format_id: true,
-      disciplines: { select: { name: true } },
+      disciplines: { select: { name: true, entry_type: true } },
       tournament_sports: { select: { sport_id: true, tournament_id: true, format_id: true, sports: { select: { name: true } } } },
       fixtures: {
-        where: { status: { in: ['completed', 'bye'] } },
+        where: { status: { in: ['completed', 'walkover', 'bye'] } },
         select: {
           status: true, round: true,
           home_team_id: true, away_team_id: true,
@@ -425,7 +442,7 @@ export async function readStandingsBreakdown(
     const rule =
       (d.discipline_id ? byDiscipline.get(d.discipline_id) : undefined) ??
       (effectiveFormatId ? byFormat.get(effectiveFormatId) : undefined) ??
-      defaultRule;
+      fallbackRuleFor(defaultRule, ts.sports?.name, d.disciplines?.entry_type);
 
     const schemeFixtures: SchemeFixture[] = d.fixtures.map((f) => {
       const cp = (f.live_state as any)?.custom_points ?? null;
@@ -438,6 +455,7 @@ export async function readStandingsBreakdown(
         winner_team_id: f.winner_team_id,
         home_points: typeof cp?.home === 'number' ? cp.home : null,
         away_points: typeof cp?.away === 'number' ? cp.away : null,
+        no_result: isNoResult(f.live_state),
       };
     });
 
@@ -460,7 +478,7 @@ export async function readStandingsBreakdown(
       const opponent = f.status === 'bye' ? 'Bye' : (oppName ?? 'TBD');
       const myScore = isHome ? f.home_score : f.away_score;
       const oppScore = isHome ? f.away_score : f.home_score;
-      const score = myScore != null && oppScore != null ? `${myScore}–${oppScore}` : null;
+      const score = myScore != null && oppScore != null ? `${formatPoints(myScore)}–${formatPoints(oppScore)}` : null;
 
       let result: BreakdownMatch['result'];
       let points: number | null = null;

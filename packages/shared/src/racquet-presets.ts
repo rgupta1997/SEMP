@@ -2,6 +2,7 @@ import type {
   ClockSpec, EndStatePolicy, LevelSpec, OfficiatingMode, ScoringFormat, ServeSpec,
 } from './scoring-rules.js';
 import { canonicalTeamSport, teamPresetsFor, TEAM_PRESETS } from './team-presets.js';
+import { ITTF_EXPEDITE } from './rally-kernel.js';
 
 // ============================================================================
 // The shelf. Every named format a customer picks off it, as data.
@@ -91,7 +92,7 @@ const tennisServe: ServeSpec = {
   pointScoring: 'rally',
   movement: 'perUnit',
   resolver: 'tennisGameLocked',
-  courtModel: 'parity',
+  courtModel: 'gameTotal',
   firstServer: 'toss',
   nextUnitServer: 'alternate',
 };
@@ -103,7 +104,7 @@ const tennisTiebreakServe: ServeSpec = {
   every: 2,
   firstTurnEvery: 1,
   resolver: 'tennisGameLocked',
-  courtModel: 'parity',
+  courtModel: 'gameTotal',
   firstServer: 'organiser',
   nextUnitServer: 'subUnitFirstServerReceives',
 };
@@ -205,6 +206,8 @@ const TABLE_TENNIS: ScoringFormat[] = [
   fmt({
     sport: 'table tennis', key: 'ittf_bo5_11', name: 'ITTF Standard — best of 5 games to 11',
     levels: [ttGame(11, 2, null, 5), match(3)], serve: ttServe(2, 10), mode: 'officiated',
+    // ITTF law for every officiated match, not only championship best-of-7s.
+    plugins: { expedite: { ...ITTF_EXPEDITE } },
   }),
   fmt({
     sport: 'table tennis', key: 'ittf_bo7_11', name: 'ITTF Championship — best of 7 games to 11',
@@ -214,7 +217,7 @@ const TABLE_TENNIS: ScoringFormat[] = [
       // WITHIN-rally counter (the receiver's 13th return) and the trigger is elapsed
       // PLAYING time, neither of which the kernel's event alphabet can express. Ships
       // off in every umpireless preset; the returns are counted by a human, never inferred.
-      expedite: { enabled: true, afterMinutes: 10, exemptAtScore: 9, returnsToWinPoint: 13, serveEvery: 1, stickyForMatch: true },
+      expedite: { ...ITTF_EXPEDITE },
     },
     rulesSheet: { ballDiameterMm: 40, netHeightCm: 15.25, towelBreakEveryPoints: 6, timeoutsPerSidePerMatch: 1 },
   }),
@@ -271,11 +274,11 @@ const BADMINTON: ScoringFormat[] = [
     levels: [bwfGame(11, 15, 6), match(3)], serve: bwfServe, mode: 'officiated',
   }),
   fmt({
-    sport: 'badminton', key: 'classic_15_sideout', name: 'Classic 15 — side-out (service) scoring',
+    sport: 'badminton', key: 'classic_15_sideout', name: 'Classic 15 — side-out (service) scoring, best of 3 games',
     // Heritage, and BUILT rather than stubbed. `setting` (the 13-all election to extend
     // the game by 5) is a documented non-goal: if the players set, the score is recorded
     // manually. Stated on the draw sheet rather than approximated.
-    levels: [bwfGame(15, null, 8, 1)], serve: bwfClassicServe, mode: 'officiated',
+    levels: [bwfGame(15, null, 8, 1), match(2)], serve: bwfClassicServe, mode: 'officiated',
     changeEnds: 'betweenUnits',
     rulesSheet: { setting: 'not scored by the console — record the final score manually' },
   }),
@@ -346,7 +349,8 @@ const TENNIS: ScoringFormat[] = [
   }),
   fmt({
     sport: 'tennis', key: 'grand_slam_bo5', name: "Grand Slam men's — best of 5, 10-point tie-break in the fifth",
-    levels: [tennisGame(), { ...tennisSet(6, 6), deciderOverride: matchTiebreakDecider(10) }, match(3)],
+    // A full fifth set; only its 6-6 tie-break changes, to 10 points (Grand Slam rule since 2022).
+    levels: [tennisGame(), { ...tennisSet(6, 6), deciderOverride: { substitute: { atUnits: 6, spec: tiebreakUnit(10) } } }, match(3)],
     serve: tennisServe, mode: 'officiated', changeEnds: 'oddCumulativeUnits',
   }),
   fmt({
@@ -473,14 +477,14 @@ const SQUASH: ScoringFormat[] = [
     sport: 'squash', key: 'english9_bo5', name: 'English / hand-in-hand-out — 9 points, best of 5',
     // Only the server scores; the serve still moves to the rally winner. Expressible
     // ONLY because pointScoring and movement are separate params.
-    // The 8-8 "set one / set two" election is a documented non-goal: the target is
-    // hard-set to 10, and the draw sheet says "set two always played".
-    levels: [sqGame(9, 1)], serve: squashEnglishServe, mode: 'officiated', changeEnds: 'never',
+    // "Set two" at 8-8: first to 9 by two, capped at 10 - so 8-8 plays to 10 (10-8 or
+    // 10-9), exactly the traditional set two. Best of 5 needs the match level it lacked.
+    levels: [sqGame(9, 2, 10), match(3)], serve: squashEnglishServe, mode: 'officiated', changeEnds: 'never',
     rulesSheet: { setChoiceAt8All: 'set two always played — the receiver election is not offered' },
   }),
   fmt({
     sport: 'squash', key: 'english9_bo3', name: 'English 9 — best of 3',
-    levels: [sqGame(9, 1), match(2)], serve: squashEnglishServe, mode: 'selfScored', changeEnds: 'never',
+    levels: [sqGame(9, 2, 10), match(2)], serve: squashEnglishServe, mode: 'selfScored', changeEnds: 'never',
   }),
   fmt({
     sport: 'squash', key: 'single_game_15_pars', name: 'Corporate single game to 15 (PARS)',

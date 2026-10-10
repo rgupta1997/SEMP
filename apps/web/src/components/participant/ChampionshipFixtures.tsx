@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Calendar, Flag } from 'lucide-react';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints, TBD_LABEL } from '@semp/shared';
 import { useApi, fmtDateTime } from '../../lib/hooks';
 import { Badge, Card, EmptyState, ListToolbar, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
 
@@ -20,24 +21,23 @@ interface FixtureRow {
   scorecard_url: string | null;
   home: TeamRef | null;
   away: TeamRef | null;
+  /** Read here only for how a match ended (retired / disqualified / conceded). */
+  live_state?: unknown;
 }
 
 // Results shows concluded matches AND in-progress ones (live), so a live match with
 // a running score appears here (marked LIVE) instead of only on the Schedule.
 const RESULT_STATUSES = new Set(['live', 'completed', 'walkover', 'bye', 'cancelled']);
 
-function teamLabel(t: TeamRef | null) { return t?.name ?? 'TBD'; }
-// Who a squad plays for: its campus or batch first, its organisation otherwise.
-// Reading the organisation alone put the same name under both sides of every match
-// in an internal championship.
+function teamLabel(t: TeamRef | null) { return t?.name ?? TBD_LABEL; }
+// Campus or batch first, organisation otherwise - the org alone showed the same
+// name on both sides of every match in an internal championship.
 function orgLabel(t: TeamRef | null) {
   return t?.org_units?.name || t?.organizations?.short_name || t?.organizations?.name || '';
 }
 
-// Ranking events (powerlifting/swimming/athletics) have no head-to-head matchup -
-// everyone competes for a single ranking - so the generator emits one team-less
-// fixture with round 'Event'. Showing "TBD v TBD" there is wrong: there's no
-// opponent to decide. We show the discipline name + a Ranking event tag instead.
+// Ranking events (powerlifting/swimming/athletics) get one team-less 'Event' fixture
+// with no opponent to decide, so show the discipline + a Ranking tag, not "TBD v TBD".
 function isRankingEvent(f: FixtureRow) { return f.round === 'Event' && !f.home && !f.away; }
 
 // Team name with its organization as a sub-heading underneath, so teams are
@@ -51,10 +51,8 @@ function TeamName({ team, align, won }: { team: TeamRef | null; align: 'left' | 
   );
 }
 
-// Read-only, whole-championship fixtures for the participant view - the same
-// schedule / results a spectator sees from Discover, so players can follow every
-// match (not just their own). `schedule` is the full fixture list (upcoming +
-// concluded); `results` narrows to matches that have concluded.
+// Whole-championship fixtures (as spectators see them) so players can follow every
+// match, not just their own. `results` narrows `schedule` to concluded matches.
 export function ChampionshipFixtures({ championshipId, mode, apiBase }: { championshipId: string; mode: 'schedule' | 'results'; apiBase?: string }) {
   const base = apiBase ?? `/championships/${championshipId}`;
   const { data: all = [], isLoading } = useApi<FixtureRow[]>(`${base}/fixtures`);
@@ -140,6 +138,7 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
             const scored = f.home_score != null && f.away_score != null;
             const homeWon = f.winner_team_id != null && f.winner_team_id === f.home?.id;
             const awayWon = f.winner_team_id != null && f.winner_team_id === f.away?.id;
+            const early = earlyEndOf(f.live_state);
             return (
               <Card key={f.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 p-3 sm:p-4">
                 <div className="w-24 shrink-0 truncate text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400" title={f.round ?? undefined}>
@@ -157,10 +156,16 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
                   ) : (
                     <>
                       <TeamName team={f.home} align="right" won={homeWon} />
-                      <span className="min-w-[3.5ch] self-start pt-0.5 text-center font-bold tabular-nums text-slate-800 dark:text-slate-100">
+                      <span className="flex min-w-[3.5ch] flex-col items-center self-start pt-0.5 text-center font-bold tabular-nums text-slate-800 dark:text-slate-100">
                         {scored
-                          ? `${f.home_score}–${f.away_score}`
+                          ? `${formatPoints(f.home_score)}–${formatPoints(f.away_score)}`
                           : <span className="text-slate-300 dark:text-slate-600">v</span>}
+                        {/* Stopped early: an unfinished score must not read as a match played out. */}
+                        {scored && early && (
+                          <span className="text-[10px] font-semibold leading-3 text-amber-600 dark:text-amber-400">
+                            {EARLY_END_LABEL[early]}
+                          </span>
+                        )}
                       </span>
                       <TeamName team={f.away} align="left" won={awayWon} />
                     </>

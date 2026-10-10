@@ -1,7 +1,8 @@
 import {
-  PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor,
+  PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor, playedContests, seatIn,
+  earlyEndOf, formatPoints, THIRD_PLACE_ROUND, type EarlyEnd, type PlayedContest,
   type AchievementKind, type EventSpec, type EventState, type FormatTemplate,
-  type LifetimeEntryKind, type Medal, type StandingsPlacement,
+  type LifetimeEntryKind, type MatchOutcome, type Medal, type StandingsPlacement,
 } from '@semp/shared';
 
 // What a locked result MEANS - as pure functions, with no database anywhere in
@@ -25,12 +26,9 @@ import {
 //    each fixture writes only the outcome it settled: the final decides gold and
 //    silver, and every other knockout round records the player it ELIMINATED.
 //
-// 2. THE TIMELINE IS ONE ENTRY PER PERSON PER FIXTURE. Medals, placements and
-//    awards ride on it as chips rather than as extra rows (J4-E2-S1: "one entry
-//    per event ... and any medal or honour chips"). The countable, queryable
-//    copies live in `achievements`, which is what a report groups by. One event
-//    the player attended = one line on their timeline, however many honours came
-//    out of it.
+// 2. THE TIMELINE IS ONE ENTRY PER PERSON PER CONTEST THEY PLAYED - per fixture, or
+//    per rubber in a team tie (see `playedContests`). Medals, placements and awards ride
+//    on the first entry as chips (J4-E2-S1); the queryable copies live in `achievements`.
 
 // ---------------------------------------------------------------------------
 // inputs
@@ -78,6 +76,8 @@ export interface DerivableFixture {
   /** null for "Whole sport" - a named discipline ("66kg") already fixes its category. */
   discipline_id: string | null;
   discipline_name: string | null;
+  /** individual | doubles | team - decides singles vs doubles for a racquet match. */
+  discipline_entry_type?: string | null;
   /** `tournament_disciplines.format_config` - carries the EventSpec for a ranking event. */
   format_config: unknown;
   /** `fixtures.live_state` - carries ranking-event competitors and their marks. */
@@ -155,7 +155,7 @@ export function verdictsOf(fx: Pick<DerivableFixture, 'round' | 'status' | 'winn
         { team_id: winner, kind: 'medal', medal: 'gold', placement: 'winner' },
         ...(loser ? [{ team_id: loser, kind: 'medal', medal: 'silver', placement: 'runner_up' } as Verdict] : []),
       ];
-    case '3rd Place':
+    case THIRD_PLACE_ROUND:
       return [
         { team_id: winner, kind: 'medal', medal: 'bronze', placement: 'third_place' },
         ...(loser ? [{ team_id: loser, kind: 'placement', placement: 'fourth_place' } as Verdict] : []),
@@ -257,7 +257,7 @@ function ordinal(n: number): string {
 // the derivation
 // ---------------------------------------------------------------------------
 
-const outcomeFor = (fx: DerivableFixture, teamId: string | null): 'won' | 'lost' | 'drew' | null => {
+const outcomeFor = (fx: DerivableFixture, teamId: string | null): MatchOutcome | null => {
   if (!teamId || !fx.home_team_id || !fx.away_team_id) return null;
   if (fx.winner_team_id) return fx.winner_team_id === teamId ? 'won' : 'lost';
   if (fx.home_score != null && fx.away_score != null && fx.home_score === fx.away_score) return 'drew';
@@ -284,8 +284,13 @@ function entryTitle(fx: DerivableFixture, teamId: string | null): string {
   // count, say), and it's already on the fixture for anyone who wants it.
   const outcome = outcomeFor(fx, teamId);
   const verb = outcome === 'won' ? 'Won' : outcome === 'lost' ? 'Lost' : outcome === 'drew' ? 'Drew' : null;
-  return verb ? `${versus} — ${verb}` : versus;
+  // Stopped early: "Won (opponent retired)" / "Lost (retired)" - never a match played out.
+  const early = earlyEndOf(fx.live_state);
+  const why = early && verb ? ` (${outcome === 'won' ? `opponent ${EARLY_END_WORD[early]}` : EARLY_END_WORD[early]})` : '';
+  return verb ? `${versus} — ${verb}${why}` : versus;
 }
+
+const EARLY_END_WORD: Record<EarlyEnd, string> = { retired: 'retired', disqualified: 'disqualified', conceded: 'conceded' };
 
 /**
  * Everything a locked fixture writes into the permanent record.
@@ -519,7 +524,21 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
     addChip(a.recipient_user_id, { kind: 'award', title: label });
   }
 
-  // ---- 4 · the timeline: one entry per person (J4-E2-S1) -------------------
+  // ---- 4 · the timeline -----------------------------------------------------
+  // Where we know who played (named racquet match, tie rubbers): one entry per contest
+  // each player played. Otherwise one entry per squad member.
+  const played = playedContests({
+    liveState: fx.live_state,
+    sportName: fx.sport_name,
+    entryType: fx.discipline_entry_type ?? null,
+    roster: { A: (byTeam.get(fx.home_team_id ?? '') ?? []).map((p) => p.user_id), B: (byTeam.get(fx.away_team_id ?? '') ?? []).map((p) => p.user_id) },
+    matchWinner: fx.winner_team_id && fx.winner_team_id === fx.home_team_id ? 'A'
+      : fx.winner_team_id && fx.winner_team_id === fx.away_team_id ? 'B' : null,
+  });
+  if (played.kind === 'contests') {
+    return { entries: contestEntries(fx, played.contests, participants, chipsByUser), achievements };
+  }
+
   const entries: LifetimeEntryDraft[] = participants.map((p) => {
     const outcome = outcomeFor(fx, p.team_id);
     const chips = chipsByUser.get(p.user_id) ?? [];
@@ -540,7 +559,7 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
           ? (p.team_id === fx.home_team_id ? fx.away_team_name : fx.home_team_name)
           : null,
         outcome,
-        score: fx.home_score != null && fx.away_score != null ? `${fx.home_score}-${fx.away_score}` : null,
+        score: fx.home_score != null && fx.away_score != null ? `${formatPoints(fx.home_score)}-${formatPoints(fx.away_score)}` : null,
         round: fx.round,
         sport: fx.sport_name,
         discipline: fx.discipline_name,
@@ -554,4 +573,74 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
   });
 
   return { entries, achievements };
+}
+
+/**
+ * Timeline entries from contests: one per player per contest they played. A tie's title
+ * names the rubber, which keeps one player's two rubbers apart under the (user, fixture,
+ * kind, title) unique index. Chips ride on the first entry only, so a medal shows once.
+ */
+function contestEntries(
+  fx: DerivableFixture,
+  contests: PlayedContest[],
+  participants: DerivableParticipant[],
+  chipsByUser: Map<string, RecordChip[]>,
+): LifetimeEntryDraft[] {
+  const byUser = new Map(participants.map((p) => [p.user_id, p]));
+  const nameOf = (id: string) => byUser.get(id)?.name ?? null;
+  const chipped = new Set<string>();
+  const entries: LifetimeEntryDraft[] = [];
+
+  for (const c of contests) {
+    for (const userId of [...c.lineup.A, ...c.lineup.B]) {
+      const p = byUser.get(userId);
+      const seat = seatIn(c, userId);
+      // A named player no longer on the squad has no account context to file under.
+      if (!p || !seat) continue;
+      const teamId = seat.side === 'A' ? fx.home_team_id : fx.away_team_id;
+      const outcome = c.rubberKey === null
+        ? outcomeFor(fx, teamId)
+        : c.winner ? (c.winner === seat.side ? 'won' : 'lost') : c.drawn ? 'drew' : null;
+      const decided = outcome != null || fx.status === 'walkover' || fx.status === 'bye';
+      const chips = chipped.has(userId) ? [] : (chipsByUser.get(userId) ?? []);
+      chipped.add(userId);
+      const base = entryTitle(fx, teamId);
+      // A rubber's own result replaces the tie's in its title - a drawn chess board included.
+      const title = c.rubberLabel
+        ? `${c.rubberLabel}: ${base.replace(/ — (Won|Lost|Drew)$/, '')}${outcome ? ` — ${outcome === 'won' ? 'Won' : outcome === 'drew' ? 'Drew' : 'Lost'}` : ''}`
+        : base;
+      entries.push({
+        user_id: userId,
+        organization_id: p.organization_id,
+        kind: decided ? 'result' : 'participation',
+        title,
+        detail: {
+          role: 'player',
+          team_id: teamId,
+          team_name: teamId ? (teamId === fx.home_team_id ? fx.home_team_name : fx.away_team_name) : null,
+          opponent_name: teamId === fx.home_team_id ? fx.away_team_name : fx.home_team_name,
+          outcome,
+          score: c.score ? `${c.score[0]}-${c.score[1]}` : (fx.home_score != null && fx.away_score != null ? `${formatPoints(fx.home_score)}-${formatPoints(fx.away_score)}` : null),
+          round: fx.round,
+          sport: fx.sport_name,
+          discipline: fx.discipline_name,
+          championship_name: fx.championship_name,
+          fixture_status: fx.status,
+          chips,
+          // Who it was against and with - the source of head-to-head and partner records.
+          position: seat.position,
+          partner_user_id: seat.partner,
+          partner_name: seat.partner ? nameOf(seat.partner) : null,
+          opponent_user_ids: seat.opponents,
+          opponent_names: seat.opponents.map((id) => nameOf(id) ?? '-'),
+          ...(c.rubberKey !== null ? {
+            rubber_key: c.rubberKey,
+            rubber_label: c.rubberLabel,
+            tie_score: fx.home_score != null && fx.away_score != null ? `${formatPoints(fx.home_score)}-${formatPoints(fx.away_score)}` : null,
+          } : {}),
+        },
+      });
+    }
+  }
+  return entries;
 }

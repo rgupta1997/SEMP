@@ -8,6 +8,7 @@ export {
   initTie,
   hydrateTie,
   rubbersWon,
+  tieScore,
   tieWinner,
   tieOutcome,
   playableRubbers,

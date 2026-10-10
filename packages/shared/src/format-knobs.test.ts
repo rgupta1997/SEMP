@@ -3,6 +3,7 @@ import {
   applyKnobs, describeKnobs, isEditable, knobsFor, readKnobs, KNOB_SPECS,
 } from './format-knobs.js';
 import { presetByKey } from './racquet-presets.js';
+import { teamPresetsFor } from './team-presets.js';
 import { scoringFormatSchema, type Side } from './scoring-rules.js';
 import { foldRally, initKernel, step, type RallyEvent, type RallyLog } from './rally-kernel.js';
 
@@ -46,10 +47,12 @@ describe('reading a format into knobs', () => {
     expect(k.collapseAt).toBe(8);
   });
 
-  it('reads squash English 9 as server-only scoring', () => {
+  it('reads squash English 9 as server-only scoring, "set two" at 8-8', () => {
     const k = readKnobs(fmt('english9_bo5'));
     expect(k.pointScoring).toBe('serverOnly');
-    expect(k.winBy).toBe(1);
+    // First to 9 by two, capped at 10: from 8-8 it is first to 10.
+    expect(k.winBy).toBe(2);
+    expect(k.cap).toBe(10);
   });
 
   it('reads a handicap start', () => {
@@ -206,6 +209,26 @@ describe('formats the flat knobs cannot describe', () => {
     for (const key of ['ittf_bo5_11', 'bwf_official_3x21', 'pars11_bo3', 'usap_single_game_15']) {
       expect(isEditable(fmt(key)), key).toBe(true);
     }
+  });
+});
+
+describe('chess formats in the editor', () => {
+  const blitz = teamPresetsFor('chess').find((f) => f.presetKey === 'blitz_bo5')!;
+
+  it('offers the games, the time control and how it is run - nothing about targets or serves', () => {
+    const keys = knobsFor(readKnobs(blitz)).map((s) => s.key);
+    expect(keys).toEqual(expect.arrayContaining(['unitsToWin', 'timeBaseMinutes', 'timeIncrementSeconds', 'drawsAllowed']));
+    expect(keys).not.toContain('target');
+    expect(keys).not.toContain('movement');
+    expect(keys).not.toContain('changeEnds');
+  });
+
+  it('reads and writes the time control on the rules sheet', () => {
+    const k = readKnobs(blitz);
+    expect([k.timeBaseMinutes, k.timeIncrementSeconds]).toEqual([3, 2]);
+    const rapid = applyKnobs(blitz, { ...k, timeBaseMinutes: 15, timeIncrementSeconds: 10 });
+    expect(rapid.rulesSheet?.timeControl).toBe('15+10');
+    expect(describeKnobs(readKnobs(rapid))).toBe('5-game match · 15+10');
   });
 });
 
@@ -369,5 +392,31 @@ describe('extra time and the shoot-out are editable, and survive the editor', ()
     const k = { ...readKnobs(ko), drawsAllowed: false, extraTimeEnabled: false };
     expect(knobsFor(k).map((x) => x.key)).not.toContain('extraTimeMinutes');
     expect(knobsFor({ ...k, extraTimeEnabled: true }).map((x) => x.key)).toContain('extraTimeMinutes');
+  });
+});
+
+describe('the expedite system knob', () => {
+  it('reads on for ITTF standard and is offered for an officiated serve-every-N format', () => {
+    const k = readKnobs(fmt('ittf_bo5_11'));
+    expect(k.expediteEnabled).toBe(true);
+    expect(k.expediteMinutes).toBe(10);
+    expect(knobsFor(k).map((s) => s.key)).toContain('expediteEnabled');
+  });
+
+  it('is not offered where nobody can count returns, or where the serve does not run on a count', () => {
+    expect(knobsFor(readKnobs(fmt('corp_bo3_11_timecap'))).map((s) => s.key)).not.toContain('expediteEnabled');
+    expect(knobsFor(readKnobs(fmt('bwf_official_3x21'))).map((s) => s.key)).not.toContain('expediteEnabled');
+  });
+
+  it('writes the time limit, turns off cleanly, and keeps other plugins', () => {
+    const base = fmt('ittf_bo7_11');
+    const k = readKnobs(base);
+    const twelve = applyKnobs(base, { ...k, expediteMinutes: 12 });
+    expect((twelve.plugins?.expedite as { afterMinutes: number }).afterMinutes).toBe(12);
+    const off = applyKnobs({ ...base, plugins: { ...base.plugins, other: 1 } }, { ...k, expediteEnabled: false });
+    expect(off.plugins?.expedite).toBeUndefined();
+    expect(off.plugins?.other).toBe(1);
+    const selfScored = applyKnobs(base, { ...k, officiatingMode: 'selfScored' });
+    expect(selfScored.plugins?.expedite).toBeUndefined();
   });
 });

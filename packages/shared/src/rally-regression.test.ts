@@ -813,9 +813,19 @@ describe('8. the clock', () => {
     const s = play(f, [...rally(6), { t: 'capFired' }], 'A');
     expect(s.ended, 'a level buzzer picked a winner').toBe(false);
     expect(s.capFired).toBe(true);
-    // The next point settles it.
+    // The next point settles it - and ends the match.
     const after = play(f, [...rally(6), { t: 'capFired' }, pt('B')], 'A');
-    expect(after.score[0]).toEqual([3, 4]);
+    expect(after).toMatchObject({ ended: true, winner: 'B', reason: 'cap' });
+  });
+
+  it('8.2b "organiser decides" plays on after a level buzzer; next-point-wins ends on the next point', () => {
+    const base = fmt('corporate_single_15_timecapped');
+    const od: ScoringFormat = { ...base, clock: { ...base.clock!, action: 'leaderWins', tieRule: 'organiserDecides' } };
+    expect(play(od, [...rally(6), { t: 'capFired' }, pt('B')], 'A').ended).toBe(false);
+    const np: ScoringFormat = { ...base, clock: { ...base.clock!, action: 'nextPointWins' } };
+    expect(play(np, [...pts('A', 5), { t: 'capFired' }, pt('A')], 'A')).toMatchObject({ ended: true, winner: 'A' });
+    // A format with no clock is untouched.
+    expect(play(fmt('bwf_official_3x21'), [...pts('A', 5), pt('B')], 'A').ended).toBe(false);
   });
 
   it('8.3 a level buzzer is a DRAW where the format allows one', () => {

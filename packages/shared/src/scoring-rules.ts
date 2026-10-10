@@ -58,7 +58,9 @@ export type ServeResolverId = (typeof SERVE_RESOLVERS)[number];
 // Right/left service court. A boolean cannot express this: table tennis's parity is
 // a constant (always right-to-right), badminton's is driven by the server's score,
 // pickleball's alternates per point, squash's is chosen by the server at each hand.
-export const COURT_MODELS = ['none', 'parity', 'handAlternate', 'fixed'] as const;
+// 'parity': the SERVING side's own score picks the court (badminton, pickleball).
+// 'gameTotal': the total points played in the game picks it - even deuce, odd ad (tennis).
+export const COURT_MODELS = ['none', 'parity', 'gameTotal', 'handAlternate', 'fixed'] as const;
 export type CourtModel = (typeof COURT_MODELS)[number];
 
 export const FIRST_SERVER_RULES = ['toss', 'appRandom', 'organiser', 'home', 'away'] as const;
@@ -117,6 +119,8 @@ export interface LevelOverride {
    */
   collapsed?: boolean;
   pointLabels?: string[] | null;
+  /** The deciding unit's own tie-break, in place of the level's usual one (Grand Slam: to 10). */
+  substitute?: { atUnits: number; spec: LevelSpec };
 }
 
 /**
@@ -343,7 +347,7 @@ export const serveSpecSchema: z.ZodType<ServeSpec> = z.object({
   nextUnitServer: z.enum(NEXT_UNIT_SERVERS),
 });
 
-const levelOverrideSchema: z.ZodType<LevelOverride> = z.object({
+const levelOverrideSchema: z.ZodType<LevelOverride, z.ZodTypeDef, unknown> = z.lazy(() => z.object({
   target: z.number().int().positive().optional(),
   winBy: z.number().int().positive().optional(),
   cap: z.number().int().positive().nullable().optional(),
@@ -352,7 +356,8 @@ const levelOverrideSchema: z.ZodType<LevelOverride> = z.object({
   serve: serveSpecSchema.optional(),
   collapsed: z.boolean().optional(),
   pointLabels: z.array(z.string()).nullable().optional(),
-});
+  substitute: z.object({ atUnits: z.number().int().nonnegative(), spec: levelSpecSchema }).optional(),
+}));
 
 // Recursive: a level's `substitute.spec` is itself a level. z.lazy defers evaluation
 // until parse() runs, which is the standard shape for self-referential zod schemas.

@@ -361,21 +361,37 @@ const BOARD: ScoringFormat[] = [
 
   // Chess is the reason `drawsAllowed` had to be real: a drawn board is the normal
   // case, not an edge one. A board is won, drawn or lost and recorded once.
+  // The time control is shown to the arbiter and players, not enforced - the clock
+  // on the table is. FIDE's usual controls: classical 90+30, rapid 15+10, blitz 3+2.
   fmt({
     sport: 'chess', key: 'single_game', name: 'Single game (win / draw / loss)',
     levels: [{ key: 'game', label: 'Game', target: 1, winBy: 1, cap: null }, unitsMatch(1)],
     serve: PER_UNIT_SERVE, endStates: { ...LEAGUE, drawsAllowed: true },
-    rulesSheet: { timeControl: 'recorded on the draw sheet, not enforced', drawByAgreement: true },
+    rulesSheet: { timeControl: '90+30', drawByAgreement: true },
+  }),
+  fmt({
+    sport: 'chess', key: 'rapid_single', name: 'Rapid — single game, 15+10',
+    levels: [{ key: 'game', label: 'Game', target: 1, winBy: 1, cap: null }, unitsMatch(1)],
+    serve: PER_UNIT_SERVE, mode: 'selfScored', endStates: { ...LEAGUE, drawsAllowed: true },
+    rulesSheet: { timeControl: '15+10', drawByAgreement: true },
+  }),
+  fmt({
+    sport: 'chess', key: 'blitz_single', name: 'Blitz — single game, 3+2',
+    levels: [{ key: 'game', label: 'Game', target: 1, winBy: 1, cap: null }, unitsMatch(1)],
+    serve: PER_UNIT_SERVE, mode: 'selfScored', endStates: { ...LEAGUE, drawsAllowed: true },
+    rulesSheet: { timeControl: '3+2', drawByAgreement: true },
   }),
   fmt({
     sport: 'chess', key: 'bo3_games', name: 'Best of 3 games',
     levels: [{ key: 'game', label: 'Game', target: 1, winBy: 1, cap: null }, unitsMatch(2)],
     serve: PER_UNIT_SERVE, endStates: { ...LEAGUE, drawsAllowed: true },
+    rulesSheet: { timeControl: '15+10' },
   }),
   fmt({
     sport: 'chess', key: 'blitz_bo5', name: 'Blitz — best of 5 games',
     levels: [{ key: 'game', label: 'Game', target: 1, winBy: 1, cap: null }, unitsMatch(3)],
     serve: PER_UNIT_SERVE, mode: 'selfScored', endStates: { ...LEAGUE, drawsAllowed: true },
+    rulesSheet: { timeControl: '3+2' },
   }),
 ];
 
@@ -496,4 +512,15 @@ export function teamPresetsFor(sport?: string | null): ScoringFormat[] {
   const key = canonicalTeamSport(sport);
   if (!key) return [];
   return TEAM_PRESETS.filter((p) => p.sport === key).map((p) => JSON.parse(JSON.stringify(p)) as ScoringFormat);
+}
+
+/**
+ * A chess draw with no format chosen plays at its discipline's pace: "Rapid" is 15+10
+ * and "Blitz" 3+2, not the classical 90+30 the sport default would give every draw.
+ * Undefined for any other discipline (Standard keeps the sport default).
+ */
+export function chessPresetForDiscipline(discipline?: string | null): ScoringFormat | undefined {
+  const name = (discipline ?? '').toLowerCase();
+  const key = /blitz/.test(name) ? 'blitz_single' : /rapid/.test(name) ? 'rapid_single' : null;
+  return key ? teamPresetsFor('chess').find((p) => p.presetKey === key) : undefined;
 }

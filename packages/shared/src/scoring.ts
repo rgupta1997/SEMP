@@ -102,12 +102,16 @@ export interface RubberSpec {
   label: string;          // "Men's Singles"
   contest: ContestSpec;
   playerRule?: string;    // free-text constraint, shown to officials (informational)
+  size?: number;          // players per side; omitted = 2 for a "Doubles" label, else 1
 }
 
 export interface TieSpec {
   winBy: 'majority' | 'count'; // majority = first to ⌈rubbers/2⌉; count = first to `target`
   target?: number;             // explicit clinch count (overrides majority maths)
-  skipDeadRubbers: boolean;    // once decided, remaining rubbers are not played
+  skipDeadRubbers: boolean;    // once decided, remaining rubbers are not played (knockout / default)
+  skipDeadInGroups?: boolean;  // the same, for league and group rounds; omitted = as skipDeadRubbers
+  /** Chess: a rubber (board) may be drawn for ½ each, and the tie is won on points. */
+  boardPoints?: boolean;
   rubbers: RubberSpec[];       // ordered
 }
 
@@ -143,12 +147,15 @@ export const rubberSpecSchema: z.ZodType<RubberSpec> = z.object({
   label: z.string().min(1),
   contest: contestSpecSchema,
   playerRule: z.string().optional(),
+  size: z.number().int().min(1).max(4).optional(),
 });
 
 export const tieSpecSchema: z.ZodType<TieSpec> = z.object({
   winBy: z.enum(['majority', 'count']),
   target: z.number().int().positive().optional(),
   skipDeadRubbers: z.boolean(),
+  skipDeadInGroups: z.boolean().optional(),
+  boardPoints: z.boolean().optional(),
   rubbers: z.array(rubberSpecSchema).min(1),
 });
 

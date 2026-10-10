@@ -25,6 +25,25 @@ describe('league_points scheme', () => {
     expect(rows.C).toMatchObject({ played: 2, won: 0, drawn: 1, lost: 1, points: 1 });
   });
 
+  it('a walkover is a win and a loss with no score', () => {
+    const wo = (home: string, away: string, winner: string, round: string | null = null): SchemeFixture =>
+      ({ ...fx(home, away, 0, 0, round), status: 'walkover', home_score: null, away_score: null, winner_team_id: winner });
+    const rows = byId(runScheme([wo('A', 'C', 'A'), fx('B', 'A', 2, 0), fx('B', 'C', 2, 1)], rule));
+    expect(rows.A).toMatchObject({ played: 2, won: 1, lost: 1, points: 3, gf: 0, ga: 2 });
+    expect(rows.C).toMatchObject({ played: 2, won: 0, lost: 2, points: 0 });
+    // A walkover with no winner recorded is not a result.
+    expect(runScheme([{ ...wo('A', 'C', 'A'), winner_team_id: null }], rule)).toHaveLength(0);
+    // A Final won by walkover still crowns the champion.
+    const placement: StandingsRule = { scheme: 'placement', points: { winner: 10, runner_up: 6 }, participation: 0 };
+    expect(byId(runScheme([wo('A', 'B', 'A', 'Final')], placement)).A.points).toBe(10);
+  });
+
+  it('an abandoned no-result shares the draw points whatever the score', () => {
+    const rows = byId(runScheme([{ ...fx('A', 'B', 1, 0), winner_team_id: null, no_result: true }], rule));
+    expect(rows.A).toMatchObject({ played: 1, drawn: 1, points: 1 });
+    expect(rows.B).toMatchObject({ played: 1, drawn: 1, points: 1 });
+  });
+
   it('honours custom point values', () => {
     const custom: StandingsRule = { scheme: 'league_points', win: 2, draw: 0, loss: 0, participation: 0, tiebreakers: ['points'] };
     const rows = byId(runScheme([fx('A', 'B', 2, 0)], custom));
