@@ -196,27 +196,25 @@ parameter_overrides = [
   # changing schema. A snapshot exists as the restore point.
   "WebOrigin=https://events.sportagon.in,https://semp-uat.netlify.app",
   "WebAppUrl=https://events.sportagon.in",
-  # DELIBERATELY NOT the real mail service.
+  # THE REAL MAIL SERVICE. UAT sends live email.
   #
-  # `.invalid` is reserved by RFC 2606 and is guaranteed never to resolve, so this
-  # cannot accidentally reach anyone's server. The reason is that UAT points at the
-  # database holding migrated PRODUCTION data: every notification resolves real
-  # recipients from real rows, and a snapshot can undo a write but cannot unsend an
-  # email.
+  # This was `https://mail.invalid` (RFC 2606, guaranteed never to resolve) so that no
+  # mail could reach the real recipients living in the migrated production data. That
+  # sinkhole is now OFF, deliberately, so OTP sign-in can be exercised in UAT.
   #
-  # Nothing breaks. sendMailBatch's DNS failure is caught by emailRecipients in
-  # notify.ts, which logs and continues - the feed row is already written and is the
-  # primary channel. The AppSync realtime path, which is what UAT exists to exercise,
-  # is unaffected.
+  # READ THIS BEFORE EXERCISING A NOTIFICATION FLOW HERE. The exposure is not uniform:
+  #   - OTP is self-limiting. It mails only the address typed into the sign-in box, so
+  #     testing with your own address reaches nobody else.
+  #   - Notification fan-out is NOT. notify() resolves recipients from real rows, so
+  #     triggering a championship or fixture notification in UAT emails whoever those
+  #     rows point at. A snapshot can undo a write; it cannot unsend an email.
   #
-  # What DOES stop working is OTP sign-in: signin.routes.ts discards the token when
-  # delivery fails, so the code never arrives. Use POST /auth/login instead - it is
-  # email + bcrypt with no mail involved. MAIL_API_KEY in AppSecret still has to be
-  # non-empty for the schema to boot, but its value is irrelevant while this URL
-  # never resolves.
+  # The mail service has no per-caller test mode - `MAIL_PROVIDERS=console` is a
+  # property of ITS deployment, not of our request - so there is no safe middle
+  # setting. The guardrail is which flows you exercise, not this line.
   #
-  # To send real mail from UAT, swap this for the real origin:
-  #   https://fjj2qymohk2fy6cpyzfihn6ud40lkhwg.lambda-url.ap-south-1.on.aws
-  "MailApiUrl=https://mail.invalid",
+  # To re-sinkhole, put `https://mail.invalid` back and redeploy. MAIL_API_KEY in
+  # AppSecret must be non-empty either way or the schema refuses to boot.
+  "MailApiUrl=https://fjj2qymohk2fy6cpyzfihn6ud40lkhwg.lambda-url.ap-south-1.on.aws",
   "ReservedConcurrency=0",
 ]
