@@ -930,6 +930,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
         state.switchEnds = base.switchEnds;
         deciderReceiverSwitch(spec, lv, state, before, base.inDecider);
         base.unitsWon = cascade(format, state, state.pointLevel);
+        base.unitsWon = [...base.unitsWon, ...afterBuzzer(format, state, base.unitsWon.length > 0)];
       }
       break;
     }
@@ -987,6 +988,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       state.switchEnds = base.switchEnds;
       deciderReceiverSwitch(spec, lv, state, before, base.inDecider);
       base.unitsWon = cascade(format, state, state.pointLevel);
+      base.unitsWon = [...base.unitsWon, ...afterBuzzer(format, state, base.unitsWon.length > 0)];
       break;
     }
 
@@ -1138,6 +1140,34 @@ function endPeriod(format: ScoringFormat, state: KernelState): FinishedUnit[] {
 function applyCap(format: ScoringFormat, state: KernelState): { unitsWon: FinishedUnit[] } {
   const clock = format.clock;
   if (!clock) return { unitsWon: [] };
+  switch (clock.action) {
+    case 'leaderWins':
+    case 'stopImmediately':
+    case 'finishPointThenLeader':
+      return settleOnTime(format, state);
+    case 'nextPointWins':
+    case 'finishUnit':
+    default:
+      return { unitsWon: [] };
+  }
+}
+
+/**
+ * After the buzzer, a point can end the match: the next point (nextPointWins), the
+ * sudden-death point after a level buzzer, or the end of the game in play (finishUnit).
+ * "Organiser decides" never ends it here.
+ */
+function afterBuzzer(format: ScoringFormat, state: KernelState, unitFinished: boolean): FinishedUnit[] {
+  const clock = format.clock;
+  if (!clock || !state.capFired || state.ended) return [];
+  if (clock.tieRule === 'organiserDecides' && clock.action !== 'nextPointWins') return [];
+  if (clock.action === 'finishUnit' && !unitFinished) return [];
+  return settleOnTime(format, state).unitsWon;
+}
+
+/** Time is up: the leader takes the match; a level score is a draw only where allowed. */
+function settleOnTime(format: ScoringFormat, state: KernelState): { unitsWon: FinishedUnit[] } {
+  const clock = format.clock!;
   const at = state.pointLevel;
   // An AGGREGATE match (kho-kho, kabaddi, football...) is decided on the total
   // across every period played SO FAR, not the period in progress alone - a
@@ -1155,36 +1185,22 @@ function applyCap(format: ScoringFormat, state: KernelState): { unitsWon: Finish
   const [a, b] = isAggregate(format) ? aggregateScore(state) : leadingScore(state, at);
   const live = state.score[at];
 
-  const settle = (): { unitsWon: FinishedUnit[] } => {
-    if (a === b) {
-      if (clock.tieRule === 'draw' && format.endStates.drawsAllowed) {
-        state.ended = true; state.outcome = 'draw'; state.winner = null; state.reason = 'cap';
-        return { unitsWon: [] };
-      }
-      // suddenDeathPoint / organiserDecides: play on. The console keeps scoring and
-      // the next point settles it - which is why this returns without ending.
+  if (a === b) {
+    if (clock.tieRule === 'draw' && format.endStates.drawsAllowed) {
+      state.ended = true; state.outcome = 'draw'; state.winner = null; state.reason = 'cap';
       return { unitsWon: [] };
     }
-    const lead: Side = a > b ? 'A' : 'B';
-    // The game under way goes to the leader only if they lead it too; otherwise it
-    // stays unfinished rather than being recorded as won from behind.
-    const liveLead = live[0] === live[1] ? null : live[0] > live[1] ? 'A' : 'B';
-    const units = isAggregate(format) || liveLead === lead ? cascade(format, state, at, lead) : [];
-    if (!state.ended) { state.ended = true; state.outcome = 'win'; state.winner = lead; }
-    state.reason = 'cap';
-    return { unitsWon: units };
-  };
-
-  switch (clock.action) {
-    case 'leaderWins':
-    case 'stopImmediately':
-    case 'finishPointThenLeader':
-      return settle();
-    case 'nextPointWins':
-    case 'finishUnit':
-    default:
-      return { unitsWon: [] };
+    // suddenDeathPoint / organiserDecides: play on; the next point is settled by afterBuzzer.
+    return { unitsWon: [] };
   }
+  const lead: Side = a > b ? 'A' : 'B';
+  // The game under way goes to the leader only if they lead it too; otherwise it
+  // stays unfinished rather than being recorded as won from behind.
+  const liveLead = live[0] === live[1] ? null : live[0] > live[1] ? 'A' : 'B';
+  const units = isAggregate(format) || liveLead === lead ? cascade(format, state, at, lead) : [];
+  if (!state.ended) { state.ended = true; state.outcome = 'win'; state.winner = lead; }
+  state.reason = 'cap';
+  return { unitsWon: units };
 }
 
 /** Who leads when time is called, by the same comparison the buzzer uses; null when level. */
@@ -1260,6 +1276,30 @@ export function headline(format: ScoringFormat, state: KernelState): Pair {
   }
 
   return [...state.score[top]] as Pair;
+}
+
+/**
+ * The scoreline a retirement, disqualification or walkover is recorded with, per the
+ * format's end-state policy. "As played" keeps the live score; "award remaining" gives
+ * the winner what they still needed (A a game up retires: B wins 2-1, not 0-1).
+ */
+function endPolicyHeadline(format: ScoringFormat, state: KernelState, h: Pair): Pair {
+  const w = state.winner;
+  const top = format.levels.length - 1;
+  if (!state.ended || !w || format.levels[top]?.decide === 'aggregate') return h;
+  const policy = format.endStates;
+  const rule = state.reason === 'walkover' ? policy.walkoverScoreline
+    : state.reason === 'retired' || state.reason === 'disqualified' ? policy.retirementScore
+    : null;
+  if (!rule || rule === 'freezeAsPlayed' || rule === 'organiserEnters') return h;
+  if (rule === 'zeroZero') return [0, 0];
+  // The headline's level: the match's units, or the points of a single-unit match.
+  const lv = top > 0 && format.levels[top].target <= 1 ? format.levels[top - 1] : format.levels[top];
+  const wi = w === 'A' ? 0 : 1;
+  const out: Pair = rule === 'targetToZero' ? [0, 0] : [h[0], h[1]];
+  const reached = Math.max(lv.target, out[1 - wi] + lv.winBy);
+  out[wi] = Math.max(out[wi], lv.cap != null ? Math.min(lv.cap, reached) : reached);
+  return out;
 }
 
 export interface ResultEnvelope {
@@ -1383,7 +1423,7 @@ export function resultEnvelope(format: ScoringFormat, state: KernelState): Resul
     outcome: state.outcome,
     winner: state.winner,
     reason: state.reason,
-    headline: headline(format, state),
+    headline: endPolicyHeadline(format, state, headline(format, state)),
     unitScores: inner.map((u) => u.score),
     // An aggregate level counts periods played, not units won - nobody wins a half.
     unitsFor: format.levels[top]?.decide === 'aggregate'

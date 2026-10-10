@@ -1,6 +1,6 @@
 import {
   PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor, playedContests, seatIn,
-  earlyEndOf, formatPoints, type EarlyEnd, type PlayedContest,
+  earlyEndOf, formatPoints, THIRD_PLACE_ROUND, type EarlyEnd, type PlayedContest,
   type AchievementKind, type EventSpec, type EventState, type FormatTemplate,
   type LifetimeEntryKind, type MatchOutcome, type Medal, type StandingsPlacement,
 } from '@semp/shared';
@@ -155,7 +155,7 @@ export function verdictsOf(fx: Pick<DerivableFixture, 'round' | 'status' | 'winn
         { team_id: winner, kind: 'medal', medal: 'gold', placement: 'winner' },
         ...(loser ? [{ team_id: loser, kind: 'medal', medal: 'silver', placement: 'runner_up' } as Verdict] : []),
       ];
-    case '3rd Place':
+    case THIRD_PLACE_ROUND:
       return [
         { team_id: winner, kind: 'medal', medal: 'bronze', placement: 'third_place' },
         ...(loser ? [{ team_id: loser, kind: 'placement', placement: 'fourth_place' } as Verdict] : []),

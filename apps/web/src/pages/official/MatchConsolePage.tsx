@@ -17,7 +17,7 @@ import {
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
 import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
 import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, isChessSport, isKnockoutFixture, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
-import type { TieSpec, EventSpec, ScoringMode, KernelState, Pairing, RallyLog, RubberLineup, Side } from '@semp/shared';
+import { unitWinner, type TieSpec, type EventSpec, type ScoringMode, type ScoringFormat, type KernelState, type Pairing, type RallyLog, type RubberLineup, type Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer, hydratePairSwap } from '../../features/scoring/RacquetDeck';
 import { LineupPanel } from '../../features/scoring/LineupPanel';
 import { ChessResult, EndingChips, chessGamesIn, chessSummary, hydrateChess, type ChessState } from '../../features/scoring/ChessResult';
@@ -497,9 +497,12 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     const parsed = tieSpecSchema.safeParse(live?.live_state?.tieSpec);
     return parsed.success ? parsed.data : undefined;
   }, [live?.live_state?.tieSpec]);
+  // A match already scored as a single match keeps that shape if a sport standard tie
+  // appears later (pickleball gained one): its points would not line up with rubbers.
+  const startedAsSingle = !frozenTie && Array.isArray(live?.live_state?.rally) && live!.live_state.rally.length > 0;
   const drawTie = (template.fixtureType === 'tie' && template.tie)
     ? template.tie
-    : tieAllowed ? tieTemplateFor(sportName)?.tie : undefined;
+    : tieAllowed && !startedAsSingle ? tieTemplateFor(sportName)?.tie : undefined;
   // Group and league rounds may play dead rubbers out; knockouts stop once decided.
   const tieSpec = frozenTie ?? (drawTie ? tieForRound(drawTie, fixture?.round) : undefined);
   // Chess ties are always won on board points, every board played - including draws
@@ -740,7 +743,8 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
             // `entryMode: 'summary'` lands.
             ? isCricketSport(sportName)
               ? <CricketManualResult key={`cman-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} live={live} invalidate={invalidate} onDone={onDone} />
-              : <ManualResult key={`man-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} live={live} invalidate={invalidate} onDone={onDone} />
+              : <ManualResult key={`man-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} live={live} invalidate={invalidate} onDone={onDone}
+                  format={isRacquetSport(sportName) ? racquetFormatFor(fixture, (live?.live_state as any)?.format ?? null).format : null} />
             // Racquet sports score through the rules-aware kernel: real targets,
             // win-by, caps, deuce and serve tracking, instead of a tap counter whose
             // "next set" button awarded the game to whoever happened to be ahead.
@@ -1069,7 +1073,10 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
   );
   const nameOfId = useMemo(() => new Map([...homeRoster, ...awayRoster].map((p) => [p.id, p.name])), [homeRoster, awayRoster]);
   const namesOf = (ids?: string[]) => ids?.map((id) => nameOfId.get(id) ?? '-');
-  const pairing: Pairing | undefined = who.lineup ? { A: namesOf(who.lineup.A)!, B: namesOf(who.lineup.B)! } : undefined;
+  // Nobody named (skipped): a singles match still serves as singles, under the side names.
+  const pairing: Pairing | undefined = who.lineup
+    ? { A: namesOf(who.lineup.A)!, B: namesOf(who.lineup.B)! }
+    : size === 1 ? { A: [teamLabel(homeTeam(fixture))], B: [teamLabel(awayTeam(fixture))] } : undefined;
   const squadIsBigger = homeRoster.length > size || awayRoster.length > size;
   // Singles plays a side-out format with one server per turn - the stat writer folds the same way.
   const format = resolved.format ? formatForPairing(resolved.format, pairing) : resolved.format;
@@ -1127,8 +1134,9 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
           noResult: reallyDone && state.outcome === 'void',
         },
         live_log: rallyTimeline(format, nextLog, firstServer, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
-        home_score: walkover ? null : env.headline[0],
-        away_score: walkover ? null : env.headline[1],
+        // A walkover carries the format's walkover scoreline (2-0), unless the organiser enters it.
+        home_score: walkover && format.endStates.walkoverScoreline === 'organiserEnters' ? null : env.headline[0],
+        away_score: walkover && format.endStates.walkoverScoreline === 'organiserEnters' ? null : env.headline[1],
         status: st,
         winner_team_id,
       },
@@ -2034,10 +2042,11 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
   };
 
   /** Patch one rubber and save; `winner` also records its result and moves on. */
-  const updateRubber = (i: number, patch: Partial<RubberInstance>, winner?: 'A' | 'B', reopen = false) => {
+  const updateRubber = (i: number, patch: Partial<RubberInstance>, winner?: 'A' | 'B' | 'draw', reopen = false) => {
     let next: TieState = { ...state, rubbers: state.rubbers.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) };
     if (reopen) next = reopenRubberFn(spec, next, i, false);
-    if (winner) next = decideRubberFn(spec, next, i, winner);
+    // Only a kernel-ended rubber reaches here as 'draw' - its own rules drew it.
+    if (winner) next = decideRubberFn(spec, next, i, winner, { drawnByRules: winner === 'draw' });
     const st = liveStatusFor(status);
     setState(next); setStatus(st); save(next, st);
   };
@@ -2149,7 +2158,7 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
 
   const rubberScore = (r: RubberInstance, i: number): string => {
     if (r.status === 'dead') return 'not played';
-    if (r.drawn) return 'Drawn ½–½';
+    if (r.drawn) return spec.boardPoints ? 'Drawn ½–½' : 'Drawn';
     const games = rubberGames(r);
     if (r.winner) return `${r.winner === 'A' ? homeName : awayName} won${games ? ` ${games}` : ''}`;
     if (games) return games;
@@ -2316,7 +2325,10 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
                           awayName={awayName}
                           homeOrg={orgTitle(homeTeam(fixture))}
                           awayOrg={orgTitle(awayTeam(fixture))}
-                          pairing={active.lineup ? { A: namesOf(active.lineup.A)!, B: namesOf(active.lineup.B)! } : undefined}
+                          // A singles rubber with nobody named still serves as singles.
+                          pairing={active.lineup
+                            ? { A: namesOf(active.lineup.A)!, B: namesOf(active.lineup.B)! }
+                            : rubberSize(spec.rubbers[state.activeRubber]) === 1 ? { A: [homeName], B: [awayName] } : undefined}
                           homePlayers={namesOf(active.lineup?.A)}
                           awayPlayers={namesOf(active.lineup?.B)}
                           matchKey={`${fixtureId}:${active.key}`}
@@ -2342,8 +2354,9 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
                             !!active.winner && !ks.ended,
                           )}
                           onSignOff={(log, ks) => {
-                            if (!ks.winner) { toast.error('This rubber has no winner yet.'); return; }
-                            updateRubber(state.activeRubber, { rally: log, format: active.format ?? baseFormat.format!, firstServer: active.firstServer ?? 'A' }, ks.winner);
+                            // A rubber that ended level under its rules (a drawn timed game) is a drawn rubber.
+                            if (!ks.winner && !ks.ended) { toast.error('This rubber has no winner yet.'); return; }
+                            updateRubber(state.activeRubber, { rally: log, format: active.format ?? baseFormat.format!, firstServer: active.firstServer ?? 'A' }, ks.winner ?? 'draw');
                           }}
                         />
                       ) : (
@@ -3170,7 +3183,11 @@ function SecondaryStatus({ fixtureId, status, label, variant, invalidate, onDone
 }
 
 /* ----------------------------- Manual result (time/measured sports) ----------------------------- */
-function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone }: { fixture: any; fixtureId: string; def: SportDef; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, format }: {
+  fixture: any; fixtureId: string; def: SportDef; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void;
+  /** The match's racquet rules, when it has them: totals are checked against these, not the sport's fixed best-of. */
+  format?: ScoringFormat | null;
+}) {
   const homeName = teamLabel(homeTeam(fixture));
   const awayName = teamLabel(awayTeam(fixture));
   const homeOrg = orgLabel(homeTeam(fixture));
@@ -3191,8 +3208,17 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone }: { f
   // Guidance on what the two numbers mean for this sport. `manualHint` (time/measured
   // sports) wins; otherwise derive from the archetype so manual mode reads clearly for
   // any sport (e.g. sets/games won vs raw points).
+  // The match's own shape when its racquet rules are known: best of N units, or one
+  // game whose points ARE the result (as the live console stores them).
+  const top = format?.levels[format.levels.length - 1];
+  const singleUnit = !!format && !!top && format.levels.length > 1 && top.target <= 1;
+  const unitLevel = format && format.levels.length > 1 ? format.levels[format.levels.length - 2] : null;
+  const unitLabel = (unitLevel?.label ?? def.segLabel).toLowerCase();
+  const bestOf = top && !singleUnit ? top.target * 2 - 1 : def.segMax;
+
   const hint = def.manualHint ?? (
-    def.archetype === 'sets' || def.archetype === 'rally' ? `Enter the number of ${def.segLabel.toLowerCase()}s each side won, then confirm the winner.`
+    singleUnit ? `Enter the final points of the ${unitLabel} for each side, then confirm the winner.`
+    : def.archetype === 'sets' || def.archetype === 'rally' ? `Enter the number of ${unitLabel}s each side won, then confirm the winner.`
     : 'Enter the final score for each side, then confirm the winner.');
 
   // Digits only - a games/points tally is never negative and never fractional, so
@@ -3202,15 +3228,22 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone }: { f
   const hs = home === '' ? null : Number(home);
   const as = away === '' ? null : Number(away);
 
-  // Best-of-N sports (sets/rally archetypes) can only end on a real games-won
-  // scoreline: one side at the win threshold, the other strictly below it. "2-3" in a
-  // best-of-3 is not a sports result, it is a typo that was never caught (EOS-164).
-  const winsNeeded = def.archetype === 'sets' || def.archetype === 'rally' ? Math.ceil(def.segMax / 2) : null;
-  const gamesValid = winsNeeded == null || hs == null || as == null
-    ? true
-    : (hs === winsNeeded && as < winsNeeded) || (as === winsNeeded && hs < winsNeeded);
-  const gamesError = winsNeeded != null && hs != null && as != null && !gamesValid
-    ? `A best-of-${def.segMax} match must end with one side on ${winsNeeded} ${def.segLabel.toLowerCase()}s and the other on fewer - e.g. ${winsNeeded}-0 or ${winsNeeded}-${winsNeeded - 1}.`
+  // A real result only: best of N ends with one side on the wins needed and the other
+  // below ("2-3" in a best of 3 is a typo, EOS-164); play-all plays every unit; a single
+  // game must be a finished score under its target, win-by and cap.
+  const racquetShape = def.archetype === 'sets' || def.archetype === 'rally' || !!format;
+  const winsNeeded = racquetShape && !singleUnit ? (top && format ? top.target : Math.ceil(def.segMax / 2)) : null;
+  const playAll = !!unitLevel?.playAll;
+  const gamesValid = !racquetShape || hs == null || as == null ? true
+    : singleUnit && unitLevel ? unitWinner(unitLevel, [hs, as]) !== null
+    : playAll ? hs + as === bestOf && hs !== as
+    : (hs === winsNeeded && as < winsNeeded!) || (as === winsNeeded && hs < winsNeeded!);
+  const gamesError = !gamesValid && hs != null && as != null
+    ? singleUnit && unitLevel
+      ? `That isn't a finished ${unitLabel}: first to ${unitLevel.target}${unitLevel.winBy > 1 ? ` by ${unitLevel.winBy}` : ''}${unitLevel.cap ? `, capped at ${unitLevel.cap}` : ''} - e.g. ${unitLevel.target}-${Math.max(0, unitLevel.target - 2)}.`
+      : playAll
+        ? `Every ${unitLabel} is played here: the two numbers must add up to ${bestOf}.`
+        : `A best-of-${bestOf} match must end with one side on ${winsNeeded} ${unitLabel}s and the other on fewer - e.g. ${winsNeeded}-0 or ${winsNeeded}-${winsNeeded! - 1}.`
     : null;
 
   const autoWinnerId = hs != null && as != null && hs !== as ? (hs > as ? fixture.home_team_id : fixture.away_team_id) : null;

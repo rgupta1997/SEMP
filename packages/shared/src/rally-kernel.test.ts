@@ -959,8 +959,9 @@ describe('the buzzer', () => {
     const level = [...interleave(4, 4).map((side) => ({ t: 'point', side }) as RallyEvent), { t: 'capFired' } as RallyEvent];
     const r = foldRally(f, level);
     expect(r.state.ended).toBe(false);
+    // The sudden-death point ends the match for whoever wins it.
     const settled = foldRally(f, [...level, { t: 'point', side: 'B' }]);
-    expect(settled.state.score[0]).toEqual([4, 5]);
+    expect(settled.state).toMatchObject({ ended: true, winner: 'B', reason: 'cap' });
   });
 
   // Kho-kho, kabaddi and the other invasion sports (`decide: 'aggregate'`) are
@@ -1557,5 +1558,34 @@ describe('presets that play as their names say', () => {
     for (let i = 0; i < 500 && !s.ended; i++) { log = [...log, { t: 'point', side: 'A' }]; s = fold('classic_15_sideout', log); }
     expect(s).toMatchObject({ ended: true, winner: 'A' });
     expect(resultEnvelope(fmtOf('classic_15_sideout'), s).headline).toEqual([2, 0]);
+  });
+});
+
+describe('retirement and walkover scorelines follow the format', () => {
+  const end = (reason: 'retired' | 'walkover', winner: Side): RallyEvent => ({ t: 'end', outcome: 'win', reason, winner });
+
+  it('award remaining: A a game up retires, B is recorded as winning 2-1', () => {
+    const f = fmtOf('bwf_official_3x21');
+    expect(f.endStates.retirementScore).toBe('freezeThenAwardRemaining');
+    const s = foldRally(f, [...points('A', 21), ...points('B', 3), end('retired', 'B')], 'A').state;
+    expect(resultEnvelope(f, s).headline).toEqual([1, 2]);
+  });
+
+  it('award remaining in a single game: the winner is given the points they needed', () => {
+    const f = fmtOf('box_sprint_11');
+    const s = foldRally(f, [...points('A', 5), ...points('B', 3), end('retired', 'B')], 'A').state;
+    expect(resultEnvelope(f, s).headline).toEqual([5, 11]);
+  });
+
+  it('as played: the score so far is kept', () => {
+    const f = fmtOf('college_bo3_to_11');
+    expect(f.endStates.retirementScore).toBe('freezeAsPlayed');
+    const s = foldRally(f, [...points('A', 11), end('retired', 'B')], 'A').state;
+    expect(resultEnvelope(f, s).headline).toEqual([1, 0]);
+  });
+
+  it('a walkover is recorded target-to-zero', () => {
+    const f = fmtOf('bwf_official_3x21');
+    expect(resultEnvelope(f, foldRally(f, [end('walkover', 'B')], 'A').state).headline).toEqual([0, 2]);
   });
 });

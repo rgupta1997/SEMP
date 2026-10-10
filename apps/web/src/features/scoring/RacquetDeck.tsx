@@ -1566,6 +1566,12 @@ function FinishPanel({ format, state, homeName, awayName, onEvent, onSuspend, on
   const level = leader === null;
   const drawOnTime = format.clock?.tieRule === 'draw' && format.endStates.drawsAllowed;
   const [abandoning, setAbandoning] = useState(false);
+  // Says what the format's retirement rule does to the scoreline.
+  const retireNote = (winner: string) => ({
+    freezeAsPlayed: 'The score so far is kept on the record.',
+    freezeThenAwardRemaining: `The score so far is kept, and ${winner} is given the rest of the match.`,
+    targetToZero: `It is recorded as a full win for ${winner}.`,
+  })[format.endStates.retirementScore];
 
   const end = async (winner: Side | null, reason: 'retired' | 'walkover' | 'conceded' | 'cap' | 'abandoned', title: string, message: string, outcome?: 'void') => {
     const ok = await confirmDialog({ title, message, confirmLabel: 'Record it' });
@@ -1593,13 +1599,11 @@ function FinishPanel({ format, state, homeName, awayName, onEvent, onSuspend, on
 
       <div className="grid gap-2 sm:grid-cols-2">
         <Button size="sm" variant="outline"
-          onClick={() => end('B', 'retired', `${homeName} retires?`,
-            `The match goes to ${awayName}. The score so far is kept on the record.`)}>
+          onClick={() => end('B', 'retired', `${homeName} retires?`, `The match goes to ${awayName}. ${retireNote(awayName)}`)}>
           {homeName} retires
         </Button>
         <Button size="sm" variant="outline"
-          onClick={() => end('A', 'retired', `${awayName} retires?`,
-            `The match goes to ${homeName}. The score so far is kept on the record.`)}>
+          onClick={() => end('A', 'retired', `${awayName} retires?`, `The match goes to ${homeName}. ${retireNote(homeName)}`)}>
           {awayName} retires
         </Button>
         <Button size="sm" variant="outline"

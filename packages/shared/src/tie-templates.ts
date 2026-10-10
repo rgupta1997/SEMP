@@ -33,6 +33,9 @@ const TIE_TEMPLATES: Record<string, FormatTemplate> = {
   'table tennis': fiveRubber,
   'table-tennis': fiveRubber,
   badminton: fiveRubber,
+  // Without a standard of its own, "Sport standard" saved nothing and a pickleball
+  // team fixture was scored as one match.
+  pickleball: fiveRubber,
   squash: tie('detailed', [
     { key: 'ms1', label: "Men's Singles", contest: rallyGame(3) },
     { key: 'ws', label: "Women's Singles", contest: rallyGame(3) },

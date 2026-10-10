@@ -1,4 +1,4 @@
-import type { StandingsRule, StandingsPlacement, StandingsTiebreaker } from '@semp/shared';
+import { THIRD_PLACE_ROUND, type StandingsRule, type StandingsPlacement, type StandingsTiebreaker } from '@semp/shared';
 
 // Pure standings computation. A scheme turns a single draw's (tournament_discipline)
 // completed fixtures into per-CONTINGENT tallies. The service aggregates these
@@ -77,8 +77,10 @@ function leagueTally(fixtures: SchemeFixture[], win: number, draw: number, loss:
     if (!home && !away) continue;
     if (home) home.played++;
     if (away) away.played++;
-    if (home && f.home_score != null) { home.gf += f.home_score; home.ga += f.away_score ?? 0; }
-    if (away && f.away_score != null) { away.gf += f.away_score; away.ga += f.home_score ?? 0; }
+    // A walkover's scoreline (2-0 by policy) is not play: it stays out of score difference.
+    const played = f.status !== 'walkover';
+    if (played && home && f.home_score != null) { home.gf += f.home_score; home.ga += f.away_score ?? 0; }
+    if (played && away && f.away_score != null) { away.gf += f.away_score; away.ga += f.home_score ?? 0; }
 
     const isDraw = f.winner_team_id == null
       && (f.no_result === true || (f.home_score != null && f.away_score != null && f.home_score === f.away_score));
@@ -136,7 +138,7 @@ function placementCandidates(f: SchemeFixture): Array<[string, StandingsPlacemen
       out.push([winner, 'winner']);
       if (loser) out.push([loser, 'runner_up']);
       break;
-    case '3rd Place':
+    case THIRD_PLACE_ROUND:
       out.push([winner, 'third_place']);
       if (loser) out.push([loser, 'fourth_place']);
       break;

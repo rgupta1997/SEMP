@@ -301,6 +301,14 @@ describe('3. winning rubbers', () => {
     expect(tieOutcome(high, playAll(high, ['A', 'B', 'A', 'B', 'A']))).toMatchObject({ winner: 'A', drawn: false, level: false });
   });
 
+  it('3.10 a rubber drawn by its own rules is a drawn rubber; a draw tap is still refused', () => {
+    const s = initTie(spec);
+    expect(decideRubber(spec, s, 0, 'draw')).toBe(s);
+    const drawn = decideRubber(spec, s, 0, 'draw', { drawnByRules: true });
+    expect(drawn.rubbers[0]).toMatchObject({ status: 'completed', winner: null, drawn: true });
+    expect(rubbersWon(drawn)).toEqual({ a: 0, b: 0 });
+  });
+
   it('3.9 a level tie takes a recorded tie-break winner', () => {
     const even: TieSpec = { ...spec, rubbers: spec.rubbers.slice(0, 4), skipDeadRubbers: false, skipDeadInGroups: false };
     const s = playAll(even, ['A', 'B', 'A', 'B']);

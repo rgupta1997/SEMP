@@ -259,11 +259,12 @@ export function applyDead(spec: TieSpec, state: TieState): TieState {
 
 // Record a rubber's result - a winner, or on board points a draw - then advance the
 // active pointer to the next playable rubber.
-export function decideRubber(spec: TieSpec, state: TieState, index: number, winner: 'A' | 'B' | 'draw'): TieState {
-  const result = winner === 'draw'
-    ? (spec.boardPoints ? { winner: null, drawn: true } : null)
-    : { winner, drawn: undefined };
-  if (!result) return state;
+export function decideRubber(spec: TieSpec, state: TieState, index: number, winner: 'A' | 'B' | 'draw',
+  opts?: { drawnByRules?: boolean }): TieState {
+  // A draw is ½ each on board points. Elsewhere only the rubber's own rules can draw it
+  // (a timed racquet game ending level), and it counts for neither side.
+  if (winner === 'draw' && !spec.boardPoints && !opts?.drawnByRules) return state;
+  const result = winner === 'draw' ? { winner: null, drawn: true } : { winner, drawn: undefined };
   const rubbers = state.rubbers.map((r, i) => {
     if (i !== index) return r;
     const next: RubberInstance = { ...r, ...result, status: 'completed' as RubberStatus };

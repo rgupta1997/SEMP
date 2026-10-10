@@ -1,4 +1,4 @@
-import { contingentKey, isChessSport, isNoResult, stageConfigSchema, type StandingsTiebreaker } from '@semp/shared';
+import { THIRD_PLACE_ROUND, contingentKey, isChessSport, isNoResult, stageConfigSchema, type StandingsTiebreaker } from '@semp/shared';
 import type { Prisma } from '../../../infra/prisma.js';
 import { resolveRuleForDraw } from '../../standings/standings.service.js';
 import { advanceInBracket } from '../bracket.js';
@@ -70,6 +70,9 @@ export async function resolveStageAdvancement(prisma: Prisma, tournamentDiscipli
       },
     });
     if (!td) return;
+    // The 3rd-place play-off is filled for EVERY knockout - a plain single-stage bracket
+    // and a legacy one too, not only group-then-knockout draws.
+    await resolveThirdPlaceLabels(prisma, tournamentDisciplineId, await loadFixtures(prisma, tournamentDisciplineId));
     const parsed = stageConfigSchema.safeParse(td.format_config);
     if (!parsed.success) return; // this discipline wasn't built with the stage wizard - nothing to resolve
 
@@ -84,16 +87,7 @@ export async function resolveStageAdvancement(prisma: Prisma, tournamentDiscipli
     // though the config technically parsed. Cheap early exit.
     if (tree.stages.length <= 1) return;
 
-    const all: FixtureRow[] = await prisma.fixtures.findMany({
-      where: { tournament_discipline_id: tournamentDisciplineId },
-      select: {
-        id: true, stage_sequence: true, pool_number: true, bracket_position: true, round: true, status: true,
-        home_team_id: true, away_team_id: true, home_slot_label: true, away_slot_label: true, winner_team_id: true,
-        home_score: true, away_score: true, live_state: true,
-        teams_fixtures_home_team_idToteams: { select: { organization_id: true, org_unit_id: true } },
-        teams_fixtures_away_team_idToteams: { select: { organization_id: true, org_unit_id: true } },
-      },
-    });
+    const all = await loadFixtures(prisma, tournamentDisciplineId);
 
     for (const stage of tree.stages) {
       if (stage.node.type !== 'group') continue;
@@ -106,8 +100,8 @@ export async function resolveStageAdvancement(prisma: Prisma, tournamentDiscipli
         await resolveGroupQualifierLabels(prisma, tournamentDisciplineId, stage.sequence, poolNumber, standings, tree);
       }
     }
-
-    await resolveThirdPlaceLabels(prisma, tournamentDisciplineId, all);
+    // Group winners may have just filled an SF; re-read before the play-off is filled.
+    await resolveThirdPlaceLabels(prisma, tournamentDisciplineId, await loadFixtures(prisma, tournamentDisciplineId));
   } catch (err) {
     console.error(`[stages] advancement failed for draw ${tournamentDisciplineId}:`, err);
   }
@@ -205,15 +199,37 @@ async function clearTieBlocked(prisma: Prisma, fixtureId: string): Promise<void>
     update fixtures set live_state = (coalesce(live_state, '{}'::jsonb) - 'tie_blocked') where id = ${fixtureId}::uuid`;
 }
 
+const loadFixtures = (prisma: Prisma, drawId: string): Promise<FixtureRow[]> => prisma.fixtures.findMany({
+  where: { tournament_discipline_id: drawId },
+  select: {
+    id: true, stage_sequence: true, pool_number: true, bracket_position: true, round: true, status: true,
+    home_team_id: true, away_team_id: true, home_slot_label: true, away_slot_label: true, winner_team_id: true,
+    home_score: true, away_score: true, live_state: true,
+    teams_fixtures_home_team_idToteams: { select: { organization_id: true, org_unit_id: true } },
+    teams_fixtures_away_team_idToteams: { select: { organization_id: true, org_unit_id: true } },
+  },
+});
+
 // Resolves any '3rd Place' row's L{n} labels once the referenced semifinal (within
-// the same stage_sequence) has a decided winner.
+// the same stage_sequence) has a decided winner. A row from the plain generator has no
+// labels: its sides are the losers of that stage's two SFs, in bracket order.
 async function resolveThirdPlaceLabels(prisma: Prisma, drawId: string, all: FixtureRow[]): Promise<void> {
-  const pending = all.filter((f) => f.home_slot_label?.startsWith('L') || f.away_slot_label?.startsWith('L'));
+  const sfsOf = (stage: number) => all
+    .filter((f) => (f.stage_sequence ?? 1) === stage && f.round === 'SF' && f.bracket_position != null)
+    .sort((a, b) => a.bracket_position! - b.bracket_position!);
+  const labelOf = (row: FixtureRow, side: 'home' | 'away'): string | null => {
+    const label = side === 'home' ? row.home_slot_label : row.away_slot_label;
+    if (label?.startsWith('L')) return label;
+    if (row.round !== THIRD_PLACE_ROUND || row.home_slot_label || row.away_slot_label) return null;
+    const sf = sfsOf(row.stage_sequence ?? 1)[side === 'home' ? 0 : 1];
+    return sf ? `L${sf.bracket_position}` : null;
+  };
+  const pending = all.filter((f) => labelOf(f, 'home') || labelOf(f, 'away'));
   for (const row of pending) {
     const data: Record<string, unknown> = {};
     for (const side of ['home', 'away'] as const) {
-      const label = side === 'home' ? row.home_slot_label : row.away_slot_label;
-      if (!label?.startsWith('L')) continue;
+      const label = labelOf(row, side);
+      if (!label) continue;
       if ((side === 'home' ? row.home_team_id : row.away_team_id) != null) continue; // already resolved or manually set - don't clobber
       const sfPosition = Number(label.slice(1));
       const sf = all.find((f) => (f.stage_sequence ?? 1) === (row.stage_sequence ?? 1) && f.bracket_position === sfPosition);

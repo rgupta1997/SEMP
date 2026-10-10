@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatTemplateSchema } from './scoring.js';
-import { buildTieSpec, isGroupRound, tieForRound, tieLayoutsFor } from './tie-templates.js';
+import { buildTieSpec, isGroupRound, tieForRound, tieLayoutsFor, tieTemplateFor } from './tie-templates.js';
 import { decideRubber, initTie, rubberSize, tieOutcome, tieTarget } from './tie.js';
 
 describe('tie layouts an organiser can pick', () => {
@@ -59,6 +59,12 @@ describe('dead rubbers by stage', () => {
   it('recognises league and group rounds, and nothing else', () => {
     expect(['Round 3', 'Pool A - Match 2', 'pool b - match 1'].every(isGroupRound)).toBe(true);
     expect(['Final', 'SF', 'QF', 'R16', '3rd Place', 'Event', '', null].some(isGroupRound)).toBe(false);
+  });
+
+  it('every racquet sport has a standard tie, so "Sport standard" always builds one', () => {
+    for (const sport of ['table tennis', 'badminton', 'tennis', 'squash', 'pickleball']) {
+      expect(tieTemplateFor(sport)?.tie?.rubbers.length, sport).toBeGreaterThan(0);
+    }
   });
 
   it('a group round plays every rubber; a knockout stops once decided', () => {
