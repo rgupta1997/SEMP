@@ -12,6 +12,7 @@ import type { Request } from 'express';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { verifyPlayerStats } from '../records/fixture-events.service.js';
 import { assertNotLocked } from '../fixtures/lock.service.js';
+import { formatVisibility, visiblePresets } from './format-visibility.service.js';
 
 // ============================================================================
 // The format shelf.
@@ -177,13 +178,22 @@ export function makeScoringFormatsRouter(prisma: Prisma): Router {
       // Nothing to offer rather than something wrong.
     }
 
+    // Rare formats the super admin has hidden drop out - but never one this draw (or a
+    // round of it) already uses, nor the sport default.
+    const all = matchPresetsFor(sportName);
+    const roundKeys = Array.isArray(current.roundFormats)
+      ? (current.roundFormats as Array<{ presetKey?: unknown }>).map((r) => (typeof r?.presetKey === 'string' ? r.presetKey : null))
+      : [];
+    const presets = visiblePresets(all, await formatVisibility(prisma),
+      [current.presetKey, defaultPresetKey, all[0]?.presetKey, ...roundKeys]);
+
     res.json({
       sport: sportName,
       sportId,
       // isScoredSport, not isKernelSport: cricket IS scored, just not by the rally
       // kernel, and the narrower question would hide the picker for it entirely.
       supported: isScoredSport(sportName),
-      presets: matchPresetsFor(sportName),
+      presets,
       saved,
       current,
       defaultPresetKey,
@@ -291,12 +301,19 @@ function isUniqueViolation(e: unknown): boolean {
         if (presetKey) {
           // One of THIS sport's presets - keys are unique across sports, so a table
           // tennis key on a chess draw would otherwise resolve to table tennis rules.
-          const sport = (await prisma.tournament_disciplines.findUnique({
+          const draw = await prisma.tournament_disciplines.findUnique({
             where: { id: req.params.id },
-            select: { tournament_sports: { select: { sports: { select: { name: true } } } } },
-          }))?.tournament_sports?.sports?.name ?? null;
-          if (!matchPresetsFor(sport).some((p) => p.presetKey === presetKey)) {
+            select: { scoring_preset_key: true, tournament_sports: { select: { sports: { select: { name: true } } } } },
+          });
+          const sport = draw?.tournament_sports?.sports?.name ?? null;
+          const all = matchPresetsFor(sport);
+          if (!all.some((p) => p.presetKey === presetKey)) {
             throw new BusinessRuleError(`"${presetKey}" is not a built-in format for ${sport ?? 'this sport'}`);
+          }
+          // A hidden format can't be newly chosen; a draw already on it keeps it.
+          const offered = visiblePresets(all, await formatVisibility(prisma), [draw?.scoring_preset_key, all[0]?.presetKey]);
+          if (!offered.some((p) => p.presetKey === presetKey)) {
+            throw new BusinessRuleError('That format has been turned off by the platform admin. Pick another one.');
           }
         }
         await prisma.$executeRaw`

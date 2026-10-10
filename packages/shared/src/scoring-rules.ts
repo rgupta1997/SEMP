@@ -119,6 +119,8 @@ export interface LevelOverride {
    */
   collapsed?: boolean;
   pointLabels?: string[] | null;
+  /** The deciding unit's own tie-break, in place of the level's usual one (Grand Slam: to 10). */
+  substitute?: { atUnits: number; spec: LevelSpec };
 }
 
 /**
@@ -345,7 +347,7 @@ export const serveSpecSchema: z.ZodType<ServeSpec> = z.object({
   nextUnitServer: z.enum(NEXT_UNIT_SERVERS),
 });
 
-const levelOverrideSchema: z.ZodType<LevelOverride> = z.object({
+const levelOverrideSchema: z.ZodType<LevelOverride, z.ZodTypeDef, unknown> = z.lazy(() => z.object({
   target: z.number().int().positive().optional(),
   winBy: z.number().int().positive().optional(),
   cap: z.number().int().positive().nullable().optional(),
@@ -354,7 +356,8 @@ const levelOverrideSchema: z.ZodType<LevelOverride> = z.object({
   serve: serveSpecSchema.optional(),
   collapsed: z.boolean().optional(),
   pointLabels: z.array(z.string()).nullable().optional(),
-});
+  substitute: z.object({ atUnits: z.number().int().nonnegative(), spec: levelSpecSchema }).optional(),
+}));
 
 // Recursive: a level's `substitute.spec` is itself a level. z.lazy defers evaluation
 // until parse() runs, which is the standard shape for self-referential zod schemas.

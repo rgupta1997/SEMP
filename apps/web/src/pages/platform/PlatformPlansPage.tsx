@@ -64,7 +64,69 @@ export function PlatformPlansPage() {
       </Card>
 
       <InsightsSwitch data={data} />
+      <MatchFormatsCard />
     </div>
+  );
+}
+
+interface FormatRow { presetKey: string; name: string; sport: string; shown: boolean; hiddenByDefault: boolean; isDefault: boolean }
+
+/**
+ * Which built-in racquet formats organisers can pick. Hiding one only affects new
+ * choices - a draw or round already using it keeps it.
+ */
+function MatchFormatsCard() {
+  const { data, isLoading } = useApi<{ formats: FormatRow[]; updated_at: string | null; updated_by: string | null }>('/platform/settings/match-formats');
+  const save = useApiMutation(
+    (v: { presetKey: string; shown: boolean }) => api('PUT', '/platform/settings/match-formats', v),
+    ['/platform/settings/match-formats', '/tournament-disciplines/'],
+  );
+  if (isLoading || !data) return <Card className="mt-4 grid h-24 place-items-center p-5"><Spinner /></Card>;
+
+  const sports = [...new Set(data.formats.map((f) => f.sport))];
+  const flip = (f: FormatRow, shown: boolean) => save.mutate({ presetKey: f.presetKey, shown }, {
+    onSuccess: () => toast.success(shown ? `"${f.name}" is offered again` : `"${f.name}" is hidden`),
+    onError: (e: any) => toast.error('Could not change the format', e.message),
+  });
+
+  return (
+    <Card className="mt-4 p-5">
+      <h2 className="text-lg font-semibold dark:text-slate-100">Match formats</h2>
+      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        Built-in formats organisers can choose for racquet sports. Hidden ones leave the picker for new choices only - a draw already using one keeps it.
+      </p>
+      <div className="mt-4 space-y-2">
+        {sports.map((sport) => {
+          const rows = data.formats.filter((f) => f.sport === sport);
+          return (
+            <details key={sport} className="rounded-lg border border-slate-200 dark:border-slate-800">
+              <summary className="flex cursor-pointer items-center justify-between px-3 py-2 text-sm font-semibold capitalize text-slate-700 dark:text-slate-200">
+                {sport}
+                <span className="text-xs font-normal normal-case text-slate-400">{rows.filter((r) => r.shown).length} of {rows.length} shown</span>
+              </summary>
+              <ul className="divide-y divide-slate-100 border-t border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+                {rows.map((f) => (
+                  <li key={f.presetKey} className="flex items-center justify-between gap-3 px-3 py-2">
+                    <span className="min-w-0 text-sm text-slate-700 dark:text-slate-200">
+                      {f.name}
+                      {f.isDefault && <Badge tone="green" className="ml-2">Default</Badge>}
+                    </span>
+                    {f.isDefault
+                      ? <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">Always offered</span>
+                      : <Toggle checked={f.shown} onChange={(v) => { if (!save.isPending) flip(f, v); }} />}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          );
+        })}
+      </div>
+      {data.updated_at && (
+        <p className="mt-4 text-xs text-slate-400 dark:text-slate-500">
+          Last changed {fmtDateTime(data.updated_at)}{data.updated_by ? ` by ${data.updated_by}` : ''}.
+        </p>
+      )}
+    </Card>
   );
 }
 

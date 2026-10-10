@@ -269,9 +269,12 @@ export function effectiveLevel(format: ScoringFormat, state: KernelState, i: num
 
   // Substitution beats the base: at 6-6 the next "game" is a tie-break, with its own
   // target, margin and serve rhythm.
-  if (parent?.substitute && parentScore) {
-    const at = parent.substitute.atUnits;
-    if (parentScore[0] >= at && parentScore[1] >= at) spec = parent.substitute.spec;
+  // A deciding set can bring its own tie-break: the Grand Slam fifth goes to 10 at 6-6.
+  const grand = format.levels[i + 2], grandScore = state.score[i + 2];
+  const parentDecides = !!grand && !!grandScore && grandScore[0] === grand.target - 1 && grandScore[1] === grand.target - 1;
+  const sub = (parentDecides ? parent?.deciderOverride?.substitute : undefined) ?? parent?.substitute;
+  if (sub && parentScore) {
+    if (parentScore[0] >= sub.atUnits && parentScore[1] >= sub.atUnits) spec = sub.spec;
   }
 
   // Decider: the parent is one unit from over for BOTH sides.
@@ -341,6 +344,12 @@ export function unitWinner(spec: LevelSpec, score: Pair): Side | null {
   if (a >= spec.target && a - b >= spec.winBy) return 'A';
   if (b >= spec.target && b - a >= spec.winBy) return 'B';
   return null;
+}
+
+/** A play-all level ends only when all `2 x target - 1` units are played. */
+function playAllWinner(spec: LevelSpec, [a, b]: Pair): Side | null {
+  if (a + b < spec.target * 2 - 1) return null;
+  return a > b ? 'A' : b > a ? 'B' : null;
 }
 
 /**
@@ -680,7 +689,10 @@ function cascade(format: ScoringFormat, state: KernelState, from: number, forced
   let i = from;
   for (;;) {
     const spec = effectiveLevel(format, state, i);
-    const w = (i === from && forced) ? forced : unitWinner(spec, state.score[i]);
+    // Play-all (squash Flash): every unit below is played out, then the bigger tally wins.
+    const w = (i === from && forced) ? forced
+      : format.levels[i - 1]?.playAll ? playAllWinner(spec, state.score[i])
+      : unitWinner(spec, state.score[i]);
     if (!w) break;
 
     const unit: FinishedUnit = {

@@ -71,6 +71,9 @@ export function describeFormat(f: MatchFormat): string {
     bits.push(sets === 1 ? 'one set' : `best of ${sets} sets`);
     bits.push(`sets to ${set.target}`);
     bits.push(set.substitute ? `tie-break at ${set.substitute.atUnits}-${set.substitute.atUnits}` : 'advantage sets');
+    const dec = set.deciderOverride;
+    if (dec?.collapsed) bits.push(`${dec.target ?? 10}-point match tie-break decider`);
+    else if (dec?.substitute) bits.push(`final set tie-break to ${dec.substitute.spec.target}`);
     if (inner.winBy === 1) bits.push('no-ad');
     return bits.join(' · ');
   }

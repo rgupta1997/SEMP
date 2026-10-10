@@ -257,11 +257,11 @@ describe('badminton classic 15 - serverOnly scoring, built not stubbed', () => {
     expect(s.serve.side).toBe('A');
   });
 
-  it('wins at 15 with a single point margin', () => {
+  it('wins a game at 15 with a single point margin; the match is best of 3', () => {
     // Only the server scores, so A must hold serve throughout.
     const r = foldRally(f, points('A', 15), 'A');
-    expect(r.state.ended).toBe(true);
-    expect(r.state.winner).toBe('A');
+    expect(r.state.score[1]).toEqual([1, 0]);
+    expect(r.state.ended).toBe(false);
   });
 });
 
@@ -1523,5 +1523,39 @@ describe('expedite system stats', () => {
   it('a match expedite never came into has no expedite stats at all', () => {
     const plain = deriveRacquetStats(f, points('A', 33), { pairing: { A: ['x'], B: ['y'] }, firstServer: 'A' });
     expect(Object.keys(plain.sides.A).filter((k) => k.startsWith('expedite'))).toEqual([]);
+  });
+});
+
+describe('presets that play as their names say', () => {
+  const games = (seq: string) => [...seq].flatMap((c) => points(c as Side, 4));
+  const fold = (key: string, log: RallyLog) => foldRally(fmtOf(key), log, 'A').state;
+
+  it('Grand Slam: the fifth set is a full set, with a 10-point tie-break at 6-6', () => {
+    const twoAll = [...games('AAAAAA'), ...games('BBBBBB'), ...games('AAAAAA'), ...games('BBBBBB')];
+    // Four points in the fifth is one game, not 4-0 in a tie-break.
+    expect(fold('grand_slam_bo5', [...twoAll, ...points('A', 4)]).score[1]).toEqual([1, 0]);
+    const sixAll = [...twoAll, ...games('ABABABABABAB')];
+    // 7-0 in the fifth-set tie-break is not enough; 10-0 wins the match.
+    expect(fold('grand_slam_bo5', [...sixAll, ...points('A', 7)]).ended).toBe(false);
+    const won = fold('grand_slam_bo5', [...sixAll, ...points('A', 10)]);
+    expect(won).toMatchObject({ ended: true, winner: 'A' });
+    // Earlier sets keep the 7-point tie-break.
+    expect(fold('grand_slam_bo5', [...games('ABABABABABAB'), ...points('A', 7)]).score[2]).toEqual([1, 0]);
+  });
+
+  it('squash Flash plays all three games, then the side with more wins', () => {
+    const g7 = (s: Side) => points(s, 7);
+    expect(fold('flash_bo3_to_7', [...g7('A'), ...g7('A')]).ended).toBe(false);
+    expect(fold('flash_bo3_to_7', [...g7('A'), ...g7('A'), ...g7('B')])).toMatchObject({ ended: true, winner: 'A' });
+    expect(fold('flash_bo3_to_7', [...g7('A'), ...g7('B'), ...g7('B')])).toMatchObject({ ended: true, winner: 'B' });
+  });
+
+  it('badminton Classic 15 is best of 3 games', () => {
+    // Side-out: A serving and winning every rally takes a game, then the match at 2-0.
+    let log: RallyLog = [];
+    let s = fold('classic_15_sideout', log);
+    for (let i = 0; i < 500 && !s.ended; i++) { log = [...log, { t: 'point', side: 'A' }]; s = fold('classic_15_sideout', log); }
+    expect(s).toMatchObject({ ended: true, winner: 'A' });
+    expect(resultEnvelope(fmtOf('classic_15_sideout'), s).headline).toEqual([2, 0]);
   });
 });

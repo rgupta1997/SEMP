@@ -274,11 +274,11 @@ const BADMINTON: ScoringFormat[] = [
     levels: [bwfGame(11, 15, 6), match(3)], serve: bwfServe, mode: 'officiated',
   }),
   fmt({
-    sport: 'badminton', key: 'classic_15_sideout', name: 'Classic 15 — side-out (service) scoring',
+    sport: 'badminton', key: 'classic_15_sideout', name: 'Classic 15 — side-out (service) scoring, best of 3 games',
     // Heritage, and BUILT rather than stubbed. `setting` (the 13-all election to extend
     // the game by 5) is a documented non-goal: if the players set, the score is recorded
     // manually. Stated on the draw sheet rather than approximated.
-    levels: [bwfGame(15, null, 8, 1)], serve: bwfClassicServe, mode: 'officiated',
+    levels: [bwfGame(15, null, 8, 1), match(2)], serve: bwfClassicServe, mode: 'officiated',
     changeEnds: 'betweenUnits',
     rulesSheet: { setting: 'not scored by the console — record the final score manually' },
   }),
@@ -349,7 +349,8 @@ const TENNIS: ScoringFormat[] = [
   }),
   fmt({
     sport: 'tennis', key: 'grand_slam_bo5', name: "Grand Slam men's — best of 5, 10-point tie-break in the fifth",
-    levels: [tennisGame(), { ...tennisSet(6, 6), deciderOverride: matchTiebreakDecider(10) }, match(3)],
+    // A full fifth set; only its 6-6 tie-break changes, to 10 points (Grand Slam rule since 2022).
+    levels: [tennisGame(), { ...tennisSet(6, 6), deciderOverride: { substitute: { atUnits: 6, spec: tiebreakUnit(10) } } }, match(3)],
     serve: tennisServe, mode: 'officiated', changeEnds: 'oddCumulativeUnits',
   }),
   fmt({
