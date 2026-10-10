@@ -211,3 +211,93 @@ export async function sendNotificationEmail(
     metadata: opts.metadata,
   });
 }
+
+// ---------- marketing: "Book a demo" --------------------------------------
+//
+// ONE mail per lead, and it goes to the visitor, not to us: it is the only thing
+// standing between "I submitted a form" and "I assume nobody saw it". Our own side of
+// this is the admin page at /platform/demo-requests, which reads the table directly -
+// deliberately no internal alert mail.
+//
+// It goes through `generic-notification` rather than raw HTML, so it arrives in the
+// same branded layout as every other Sportagon mail and gets a plaintext part for
+// free. Ask for a bespoke template if this copy starts changing often.
+
+/** The parts of a lead this mail reads - a superset is fine, the row itself fits. */
+export interface DemoRequestMail {
+  id: string;
+  name: string;
+  email: string;
+  organization?: string | null;
+  role?: string | null;
+  city?: string | null;
+  event_date?: string | null;
+  sport_count?: number | null;
+  participant_count?: number | null;
+}
+
+/**
+ * Only what the visitor typed themselves, echoed back so they can spot a wrong phone
+ * number while they still remember sending it. Nothing is read from any other row:
+ * this mail goes to an address an anonymous caller supplied, so it must never be able
+ * to carry anything they did not already know.
+ */
+const leadDetails = (lead: DemoRequestMail): Array<{ label: string; value: string }> => [
+  { label: 'Organization', value: lead.organization ?? '' },
+  { label: 'Type', value: lead.role ?? '' },
+  { label: 'City', value: lead.city ?? '' },
+  { label: 'Event date', value: lead.event_date ?? '' },
+  // Numbers must reach the template as STRINGS - a number is a 422 - and a genuine
+  // zero has to survive, so this tests for null rather than falsiness.
+  { label: 'Sports', value: lead.sport_count == null ? '' : String(lead.sport_count) },
+  { label: 'Participants', value: lead.participant_count == null ? '' : String(lead.participant_count) },
+];
+
+/**
+ * To the person who just submitted the form.
+ *
+ * The promise in here - a specialist, within one working day - is the SAME promise the
+ * landing page makes on its thank-you screen. If one changes, change both: a visitor
+ * who is told two different things believes the slower one and trusts neither.
+ */
+export function demoRequestAckMail(lead: DemoRequestMail, appUrl: string): NotificationEmail {
+  // Just the first word: "Hi Priya," reads as written by a person, "Hi Priya Sharma,"
+  // reads as written by a database. Falls back to a bare "Hi there," rather than
+  // rendering an empty name.
+  const firstName = nonEmpty(lead.name?.trim().split(/\s+/)[0]);
+
+  return {
+    subject: 'We have your Sportagon demo request',
+    heading: 'Your demo request is with us',
+    greeting: firstName ? `Hi ${firstName},` : 'Hi there,',
+    paragraphs: [
+      'Thanks for asking for a demo of Sportagon. One of our specialists will reach out to you '
+      + 'within one working day to schedule your 20-minute walkthrough.',
+      'The walkthrough is mapped to your event rather than being a generic tour, so it helps to have '
+      + 'your sports, categories and dates to hand when we call.',
+    ],
+    details: leadDetails(lead),
+    ctaUrl: `${appUrl}/login?mode=signup`,
+    ctaLabel: 'Start free while you wait',
+    // The standard courtesy for any mail triggered by a form an anonymous visitor can
+    // type any address into. It is also the only honest thing to say to someone who
+    // did not ask for this.
+    footnote: 'You are receiving this because this address was entered on the "Book a demo" form at '
+      + 'sportagon.in. If that was not you, you can safely ignore this email.',
+  };
+}
+
+export async function sendDemoRequestAckEmail(
+  lead: DemoRequestMail,
+  appUrl: string,
+): Promise<MailResult> {
+  return sendNotificationEmail(lead.email, demoRequestAckMail(lead, appUrl), {
+    // Someone has just pressed a button and is watching for this, but not the way they
+    // watch for a sign-in code.
+    priority: 3,
+    // The lead row, not the clock: a retry after a timeout must not send it twice,
+    // and a genuine second enquiry is a different row and so a different mail.
+    idempotencyKey: `demo-request-ack-${lead.id}`,
+    metadata: { kind: 'demo_request_ack', demoRequestId: lead.id },
+  });
+}

@@ -1,0 +1,26 @@
+# Production build defaults for the marketing site. Vite reads this file for
+# `vite build` (mode=production); `npm run dev` never sees it.
+#
+# WHY THIS FILE EXISTS AT ALL.
+#
+# VITE_API_URL is baked into the bundle at BUILD time, and until now it lived only in
+# one person's shell. On 2026-10-07 a build made without it went live, and for every
+# visitor after that the "Book a demo" form did not merely fail - it was COMPILED
+# AWAY. API_URL is a compile-time null (src/data/site.js), so the minifier removed the
+# whole fetch branch and the deployed bundle contained no endpoint at all. The form
+# told visitors it "is not configured to send yet" and nothing was recorded. The two
+# deploys before it, on 2026-10-02, had the value and worked.
+#
+# A value that has to be remembered is a value that will be forgotten, so it is
+# committed here instead. There is no secret to protect: this origin is already
+# readable in apps/web's shipped bundle, which has always carried it.
+#
+# PRECEDENCE, exactly: .env, then .env.local, then THIS FILE, then
+# .env.production.local, and process.env over all of them. So a VITE_API_URL set in the
+# Netlify UI or in your shell still wins - this is a floor, not a lock - but note that
+# this file beats a plain `.env`, so pointing a PRODUCTION build somewhere else means
+# an environment variable or `.env.production.local`, not an edit to `.env`.
+#
+# The origin only - no trailing slash and no /api. src/data/site.js appends /api, the
+# same way apps/web's lib/api.ts does.
+VITE_API_URL="api.endpoint"

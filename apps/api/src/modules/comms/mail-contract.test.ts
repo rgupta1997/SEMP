@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { notificationMailData } from './email.js';
+import { demoRequestAckMail, notificationMailData } from './email.js';
 
 // Contract test against the RUNNING mail service.
 //
@@ -84,6 +84,26 @@ live('payloads we actually send', () => {
       ctaUrl: 'https://app.sportagon.in/organizations/1/invitations',
       ctaLabel: 'View the invitation',
     });
+
+    expect(await previewStatus('generic-notification', data)).toBe(200);
+  });
+
+  // The "Book a demo" acknowledgement, with a lead who answered EVERY question - the
+  // case that fills the details table furthest and sends the two numeric fields.
+  // demo-request-mail.test.ts pins those rules hermetically; this is the same payload
+  // put in front of the real validator.
+  it('accepts the demo-request acknowledgement for a fully completed form', async () => {
+    const data = notificationMailData(demoRequestAckMail({
+      id: 'lead-1',
+      name: 'Priya Sharma',
+      email: 'priya@example.com',
+      organization: 'Northfield School',
+      role: 'School',
+      city: 'Pune',
+      event_date: 'mid-January',
+      sport_count: 6,
+      participant_count: 900,
+    }, 'https://events.sportagon.in'));
 
     expect(await previewStatus('generic-notification', data)).toBe(200);
   });
