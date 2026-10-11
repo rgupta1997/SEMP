@@ -26,7 +26,21 @@ export function parseAuth(req: Request, _res: Response, next: NextFunction): voi
   const header = req.headers.authorization;
   if (header?.startsWith('Bearer ')) {
     try {
-      const decoded = jwt.verify(header.slice(7), env.JWT_SECRET) as JwtPayload;
+      const decoded = jwt.verify(header.slice(7), env.JWT_SECRET) as JwtPayload & { aud?: unknown };
+
+      // A session token has no audience. Anything that does was minted for some
+      // other purpose, and the only such token in this system is the AppSync
+      // realtime token (modules/notifications/realtime-token.ts).
+      //
+      // That token is already signed with an HKDF-DERIVED key, so it cannot verify
+      // above and this branch should be unreachable. It is here because the
+      // derivation is one refactor away from being "simplified" back to
+      // env.JWT_SECRET, and the consequence would be invisible: `jwt.verify` takes
+      // no audience option by default, so every realtime token the mint endpoint
+      // hands out would silently become a working API session. Two independent
+      // fences, because the failure mode has no symptom.
+      if (decoded.aud !== undefined) return next();
+
       req.user = {
         id: decoded.sub,
         email: decoded.email,

@@ -14,8 +14,13 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Used by the Prisma CLI only (`db pull`, `migrate`), never at runtime - which is
+  // why Render has always worked without it. DIRECT_URL is currently set in NO .env
+  // file in this repo, so `prisma db pull` runs against an undefined value; set it
+  // to a non-pooled connection string before introspecting.
+  directUrl = env("DIRECT_URL")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -297,6 +302,22 @@ model sportagon_id_counters {
   last_value Int    @default(0)
 }
 
+/// Which infra/rds-migrations/*.sql files have run against this database; written by
+/// that directory's apply.sh, never by the application. Declared here ONLY so
+/// `prisma migrate diff` stops emitting `DROP TABLE "rds_migrations"` - without this
+/// model the next generated migration quietly deletes the record of what has been
+/// applied, which is the one table that must survive a schema sync. @@ignore keeps it
+/// out of the generated client: nothing in apps/ should read or write it.
+model rds_migrations {
+  filename   String   @id
+  applied_at DateTime @default(now()) @db.Timestamptz(6)
+  applied_by String   @default(dbgenerated("CURRENT_USER"))
+  checksum   String?
+  note       String?
+
+  @@ignore
+}
+
 model sports {
   id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name               String               @db.VarChar
@@ -559,7 +580,7 @@ model users {
   platform_settings                                                        platform_settings[]
   championships_archived                                                   championships[]              @relation("championships_archived_byTousers")
   organizations_archived                                                   organizations[]              @relation("organizations_archived_byTousers")
-  player_match_stats_player_match_stats_partner_user_idTousers            player_match_stats[]         @relation("player_match_stats_partner_user_idTousers")
+  player_match_stats_player_match_stats_partner_user_idTousers             player_match_stats[]         @relation("player_match_stats_partner_user_idTousers")
   player_match_stats_player_match_stats_user_idTousers                     player_match_stats[]         @relation("player_match_stats_user_idTousers")
   profile_privacy                                                          profile_privacy?
   racquet_match_lines                                                      racquet_match_lines[]

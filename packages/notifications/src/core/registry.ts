@@ -7,11 +7,46 @@ export interface RuleContext {
   userId?: string;
 }
 
+/**
+ * What the same event looks like as an email.
+ *
+ * Separate from title/bodyTemplate rather than derived from them, because the feed
+ * and the inbox are different rooms. A feed entry is read in context, next to the
+ * thing it is about, and can be a fragment; an email arrives cold days later and has
+ * to carry its own context and a way back into the product.
+ */
+export interface NotificationEmailContent {
+  subject: string;
+  paragraphs: string[];
+  /** Rendered as a table. Values must be strings - a number is rejected upstream. */
+  details?: Array<{ label: string; value: string }>;
+  /**
+   * App-RELATIVE path. The transport makes it absolute, because only the API layer
+   * knows where the web app lives and this package must stay free of that config.
+   */
+  ctaPath?: string;
+  ctaLabel?: string;
+}
+
+export interface NotificationEmailDef {
+  /** Return null to skip the email for this particular instance. */
+  build: (data: Record<string, unknown>, ctx: RuleContext) => NotificationEmailContent | null;
+  /** 1-2 urgent, 3-5 transactional, 6-9 bulk. Defaults to 5. */
+  priority?: number;
+}
+
 export interface NotificationTypeDef {
   key: string;
   defaultAudience: (ctx: RuleContext) => AudienceRule;
   titleTemplate: (data: Record<string, unknown>) => string;
   bodyTemplate?: (data: Record<string, unknown>) => string | null;
+  /**
+   * Opt-in. A type with no `email` block reaches the in-app feed only, which is the
+   * right default: every type here fires today without anybody having agreed to be
+   * emailed about it, and quietly turning them all on would be a mailing list nobody
+   * subscribed to.
+   */
+  email?: NotificationEmailDef;
 }
 
 // `satisfies` rather than a `: Record<string, NotificationTypeDef>` annotation
@@ -76,6 +111,45 @@ export const NOTIFICATION_TYPES = {
         default:
           return null;
       }
+    },
+
+    // Emailed because these three moments are deadlines for somebody: registration
+    // opening is the one where a POC who misses the feed misses the event entirely.
+    email: {
+      build: (data, ctx) => {
+        const name = data.championshipName ? String(data.championshipName) : 'A championship';
+        if (!ctx.championshipId) return null;
+
+        switch (data.status) {
+          case 'registration_open':
+            return {
+              subject: `Registration is open for ${name}`,
+              paragraphs: [
+                `${name} is now open for institutions to register.`,
+                'Register your institution to enter teams before entries close.',
+              ],
+              ctaPath: `/championships/${ctx.championshipId}`,
+              ctaLabel: 'Open the championship',
+            };
+          case 'ongoing':
+            return {
+              subject: `${name} is now live`,
+              paragraphs: [`Matches at ${name} are underway. Fixtures and results update as they are recorded.`],
+              ctaPath: `/championships/${ctx.championshipId}/schedule`,
+              ctaLabel: 'View the schedule',
+            };
+          case 'completed':
+            return {
+              subject: `${name} has concluded`,
+              paragraphs: [`Thanks for taking part in ${name}. Final standings are now available.`],
+              ctaPath: `/championships/${ctx.championshipId}/standings`,
+              ctaLabel: 'View final standings',
+            };
+          default:
+            return null;
+        }
+      },
+      priority: 5,
     },
   },
 
@@ -201,6 +275,32 @@ export const NOTIFICATION_TYPES = {
         ? `Changed from ${from}. Everything the new plan includes is available now.`
         : 'Everything the new plan includes is available now.';
     },
+
+    // A billing change against somebody's institution. Emailed because the person who
+    // notices the capability move is often not the person who made the change, and a
+    // written record of what changed and when is the cheaper half of that conversation.
+    email: {
+      build: (data, ctx) => {
+        const org = String(data.organizationName ?? 'Your institution');
+        const to = String(data.to ?? 'a new plan');
+        const from = data.from ? String(data.from) : null;
+        return {
+          subject: `${org} is now on ${to}`,
+          paragraphs: [
+            from
+              ? `${org}'s plan has changed from ${from} to ${to}.`
+              : `${org} is now on ${to}.`,
+            'Everything the new plan includes is available now.',
+          ],
+          details: from
+            ? [{ label: 'Previous plan', value: from }, { label: 'New plan', value: to }]
+            : [{ label: 'Plan', value: to }],
+          ctaPath: ctx.organizationId ? `/organizations/${ctx.organizationId}/admin` : '/plans',
+          ctaLabel: 'View billing',
+        };
+      },
+      priority: 3,
+    },
   },
 
   plan_downgrade_scheduled: {
@@ -225,6 +325,32 @@ export const NOTIFICATION_TYPES = {
         : 'the end of the current period';
 
       return `Nothing changes until ${when} - the plan you have paid for runs to the end of its term. Nothing you have created will be deleted.`;
+    },
+
+    // The date is the whole message, and it is a deadline: somebody has until then to
+    // change their mind. That is exactly the kind of thing a feed entry scrolls past.
+    email: {
+      build: (data, ctx) => {
+        const org = String(data.organizationName ?? 'Your institution');
+        const to = String(data.to ?? 'a lower plan');
+        const at = data.effectiveAt ? new Date(String(data.effectiveAt)) : null;
+        const when = at && !Number.isNaN(at.getTime())
+          ? at.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+          : 'the end of the current period';
+
+        return {
+          subject: `${org} will move to ${to} on ${when}`,
+          paragraphs: [
+            `${org} is scheduled to move to ${to}.`,
+            `Nothing changes until ${when} - the plan you have paid for runs to the end of its term, and nothing you have created will be deleted.`,
+            'If this was not intended, you can change it before that date.',
+          ],
+          details: [{ label: 'New plan', value: to }, { label: 'Takes effect', value: when }],
+          ctaPath: ctx.organizationId ? `/organizations/${ctx.organizationId}/admin` : '/plans',
+          ctaLabel: 'Review the plan',
+        };
+      },
+      priority: 3,
     },
   },
 
@@ -329,6 +455,59 @@ ${where}` : where;
 
       return `You’ve been approved to join ${organizationName}`;
     },
+
+    // The outcome of something the recipient asked for and is waiting on, so it is
+    // worth reaching them wherever they are rather than only in a feed they may not
+    // revisit.
+    email: {
+      build: (data, ctx) => {
+        const org = String(data.organizationName ?? 'the organisation');
+        return {
+          subject: `You've been approved to join ${org}`,
+          paragraphs: [
+            `Your request to join ${org} on Sportagon has been approved.`,
+            'You can now see its teams, players and championships.',
+          ],
+          ctaPath: ctx.organizationId ? `/organizations/${ctx.organizationId}/overview` : '/home',
+          ctaLabel: `Open ${org}`,
+        };
+      },
+      priority: 3,
+    },
+  },
+  // Somebody has been invited to join an organisation.
+  //
+  // In the DB's type CHECK since the email-invitations migration but never added
+  // here, so notify() rejected it and the in-app half of that feature never shipped.
+  // Direct-to-user: it only fires when the invited address already resolves to an
+  // account. An invitee with no account has nothing to show a feed to - the email is
+  // the whole message for them.
+  org_invitation: {
+    key: 'org_invitation',
+
+    defaultAudience: (ctx) => {
+      if (!ctx.userId) {
+        throw new Error('userId is required for org_invitation');
+      }
+
+      return Rules.directUser(ctx.userId);
+    },
+
+    titleTemplate: (data) => {
+      const organizationName = String(data.organizationName ?? 'an organization');
+      const inviterName = data.inviterName ? String(data.inviterName) : null;
+
+      return inviterName
+        ? `${inviterName} invited you to join ${organizationName}`
+        : `You've been invited to join ${organizationName}`;
+    },
+
+    bodyTemplate: (data) => {
+      const role = data.role ? String(data.role) : null;
+      return role
+        ? `You've been invited as ${role}. Open the invitation to accept it.`
+        : 'Open the invitation to accept it.';
+    },
   },
   // ---- organisation verification ------------------------------------------
   //
@@ -396,6 +575,23 @@ ${where}` : where;
       );
 
       return `Your request to join ${organizationName} was declined`;
+    },
+
+    // The other half of the same wait. Told plainly and without a call to action -
+    // there is nothing useful to click, and a button here would only invite a retry
+    // that lands somebody back where they started.
+    email: {
+      build: (data) => {
+        const org = String(data.organizationName ?? 'the organisation');
+        return {
+          subject: `Your request to join ${org} was declined`,
+          paragraphs: [
+            `Your request to join ${org} on Sportagon was not approved.`,
+            'If you think this is a mistake, contact the institution directly - they manage their own membership.',
+          ],
+        };
+      },
+      priority: 3,
     },
   },
 
