@@ -37,9 +37,28 @@ crash on every invocation, with nothing to warn you. Set on the function:
 ```
 NODE_ENV=development
 MAIL_TRANSPORT=console
-REALTIME_TRANSPORT=off
+REALTIME_TRANSPORT=supabase
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_PUBLISHABLE_KEY=<the project's publishable / anon key>
+SUPABASE_JWT_SECRET=<the project's legacy JWT secret - must NOT equal JWT_SECRET>
 ```
 
 `development`, not `production`: the production guards would additionally demand a real
-mail key plus AppSync queue, endpoint and region values that only a deployed `semp-*`
-stack produces. Beta has no stack, so `off` and `console` are the honest settings.
+mail key. Mail stays on `console` until beta has one.
+
+## Live notifications on beta: Supabase Realtime
+
+Beta's database is a Supabase project, so its notification bell uses **Supabase
+Realtime**, not AppSync (which needs the `semp-*` stack beta does not have). The code is
+the same build as UAT; only this setting differs - see `REALTIME_TRANSPORT` in
+`apps/api/src/config/env.schema.ts`.
+
+- The three `SUPABASE_*` values come from the Supabase dashboard (Project Settings >
+  API, and > JWT for the legacy secret). The URL and publishable key reach the browser in
+  the `POST /notifications/realtime-token` response; the secret never leaves the API.
+- Apply migration `20261011000000_supabase_realtime_where_supabase.sql` to the beta
+  database. It restores the RLS policy and the realtime publication that
+  `20260922000000_retire_supabase_realtime.sql` removed (and is a no-op on RDS).
+- Netlify needs no new variable: the browser is told which transport to use at runtime.
+- `REALTIME_TRANSPORT=off` still works if Supabase Realtime is not set up - the bell
+  then falls back to its 2-minute poll.
