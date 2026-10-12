@@ -3,9 +3,16 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" type="image/png" href="/sportagon-mark.png" />
+    <!-- Same icon set as the app under /app (apps/web/public). Keep the two in
+         step: one domain, one mark - a visitor who clicks from here into the app
+         should not watch the tab icon change. -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
 
-    <title>Multi-Sport Tournament Management Software | Sportagon EOS</title>
+    <title>Multi Sports Tournament Management Software | Sportagon</title>
     <meta
       name="description"
       content="Run your entire sports event from one operating system. Registrations, teams, fixtures, live scoring, standings, certificates and reports for schools, colleges, corporates and tournament organizers. Start free."
@@ -25,8 +32,8 @@
     </script>
 
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Sportagon EOS" />
-    <meta property="og:title" content="Multi-Sport Tournament Management Software | Sportagon EOS" />
+    <meta property="og:site_name" content="Sportagon" />
+    <meta property="og:title" content="Multi Sports Tournament Management Software | Sportagon" />
     <meta
       property="og:description"
       content="One operating system for the whole tournament: registrations, fixtures, live scoring, standings, certificates and reports."
@@ -45,7 +52,7 @@
       {
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
-        "name": "Sportagon EOS",
+        "name": "Sportagon",
         "applicationCategory": "BusinessApplication",
         "operatingSystem": "Web",
         "description": "End-to-end multi-sport tournament management: registrations, teams, fixtures, live scoring, standings, certificates and reports.",

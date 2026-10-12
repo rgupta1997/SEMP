@@ -37,23 +37,32 @@ export const SIGN_UP = `${APP}/login?mode=signup`
    Same shape as apps/web's `lib/api.ts` (VITE_API_URL + '/api'), and the same
    dev default, so a local `npm run dev` talks to the local API with nothing set.
 
-   THERE IS DELIBERATELY NO PRODUCTION FALLBACK. VITE_API_URL is baked in at
-   build time, and the production API is an API Gateway host that lives in the
-   deploy's environment, not in this repo. Guessing one here would be worse than
-   having none: the form would look like it submitted and every lead would be
-   POSTed into the void. Unset in a production build, API_URL is null, and the
-   demo form says so instead of pretending to succeed.
+   THERE IS STILL NO FALLBACK IN THIS FILE, and there must not be: a guessed origin
+   here would make the form look like it submitted while every lead went into the
+   void. Unset, API_URL is null and the demo form says so rather than pretending to
+   succeed.
+
+   The production origin lives in `.env.production` instead, which Vite reads for
+   `vite build` and which is committed precisely because leaving it in one person's
+   shell is not a safeguard - it is a single point of failure that already fired. A
+   build made without it on 2026-10-07 shipped a bundle with the fetch branch
+   MINIFIED AWAY (API_URL is a compile-time null, so the endpoint string is not even
+   in the file), and the form told visitors it was not configured until this was
+   found. Anything in the environment still overrides that file.
    --------------------------------------------------------------------------- */
 const API_ORIGIN = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:4000' : '')
 
 export const API_URL = API_ORIGIN ? `${API_ORIGIN}/api` : null
+
+// The main Sportagon website - where the logo leads, from the nav and the footer.
+export const MAIN_SITE = 'https://www.sportagon.in'
 
 export const CONTACT = {
   email: 'play@sportagon.in',
   phone: '+91 72760 88888',
   phoneHref: 'tel:+917276088888',
   whatsapp: 'https://wa.me/917276088888',
-  instagram: 'https://www.instagram.com/sportagon',
+  instagram: 'https://www.instagram.com/sportagon_india/',
   linkedin: 'https://www.linkedin.com/company/sportagon-india',
   hours: 'Monday to Saturday, working hours IST',
 }

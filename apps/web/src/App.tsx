@@ -45,6 +45,7 @@ import { TemplateGalleryPage } from './pages/organization/certificates/TemplateG
 import { TemplatePreviewPage } from './pages/organization/certificates/TemplatePreviewPage';
 import { VerifyCertificatePage } from './pages/public/VerifyCertificatePage';
 import { PublicProfilePage } from './pages/public/PublicProfilePage';
+import { InviteAcceptPage, PENDING_INVITE_KEY } from './pages/InviteAcceptPage';
 import { AdminPage } from './pages/organization/AdminPage';
 import { MembersPage } from './pages/organization/MembersPage';
 import { InvitationsPage } from './pages/organization/InvitationsPage';
@@ -178,9 +179,16 @@ function AppRoutes() {
   // Consume the one-shot login flag once we've acted on it (below).
   useEffect(() => { if (justLoggedIn) clearJustLoggedIn(); }, [justLoggedIn, clearJustLoggedIn]);
 
+  // Every route match is read before the first early return below: a hook skipped by
+  // a return changes the hook count between renders, which React does not forgive.
+  const publicMatch = useMatch('/c/:token');
+  const verifyMatch = useMatch('/verify/:token');
+  const verifyRoot = useMatch('/verify');
+  const publicProfileMatch = useMatch('/p/:handle');
+  const inviteMatch = useMatch('/invites/:token');
+
   // Public, view-only share link - rendered with no sidebar/login, regardless of
   // whether the visitor is signed in (so the link works for anyone).
-  const publicMatch = useMatch('/c/:token');
   if (publicMatch?.params.token) return <PublicChampionshipPage token={publicMatch.params.token} />;
 
   // Certificate verification, outside the shell and outside auth for the same
@@ -188,17 +196,18 @@ function AppRoutes() {
   // employer or a selector has no account here, and a verifier that asked them to
   // sign in would verify nothing for the people who most need it. Matched before
   // the signed-out redirect below so it works whoever opens it.
-  // Both matches are read unconditionally - a hook behind an `if` changes the hook
-  // order between renders, which React does not forgive.
-  const verifyMatch = useMatch('/verify/:token');
-  const verifyRoot = useMatch('/verify');
   if (verifyMatch || verifyRoot) return <VerifyCertificatePage token={verifyMatch?.params.token} />;
 
   // Public sports profile - outside the shell and outside auth for the same
   // reason: a profile someone chose to make public has to be openable by a
   // stranger with no account, or "public" does not mean anything.
-  const publicProfileMatch = useMatch('/p/:handle');
   if (publicProfileMatch) return <PublicProfilePage handle={publicProfileMatch.params.handle} />;
+
+  // An emailed invitation. Also matched ahead of the signed-out redirect, and for the
+  // same reason as the two above: the recipient usually has no account yet, and a
+  // login wall reached from an email - with no statement of what it is for - is
+  // indistinguishable from a phishing page.
+  if (inviteMatch?.params.token) return <InviteAcceptPage token={inviteMatch.params.token} />;
 
   if (loading) return <div className="grid h-screen place-items-center"><Spinner /></div>;
   // Logged out: a public marketing landing page at the root, with the sign-in
@@ -212,6 +221,14 @@ function AppRoutes() {
   );
   // Provisioned logins must set their own password before they can use the app.
   if (ctx.user.must_change_password) return <ChangePasswordPage />;
+  // Somebody who followed an invitation link had to sign in first, which cost them
+  // the URL. Put them back on it rather than on their dashboard, where the invitation
+  // they came to accept would be nowhere in sight.
+  const pendingInvite = sessionStorage.getItem(PENDING_INVITE_KEY);
+  if (pendingInvite) {
+    sessionStorage.removeItem(PENDING_INVITE_KEY);
+    return <Navigate to={`/invites/${pendingInvite}`} replace />;
+  }
   // After an explicit login/signup, bounce to the role's home so the previous
   // session's last-visited URL never renders. Initial token refresh skips this.
   if (justLoggedIn) return <Navigate to={roleHome(activeRole)} replace />;
