@@ -51,6 +51,13 @@ export const CHESS_GAME_COLUMNS = [
   'wins_by_checkmate', 'wins_by_resignation', 'wins_on_time', 'draws_by_agreement',
 ] as const;
 
+/** Carrom per-match counters (carromLineStats): metric key and board_match_lines column are the same name. */
+export const CARROM_LINE_COLUMNS = [
+  'carrom_games', 'carrom_games_won', 'carrom_games_lost', 'carrom_points_for', 'carrom_points_against',
+  'best_board', 'slams', 'carrom_fouls', 'boards_broken', 'board_wins_on_break',
+  'carrom_deciders', 'carrom_deciders_won',
+] as const;
+
 /**
  * metric key → column, per family. Every non-derived registry metric appears here
  * or in SPINE_METRICS; the test enforces it.
@@ -128,6 +135,7 @@ export const COLUMN_MAP: Record<Exclude<StatFamily, 'measured' | 'cricket'>, Rec
     as_white: bool('colour_is_white'), as_black: bool('colour_is_black'),
     // Chess per game - a match line holds every game in it, so colour splits add up.
     ...Object.fromEntries(CHESS_GAME_COLUMNS.map((c) => [c, c])),
+    ...Object.fromEntries(CARROM_LINE_COLUMNS.map((c) => [c, c])),
   },
   combat: {
     minutes: 'minutes',

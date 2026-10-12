@@ -16,6 +16,8 @@ import {
 } from '../../features/scoring/tie';
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
 import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
+import { carromHeadline, carromMatch, carromRulesOf, isCarromSport } from '@semp/shared';
+import { CarromResult, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
 import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, isChessSport, isKnockoutFixture, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
 import { unitWinner, type TieSpec, type EventSpec, type ScoringMode, type ScoringFormat, type KernelState, type Pairing, type RallyLog, type RubberLineup, type Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer, hydratePairSwap } from '../../features/scoring/RacquetDeck';
@@ -750,6 +752,10 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
             // "next set" button awarded the game to whoever happened to be ahead.
             : isRacquetSport(sportName)
               ? <RacquetConsole key={`rac-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} live={live} invalidate={invalidate} onDone={onDone} />
+              // Carrom records each board's result and the points follow. A match already
+              // scored on the old +1 deck keeps it - its points are in a rally log.
+              : isCarromSport(sportName) && !(live?.live_state?.rally?.length && !live?.live_state?.carrom)
+                ? <CarromConsole key={`carrom-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} live={live} invalidate={invalidate} onDone={onDone} />
               // Every OTHER kernel sport - invasion, raid, net, board, combat - runs
               // the same kernel through a period-based deck: clock-terminated halves,
               // aggregate scoring, and actions attributed to a person.
@@ -1487,6 +1493,67 @@ function ChessConsole({ fixture, fixtureId, live, invalidate, onDone }:
       timeControl={timeControl} initial={initial}
       busy={persist.isPending} onSave={save} />
   );
+}
+
+/* ----------------------------- Carrom console ----------------------------- */
+/** Board by board: the points follow from each board's result (carrom.ts). */
+function CarromConsole({ fixture, fixtureId, live, invalidate, onDone }:
+  { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+  const td = fixture?.tournament_disciplines ?? {};
+  const homeName = teamLabel(homeTeam(fixture));
+  const awayName = teamLabel(awayTeam(fixture));
+  const format = useMemo(() => resolveFormat(
+    {
+      scoring_format_id: fixture?.scoring_format_id ?? null,
+      round: fixture?.round ?? null,
+      stage_sequence: fixture?.stage_sequence ?? null,
+      frozen_format: (live?.live_state as any)?.format ?? null,
+      format_overrides: fixture?.format_overrides ?? null,
+    },
+    {
+      scoring_format_id: td.scoring_format_id ?? null,
+      scoring_preset_key: td.scoring_preset_key ?? null,
+      round_formats: td.round_formats,
+      sport: sportNameOf(fixture),
+    },
+    (fixture?.scoring_formats ?? []) as any[],
+  ).format, [fixture, live?.live_state, td.round_formats, td.scoring_format_id, td.scoring_preset_key]);
+  const rules = useMemo(() => carromRulesOf(format), [format]);
+  const initial = useMemo(() => hydrateCarrom(live?.live_state?.carrom), [live?.live_state?.carrom]);
+  const persist = useLiveSave(fixtureId, invalidate);
+  const [status, setStatus] = useState<string>(fixture.status);
+
+  const save = (state: CarromState, done: boolean) => {
+    const m = carromMatch(state.boards, rules, state.firstBreak);
+    const [h, a] = carromHeadline(m, rules);
+    const winner_team_id = m.winner === 'A' ? fixture.home_team_id : m.winner === 'B' ? fixture.away_team_id : null;
+    const st = done ? 'completed' : (status === 'scheduled' || status === 'completed' ? 'live' : status);
+    const live_log: LogEntry[] = m.games.flatMap((g, gi) => g.boards.map((b, bi) => ({
+      t: '', team: b.winner,
+      txt: `Game ${gi + 1}, board ${bi + 1}: ${b.winner === 'A' ? homeName : awayName} won ${b.points}${b.slam ? ' (slam)' : ''}`,
+    })));
+    persist.mutate(
+      {
+        // The rules freeze with the first board, as every other console does.
+        live_state: {
+          ...(live?.live_state ?? {}),
+          carrom: state,
+          ...(!(live?.live_state as any)?.format && format && state.boards.length ? { format } : {}),
+        },
+        live_log,
+        home_score: state.boards.length ? h : null,
+        away_score: state.boards.length ? a : null,
+        status: st,
+        winner_team_id: done || m.decided ? winner_team_id : null,
+      },
+      {
+        onSuccess: () => { setStatus(st); if (done) onDone(); },
+        onError: (e: any) => toast.error(e.message),
+      },
+    );
+  };
+
+  return <CarromResult homeName={homeName} awayName={awayName} rules={rules} initial={initial} busy={persist.isPending} onSave={save} />;
 }
 
 function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:

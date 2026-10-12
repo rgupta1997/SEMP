@@ -420,3 +420,13 @@ columns this database did not have until now.
 
 **Still not applied to prod** (the RDS database) — that remains pending the owner's
 go-ahead, as the 10-09 entries above say.
+
+---
+
+## Not yet applied — `20261012000000_carrom_line_stats`
+
+Adds twelve integer counters (default 0) to `board_match_lines` for carrom matches scored
+on the board-by-board console: games won/lost, points scored/conceded, best board, slams,
+fouls, boards broken and won on the break, and deciding games. Real boards keep
+`units_won` / `units_lost`; `queens` now means queens covered. RDS twin:
+`infra/rds-migrations/011_carrom_line_stats.sql`.

@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { CHESS_GAME_COLUMNS, toCategoryRow, type CategoryRow, type StatBag } from '@semp/shared';
+import { CARROM_LINE_COLUMNS, CHESS_GAME_COLUMNS, toCategoryRow, type CategoryRow, type StatBag } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
 
 // ============================================================================
@@ -55,7 +55,7 @@ const ALLOWED = new Set([
   'kills', 'digs', 'service_errors', 'attack_errors', 'reception_errors', 'sets_played',
   // board
   'units_won', 'units_lost', 'queens', 'coins', 'highest_break', 'breaks_50',
-  'centuries', 'result_points_x2', 'colour', 'board_no', 'opponent_user_id', ...CHESS_GAME_COLUMNS,
+  'centuries', 'result_points_x2', 'colour', 'board_no', 'opponent_user_id', ...CHESS_GAME_COLUMNS, ...CARROM_LINE_COLUMNS,
   // combat
   'weight_class', 'side_used', 'bouts', 'rounds_won', 'rounds_lost',
   'touches_for', 'touches_against', 'win_by', 'penalties', 'stoppages',

@@ -1,5 +1,6 @@
 import {
-  canonicalRacquetSport, chessLineStats, competitionTier, cricketCareerBag, deriveRacquetStats, type ChessGame,
+  canonicalRacquetSport, carromLineStats, carromMatch, carromRulesOf, isCarromSport, type CarromBoard,
+  chessLineStats, competitionTier, cricketCareerBag, deriveRacquetStats, type ChessGame,
   deriveTeamStats, effectiveEventSpec, eventTemplateFor, foldCricketCareer, isChessSport, isCricketSport,
   parseStoredFormat, playedContests, rankSubEvent, resolveFormat, seatIn, statSpecFor,
   type PlayedContest,
@@ -279,6 +280,20 @@ export async function buildPlayerStatRows(
     const games = isChessSport(sportName) && Array.isArray(raw)
       ? (raw as ChessGame[]).filter((g) => g && (g.result === 'A' || g.result === 'B' || g.result === 'draw'))
       : [];
+    // Carrom: real boards, points, queens and games from the board console's results,
+    // under the rules the match froze. Replaces the headline-as-boards guess above.
+    const carrom = (fx.live_state as { carrom?: { boards?: unknown; firstBreak?: unknown } } | null)?.carrom;
+    if (isCarromSport(sportName) && Array.isArray(carrom?.boards) && carrom.boards.length) {
+      const frozen = parseStoredFormat((fx.live_state as { format?: unknown } | null)?.format);
+      const rules = carromRulesOf(frozen ?? resolveFormat({ round: fx.round, stage_sequence: fx.stage_sequence }, { sport: sportName }).format);
+      const boards = (carrom.boards as CarromBoard[]).filter((b) => b && (b.winner === 'A' || b.winner === 'B'));
+      const match = carromMatch(boards, rules, carrom.firstBreak === 'B' ? 'B' : 'A');
+      const base = statOf;
+      statOf = (userId) => {
+        const side = sideOf.get(userId);
+        return side ? { ...base(userId), ...carromLineStats(match, rules, side) } : base(userId);
+      };
+    }
     if (games.length) {
       const base = statOf;
       const white = games.length === 1 ? games[0].white : null;

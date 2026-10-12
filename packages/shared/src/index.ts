@@ -18,6 +18,7 @@ export * from './stage-config.js';
 export * from './event-scoring.js';
 export * from './event-templates.js';
 export * from './chess.js';
+export * from './carrom.js';
 export * from './tie.js';
 export * from './played-contests.js';
 export * from './insights.js';

@@ -325,16 +325,26 @@ const RAID: ScoringFormat[] = [
 // ============================================================================
 
 const BOARD: ScoringFormat[] = [
+  // Carrom: the first level is a GAME of points (25 ICF), built board by board in
+  // carrom.ts - a board's points are the loser's coins left, plus the queen. Keys are
+  // unchanged so draws that already chose them keep their format.
   fmt({
-    sport: 'carrom', key: 'icf_bo3_boards', name: 'ICF — best of 3 boards to 25',
-    levels: [{ key: 'board', label: 'Board', target: 25, winBy: 1, cap: null }, unitsMatch(2)],
+    sport: 'carrom', key: 'icf_bo3_boards', name: 'ICF — best of 3 games to 25 (8 boards a game)',
+    levels: [{ key: 'game', label: 'Game', target: 25, winBy: 1, cap: null }, unitsMatch(2)],
     serve: PER_UNIT_SERVE, changeEnds: 'betweenUnits',
-    rulesSheet: { queenMustBeCovered: true, boardPointsCappedAt: 25 },
+    rulesSheet: { maxBoards: 8, queenPoints: 3, queenCutoff: 22, queenMustBeCovered: true },
   }),
   fmt({
-    sport: 'carrom', key: 'corp_bo3_21', name: 'Corporate — best of 3 boards to 21',
-    levels: [{ key: 'board', label: 'Board', target: 21, winBy: 1, cap: null }, unitsMatch(2)],
+    sport: 'carrom', key: 'corp_bo3_21', name: 'Corporate — best of 3 games to 21',
+    levels: [{ key: 'game', label: 'Game', target: 21, winBy: 1, cap: null }, unitsMatch(2)],
     serve: PER_UNIT_SERVE, mode: 'selfScored',
+    rulesSheet: { queenPoints: 3 },
+  }),
+  fmt({
+    sport: 'carrom', key: 'corp_single_29', name: 'Corporate — single game to 29',
+    levels: [{ key: 'game', label: 'Game', target: 29, winBy: 1, cap: null }, unitsMatch(1)],
+    serve: PER_UNIT_SERVE, mode: 'selfScored',
+    rulesSheet: { queenPoints: 3 },
   }),
   fmt({
     sport: 'carrom', key: 'boards_bo5', name: 'Best of 5 boards (board winner only)',

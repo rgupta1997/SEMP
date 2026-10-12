@@ -472,12 +472,33 @@ const NET_METRICS: StatMetric[] = [
 
 // ---- board & frame ---------------------------------------------------------
 
+// Carrom. Boards are real boards (carromLineStats); a 25-point game is `carrom_games`.
 const BOARD_METRICS: StatMetric[] = [
   ...UNIVERSAL,
   rally('boards_won', 'Boards won', 'BW', { headline: true }),
   rally('boards_lost', 'Boards lost', 'BL', { higherIsBetter: false }),
-  count('queens', 'Queens pocketed', 'Q', { fromEvents: ['queen'], headline: true }),
-  count('coins', 'Coins pocketed', 'C', { fromEvents: ['coin'] }),
+  share('board_win_pct', 'Board win %', 'B%', ['boards_won', 'boards_lost'], true),
+  rally('carrom_games', 'Games', 'G'),
+  rally('carrom_games_won', 'Games won', 'GW'),
+  rally('carrom_games_lost', 'Games lost', 'GL', { higherIsBetter: false }),
+  rate('game_win_pct', 'Game win %', 'G%', ['carrom_games_won', 'carrom_games'], true),
+  rally('carrom_points_for', 'Points scored', 'Pts'),
+  rally('carrom_points_against', 'Points conceded', 'PA', { higherIsBetter: false }),
+  rally('carrom_points_per_board', 'Points per board won', 'P/B',
+    { source: 'derived', formula: { op: 'per', of: ['carrom_points_for', 'boards_won'] } }),
+  rally('best_board', 'Best board', 'Best', { aggregate: 'max' }),
+  // Covered, not merely pocketed: a queen only counts once it is covered.
+  count('queens', 'Queens covered', 'Q', { fromEvents: ['queen'], headline: true }),
+  rally('slams', 'Slams', 'Slam'),
+  rally('carrom_fouls', 'Fouls (dues)', 'F', { higherIsBetter: false }),
+  rally('boards_broken', 'Boards broken', 'Brk', { hidden: true }),
+  rally('board_wins_on_break', 'Boards won on the break', 'BWB', { hidden: true }),
+  rate('break_win_pct', 'Win % on own break', 'Brk%', ['board_wins_on_break', 'boards_broken']),
+  rally('carrom_deciders', 'Deciding games', 'Dec', { hidden: true }),
+  rally('carrom_deciders_won', 'Deciding games won', 'DecW'),
+  rate('carrom_decider_pct', 'Deciding game win %', 'Dec%', ['carrom_deciders_won', 'carrom_deciders']),
+  // Only the old +1 deck recorded this, one tap per coin; the board console does not.
+  count('coins', 'Coins pocketed', 'C', { fromEvents: ['coin'], hidden: true }),
 ];
 
 const FRAME_METRICS: StatMetric[] = [
