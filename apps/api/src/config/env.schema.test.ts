@@ -166,6 +166,32 @@ describe('realtime transport in production', () => {
     expect(failedPaths(input)).toContain('APPSYNC_NOTIFICATIONS_QUEUE_URL');
   });
 
+  // Beta runs on Supabase, so its live transport is Supabase Realtime.
+  const supabaseProd = {
+    ...prodOk,
+    REALTIME_TRANSPORT: 'supabase',
+    APPSYNC_NOTIFICATIONS_QUEUE_URL: undefined,
+    APPSYNC_EVENTS_HTTP_ENDPOINT: undefined,
+    APPSYNC_EVENTS_REGION: undefined,
+    SUPABASE_URL: 'https://proj.supabase.co',
+    SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_x',
+    SUPABASE_JWT_SECRET: 'b'.repeat(40),
+  };
+
+  it('boots in production on supabase with no AppSync settings', () => {
+    expect(parsed(supabaseProd).REALTIME_TRANSPORT).toBe('supabase');
+  });
+
+  it.each(['SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_JWT_SECRET'])('rejects supabase with no %s', (key) => {
+    const input: Record<string, unknown> = { ...supabaseProd };
+    delete input[key];
+    expect(failedPaths(input)).toContain('SUPABASE_URL');
+  });
+
+  it('refuses a SUPABASE_JWT_SECRET equal to JWT_SECRET, which would make realtime tokens sessions', () => {
+    expect(failedPaths({ ...supabaseProd, SUPABASE_JWT_SECRET: base.JWT_SECRET })).toContain('SUPABASE_JWT_SECRET');
+  });
+
   // Defaults that three separately-deployed things depend on agreeing about.
   it('defaults the namespace and TTL to the values the template and client assume', () => {
     const env = parsed(prodOk);

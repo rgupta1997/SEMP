@@ -106,7 +106,18 @@ const schema = z.object({
   // runnable with no AWS account. Production must be 'appsync' - see the refinement
   // below, and note that the mail port shipping unregistered for months is precisely
   // the failure that guard exists to prevent.
-  REALTIME_TRANSPORT: z.enum(['off', 'appsync']).default('off'),
+  //
+  // 'supabase' is the second live transport, for a deploy whose database IS Supabase
+  // (beta): the browser subscribes to notification_deliveries INSERTs over Supabase
+  // Realtime, authorised by RLS. It reads Supabase's own WAL, so it cannot work on RDS.
+  REALTIME_TRANSPORT: z.enum(['off', 'appsync', 'supabase']).default('off'),
+
+  // Supabase Realtime, all three required when REALTIME_TRANSPORT=supabase. The URL
+  // and publishable key are public (they reach the browser in the token response);
+  // the JWT secret signs the browser's realtime token and never leaves the API.
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_PUBLISHABLE_KEY: z.string().min(1).optional(),
+  SUPABASE_JWT_SECRET: z.string().min(1).optional(),
 
   // The fan-out queue. The API only ever enqueues; a separate Lambda publishes, and
   // the API's IAM role deliberately has no appsync:EventPublish permission at all.
@@ -208,11 +219,27 @@ export const envSchema = schema
   // NOTE for the Render deployment: render.yaml sets NODE_ENV=production, so this
   // guard stops that service booting until it either gets the two values below plus
   // AWS credentials, or is retired in favour of Lambda (which is the plan).
-  .refine((e) => !(e.NODE_ENV === 'production' && e.REALTIME_TRANSPORT !== 'appsync'), {
+  .refine((e) => !(e.NODE_ENV === 'production' && e.REALTIME_TRANSPORT === 'off'), {
     path: ['REALTIME_TRANSPORT'],
     message:
-      'REALTIME_TRANSPORT must be "appsync" in production - "off" silently drops every live ' +
+      'REALTIME_TRANSPORT must be "appsync" or "supabase" in production - "off" silently drops every live ' +
       'notification, and the bell degrades to polling with nothing anywhere reporting it.',
+  })
+  .refine(
+    (e) =>
+      e.REALTIME_TRANSPORT !== 'supabase' ||
+      (!!e.SUPABASE_URL && !!e.SUPABASE_PUBLISHABLE_KEY && !!e.SUPABASE_JWT_SECRET),
+    {
+      path: ['SUPABASE_URL'],
+      message: 'REALTIME_TRANSPORT=supabase needs SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY and SUPABASE_JWT_SECRET',
+    },
+  )
+  // The realtime token is signed with SUPABASE_JWT_SECRET. If that equalled JWT_SECRET,
+  // parseAuth would accept it as an API session - a 15-minute token handed to a
+  // third-party service would become a sign-in as that user.
+  .refine((e) => !e.SUPABASE_JWT_SECRET || e.SUPABASE_JWT_SECRET !== e.JWT_SECRET, {
+    path: ['SUPABASE_JWT_SECRET'],
+    message: 'SUPABASE_JWT_SECRET must differ from JWT_SECRET - otherwise a realtime token works as a session',
   })
   .refine(
     (e) =>

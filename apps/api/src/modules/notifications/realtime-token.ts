@@ -25,18 +25,49 @@ import {
  * signed in as that user". See modules/realtime/token-key.ts, and the paired guard
  * in parseAuth that also rejects any token carrying an `aud`.
  *
- * The previous implementation signed with SUPABASE_JWT_SECRET so that Supabase
- * Realtime's RLS check could resolve auth.uid(). That secret is gone: RLS is no
- * longer what enforces per-user isolation - the AppSync Lambda authorizer is.
+ * With REALTIME_TRANSPORT=supabase (beta) the token is instead signed with
+ * SUPABASE_JWT_SECRET, which env.schema.ts requires to differ from JWT_SECRET, and
+ * RLS on notification_deliveries is what enforces per-user isolation.
  */
-export function mintRealtimeToken(userId: string): {
-  token: string;
-  expires_at: number;
-  endpoint: string | undefined;
-  region: string | undefined;
-  channel: string;
-} {
+export type RealtimeGrant =
+  | {
+      transport: 'appsync' | 'off';
+      token: string;
+      expires_at: number;
+      endpoint: string | undefined;
+      region: string | undefined;
+      channel: string;
+    }
+  | {
+      transport: 'supabase';
+      token: string;
+      expires_at: number;
+      /** Supabase project URL and publishable key - both public by design. */
+      url: string;
+      key: string;
+      /** The user id the subscription filters on; RLS enforces the same rule. */
+      channel: string;
+    };
+
+export function mintRealtimeToken(userId: string): RealtimeGrant {
   const ttl = env.REALTIME_TOKEN_TTL_SECONDS;
+
+  // Beta runs on a Supabase database, so live delivery there is Supabase Realtime:
+  // the token is signed with the project's JWT secret so RLS can resolve auth.uid().
+  // `role: 'authenticated'` is required - without it Supabase treats the socket as anon.
+  if (env.REALTIME_TRANSPORT === 'supabase') {
+    return {
+      transport: 'supabase',
+      token: jwt.sign({ sub: userId, role: 'authenticated' }, env.SUPABASE_JWT_SECRET!, {
+        algorithm: 'HS256',
+        expiresIn: ttl,
+      }),
+      expires_at: Math.floor(Date.now() / 1000) + ttl,
+      url: env.SUPABASE_URL!,
+      key: env.SUPABASE_PUBLISHABLE_KEY!,
+      channel: userId,
+    };
+  }
 
   const token = jwt.sign({ sub: userId }, realtimeSigningKey(env.JWT_SECRET), {
     algorithm: 'HS256',
@@ -46,6 +77,7 @@ export function mintRealtimeToken(userId: string): {
   });
 
   return {
+    transport: env.REALTIME_TRANSPORT === 'appsync' ? 'appsync' : 'off',
     token,
     // Seconds, matching the client's expectation - it refreshes two minutes early.
     expires_at: Math.floor(Date.now() / 1000) + ttl,

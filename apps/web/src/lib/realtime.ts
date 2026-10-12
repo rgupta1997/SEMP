@@ -6,8 +6,10 @@ import type {
 
 import { api, tokenStore } from './api';
 
-// Live notification delivery over AppSync Events. Replaces Supabase Realtime, which
-// read Supabase's own Postgres WAL and so could not survive the move to RDS.
+// Live notification delivery: AppSync Events where the database is RDS (UAT/production),
+// Supabase Realtime where it is still Supabase (beta). The API's token response names
+// the transport, so the same build serves both - see realtime-appsync.ts and
+// realtime-supabase.ts, the only two files that touch either SDK.
 //
 // ---------------------------------------------------------------------------
 // NOTHING IN THIS MODULE MAY THROW AT IMPORT TIME.
@@ -37,14 +39,17 @@ import { api, tokenStore } from './api';
  */
 const REFRESH_BUFFER_MS = 2 * 60 * 1000;
 
-interface RealtimeGrant {
+// Which transport is the SERVER's call (REALTIME_TRANSPORT): AppSync on UAT/production,
+// Supabase Realtime on beta, whose database is Supabase. One frontend build serves both.
+type RealtimeGrant = {
   token: string;
   /** ms, to compare against Date.now(). */
   expiresAt: number;
-  endpoint: string;
-  region: string;
   channel: string;
-}
+} & (
+  | { transport: 'appsync'; endpoint: string; region: string }
+  | { transport: 'supabase'; url: string; key: string }
+);
 
 let grantCache: RealtimeGrant | null = null;
 let inflight: Promise<RealtimeGrant | null> | null = null;
@@ -77,12 +82,27 @@ export async function fetchRealtimeGrant(): Promise<RealtimeGrant | null> {
   inflight = (async () => {
     try {
       const result = await api<{
+        transport?: 'appsync' | 'supabase' | 'off';
         token: string;
         expires_at: number;
         endpoint?: string;
         region?: string;
+        url?: string;
+        key?: string;
         channel: string;
       }>('POST', '/notifications/realtime-token');
+
+      if (result.transport === 'supabase' && result.url && result.key) {
+        grantCache = {
+          transport: 'supabase',
+          token: result.token,
+          expiresAt: result.expires_at * 1000,
+          url: result.url,
+          key: result.key,
+          channel: result.channel,
+        };
+        return grantCache;
+      }
 
       // The server is the one that decides whether live delivery is on at all
       // (REALTIME_TRANSPORT). No endpoint means it is off - a normal, supported
@@ -101,6 +121,7 @@ export async function fetchRealtimeGrant(): Promise<RealtimeGrant | null> {
       }
 
       grantCache = {
+        transport: 'appsync',
         token: result.token,
         // expires_at from the server is in seconds; store ms to match Date.now().
         expiresAt: result.expires_at * 1000,
@@ -231,12 +252,7 @@ function createSession(
     }
 
     try {
-      const { connectChannel } = await import('./realtime-appsync');
-      if (cancelled) return;
-
-      const opened = await connectChannel({
-        endpoint: grant.endpoint,
-        region: grant.region,
+      const common = {
         channel: grant.channel,
         authToken: grant.token,
         onMessage: options.onNotification,
@@ -245,7 +261,19 @@ function createSession(
         onError: () => {
           if (!cancelled) schedule(backoffMs(++attempt));
         },
-      });
+      };
+      // Each transport is its own lazily-loaded chunk, so a deploy only downloads the
+      // one its API names.
+      let opened: { close(): void };
+      if (grant.transport === 'supabase') {
+        const { connectChannel } = await import('./realtime-supabase');
+        if (cancelled) return;
+        opened = await connectChannel({ ...common, url: grant.url, key: grant.key });
+      } else {
+        const { connectChannel } = await import('./realtime-appsync');
+        if (cancelled) return;
+        opened = await connectChannel({ ...common, endpoint: grant.endpoint, region: grant.region });
+      }
 
       if (cancelled) {
         // Opened after teardown. Close it immediately or it lives on as a billed,

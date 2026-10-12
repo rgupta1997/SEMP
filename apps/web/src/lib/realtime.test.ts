@@ -36,6 +36,11 @@ vi.mock('./realtime-appsync', () => ({
   connectChannel: (...args: unknown[]) => connectMock(...args),
 }));
 
+let supabaseConnectMock: ReturnType<typeof vi.fn>;
+vi.mock('./realtime-supabase', () => ({
+  connectChannel: (...args: unknown[]) => supabaseConnectMock(...args),
+}));
+
 function grant(overrides: Record<string, unknown> = {}) {
   return {
     token: 'realtime-token',
@@ -57,6 +62,7 @@ beforeEach(async () => {
   apiMock = vi.fn(async () => grant());
   closeSpy = vi.fn();
   connectMock = vi.fn(async () => ({ close: closeSpy }));
+  supabaseConnectMock = vi.fn(async () => ({ close: closeSpy }));
 
   mod = await import('./realtime');
 });
@@ -162,6 +168,31 @@ describe('the subscription session', () => {
       authToken: 'realtime-token',
       region: 'ap-south-1',
     });
+  });
+
+  it('uses Supabase Realtime when the server names it, and never loads AppSync', async () => {
+    apiMock = vi.fn(async () => ({
+      transport: 'supabase', token: 'sb-token', expires_at: Math.floor((Date.now() + TTL_MS) / 1000),
+      url: 'https://proj.supabase.co', key: 'pk', channel: 'u1',
+    }));
+    const onNotification = vi.fn();
+    mod.notificationTransport.subscribe({ userId: 'u1', onNotification });
+    await settle();
+
+    expect(connectMock).not.toHaveBeenCalled();
+    expect(supabaseConnectMock).toHaveBeenCalledTimes(1);
+    expect(supabaseConnectMock.mock.calls[0]![0]).toMatchObject({
+      url: 'https://proj.supabase.co', key: 'pk', channel: 'u1', authToken: 'sb-token',
+    });
+    supabaseConnectMock.mock.calls[0]![0].onMessage();
+    expect(onNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a response with no transport field but an endpoint as AppSync', async () => {
+    mod.notificationTransport.subscribe({ userId: 'u1', onNotification: () => {} });
+    await settle();
+    expect(connectMock).toHaveBeenCalledTimes(1);
+    expect(supabaseConnectMock).not.toHaveBeenCalled();
   });
 
   it('forwards deliveries to the callback', async () => {

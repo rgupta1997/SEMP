@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import jwt from 'jsonwebtoken';
+import type { RealtimeGrant } from './realtime-token.js';
 
 const SECRET = 'a-test-jwt-secret-of-at-least-32-characters';
 const HOST = 'abcdefghijklmnopqrstuvwxyz.appsync-api.ap-south-1.amazonaws.com';
@@ -14,7 +15,9 @@ vi.mock('../../config/env.js', () => ({
   },
 }));
 
-const { mintRealtimeToken } = await import('./realtime-token.js');
+const { mintRealtimeToken: mintAny } = await import('./realtime-token.js');
+// The AppSync shape - this file covers REALTIME_TRANSPORT=appsync/off (supabase: realtime-token.supabase.test.ts).
+const mintRealtimeToken = (u: string) => mintAny(u) as Extract<RealtimeGrant, { transport: 'appsync' | 'off' }>;
 const { realtimeSigningKey, REALTIME_TOKEN_AUDIENCE, REALTIME_TOKEN_ISSUER } =
   await import('../realtime/token-key.js');
 
@@ -100,7 +103,7 @@ describe('when live delivery is off', () => {
     }));
 
     const { mintRealtimeToken: mint } = await import('./realtime-token.js');
-    const result = mint(USER);
+    const result = mint(USER) as Extract<RealtimeGrant, { transport: 'appsync' | 'off' }>;
 
     expect(result.endpoint).toBeUndefined();
     expect(result.token).toBeTruthy();

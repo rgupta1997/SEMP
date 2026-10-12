@@ -16,9 +16,10 @@ import { fileURLToPath } from 'node:url';
 //   2. packages/notifications never imports aws-amplify. That package is
 //      deliberately transport-agnostic - the whole reason the port interface in its
 //      client/realtime.ts exists.
-//   3. Nothing anywhere still references @supabase/supabase-js. A half-finished
-//      revert would otherwise leave a dead import or a phantom dependency that
-//      typechecks fine until someone runs an install.
+//   3. @supabase/supabase-js (beta's transport, REALTIME_TRANSPORT=supabase) gets the
+//      same treatment as Amplify: one adapter, lib/realtime-supabase.ts, reached only
+//      by a dynamic import, never in packages/notifications, and a dependency of
+//      apps/web alone - so a deploy on AppSync never downloads it.
 //
 // fileURLToPath, NOT a slice of import.meta.url: this repository lives in a
 // directory whose name contains a space, so the raw URL arrives percent-encoded and
@@ -31,6 +32,7 @@ const repoRoot = join(webSrc, '..', '..', '..'); // repo root
 const notificationsSrc = join(repoRoot, 'packages', 'notifications', 'src');
 
 const AMPLIFY_ADAPTER = join(webSrc, 'lib', 'realtime-appsync.ts');
+const SUPABASE_ADAPTER = join(webSrc, 'lib', 'realtime-supabase.ts');
 
 // This file is excluded from its own scan, and not as a convenience: it necessarily
 // contains every string it forbids - in the regexes, and in comments that quote the
@@ -58,6 +60,7 @@ const notificationFiles = sourceFiles(notificationsSrc);
 
 /** Matches a real import of the package, not a mention of it in a comment. */
 const IMPORTS_AMPLIFY = /(?:from\s+|import\s*\(\s*)['"]aws-amplify(?:\/[\w-]+)?['"]/;
+const IMPORTS_SUPABASE_JS = /(?:from\s+|import\s*\(\s*)['"]@supabase\/supabase-js['"]/;
 const MENTIONS_SUPABASE_JS = /@supabase\/supabase-js/;
 
 describe('the sources exist to be checked', () => {
@@ -96,22 +99,35 @@ describe('aws-amplify stays behind one adapter', () => {
   });
 });
 
-describe('the Supabase client is gone', () => {
-  it('is referenced by no source file', () => {
-    const offenders = [...webFiles, ...notificationFiles]
-      .filter((f) => MENTIONS_SUPABASE_JS.test(readFileSync(f, 'utf8')))
-      .map((f) => relative(repoRoot, f));
-    expect(offenders).toEqual([]);
+describe('the Supabase client stays behind one adapter', () => {
+  it('is imported by exactly one file in apps/web', () => {
+    const importers = webFiles.filter((f) => IMPORTS_SUPABASE_JS.test(readFileSync(f, 'utf8')));
+    expect(importers.map((f) => relative(repoRoot, f))).toEqual([
+      relative(repoRoot, SUPABASE_ADAPTER),
+    ]);
   });
 
-  it('is not a dependency of any workspace', () => {
+  it('is never imported by packages/notifications', () => {
+    const importers = notificationFiles
+      .filter((f) => IMPORTS_SUPABASE_JS.test(readFileSync(f, 'utf8')))
+      .map((f) => relative(repoRoot, f));
+    expect(importers).toEqual([]);
+  });
+
+  it('is reached only through a dynamic import', () => {
+    const realtime = readFileSync(join(webSrc, 'lib', 'realtime.ts'), 'utf8');
+    expect(realtime).toMatch(/await import\(['"]\.\/realtime-supabase['"]\)/);
+    expect(IMPORTS_SUPABASE_JS.test(realtime)).toBe(false);
+  });
+
+  it('is a dependency of apps/web only', () => {
     for (const pkg of [
       join(repoRoot, 'package.json'),
-      join(repoRoot, 'apps', 'web', 'package.json'),
       join(repoRoot, 'apps', 'api', 'package.json'),
       join(repoRoot, 'packages', 'notifications', 'package.json'),
     ]) {
       expect(readFileSync(pkg, 'utf8')).not.toMatch(MENTIONS_SUPABASE_JS);
     }
+    expect(readFileSync(join(repoRoot, 'apps', 'web', 'package.json'), 'utf8')).toMatch(MENTIONS_SUPABASE_JS);
   });
 });
