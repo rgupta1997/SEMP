@@ -5,7 +5,10 @@
 // pooler) - the row's `status` is the progress signal the UI polls.
 
 import { Router } from 'express';
-import { createDemoSandboxSchema, type CreateDemoSandboxInput } from '@semp/shared';
+import {
+  createDemoSandboxSchema, createSeedBuildSchema, eventTemplateFor, tieTemplateFor,
+  type CreateDemoSandboxInput, type CreateSeedBuildInput,
+} from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
@@ -13,7 +16,12 @@ import { requireSuperAdmin } from '../../http/middleware/auth.js';
 import { ConflictError, NotFoundError } from '../../shared/errors.js';
 import { emailDomainFor, generateDemoPassword, makeSandboxSlug } from './demo-names.js';
 import { seedSandbox } from './demo-seeder.service.js';
+import { seedBlueprintRow } from './blueprint-run.service.js';
 import { wipeSandbox } from './demo-teardown.service.js';
+
+/** A row built from a blueprint resets through the new engine, not the old recipe. */
+const isBlueprint = (row: { config: unknown }) =>
+  !!(row.config as any)?.draws;
 
 // A sandbox may sit in `seeding`/`resetting` forever if the process died mid-job;
 // after this long we treat the busy state as stale and allow Reset/Delete again.
@@ -38,6 +46,9 @@ function toListRow(row: any) {
     organiser_user_id: row.organiser_user_id,
     created_at: row.created_at,
     last_seeded_at: row.last_seeded_at,
+    // What the build actually produced. Written by the blueprint engine onto the
+    // config; absent for rows made by the old four-championship recipe.
+    result: row.config?._result ?? null,
     counts: {
       championships: manifest.championships?.length ?? 0,
       organizations: manifest.organizations?.length ?? 0,
@@ -130,9 +141,186 @@ export function makeDemosRouter(prisma: Prisma): Router {
     await prisma.demo_sandboxes.update({ where: { id: row.id }, data: { status: 'resetting', error: null, updated_at: new Date() } });
     runJob(row.id, async () => {
       await wipeSandbox(prisma, row);
-      await seedSandbox(prisma, row.id);
+      // Reset rebuilds through whichever engine made it. A blueprint row reseeded
+      // by the old recipe would come back as a different demo entirely.
+      if (isBlueprint(row)) await seedBlueprintRow(prisma, row.id);
+      else await seedSandbox(prisma, row.id);
     });
     res.status(202).json({ ok: true });
+  }));
+
+  // ---- Blueprint builds ---------------------------------------------------
+  // The configurable replacement for the fixed four-championship recipe above.
+  // Both live on this router and on the same table: a row is a blueprint build if
+  // its config carries `draws`, and `seedRow` dispatches on exactly that - so old
+  // sandbox rows keep resetting through the old seeder rather than breaking.
+
+  /** What the form needs to populate its pickers, in one call. */
+  /**
+   * Every login this build made, with what each person is.
+   *
+   * Derived from the manifest rather than stored on the row: a build is well over a
+   * thousand accounts, and writing them all into the row's jsonb would bloat every
+   * list request for something only one card at a time ever opens.
+   *
+   * Returned whole - a thousand-odd rows is one small response, and searching and
+   * paging them in the browser is far better than a round trip per keystroke.
+   */
+  router.get('/:id/logins', requireSuperAdmin, asyncHandler(async (req, res) => {
+    const row = await prisma.demo_sandboxes.findUnique({ where: { id: req.params.id } });
+    if (!row) throw new NotFoundError('Build');
+
+    const manifest = (row.manifest ?? {}) as Record<string, string[]>;
+    const userIds = manifest.users ?? [];
+    if (!userIds.length) { res.json({ password: row.organiser_password, total: 0, rows: [] }); return; }
+
+    const [users, memberships, eventRoles, captaincies] = await Promise.all([
+      prisma.users.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, name: true, email: true, account_type: true, organizations: { select: { name: true, short_name: true } } },
+        orderBy: { email: 'asc' },
+      }),
+      prisma.organization_members.findMany({
+        where: { user_id: { in: userIds } },
+        select: { user_id: true, role: true, member_code: true },
+      }),
+      prisma.user_championship_roles.findMany({
+        where: { user_id: { in: userIds } },
+        select: { user_id: true, roles: { select: { code: true, name: true } } },
+      }),
+      // Captaincy is what makes a participant worth opening on screen - they have a
+      // squad behind them and records to show.
+      prisma.team_members.findMany({
+        where: { user_id: { in: userIds }, role: 'captain' },
+        select: { user_id: true, teams: { select: { name: true } } },
+      }),
+    ]);
+
+    const memberOf = new Map(memberships.map((m) => [m.user_id, m]));
+    const eventRoleOf = new Map<string, string>();
+    for (const r of eventRoles) {
+      // An organiser who is also a POC should read as the more significant one.
+      const code = r.roles?.code ?? '';
+      const rank = ['participant', 'captain', 'poc', 'official', 'organiser'];
+      const cur = eventRoleOf.get(r.user_id);
+      if (!cur || rank.indexOf(code) > rank.indexOf(cur)) eventRoleOf.set(r.user_id, code);
+    }
+    const captainOf = new Map<string, string>();
+    for (const c of captaincies) if (!captainOf.has(c.user_id)) captainOf.set(c.user_id, c.teams?.name ?? '');
+
+    const LABEL: Record<string, string> = {
+      organiser: 'Organiser', official: 'Official', poc: 'POC', captain: 'Captain', participant: 'Player',
+    };
+
+    // `key=1` is the handful a demo is actually driven from - everyone who is not
+    // just a player. It exists so the summary tab can show real accounts without
+    // pulling a thousand rows it will never display.
+    const keyOnly = req.query.key === '1';
+
+    const rows = users.map((u) => {
+      const m = memberOf.get(u.id);
+      const ev = eventRoleOf.get(u.id);
+      const captainTeam = captainOf.get(u.id);
+      // Most specific thing a person is, in the order that matters on screen.
+      const role = ev === 'organiser' ? 'Organiser'
+        : ev === 'official' ? 'Official'
+          : m?.role === 'owner' ? 'Institution admin'
+            : m?.role === 'admin' ? 'Org admin'
+              : captainTeam ? 'Captain'
+                : ev ? (LABEL[ev] ?? 'Player') : 'Player';
+      return {
+        name: u.name,
+        email: u.email,
+        role,
+        organization: u.organizations?.name ?? null,
+        short: u.organizations?.short_name ?? null,
+        member_code: m?.member_code ?? null,
+        team: captainTeam || null,
+      };
+    });
+
+    // Sorted by how significant the role is, then by name - so the organiser is the
+    // first thing on screen rather than whoever's email sorted first.
+    const RANK = ['Organiser', 'Institution admin', 'Org admin', 'Official', 'POC', 'Captain', 'Player'];
+    const visible = (keyOnly ? rows.filter((r) => r.role !== 'Player') : rows)
+      .sort((a, b) => (RANK.indexOf(a.role) - RANK.indexOf(b.role)) || a.name.localeCompare(b.name));
+
+    res.json({ password: row.organiser_password, total: visible.length, rows: visible });
+  }));
+
+  router.get('/catalogue', requireSuperAdmin, asyncHandler(async (_req, res) => {
+    const [sports, disciplines, formats] = await Promise.all([
+      prisma.sports.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+      prisma.disciplines.findMany({ select: { id: true, name: true, sport_id: true } }),
+      prisma.tournament_formats.findMany({ select: { name: true }, orderBy: { name: 'asc' } }),
+    ]);
+    const bySport = new Map<string, string[]>();
+    for (const d of disciplines) {
+      bySport.set(d.sport_id, [...(bySport.get(d.sport_id) ?? []), d.name]);
+    }
+    res.json({
+      sports: sports.map((s) => ({
+        name: s.name,
+        disciplines: (bySport.get(s.id) ?? []).sort(),
+        // The shared templates decide how a sport is scored, so the form can show
+        // it rather than letting someone pick a structure the engine will override.
+        kind: tieTemplateFor(s.name) ? 'tie' : eventTemplateFor(s.name) ? 'event' : 'single',
+      })),
+      formats: formats.map((f) => f.name),
+    });
+  }));
+
+  router.post('/builds', requireSuperAdmin, validateBody(createSeedBuildSchema), asyncHandler(async (req, res) => {
+    const { label, blueprint } = req.body as CreateSeedBuildInput;
+
+    // Validate the catalogue references up front, so a typo fails the request
+    // rather than a job that has already created half a championship.
+    const [sports, formats] = await Promise.all([
+      prisma.sports.findMany({ select: { id: true, name: true } }),
+      prisma.tournament_formats.findMany({ select: { name: true } }),
+    ]);
+    const sportByName = new Map(sports.map((s) => [s.name, s.id]));
+    const formatNames = new Set(formats.map((f) => f.name));
+    const unknownSports = [...new Set(blueprint.draws.map((d) => d.sport))].filter((s) => !sportByName.has(s));
+    if (unknownSports.length) throw new ConflictError(`Unknown sports: ${unknownSports.join(', ')}`);
+    const unknownFormats = [...new Set(blueprint.draws.map((d) => d.format))].filter((f) => !formatNames.has(f));
+    if (unknownFormats.length) throw new ConflictError(`Unknown formats: ${unknownFormats.join(', ')}`);
+
+    const disciplines = await prisma.disciplines.findMany({ select: { name: true, sport_id: true } });
+    const badDraw = blueprint.draws.find((d) =>
+      !disciplines.some((x) => x.sport_id === sportByName.get(d.sport) && x.name === d.discipline));
+    if (badDraw) throw new ConflictError(`${badDraw.sport} has no discipline "${badDraw.discipline}"`);
+
+    // Emails must be free before anything is created - a build that dies on a
+    // unique violation half way through leaves rows nobody asked for.
+    const emails = [blueprint.accounts.organiser.email, blueprint.accounts.player.email, blueprint.accounts.institution_admin.email];
+    const clash = await prisma.users.findFirst({ where: { email: { in: emails, mode: 'insensitive' } }, select: { email: true } });
+    if (clash) throw new ConflictError(`An account already exists for ${clash.email}`);
+
+    // The domain is stored EXACTLY as the engine will use it. Teardown's safety net
+    // sweeps for users at the row's domain to catch anything created during a demo,
+    // and a row whose domain does not match the real logins makes that sweep find
+    // nothing - leaving whatever the manifest missed behind forever.
+    const domainClash = await prisma.demo_sandboxes.findFirst({ where: { email_domain: blueprint.email_domain } });
+    if (domainClash) {
+      throw new ConflictError(`"${blueprint.email_domain}" is already used by the build "${domainClash.client_name}". Give this one its own email domain.`);
+    }
+
+    const slug = makeSandboxSlug(label);
+    const row = await prisma.demo_sandboxes.create({ data: {
+      client_name: label.trim(),
+      slug,
+      email_domain: blueprint.email_domain,
+      config: { ...blueprint, _kind: 'blueprint' } as any,
+      manifest: {},
+      organiser_email: blueprint.accounts.organiser.email,
+      organiser_password: blueprint.password,
+      status: 'seeding',
+      created_by: req.user!.id,
+    } });
+
+    runJob(row.id, () => seedBlueprintRow(prisma, row.id));
+    res.status(201).json(toListRow(row));
   }));
 
   // Delete: wipe everything, then drop the sandbox row itself.

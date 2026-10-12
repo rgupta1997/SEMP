@@ -1165,3 +1165,148 @@ export const requestUpgradeSchema = z.object({
   plan: z.enum(PLAN_TIERS).optional(),
   note: z.string().max(500).optional(),
 });
+
+// ---------- Seed blueprint (super-admin demo builder) ----------
+//
+// The full specification of a championship to build. This is the contract between
+// the super-admin form and the seeding engine, and it is deliberately ONE object
+// with no behaviour in it: the form produces it, the engine consumes it, and the
+// same object is stored on the row so a Reset rebuilds exactly what was asked for.
+//
+// It replaces the fixed four-championship recipe the demo sandbox used to seed.
+// Rows whose config lacks `draws` are the old shape and still reset through the
+// old seeder - the engine chooses on that key.
+
+export const SEED_DRAW_FORMATS = ['Knockout', 'League', 'Rankings'] as const;
+export type SeedDrawFormat = (typeof SEED_DRAW_FORMATS)[number];
+
+export const seedDrawSchema = z.object({
+  sport: z.string().min(1),
+  /** Discipline name as the catalogue spells it - 'Men', 'Women', 'Mixed'. */
+  discipline: z.string().min(1),
+  format: z.enum(SEED_DRAW_FORMATS).default('Knockout'),
+  /**
+   * How many players each entrant fields. Left out, the engine uses the sport's
+   * real minimum (a Cricket XI, a Basketball five) - which is what "fulfil the
+   * minimum criteria of each sport" means in practice.
+   */
+  squad: z.number().int().min(1).max(30).optional(),
+});
+export type SeedDraw = z.infer<typeof seedDrawSchema>;
+
+export const seedOrganizationSchema = z.object({
+  name: z.string().min(2).max(120),
+  short: z.string().min(1).max(12),
+  city: z.string().max(80).optional(),
+});
+
+export const seedAccountSchema = z.object({
+  name: z.string().min(2).max(80),
+  // Normalised like the domain is, and with a message that shows the shape rather
+  // than saying "Invalid email" and leaving you to spot the comma in gmail,com.
+  email: z.string().trim().toLowerCase().email('Must look like name@example.com'),
+});
+
+export const seedBlueprintSchema = z.object({
+  championship: z.object({
+    name: z.string().min(2).max(120),
+    venue: z.string().max(120).optional(),
+    city: z.string().max(80).optional(),
+    description: z.string().max(400).optional(),
+    visibility: z.enum(CHAMPIONSHIP_VISIBILITY).default('public'),
+    days: z.number().int().min(1).max(14).default(3),
+    /**
+     * Pin real dates, or leave null for dates relative to the build: the last day
+     * is the day it was built, so a demo always opens on an event in progress
+     * rather than one that finished last month.
+     */
+    fixed_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
+    /** How many days are finished. The rest are still to play. */
+    played_through_day: z.number().int().min(0).max(14).default(2),
+    /** Finals left mid-match, for the live-scoring part of a demo. */
+    live_finals: z.number().int().min(0).max(40).default(6),
+  }),
+
+  /** Must be one of `organizations` by name. Gets host_organization_id. */
+  host_organization: z.string().min(2).max(120),
+
+  organizations: z.array(seedOrganizationSchema).min(2).max(32),
+
+  /**
+   * People per organisation. The cap bounds build time, not the product: every
+   * participant is a real account with a membership, a batch and a login.
+   */
+  participants_per_organization: z.number().int().min(4).max(500).default(200),
+
+  draws: z.array(seedDrawSchema).min(1).max(60),
+
+  officials: z.number().int().min(0).max(20).default(4),
+
+  /** Shared by every seeded account, and shown on the build so it can be handed over. */
+  password: z.string().min(6).max(64).default('Demo@2026'),
+  /**
+   * Normalised before it is checked: a domain typed as "IIMK.demo" or with a
+   * trailing space is what someone meant, not an error to refuse. Digits are
+   * allowed in every label too - "iimk.demo2026" is a perfectly good fake domain,
+   * and the first version of this rejected it because it demanded letters in the
+   * last one.
+   */
+  email_domain: z.string().trim().toLowerCase()
+    .regex(
+      /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/,
+      'Use something like "acme.demo" - letters, numbers and dashes, with at least one dot',
+    )
+    .default('demo.local'),
+
+  accounts: z.object({
+    organiser: seedAccountSchema,
+    /** Opens Personal Space. Seated in their organisation's roster. */
+    player: seedAccountSchema.extend({ organization: z.string().min(2) }),
+    /** Opens Org Space. Becomes that organisation's owner. */
+    institution_admin: seedAccountSchema.extend({ organization: z.string().min(2) }),
+  }),
+
+  /**
+   * Run the product's own post-lock derivations over every played fixture, so the
+   * demo has real lifetime records, medals and per-player statistics rather than a
+   * scoreline and nothing behind it. Costs most of the build time - each played
+   * fixture recomputes career stats for everyone it touched.
+   */
+  derive_records: z.boolean().default(true),
+})
+  .refine((b) => b.organizations.some((o) => o.name === b.host_organization), {
+    path: ['host_organization'],
+    message: 'The host must be one of the participating organizations',
+  })
+  .refine((b) => b.championship.played_through_day <= b.championship.days, {
+    path: ['championship', 'played_through_day'],
+    message: 'Cannot play through more days than the championship has',
+  })
+  .refine((b) => {
+    const names = b.organizations.map((o) => o.name.trim().toLowerCase());
+    return new Set(names).size === names.length;
+  }, { path: ['organizations'], message: 'Two organizations cannot share a name' })
+  .refine((b) => {
+    const shorts = b.organizations.map((o) => o.short.trim().toLowerCase());
+    return new Set(shorts).size === shorts.length;
+  }, { path: ['organizations'], message: 'Two organizations cannot share a short name' })
+  .refine((b) => {
+    const keys = b.draws.map((d) => `${d.sport}|${d.discipline}`.toLowerCase());
+    return new Set(keys).size === keys.length;
+  }, { path: ['draws'], message: 'The same sport and discipline is listed twice' })
+  .refine((b) => {
+    // Three accounts, three logins. Two sharing an address passes every field-level
+    // check and then fails the users unique constraint MID-BUILD, after the
+    // organisations and the championship already exist - a failure that looks like
+    // the engine breaking rather than a form that was never going to work.
+    const emails = [b.accounts.organiser.email, b.accounts.player.email, b.accounts.institution_admin.email];
+    return new Set(emails).size === emails.length;
+  }, { path: ['accounts'], message: 'The organiser, player and institution admin each need their own email' });
+
+export type SeedBlueprint = z.infer<typeof seedBlueprintSchema>;
+
+export const createSeedBuildSchema = z.object({
+  label: z.string().min(2).max(80),
+  blueprint: seedBlueprintSchema,
+});
+export type CreateSeedBuildInput = z.infer<typeof createSeedBuildSchema>;
