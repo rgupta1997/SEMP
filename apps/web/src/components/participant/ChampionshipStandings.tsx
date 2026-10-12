@@ -3,6 +3,7 @@ import { useApi } from '../../lib/hooks';
 import { ChevronDown, Trophy } from 'lucide-react';
 import { Avatar, Badge, EmptyState, ListToolbar, RefreshBar, Select, Spinner, Table, Tabs, cn } from '../../components/ui';
 import { StandingsBreakdown } from '../StandingsBreakdown';
+import { RankBadge } from '../RankBadge';
 import { StandingsMedalTable } from '../StandingsMedalTable';
 
 // A draw row (subset of GET /:id/draws) - used only to source the tournament + sport
@@ -34,7 +35,6 @@ interface StandingRow {
 }
 interface StandingsResponse { scope: string; scope_id: string | null; standings: StandingRow[]; completed_matches: number }
 
-const MEDAL = ['🥇', '🥈', '🥉'];
 
 // Read-only standings for the participant view - the same per-scope tables the
 // organiser sees. Standings are materialized one scope at a time, so the tournament
@@ -82,9 +82,6 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
     return () => clearInterval(t);
   }, [refetch]);
 
-  // Show a medals column only when some discipline used the medal scheme.
-  const showMedals = rows.some((r) => r.detail && (r.detail.gold || r.detail.silver || r.detail.bronze));
-
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -126,14 +123,12 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
               <th className="px-3 py-3 text-center">W</th>
               <th className="px-3 py-3 text-center">D</th>
               <th className="px-3 py-3 text-center">L</th>
-              {showMedals && <th className="px-3 py-3 text-center">Medals</th>}
               <th className="px-4 py-3 text-center">Pts</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => {
               const isOpen = expanded === r.entity_id;
-              const colSpan = 7 + (showMedals ? 1 : 0);
               return (
               <Fragment key={r.entity_id}>
               <tr
@@ -141,7 +136,7 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
                 className={cn('cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40', isOpen && 'bg-slate-50 dark:bg-slate-800/40')}
                 title="Show how these points were earned"
               >
-                <td className="px-4 py-3 text-lg">{MEDAL[i] ?? <span className="font-bold text-slate-400 dark:text-slate-500">{r.rank ?? i + 1}</span>}</td>
+                <td className="px-4 py-3"><RankBadge pos={r.rank ?? i + 1} /></td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
                     <ChevronDown size={16} className={cn('shrink-0 text-slate-400 transition-transform dark:text-slate-500', isOpen && 'rotate-180')} />
@@ -158,19 +153,11 @@ export function ChampionshipStandings({ championshipId, apiBase }: { championshi
                 <td className="px-3 py-3 text-center font-semibold text-emerald-600">{r.won}</td>
                 <td className="px-3 py-3 text-center text-slate-500 dark:text-slate-400">{r.drawn}</td>
                 <td className="px-3 py-3 text-center text-rose-500">{r.lost}</td>
-                {showMedals && (
-                  <td className="px-3 py-3 text-center text-sm tabular-nums">
-                    {(['gold', 'silver', 'bronze'] as const).map((m, mi) =>
-                      r.detail?.[m] ? <span key={m} className="mr-1.5 whitespace-nowrap">{MEDAL[mi]}{r.detail[m]}</span> : null,
-                    )}
-                    {!r.detail?.gold && !r.detail?.silver && !r.detail?.bronze && <span className="text-slate-300 dark:text-slate-600">-</span>}
-                  </td>
-                )}
                 <td className="px-4 py-3 text-center"><Badge tone="brand">{r.points}</Badge></td>
               </tr>
               {isOpen && (
                 <tr className="bg-slate-50/60 dark:bg-slate-800/20">
-                  <td colSpan={colSpan} className="px-4 pb-4 pt-0">
+                  <td colSpan={7} className="px-4 pb-4 pt-0">
                     <StandingsBreakdown base={base} scope={scope} scopeId={scopeId} entityId={r.entity_id} />
                   </td>
                 </tr>

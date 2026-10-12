@@ -1,41 +1,107 @@
 import jwt from 'jsonwebtoken';
+import { notificationChannelPath } from '@semp/notifications/core/channels.js';
+import { env } from '../../config/env.js';
+import {
+  realtimeSigningKey,
+  REALTIME_TOKEN_AUDIENCE,
+  REALTIME_TOKEN_ISSUER,
+} from '../realtime/token-key.js';
 
-// Short-lived by design (security: small blast radius if ever leaked).
-// The frontend's `accessToken` callback (lib/supabase.ts) refetches before
-// this expires, so a long-open tab never actually loses its connection -
-// see the token-refresh explanation for why this is safe.
-const REALTIME_TOKEN_TTL_SECONDS = 15 * 60;
+/**
+ * Mints the short-lived token the browser presents to AppSync Events.
+ *
+ * Short-lived by design: it leaves this process, is handed to a third-party service,
+ * and rides WebSocket handshakes, so it is the credential in this system most likely
+ * to be observed somewhere it should not be. Fifteen minutes bounds that.
+ *
+ * ---------------------------------------------------------------------------
+ * Signed with a DERIVED key, not env.JWT_SECRET. This is the whole point.
+ * ---------------------------------------------------------------------------
+ * parseAuth() verifies session tokens with `jwt.verify(token, env.JWT_SECRET)` and
+ * passes no audience option, so it accepts anything signed with that secret. Sign
+ * this token with JWT_SECRET and the mint endpoint is handing out working API
+ * sessions - which would defeat the short lifetime entirely, since the blast radius
+ * of a leak stops being "someone sees notification ids" and becomes "someone is
+ * signed in as that user". See modules/realtime/token-key.ts, and the paired guard
+ * in parseAuth that also rejects any token carrying an `aud`.
+ *
+ * With REALTIME_TRANSPORT=supabase (beta) the token is instead signed with
+ * SUPABASE_JWT_SECRET, which env.schema.ts requires to differ from JWT_SECRET, and
+ * RLS on notification_deliveries is what enforces per-user isolation.
+ */
+export type RealtimeGrant =
+  | {
+      transport: 'appsync' | 'off';
+      token: string;
+      expires_at: number;
+      endpoint: string | undefined;
+      region: string | undefined;
+      channel: string;
+    }
+  | {
+      transport: 'supabase';
+      token: string;
+      expires_at: number;
+      /** Supabase project URL and publishable key - both public by design. */
+      url: string;
+      key: string;
+      /** The user id the subscription filters on; RLS enforces the same rule. */
+      channel: string;
+    };
 
-// This token has nothing to do with this app's own auth (jsonwebtoken +
-// env.JWT_SECRET, used for normal API calls). It's a separate, purpose-built
-// token signed with Supabase's own (still-active) legacy project JWT secret,
-// used only so Supabase Realtime's RLS check can resolve auth.uid() for the
-// notification_deliveries subscription. `role: 'authenticated'` is required -
-// without it Supabase treats the connection as `anon` regardless of `sub`.
-export function mintRealtimeToken(userId: string): {
-  token: string;
-  expires_at: number;
-} {
-  const secret = process.env.SUPABASE_JWT_SECRET;
+export function mintRealtimeToken(userId: string): RealtimeGrant {
+  const ttl = env.REALTIME_TOKEN_TTL_SECONDS;
 
-  if (!secret) {
-    throw new Error('SUPABASE_JWT_SECRET is not configured');
+  // Beta runs on a Supabase database, so live delivery there is Supabase Realtime:
+  // the token is signed with the project's JWT secret so RLS can resolve auth.uid().
+  // `role: 'authenticated'` is required - without it Supabase treats the socket as anon.
+  if (env.REALTIME_TRANSPORT === 'supabase') {
+    return {
+      transport: 'supabase',
+      token: jwt.sign({ sub: userId, role: 'authenticated' }, env.SUPABASE_JWT_SECRET!, {
+        algorithm: 'HS256',
+        expiresIn: ttl,
+      }),
+      expires_at: Math.floor(Date.now() / 1000) + ttl,
+      url: env.SUPABASE_URL!,
+      key: env.SUPABASE_PUBLISHABLE_KEY!,
+      channel: userId,
+    };
   }
 
-  const expiresAt =
-    Math.floor(Date.now() / 1000) + REALTIME_TOKEN_TTL_SECONDS;
+  const token = jwt.sign({ sub: userId }, realtimeSigningKey(env.JWT_SECRET), {
+    algorithm: 'HS256',
+    audience: REALTIME_TOKEN_AUDIENCE,
+    issuer: REALTIME_TOKEN_ISSUER,
+    expiresIn: ttl,
+  });
 
-  const token = jwt.sign(
-    {
-      sub: userId,
-      role: 'authenticated',
-    },
-    secret,
-    {
-      algorithm: 'HS256',
-      expiresIn: REALTIME_TOKEN_TTL_SECONDS,
-    },
-  );
+  return {
+    transport: env.REALTIME_TRANSPORT === 'appsync' ? 'appsync' : 'off',
+    token,
+    // Seconds, matching the client's expectation - it refreshes two minutes early.
+    expires_at: Math.floor(Date.now() / 1000) + ttl,
 
-  return { token, expires_at: expiresAt };
+    // The endpoint and the channel come from the SERVER, deliberately.
+    //
+    // The endpoint could have been a VITE_ constant, but Vite inlines those at build
+    // time: the frontend would then need a rebuild every time the stack is replaced,
+    // and would silently point at a dead endpoint until someone remembered. The
+    // stack-output comment on VITE_API_URL in infra/semp-api.yaml describes living
+    // with exactly that.
+    //
+    // The channel is server-side because the client has no business deciding which
+    // channel it may listen on. It is told, the authorizer independently enforces
+    // the same rule, and a client-side bug can at worst produce a rejected subscribe
+    // rather than a subscription to somebody else's notifications.
+    // Assembled, not passed through. Amplify's events client requires exactly
+    // `https://<host>/event` and derives the wss:// URL from it - see the comment on
+    // APPSYNC_EVENTS_HTTP_ENDPOINT in config/env.schema.ts for what happens when
+    // this shape is wrong, which is "nothing, silently".
+    endpoint: env.APPSYNC_EVENTS_HTTP_ENDPOINT
+      ? `https://${env.APPSYNC_EVENTS_HTTP_ENDPOINT}/event`
+      : undefined,
+    region: env.APPSYNC_EVENTS_REGION,
+    channel: notificationChannelPath(userId),
+  };
 }

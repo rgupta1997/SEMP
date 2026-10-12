@@ -356,3 +356,12 @@ games, wins/draws/losses, points (doubled) and points available, the same split 
 and black, and wins by checkmate / resignation / time plus draws by agreement. Applied to
 the dev Supabase database with the same runner; all sixteen statements succeeded. **Not
 applied to prod** - pending the owner's go-ahead.
+
+## Not yet applied — `20261011000000_supabase_realtime_where_supabase`
+
+Restores Supabase Realtime for notifications on Supabase databases only: RLS on
+`notification_deliveries` with the "own deliveries" SELECT policy, and the table back in
+the `supabase_realtime` publication. Needed by deploys with `REALTIME_TRANSPORT=supabase`
+(beta). Guarded on the publication, the `authenticated` role and `auth.uid()` existing,
+so it is a no-op on RDS. Before an RDS baseline dump taken FROM a Supabase database,
+re-run `20260922000000_retire_supabase_realtime.sql` first.

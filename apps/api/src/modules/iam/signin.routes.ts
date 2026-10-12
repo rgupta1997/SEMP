@@ -7,18 +7,18 @@ import {
   type OtpPurpose,
 } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
-import { env } from '../../config/env.js';
+import { env, isProduction } from '../../config/env.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { signToken } from '../../http/middleware/auth.js';
 import { ConflictError, DomainError, UnauthorizedError, ValidationError } from '../../shared/errors.js';
 import {
-  consumeById, issueToken, normalizeEmail, normalizePhone,
+  consumeById, discardToken, issueToken, normalizeEmail, normalizePhone,
   recentTokenCount, verifyToken, type TokenSubject,
 } from './auth-tokens.service.js';
 import { accountsForSubject, accountsMatchingPassword, phoneHasCapacity, type AccountChoice } from './accounts.service.js';
 import { readVerificationTicket, signVerificationTicket } from './verification-ticket.js';
-import { sendEmail, otpEmail } from '../comms/email.js';
+import { sendOtpEmail, sendWelcomeEmail } from '../comms/email.js';
 import { sendSms, otpSms } from '../comms/sms.js';
 import { otpWhatsapp, sendWhatsapp, toDestination, whatsappConfigured } from '../comms/whatsapp.js';
 import { notify } from '@semp/notifications/server/notify.js';
@@ -159,33 +159,72 @@ export function makeSignInRouter(prisma: Prisma): Router {
     // A phone token carries no user_id even when it resolves to exactly one account:
     // it proves the NUMBER, and binding it to a user here would pre-empt the chooser.
     const userId = !isPhone(subject) && accounts.length === 1 ? accounts[0].id : null;
-    const { code, expires_at } = await issueToken(prisma, { ...subject, kind, userId } as never);
+    const { id: tokenId, code, expires_at } = await issueToken(prisma, { ...subject, kind, userId } as never);
 
-    let delivered: boolean;
-    if (isPhone(subject)) {
-      ({ delivered } = await deliverPhoneOtp(normalizePhone(subject.phone), code));
-      // A code that was never sent is worse than an error: the person waits for it,
-      // asks for another, and spends the window. Say so - unless the bypass is on,
-      // in which case not sending it is the point and the screen will show it.
-      if (!delivered && !env.OTP_SMS_BYPASS) {
+    // Delivery must not be able to fail the request SILENTLY.
+    //
+    // The token is already written by this point, so a throw here would 500 the
+    // sign-in AND leave the row counting against the five-per-fifteen-minutes limit.
+    // Do that five times during a mail outage and the address is locked out for the
+    // rest of the window - silently, because the throttle branch above returns the
+    // ordinary success shape. Discarding the token instead means a failed send costs
+    // the user nothing but the retry.
+    let delivered = true;
+    // Whether the code actually reached a person (WhatsApp took it). The SMS stub
+    // "succeeds" without sending while the bypass is on - that is the point, the
+    // screen shows the code - so this is narrower than `delivered`.
+    let reachedPhone = false;
+    try {
+      if (isPhone(subject)) {
+        const r = await deliverPhoneOtp(normalizePhone(subject.phone), code);
+        reachedPhone = !!r?.delivered;
+        if (!reachedPhone && !env.OTP_SMS_BYPASS) throw new Error('WhatsApp did not deliver the code');
+      } else {
+        const addr = normalizeEmail((subject as { email: string }).email);
+        await sendOtpEmail(addr, code, env.OTP_TTL_MIN, purpose, {
+          tokenId,
+          // One account resolves to a name; a number reaching several, or an address
+          // with no account yet, does not. The template renders "Hi," without it.
+          name: accounts.length === 1 ? accounts[0].name : null,
+        });
+      }
+    } catch (err) {
+      delivered = false;
+      console.error(`[otp] delivery failed for ${kind}/${purpose}:`, err);
+      await discardToken(prisma, tokenId);
+      // A phone code nobody receives is worse than an error: the person waits for it,
+      // asks for another, and spends the window. Say so. Email keeps the uniform
+      // success shape below, so the mail service's health is not reported to anyone.
+      if (isPhone(subject)) {
         throw new DomainError('OTP_DELIVERY_FAILED', 'We could not send your code on WhatsApp. Try again in a moment.', 502);
       }
-    } else {
-      const addr = normalizeEmail((subject as { email: string }).email);
-      const mailPurpose = purpose === 'password_reset' ? 'password_reset' : 'signup';
-      ({ delivered } = await sendEmail({ to: addr, ...otpEmail(code, env.OTP_TTL_MIN, mailPurpose) }));
     }
 
-    // Only when nothing actually went out. A delivered code must never also come
-    // back in the response, whatever the bypass flags say.
-    const bypassed = !delivered && (isPhone(subject) ? env.OTP_SMS_BYPASS : env.AUTH_EMAIL_BYPASS);
+    // Two different bargains, deliberately not the same flag as MAIL_TRANSPORT:
+    // this one hands the code back to whoever asked for it, which is a sign-in as
+    // any address they like, and env.ts refuses to boot in production with it on.
+    // A code WhatsApp actually delivered must never also come back in-band.
+    const bypassed = isPhone(subject) ? env.OTP_SMS_BYPASS && !reachedPhone : env.AUTH_EMAIL_BYPASS;
+
+    // `&& !isProduction` is redundant against a correctly-configured process - the
+    // boot guard in env.schema.ts already refuses production with either bypass on.
+    // It is repeated HERE, at the point of emission, because the two conditions have
+    // independent failure modes and neither is the other's proof: the boot guard is
+    // only as good as NODE_ENV being right, and this route is mounted BEFORE
+    // requireAuth (http/server.ts), so the cost of getting it wrong once is an
+    // unauthenticated sign-in as any address in the system. That is not a
+    // hypothetical - it is what a deploy path that passed three env vars and no
+    // NODE_ENV actually shipped.
+    const emitCode = bypassed && delivered && !isProduction;
+
     res.json({
+      // Unchanged even when delivery failed. The caller is anonymous, and an error
+      // here would report on the health of the mail service to anybody who asked.
       sent: true,
-      expires_at,
-      // No delivery service is wired yet. Until one is, the code comes back in-band
-      // so the flow works end to end; env.ts refuses to boot in production with
-      // either bypass on. Wiring a provider removes this field and nothing else.
-      ...(bypassed ? { dev_code: code, bypass: true } : {}),
+      // Only meaningful if something was actually sent - a discarded token has no
+      // expiry worth showing.
+      ...(delivered ? { expires_at } : {}),
+      ...(emitCode ? { dev_code: code, bypass: true } : {}),
     });
   }));
 
@@ -325,6 +364,19 @@ export function makeSignInRouter(prisma: Prisma): Router {
       select: { id: true, name: true, email: true, is_super_admin: true, organization_id: true },
     });
 
+    // The account exists and the session is about to be handed over, so a mail
+    // failure here must not turn a successful sign-up into an error. Not retried
+    // either: the idempotency key is the user id, so if the service did receive it
+    // the retry is a no-op, and if it did not, a missing welcome is not worth a
+    // second round-trip on the response path.
+    try {
+      await sendWelcomeEmail(email, created.name, env.WEB_APP_URL, created.id);
+    } catch (err) {
+      console.error(`[signup] welcome email failed for ${created.id}:`, err);
+    }
+
+    // The in-app welcome is separate from the email (account_created has no email
+    // channel), so it must still be sent - replacing it dropped it from the feed.
     try {
       await notify(prisma, { type: 'account_created', userId: created.id, senderId: created.id, data: {} });
     } catch (err) {

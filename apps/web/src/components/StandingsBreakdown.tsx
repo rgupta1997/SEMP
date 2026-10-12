@@ -1,3 +1,4 @@
+import { FINALIST_DETAIL_KEY } from '@semp/shared';
 import { useApi } from '../lib/hooks';
 import { Badge, Spinner, cn } from './ui';
 
@@ -24,7 +25,7 @@ interface BreakdownEvent {
 
 // Friendly labels for the placement/medal/participation keys the schemes emit.
 const DETAIL_LABELS: Record<string, string> = {
-  winner: 'Winner', runner_up: 'Runner-up', third_place: '3rd place', fourth_place: '4th place',
+  winner: 'Winner', runner_up: 'Runner-up', [FINALIST_DETAIL_KEY]: 'Finalist', third_place: '3rd place', fourth_place: '4th place',
   semi_finalist: 'Semi-finalist', quarter_finalist: 'Quarter-finalist',
   gold: 'Gold', silver: 'Silver', bronze: 'Bronze', participation: 'Participation',
 };

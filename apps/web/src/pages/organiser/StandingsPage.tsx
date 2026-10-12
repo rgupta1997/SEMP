@@ -6,6 +6,7 @@ import { useApi } from '../../lib/hooks';
 import { Avatar, Badge, Card, CardBody, CardHeader, EmptyState, RefreshBar, Spinner, StatCard, Table, Tabs, cn } from '../../components/ui';
 import { SharePublicLink } from '../../components/SharePublicLink';
 import { StandingsBreakdown } from '../../components/StandingsBreakdown';
+import { RankBadge } from '../../components/RankBadge';
 import { StandingsMedalTable, rankMedals } from '../../components/StandingsMedalTable';
 
 interface StandingRow {
@@ -37,22 +38,6 @@ interface DrawRow {
   } | null;
 }
 
-const RANK_COLORS = [
-  { bg: 'var(--gold-500)', color: '#3b1f00' },
-  { bg: 'var(--silver)', color: '#1e293b' },
-  { bg: 'var(--bronze)', color: '#fff7ed' },
-];
-
-function RankBadge({ pos }: { pos: number }) {
-  const c = RANK_COLORS[pos - 1];
-  if (!c) return <span className="font-bold tabular-nums text-slate-400 dark:text-slate-500">{pos}</span>;
-  return (
-    <span
-      className="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold"
-      style={{ background: c.bg, color: c.color }}
-    >{pos}</span>
-  );
-}
 
 export function StandingsPage() {
   const { eventId, championship } = useEvent();
@@ -102,9 +87,6 @@ export function StandingsPage() {
     const t = setInterval(() => refetch(), 10000);
     return () => clearInterval(t);
   }, [refetch]);
-
-  // Show a medals column only when some discipline used the medal scheme.
-  const showMedals = rows.some((r) => r.detail && (r.detail.gold || r.detail.silver || r.detail.bronze));
 
   // Medal leader = top of the medal tally (gold, then silver/bronze); points leader = rank 1.
   const medalLeader = rankMedals(rows)[0]?.row;
@@ -156,11 +138,11 @@ export function StandingsPage() {
           ) : (
             <>
             {/* ---------------- phone: a league table that fits ----------------
-                Eight columns - #, name, P, W, D, L, Medals, Pts - is a horizontal
+                Seven columns - #, name, P, W, D, L, Pts - is a horizontal
                 scroll on a 390px screen, and the two that matter (who, and how many
                 points) sit at opposite ends of the drag. Two lines instead: the
                 position, the squad's short name and its points on the first, the
-                record and any medals on the second. Same rows, same expansion, no
+                record on the second. Same rows, same expansion, no
                 sideways movement. */}
             <div className="sm:hidden">
               {rows.map((r, i) => {
@@ -189,13 +171,6 @@ export function StandingsPage() {
                           <span className="text-emerald-600 dark:text-emerald-400">W{r.won}</span>
                           <span>D{r.drawn}</span>
                           <span className="text-rose-500 dark:text-rose-400">L{r.lost}</span>
-                          {showMedals && (['gold', 'silver', 'bronze'] as const).map((m) => (
-                            r.detail?.[m] ? (
-                              <span key={m} className="inline-flex items-center gap-0.5">
-                                <span className={`medal-pip medal-pip--${m}`} />{r.detail[m]}
-                              </span>
-                            ) : null
-                          ))}
                         </span>
                       </span>
                       <Badge tone="brand">{r.points}</Badge>
@@ -221,14 +196,12 @@ export function StandingsPage() {
                   <th className="px-3 py-3 text-center">W</th>
                   <th className="px-3 py-3 text-center">D</th>
                   <th className="px-3 py-3 text-center">L</th>
-                  {showMedals && <th className="px-3 py-3 text-center">Medals</th>}
                   <th className="px-4 py-3 text-center">Pts</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r, i) => {
                   const isOpen = expanded === r.entity_id;
-                  const colSpan = 7 + (showMedals ? 1 : 0);
                   return (
                   <Fragment key={r.entity_id}>
                   <tr
@@ -253,24 +226,11 @@ export function StandingsPage() {
                     <td className="px-3 py-3 text-center font-semibold text-emerald-600">{r.won}</td>
                     <td className="px-3 py-3 text-center text-slate-500 dark:text-slate-400">{r.drawn}</td>
                     <td className="px-3 py-3 text-center text-rose-500">{r.lost}</td>
-                    {showMedals && (
-                      <td className="px-3 py-3 text-center text-sm tabular-nums">
-                        {(['gold', 'silver', 'bronze'] as const).map((m, mi) =>
-                          r.detail?.[m] ? (
-                            <span key={m} className="mr-1.5 inline-flex items-center gap-0.5 whitespace-nowrap">
-                              <span className={`medal-pip medal-pip--${m}`} />
-                              <span>{r.detail[m]}</span>
-                            </span>
-                          ) : null,
-                        )}
-                        {!r.detail?.gold && !r.detail?.silver && !r.detail?.bronze && <span className="text-slate-300 dark:text-slate-600">-</span>}
-                      </td>
-                    )}
                     <td className="px-4 py-3 text-center"><Badge tone="brand">{r.points}</Badge></td>
                   </tr>
                   {isOpen && (
                     <tr className="bg-slate-50/60 dark:bg-slate-800/20">
-                      <td colSpan={colSpan} className="px-4 pb-4 pt-0">
+                      <td colSpan={7} className="px-4 pb-4 pt-0">
                         <StandingsBreakdown base={`/championships/${eventId}`} scope={scope} scopeId={scopeId} entityId={r.entity_id} />
                       </td>
                     </tr>
