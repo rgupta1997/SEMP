@@ -11,7 +11,7 @@ import { env, isProduction } from '../../config/env.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { signToken } from '../../http/middleware/auth.js';
-import { ConflictError, UnauthorizedError, ValidationError } from '../../shared/errors.js';
+import { ConflictError, DomainError, UnauthorizedError, ValidationError } from '../../shared/errors.js';
 import {
   consumeById, discardToken, issueToken, normalizeEmail, normalizePhone,
   recentTokenCount, verifyToken, type TokenSubject,
@@ -20,6 +20,7 @@ import { accountsForSubject, accountsMatchingPassword, phoneHasCapacity, type Ac
 import { readVerificationTicket, signVerificationTicket } from './verification-ticket.js';
 import { sendOtpEmail, sendWelcomeEmail } from '../comms/email.js';
 import { sendSms, otpSms } from '../comms/sms.js';
+import { otpWhatsapp, sendWhatsapp, toDestination, whatsappConfigured } from '../comms/whatsapp.js';
 import { notify } from '@semp/notifications/server/notify.js';
 
 // Phone-first sign-in (Option B).
@@ -57,6 +58,21 @@ const isPhone = (s: TokenSubject): s is { phone: string } =>
 // 'otp' for anything that is a sign-in or a verification; 'password_reset' stands
 // apart so a code minted to reset a password cannot be spent signing in and vice versa.
 const kindFor = (purpose: OtpPurpose) => (purpose === 'password_reset' ? 'password_reset' : 'otp');
+
+/**
+ * A code, to a number.
+ *
+ * WhatsApp via AiSensy is the channel when it is configured; the SMS stub is the
+ * fallback, and with OTP_SMS_BYPASS on it just logs the code so a developer with no
+ * AiSensy key can still run the whole flow. Returns whether anything was really
+ * sent - the caller needs that to decide whether the code may also come back in the
+ * response, and a delivered code never may.
+ */
+async function deliverPhoneOtp(phone: string, code: string): Promise<{ delivered: boolean }> {
+  if (!whatsappConfigured()) return sendSms({ to: phone, ...otpSms(code, env.OTP_TTL_MIN) });
+
+  return sendWhatsapp({ destination: toDestination(phone), ...otpWhatsapp(code) });
+}
 
 export function makeSignInRouter(prisma: Prisma): Router {
   const router = Router();
@@ -145,7 +161,7 @@ export function makeSignInRouter(prisma: Prisma): Router {
     const userId = !isPhone(subject) && accounts.length === 1 ? accounts[0].id : null;
     const { id: tokenId, code, expires_at } = await issueToken(prisma, { ...subject, kind, userId } as never);
 
-    // Delivery must not be able to fail the request.
+    // Delivery must not be able to fail the request SILENTLY.
     //
     // The token is already written by this point, so a throw here would 500 the
     // sign-in AND leave the row counting against the five-per-fifteen-minutes limit.
@@ -154,9 +170,15 @@ export function makeSignInRouter(prisma: Prisma): Router {
     // ordinary success shape. Discarding the token instead means a failed send costs
     // the user nothing but the retry.
     let delivered = true;
+    // Whether the code actually reached a person (WhatsApp took it). The SMS stub
+    // "succeeds" without sending while the bypass is on - that is the point, the
+    // screen shows the code - so this is narrower than `delivered`.
+    let reachedPhone = false;
     try {
       if (isPhone(subject)) {
-        await sendSms({ to: normalizePhone(subject.phone), ...otpSms(code, env.OTP_TTL_MIN) });
+        const r = await deliverPhoneOtp(normalizePhone(subject.phone), code);
+        reachedPhone = !!r?.delivered;
+        if (!reachedPhone && !env.OTP_SMS_BYPASS) throw new Error('WhatsApp did not deliver the code');
       } else {
         const addr = normalizeEmail((subject as { email: string }).email);
         await sendOtpEmail(addr, code, env.OTP_TTL_MIN, purpose, {
@@ -170,12 +192,19 @@ export function makeSignInRouter(prisma: Prisma): Router {
       delivered = false;
       console.error(`[otp] delivery failed for ${kind}/${purpose}:`, err);
       await discardToken(prisma, tokenId);
+      // A phone code nobody receives is worse than an error: the person waits for it,
+      // asks for another, and spends the window. Say so. Email keeps the uniform
+      // success shape below, so the mail service's health is not reported to anyone.
+      if (isPhone(subject)) {
+        throw new DomainError('OTP_DELIVERY_FAILED', 'We could not send your code on WhatsApp. Try again in a moment.', 502);
+      }
     }
 
     // Two different bargains, deliberately not the same flag as MAIL_TRANSPORT:
     // this one hands the code back to whoever asked for it, which is a sign-in as
     // any address they like, and env.ts refuses to boot in production with it on.
-    const bypassed = isPhone(subject) ? env.OTP_SMS_BYPASS : env.AUTH_EMAIL_BYPASS;
+    // A code WhatsApp actually delivered must never also come back in-band.
+    const bypassed = isPhone(subject) ? env.OTP_SMS_BYPASS && !reachedPhone : env.AUTH_EMAIL_BYPASS;
 
     // `&& !isProduction` is redundant against a correctly-configured process - the
     // boot guard in env.schema.ts already refuses production with either bypass on.

@@ -68,6 +68,7 @@ fi
 # NODE_ENV unset, env.ts defaulted it to 'development', every production refinement
 # went inert, AUTH_EMAIL_BYPASS/OTP_SMS_BYPASS defaulted ON, and /auth/otp/send -
 # which is mounted before requireAuth - handed sign-in codes back to any caller.
+# AISENSY_API_KEY is carried separately below, only when present.
 # Bash `source` unconditionally overwrites already-set variables, which
 # contradicts "prefers already-exported values" above - save any pre-exported
 # overrides first and restore them after sourcing .env, so e.g.
@@ -87,6 +88,16 @@ WEB_ORIGIN="${_PRESET_WEB_ORIGIN:-$WEB_ORIGIN}"
 : "${DATABASE_URL:?DATABASE_URL not set (export it, or add it to apps/api/.env)}"
 : "${JWT_SECRET:?JWT_SECRET not set (export it, or add it to apps/api/.env)}"
 WEB_ORIGIN="${WEB_ORIGIN:-http://localhost:5173}"
+
+# WhatsApp OTP delivery. Carried into the pushed environment ONLY when a key is
+# actually present here - because `update-function-configuration --environment`
+# REPLACES the whole variable map, so a DEPLOY_ENV=1 deploy from a machine without
+# the key would otherwise blank it on the live function and take phone sign-in down
+# with it (silently: the API keeps booting, it just stops delivering codes).
+AISENSY_JSON=""
+if [[ -n "${AISENSY_API_KEY:-}" ]]; then
+  AISENSY_JSON=",\"AISENSY_API_KEY\":\"${AISENSY_API_KEY}\",\"AISENSY_OTP_CAMPAIGN\":\"${AISENSY_OTP_CAMPAIGN:-otp}\""
+fi
 
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 echo "== account $ACCOUNT_ID, region $REGION =="
@@ -241,7 +252,7 @@ if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" >
   if [[ "${DEPLOY_ENV:-}" == "1" ]]; then
     echo "== DEPLOY_ENV=1: overwriting the function's environment from .env =="
     ENV_JSON=$(cat <<JSON
-{"Variables":{"DATABASE_URL":"${LAMBDA_DATABASE_URL}","JWT_SECRET":"${JWT_SECRET}","WEB_ORIGIN":"${WEB_ORIGIN}"}}
+{"Variables":{"DATABASE_URL":"${LAMBDA_DATABASE_URL}","JWT_SECRET":"${JWT_SECRET}","WEB_ORIGIN":"${WEB_ORIGIN}"${AISENSY_JSON}}}
 JSON
 )
     aws lambda update-function-configuration \
@@ -249,7 +260,7 @@ JSON
       --environment "$ENV_JSON" \
       --memory-size "$MEMORY_MB" --timeout "$TIMEOUT_SEC" >/dev/null
   else
-    echo "== keeping the function's existing environment (JWT_SECRET, WEB_ORIGIN, DATABASE_URL) =="
+    echo "== keeping the function's existing environment (JWT_SECRET, WEB_ORIGIN, DATABASE_URL, AISENSY_API_KEY) =="
     echo "   pass DEPLOY_ENV=1 to overwrite it from apps/api/.env"
     aws lambda update-function-configuration \
       --function-name "$FUNCTION_NAME" --region "$REGION" \
@@ -259,7 +270,7 @@ JSON
 else
   # A NEW function has no environment to keep, so the local values are all there is.
   ENV_JSON=$(cat <<JSON
-{"Variables":{"DATABASE_URL":"${LAMBDA_DATABASE_URL}","JWT_SECRET":"${JWT_SECRET}","WEB_ORIGIN":"${WEB_ORIGIN}"}}
+{"Variables":{"DATABASE_URL":"${LAMBDA_DATABASE_URL}","JWT_SECRET":"${JWT_SECRET}","WEB_ORIGIN":"${WEB_ORIGIN}"${AISENSY_JSON}}}
 JSON
 )
   echo "== creating function $FUNCTION_NAME =="

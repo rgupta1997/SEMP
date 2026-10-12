@@ -3,15 +3,17 @@ import { env } from '../../config/env.js';
 // The one place the API sends an SMS.
 //
 // Deliberately the same shape as email.ts: this module renders the message and
-// hands it to a transport. No provider is wired yet, and with OTP_SMS_BYPASS on we
-// log it and let the caller surface the code in-band - exactly what the email path
-// already does, so a developer with no gateway account can still run the whole
-// sign-in flow end to end.
+// hands it to a transport. No SMS provider is wired, and none is planned - phone
+// sign-in codes go out over WhatsApp instead (comms/whatsapp.ts), which is why:
+// transactional SMS in India needs DLT registration, a sender ID and per-template
+// approval, which is procurement with a lead time rather than code, while the
+// WhatsApp template was approved on the AiSensy side.
 //
-// Wiring a real provider replaces the body of sendSms() and nothing else. Whichever
-// one is chosen, transactional SMS in India also needs DLT registration - a sender
-// ID and per-template approval - which is procurement with a lead time rather than
-// code. The bypass is what stops that blocking the build.
+// So this is now the FALLBACK, reached only when AiSensy is unconfigured. With
+// OTP_SMS_BYPASS on it logs the code and the caller surfaces it in-band - exactly
+// what the email path does - so a developer with no AiSensy key can still run the
+// whole sign-in flow end to end. Off, it refuses, and the route turns that into a
+// clear delivery failure rather than a code nobody receives.
 
 export interface SmsMessage {
   to: string;

@@ -25,6 +25,7 @@ const prodOk = {
   APPSYNC_NOTIFICATIONS_QUEUE_URL: 'https://sqs.ap-south-1.amazonaws.com/1/semp-api-realtime',
   APPSYNC_EVENTS_HTTP_ENDPOINT: 'abcdefghijklmnopqrstuvwxyz.appsync-api.ap-south-1.amazonaws.com',
   APPSYNC_EVENTS_REGION: 'ap-south-1',
+  AISENSY_API_KEY: 'k',
 };
 
 /** The `path` each reported issue was tagged with. */
@@ -137,6 +138,7 @@ describe('production guards', () => {
     expect(paths).toContain('OTP_SMS_BYPASS');
     expect(paths).toContain('MAIL_TRANSPORT');
     expect(paths).toContain('REALTIME_TRANSPORT');
+    expect(paths).toContain('AISENSY_API_KEY');
   });
 });
 

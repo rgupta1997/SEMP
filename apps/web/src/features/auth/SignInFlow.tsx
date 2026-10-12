@@ -206,7 +206,7 @@ export function SignInFlow({ dark, inputStyle, labelStyle, t, onHeading, onWantS
           margin: 0, borderRadius: 6, border: `1px dashed ${C.line}`, background: dark ? 'color-mix(in srgb, var(--brand) 10%, transparent)' : C.blue50,
           padding: '9px 12px', fontSize: 13, color: t.body,
         }}>
-          No SMS provider is wired yet, so here is the code: <b style={{ fontFamily: MONO, color: C.blue }}>{devCode}</b>
+          Delivery isn't wired yet, so here is the code: <b style={{ fontFamily: MONO, color: C.blue }}>{devCode}</b>
         </p>
       )}
       <Err />

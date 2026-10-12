@@ -125,6 +125,28 @@ export async function wipeSandbox(prisma: Prisma, sandbox: SandboxRow): Promise<
   const orgList = [...orgIds];
 
   // ---- delete, children -> parents ---------------------------------------------
+
+  // Derived records first, and NOT by manifest id: the lifetime timeline, medals
+  // and per-player stat lines are written by the product's own derivations when a
+  // result locks, so nothing here ever tracked their ids. They are found through
+  // the people and fixtures that ARE tracked. Without this the users delete fails
+  // on lifetime_entries_user_id_fkey and strands everything behind it - which is
+  // exactly what a build with `derive_records` on produces.
+  for (const [table, where] of [
+    ['player_match_stats', { user_id: { in: [...userIds] } }],
+    ['fixture_events', { fixture_id: { in: fixtureIds } }],
+    ['career_stats', { user_id: { in: [...userIds] } }],
+    ['achievements', { user_id: { in: [...userIds] } }],
+    ['lifetime_entries', { user_id: { in: [...userIds] } }],
+  ] as const) {
+    if (!userIds.size && !fixtureIds.length) break;
+    try {
+      await (prisma as any)[table].deleteMany({ where });
+    } catch (e) {
+      console.warn(`[demos] teardown ${table}:`, e instanceof Error ? e.message.split('\n')[0] : e);
+    }
+  }
+
   if (fixtureIds.length) {
     await prisma.fixture_awards.deleteMany({ where: { fixture_id: { in: fixtureIds } } });
     await prisma.fixtures.deleteMany({ where: { id: { in: fixtureIds } } });

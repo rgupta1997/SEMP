@@ -81,7 +81,7 @@ const SERVICES = [
   ['Certificates and QR verification', 'operational'],
   ['Reports and exports', 'operational'],
   ['Email delivery', 'degraded'],
-  ['SMS delivery', 'degraded'],
+  ['WhatsApp sign-in codes', 'degraded'],
 ] as const;
 
 const card: React.CSSProperties = {
@@ -169,11 +169,13 @@ export function HelpPage() {
             }}>{state}</span>
           </div>
         ))}
-        {/* Honest rather than green: both delivery services are bypassed, and a fake
-            green light is worse than no light at all. */}
+        {/* Honest rather than green: a fake green light is worse than no light at all.
+            Flip the WhatsApp row to 'operational' once AISENSY_API_KEY is set on the
+            API - this list is static, so it cannot see that for itself. */}
         <p style={{ margin: '12px 0 0', fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.55 }}>
-          Email and SMS are in bypass: codes are shown on screen instead of being sent. Everything else
-          runs normally.
+          Email is in bypass: those codes are shown on screen instead of being sent. Sign-in codes for a
+          phone number go out on WhatsApp, and are shown on screen only while that is unconfigured.
+          Everything else runs normally.
         </p>
       </div>
 

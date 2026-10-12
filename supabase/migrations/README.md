@@ -357,7 +357,14 @@ and black, and wins by checkmate / resignation / time plus draws by agreement. A
 the dev Supabase database with the same runner; all sixteen statements succeeded. **Not
 applied to prod** - pending the owner's go-ahead.
 
-## Not yet applied — `20261011000000_supabase_realtime_where_supabase`
+## Applied 2026-10-12 — `20261011000000_supabase_realtime_where_supabase`
+
+Applied to the beta/local Supabase project (`iwxgd…`) with `apply-migration.ts --direct`.
+The policy and publication membership were already present beforehand, so this was a
+confirming no-op; `20260922000000_retire_supabase_realtime` was deliberately NOT run here
+(it would switch beta's live bell off). Not ported to `infra/rds-migrations/` - it is
+Supabase-only; the 10-04 → 10-09 batch is, as `011_scoring_stats_oct04_to_oct09.sql`.
+
 
 Restores Supabase Realtime for notifications on Supabase databases only: RLS on
 `notification_deliveries` with the "own deliveries" SELECT policy, and the table back in
@@ -365,3 +372,51 @@ the `supabase_realtime` publication. Needed by deploys with `REALTIME_TRANSPORT=
 (beta). Guarded on the publication, the `authenticated` role and `auth.uid()` existing,
 so it is a no-op on RDS. Before an RDS baseline dump taken FROM a Supabase database,
 re-run `20260922000000_retire_supabase_realtime.sql` first.
+
+---
+
+## Applied 2026-10-10 — the whole 2026-10-04 → 2026-10-09 batch (15 files)
+
+After PR #28 merged to `main`, the database `apps/api/.env` points at was checked column
+by column and turned out to be missing **everything dated 2026-10-04 or later**. It had
+every migration up to and including `20260929000000_organization_archive`; the entries
+above claiming the 10-04 → 10-09 files were applied were written against a different
+database, so they do not vouch for this one.
+
+Applied in filename order with the usual runner, each file on its own:
+
+```
+npx tsx scripts/apply-migration.ts ../../supabase/migrations/<file>.sql
+```
+
+| File | Statements |
+|---|---|
+| `20261004000000_rubber_lineups_head_to_head` | 7 |
+| `20261005000000_event_scoped_disciplines` | 2 |
+| `20261005000001_pair_serve_receive_points` | 2 |
+| `20261005000002_expedite_stats` | 6 |
+| `20261005000003_clutch_stats` | 9 |
+| `20261005000004_side_out_stats` | 3 |
+| `20261005000005_side_out_pct_pickles` | 2 |
+| `20261005000006_pair_points_won` | 2 |
+| `20261007000000_tennis_serve_stats` | 4 |
+| `20261007000001_tennis_service_games` | 4 |
+| `20261009000000_fixture_half_point_scores` | 1 |
+| `20261009000001_chess_game_stats` | 16 |
+| `20261009000002_draw_scoring_preset_key` | 1 |
+| `20261009000003_break_points_faced` | 1 |
+| `20261009000004_tennis_love_holds_bagels` | 3 |
+
+All 63 statements succeeded, with the API still running on :4000 — no lock retries were
+needed this time. Verified afterwards against `information_schema` / `pg_indexes`:
+`fixtures.home_score` and `away_score` now read `double precision`, all 16 chess counters
+are on `board_match_lines`, `tournament_disciplines.scoring_preset_key` exists, the racquet
+counters are present, and `idx_pms_opponents`, `uq_career_stats_grain` and
+`idx_disciplines_championship` all exist.
+
+No `db pull` and no `prisma generate`: `schema.prisma` already described the
+post-migration state (it came with the same PRs), which is also why the API was selecting
+columns this database did not have until now.
+
+**Still not applied to prod** (the RDS database) — that remains pending the owner's
+go-ahead, as the 10-09 entries above say.

@@ -52,26 +52,33 @@ function required(name: string): string {
   return v;
 }
 
-const [db, app] = await Promise.all([
-  getSecret(required('DB_SECRET_ARN')),
-  getSecret(required('APP_SECRET_ARN')),
-]);
+// Beta (the unmanaged `semp-api` function, Supabase database) carries DATABASE_URL,
+// JWT_SECRET and MAIL_API_KEY as plain environment variables and has no secrets at
+// all. Only a SAM-deployed stack (UAT / production, infra/semp-api.yaml) sets the two
+// ARNs, so their ABSENCE is what selects the plain-env path - not a flag that a
+// deploy could forget. A half-configured stack (one ARN, not both) still fails loud.
+if (process.env.DB_SECRET_ARN || process.env.APP_SECRET_ARN) {
+  const [db, app] = await Promise.all([
+    getSecret(required('DB_SECRET_ARN')),
+    getSecret(required('APP_SECRET_ARN')),
+  ]);
 
-// Assembled here rather than in the CloudFormation template so the password never
-// becomes a function environment variable. encodeURIComponent because a single '#'
-// in a generated password turns the rest of the connection string into a URL
-// fragment and Prisma then fails with something entirely unrelated-looking.
-//
-// connection_limit=1 because each Lambda container serves one request at a time, so
-// it never needs more; the bound on total database connections is that times the
-// function's reserved concurrency.
-process.env.DATABASE_URL =
-  `postgresql://${encodeURIComponent(db.username)}:${encodeURIComponent(db.password)}` +
-  `@${db.host}:${db.port}/${db.dbname}` +
-  '?sslmode=require&connection_limit=1&pool_timeout=10&connect_timeout=10';
+  // Assembled here rather than in the CloudFormation template so the password never
+  // becomes a function environment variable. encodeURIComponent because a single '#'
+  // in a generated password turns the rest of the connection string into a URL
+  // fragment and Prisma then fails with something entirely unrelated-looking.
+  //
+  // connection_limit=1 because each Lambda container serves one request at a time, so
+  // it never needs more; the bound on total database connections is that times the
+  // function's reserved concurrency.
+  process.env.DATABASE_URL =
+    `postgresql://${encodeURIComponent(db.username)}:${encodeURIComponent(db.password)}` +
+    `@${db.host}:${db.port}/${db.dbname}` +
+    '?sslmode=require&connection_limit=1&pool_timeout=10&connect_timeout=10';
 
-process.env.JWT_SECRET = app.JWT_SECRET;
-process.env.MAIL_API_KEY = app.MAIL_API_KEY;
+  process.env.JWT_SECRET = app.JWT_SECRET;
+  process.env.MAIL_API_KEY = app.MAIL_API_KEY;
+}
 
 const { handler: inner } = await import('./lambda-app.js');
 
