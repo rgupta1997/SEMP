@@ -21,8 +21,12 @@ export const isCarromSport = (name?: string | null): boolean => (name ?? '').tri
 /** Coins per player (or pair) - and so the most a board can be won by on coins. */
 export const CARROM_COINS = 9;
 
-/** Who covered the queen on a board. The loser covering it scores nobody anything. */
-export const QUEEN_COVER = ['winner', 'loser'] as const;
+/**
+ * Who covered the queen on a board. The loser covering it scores nobody anything.
+ * 'none' - left uncovered - only exists where covering is not compulsory (house rules);
+ * under ICF a board cannot end with the queen uncovered.
+ */
+export const QUEEN_COVER = ['winner', 'loser', 'none'] as const;
 export type QueenCover = (typeof QUEEN_COVER)[number];
 
 export interface CarromBoard {
@@ -36,6 +40,24 @@ export interface CarromBoard {
   fouls?: { A: number; B: number };
 }
 
+/** A carrom match as recorded - stored in live_state.carrom, or on a tie rubber. */
+export interface CarromBoardsState {
+  boards: CarromBoard[];
+  /** Who broke (and so played white on) the first board - the toss. */
+  firstBreak: Side;
+}
+
+/** A stored carrom state, tolerating anything malformed; null when there is none. */
+export function readCarromState(raw: unknown): CarromBoardsState | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as { boards?: unknown; firstBreak?: unknown };
+  if (!Array.isArray(r.boards)) return null;
+  const boards = r.boards.filter((b): b is CarromBoard =>
+    !!b && typeof b === 'object' && ((b as CarromBoard).winner === 'A' || (b as CarromBoard).winner === 'B')
+    && typeof (b as CarromBoard).coinsLeft === 'number');
+  return { boards, firstBreak: r.firstBreak === 'B' ? 'B' : 'A' };
+}
+
 export interface CarromRules {
   /** Points that win a game (25 ICF). 1 or less = boards-only: each board is a point. */
   gameTarget: number;
@@ -46,9 +68,17 @@ export interface CarromRules {
   queenPoints: number;
   /** The queen stops counting once the board winner's game score has reached this. */
   queenCutoff: number | null;
+  /** ICF: a board cannot end with the queen uncovered, so 'none' is not offered. */
+  queenMustBeCovered: boolean;
 }
 
-export const ICF_CARROM_RULES: CarromRules = { gameTarget: 25, gamesToWin: 2, maxBoards: 8, queenPoints: 3, queenCutoff: 22 };
+export const ICF_CARROM_RULES: CarromRules = {
+  gameTarget: 25, gamesToWin: 2, maxBoards: 8, queenPoints: 3, queenCutoff: 22, queenMustBeCovered: true,
+};
+
+/** The queen choices a format offers. */
+export const queenCoversFor = (rules: CarromRules): readonly QueenCover[] =>
+  rules.queenMustBeCovered ? ['winner', 'loser'] : QUEEN_COVER;
 
 /** The rules a carrom format describes: target and best-of from its levels, the rest from its rules sheet. */
 export function carromRulesOf(format: { levels: Array<{ target: number }>; rulesSheet?: Record<string, unknown> } | null | undefined): CarromRules {
@@ -62,6 +92,7 @@ export function carromRulesOf(format: { levels: Array<{ target: number }>; rules
     maxBoards: num(sheet.maxBoards),
     queenPoints: num(sheet.queenPoints) ?? 3,
     queenCutoff: num(sheet.queenCutoff),
+    queenMustBeCovered: sheet.queenMustBeCovered === true,
   };
 }
 
@@ -185,7 +216,8 @@ export function carromLineStats(m: CarromMatch, rules: CarromRules, side: Side):
         add(won ? 'carrom_points_for' : 'carrom_points_against', b.points);
         if (won) s.best_board = Math.max(s.best_board ?? 0, b.points);
         // Covered by me: as the winner, or as the loser who covered it for nothing.
-        if ((b.queen === 'winner') === won) add('queens');
+        // Left uncovered ('none') credits nobody.
+        if (b.queen !== 'none' && (b.queen === 'winner') === won) add('queens');
       }
       if (won && b.slam) add('slams');
       const f = b.fouls?.[side];

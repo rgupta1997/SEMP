@@ -8,6 +8,7 @@ import type { ContestSpec, RubberSpec, TieSpec } from './scoring.js';
 import type { RallyLog } from './rally-kernel.js';
 import type { ScoringFormat } from './scoring-rules.js';
 import { CHESS_ENDINGS, type ChessEnding } from './chess.js';
+import { readCarromState, type CarromBoardsState } from './carrom.js';
 
 // Snapshot of one contest (a single match, or one rubber of a tie). Structurally the
 // state the web engine's reducer operates on; hydrate() tolerates partial persists.
@@ -61,6 +62,8 @@ export interface RubberInstance {
   firstServer?: 'A' | 'B';
   /** Racquet rubbers: the rules in force, frozen at the first rally. */
   format?: ScoringFormat;
+  /** Carrom rubbers: the boards recorded on the board-by-board console. */
+  carrom?: CarromBoardsState;
 }
 
 /** Players per side in a rubber: an explicit size, else doubles by name. */
@@ -165,6 +168,7 @@ export function hydrateTie(raw: any, spec: TieSpec): TieState {
           : {}),
         ...(rr.firstServer === 'A' || rr.firstServer === 'B' ? { firstServer: rr.firstServer } : {}),
         ...(rr.format && typeof rr.format === 'object' ? { format: rr.format } : {}),
+        ...(readCarromState(rr.carrom) ? { carrom: readCarromState(rr.carrom)! } : {}),
       };
     });
     if (typeof raw.activeRubber === 'number') base.activeRubber = Math.min(Math.max(0, raw.activeRubber), spec.rubbers.length - 1);
@@ -293,7 +297,7 @@ export function reopenRubber(spec: TieSpec, state: TieState, index: number, rese
       delete reopened.drawn;
       delete reopened.ending;
       // A fresh re-score clears the points and their frozen rules; who played stays.
-      if (resetState) { delete reopened.rally; delete reopened.format; delete reopened.firstServer; }
+      if (resetState) { delete reopened.rally; delete reopened.format; delete reopened.firstServer; delete reopened.carrom; }
       return reopened;
     }
     return r.winner === null && r.status === 'dead' ? { ...r, status: 'pending' as RubberStatus } : r;

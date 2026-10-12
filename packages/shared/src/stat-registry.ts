@@ -491,9 +491,10 @@ const BOARD_METRICS: StatMetric[] = [
   count('queens', 'Queens covered', 'Q', { fromEvents: ['queen'], headline: true }),
   rally('slams', 'Slams', 'Slam'),
   rally('carrom_fouls', 'Fouls (dues)', 'F', { higherIsBetter: false }),
-  rally('boards_broken', 'Boards broken', 'Brk', { hidden: true }),
-  rally('board_wins_on_break', 'Boards won on the break', 'BWB', { hidden: true }),
-  rate('break_win_pct', 'Win % on own break', 'Brk%', ['board_wins_on_break', 'boards_broken']),
+  // ICF: whoever breaks plays white, so "on the break" IS "with white".
+  rally('boards_broken', 'Boards with white (broke)', 'Wh', { hidden: true }),
+  rally('board_wins_on_break', 'Boards won with white', 'WhW', { hidden: true }),
+  rate('break_win_pct', 'Win % with white (on the break)', 'Wh%', ['board_wins_on_break', 'boards_broken']),
   rally('carrom_deciders', 'Deciding games', 'Dec', { hidden: true }),
   rally('carrom_deciders_won', 'Deciding games won', 'DecW'),
   rate('carrom_decider_pct', 'Deciding game win %', 'Dec%', ['carrom_deciders_won', 'carrom_deciders']),

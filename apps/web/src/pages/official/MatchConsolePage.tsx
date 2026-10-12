@@ -11,13 +11,14 @@ import {
 } from '../../features/scoring/engine';
 import { resolveTemplate, tieTemplateFor, eventTemplateFor } from '../../features/scoring/templates';
 import {
-  hydrateTie, rubbersWon, tieScore, tieOutcome, tieTarget, rubberDef, decideRubber as decideRubberFn, reopenRubber as reopenRubberFn,
+  hydrateTie, initTie, rubbersWon, tieScore, tieOutcome, tieTarget, rubberDef, decideRubber as decideRubberFn, reopenRubber as reopenRubberFn,
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
 import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
 import { carromHeadline, carromMatch, carromRulesOf, isCarromSport } from '@semp/shared';
 import { CarromResult, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
+import { TieLayoutEditor, type TieLayoutValue } from '../../features/scoring/TieLayoutEditor';
 import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, isChessSport, isKnockoutFixture, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
 import { unitWinner, type TieSpec, type EventSpec, type ScoringMode, type ScoringFormat, type KernelState, type Pairing, type RallyLog, type RubberLineup, type Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer, hydratePairSwap } from '../../features/scoring/RacquetDeck';
@@ -1219,6 +1220,30 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
   );
 }
 
+/**
+ * The carrom format for a fixture through the format ladder, and where it came from
+ * (draw default, this match, sport default...). `frozen` wins once scoring has begun.
+ */
+function carromResolved(fixture: any, frozen: any) {
+  const td = fixture?.tournament_disciplines ?? {};
+  return resolveFormat(
+    {
+      scoring_format_id: fixture?.scoring_format_id ?? null,
+      round: fixture?.round ?? null,
+      stage_sequence: fixture?.stage_sequence ?? null,
+      frozen_format: frozen ?? null,
+      format_overrides: fixture?.format_overrides ?? null,
+    },
+    {
+      scoring_format_id: td.scoring_format_id ?? null,
+      scoring_preset_key: td.scoring_preset_key ?? null,
+      round_formats: td.round_formats,
+      sport: sportNameOf(fixture),
+    },
+    (fixture?.scoring_formats ?? []) as any[],
+  );
+}
+
 /** The racquet rules for a fixture through the format ladder; `frozen` wins once scoring has begun. */
 function racquetFormatFor(fixture: any, frozen: any) {
   const td = fixture?.tournament_disciplines ?? {};
@@ -1499,25 +1524,10 @@ function ChessConsole({ fixture, fixtureId, live, invalidate, onDone }:
 /** Board by board: the points follow from each board's result (carrom.ts). */
 function CarromConsole({ fixture, fixtureId, live, invalidate, onDone }:
   { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
-  const td = fixture?.tournament_disciplines ?? {};
   const homeName = teamLabel(homeTeam(fixture));
   const awayName = teamLabel(awayTeam(fixture));
-  const format = useMemo(() => resolveFormat(
-    {
-      scoring_format_id: fixture?.scoring_format_id ?? null,
-      round: fixture?.round ?? null,
-      stage_sequence: fixture?.stage_sequence ?? null,
-      frozen_format: (live?.live_state as any)?.format ?? null,
-      format_overrides: fixture?.format_overrides ?? null,
-    },
-    {
-      scoring_format_id: td.scoring_format_id ?? null,
-      scoring_preset_key: td.scoring_preset_key ?? null,
-      round_formats: td.round_formats,
-      sport: sportNameOf(fixture),
-    },
-    (fixture?.scoring_formats ?? []) as any[],
-  ).format, [fixture, live?.live_state, td.round_formats, td.scoring_format_id, td.scoring_preset_key]);
+  const resolved = useMemo(() => carromResolved(fixture, (live?.live_state as any)?.format), [fixture, live?.live_state]);
+  const format = resolved.format as ScoringFormat | null;
   const rules = useMemo(() => carromRulesOf(format), [format]);
   const initial = useMemo(() => hydrateCarrom(live?.live_state?.carrom), [live?.live_state?.carrom]);
   const persist = useLiveSave(fixtureId, invalidate);
@@ -1553,7 +1563,8 @@ function CarromConsole({ fixture, fixtureId, live, invalidate, onDone }:
     );
   };
 
-  return <CarromResult homeName={homeName} awayName={awayName} rules={rules} initial={initial} busy={persist.isPending} onSave={save} />;
+  return <CarromResult homeName={homeName} awayName={awayName} rules={rules} formatName={format?.name} provenance={resolved.source}
+    initial={initial} busy={persist.isPending} onSave={save} />;
 }
 
 function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
@@ -2060,8 +2071,12 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
 // persistence (whole tie -> live_state.tie, headline = rubbers won); each rubber is
 // scored by the same per-contest deck. Detailed mode shows the live deck; manual mode
 // (and measured rubbers like pool/chess) just records the rubber winner.
-function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }:
+function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate, onDone }:
   { fixture: any; fixtureId: string; spec: TieSpec; mode: ScoringMode; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+  // A layout just changed here wins until the saved one comes back, so the rubbers on
+  // screen and the spec describing them never disagree for a render.
+  const [specOverride, setSpecOverride] = useState<TieSpec | null>(null);
+  const spec = specOverride ?? specProp;
   const homeName = teamLabel(homeTeam(fixture));
   const awayName = teamLabel(awayTeam(fixture));
   const homeOrg = orgLabel(homeTeam(fixture));
@@ -2082,11 +2097,59 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
   // own rules - the same console a single match uses.
   const racquet = isRacquetSport(sportNameOf(fixture));
   const baseFormat = useMemo(() => (racquet ? racquetFormatFor(fixture, null) : null), [fixture, racquet]);
+  // Carrom rubbers are scored board by board under the draw's carrom format, frozen per
+  // rubber at its first board - not on the legacy tap counter.
+  const carromTie = isCarromSport(sportNameOf(fixture));
+  const carromBaseResolved = useMemo(() => (carromTie ? carromResolved(fixture, null) : null), [fixture, carromTie]);
+  const carromBase = (carromBaseResolved?.format ?? null) as ScoringFormat | null;
+  const carromRulesFor = (r: RubberInstance) => carromRulesOf(r.format ?? carromBase);
   const homeRoster = useMemo(() => rosterPeople(homeTeam(fixture)), [fixture]);
   const awayRoster = useMemo(() => rosterPeople(awayTeam(fixture)), [fixture]);
   const nameOfId = useMemo(() => new Map([...homeRoster, ...awayRoster].map((p) => [p.id, p.name])), [homeRoster, awayRoster]);
   const namesOf = (ids?: string[]) => ids?.map((id) => nameOfId.get(id) ?? '-');
   const [editingLineup, setEditingLineup] = useState<number | null>(null);
+
+  // CHANGING THE RUBBERS from the console, where an organiser actually sees them - the
+  // setup wizard is a page nobody thinks to open. Only before anything is scored, so
+  // no result ever lands under different rubbers than it was played as.
+  const [editingLayout, setEditingLayout] = useState(false);
+  const [layoutDraft, setLayoutDraft] = useState<TieLayoutValue | null>(null);
+  const [savingLayout, setSavingLayout] = useState(false);
+  const untouched = state.rubbers.every((r) =>
+    r.status === 'pending' && !r.winner && !r.drawn && !r.rally?.length && !r.lineup && !r.lineupSkipped && !r.state.ended
+    && r.state.a === 0 && r.state.b === 0);
+  const saveLayout = async (scope: 'match' | 'draw') => {
+    if (!layoutDraft) { setEditingLayout(false); return; }
+    const sport = sportNameOf(fixture);
+    const nextSpec = layoutDraft.standard ? (tieTemplateFor(sport)?.tie ?? layoutDraft.spec) : layoutDraft.spec;
+    setSavingLayout(true);
+    try {
+      if (scope === 'draw') {
+        // Same write as the setup wizard: the draw's own layout, every other key kept.
+        const td = fixture?.tournament_disciplines ?? {};
+        const { scoring: _old, ...rest } = (td.format_config ?? {}) as Record<string, unknown>;
+        const format_config = layoutDraft.standard ? rest : {
+          ...rest,
+          scoring: { fixtureType: 'tie', scoringMode: (td.format_config as any)?.scoring?.scoringMode ?? 'detailed', tie: layoutDraft.spec },
+        };
+        await api('PATCH', `/tournament-disciplines/${td.id}`, { format_config });
+      }
+      // This match starts over on the new rubbers - nothing was scored, so nothing is lost.
+      const fresh = initTie(nextSpec);
+      setSpecOverride(nextSpec);
+      persist.mutate(
+        { live_state: { ...(live?.live_state ?? {}), tie: fresh, tieSpec: nextSpec }, live_log: [] },
+        { onError: (e: any) => toast.error(e.message) },
+      );
+      setState(fresh);
+      setEditingLayout(false);
+      toast.success(scope === 'draw' ? 'Rubbers changed for every match in this draw' : 'Rubbers changed for this match');
+    } catch (e: any) {
+      toast.error(scope === 'draw' ? 'Only the organiser can change the whole draw. Save it for this match instead.' : e.message);
+    } finally {
+      setSavingLayout(false);
+    }
+  };
 
   // Public ticker log: one line per decided rubber, naming who played it.
   const buildLog = (s: TieState): LogEntry[] =>
@@ -2226,6 +2289,11 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
   const rubberScore = (r: RubberInstance, i: number): string => {
     if (r.status === 'dead') return 'not played';
     if (r.drawn) return spec.boardPoints ? 'Drawn ½–½' : 'Drawn';
+    if (carromTie && r.carrom?.boards.length) {
+      const rules = carromRulesFor(r);
+      const h = carromHeadline(carromMatch(r.carrom.boards, rules, r.carrom.firstBreak), rules);
+      return r.winner ? `${r.winner === 'A' ? homeName : awayName} won ${h[0]}–${h[1]}` : `${h[0]}–${h[1]}`;
+    }
     const games = rubberGames(r);
     if (r.winner) return `${r.winner === 'A' ? homeName : awayName} won${games ? ` ${games}` : ''}`;
     if (games) return games;
@@ -2267,8 +2335,26 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
             <Card>
               <CardHeader title={spec.boardPoints ? 'Boards' : 'Rubbers'} subtitle={spec.boardPoints
                 ? 'Tap a board to record its result (or to correct one). A drawn board is ½ each; the match is won on board points.'
-                : 'Tap a rubber to score it (or to reopen and correct one). The tie is won by taking the majority.'} />
+                : 'Tap a rubber to score it (or to reopen and correct one). The tie is won by taking the majority.'}
+                action={untouched && !editingLayout ? (
+                  <Button size="sm" variant="outline" onClick={() => { setLayoutDraft(null); setEditingLayout(true); }}>
+                    Edit {spec.boardPoints ? 'boards' : 'rubbers'}
+                  </Button>
+                ) : undefined} />
               <CardBody className="space-y-1.5">
+                {editingLayout && (
+                  <div className="mb-3 grid gap-3 rounded-xl border border-brand-300 bg-brand-50/40 p-3 dark:border-brand-500/40 dark:bg-brand-500/5">
+                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                      Change the {spec.boardPoints ? 'boards' : 'rubbers'} before play starts. Nothing has been scored yet, so nothing is lost.
+                    </p>
+                    <TieLayoutEditor sport={sportNameOf(fixture) ?? ''} stored={spec} onChange={setLayoutDraft} />
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button variant="outline" disabled={savingLayout} onClick={() => setEditingLayout(false)}>Cancel</Button>
+                      <Button variant="outline" disabled={savingLayout || !layoutDraft} onClick={() => void saveLayout('match')}>Save for this match</Button>
+                      <Button disabled={savingLayout || !layoutDraft} onClick={() => void saveLayout('draw')}>Save for every match in this draw</Button>
+                    </div>
+                  </div>
+                )}
                 {state.rubbers.map((r, i) => {
                   const isActive = i === state.activeRubber;
                   const dead = r.status === 'dead';
@@ -2349,7 +2435,7 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
 
             {active && (
               <Card className="mt-5">
-                <CardHeader title={active.label} subtitle={active.status === 'dead' ? 'Skipped (dead rubber)' : active.drawn ? 'Drawn - ½ each' : active.winner ? `${active.winner === 'A' ? homeName : awayName} won this ${unit}` : spec.boardPoints ? 'Record this board: a win, or a draw for ½ each.' : racquet && mode === 'detailed' ? 'Point by point' : rdef.archetype === 'time' ? 'Pick the winner of this rubber.' : `${rdef.segLabel} ${Math.min(active.state.seg, rdef.segMax)} of ${rdef.segMax}`} />
+                <CardHeader title={active.label} subtitle={active.status === 'dead' ? 'Skipped (dead rubber)' : active.drawn ? 'Drawn - ½ each' : active.winner ? `${active.winner === 'A' ? homeName : awayName} won this ${unit}` : spec.boardPoints ? 'Record this board: a win, or a draw for ½ each.' : carromTie ? 'Board by board' : racquet && mode === 'detailed' ? 'Point by point' : rdef.archetype === 'time' ? 'Pick the winner of this rubber.' : `${rdef.segLabel} ${Math.min(active.state.seg, rdef.segMax)} of ${rdef.segMax}`} />
                 <CardBody className="space-y-4">
                   {active.status === 'dead' ? (
                     <div className="space-y-3 text-center">
@@ -2383,7 +2469,32 @@ function TieConsole({ fixture, fixtureId, spec, mode, live, invalidate, onDone }
                           {active.lineup ? 'Change players' : 'Name players'}
                         </button>
                       </div>
-                      {racquet && mode === 'detailed' && baseFormat?.format ? (
+                      {carromTie ? (
+                        <CarromResult
+                          key={`carrom-${active.key}`}
+                          rubber
+                          homeName={homeName}
+                          awayName={awayName}
+                          rules={carromRulesFor(active)}
+                          formatName={(active.format ?? carromBase)?.name}
+                          provenance={active.format ? 'frozen at this rubber\'s first board' : carromBaseResolved?.source}
+                          initial={hydrateCarrom(active.carrom)}
+                          busy={submitting}
+                          onSave={(cs, done) => {
+                            const fmt = active.format ?? carromBase ?? undefined;
+                            const m = carromMatch(cs.boards, carromRulesFor(active), cs.firstBreak);
+                            const patch: Partial<RubberInstance> = {
+                              carrom: cs,
+                              ...(cs.boards.length && fmt ? { format: fmt } : {}),
+                              status: active.status === 'pending' ? 'live' : active.status,
+                            };
+                            // Confirmed and decided: the rubber goes to its winner. Undone past
+                            // the end: a decided rubber reopens.
+                            if (done && m.winner) updateRubber(state.activeRubber, patch, m.winner);
+                            else updateRubber(state.activeRubber, patch, undefined, !!active.winner && !m.decided);
+                          }}
+                        />
+                      ) : racquet && mode === 'detailed' && baseFormat?.format ? (
                         <RacquetDeck
                           key={`rubber-${active.key}`}
                           format={active.format ?? baseFormat.format}

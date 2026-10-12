@@ -234,7 +234,7 @@ export async function buildPlayerStatRows(
   });
   if (played.kind === 'contests') {
     return contestRows(fx, played.contests, people, sideOf, {
-      sportId, occurred, racquet: !!canonical, chess: isChessSport(sportName),
+      sportId, occurred, racquet: !!canonical, chess: isChessSport(sportName), carrom: isCarromSport(sportName),
       singleOutcome: (side) => outcomeForFixture(fx, side),
     });
   }
@@ -373,7 +373,7 @@ function contestRows(
   contests: PlayedContest[],
   people: FixtureParticipants['resolved'],
   sideOf: Map<string, Side>,
-  opts: { sportId: string | null; occurred: Date; racquet: boolean; chess?: boolean; singleOutcome: (side: Side) => MatchOutcome | null },
+  opts: { sportId: string | null; occurred: Date; racquet: boolean; chess?: boolean; carrom?: boolean; singleOutcome: (side: Side) => MatchOutcome | null },
 ): PlayerStatRow[] {
   // A chess board's line IS its result: half-points doubled (2 win, 1 draw, 0 loss),
   // the board it was played on, and the colour when the tie recorded one.
@@ -420,7 +420,13 @@ function contestRows(
           : c.winner ? (c.winner === seat.side ? 'won' : 'lost') : c.drawn ? 'drew' : null,
         stats: opts.chess && (c.winner || c.drawn)
           ? chessStats(c, seat.side)
-          : derived?.players.find((x) => x.userId === userId)?.stats ?? {},
+          // Carrom rubber: its boards under the rules it froze, the same counters a singles match writes.
+          : opts.carrom && c.carrom?.boards.length
+            ? (() => {
+              const rules = carromRulesOf(c.format);
+              return carromLineStats(carromMatch(c.carrom.boards, rules, c.carrom.firstBreak), rules, seat.side);
+            })()
+            : derived?.players.find((x) => x.userId === userId)?.stats ?? {},
         occurred_on: opts.occurred,
         lock_version: fx.lock_version,
       });

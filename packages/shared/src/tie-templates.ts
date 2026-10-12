@@ -41,10 +41,12 @@ const TIE_TEMPLATES: Record<string, FormatTemplate> = {
     { key: 'ws', label: "Women's Singles", contest: rallyGame(3) },
     { key: 'ms2', label: "Men's Singles", contest: rallyGame(3) },
   ]),
+  // Each rubber is scored board by board under the draw's carrom format (CarromResult);
+  // this contest is only the legacy fallback, so it is at least an odd best-of.
   carrom: tie('detailed', [
-    { key: 'ms', label: 'Men Singles', contest: setsOf(4, 'Board') },
-    { key: 'ws', label: 'Women Singles', contest: setsOf(4, 'Board') },
-    { key: 'xd', label: 'Mixed Doubles', contest: setsOf(4, 'Board') },
+    { key: 'ms', label: 'Men Singles', contest: setsOf(3, 'Game') },
+    { key: 'ws', label: 'Women Singles', contest: setsOf(3, 'Game') },
+    { key: 'xd', label: 'Mixed Doubles', contest: setsOf(3, 'Game') },
   ]),
   tennis: tie('detailed', [
     { key: 'ms', label: "Men's Singles", contest: setsOf(9, 'Game') },

@@ -2,6 +2,7 @@ import { foldRally, resultEnvelope, type RallyLog } from './rally-kernel.js';
 import { canonicalRacquetSport } from './racquet-presets.js';
 import { formatForPairing } from './serve-resolvers.js';
 import { CHESS_ENDINGS, isChessSport, whiteOnBoard, type ChessEnding } from './chess.js';
+import { readCarromState, type CarromBoardsState } from './carrom.js';
 import type { ScoringFormat, Side } from './scoring-rules.js';
 import { playersPerSide, readLineup, resolveMatchLineup, type RubberLineup } from './tie.js';
 import type { MatchPosition } from './enums.js';
@@ -34,6 +35,8 @@ export interface PlayedContest {
   white?: Side;
   /** Chess: how the game ended, when the scorer said. */
   ending?: ChessEnding;
+  /** Carrom: the rubber's boards, from the board-by-board console. */
+  carrom?: CarromBoardsState;
   log: RallyLog;
   /** The rules it was played under, when it was scored point by point. */
   format: ScoringFormat | null;
@@ -95,6 +98,7 @@ export function playedContests(input: {
         ...(side(ls.tie?.firstWhite) || isChessSport(input.sportName)
           ? { white: whiteOnBoard(side(ls.tie?.firstWhite) ?? 'A', i) } : {}),
         ...(typeof r?.ending === 'string' && r.ending in CHESS_ENDINGS ? { ending: r.ending as ChessEnding } : {}),
+        ...(readCarromState(r?.carrom) ? { carrom: readCarromState(r?.carrom)! } : {}),
         log,
         format,
         firstServer,

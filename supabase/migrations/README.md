@@ -365,13 +365,14 @@ confirming no-op; `20260922000000_retire_supabase_realtime` was deliberately NOT
 (it would switch beta's live bell off). Not ported to `infra/rds-migrations/` - it is
 Supabase-only; the 10-04 → 10-09 batch is, as `011_scoring_stats_oct04_to_oct09.sql`.
 
-
 Restores Supabase Realtime for notifications on Supabase databases only: RLS on
 `notification_deliveries` with the "own deliveries" SELECT policy, and the table back in
 the `supabase_realtime` publication. Needed by deploys with `REALTIME_TRANSPORT=supabase`
 (beta). Guarded on the publication, the `authenticated` role and `auth.uid()` existing,
 so it is a no-op on RDS. Before an RDS baseline dump taken FROM a Supabase database,
-re-run `20260922000000_retire_supabase_realtime.sql` first.
+re-run `20260922000000_retire_supabase_realtime.sql` first. On dev the policy and
+publication were already present (the retire migration had never run there), so this
+just recreated the same policy.
 
 ---
 
@@ -423,10 +424,11 @@ go-ahead, as the 10-09 entries above say.
 
 ---
 
-## Not yet applied — `20261012000000_carrom_line_stats`
+## Applied 2026-10-12 (dev only) — `20261012000000_carrom_line_stats`
 
 Adds twelve integer counters (default 0) to `board_match_lines` for carrom matches scored
 on the board-by-board console: games won/lost, points scored/conceded, best board, slams,
 fouls, boards broken and won on the break, and deciding games. Real boards keep
 `units_won` / `units_lost`; `queens` now means queens covered. RDS twin:
-`infra/rds-migrations/011_carrom_line_stats.sql`.
+`infra/rds-migrations/011_carrom_line_stats.sql` (not applied). Applied to dev statement by
+statement; all twelve columns were read back as present. **Not applied to prod.**

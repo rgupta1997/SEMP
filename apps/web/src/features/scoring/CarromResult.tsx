@@ -1,34 +1,29 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  CARROM_COINS, boardsOnly, carromBoardPoints, carromHeadline, carromMatch,
-  type CarromBoard, type CarromRules, type QueenCover, type Side,
+  CARROM_COINS, boardsOnly, carromBoardPoints, carromHeadline, carromMatch, queenCoversFor, readCarromState,
+  type CarromBoard, type CarromBoardsState, type CarromGame, type CarromRules, type QueenCover, type Side,
 } from '@semp/shared';
 import { Button, Card, CardBody, CardHeader, cn, confirmDialog, toast } from '../../components/ui';
 
-/** What the carrom screen keeps in `live_state.carrom`. */
-export interface CarromState {
-  boards: CarromBoard[];
-  /** Who broke the first board (the toss winner's choice). */
-  firstBreak: Side;
-}
-
-const sideOf = (v: unknown): Side | undefined => (v === 'A' || v === 'B' ? v : undefined);
+/** What the carrom screen keeps in `live_state.carrom` (or on a tie rubber). */
+export type CarromState = CarromBoardsState;
 
 export function hydrateCarrom(raw: unknown): CarromState {
-  const r = (raw ?? {}) as Partial<CarromState>;
-  const boards = Array.isArray(r.boards)
-    ? r.boards.filter((x): x is CarromBoard => !!x && !!sideOf(x.winner) && typeof x.coinsLeft === 'number')
-    : [];
-  return { boards, firstBreak: sideOf(r.firstBreak) ?? 'A' };
+  return readCarromState(raw) ?? { boards: [], firstBreak: 'A' };
 }
 
 /**
  * Carrom records each BOARD's result - who won it, the loser's coins left and who
  * covered the queen - and the points follow (carrom.ts). Nobody taps points one by one.
  */
-export function CarromResult({ homeName, awayName, rules, initial, disabled, busy, onSave }: {
+export function CarromResult({ homeName, awayName, rules, initial, disabled, busy, onSave, rubber, formatName, provenance }: {
   homeName: string; awayName: string;
   rules: CarromRules;
+  /** The format being scored ("ICF — best of 3 games to 25"), and where it came from. */
+  formatName?: string;
+  provenance?: string;
+  /** A rubber of a team tie: confirming it settles the rubber, not the fixture. */
+  rubber?: boolean;
   initial: CarromState;
   disabled?: boolean;
   busy?: boolean;
@@ -47,30 +42,39 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
   const nameOf = (s: Side) => (s === 'A' ? homeName : awayName);
   const match = useMemo(() => carromMatch(state.boards, rules, state.firstBreak), [state, rules]);
   const onlyBoards = boardsOnly(rules);
+  const queenCovers = queenCoversFor(rules);
   const update = (next: CarromState) => { edited.current = true; setState(next); onSave(next, false); };
 
   // The board being entered.
   const [winner, setWinner] = useState<Side | null>(null);
-  const [coins, setCoins] = useState(0);
+  // No default: a board ends on the winner's last coin, so the loser always has 1-9
+  // left - and a pre-selected number got recorded without anyone choosing it.
+  const [coins, setCoins] = useState<number | null>(null);
   const [queen, setQueen] = useState<QueenCover>('winner');
   const [extras, setExtras] = useState(false);
   const [slam, setSlam] = useState(false);
   const [fouls, setFouls] = useState({ A: 0, B: 0 });
-  const resetEntry = () => { setWinner(null); setCoins(0); setQueen('winner'); setSlam(false); setFouls({ A: 0, B: 0 }); setExtras(false); };
+  const resetEntry = () => { setWinner(null); setCoins(null); setQueen('winner'); setSlam(false); setFouls({ A: 0, B: 0 }); setExtras(false); };
 
   const game = match.decided ? null : match.games.find((g) => !g.winner) ?? null;
-  const gameScore = game?.score ?? [0, 0];
+  const gameScore: [number, number] = game?.score ?? [0, 0];
   // The fixture's score: games won, or a one-game match's points (even once it is over).
   const headline = carromHeadline(match, rules);
-  const preview = winner
+  const multiGame = rules.gamesToWin > 1 && !onlyBoards;
+  const headlineUnit = onlyBoards ? 'boards' : multiGame ? 'games' : 'points';
+  // Ready to record: a winner, and - unless only the winner is recorded - the coins left.
+  const ready = !!winner && (onlyBoards || coins !== null);
+  const preview = winner && coins !== null
     ? carromBoardPoints({ winner, coinsLeft: coins, queen }, gameScore[winner === 'A' ? 0 : 1], rules)
     : 0;
+  const queenCounts = queen === 'winner' && coins !== null && preview > coins;
 
   const record = () => {
     if (!winner) { toast.error('Pick who won the board.'); return; }
+    if (!onlyBoards && coins === null) { toast.error("Pick how many coins the loser had left."); return; }
     const board: CarromBoard = {
       winner,
-      coinsLeft: onlyBoards ? 0 : coins,
+      coinsLeft: onlyBoards ? 0 : coins!,
       queen,
       ...(slam ? { slam: true } : {}),
       ...(fouls.A || fouls.B ? { fouls } : {}),
@@ -84,10 +88,11 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
   const confirm = async () => {
     if (!match.decided || !match.winner) { toast.error('The match is not decided yet.'); return; }
     const ok = await confirmDialog({
-      title: 'Confirm final result',
-      confirmLabel: 'Sign off',
+      title: rubber ? 'Confirm this rubber' : 'Confirm final result',
+      confirmLabel: rubber ? 'Record rubber' : 'Sign off',
       message: `${nameOf(match.winner)} win ${headline[match.winner === 'A' ? 0 : 1]}-${headline[match.winner === 'A' ? 1 : 0]}`
-        + (onlyBoards ? ' in boards' : rules.gamesToWin > 1 ? ' in games' : '') + '. This completes the match and updates standings.',
+        + ` in ${headlineUnit}. `
+        + (rubber ? 'The rubber goes to them in the tie.' : 'This completes the match and updates standings.'),
     });
     if (ok) onSave(state, true);
   };
@@ -95,39 +100,71 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
   const status = busy
     ? 'Saving… the buttons unlock when the server confirms'
     : match.decided
-      ? `${nameOf(match.winner!)} win the match - ready to confirm`
+      ? `${nameOf(match.winner!)} win the ${rubber ? 'rubber' : 'match'} - ready to confirm`
       : match.current.tieBreak
         ? `Level after ${rules.maxBoards} boards - the next board decides the game`
-        : `Game ${match.current.game} · board ${match.current.board}${rules.maxBoards ? ` of ${rules.maxBoards}` : ''} · ${nameOf(match.nextBreaker)} breaks`;
+        : state.boards.length === 0
+          ? 'Pick who breaks first, then record each board as it finishes'
+          : 'Record the next board when it finishes';
+
+  // Finished games newest first, collapsed; the game in progress is always open.
+  const finishedGames = match.games.map((g, i) => ({ g, i })).filter(({ g }) => g.winner).reverse();
 
   return (
     <Card>
       <CardHeader
-        title={onlyBoards ? `Carrom · first to ${rules.gamesToWin} boards` : `Carrom · ${rules.gamesToWin > 1 ? `best of ${rules.gamesToWin * 2 - 1} games` : 'one game'} to ${rules.gameTarget}`}
+        title={onlyBoards ? `Carrom · first to ${rules.gamesToWin} boards` : `Carrom · ${multiGame ? `best of ${rules.gamesToWin * 2 - 1} games` : 'one game'} to ${rules.gameTarget}`}
         subtitle={onlyBoards
           ? 'Record who won each board.'
-          : `Record each board: who won, the loser's coins left, and who covered the queen (${rules.queenPoints} pts${rules.queenCutoff ? ` until ${rules.queenCutoff}` : ''}).`} />
+          : `Each board: who won, the loser's coins left, who covered the queen (+${rules.queenPoints}${rules.queenCutoff ? ` until ${rules.queenCutoff}` : ''})${rules.maxBoards ? ` · ${rules.maxBoards} boards a game` : ''}.`} />
       <CardBody className="space-y-5">
-        {/* Scoreboard: games won, and the game in progress. */}
-        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-800 dark:bg-slate-900/60">
-          <Name name={homeName} breaking={!match.decided && match.nextBreaker === 'A'} winner={match.winner === 'A'} />
-          <div className="text-center">
-            <div className="font-mono text-4xl font-black tabular-nums text-slate-900 dark:text-white">
-              {headline[0]}–{headline[1]}
-            </div>
-            {rules.gamesToWin > 1 && !onlyBoards && game && (
-              <div className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Game {match.current.game}: {gameScore[0]}–{gameScore[1]}
-              </div>
-            )}
+        {/* Which format is being scored - and where it came from - as the racquet consoles show it. */}
+        {formatName && (
+          <div className="-mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-500 dark:text-slate-400">
+            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">Format</span>
+            <span className="font-semibold text-slate-800 dark:text-slate-100">{formatName}</span>
+            {provenance && <span className="text-xs">· {provenance}</span>}
           </div>
-          <Name name={awayName} breaking={!match.decided && match.nextBreaker === 'B'} winner={match.winner === 'B'} align="right" />
+        )}
+        {/* Scoreboard: the match score with its unit, and the game in progress as points to the target. */}
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/60">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
+            <Name name={homeName} colour={match.decided ? null : match.nextBreaker === 'A' ? 'white' : 'black'} winner={match.winner === 'A'} />
+            <div className="text-center">
+              <div className="font-mono text-4xl font-black tabular-nums text-slate-900 dark:text-white">
+                {headline[0]}<span className="px-2 text-slate-300 dark:text-slate-600">–</span>{headline[1]}
+              </div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{headlineUnit}</div>
+            </div>
+            <Name name={awayName} colour={match.decided ? null : match.nextBreaker === 'B' ? 'white' : 'black'} winner={match.winner === 'B'} align="right" />
+          </div>
+          {multiGame && !match.decided && (
+            <div className="mt-4 grid gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-300">
+                <span>Game {match.current.game}</span>
+                <span className="font-normal text-slate-500 dark:text-slate-400">
+                  {match.current.tieBreak
+                    ? `level after ${rules.maxBoards} boards · tie-breaker board`
+                    : `board ${match.current.board}${rules.maxBoards ? ` of ${rules.maxBoards}` : ''} · to ${rules.gameTarget}`}
+                </span>
+              </div>
+              {(['A', 'B'] as Side[]).map((s) => (
+                <Progress key={s} label={nameOf(s)} value={gameScore[s === 'A' ? 0 : 1]} max={rules.gameTarget} />
+              ))}
+            </div>
+          )}
+          {!multiGame && !onlyBoards && !match.decided && (
+            <div className="mt-4 grid gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+              {(['A', 'B'] as Side[]).map((s) => (
+                <Progress key={s} label={nameOf(s)} value={gameScore[s === 'A' ? 0 : 1]} max={rules.gameTarget} />
+              ))}
+            </div>
+          )}
         </div>
 
         {/* The toss: who breaks the first board. Fixed once a board is recorded. */}
         {state.boards.length === 0 && (
-          <div className="grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] sm:items-center sm:gap-4">
-            <div className="text-sm text-slate-600 dark:text-slate-300">Breaks first (won the toss)</div>
+          <Row label="Breaks first (plays white)">
             <div className="grid grid-cols-2 gap-2">
               {(['A', 'B'] as Side[]).map((s) => (
                 <button key={s} type="button" disabled={disabled} className={choiceCls(state.firstBreak === s)}
@@ -136,14 +173,21 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
                 </button>
               ))}
             </div>
-          </div>
+          </Row>
         )}
 
         {!match.decided && (
-          <div className="grid gap-3 rounded-xl border border-brand-300 bg-brand-50/40 p-3 dark:border-brand-500/40 dark:bg-brand-500/5">
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              {match.current.tieBreak ? 'Tie-breaker board' : `Board ${match.current.board}`}
+          <div className="grid gap-4 rounded-xl border border-brand-300 bg-brand-50/40 p-4 dark:border-brand-500/40 dark:bg-brand-500/5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-base font-bold text-slate-900 dark:text-slate-100">
+                {multiGame && <span className="text-slate-500 dark:text-slate-400">Game {match.current.game} · </span>}
+                {match.current.tieBreak ? 'Tie-breaker board' : `Board ${match.current.board}`}
+              </div>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-700">
+                <Disc white /> {nameOf(match.nextBreaker)} breaks · plays white
+              </span>
             </div>
+
             <Row label="Won by">
               <div className="grid grid-cols-2 gap-2">
                 {(['A', 'B'] as Side[]).map((s) => (
@@ -155,36 +199,51 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
             </Row>
             {!onlyBoards && (
               <>
-                <Row label={`${winner ? nameOf(winner === 'A' ? 'B' : 'A') : 'Loser'}'s coins left`}>
-                  <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-10">
-                    {Array.from({ length: CARROM_COINS + 1 }, (_, n) => (
-                      <button key={n} type="button" disabled={disabled} className={cn(choiceCls(coins === n), 'px-0 py-1.5')} onClick={() => setCoins(n)}>
+                <Row label={winner ? `Coins ${nameOf(winner === 'A' ? 'B' : 'A')} had left` : "Loser's coins left"}>
+                  <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-9">
+                    {Array.from({ length: CARROM_COINS }, (_, i) => i + 1).map((n) => (
+                      <button key={n} type="button" disabled={disabled} aria-pressed={coins === n}
+                        className={cn(choiceCls(coins === n), 'px-0 py-2 font-mono tabular-nums')} onClick={() => setCoins(n)}>
                         {n}
                       </button>
                     ))}
                   </div>
                 </Row>
                 <Row label="Queen covered by">
-                  <div className="grid grid-cols-2 gap-2">
-                    {(['winner', 'loser'] as QueenCover[]).map((q) => (
+                  {/* "Nobody" only where covering is not compulsory - ICF never ends a board uncovered. */}
+                  <div className={cn('grid gap-2', queenCovers.length === 3 ? 'grid-cols-3' : 'grid-cols-2')}>
+                    {queenCovers.map((q) => (
                       <button key={q} type="button" disabled={disabled} className={choiceCls(queen === q)} onClick={() => setQueen(q)}>
-                        {q === 'winner' ? `Board winner (+${rules.queenPoints})` : 'The other side'}
+                        <span className="block truncate">
+                          {q === 'winner'
+                            ? `${winner ? nameOf(winner) : 'Board winner'} (+${rules.queenPoints})`
+                            : q === 'loser'
+                              ? winner ? nameOf(winner === 'A' ? 'B' : 'A') : 'The other side'
+                              : 'Nobody (uncovered)'}
+                        </span>
                       </button>
                     ))}
                   </div>
                 </Row>
               </>
             )}
+
             {extras ? (
-              <div className="grid gap-2 rounded-lg border border-slate-200 p-2 text-sm dark:border-slate-700">
-                <label className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
-                  <input type="checkbox" checked={slam} disabled={disabled} onChange={(e) => setSlam(e.target.checked)} />
-                  Slam - every coin and the queen in one turn from the break
+              <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Optional · for stats only</span>
+                  <button type="button" className="text-xs text-slate-500 underline underline-offset-2 dark:text-slate-400" onClick={() => { setExtras(false); setSlam(false); setFouls({ A: 0, B: 0 }); }}>
+                    Remove
+                  </button>
+                </div>
+                <label className="flex items-start gap-2 text-slate-700 dark:text-slate-200">
+                  <input type="checkbox" className="mt-0.5" checked={slam} disabled={disabled} onChange={(e) => setSlam(e.target.checked)} />
+                  <span><b>Slam</b> - the winner pocketed every coin and the queen in one turn from the break</span>
                 </label>
                 {(['A', 'B'] as Side[]).map((s) => (
                   <div key={s} className="flex items-center justify-between gap-2">
-                    <span className="truncate text-slate-700 dark:text-slate-200">Fouls (dues) · {nameOf(s)}</span>
-                    <span className="flex items-center gap-1.5">
+                    <span className="min-w-0 truncate text-slate-700 dark:text-slate-200"><b>Fouls</b> (dues) · {nameOf(s)}</span>
+                    <span className="flex shrink-0 items-center gap-1.5">
                       <Button size="sm" variant="outline" disabled={disabled || fouls[s] === 0} onClick={() => setFouls({ ...fouls, [s]: fouls[s] - 1 })}>−</Button>
                       <span className="w-6 text-center font-mono tabular-nums">{fouls[s]}</span>
                       <Button size="sm" variant="outline" disabled={disabled} onClick={() => setFouls({ ...fouls, [s]: fouls[s] + 1 })}>+</Button>
@@ -193,48 +252,36 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
                 ))}
               </div>
             ) : (
-              <button type="button" className="text-left text-xs text-slate-500 underline underline-offset-2 dark:text-slate-400" onClick={() => setExtras(true)}>
+              <button type="button" className="justify-self-start text-xs text-slate-500 underline underline-offset-2 dark:text-slate-400" onClick={() => setExtras(true)}>
                 + Slam or fouls (optional)
               </button>
             )}
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-sm text-slate-600 dark:text-slate-300">
-                {winner
-                  ? onlyBoards
-                    ? `${nameOf(winner)} take the board`
-                    : `${nameOf(winner)} score ${preview}${queen === 'winner' && preview > coins ? ` (${coins} + queen)` : ''}`
-                  : 'Pick who won the board'}
-              </span>
-              <Button className="ml-auto" disabled={disabled || busy || !winner} onClick={record}>Record board</Button>
+
+            {/* What recording this board will do, before it is recorded. */}
+            <div className="flex flex-wrap items-center gap-3 border-t border-brand-200 pt-3 dark:border-brand-500/20">
+              {ready && winner ? (
+                <span className="inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-1.5 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">
+                  <b className="font-mono text-base tabular-nums">+{onlyBoards ? 1 : preview}</b>
+                  <span className="min-w-0 truncate">
+                    {nameOf(winner)}{onlyBoards ? ' take the board' : queenCounts ? ` · ${coins} coins + queen` : ` · ${coins} coin${coins === 1 ? '' : 's'}`}
+                  </span>
+                </span>
+              ) : (
+                <span className="text-sm text-slate-500 dark:text-slate-400">
+                  {winner ? 'Pick how many coins the loser had left' : 'Pick who won the board'}
+                </span>
+              )}
+              <Button className="ml-auto" disabled={disabled || busy || !ready} onClick={record}>Record board</Button>
             </div>
           </div>
         )}
 
-        {/* The scoresheet, game by game. */}
-        {match.games.length > 0 && (
-          <div className="space-y-3">
-            {match.games.map((g, gi) => (
-              <div key={gi} className="rounded-xl border border-slate-200 dark:border-slate-800">
-                <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2 text-sm font-semibold dark:border-slate-800">
-                  <span>{onlyBoards ? `Board ${gi + 1}` : `Game ${gi + 1}`}</span>
-                  <span className="font-mono tabular-nums">{onlyBoards ? (g.winner ? `${nameOf(g.winner)} won` : '') : `${g.score[0]}–${g.score[1]}${g.winner ? ` · ${nameOf(g.winner)} won` : ''}`}</span>
-                </div>
-                {!onlyBoards && (
-                  <ol className="divide-y divide-slate-100 text-xs text-slate-600 dark:divide-slate-800 dark:text-slate-300">
-                    {g.boards.map((bd, bi) => (
-                      <li key={bi} className="flex flex-wrap justify-between gap-2 px-3 py-1.5">
-                        <span>Board {bi + 1} · {nameOf(bd.winner)} won{bd.slam ? ' · slam' : ''}</span>
-                        <span className="text-slate-400 dark:text-slate-500">
-                          {bd.coinsLeft} coin{bd.coinsLeft === 1 ? '' : 's'}{bd.points > bd.coinsLeft ? ' + queen' : ''} = <b className="text-slate-700 dark:text-slate-200">{bd.points}</b> · {nameOf(bd.breaker)} broke
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {/* The scoresheet: the game in progress open, finished games folded, newest first. */}
+        {game && <GameSheet title={`Game ${match.current.game} · in progress`} game={game} nameOf={nameOf} onlyBoards={onlyBoards} open />}
+        {finishedGames.map(({ g, i }) => (
+          <GameSheet key={i} title={onlyBoards ? `Board ${i + 1}` : `Game ${i + 1}`} game={g} nameOf={nameOf} onlyBoards={onlyBoards}
+            open={match.decided && finishedGames.length === 1} />
+        ))}
 
         <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
           <span className={cn('text-sm', busy ? 'text-amber-600 dark:text-amber-300' : match.decided ? 'font-semibold text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400')}>
@@ -242,7 +289,7 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
           </span>
           <div className="ml-auto flex gap-2">
             {state.boards.length > 0 && <Button variant="outline" disabled={disabled || busy} onClick={undo}>Undo last board</Button>}
-            <Button disabled={disabled || busy || !match.decided} onClick={confirm}>Confirm result</Button>
+            <Button disabled={disabled || busy || !match.decided} onClick={confirm}>{rubber ? 'Confirm rubber' : 'Confirm result'}</Button>
           </div>
         </div>
       </CardBody>
@@ -250,20 +297,102 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
   );
 }
 
+/** One game's boards as a table, with the running score after each board. */
+function GameSheet({ title, game, nameOf, onlyBoards, open }: {
+  title: string; game: CarromGame; nameOf: (s: Side) => string; onlyBoards: boolean; open?: boolean;
+}) {
+  const running: [number, number] = [0, 0];
+  const rows = game.boards.map((b) => {
+    running[b.winner === 'A' ? 0 : 1] += onlyBoards ? 1 : b.points;
+    return { b, after: [running[0], running[1]] as [number, number] };
+  });
+  return (
+    <details open={open} className="group rounded-xl border border-slate-200 dark:border-slate-800">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm">
+        <span className="font-semibold text-slate-900 dark:text-slate-100">{title}</span>
+        <span className="flex min-w-0 items-center gap-2">
+          {!onlyBoards && <span className="font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">{game.score[0]}–{game.score[1]}</span>}
+          {game.winner && <span className="truncate text-xs text-emerald-700 dark:text-emerald-300">{nameOf(game.winner)} won</span>}
+          <span className="text-slate-400 transition group-open:rotate-180" aria-hidden>▾</span>
+        </span>
+      </summary>
+      {!onlyBoards && rows.length > 0 && (
+        <table className="w-full border-t border-slate-200 text-xs dark:border-slate-800">
+          <thead className="text-left text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
+            <tr>
+              <th className="px-3 py-1.5 font-semibold">Board</th>
+              <th className="px-3 py-1.5 font-semibold">Won by</th>
+              <th className="px-3 py-1.5 text-right font-semibold">Points</th>
+              <th className="hidden px-3 py-1.5 font-semibold sm:table-cell">White (broke)</th>
+              <th className="px-3 py-1.5 text-right font-semibold">Score</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 text-slate-700 dark:divide-slate-800 dark:text-slate-300">
+            {rows.map(({ b, after }, i) => (
+              <tr key={i}>
+                <td className="px-3 py-1.5 tabular-nums">{i + 1}</td>
+                <td className="max-w-[10rem] truncate px-3 py-1.5">{nameOf(b.winner)}{b.slam ? ' · slam' : ''}</td>
+                <td className="px-3 py-1.5 text-right">
+                  <b className="font-mono tabular-nums">{b.points}</b>
+                  {b.points > b.coinsLeft && <span className="ml-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400" title="Includes the queen">+Q</span>}
+                </td>
+                <td className="hidden max-w-[10rem] truncate px-3 py-1.5 text-slate-500 sm:table-cell dark:text-slate-400"><span className="inline-flex items-center gap-1.5"><Disc white /> {nameOf(b.breaker)}</span></td>
+                <td className="px-3 py-1.5 text-right font-mono tabular-nums">{after[0]}–{after[1]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </details>
+  );
+}
+
+/**
+ * A carrom coin in the colour a side plays. ICF: whoever breaks plays white, so the
+ * colours alternate with the break - nothing extra is recorded.
+ */
+function Disc({ white }: { white: boolean }) {
+  return (
+    <span aria-label={white ? 'White' : 'Black'}
+      className={cn('inline-block h-3 w-3 shrink-0 rounded-full border',
+        white ? 'border-slate-400 bg-white' : 'border-slate-700 bg-slate-900 dark:border-slate-400')} />
+  );
+}
+
+function Progress({ label, value, max }: { label: string; value: number; max: number }) {
+  return (
+    <div className="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)_2.5rem] items-center gap-2 text-xs">
+      <span className="truncate text-slate-600 dark:text-slate-300">{label}</span>
+      <span className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+        <span className="block h-full rounded-full bg-brand-500 transition-all" style={{ width: `${Math.min(100, (value / max) * 100)}%` }} />
+      </span>
+      <span className="text-right font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">{value}</span>
+    </div>
+  );
+}
+
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid gap-1.5 sm:grid-cols-[10rem_minmax(0,1fr)] sm:items-center sm:gap-4">
+    <div className="grid gap-1.5 sm:grid-cols-[11rem_minmax(0,1fr)] sm:items-center sm:gap-4">
       <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">{label}</div>
       {children}
     </div>
   );
 }
 
-function Name({ name, breaking, winner, align = 'left' }: { name: string; breaking: boolean; winner: boolean; align?: 'left' | 'right' }) {
+/** A side's name, with the colour it plays on the next board (white breaks). */
+function Name({ name, colour, winner, align = 'left' }: {
+  name: string; colour: 'white' | 'black' | null; winner: boolean; align?: 'left' | 'right';
+}) {
   return (
     <div className={cn('min-w-0', align === 'right' && 'text-right')}>
       <div className={cn('truncate text-sm font-bold sm:text-base', winner ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-900 dark:text-slate-100')}>{name}</div>
-      <div className="text-[11px] text-slate-500 dark:text-slate-400">{winner ? 'winner' : breaking ? 'breaks next' : ' '}</div>
+      <div className={cn('mt-0.5 flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400', align === 'right' && 'justify-end')}>
+        {winner ? 'match winner'
+          : colour === 'white' ? (<><Disc white /> white · breaks next</>)
+          : colour === 'black' ? (<><Disc white={false} /> black</>)
+          : ' '}
+      </div>
     </div>
   );
 }

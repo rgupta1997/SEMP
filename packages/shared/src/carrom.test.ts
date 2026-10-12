@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ICF_CARROM_RULES, carromBoardPoints, carromHeadline, carromLineStats, carromMatch, carromRulesOf, isCarromSport,
-  type CarromBoard,
+  ICF_CARROM_RULES, carromBoardPoints, carromHeadline, carromLineStats, carromMatch, carromRulesOf, isCarromSport, queenCoversFor,
+  type CarromBoard, type QueenCover,
 } from './carrom.js';
 import { presetByKey } from './racquet-presets.js';
 import { foldCareerStats, statSpecFor } from './stat-registry.js';
 import { toCategoryRow } from './category-lines.js';
+import { tieTemplateFor } from './tie-templates.js';
+import { decideRubber, hydrateTie, initTie, reopenRubber } from './tie.js';
+import { playedContests } from './played-contests.js';
 
-const b = (winner: 'A' | 'B', coinsLeft: number, queen: 'winner' | 'loser' = 'loser'): CarromBoard => ({ winner, coinsLeft, queen });
+const b = (winner: 'A' | 'B', coinsLeft: number, queen: QueenCover = 'loser'): CarromBoard => ({ winner, coinsLeft, queen });
 const R = ICF_CARROM_RULES;
 
 describe('a carrom board', () => {
@@ -125,6 +128,48 @@ describe('carrom career stats', () => {
     expect(s).toMatchObject({ boards_won: 3 });
     expect(s.carrom_points_for).toBeUndefined();
     expect(s.carrom_games).toBeUndefined();
+  });
+});
+
+describe('a queen left uncovered (house rules)', () => {
+  const corporate = carromRulesOf(presetByKey('corp_bo3_21'));
+
+  it('is offered only where covering is not compulsory', () => {
+    expect(queenCoversFor(R)).toEqual(['winner', 'loser']);
+    expect(queenCoversFor(corporate)).toEqual(['winner', 'loser', 'none']);
+  });
+
+  it('scores no queen points and credits the queen to nobody', () => {
+    const board = b('A', 5, 'none');
+    expect(carromBoardPoints(board, 0, corporate)).toBe(5);
+    const m = carromMatch([board], corporate);
+    expect(carromLineStats(m, corporate, 'A').queens).toBeUndefined();
+    expect(carromLineStats(m, corporate, 'B').queens).toBeUndefined();
+  });
+});
+
+describe('a carrom team tie', () => {
+  const spec = tieTemplateFor('carrom')!.tie!;
+  const boards = { boards: [b('A', 9, 'winner'), b('A', 9, 'winner'), b('A', 9)], firstBreak: 'B' as const };
+
+  it('is an odd best-of in its fallback, not "best of 4 boards"', () => {
+    expect(spec.rubbers.every((r) => r.contest.segMax % 2 === 1)).toBe(true);
+  });
+
+  it('keeps a rubber\'s boards across a reload, and a full reset clears them', () => {
+    const s = initTie(spec);
+    s.rubbers[0] = { ...s.rubbers[0], carrom: boards };
+    const back = hydrateTie(JSON.parse(JSON.stringify(s)), spec);
+    expect(back.rubbers[0].carrom).toEqual(boards);
+    expect(reopenRubber(spec, back, 0, true).rubbers[0].carrom).toBeUndefined();
+  });
+
+  it('hands each rubber\'s boards to the career records', () => {
+    let s = initTie(spec);
+    s.rubbers[0] = { ...s.rubbers[0], lineup: { A: ['a1'], B: ['b1'] }, carrom: boards };
+    s = decideRubber(spec, s, 0, 'A');
+    const r = playedContests({ liveState: { tie: s }, sportName: 'carrom', entryType: 'team', roster: { A: ['a1'], B: ['b1'] }, matchWinner: null });
+    expect(r.kind === 'contests' && r.contests[0].carrom?.boards).toHaveLength(3);
   });
 });
 
