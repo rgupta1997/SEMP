@@ -108,6 +108,7 @@ export const COLUMN_MAP: Record<Exclude<StatFamily, 'measured' | 'cricket'>, Rec
     points_scored: 'points_scored', fg_1: 'fg_1', fg_2: 'fg_2', fg_3: 'fg_3',
     rebounds: 'rebounds', steals: 'steals', blocks: 'blocks',
     turnovers: 'turnovers', fouls: 'fouls',
+    ftm: 'ftm', fta: 'fta', fgm: 'fgm', fga: 'fga', fg3m: 'fg3m', fg3a: 'fg3a',
   },
   raid: {
     minutes: 'minutes',

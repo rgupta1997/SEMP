@@ -181,6 +181,9 @@ const SHOOTOUT = { kicks: 5 };
 // Short halves want short extra time: five minutes each, both played out.
 const FEST_TIEBREAK = { extraTime: { periods: 2, minutes: 5 }, penalties: SHOOTOUT };
 
+// FIBA overtime: five minutes, then another, for as long as the score is level.
+const BASKETBALL_OVERTIME = { extraTime: { periods: 1, minutes: 5, repeat: true, label: 'Overtime' } };
+
 const INVASION: ScoringFormat[] = [
   // FIRST IN THE LIST IS THE SPORT DEFAULT (`defaultFormatFor` takes list[0]), and
   // this is the one a fest actually plays: short halves, because twenty pitches have
@@ -244,13 +247,18 @@ const INVASION: ScoringFormat[] = [
   fmt({
     sport: 'basketball', key: 'fiba_4x10', name: 'FIBA — four quarters of 10 minutes',
     levels: [period('Quarter', 'quarter'), aggregateMatch(4)], clock: cap(40, 'leaderWins', 'organiserDecides'),
+    // Basketball has no draws: level after the 4th quarter plays 5-minute overtimes
+    // until someone leads (FIBA). No shoot-out.
+    tieBreak: BASKETBALL_OVERTIME,
     endStates: STRICT,
-    rulesSheet: { shotClockSeconds: 24, foulsToDisqualify: 5, timeoutsPerHalf: 2 },
+    rulesSheet: { shotClockSeconds: 24, foulsToDisqualify: 5, timeoutsPerHalf: 2, overtime: '5 minutes, repeated until a side leads' },
   }),
   fmt({
     sport: 'basketball', key: 'basketball_corp_2x10', name: 'Corporate — two halves of 10 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)], mode: 'selfScored',
-    clock: cap(20, 'leaderWins'), endStates: LEAGUE,
+    // No draws here either - a level game goes to overtime like any other.
+    clock: cap(20, 'leaderWins', 'organiserDecides'), tieBreak: BASKETBALL_OVERTIME, endStates: STRICT,
+    rulesSheet: { foulsToDisqualify: 5, overtime: '5 minutes, repeated until a side leads' },
   }),
   fmt({
     sport: 'basketball', key: 'street_21', name: 'Streetball — first to 21',

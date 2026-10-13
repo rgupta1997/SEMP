@@ -246,6 +246,10 @@ export function TeamDeck(p: TeamDeckProps) {
     return tally;
   }, [log, events]);
 
+  // Basketball's foul-out: at this many personal fouls a player must leave (FIBA 5).
+  const foulLimit = Number(format.rulesSheet?.foulsToDisqualify) || 0;
+  const actorFouls = foulLimit && actor ? playerCards.get(actor)?.caution ?? 0 : 0;
+
   const canAttribute = events.length > 0 && players.length > 0;
   // Only a goal-shaped action offers a second person; nothing else does.
   const wantsSecond = events.some((e) => e.secondPlayer);
@@ -285,9 +289,12 @@ export function TeamDeck(p: TeamDeckProps) {
    * exactly the sort of nonsense an official stops trusting a console over.
    */
   const inExtra = progress.phase === 'extraTime';
-  const periodName = inExtra ? 'Extra time' : lv.label;
+  const extraSpec = format.tieBreak?.extraTime;
+  // Basketball overtime repeats while level, so it has no "of N" - each one may be the last.
+  const repeatingExtra = inExtra && !!extraSpec?.repeat;
+  const periodName = inExtra ? (extraSpec?.label ?? 'Extra time') : lv.label;
   const periodNo = inExtra ? progress.extraPlayed + 1 : Math.min(played + 1, totalPeriods);
-  const periodOf = inExtra ? progress.extraTotal : totalPeriods;
+  const periodOf = repeatingExtra ? periodNo : inExtra ? progress.extraTotal : totalPeriods;
 
   const shoot = useMemo(
     () => shootoutState(log, format.tieBreak?.penalties?.kicks ?? 5),
@@ -305,10 +312,12 @@ export function TeamDeck(p: TeamDeckProps) {
         // What happens after the LAST period depends entirely on whether the scores
         // are level, and an official about to blow the final whistle should be told
         // which it is before they do it, not after.
-        : level && inExtra && format.tieBreak?.penalties
+        : level && repeatingExtra
+          ? `Still ${shown[0]}–${shown[1]}. Another ${periodName.toLowerCase()} of ${extraSpec!.minutes} minutes is played.`
+          : level && inExtra && format.tieBreak?.penalties
           ? `Still ${shown[0]}–${shown[1]} after extra time. This goes to a penalty shoot-out.`
           : level && !inExtra && format.tieBreak?.extraTime
-            ? `Level at ${shown[0]}–${shown[1]}. This goes to extra time.`
+            ? `Level at ${shown[0]}–${shown[1]}. This goes to ${(extraSpec?.label ?? 'extra time').toLowerCase()}${extraSpec?.repeat ? ` (${extraSpec.minutes} min, repeated until someone leads)` : ''}.`
             : `This is the last ${periodName.toLowerCase()}. The match is decided on the total, currently ${shown[0]}–${shown[1]}.`,
     });
     if (ok) push({ t: 'endPeriod' });
@@ -346,7 +355,7 @@ export function TeamDeck(p: TeamDeckProps) {
             <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-on-brand">
               {progress.phase === 'penalties'
                 ? 'Penalties'
-                : aggregate ? `${periodName} ${periodNo} of ${periodOf}` : lv.label}
+                : aggregate ? (repeatingExtra ? `${periodName} ${periodNo}` : `${periodName} ${periodNo} of ${periodOf}`) : lv.label}
             </div>
 
             {/* THE CLOCK. Tapping the reading opens the correction panel - an
@@ -522,9 +531,18 @@ export function TeamDeck(p: TeamDeckProps) {
                   <PeopleGrid
                     value={actor} qa={`actor-${side}`}
                     options={players.map((x) => [x.id, x.name] as [string, string])}
-                    cards={playerCards}
+                    cards={playerCards} foulLimit={foulLimit}
                     onChange={(v) => { setActor(v); if (v === second) setSecond(''); setAssistOpen(false); }}
                   />
+                  {foulLimit > 0 && actorFouls >= foulLimit - 1 && (
+                    <p data-qa="foul-out-warning" role="status"
+                      className={cn('mt-1 text-[11px] font-semibold',
+                        actorFouls >= foulLimit ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400')}>
+                      {actorFouls >= foulLimit
+                        ? `Fouled out — ${actorFouls} fouls. They must be substituted.`
+                        : `${actorFouls} fouls — one more and they foul out.`}
+                    </p>
+                  )}
                 </Group>
 
                 {wantsSecond && actor && (
@@ -1093,10 +1111,12 @@ function CardPips({ counts, on }: { counts: { caution: number; dismissal: number
   );
 }
 
-function PeopleGrid({ value, options, onChange, qa, cards }: {
+function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0 }: {
   value: string; options: Array<[string, string]>; onChange: (v: string) => void; qa?: string;
   /** Cards booked per player id, so a chip can say who is already on a yellow. */
   cards?: Map<string, { caution: number; dismissal: number }>;
+  /** Fouls that put a player out (basketball); 0 when the sport has no foul-out. */
+  foulLimit?: number;
 }) {
   const labels = shortNames(options.map(([, label]) => label));
   return (
@@ -1115,14 +1135,18 @@ function PeopleGrid({ value, options, onChange, qa, cards }: {
           ? (marks.caution ? 2 + (marks.caution > 1 ? 1 : 0) : 0)
             + (marks.dismissal ? 2 + (marks.dismissal > 1 ? 1 : 0) : 0)
           : 0;
+        const fouledOut = foulLimit > 0 && (marks?.caution ?? 0) >= foulLimit;
+        const onLastFoul = foulLimit > 0 && !fouledOut && (marks?.caution ?? 0) === foulLimit - 1;
         return (
           <button key={v || '_none'} type="button" data-qa-value={v}
+            data-fouled-out={fouledOut || undefined}
             // The tooltip is the only place the name is guaranteed whole, so it now
             // carries the booking too rather than just repeating the label.
-            title={marks
-              ? `${label} — ${[marks.caution && `${marks.caution} caution${marks.caution > 1 ? 's' : ''}`,
+            title={fouledOut ? `${label} — fouled out (${marks!.caution} fouls)`
+              : marks
+              ? `${label} — ${[marks.caution && `${marks.caution} ${foulLimit ? 'foul' : 'caution'}${marks.caution > 1 ? 's' : ''}`,
                   marks.dismissal && `${marks.dismissal} dismissal${marks.dismissal > 1 ? 's' : ''}`]
-                  .filter(Boolean).join(', ')}`
+                  .filter(Boolean).join(', ')}${onLastFoul ? ', one from fouling out' : ''}`
               : label}
             onClick={() => onChange(v)}
             className={cn(
@@ -1133,7 +1157,8 @@ function PeopleGrid({ value, options, onChange, qa, cards }: {
                 : 'border border-line bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200',
               // A sending-off is not a footnote on the chip - the player is off, and
               // an official about to attribute a goal to them should see it first.
-              !!marks?.dismissal && !on && 'border-red-300 bg-red-50 dark:border-red-500/40 dark:bg-red-500/10',
+              (!!marks?.dismissal || fouledOut) && !on && 'border-red-300 bg-red-50 dark:border-red-500/40 dark:bg-red-500/10',
+              onLastFoul && !on && 'border-amber-300 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10',
             )}>
             <span className="truncate">{shown}</span>
             {marks && <CardPips counts={marks} on={on} />}

@@ -155,6 +155,12 @@ export function deriveTeamStats(
     }
   }
 
+  // No miss logged means misses weren't being kept: drop the shot counters, not show 100%.
+  const att = spec.attempts;
+  if (att && !log.some((e) => e.t === 'point' && !!e.kind && att.missEvents.includes(e.kind))) {
+    for (const bag of perPerson.values()) for (const k of att.metrics) delete bag[k];
+  }
+
   // ---- the sports where the RESULT is the statistic --------------------------
   //
   // Applied only when the log credited nobody, so an event-recording sport is never

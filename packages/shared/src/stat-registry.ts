@@ -118,6 +118,8 @@ export interface SportStatSpec {
   events: StatEventSpec[];
   /** Lineup positions / roles offered on the team sheet. */
   positions?: string[];
+  /** Shot counters kept only when the scorer logged a miss in that match - else every % reads 100. */
+  attempts?: { missEvents: string[]; metrics: string[] };
 }
 
 // ---- metric helpers --------------------------------------------------------
@@ -344,6 +346,12 @@ const count = (key: string, label: string, short: string, o: Partial<StatMetric>
   key, label, short, source: 'event', per: 1, aggregate: 'sum', higherIsBetter: true, ...o,
 });
 
+/** A plain average per match - `rate` would show 20 points in one match as 2000%. */
+const perMatch = (key: string, label: string, short: string, of: string): StatMetric => ({
+  key, label, short, source: 'derived', aggregate: 'sum',
+  formula: { op: 'per', of: [of, 'matches'] }, higherIsBetter: true, headline: true,
+});
+
 /** Appearances and the result - every family has these, however it is scored. */
 const UNIVERSAL: StatMetric[] = [
   rally('matches', 'Matches', 'M', { headline: true }),
@@ -385,15 +393,19 @@ const GOAL_METRICS: StatMetric[] = [
   count('reds', 'Red cards', 'RC', { fromEvents: ['red'], higherIsBetter: false }),
   count('pens_scored', 'Penalties scored', 'PS', { fromEvents: ['pen_scored'] }),
   count('pens_missed', 'Penalties missed', 'PM', { fromEvents: ['pen_missed'], higherIsBetter: false }),
-  rate('goals_per_match', 'Goals per match', 'G/M', ['goals', 'matches'], true),
+  perMatch('goals_per_match', 'Goals per match', 'G/M', 'goals'),
 ];
 
 // Basketball counts the same shape with a different vocabulary, and its baskets are
 // worth one, two or three - which is what `value` on an event is for.
+// Made shots also count as attempts; ftm/fgm/fg3m are the made side of each %.
 const BASKET_EVENTS: StatEventSpec[] = [
-  ev('fg1', 'Free throw', { points_scored: 1, fg_1: 1 }, { points: 1 }),
-  ev('fg2', 'Two-pointer', { points_scored: 2, fg_2: 1 }, { points: 2 }),
-  ev('fg3', 'Three-pointer', { points_scored: 3, fg_3: 1 }, { points: 3 }),
+  ev('fg1', 'Free throw', { points_scored: 1, fg_1: 1, ftm: 1, fta: 1 }, { points: 1 }),
+  ev('fg2', 'Two-pointer', { points_scored: 2, fg_2: 1, fgm: 1, fga: 1 }, { points: 2 }),
+  ev('fg3', 'Three-pointer', { points_scored: 3, fg_3: 1, fgm: 1, fga: 1, fg3m: 1, fg3a: 1 }, { points: 3 }),
+  ev('ft_miss', 'Missed free throw', { fta: 1 }, { tone: 'error' }),
+  ev('fg2_miss', 'Missed two', { fga: 1 }, { tone: 'error' }),
+  ev('fg3_miss', 'Missed three', { fga: 1, fg3a: 1 }, { tone: 'error' }),
   ev('rebound', 'Rebound', { rebounds: 1 }, { tone: 'good' }),
   ev('assist_bb', 'Assist', { assists: 1 }, { tone: 'good' }),
   ev('steal', 'Steal', { steals: 1 }, { tone: 'good' }),
@@ -414,7 +426,16 @@ const BASKET_METRICS: StatMetric[] = [
   count('blocks', 'Blocks', 'Blk', { fromEvents: ['block'] }),
   count('turnovers', 'Turnovers', 'TO', { fromEvents: ['turnover'], higherIsBetter: false }),
   count('fouls', 'Fouls', 'PF', { fromEvents: ['foul'], higherIsBetter: false }),
-  rate('points_per_match', 'Points per match', 'P/M', ['points_scored', 'matches'], true),
+  count('ftm', 'Free throws made', 'FTM', { fromEvents: ['fg1'], hidden: true }),
+  count('fta', 'Free throws attempted', 'FTA', { fromEvents: ['fg1', 'ft_miss'], hidden: true }),
+  count('fgm', 'Field goals made', 'FGM', { fromEvents: ['fg2', 'fg3'], hidden: true }),
+  count('fga', 'Field goals attempted', 'FGA', { fromEvents: ['fg2', 'fg3', 'fg2_miss', 'fg3_miss'], hidden: true }),
+  count('fg3m', 'Threes made', '3PM', { fromEvents: ['fg3'], hidden: true }),
+  count('fg3a', 'Threes attempted', '3PA', { fromEvents: ['fg3', 'fg3_miss'], hidden: true }),
+  rate('fg_pct', 'Field goal %', 'FG%', ['fgm', 'fga'], true),
+  rate('fg3_pct', 'Three-point %', '3P%', ['fg3m', 'fg3a']),
+  rate('ft_pct', 'Free throw %', 'FT%', ['ftm', 'fta']),
+  perMatch('points_per_match', 'Points per match', 'P/M', 'points_scored'),
 ];
 
 // ---- raid & tag ------------------------------------------------------------
@@ -566,7 +587,10 @@ export const TEAM_STAT_SPECS: SportStatSpec[] = [
   spec('hockey', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['GK', 'DEF', 'MID', 'FWD']),
   spec('handball', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['GK', 'BACK', 'WING', 'PIVOT']),
   spec('frisbee', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['handler', 'cutter']),
-  spec('basketball', 'invasion', BASKET_METRICS, BASKET_EVENTS, ['PG', 'SG', 'SF', 'PF', 'C']),
+  {
+    ...spec('basketball', 'invasion', BASKET_METRICS, BASKET_EVENTS, ['PG', 'SG', 'SF', 'PF', 'C']),
+    attempts: { missEvents: ['ft_miss', 'fg2_miss', 'fg3_miss'], metrics: ['ftm', 'fta', 'fgm', 'fga', 'fg3m', 'fg3a'] },
+  },
   // raid
   spec('kabaddi', 'raid', RAID_METRICS, RAID_EVENTS, ['raider', 'defender', 'all-rounder']),
   spec('kho-kho', 'raid', RAID_METRICS, RAID_EVENTS, ['attacker', 'defender']),
