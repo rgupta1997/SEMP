@@ -113,7 +113,7 @@ describe('carrom career stats', () => {
   it('folds into a career with the rates worked out', () => {
     const spec = statSpecFor('carrom')!;
     const career = foldCareerStats(spec, [carromLineStats(m, R, 'A'), carromLineStats(m, R, 'A')]);
-    expect(career).toMatchObject({ boards_won: 12, board_win_pct: 60, game_win_pct: 66.7, carrom_points_per_board: 11, best_board: 12 });
+    expect(career).toMatchObject({ boards_won: 12, board_win_pct: 60, game_win_pct: 66.7, best_board: 12 });
   });
 
   it('lands in board_match_lines columns', () => {

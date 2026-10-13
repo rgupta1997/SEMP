@@ -484,8 +484,6 @@ const BOARD_METRICS: StatMetric[] = [
   rate('game_win_pct', 'Game win %', 'G%', ['carrom_games_won', 'carrom_games'], true),
   rally('carrom_points_for', 'Points scored', 'Pts'),
   rally('carrom_points_against', 'Points conceded', 'PA', { higherIsBetter: false }),
-  rally('carrom_points_per_board', 'Points per board won', 'P/B',
-    { source: 'derived', formula: { op: 'per', of: ['carrom_points_for', 'boards_won'] } }),
   rally('best_board', 'Best board', 'Best', { aggregate: 'max' }),
   // Covered, not merely pocketed: a queen only counts once it is covered.
   count('queens', 'Queens covered', 'Q', { fromEvents: ['queen'], headline: true }),

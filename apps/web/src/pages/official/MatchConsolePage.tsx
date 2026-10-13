@@ -747,7 +747,9 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
             ? isCricketSport(sportName)
               ? <CricketManualResult key={`cman-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} live={live} invalidate={invalidate} onDone={onDone} />
               : <ManualResult key={`man-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} live={live} invalidate={invalidate} onDone={onDone}
-                  format={isRacquetSport(sportName) ? racquetFormatFor(fixture, (live?.live_state as any)?.format ?? null).format : null} />
+                  format={isRacquetSport(sportName) ? racquetFormatFor(fixture, (live?.live_state as any)?.format ?? null).format
+                    : isCarromSport(sportName) ? carromResolved(fixture, (live?.live_state as any)?.format ?? null).format as ScoringFormat | null
+                    : null} />
             // Racquet sports score through the rules-aware kernel: real targets,
             // win-by, caps, deuce and serve tracking, instead of a tap counter whose
             // "next set" button awarded the game to whoever happened to be ahead.
@@ -3393,9 +3395,12 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
   const unitLevel = format && format.levels.length > 1 ? format.levels[format.levels.length - 2] : null;
   const unitLabel = (unitLevel?.label ?? def.segLabel).toLowerCase();
   const bestOf = top && !singleUnit ? top.target * 2 - 1 : def.segMax;
+  // Carrom: a game's score stops at its target, so one game ends with the winner ON it.
+  const carrom = isCarromSport(sportNameOf(fixture)) && format ? carromRulesOf(format) : null;
 
   const hint = def.manualHint ?? (
-    singleUnit ? `Enter the final points of the ${unitLabel} for each side, then confirm the winner.`
+    carrom && singleUnit ? `Enter each side's points in the game (first to ${carrom.gameTarget}), then confirm the winner.`
+    : singleUnit ? `Enter the final points of the ${unitLabel} for each side, then confirm the winner.`
     : def.archetype === 'sets' || def.archetype === 'rally' ? `Enter the number of ${unitLabel}s each side won, then confirm the winner.`
     : 'Enter the final score for each side, then confirm the winner.');
 
@@ -3412,12 +3417,22 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
   const racquetShape = def.archetype === 'sets' || def.archetype === 'rally' || !!format;
   const winsNeeded = racquetShape && !singleUnit ? (top && format ? top.target : Math.ceil(def.segMax / 2)) : null;
   const playAll = !!unitLevel?.playAll;
+  const carromGameValid = (a: number, b: number) => {
+    const hi = Math.max(a, b);
+    // With a board limit a game can end short of the target on the higher score.
+    return a !== b && hi <= carrom!.gameTarget && (carrom!.maxBoards != null || hi === carrom!.gameTarget);
+  };
   const gamesValid = !racquetShape || hs == null || as == null ? true
+    : carrom && singleUnit ? carromGameValid(hs, as)
     : singleUnit && unitLevel ? unitWinner(unitLevel, [hs, as]) !== null
     : playAll ? hs + as === bestOf && hs !== as
     : (hs === winsNeeded && as < winsNeeded!) || (as === winsNeeded && hs < winsNeeded!);
   const gamesError = !gamesValid && hs != null && as != null
-    ? singleUnit && unitLevel
+    ? carrom && singleUnit
+      ? carrom.maxBoards != null
+        ? `A carrom game ends on ${carrom.gameTarget}, or on the higher score after ${carrom.maxBoards} boards - nobody passes ${carrom.gameTarget} and it can't be level.`
+        : `A carrom game ends when one side reaches ${carrom.gameTarget}: the winner is on ${carrom.gameTarget} and the other side on fewer - e.g. ${carrom.gameTarget}-14.`
+      : singleUnit && unitLevel
       ? `That isn't a finished ${unitLabel}: first to ${unitLevel.target}${unitLevel.winBy > 1 ? ` by ${unitLevel.winBy}` : ''}${unitLevel.cap ? `, capped at ${unitLevel.cap}` : ''} - e.g. ${unitLevel.target}-${Math.max(0, unitLevel.target - 2)}.`
       : playAll
         ? `Every ${unitLabel} is played here: the two numbers must add up to ${bestOf}.`
