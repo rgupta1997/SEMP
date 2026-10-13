@@ -1751,6 +1751,7 @@ model net_match_lines {
   minutes            Int?
   points_won         Int                @default(0)
   sets_lost          Int                @default(0)
+  points_lost        Int                @default(0)
   player_match_stats player_match_stats @relation(fields: [line_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([line_id], map: "idx_net_lines_line")

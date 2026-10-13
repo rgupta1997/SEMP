@@ -15,7 +15,7 @@ import {
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
+import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
 import { carromHeadline, carromMatch, carromRulesOf, isCarromSport } from '@semp/shared';
 import { CarromResult, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
 import { TieLayoutEditor, type TieLayoutValue } from '../../features/scoring/TieLayoutEditor';
@@ -747,7 +747,9 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
             ? isCricketSport(sportName)
               ? <CricketManualResult key={`cman-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} live={live} invalidate={invalidate} onDone={onDone} />
               : <ManualResult key={`man-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} live={live} invalidate={invalidate} onDone={onDone}
-                  format={isRacquetSport(sportName) ? racquetFormatFor(fixture, (live?.live_state as any)?.format ?? null).format
+                  // Volleyball and throwball are set-shaped too: check against their own best-of, not a fixed 5.
+                  format={isRacquetSport(sportName) || statSpecFor(sportName)?.family === 'net'
+                    ? racquetFormatFor(fixture, (live?.live_state as any)?.format ?? null).format
                     : isCarromSport(sportName) ? carromResolved(fixture, (live?.live_state as any)?.format ?? null).format as ScoringFormat | null
                     : null} />
             // Racquet sports score through the rules-aware kernel: real targets,
@@ -3422,8 +3424,15 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
     // With a board limit a game can end short of the target on the higher score.
     return a !== b && hi <= carrom!.gameTarget && (carrom!.maxBoards != null || hi === carrom!.gameTarget);
   };
+  // A time cap can stop play short of the target, so any score inside the limits stands.
+  // Multi-unit stays lenient on level: time up can go to the side ahead in the set in play.
+  const timed = !!format?.clock;
+  const timedValid = (a: number, b: number) => singleUnit && unitLevel
+    ? Math.max(a, b) <= unitLevel.target && (a !== b || format!.endStates.drawsAllowed)
+    : Math.max(a, b) <= winsNeeded! && !(a === winsNeeded && b === winsNeeded);
   const gamesValid = !racquetShape || hs == null || as == null ? true
     : carrom && singleUnit ? carromGameValid(hs, as)
+    : timed ? timedValid(hs, as)
     : singleUnit && unitLevel ? unitWinner(unitLevel, [hs, as]) !== null
     : playAll ? hs + as === bestOf && hs !== as
     : (hs === winsNeeded && as < winsNeeded!) || (as === winsNeeded && hs < winsNeeded!);
@@ -3432,6 +3441,10 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
       ? carrom.maxBoards != null
         ? `A carrom game ends on ${carrom.gameTarget}, or on the higher score after ${carrom.maxBoards} boards - nobody passes ${carrom.gameTarget} and it can't be level.`
         : `A carrom game ends when one side reaches ${carrom.gameTarget}: the winner is on ${carrom.gameTarget} and the other side on fewer - e.g. ${carrom.gameTarget}-14.`
+      : timed
+      ? singleUnit && unitLevel
+        ? `Play stops at ${unitLevel.target} or on time - neither side can pass ${unitLevel.target}${format!.endStates.drawsAllowed ? '' : ', and it can\'t be level'}.`
+        : `Neither side can have more than ${winsNeeded} ${unitLabel}s.`
       : singleUnit && unitLevel
       ? `That isn't a finished ${unitLabel}: first to ${unitLevel.target}${unitLevel.winBy > 1 ? ` by ${unitLevel.winBy}` : ''}${unitLevel.cap ? `, capped at ${unitLevel.cap}` : ''} - e.g. ${unitLevel.target}-${Math.max(0, unitLevel.target - 2)}.`
       : playAll

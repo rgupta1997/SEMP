@@ -1,7 +1,7 @@
 import { ChevronDown } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  aggregateScore, effectiveLevel, foldRally, isAggregate, periodsPlayed, resultEnvelope,
+  aggregateScore, capLeader, changesEndsAfterUnit, effectiveLevel, foldRally, isDecider, isAggregate, periodsPlayed, resultEnvelope,
   clockReading, formatClock, minuteLabel, tieProgress, shootoutState, shootoutLine, shootoutEnd,
   type ClockReading, type ShootoutState,
   statSpecFor, type EventTone, type KernelState, type RallyEvent, type RallyLog, type ScoringFormat,
@@ -114,7 +114,8 @@ function useDeckHeight(ref: React.RefObject<HTMLElement>): number | undefined {
 
 export function TeamDeck(p: TeamDeckProps) {
   const { format, log } = p;
-  const state = useMemo(() => foldRally(format, log, 'A').state, [format, log]);
+  const fold = useMemo(() => foldRally(format, log, 'A'), [format, log]);
+  const state = fold.state;
   const lv = effectiveLevel(format, state, state.pointLevel);
   const env = resultEnvelope(format, state);
   const aggregate = isAggregate(format);
@@ -194,6 +195,27 @@ export function TeamDeck(p: TeamDeckProps) {
   const nameOf = (s: Side) => (s === 'A' ? p.homeName : p.awayName);
   const played = periodsPlayed(state);
   const totalPeriods = format.levels[format.levels.length - 1].target;
+  // A sets match's target is sets to WIN: best of 5 is first to 3, so up to 5 are played.
+  const unitPlayAll = !!format.levels[format.levels.length - 2]?.playAll;
+  const maxUnits = aggregate || unitPlayAll ? totalPeriods : totalPeriods * 2 - 1;
+
+  // Volleyball and throwball only: the rally winner serves, and ends change between sets.
+  const rallyServe = format.serve.movement === 'rallyWinner';
+  const serving: Side | null = rallyServe && !state.ended ? state.serve.side : null;
+  const noRallyYet = !log.some((e) => e.t === 'point' || e.t === 'penalty');
+  let playIdx = fold.trace.length - 1;
+  while (playIdx >= 0 && PASSIVE.has(fold.trace[playIdx].event.t)) playIdx -= 1;
+  const lastEffect = playIdx >= 0 ? fold.trace[playIdx] : undefined;
+  const afterUnit = rallyServe && !!lastEffect && changesEndsAfterUnit(format, state, lastEffect.unitsWon);
+  // FIVB 18.2: no change before the deciding set - there is a fresh toss instead.
+  const nextIsDecider = afterUnit && isDecider(format, state, 0);
+  const [switchDismissed, setSwitchDismissed] = useState(-1);
+  const showSwitch = rallyServe && !state.ended && (!!lastEffect?.switchEnds || afterUnit) && switchDismissed !== playIdx;
+  const switchText = nextIsDecider
+    ? `Deciding ${lv.label.toLowerCase()} next: toss again for serve and ends`
+    : afterUnit
+      ? `Change ends before the next ${lv.label.toLowerCase()}`
+      : `Change ends · ${state.score[0][0]}–${state.score[0][1]} in the deciding ${lv.label.toLowerCase()}`;
 
   const players = p.roster?.[side] ?? [];
   const nameFor = (id: string) =>
@@ -349,7 +371,7 @@ export function TeamDeck(p: TeamDeckProps) {
       <div data-qa="team-scoreboard"
         className="shrink-0 overflow-hidden rounded-xl bg-brand-900 px-3 py-2 text-white shadow-sm">
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-          <ScoreSide name={p.homeName} org={p.homeOrg} score={shown[0]} side="home" />
+          <ScoreSide name={p.homeName} org={p.homeOrg} score={shown[0]} side="home" serving={serving === 'A'} />
 
           <div className="flex flex-col items-center gap-1">
             <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-on-brand">
@@ -393,9 +415,14 @@ export function TeamDeck(p: TeamDeckProps) {
                 {progress.phase === 'penalties' ? 'Level' : aggregate ? 'Total' : lv.label}
               </div>
             )}
+            {!aggregate && maxUnits > 1 && (
+              <div data-qa="units-won" className="font-mono text-[11px] font-bold tabular-nums text-white">
+                {lv.label}s {env.unitsFor[0]}–{env.unitsFor[1]}
+              </div>
+            )}
           </div>
 
-          <ScoreSide name={p.awayName} org={p.awayOrg} score={shown[1]} side="away" align="right" />
+          <ScoreSide name={p.awayName} org={p.awayOrg} score={shown[1]} side="away" align="right" serving={serving === 'B'} />
         </div>
 
         {/* The strip: what has been booked, and how each period finished. */}
@@ -404,7 +431,7 @@ export function TeamDeck(p: TeamDeckProps) {
         <div className="mt-1.5 grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-t border-white/15 pt-1.5">
           <Discipline counts={cards.A} />
           <div className="flex min-w-0 items-center justify-center gap-1 overflow-x-auto">
-            {Array.from({ length: totalPeriods }, (_, i) => {
+            {Array.from({ length: maxUnits }, (_, i) => {
               const u = env.unitScores[i];
               const current = i === played && !state.ended;
               return (
@@ -431,6 +458,30 @@ export function TeamDeck(p: TeamDeckProps) {
           </div>
         )}
       </div>
+
+      {/* At 0-0 of any set the server can be set: the toss, or FIVB's alternation. */}
+      {serving && state.score[0][0] === 0 && state.score[0][1] === 0 && (
+        <div data-qa="serve-picker" className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line px-2 py-0.5 text-[11px]">
+          <span className="mr-auto font-semibold text-muted">
+            {noRallyYet ? 'Who serves first?' : `Who serves first in ${lv.label.toLowerCase()} ${played + 1}?`}
+          </span>
+          {(['A', 'B'] as Side[]).map((s) => (
+            <Button key={s} size="sm" variant={serving === s ? 'primary' : 'outline'} className="h-6 max-w-[40%] truncate px-2 text-[11px]"
+              disabled={p.disabled || p.busy}
+              onClick={() => { if (serving !== s) push({ t: 'setServe', side: s, reason: 'toss' }); }}>
+              {nameOf(s)}
+            </Button>
+          ))}
+        </div>
+      )}
+
+      {showSwitch && (
+        <div data-qa="change-ends" role="status"
+          className="flex shrink-0 items-center gap-2 rounded-lg bg-amber-100 px-3 py-1.5 text-sm font-semibold text-amber-900 dark:bg-amber-500/15 dark:text-amber-300">
+          <span className="mr-auto">{switchText}</span>
+          <Button size="sm" variant="subtle" className="h-7" onClick={() => setSwitchDismissed(playIdx)}>Dismiss</Button>
+        </div>
+      )}
 
       {/* ── The working region: everything swaps HERE ────────────────────── */}
       <div data-qa="team-region" className="relative min-h-0 flex-1">
@@ -498,8 +549,9 @@ export function TeamDeck(p: TeamDeckProps) {
           />
         ) : surface === 'more' ? (
           <MorePanel
-            format={format} nameOf={nameOf} shown={shown} played={played}
-            totalPeriods={totalPeriods} periodLabel={lv.label} finishing={finishing}
+            format={format} state={state} nameOf={nameOf} shown={shown} played={played}
+            totalPeriods={totalPeriods} bestOf={maxUnits !== totalPeriods ? maxUnits : undefined}
+            periodLabel={lv.label} finishing={finishing}
             onFinishing={setFinishing} onEvent={push} onClose={() => setSurface('act')}
           />
         ) : (
@@ -513,7 +565,7 @@ export function TeamDeck(p: TeamDeckProps) {
                     'min-h-[2.5rem] truncate rounded-lg px-2 text-sm font-semibold transition',
                     side === s
                       ? 'bg-brand-600 text-white'
-                      : 'border border-line bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200',
+                      : 'border border-line bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
                   )}>
                   {nameOf(s)}
                 </button>
@@ -526,7 +578,9 @@ export function TeamDeck(p: TeamDeckProps) {
                 last name chip and the Goal button. The slack is collected by a
                 spacer at the BOTTOM of the card instead. */}
             {canAttribute ? (
-              <div className="min-h-0 shrink grow-0 space-y-1.5 overflow-y-auto">
+              // The floor is the "Who" label plus one whole row of chips: below that the
+              // names were sliced in half when a banner above took the height.
+              <div className="min-h-[3.25rem] shrink grow-0 space-y-1.5 overflow-y-auto">
                 <Group label="Who">
                   <PeopleGrid
                     value={actor} qa={`actor-${side}`}
@@ -553,7 +607,7 @@ export function TeamDeck(p: TeamDeckProps) {
                       onClick={() => setAssistOpen((v) => !v)}
                       className={cn(
                         'flex w-full items-center justify-between rounded-lg border border-line px-2.5 py-1 text-left transition',
-                        assistOpen ? 'bg-slate-50 dark:bg-slate-800' : 'bg-white hover:bg-slate-50 dark:bg-slate-800/60',
+                        assistOpen ? 'bg-slate-50 dark:bg-slate-800' : 'bg-white hover:bg-slate-50 dark:bg-slate-800/60 dark:hover:bg-slate-700',
                       )}>
                       <span className="text-[10px] uppercase tracking-wide text-muted">Assisted by</span>
                       <span className="flex items-center gap-1 truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
@@ -688,6 +742,9 @@ export function TeamDeck(p: TeamDeckProps) {
 
 const SURFACE = 'absolute inset-0 flex flex-col overflow-hidden';
 
+/** Events that are not play, so a change-ends prompt reads past them. */
+const PASSIVE: ReadonlySet<string> = new Set(['clockStart', 'clockPause', 'clockAdjust', 'timeout', 'setServe']);
+
 /** A panel toggle that is currently open - readable as "on" without going solid. */
 const PANEL_OPEN = 'border-brand-300 bg-brand-50 text-brand-700 ring-1 ring-brand-200 dark:border-brand-500/50 dark:bg-brand-500/10 dark:text-brand-200 dark:ring-brand-500/30';
 
@@ -710,7 +767,7 @@ const TONE: Record<EventTone, string> = {
   good: 'border border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200',
   caution: 'bg-yellow-400 text-yellow-950 hover:bg-yellow-500 shadow-sm dark:bg-yellow-400 dark:text-yellow-950',
   dismissal: 'bg-red-600 text-white hover:bg-red-700 shadow-sm',
-  error: 'border border-line bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200',
+  error: 'border border-line bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
 };
 
 /** A tone was declared, or one is inferred from whether the action scores. */
@@ -921,12 +978,16 @@ function Shootout({ shoot, nameOf, kicksEach, busy, score, onKick, onUndo, onSet
 }
 
 /** One side of the board: who they are, and their number. */
-function ScoreSide({ name, org, score, side, align = 'left' }: {
+function ScoreSide({ name, org, score, side, align = 'left', serving = false }: {
+  serving?: boolean;
   name: string; org?: string | null; score: number; side: 'home' | 'away'; align?: 'left' | 'right';
 }) {
   return (
     <div className={cn('min-w-0', align === 'right' && 'text-right')}>
-      <div className="truncate text-[13px] font-bold leading-tight text-white">{name}</div>
+      <div className={cn('flex items-center gap-1', align === 'right' && 'flex-row-reverse')}>
+        {serving && <span data-qa="serving-dot" title="Serving" className="h-2 w-2 shrink-0 rounded-full bg-amber-400" />}
+        <span className="truncate text-[13px] font-bold leading-tight text-white">{name}</span>
+      </div>
       <div className="truncate text-[9px] font-semibold uppercase tracking-wide text-on-brand">
         {org ? `${org} · ` : ''}{side}
       </div>
@@ -1154,7 +1215,7 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0 }: {
               chipFont(shown, extra),
               on
                 ? 'bg-brand-600 text-white shadow-sm'
-                : 'border border-line bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200',
+                : 'border border-line bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
               // A sending-off is not a footnote on the chip - the player is off, and
               // an official about to attribute a goal to them should see it first.
               (!!marks?.dismissal || fouledOut) && !on && 'border-red-300 bg-red-50 dark:border-red-500/40 dark:bg-red-500/10',
@@ -1220,6 +1281,8 @@ function Timeline({ log, nameOf, nameFor, fullMs, onClose }: {
                       <span className="ml-1 font-mono text-xs text-brand-600">+{ev.pts}</span>
                     )}
                   </>
+                ) : ev.t === 'setServe' ? (
+                  <span className="text-muted">{nameOf(ev.side)} to serve</span>
                 ) : ev.t === 'clockStart' ? (
                   <span className="text-muted">Clock started</span>
                 ) : ev.t === 'clockPause' ? (
@@ -1245,9 +1308,12 @@ function Timeline({ log, nameOf, nameFor, fullMs, onClose }: {
 
 /** Corrections and the ways a match ends that the rules did not produce. */
 function MorePanel({
-  format, nameOf, shown, played, totalPeriods, periodLabel, finishing, onFinishing, onEvent, onClose,
+  format, state, nameOf, shown, played, totalPeriods, bestOf, periodLabel, finishing, onFinishing, onEvent, onClose,
 }: {
   format: ScoringFormat;
+  state: KernelState;
+  /** Set for a sets match ("best of 5"); absent when every period is played. */
+  bestOf?: number;
   nameOf: (s: Side) => string;
   shown: readonly [number, number] | number[];
   played: number;
@@ -1297,7 +1363,9 @@ function MorePanel({
         <div>
           <div className="mb-1 text-[10px] uppercase tracking-wide text-muted">End this match early</div>
           <p className="mb-1.5 text-xs text-muted">
-            {played} of {totalPeriods} {periodLabel.toLowerCase()}s played, currently{' '}
+            {bestOf
+              ? `${played} ${periodLabel.toLowerCase()}${played === 1 ? '' : 's'} played (best of ${bestOf}), currently `
+              : `${played} of ${totalPeriods} ${periodLabel.toLowerCase()}s played, currently `}
             <span className="font-mono tabular-nums">{shown[0]}–{shown[1]}</span>. Pick how it ended
             and it is recorded with that reason.
           </p>
@@ -1320,6 +1388,31 @@ function MorePanel({
                   Award to {nameOf(side)}
                 </Button>
               ))}
+              {/* Time-capped (volleyball's 15-minute set): the side ahead at the buzzer takes it. */}
+              {format.clock && format.levels[0].terminator !== 'clock' && (() => {
+                const leader = capLeader(format, state);
+                const drawOnTime = format.clock!.tieRule === 'draw' && format.endStates.drawsAllowed;
+                return (
+                  <Button size="sm" variant="outline" data-qa="time-up"
+                    onClick={async () => {
+                      if (leader === null && !drawOnTime) {
+                        toast.error('Scores are level and this format does not allow a draw — play the next point.');
+                        return;
+                      }
+                      const ok = await confirmDialog({
+                        title: leader ? `Time up — ${nameOf(leader)} leads?` : 'Time up — record a draw?',
+                        confirmLabel: 'Record it',
+                        message: leader ? `${nameOf(leader)} takes the match on the score at the buzzer.` : 'The match is recorded as drawn.',
+                      });
+                      if (!ok) return;
+                      onFinishing(false);
+                      onEvent(leader ? { t: 'end', outcome: 'win', reason: 'cap', winner: leader }
+                        : { t: 'end', outcome: 'draw', reason: 'cap', winner: null });
+                    }}>
+                    Time up ({format.clock!.minutes} min) — {leader ? `${nameOf(leader)} leads` : 'level'}
+                  </Button>
+                );
+              })()}
               {format.endStates.drawsAllowed && shown[0] === shown[1] && (
                 <Button size="sm" variant="subtle"
                   onClick={async () => {

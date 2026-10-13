@@ -470,16 +470,21 @@ const NET_EVENTS: StatEventSpec[] = [
   ev('ace', 'Ace', { aces: 1, points_scored: 1 }, { points: 1 }),
   ev('kill', 'Attack kill', { kills: 1, points_scored: 1 }, { points: 1 }),
   ev('block_vb', 'Block', { blocks: 1, points_scored: 1 }, { points: 1 }),
-  ev('serve_error', 'Service error', { service_errors: 1 }, { tone: 'error' }),
-  ev('attack_error', 'Attack error', { attack_errors: 1 }, { tone: 'error' }),
+  // Every error is a point to the opponent; the error stays on the player's own record.
+  ev('serve_error', 'Service error', { service_errors: 1 }, { points: 1, forOpponent: true, tone: 'error' }),
+  ev('attack_error', 'Attack error', { attack_errors: 1 }, { points: 1, forOpponent: true, tone: 'error' }),
   ev('dig', 'Dig', { digs: 1 }, { tone: 'good' }),
 ];
 
 const NET_METRICS: StatMetric[] = [
   ...UNIVERSAL,
+  // Team figures, credited to the whole team sheet (netLineStats).
   rally('points_won', 'Points won', 'Pts', { headline: true }),
+  rally('points_lost', 'Points lost', 'PL', { higherIsBetter: false, hidden: true }),
   rally('sets_won', 'Sets won', 'SW'),
   rally('sets_lost', 'Sets lost', 'SL', { higherIsBetter: false }),
+  share('set_win_pct', 'Set win %', 'Set%', ['sets_won', 'sets_lost'], true),
+  share('point_win_pct', 'Point win %', 'Pt%', ['points_won', 'points_lost']),
   // Declared, because ace/kill/block all credit it. Without it, three of the six
   // taps a volleyball official has scored nothing at all.
   count('points_scored', 'Points scored', 'PtsS', { fromEvents: ['ace', 'kill', 'block_vb'], headline: true }),

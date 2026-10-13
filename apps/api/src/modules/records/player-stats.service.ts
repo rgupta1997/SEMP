@@ -1,7 +1,7 @@
 import {
   canonicalRacquetSport, carromLineStats, carromMatch, carromRulesOf, isCarromSport, type CarromBoard,
   chessLineStats, competitionTier, cricketCareerBag, deriveRacquetStats, type ChessGame,
-  deriveTeamStats, effectiveEventSpec, eventTemplateFor, foldCricketCareer, isChessSport, isCricketSport,
+  deriveTeamStats, netLineStats, effectiveEventSpec, eventTemplateFor, foldCricketCareer, isChessSport, isCricketSport,
   parseStoredFormat, playedContests, rankSubEvent, resolveFormat, seatIn, statSpecFor,
   type PlayedContest,
   type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
@@ -293,6 +293,19 @@ export async function buildPlayerStatRows(
         const side = sideOf.get(userId);
         return side ? { ...base(userId), ...carromLineStats(match, rules, side) } : base(userId);
       };
+    }
+    // Volleyball / throwball: the side's sets and points go to everyone on its sheet.
+    if (statSpecFor(sportName)?.family === 'net') {
+      const frozen = parseStoredFormat((fx.live_state as { format?: unknown } | null)?.format);
+      const netFormat = frozen ?? resolveFormat({ round: fx.round, stage_sequence: fx.stage_sequence }, { sport: sportName }).format;
+      if (netFormat) {
+        const result = { home: fx.home_score, away: fx.away_score, winner: winnerSide() };
+        const base = statOf;
+        statOf = (userId) => {
+          const side = sideOf.get(userId);
+          return side ? { ...base(userId), ...netLineStats(netFormat, log, result, side) } : base(userId);
+        };
+      }
     }
     if (games.length) {
       const base = statOf;

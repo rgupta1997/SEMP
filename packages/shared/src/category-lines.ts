@@ -118,7 +118,7 @@ export const COLUMN_MAP: Record<Exclude<StatFamily, 'measured' | 'cricket'>, Rec
   },
   net: {
     minutes: 'minutes',
-    points_won: 'points_won', points_scored: 'points_scored',
+    points_won: 'points_won', points_lost: 'points_lost', points_scored: 'points_scored',
     aces: 'aces', kills: 'kills', blocks: 'blocks', digs: 'digs',
     service_errors: 'service_errors', attack_errors: 'attack_errors',
     sets_won: 'sets_won', sets_lost: 'sets_lost',
