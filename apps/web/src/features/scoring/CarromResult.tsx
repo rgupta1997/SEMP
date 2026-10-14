@@ -1,3 +1,4 @@
+import { ChevronDown } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   CARROM_COINS, boardsOnly, carromBoardPoints, carromHeadline, carromMatch, queenCoversFor, readCarromState,
@@ -68,6 +69,20 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
     ? carromBoardPoints({ winner, coinsLeft: coins, queen }, gameScore[winner === 'A' ? 0 : 1], rules)
     : 0;
   const queenCounts = queen === 'winner' && coins !== null && preview > coins;
+
+  // A slam is a whole board cleared in one turn from the break: the loser still has all
+  // 9 coins and the winner covered the queen, so one tap fills both. With no winner
+  // picked yet it is the side breaking this board - a slam can only come from the break.
+  const toggleSlam = () => {
+    if (slam) { setSlam(false); setCoins(null); return; }
+    setWinner(winner ?? match.nextBreaker);
+    setCoins(CARROM_COINS);
+    setQueen('winner');
+    setSlam(true);
+  };
+  // Changing the coins or the queen afterwards means it was not a slam after all.
+  const pickCoins = (n: number) => { setCoins(n); if (slam && n !== CARROM_COINS) setSlam(false); };
+  const pickQueen = (q: QueenCover) => { setQueen(q); if (slam && q !== 'winner') setSlam(false); };
 
   const record = () => {
     if (!winner) { toast.error('Pick who won the board.'); return; }
@@ -203,7 +218,7 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
                   <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-9">
                     {Array.from({ length: CARROM_COINS }, (_, i) => i + 1).map((n) => (
                       <button key={n} type="button" disabled={disabled} aria-pressed={coins === n}
-                        className={cn(choiceCls(coins === n), 'px-0 py-2 font-mono tabular-nums')} onClick={() => setCoins(n)}>
+                        className={cn(choiceCls(coins === n), 'px-0 py-2 font-mono tabular-nums')} onClick={() => pickCoins(n)}>
                         {n}
                       </button>
                     ))}
@@ -213,7 +228,7 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
                   {/* "Nobody" only where covering is not compulsory - ICF never ends a board uncovered. */}
                   <div className={cn('grid gap-2', queenCovers.length === 3 ? 'grid-cols-3' : 'grid-cols-2')}>
                     {queenCovers.map((q) => (
-                      <button key={q} type="button" disabled={disabled} className={choiceCls(queen === q)} onClick={() => setQueen(q)}>
+                      <button key={q} type="button" disabled={disabled} className={choiceCls(queen === q)} onClick={() => pickQueen(q)}>
                         <span className="block truncate">
                           {q === 'winner'
                             ? `${winner ? nameOf(winner) : 'Board winner'} (+${rules.queenPoints})`
@@ -232,14 +247,32 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
               <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Optional · for stats only</span>
-                  <button type="button" className="text-xs text-slate-500 underline underline-offset-2 dark:text-slate-400" onClick={() => { setExtras(false); setSlam(false); setFouls({ A: 0, B: 0 }); }}>
+                  <button type="button" className="text-xs text-slate-500 underline underline-offset-2 dark:text-slate-400" onClick={() => { if (slam) toggleSlam(); setExtras(false); setFouls({ A: 0, B: 0 }); }}>
                     Remove
                   </button>
                 </div>
-                <label className="flex items-start gap-2 text-slate-700 dark:text-slate-200">
-                  <input type="checkbox" className="mt-0.5" checked={slam} disabled={disabled} onChange={(e) => setSlam(e.target.checked)} />
-                  <span><b>Slam</b> - the winner pocketed every coin and the queen in one turn from the break</span>
-                </label>
+                <button type="button" disabled={disabled} aria-pressed={slam} onClick={toggleSlam}
+                  className={cn(
+                    'flex min-w-0 items-center gap-3 rounded-lg border-2 px-3 py-2 text-left text-sm transition disabled:opacity-50',
+                    slam
+                      ? 'border-amber-500 bg-amber-50 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200'
+                      : 'border-dashed border-slate-300 bg-white text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:bg-transparent dark:text-slate-200',
+                  )}>
+                  <span aria-hidden className={cn('flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 text-[11px] font-bold',
+                    slam ? 'border-amber-500 bg-amber-500 text-white' : 'border-slate-300 dark:border-slate-600')}>
+                    {slam ? '✓' : ''}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-semibold">
+                      {slam ? `Slam by ${nameOf(winner ?? match.nextBreaker)}` : 'Slam'}
+                    </span>
+                    <span className="block text-xs opacity-80">
+                      {slam
+                        ? `All ${CARROM_COINS} coins and the queen in one turn from the break - filled in above.`
+                        : `Cleared the board in one turn from the break - fills in ${CARROM_COINS} coins and the queen.`}
+                    </span>
+                  </span>
+                </button>
                 {(['A', 'B'] as Side[]).map((s) => (
                   <div key={s} className="flex items-center justify-between gap-2">
                     <span className="min-w-0 truncate text-slate-700 dark:text-slate-200"><b>Fouls</b> (dues) · {nameOf(s)}</span>
@@ -252,8 +285,16 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
                 ))}
               </div>
             ) : (
-              <button type="button" className="justify-self-start text-xs text-slate-500 underline underline-offset-2 dark:text-slate-400" onClick={() => setExtras(true)}>
-                + Slam or fouls (optional)
+              // A full-width bar rather than a faint link: rare, but it must not be missed.
+              <button type="button" disabled={disabled} onClick={() => setExtras(true)} aria-expanded={false}
+                className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-left transition hover:border-brand-400 hover:bg-brand-50/50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900/40 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/5">
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">Slam or fouls</span>
+                  <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                    A board cleared in one turn from the break, or fouls (dues) by either side
+                  </span>
+                </span>
+                <ChevronDown aria-hidden className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" />
               </button>
             )}
 
@@ -263,7 +304,10 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
                 <span className="inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-1.5 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">
                   <b className="font-mono text-base tabular-nums">+{onlyBoards ? 1 : preview}</b>
                   <span className="min-w-0 truncate">
+                    {slam && <b>Slam · </b>}
                     {nameOf(winner)}{onlyBoards ? ' take the board' : queenCounts ? ` · ${coins} coins + queen` : ` · ${coins} coin${coins === 1 ? '' : 's'}`}
+                    {/* ICF: the queen stops counting once the winner reaches the cut-off. */}
+                    {slam && !onlyBoards && !queenCounts && rules.queenCutoff ? ` (queen not counted from ${rules.queenCutoff})` : ''}
                   </span>
                 </span>
               ) : (
