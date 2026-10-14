@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { entrantUnitType, pluralise, type EntryLevel, type UnitType } from '@semp/shared';
+import { useOrgUnits } from '../lib/units';
 import { api } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { Button, Card, Checkbox, Pills, Spinner, toast } from './ui';
@@ -12,6 +14,8 @@ interface Enrollment {
   org_units?: { id: string; name: string; code: string | null; type: string } | null;
   /** Server-resolved "Championship · Campus", so no two screens label it differently. */
   label?: string;
+  /** Internal events only: the campuses/departments invited (Setup → Invite). */
+  invited_unit_ids?: string[];
 }
 
 const CHOOSE_LATER = '';
@@ -109,17 +113,20 @@ export function EnterChampionshipsPanel({ team, onClose }: { team: any; onClose:
     () => new Set((team.team_entries ?? []).map((e: any) => e.championship_id)),
     [team.team_entries],
   );
+  // A unit squad's own level: a department squad plays department events, a campus squad campus ones.
+  const unitType = team.org_units?.type as UnitType | undefined;
+  const { labels } = useOrgUnits(team.organization_id);
   const approved = useMemo(
-    () => enrollments.filter((e) => e.status === 'approved'
-      && !alreadyIn.has(e.championship_id)
-      // Which squads may enter which events. A whole-organisation squad plays open
-      // championships; a campus or department squad plays internal ones. Offering
-      // either the other's events would produce a standings table mixing an
-      // institution with its own campuses - the server refuses it, and filtering
-      // here means the option is never offered rather than offered and rejected.
-      && (team.org_unit_id ? e.championships?.entry_level !== 'organization'
-        : (e.championships?.entry_level ?? 'organization') === 'organization')),
-    [enrollments, alreadyIn, team.org_unit_id],
+    () => enrollments.filter((e) => {
+      if (e.status !== 'approved' || alreadyIn.has(e.championship_id)) return false;
+      const level = (e.championships?.entry_level ?? 'organization') as EntryLevel;
+      // A whole-organisation squad plays open championships only.
+      if (!team.org_unit_id) return level === 'organization';
+      // A unit squad: its own level, and its unit invited - the two checks the server
+      // makes (squadEntryRefusal), so nothing offered here is then refused.
+      return entrantUnitType(level) === unitType && (e.invited_unit_ids ?? []).includes(team.org_unit_id);
+    }),
+    [enrollments, alreadyIn, team.org_unit_id, unitType],
   );
 
   const toggle = (enrollmentId: string) =>
@@ -155,7 +162,7 @@ export function EnterChampionshipsPanel({ team, onClose }: { team: any; onClose:
       {approved.length === 0 ? (
         <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
           {team.org_unit_id
-            ? 'No internal championships left for this squad to enter. A campus or department squad only plays championships contested inside this organisation.'
+            ? `No championships left for this squad to enter. It plays for ${team.org_units?.name ?? 'its unit'}, so it can only enter internal championships run between ${pluralise(labels[unitType ?? 'campus']).toLowerCase()} that ${team.org_units?.name ?? 'it'} has been invited to (Setup → Invite).`
             : 'No approved championships left to enter - either this team’s organization has none approved yet (apply via “Browse championships”) or this team is already in all of them.'}
         </p>
       ) : (

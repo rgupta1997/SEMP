@@ -495,45 +495,78 @@ export function makeTeamsRouter(prisma: Prisma): Router {
   // each with the creator as captain. All-or-nothing so a partial failure never
   // leaves orphan teams.
   router.post('/teams/bulk', guards.teamCreate, validateBody(bulkCreateTeamsSchema), asyncHandler(async (req, res) => {
-    const teams = req.body.teams as Array<{
+    const input = req.body.teams as Array<{
       championship_id: string; sport_id: string; organization_id: string;
       championship_organization_id: string; tournament_discipline_id: string; name: string; short_name: string;
+      org_unit_id?: string | null;
     }>;
-    for (const orgId of new Set(teams.map((t) => t.organization_id))) await assertOrgNotArchived(prisma, orgId);
-    for (const t of teams) {
+    for (const orgId of new Set(input.map((t) => t.organization_id))) await assertOrgNotArchived(prisma, orgId);
+    for (const t of input) {
       await assertDisciplineForTeam(prisma, t.tournament_discipline_id, t.championship_id, t.sport_id);
     }
-    const eiIds = [...new Set(teams.map((t) => t.championship_organization_id))];
+    const eiIds = [...new Set(input.map((t) => t.championship_organization_id))];
     const eiMap = new Map(
-      (await prisma.championship_organizations.findMany({ where: { id: { in: eiIds } }, select: { id: true, status: true } }))
+      (await prisma.championship_organizations.findMany({ where: { id: { in: eiIds } }, select: { id: true, status: true, organization_id: true } }))
         .map((e) => [e.id, e]),
     );
-    // Reject duplicate draw entries against existing entries (one query) and within the batch.
-    // These are whole-organisation squads, so only another whole-organisation entry
-    // (org_unit_id null) occupies the draw - a department's or campus's does not.
-    const dupKey = (t: { organization_id: string; championship_id: string; tournament_discipline_id: string }) =>
-      `${t.organization_id}|${t.championship_id}|${t.tournament_discipline_id}`;
-    const existing = await prisma.team_entries.findMany({
-      where: { org_unit_id: null, OR: teams.map((t) => ({ organization_id: t.organization_id, championship_id: t.championship_id, tournament_discipline_id: t.tournament_discipline_id })) },
-      select: { organization_id: true, championship_id: true, tournament_discipline_id: true },
-    });
-    const seen = new Set(existing.map((e) => `${e.organization_id}|${e.championship_id}|${e.tournament_discipline_id}`));
-    // No two teams of the same org may share a name within a sport - check against the
-    // existing roster (one query) and within this batch.
-    const nameKey = (orgId: string, sportId: string, name: string) => `${orgId}|${sportId}|${name.trim().toLowerCase()}`;
-    const existingTeams = await prisma.teams.findMany({
-      where: { OR: teams.map((t) => ({ organization_id: t.organization_id, sport_id: t.sport_id })) },
-      select: { organization_id: true, sport_id: true, name: true },
-    });
-    const nameSeen = new Set(existingTeams.map((t) => nameKey(t.organization_id, t.sport_id, t.name)));
-    for (const t of teams) {
+    const champIds = [...new Set(input.map((t) => t.championship_id))];
+    const champMap = new Map(
+      (await prisma.championships.findMany({
+        where: { id: { in: champIds } },
+        select: { id: true, name: true, entry_level: true, entry_scope_unit_id: true, host_organization_id: true, organizations: { select: { settings: true } } },
+      })).map((c) => [c.id, c]),
+    );
+
+    // Which campus or department each squad plays for - the same rules as POST /teams.
+    // The unit used to be dropped here, so every squad this wizard made became a
+    // whole-organisation team, even on the Campuses / Departments tab.
+    const teams: Array<(typeof input)[number] & { org_unit_id: string | null }> = [];
+    for (const t of input) {
       const ei = eiMap.get(t.championship_organization_id);
       if (!ei) throw new NotFoundError('Enrollment');
       if (ei.status !== 'approved') throw new BusinessRuleError(`Enrollment not approved for "${t.name}"`);
+      if (ei.organization_id !== t.organization_id) throw new BusinessRuleError('That entry belongs to another organisation');
+      const champ = champMap.get(t.championship_id);
+      let unitId = t.org_unit_id ?? null;
+      if (champ && champ.entry_level !== 'organization') {
+        if (!unitId) {
+          throw new BusinessRuleError(`"${champ.name}" is contested between campuses or departments. Say which one these squads play for.`);
+        }
+        const refusal = await squadEntryRefusal(prisma, champ as never, champ.name, unitId, unitLabels(champ.organizations?.settings));
+        if (refusal) throw new BusinessRuleError(refusal);
+      } else {
+        // An open event is played by the whole organisation, whatever the request said.
+        unitId = null;
+      }
+      teams.push({ ...t, org_unit_id: unitId });
+    }
+
+    // One team per draw per CONTINGENT (organisation + unit), against existing entries
+    // and within the batch - so two departments can each enter the same discipline.
+    const dupKey = (t: { organization_id: string; org_unit_id: string | null; championship_id: string; tournament_discipline_id: string | null }) =>
+      `${t.organization_id}|${t.org_unit_id ?? ''}|${t.championship_id}|${t.tournament_discipline_id}`;
+    const existing = await prisma.team_entries.findMany({
+      where: { OR: teams.map((t) => ({ organization_id: t.organization_id, org_unit_id: t.org_unit_id, championship_id: t.championship_id, tournament_discipline_id: t.tournament_discipline_id })) },
+      select: { organization_id: true, org_unit_id: true, championship_id: true, tournament_discipline_id: true },
+    });
+    const seen = new Set(existing.map(dupKey));
+    // No two teams of the same contingent may share a name within a sport.
+    const nameKey = (orgId: string, unitId: string | null, sportId: string, name: string) =>
+      `${orgId}|${unitId ?? ''}|${sportId}|${name.trim().toLowerCase()}`;
+    const existingTeams = await prisma.teams.findMany({
+      where: { OR: teams.map((t) => ({ organization_id: t.organization_id, org_unit_id: t.org_unit_id, sport_id: t.sport_id })) },
+      select: { organization_id: true, org_unit_id: true, sport_id: true, name: true },
+    });
+    const nameSeen = new Set(existingTeams.map((t) => nameKey(t.organization_id, t.org_unit_id, t.sport_id, t.name)));
+    for (const t of teams) {
       const k = dupKey(t);
-      if (seen.has(k)) throw new BusinessRuleError(`A duplicate team for "${t.name}" is in this discipline draw`);
+      if (seen.has(k)) {
+        throw new BusinessRuleError(t.org_unit_id
+          ? `That campus or department already has a team in the draw for "${t.name}"`
+          : `A duplicate team for "${t.name}" is in this discipline draw`);
+      }
       seen.add(k);
-      const nk = nameKey(t.organization_id, t.sport_id, t.name);
+      const nk = nameKey(t.organization_id, t.org_unit_id, t.sport_id, t.name);
       if (nameSeen.has(nk)) throw new BusinessRuleError(`A team named "${t.name}" already exists in this sport`);
       nameSeen.add(nk);
     }
@@ -545,11 +578,11 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       const out: any[] = [];
       for (const t of teams) {
         const team = await tx.teams.create({
-          data: { sport_id: t.sport_id, organization_id: t.organization_id, name: t.name, short_name: t.short_name, status: 'forming', invite_token: randomBytes(16).toString('hex') },
+          data: { sport_id: t.sport_id, organization_id: t.organization_id, org_unit_id: t.org_unit_id, name: t.name, short_name: t.short_name, status: 'forming', invite_token: randomBytes(16).toString('hex') },
         });
         await tx.team_entries.create({
           data: {
-            team_id: team.id, organization_id: t.organization_id, championship_id: t.championship_id,
+            team_id: team.id, organization_id: t.organization_id, org_unit_id: t.org_unit_id, championship_id: t.championship_id,
             championship_organization_id: t.championship_organization_id, tournament_discipline_id: t.tournament_discipline_id,
             status: 'forming',
           },

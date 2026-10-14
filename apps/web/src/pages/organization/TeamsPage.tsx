@@ -92,10 +92,10 @@ function BulkCreateTeamsModal({ approved, organization, kind, defaultEnrollmentI
   // campus or batch tab the tab has fixed the KIND, so all that remains is WHICH -
   // and when the organisation has only one, not even that.
   const { units: campusTree, labels: unitLabels, flat: allUnits } = useOrgUnits(organization?.id);
+  // Only units in use: a SETUP or ARCHIVED unit cannot enter a championship (the server refuses it).
   const pickable = useMemo(
-    () => (kind === 'campus' ? allUnits.filter((u) => u.type === 'campus')
-      : kind === 'department' ? allUnits.filter((u) => u.type === 'department')
-        : []),
+    () => (kind === 'organization' ? []
+      : allUnits.filter((u) => u.type === kind && u.status === 'ACTIVE')),
     [allUnits, kind],
   );
   const [bulkUnitId, setBulkUnitId] = useState('');
