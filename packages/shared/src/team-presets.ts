@@ -55,6 +55,9 @@ const RALLY_SERVE: ServeSpec = {
   nextUnitServer: 'previousWinner',
 };
 
+/** Volleyball: FIVB 7.1 - each set is served first by the team that did not serve first in the last. */
+const VOLLEY_SERVE: ServeSpec = { ...RALLY_SERVE, nextUnitServer: 'alternate' };
+
 /** The serve passes with the unit - carrom boards, snooker frames. */
 const PER_UNIT_SERVE: ServeSpec = { ...NO_SERVE, movement: 'perUnit' };
 
@@ -126,26 +129,26 @@ const vSet = (target: number, decider: number, switchEndsAt: number | null = nul
 const NET: ScoringFormat[] = [
   fmt({
     sport: 'volleyball', key: 'fivb_25_bo5', name: 'FIVB — best of 5 sets to 25 (decider 15)',
-    levels: [vSet(25, 15, 13), unitsMatch(3)], serve: RALLY_SERVE,
+    levels: [vSet(25, 15, 13), unitsMatch(3)], serve: VOLLEY_SERVE,
     changeEnds: 'atDeciderMidpoint',
     rulesSheet: { rotation: 'not tracked by the console', libero: 'not tracked', timeoutsPerSet: 2 },
   }),
   fmt({
     sport: 'volleyball', key: 'fivb_25_bo3', name: 'Best of 3 sets to 25 (decider 15)',
-    levels: [vSet(25, 15, 13), unitsMatch(2)], serve: RALLY_SERVE, changeEnds: 'atDeciderMidpoint',
+    levels: [vSet(25, 15, 13), unitsMatch(2)], serve: VOLLEY_SERVE, changeEnds: 'atDeciderMidpoint',
   }),
   fmt({
     sport: 'volleyball', key: 'corp_21_bo3', name: 'Corporate — best of 3 sets to 21 (decider 15)',
-    levels: [vSet(21, 15), unitsMatch(2)], serve: RALLY_SERVE, mode: 'selfScored', changeEnds: 'never',
+    levels: [vSet(21, 15), unitsMatch(2)], serve: VOLLEY_SERVE, mode: 'selfScored', changeEnds: 'never',
   }),
   fmt({
     sport: 'volleyball', key: 'single_set_25', name: 'Single set to 25',
-    levels: [vSet(25, 25), unitsMatch(1)], serve: RALLY_SERVE, mode: 'selfScored', changeEnds: 'never',
+    levels: [vSet(25, 25), unitsMatch(1)], serve: VOLLEY_SERVE, mode: 'selfScored', changeEnds: 'never',
   }),
   fmt({
     sport: 'volleyball', key: 'timecap_15min', name: 'Time-capped set — 15 minutes, highest score',
     levels: [{ key: 'set', label: 'Set', target: 25, winBy: 1, cap: null }, unitsMatch(1)],
-    serve: RALLY_SERVE, mode: 'selfScored', clock: cap(15), changeEnds: 'never', endStates: LEAGUE,
+    serve: VOLLEY_SERVE, mode: 'selfScored', clock: cap(15), changeEnds: 'never', endStates: LEAGUE,
   }),
 
   fmt({

@@ -52,6 +52,27 @@ describe('volleyball serve and ends', () => {
     expect(foldRally(f, [{ t: 'setServe', side: 'B' }]).state.serve.side).toBe('B');
   });
 
+  // FIVB 7.1: the team that did not serve first in the last set serves first in the next,
+  // whoever won it. A won set 1 here, and still B opens set 2.
+  it('alternates the first server of each set, not the set winner', () => {
+    expect(foldRally(f, run('A', 25)).state.serve.side).toBe('B');
+    expect(foldRally(f, [...run('A', 25), ...run('B', 25)]).state.serve.side).toBe('A');
+  });
+
+  it('a toss before the first point is where the alternation starts', () => {
+    const tossB: RallyEvent = { t: 'setServe', side: 'B', reason: 'toss' };
+    expect(foldRally(f, [tossB, ...run('A', 25)]).state.serve.side).toBe('A');
+  });
+
+  it('a serve correction mid-set does not move the alternation', () => {
+    const fix: RallyEvent = { t: 'setServe', side: 'B', reason: 'corrected' };
+    expect(foldRally(f, [pt('A'), fix, ...run('A', 24)]).state.serve.side).toBe('B');
+  });
+
+  it('throwball keeps its own serve rule for now', () => {
+    expect(presetByKey('tb_bo3_15')!.serve.nextUnitServer).toBe('previousWinner');
+  });
+
   it('ends change after a set; the 2-2 decider is flagged for a fresh toss', () => {
     const { state, trace } = foldRally(f, run('A', 25));
     expect(changesEndsAfterUnit(f, state, trace[trace.length - 1].unitsWon)).toBe(true);
