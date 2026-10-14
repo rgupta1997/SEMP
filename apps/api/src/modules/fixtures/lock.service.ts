@@ -29,10 +29,9 @@ import { resolveFixtureParticipants, type FixtureParticipants } from './particip
  * The statement count is the real fix (see writeCategoryLines, which now writes one
  * statement per table instead of two per player). This is the honest budget beside
  * it: a lock legitimately does a lot, and it must not be cut off part-way on a slow
- * connection. 28s is just under API Gateway's 30s cap; on Lambda the function's own
- * Timeout (infra/semp-api.yaml) must be raised to match, or it cuts in first.
+ * connection. Still well inside the API's own request ceiling.
  */
-const LOCK_TX = { timeout: 28_000, maxWait: 10_000 } as const;
+const LOCK_TX = { timeout: 25_000, maxWait: 10_000 } as const;
 import { refreshCareerStatsForFixture } from '../records/career-stats.service.js';
 
 // The scorecard state machine - the spine of every "verified" claim in the product.
