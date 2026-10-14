@@ -430,5 +430,5 @@ Adds twelve integer counters (default 0) to `board_match_lines` for carrom match
 on the board-by-board console: games won/lost, points scored/conceded, best board, slams,
 fouls, boards broken and won on the break, and deciding games. Real boards keep
 `units_won` / `units_lost`; `queens` now means queens covered. RDS twin:
-`infra/rds-migrations/011_carrom_line_stats.sql` (not applied). Applied to dev statement by
+`infra/rds-migrations/012_carrom_line_stats.sql` (not applied). Applied to dev statement by
 statement; all twelve columns were read back as present. **Not applied to prod.**
