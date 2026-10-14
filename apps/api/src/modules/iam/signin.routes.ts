@@ -22,6 +22,7 @@ import { sendOtpEmail, sendWelcomeEmail } from '../comms/email.js';
 import { sendSms, otpSms } from '../comms/sms.js';
 import { otpWhatsapp, sendWhatsapp, toDestination, whatsappConfigured } from '../comms/whatsapp.js';
 import { notify } from '@semp/notifications/server/notify.js';
+import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 
 // Phone-first sign-in (Option B).
 //
@@ -340,7 +341,7 @@ export function makeSignInRouter(prisma: Prisma): Router {
 
     // Email is still the account key - it is what makes phone1+email2 a different
     // account from phone1+email1 rather than a duplicate.
-    const clash = await prisma.users.findFirst({ where: { email: { equals: email, mode: 'insensitive' } }, select: { id: true } });
+    const clash = await prisma.users.findFirst({ where: { email: equalsIgnoreCase(email) }, select: { id: true } });
     if (clash) throw new ConflictError('An account with this email already exists - sign in instead');
     if (!(await phoneHasCapacity(prisma, phone))) {
       throw new ConflictError(`This number already has ${env.MAX_ACCOUNTS_PER_PHONE} accounts`);

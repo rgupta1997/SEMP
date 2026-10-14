@@ -7,6 +7,7 @@ import { readStandings, readStandingsBreakdown, countCompletedMatches } from '..
 import { listChampionshipFixtures } from '../championships/fixtures-list.js';
 import { verifyShareToken } from './share-token.js';
 import { verifySignature, type CertificateFacts } from '../certificates/certificates.service.js';
+import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 
 // Unauthenticated, view-only championship pages reachable via a share token. Mounted
 // BEFORE the global requireAuth. Only the read-only Overview + Standings are exposed,
@@ -119,7 +120,7 @@ export function makePublicRouter(prisma: Prisma): Router {
   // changed nothing. This is the one place that value now actually does something.
   router.get('/profiles/:handle', asyncHandler(async (req, res) => {
     const user = await prisma.users.findFirst({
-      where: { handle: { equals: req.params.handle, mode: 'insensitive' } },
+      where: { handle: equalsIgnoreCase(req.params.handle) },
       select: {
         id: true, name: true, handle: true, tagline: true, preferred_sports: true,
         avatar_url: true, sportagon_id: true, officiates: true,

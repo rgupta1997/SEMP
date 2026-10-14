@@ -17,6 +17,7 @@ import {
   notifyOrganizationCreated, notifyJoinRequested, notifyJoinApproved, notifyJoinDeclined,
   newlyAddedMembers, notifyNewOrgMembers,
 } from './organizations.notifications.js';
+import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 // Organizations router: list/get are open reads. Any authenticated user can
 // create an organization (they become its first `owner`). Edits, deletes and
 // member management require an owner/admin of that org (or super admin).
@@ -96,7 +97,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     // scoped to organizations they already own, so two different people can still
     // each run their own "Sport Club".
     const ownDuplicate = await prisma.organization_members.findFirst({
-      where: { user_id: req.user!.id, role: 'owner', organizations: { name: { equals: organization.name, mode: 'insensitive' } } },
+      where: { user_id: req.user!.id, role: 'owner', organizations: { name: equalsIgnoreCase(organization.name) } },
     });
     if (ownDuplicate) throw new BusinessRuleError('You already have an organization with this name');
 
@@ -107,8 +108,8 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     // with who happens to own it.
     const sameNameAndCity = await prisma.organizations.findFirst({
       where: {
-        name: { equals: organization.name, mode: 'insensitive' },
-        city: { equals: organization.city, mode: 'insensitive' },
+        name: equalsIgnoreCase(organization.name),
+        city: equalsIgnoreCase(organization.city),
       },
     });
     if (sameNameAndCity) throw new BusinessRuleError(`An organization named "${organization.name}" already exists in ${organization.city}`);

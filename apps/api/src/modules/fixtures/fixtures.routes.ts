@@ -29,6 +29,7 @@ import {
 } from './lock.service.js';
 import { assignMatchNos, championshipOfDiscipline } from './match-no.js';
 import { assertScoreShape } from './score-shape.js';
+import { liveWriteAffectsStandings, type FixtureStandingsView } from './standings-trigger.js';
 // A match can only be recorded once its championship is under way. Resolves the
 // owning championship from the fixture's draw and blocks scoring while it's still
 // in draft or registration - nothing should be played before the event starts.
@@ -505,6 +506,12 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       throw new BusinessRuleError('Winner must be one of the two teams in this match');
     }
     const headlineChanged = Object.keys(data).length > 0;
+    // What standings can see of this fixture BEFORE the write - see liveWriteAffectsStandings.
+    const [prior] = await prisma.$queryRaw<FixtureStandingsView[]>`
+      select status::text as status,
+             coalesce(jsonb_typeof(live_state -> 'eventStandings') = 'array'
+               and jsonb_array_length(live_state -> 'eventStandings') > 0, false) as has_event_standings
+      from fixtures where id = ${req.params.id}::uuid`;
     if (headlineChanged) {
       await prisma.fixtures.update({ where: { id: req.params.id }, data });
     }
@@ -538,7 +545,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     // Recompute standings AFTER both writes, so a freshly-persisted eventStandings (event
     // sign-off) is reflected - recomputing before the live_state write would read the old
     // contribution and leave the materialized table stale.
-    if (headlineChanged) await refreshStandings(prisma, req.params.id);
+    // A live point tap on a head-to-head match can't move standings - skip the
+    // full-championship rebuild for it (see liveWriteAffectsStandings).
+    if ((headlineChanged || 'live_state' in b) && liveWriteAffectsStandings(prior, b)) await refreshStandings(prisma, req.params.id);
     // Completing a bracket match (or a walkover with a winner) → advance the winner;
     // custom-points → remind organiser.
     if (b.status === 'completed' || b.status === 'walkover') {

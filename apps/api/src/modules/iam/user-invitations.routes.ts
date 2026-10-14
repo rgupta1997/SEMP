@@ -10,6 +10,7 @@ import { INVITE_TTL_DAYS, hashInviteToken, inviteAcceptUrl, issueInviteToken } f
 import { env } from '../../config/env.js';
 import { sendInvitationEmail } from '../comms/email.js';
 import { notify } from '@semp/notifications/server/notify.js';
+import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 
 // Invite a person by mobile to a role (org member / co-organiser / official). When
 // they sign in with that number the invite is auto-applied (see the service).
@@ -126,7 +127,7 @@ export function makeUserInvitationsRouter(prisma: Prisma): Router {
         describeInviteTarget(prisma, input.targetType, input.targetId),
         prisma.users.findUnique({ where: { id: input.inviterId }, select: { name: true } }),
         prisma.users.findFirst({
-          where: { email: { equals: input.email, mode: 'insensitive' }, is_active: true },
+          where: { email: equalsIgnoreCase(input.email), is_active: true },
           select: { id: true, name: true },
         }),
       ]);

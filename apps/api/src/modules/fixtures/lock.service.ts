@@ -5,7 +5,7 @@ import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { friendlyError } from '../../http/middleware/error.js';
 import { audit, auditSystem, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import { recomputeStandingsForFixture } from '../standings/standings.service.js';
-import { createNotification } from '../notifications/audience.js';
+import { createNotifications } from '../notifications/audience.js';
 import { notify } from '@semp/notifications/server/notify.js';
 import { Rules } from '@semp/notifications/core/rules.js';
 import { advanceWinnerStrict } from './bracket.js';
@@ -29,9 +29,17 @@ import { resolveFixtureParticipants, type FixtureParticipants } from './particip
  * The statement count is the real fix (see writeCategoryLines, which now writes one
  * statement per table instead of two per player). This is the honest budget beside
  * it: a lock legitimately does a lot, and it must not be cut off part-way on a slow
- * connection. Still well inside the API's own request ceiling.
+ * connection.
+ *
+ * It must also stay UNDER the API's own ceiling - Lambda kills the request at 15s. It
+ * was 25s, which on Lambda bought nothing: past 15s the function died mid-transaction
+ * and the official got a bare gateway error instead of the honest "not saved". 12s
+ * keeps that message, and is still ~10x the measured cost: a 22-player lock's
+ * transaction ran in ~1.2s from a remote laptop (2026-10-14), less from Lambda.
+ * maxWait (waiting for a pooled connection) comes first and counts toward the same
+ * ceiling, so the two together stay at 15s.
  */
-const LOCK_TX = { timeout: 25_000, maxWait: 10_000 } as const;
+const LOCK_TX = { timeout: 12_000, maxWait: 3_000 } as const;
 import { refreshCareerStatsForFixture } from '../records/career-stats.service.js';
 
 // The scorecard state machine - the spine of every "verified" claim in the product.
@@ -466,17 +474,15 @@ async function notifyParticipants(
     ? ` Final score ${formatPoints(fixture.home_score)}-${formatPoints(fixture.away_score)}.`
     : '';
   try {
-    for (const p of participants.resolved) {
-      await createNotification(prisma, {
-        championship_id: championshipId,
-        target_user_id: p.user_id,
-        sender_id: senderId,
-        type: 'event_lifecycle',
-        audience: 'all', // ignored for direct notifications - target_user_id drives visibility
-        title: `Result verified: ${label}`,
-        body: `The organiser has locked this scorecard, so the result is now official.${score}`,
-      });
-    }
+    await createNotifications(prisma, participants.resolved.map((p) => ({
+      championship_id: championshipId,
+      target_user_id: p.user_id,
+      sender_id: senderId,
+      type: 'event_lifecycle' as const,
+      audience: 'all' as const, // ignored for direct notifications - target_user_id drives visibility
+      title: `Result verified: ${label}`,
+      body: `The organiser has locked this scorecard, so the result is now official.${score}`,
+    })));
   } catch (err) {
     console.error(`[lock] participant notification failed for fixture ${fixture.id}:`, err);
   }
@@ -609,7 +615,7 @@ export interface AutoLockSweepResult { checked: number; locked: number }
 // it, precisely how lockScorecardsBulk treats one bad card in a batch.
 export async function autoLockDueFixtures(
   prisma: Prisma,
-  opts: { championshipId?: string; graceMinutes?: number } = {},
+  opts: { championshipId?: string; graceMinutes?: number; limit?: number } = {},
 ): Promise<AutoLockSweepResult> {
   const cutoff = new Date(Date.now() - (opts.graceMinutes ?? AUTO_LOCK_GRACE_MINUTES) * 60_000);
   const due = await prisma.fixtures.findMany({
@@ -621,7 +627,9 @@ export async function autoLockDueFixtures(
         : {}),
     },
     select: { id: true },
-    take: 200, // a safety ceiling, not a real limit - nothing due ever piles up this high
+    // Oldest first, so a capped sweep (see limit) still drains a backlog in order.
+    orderBy: { completed_at: 'asc' },
+    take: opts.limit ?? 200, // 200 is a safety ceiling, not a real limit
   });
 
   let locked = 0;

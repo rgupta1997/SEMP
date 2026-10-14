@@ -3,6 +3,7 @@ import type { Prisma } from '../../infra/prisma.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { audit } from '../iam/audit.service.js';
 import { loadTemplateFor, type TemplateShape } from './templates.service.js';
+import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 
 // Applying a championship template (J2-E1-S1).
 //
@@ -83,7 +84,7 @@ export async function applyShape(
   const names = [...new Set(shape.draws.map((d) => d.format).filter((f): f is string => !!f))];
   const formats = names.length
     ? await prisma.tournament_formats.findMany({
-      where: { OR: names.map((name) => ({ name: { equals: name, mode: 'insensitive' as const } })) },
+      where: { OR: names.map((name) => ({ name: equalsIgnoreCase(name) })) },
       select: { id: true, name: true },
     })
     : [];
@@ -94,7 +95,7 @@ export async function applyShape(
 
   for (const draw of shape.draws) {
     const sport = await prisma.sports.findFirst({
-      where: { name: { equals: draw.sport, mode: 'insensitive' } },
+      where: { name: equalsIgnoreCase(draw.sport) },
       select: { id: true },
     });
     if (!sport) { skipped.push(draw.sport); continue; }
@@ -139,7 +140,7 @@ export async function applyShape(
       const discipline = await prisma.disciplines.findFirst({
         where: {
           sport_id: sport.id,
-          name: { equals: disciplineName, mode: 'insensitive' },
+          name: equalsIgnoreCase(disciplineName),
           OR: [{ championship_id: null }, { championship_id: championshipId }],
         },
         orderBy: { championship_id: { sort: 'asc', nulls: 'first' } },

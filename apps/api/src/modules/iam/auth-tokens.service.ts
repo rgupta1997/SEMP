@@ -14,7 +14,7 @@ import { env } from '../../config/env.js';
 
 export const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
-// A phone is normalised to its last ten digits, matching idx_users_phone_last10:
+// A phone is normalised to its last ten digits, matching idx_users_phone_last10_any:
 // "+91 98765 43210" and "9876543210" are one number, and a code issued to either
 // spelling has to be findable by the other.
 export const normalizePhone = (phone: string) => phone.replace(/[^0-9]/g, '').slice(-10);
@@ -68,6 +68,16 @@ export async function issueToken(
     data: { ...addr, kind, token_hash: hashCode(code), expires_at, user_id: userId ?? null },
     select: { id: true },
   });
+
+  // Nothing purged this table, and there is no scheduler to do it, so each issue
+  // sweeps codes that expired over a day ago (idx_auth_tokens_expires). Nothing reads
+  // them: verify only wants the newest live code, and recentTokenCount looks back
+  // minutes. Best-effort - a failed sweep must not fail a sign-in.
+  try {
+    await prisma.auth_tokens.deleteMany({ where: { expires_at: { lt: new Date(now.getTime() - 86_400_000) } } });
+  } catch (err) {
+    console.error('[auth-tokens] expired-code sweep failed', err);
+  }
 
   return { id: row.id, code, expires_at };
 }

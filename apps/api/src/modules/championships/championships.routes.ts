@@ -668,8 +668,12 @@ export function makeEventsRouter(prisma: Prisma): Router {
     // landDuePlanChanges for billing. A finished result nobody reviewed for 30
     // minutes becomes official here, on the exact screen that would show it
     // waiting; errors never block the read itself.
+    //
+    // Capped at two per read: each lock is a full transaction plus standings,
+    // stats, achievements and notifications - seconds, not milliseconds - and the
+    // API runs on Lambda with a 15s ceiling. A backlog drains over the next reads.
     try {
-      await autoLockDueFixtures(prisma, { championshipId: req.params.id });
+      await autoLockDueFixtures(prisma, { championshipId: req.params.id, limit: 2 });
     } catch (err) {
       console.error(`[auto-lock] sweep failed for championship ${req.params.id}:`, err);
     }

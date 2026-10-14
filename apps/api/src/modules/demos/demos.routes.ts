@@ -18,6 +18,7 @@ import { emailDomainFor, generateDemoPassword, makeSandboxSlug } from './demo-na
 import { seedSandbox } from './demo-seeder.service.js';
 import { seedBlueprintRow } from './blueprint-run.service.js';
 import { wipeSandbox } from './demo-teardown.service.js';
+import { inIgnoreCase } from '../../shared/exact-ci.js';
 
 /** A row built from a blueprint resets through the new engine, not the old recipe. */
 const isBlueprint = (row: { config: unknown }) =>
@@ -294,7 +295,7 @@ export function makeDemosRouter(prisma: Prisma): Router {
     // Emails must be free before anything is created - a build that dies on a
     // unique violation half way through leaves rows nobody asked for.
     const emails = [blueprint.accounts.organiser.email, blueprint.accounts.player.email, blueprint.accounts.institution_admin.email];
-    const clash = await prisma.users.findFirst({ where: { email: { in: emails, mode: 'insensitive' } }, select: { email: true } });
+    const clash = await prisma.users.findFirst({ where: { email: inIgnoreCase(emails) }, select: { email: true } });
     if (clash) throw new ConflictError(`An account already exists for ${clash.email}`);
 
     // The domain is stored EXACTLY as the engine will use it. Teardown's safety net

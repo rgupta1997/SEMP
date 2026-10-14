@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Prisma as PrismaNS } from '@prisma/client';
 import { createNotificationSchema, reactNotificationSchema } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -7,8 +8,10 @@ import { parsePaging } from '../../http/paging.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import {
   canPostToEvent, canSeeNotification, parseAudienceRule,
-  getUserEventScopes, visibilityWhere,
+  getUserEventScopes, visibilitySql,
 } from './audience.js';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 import { markSeen, getUnreadCountByCursor } from './cursor.js';
 import { mintRealtimeToken } from './realtime-token.js';
 import { assertNotArchived } from '../championships/championship-archive.service.js';
@@ -38,22 +41,29 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
     const eventId = typeof req.query.championship_id === 'string' ? req.query.championship_id : undefined;
     const unreadOnly = req.query.unread === '1' || req.query.unread === 'true';
 
-    const rows = await prisma.notifications.findMany({
-      where: {
-        ...visibilityWhere(scopes),
-        ...(eventId ? { championship_id: eventId } : {}),
-        ...(unreadOnly ? { notification_reads: { none: { user_id: user.id } } } : {}),
-      },
+    // A malformed id can match nothing - answer that rather than let the ::uuid cast 500.
+    if (eventId && !UUID_RE.test(eventId)) { res.json([]); return; }
+
+    // Page the ids in SQL (visibilitySql can use the audience index), then hydrate
+    // just that page with Prisma's includes.
+    const page = await prisma.$queryRaw<{ id: string }[]>(PrismaNS.sql`
+      select n.id from notifications n
+      where ${visibilitySql(scopes)}
+        ${eventId ? PrismaNS.sql`and n.championship_id = ${eventId}::uuid` : PrismaNS.empty}
+        ${unreadOnly ? PrismaNS.sql`and not exists (select 1 from notification_reads r where r.notification_id = n.id and r.user_id = ${user.id}::uuid)` : PrismaNS.empty}
+      order by n.created_at desc, n.id desc
+      limit ${take ?? 50} offset ${skip ?? 0}`);
+    const order = new Map(page.map((p, i) => [p.id, i]));
+
+    const rows = (await prisma.notifications.findMany({
+      where: { id: { in: page.map((p) => p.id) } },
       include: {
         championships: { select: { id: true, name: true, slug: true } },
         users: { select: { id: true, name: true } }, // sender (nullable for system)
         notification_reactions: { select: { reaction: true, user_id: true } },
         notification_reads: { where: { user_id: user.id }, select: { id: true } },
       },
-      orderBy: { created_at: 'desc' },
-      take: take ?? 50,
-      skip,
-    });
+    })).sort((a, b) => order.get(a.id)! - order.get(b.id)!);
 
     res.json(rows.map((n) => ({
       id: n.id,
@@ -179,17 +189,15 @@ export function makeNotificationsRouter(prisma: Prisma): Router {
   router.post('/notifications/read-all', asyncHandler(async (req, res) => {
     const user = req.user!;
     const scopes = await getUserEventScopes(prisma, user);
-    const unread = await prisma.notifications.findMany({
-      where: { ...visibilityWhere(scopes), notification_reads: { none: { user_id: user.id } } },
-      select: { id: true },
-    });
-    if (unread.length > 0) {
-      await prisma.notification_reads.createMany({
-        data: unread.map((n) => ({ notification_id: n.id, user_id: user.id })),
-        skipDuplicates: true,
-      });
-    }
-    res.json({ marked: unread.length });
+    // One statement instead of loading every unread id into the API and sending
+    // them back. ON CONFLICT plays the part createMany's skipDuplicates did.
+    const marked = await prisma.$executeRaw(PrismaNS.sql`
+      insert into notification_reads (notification_id, user_id)
+      select n.id, ${user.id}::uuid from notifications n
+      where ${visibilitySql(scopes)}
+        and not exists (select 1 from notification_reads r where r.notification_id = n.id and r.user_id = ${user.id}::uuid)
+      on conflict (notification_id, user_id) do nothing`);
+    res.json({ marked });
   }));
 
   // ----- Toggle an emoji reaction (recipients only; never the author) -----

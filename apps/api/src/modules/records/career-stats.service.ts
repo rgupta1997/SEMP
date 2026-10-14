@@ -86,39 +86,33 @@ export async function recomputeCareerStats(prisma: Prisma, userId: string, organ
   ]);
 
   // Discipline and format are not on either row - they hang off the fixture. Resolved
-  // in one query for every fixture involved rather than per row.
+  // in one query for every fixture involved rather than per row - and as one join:
+  // the nested Prisma select it replaces cost a round trip per relation level (six),
+  // per person, for every person a lock refreshes.
   const fixtureIds = [...new Set([...entries, ...achievements]
     .map((r) => r.fixture_id).filter((f): f is string => !!f))];
   const fixtures = fixtureIds.length
-    ? await prisma.fixtures.findMany({
-      where: { id: { in: fixtureIds } },
-      select: {
-        id: true,
-        tournament_disciplines: {
-          select: {
-            discipline_id: true,
-            tournament_formats: { select: { name: true } },
-            tournament_sports: {
-              select: {
-                sport_id: true,
-                // The championship's entry_level is what decides the TIER: entries
-                // that are organisations mean institution-against-institution;
-                // entries that are campuses or departments mean intra.
-                tournaments: {
-                  select: { championships: { select: { entry_level: true } } },
-                },
-              },
-            },
-          },
-        },
-      },
-    })
+    ? await prisma.$queryRaw<Array<{
+      id: string; discipline_id: string | null; format: string | null; sport_id: string | null; entry_level: string | null;
+    }>>`
+      select f.id, td.discipline_id, tf.name as format, ts.sport_id,
+             -- The championship's entry_level is what decides the TIER: entries that
+             -- are organisations mean institution-against-institution; entries that
+             -- are campuses or departments mean intra.
+             ch.entry_level
+      from fixtures f
+      left join tournament_disciplines td on td.id = f.tournament_discipline_id
+      left join tournament_formats tf on tf.id = td.format_id
+      left join tournament_sports ts on ts.id = td.tournament_sport_id
+      left join tournaments t on t.id = ts.tournament_id
+      left join championships ch on ch.id = t.championship_id
+      where f.id = any(${fixtureIds}::uuid[])`
     : [];
   const shapeOf = new Map(fixtures.map((f) => [f.id, {
-    discipline_id: f.tournament_disciplines?.discipline_id ?? null,
-    format: f.tournament_disciplines?.tournament_formats?.name ?? null,
-    sport_id: f.tournament_disciplines?.tournament_sports?.sport_id ?? null,
-    entry_level: f.tournament_disciplines?.tournament_sports?.tournaments?.championships?.entry_level ?? null,
+    discipline_id: f.discipline_id,
+    format: f.format,
+    sport_id: f.sport_id,
+    entry_level: f.entry_level,
   }]));
 
   const buckets = new Map<string, Bucket>();

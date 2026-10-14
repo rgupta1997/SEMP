@@ -432,3 +432,18 @@ fouls, boards broken and won on the break, and deciding games. Real boards keep
 `units_won` / `units_lost`; `queens` now means queens covered. RDS twin:
 `infra/rds-migrations/012_carrom_line_stats.sql` (not applied). Applied to dev statement by
 statement; all twelve columns were read back as present. **Not applied to prod.**
+
+---
+
+## Applied 2026-10-14 (dev only) — `20261014000000_query_path_indexes`
+
+Index-only output of the 2026-10-14 database audit; no column, table or data change.
+Adds indexes matching what the app actually queries (phone sign-in, OTP issue/verify,
+the auto-lock sweep), an index on each of the 52 foreign keys that had none, and drops
+27 indexes that were left prefixes of another index plus three nothing used
+(`idx_users_phone_last10` - replaced by `_any`, `idx_auth_tokens_phone`, `idx_pms_stats`).
+Sets `fixtures` fillfactor to 80. Every statement skips itself if its object is missing,
+and a redundant index is dropped only if its covering index exists in that database.
+Applied with `apply-migration.ts` (3 statements). Read back: 0 unindexed foreign keys,
+349 public indexes, and EXPLAIN shows the four target queries on their new indexes.
+RDS twin: `infra/rds-migrations/015_query_path_indexes.sql` (not applied). **Not applied to prod.**

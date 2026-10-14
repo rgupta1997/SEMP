@@ -7,6 +7,7 @@ import { can } from '../../http/middleware/can.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import { createNotification } from '../notifications/audience.js';
+import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 
 // Claiming an achievement earned elsewhere (J4-E5).
 //
@@ -60,7 +61,7 @@ export function makeClaimsRouter(prisma: Prisma): Router {
 
     const dupe = await prisma.achievement_claims.findFirst({
       where: { user_id: req.user!.id, organization_id: body.organization_id, status: 'pending',
-               title: { equals: body.title, mode: 'insensitive' }, occurred_on: new Date(body.occurred_on) },
+               title: equalsIgnoreCase(body.title), occurred_on: new Date(body.occurred_on) },
       select: { id: true },
     });
     if (dupe) throw new BusinessRuleError('You already have this claim waiting for a decision.');

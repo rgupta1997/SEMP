@@ -17,8 +17,8 @@ const auditSystemFn = vi.fn(async () => {});
 // tests; here they are stubbed so a failure in one can be injected deliberately.
 const resolveParticipants = vi.fn(async () => ({ resolved: [{ user_id: 'u1', team_id: 'tA', name: 'A Player' }], unmatched: [] as any[] }));
 const notify = vi.fn(async () => ({}));
-// The v2 notify() (@semp/notifications) - a SEPARATE seam from createNotification
-// above. lockScorecard/submitScorecard call both: createNotification for the match
+// The v2 notify() (@semp/notifications) - a SEPARATE seam from createNotifications
+// above. lockScorecard/submitScorecard call both: createNotifications for the match
 // participants, notify() for achievement_created/match_score_locked/
 // standings_updated/team_eliminated/score_pending_validation. Left unmocked, these
 // calls hit the fake prisma's real (absent) `.notifications.create` and throw -
@@ -47,7 +47,9 @@ vi.mock('../iam/audit.service.js', async (importOriginal) => ({
   auditSystem: (...a: any[]) => auditSystemFn(...a as []),
 }));
 vi.mock('./participants.js', () => ({ resolveFixtureParticipants: (...a: any[]) => resolveParticipants(...a as []) }));
-vi.mock('../notifications/audience.js', () => ({ createNotification: (...a: any[]) => notify(...a as []) }));
+// Participants are told in one batch (createNotifications), so `notify` receives the
+// prisma client and the array of rows - one per participant.
+vi.mock('../notifications/audience.js', () => ({ createNotifications: (...a: any[]) => notify(...a as []) }));
 vi.mock('@semp/notifications/server/notify.js', () => ({ notify: (...a: any[]) => notifyV2(...a as []) }));
 
 const {
@@ -293,8 +295,9 @@ describe('lockScorecard · notifying participants (J4-E1-S2)', () => {
 
     expect(notify).toHaveBeenCalledOnce();
     const sent = (notify.mock.calls[0] as any[])[1];
-    expect(sent.target_user_id).toBe('u1');
-    expect(sent.title).toMatch(/verified/i);
+    expect(sent).toHaveLength(1); // one row per resolved participant
+    expect(sent[0].target_user_id).toBe('u1');
+    expect(sent[0].title).toMatch(/verified/i);
     // Committed before anyone was told: the card is locked by the time we notify.
     expect(prisma.current.scorecard_status).toBe('locked');
   });
@@ -398,7 +401,7 @@ describe('lockScorecard · auto-lock (no human actor)', () => {
     await lockScorecard(prisma, null, 'fx1');
     expect(notify).toHaveBeenCalledOnce();
     const sent = (notify.mock.calls[0] as any[])[1];
-    expect(sent.sender_id).toBeNull();
+    expect(sent[0].sender_id).toBeNull();
   });
 });
 

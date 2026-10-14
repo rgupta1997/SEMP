@@ -388,7 +388,36 @@ export async function resolveUserIds(
         case 'compose': {
             const result = new Set<string>();
 
+            // A draw announcement composes one team_members rule per team, so
+            // resolving them one by one cost a query per team. Fold them into a
+            // single lookup - the result is a union either way.
+            const teamIds = rule.rules
+                .filter((child) => child.kind === 'team_members')
+                .map((child) => (child as { teamId: string }).teamId);
+
+            if (teamIds.length > 0) {
+                const rows = await prisma.team_members.findMany({
+                    where: {
+                        team_id: {
+                            in: teamIds,
+                        },
+                        is_active: true,
+                    },
+                    select: {
+                        user_id: true,
+                    },
+                });
+
+                for (const row of rows) {
+                    result.add(row.user_id);
+                }
+            }
+
             for (const childRule of rule.rules) {
+                if (childRule.kind === 'team_members') {
+                    continue;
+                }
+
                 const ids = await resolveUserIds(
                     prisma,
                     childRule,

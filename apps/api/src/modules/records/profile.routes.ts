@@ -4,6 +4,7 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { ConflictError, NotFoundError } from '../../shared/errors.js';
+import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 
 // The sports profile: identity, the controlled half, and the privacy choices.
 //
@@ -102,7 +103,7 @@ export function makeProfileRouter(prisma: Prisma): Router {
     const handle = String(req.query.handle ?? '');
     if (!HANDLE.test(handle)) { res.json({ available: false }); return; }
     const taken = await prisma.users.findFirst({
-      where: { handle: { equals: handle, mode: 'insensitive' }, id: { not: req.user!.id } },
+      where: { handle: equalsIgnoreCase(handle), id: { not: req.user!.id } },
       select: { id: true },
     });
     res.json({ available: !taken });
@@ -114,7 +115,7 @@ export function makeProfileRouter(prisma: Prisma): Router {
     if (body.handle) {
       // Case-insensitive, because the handle is a URL and URLs are not.
       const taken = await prisma.users.findFirst({
-        where: { handle: { equals: body.handle, mode: 'insensitive' }, id: { not: req.user!.id } },
+        where: { handle: equalsIgnoreCase(body.handle), id: { not: req.user!.id } },
         select: { id: true },
       });
       if (taken) throw new ConflictError('That handle is already taken');

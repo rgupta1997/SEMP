@@ -7,6 +7,7 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { requireSuperAdmin } from '../../http/middleware/auth.js';
 import { NotFoundError } from '../../shared/errors.js';
 import { sendDemoRequestAckEmail, type DemoRequestMail } from '../comms/email.js';
+import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 
 /**
  * How long one email address stays acknowledged for.
@@ -33,7 +34,7 @@ async function acknowledge(prisma: Prisma, lead: DemoRequestMail): Promise<void>
       // Case-insensitively: the form takes whatever was typed, so the same mailbox
       // reaches us as both Priya@ and priya@ and a case-sensitive match would let the
       // second one straight through the guard.
-      email: { equals: lead.email, mode: 'insensitive' },
+      email: equalsIgnoreCase(lead.email),
       created_at: { gte: new Date(Date.now() - ACK_WINDOW_MS) },
     },
   });

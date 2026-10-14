@@ -1,5 +1,6 @@
+import { Prisma as PrismaNS } from '@prisma/client';
 import type { Prisma } from '../../infra/prisma.js';
-import { visibilityWhere, type EventScopes } from './audience.js';
+import { visibilitySql, type EventScopes } from './audience.js';
 
 // Upserts the per-user "last seen" watermark used to compute the unread
 // badge count cheaply (see getUnreadCountByCursor below). Called when the
@@ -22,7 +23,7 @@ export function markSeen(prisma: Prisma, userId: string) {
 // can change AFTER a notification is created (e.g. a "registration is open"
 // announcement fires when nobody's enrolled yet, then an org enrolls
 // afterward). GET /notifications already re-evaluates visibility live via
-// visibilityWhere() for exactly this reason - the feed shows such a
+// visibilitySql() for exactly this reason - the feed shows such a
 // notification correctly the moment the org's scope changes, even with no
 // delivery row.
 //
@@ -57,23 +58,19 @@ export async function getUnreadCountByCursor(
     return prisma.notifications.count({ where: { created_at: { gt: since } } });
   }
 
-  const visible = visibilityWhere(scopes);
-  return prisma.notifications.count({
-    where: {
-      OR: [
-        // Delivered to me at write time - cursor timestamp is a faithful
-        // "unread since" signal here, since I was always eligible for it.
-        { created_at: { gt: since }, notification_deliveries: { some: { user_id: userId } } },
-        // Visible to me NOW via a live scope match that may not have existed
-        // when this was created - correctness has to come from per-item read
-        // state (same as the feed), not a timestamp that predates my eligibility.
-        {
-          AND: [
-            { OR: Array.isArray(visible.OR) ? visible.OR : [] },
-            { notification_reads: { none: { user_id: userId } } },
-          ],
-        },
-      ],
-    },
-  });
+  // Raw SQL so the visibility branch can use the audience index (see
+  // visibilitySql). A notification is counted once even if both branches hold.
+  const [{ count }] = await prisma.$queryRaw<{ count: number }[]>(PrismaNS.sql`
+    select count(*)::int as count from notifications n
+    where
+      -- Delivered to me at write time - cursor timestamp is a faithful
+      -- "unread since" signal here, since I was always eligible for it.
+      (n.created_at > ${since} and exists (
+        select 1 from notification_deliveries d where d.notification_id = n.id and d.user_id = ${userId}::uuid))
+      -- Visible to me NOW via a live scope match that may not have existed
+      -- when this was created - correctness has to come from per-item read
+      -- state (same as the feed), not a timestamp that predates my eligibility.
+      or (${visibilitySql(scopes)} and not exists (
+        select 1 from notification_reads r where r.notification_id = n.id and r.user_id = ${userId}::uuid))`);
+  return count;
 }

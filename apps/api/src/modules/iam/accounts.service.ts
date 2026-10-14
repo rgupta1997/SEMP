@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import type { Prisma } from '../../infra/prisma.js';
 import { env } from '../../config/env.js';
 import { normalizeEmail, normalizePhone, type TokenSubject } from './auth-tokens.service.js';
+import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 
 // Resolving a subject to the account (or accounts) it opens.
 //
@@ -47,7 +48,7 @@ const toChoice = (u: ChoiceRow): AccountChoice => ({
 /**
  * Every active account reachable from a subject.
  *
- * The phone lookup matches `idx_users_phone_last10` - the last ten digits - so a
+ * The phone lookup matches `idx_users_phone_last10_any` - the last ten digits - so a
  * number stored as "+91 98765 43210" is found by "9876543210" and the reverse.
  * Ordered oldest first so the chooser is stable between visits rather than
  * reshuffling as rows are touched.
@@ -59,7 +60,7 @@ export async function accountsForSubject(prisma: Prisma, subject: TokenSubject):
       `select id from users
        where is_active
          and phone is not null
-         and right(regexp_replace(phone, '[^0-9]', '', 'g'), 10) = $1
+         and right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) = $1
        order by created_at asc`,
       last10,
     );
@@ -75,7 +76,7 @@ export async function accountsForSubject(prisma: Prisma, subject: TokenSubject):
 
   const email = normalizeEmail((subject as { email: string }).email);
   const user = await prisma.users.findFirst({
-    where: { email: { equals: email, mode: 'insensitive' }, is_active: true },
+    where: { email: equalsIgnoreCase(email), is_active: true },
     select: CHOICE_SELECT,
   });
   return user ? [toChoice(user as ChoiceRow)] : [];

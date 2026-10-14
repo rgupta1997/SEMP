@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Prisma as PrismaNS } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { matrixImportSchema, eventTemplateFor, isRankingSport } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
@@ -8,6 +9,7 @@ import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError } from '../../shared/errors.js';
 import { findEntrant } from '../championships/contingent.js';
 import { deriveProvisionedPassword, findUsersByPhones, maskPhone, phoneLast10 } from '../iam/users.helpers.js';
+import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 
 // Champion­ship setup matrix import: turn one 2D spreadsheet (sections × sport/
 // discipline) into the full structure - sports/disciplines mapped in, each section
@@ -113,7 +115,7 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
     // Ranking sports (powerlifting/swimming/athletics) have no head-to-head matches, so
     // they're locked to the "Rankings" format rather than the sheet's default (Knockout).
     // Resolve its id once; if the format isn't seeded yet we fall back to the default.
-    const rankingFormat = await prisma.tournament_formats.findFirst({ where: { name: { equals: 'Rankings', mode: 'insensitive' } }, select: { id: true } });
+    const rankingFormat = await prisma.tournament_formats.findFirst({ where: { name: equalsIgnoreCase('Rankings') }, select: { id: true } });
     const rankingFormatId = rankingFormat?.id ?? null;
 
     // Resolve people up front (one query); anyone we can't match by phone is either
@@ -174,7 +176,7 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
       const getSport = async (name: string): Promise<string> => {
         const key = name.toLowerCase();
         if (sportIdByName.has(key)) return sportIdByName.get(key)!;
-        const found = await tx.sports.findFirst({ where: { name: { equals: name, mode: 'insensitive' } }, select: { id: true } });
+        const found = await tx.sports.findFirst({ where: { name: equalsIgnoreCase(name) }, select: { id: true } });
         const id = found?.id ?? (summary.sports.created++, (await tx.sports.create({ data: { name }, select: { id: true } })).id);
         sportIdByName.set(key, id);
         return id;
@@ -210,7 +212,7 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
           const foundD = await tx.disciplines.findFirst({
             where: {
               sport_id: sportId,
-              name: { equals: discipline, mode: 'insensitive' },
+              name: equalsIgnoreCase(discipline),
               OR: [{ championship_id: null }, { championship_id: championshipId }],
             },
             orderBy: { championship_id: { sort: 'asc', nulls: 'first' } },
@@ -245,7 +247,7 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
       const ensureSection = async (section: string): Promise<{ orgId: string; champOrgId: string }> => {
         const key = section.toLowerCase();
         if (orgIdBySection.has(key)) return { orgId: orgIdBySection.get(key)!, champOrgId: champOrgBySection.get(key)! };
-        const found = await tx.organizations.findFirst({ where: { name: { equals: section, mode: 'insensitive' } }, select: { id: true } });
+        const found = await tx.organizations.findFirst({ where: { name: equalsIgnoreCase(section) }, select: { id: true } });
         const orgId = found?.id ?? (summary.orgs.created++, (await tx.organizations.create({ data: { name: section, status: true }, select: { id: true } })).id);
         if (found) summary.orgs.existing++;
         // The matrix sheet's sections ARE organisations, so this builds inter-org
@@ -317,51 +319,132 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
       }
 
       // 5) Teams + entries + captain/poc members, per section × unit.
+      //
+      // Set-based rather than per cell. Cell by cell this was ~5 sequential statements
+      // (find team, create team, upsert entry, upsert captain, upsert POC), so a big
+      // sheet ran thousands of round trips inside one transaction - past Lambda's 15s
+      // ceiling long before the 120s transaction budget mattered. Now: one read and
+      // one insert for teams, one upsert statement each for entries and members. The
+      // final state is what the per-cell loop produced: where a sheet names the same
+      // team or person twice, the later cell wins, exactly as its upsert did.
+
+      // 5a) Resolve every cell's section and draw first. Both are cached match-or-create
+      //     steps that don't depend on the team writes, so doing them up front changes
+      //     nothing they produce.
+      type Cell = {
+        orgId: string; champOrgId: string; sportId: string; tdId: string; name: string;
+        captain: { id: string } | null; poc: { id: string } | null;
+      };
+      const cells: Cell[] = [];
       for (const u of body.units) {
         for (const t of u.teams) {
           if (!t.captain?.phone && !t.poc?.phone) continue; // empty cell - nothing to build
           const { orgId, champOrgId } = await ensureSection(t.section);
           const { sportId, tdId } = await getDraw(u.sport, u.discipline);
-          const name = teamName(u.sport, u.discipline);
-
-          let team = await tx.teams.findFirst({ where: { organization_id: orgId, sport_id: sportId, name: { equals: name, mode: 'insensitive' } }, select: { id: true } });
-          if (!team) {
-            team = await tx.teams.create({ data: { organization_id: orgId, sport_id: sportId, name, status: 'forming' }, select: { id: true } });
-            summary.teams.created++;
-          } else {
-            summary.teams.existing++;
-          }
-
-          await tx.team_entries.upsert({
-            where: { team_id_championship_id: { team_id: team.id, championship_id: championshipId } },
-            update: { tournament_discipline_id: tdId, championship_organization_id: champOrgId },
-            create: { team_id: team.id, organization_id: orgId, championship_id: championshipId, championship_organization_id: champOrgId, tournament_discipline_id: tdId, status: 'forming' },
+          cells.push({
+            orgId, champOrgId, sportId, tdId, name: teamName(u.sport, u.discipline),
+            captain: t.captain?.phone ? resolved(t.captain.phone) : null,
+            poc: t.poc?.phone ? resolved(t.poc.phone) : null,
           });
+        }
+      }
 
-          const captain = t.captain?.phone ? resolved(t.captain.phone) : null;
-          if (captain) {
-            await tx.team_members.upsert({
-              where: { team_id_user_id: { team_id: team.id, user_id: captain.id } },
-              update: { role: 'captain', is_active: true },
-              create: { team_id: team.id, user_id: captain.id, role: 'captain' },
-            });
-            // Also a member of the section org, so the org shows in their Organizations.
-            addTeamOrgMember(captain.id, orgId);
-            summary.captains_assigned++;
+      // 5b) Teams: match by org + sport + name (any case), create the missing ones.
+      const teamKey = (orgId: string, sportId: string, name: string) => `${orgId}|${sportId}|${name.toLowerCase()}`;
+      const teamIdByKey = new Map<string, string>();
+      if (cells.length) {
+        const existing = await tx.teams.findMany({
+          where: {
+            organization_id: { in: [...new Set(cells.map((c) => c.orgId))] },
+            sport_id: { in: [...new Set(cells.map((c) => c.sportId))] },
+          },
+          select: { id: true, organization_id: true, sport_id: true, name: true },
+        });
+        for (const tm of existing) {
+          if (!tm.sport_id) continue;
+          const k = teamKey(tm.organization_id, tm.sport_id, tm.name);
+          if (!teamIdByKey.has(k)) teamIdByKey.set(k, tm.id);
+        }
+      }
+      const toCreate = new Map<string, { organization_id: string; sport_id: string; name: string; status: string }>();
+      for (const c of cells) {
+        const k = teamKey(c.orgId, c.sportId, c.name);
+        // Counted per cell, as before: the first sighting of a missing team creates it,
+        // and every later cell naming it finds it.
+        if (teamIdByKey.has(k) || toCreate.has(k)) summary.teams.existing++;
+        else { toCreate.set(k, { organization_id: c.orgId, sport_id: c.sportId, name: c.name, status: 'forming' }); summary.teams.created++; }
+      }
+      if (toCreate.size) {
+        const made = await tx.teams.createManyAndReturn({
+          data: [...toCreate.values()],
+          select: { id: true, organization_id: true, sport_id: true, name: true },
+        });
+        for (const tm of made) teamIdByKey.set(teamKey(tm.organization_id, tm.sport_id!, tm.name), tm.id);
+      }
+
+      // 5c) What each team's entry and members should end up as - later cells win.
+      const entries = new Map<string, { team_id: string; organization_id: string; champOrgId: string; tdId: string }>();
+      const members = new Map<string, { team_id: string; user_id: string; role: string }>();
+      for (const c of cells) {
+        const teamId = teamIdByKey.get(teamKey(c.orgId, c.sportId, c.name))!;
+        entries.set(teamId, { team_id: teamId, organization_id: c.orgId, champOrgId: c.champOrgId, tdId: c.tdId });
+        if (c.captain) {
+          members.set(`${teamId}|${c.captain.id}`, { team_id: teamId, user_id: c.captain.id, role: 'captain' });
+          // Also a member of the section org, so the org shows in their Organizations.
+          addTeamOrgMember(c.captain.id, c.orgId);
+          summary.captains_assigned++;
+        }
+        // The per-discipline POC is added as vice_captain: that team role carries the
+        // same manage-the-team ("owner") rights as captain (see teamManager guard) and
+        // is permitted by the team_members role check constraint (no 'poc' value). Skip
+        // if they're already this team's captain so we never downgrade them.
+        if (c.poc && c.poc.id !== c.captain?.id) {
+          members.set(`${teamId}|${c.poc.id}`, { team_id: teamId, user_id: c.poc.id, role: 'vice_captain' });
+          addTeamOrgMember(c.poc.id, c.orgId);
+          summary.pocs_assigned++;
+        }
+      }
+
+      // 5d) Write them: one upsert statement each, behind a savepoint. One multi-row
+      //     statement can trip team_entries' second unique index (org + draw) part-way
+      //     through a reshuffle where row-at-a-time upserts would not, so if the batch
+      //     fails it is rolled back and the original per-row upserts run instead.
+      if (entries.size || members.size) {
+        await tx.$executeRawUnsafe('savepoint matrix_batch');
+        try {
+          if (entries.size) {
+            await tx.$executeRaw`
+              insert into team_entries (team_id, organization_id, championship_id, championship_organization_id, tournament_discipline_id, status)
+              values ${PrismaNS.join([...entries.values()].map((e) =>
+                PrismaNS.sql`(${e.team_id}::uuid, ${e.organization_id}::uuid, ${championshipId}::uuid, ${e.champOrgId}::uuid, ${e.tdId}::uuid, 'forming')`))}
+              on conflict (team_id, championship_id) do update
+                set tournament_discipline_id = excluded.tournament_discipline_id,
+                    championship_organization_id = excluded.championship_organization_id`;
           }
-          // The per-discipline POC is added as vice_captain: that team role carries the
-          // same manage-the-team ("owner") rights as captain (see teamManager guard) and
-          // is permitted by the team_members role check constraint (no 'poc' value). Skip
-          // if they're already this team's captain so we never downgrade them.
-          const poc = t.poc?.phone ? resolved(t.poc.phone) : null;
-          if (poc && poc.id !== captain?.id) {
-            await tx.team_members.upsert({
-              where: { team_id_user_id: { team_id: team.id, user_id: poc.id } },
-              update: { role: 'vice_captain', is_active: true },
-              create: { team_id: team.id, user_id: poc.id, role: 'vice_captain' },
+          if (members.size) {
+            await tx.$executeRaw`
+              insert into team_members (team_id, user_id, role)
+              values ${PrismaNS.join([...members.values()].map((m) =>
+                PrismaNS.sql`(${m.team_id}::uuid, ${m.user_id}::uuid, ${m.role})`))}
+              on conflict (team_id, user_id) do update
+                set role = excluded.role, is_active = true`;
+          }
+          await tx.$executeRawUnsafe('release savepoint matrix_batch');
+        } catch {
+          await tx.$executeRawUnsafe('rollback to savepoint matrix_batch');
+          for (const e of entries.values()) {
+            await tx.team_entries.upsert({
+              where: { team_id_championship_id: { team_id: e.team_id, championship_id: championshipId } },
+              update: { tournament_discipline_id: e.tdId, championship_organization_id: e.champOrgId },
+              create: { team_id: e.team_id, organization_id: e.organization_id, championship_id: championshipId, championship_organization_id: e.champOrgId, tournament_discipline_id: e.tdId, status: 'forming' },
             });
-            addTeamOrgMember(poc.id, orgId);
-            summary.pocs_assigned++;
+          }
+          for (const m of members.values()) {
+            await tx.team_members.upsert({
+              where: { team_id_user_id: { team_id: m.team_id, user_id: m.user_id } },
+              update: { role: m.role, is_active: true },
+              create: { team_id: m.team_id, user_id: m.user_id, role: m.role },
+            });
           }
         }
       }

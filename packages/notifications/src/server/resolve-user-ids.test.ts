@@ -219,4 +219,27 @@ describe('resolveUserIds · compose', () => {
     ]));
     expect(ids).toEqual(new Set());
   });
+
+  it('resolves many team_members rules with ONE lookup, same people as one-by-one', async () => {
+    const prisma = fakePrisma({
+      teamMembers: [
+        { team_id: 'tA', user_id: 'a1', role: 'player', is_active: true },
+        { team_id: 'tB', user_id: 'b1', role: 'player', is_active: true },
+        { team_id: 'tB', user_id: 'b2', role: 'player', is_active: false },
+        { team_id: 'tC', user_id: 'c1', role: 'player', is_active: true },
+      ],
+    });
+    let lookups = 0;
+    const findMany = prisma.team_members.findMany;
+    prisma.team_members.findMany = (args) => { lookups++; return findMany(args); };
+
+    const teams = ['tA', 'tB', 'tC'];
+    const ids = await resolveUserIds(prisma, Rules.compose(teams.map((t) => Rules.teamMembers(t))));
+
+    expect(lookups).toBe(1);
+    const oneByOne = new Set<string>();
+    for (const t of teams) for (const id of await resolveUserIds(prisma, Rules.teamMembers(t))) oneByOne.add(id);
+    expect(ids).toEqual(oneByOne);
+    expect(ids).toEqual(new Set(['a1', 'b1', 'c1']));
+  });
 });

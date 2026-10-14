@@ -14,6 +14,10 @@ import { SaveAsTemplate } from './SaveAsTemplate';
 import { InvitePanel } from '../../components/InvitePanel';
 
 const slugify = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+// Unit labels are tenant-configurable ("Campus", "Branch", "Faculty"), so a bare
+// trailing "s" gives "campuss" / "branchs". English plural rules for the common cases.
+const pluralize = (w: string) =>
+  /(s|x|z|ch|sh)$/i.test(w) ? `${w}es` : /[^aeiou]y$/i.test(w) ? `${w.slice(0, -1)}ies` : `${w}s`;
 
 // Venue + a separate "Seasons" step are gone: the city captured below doubles as the
 // venue, and a default season is auto-created with the championship, so the organiser
@@ -281,7 +285,7 @@ export function CreateEventWizard() {
                         <span className="min-w-0">
                           <span className="block font-medium text-slate-800 dark:text-slate-100">
                             {meta.intra && resolvedHostId
-                              ? `Between ${(lvl === 'campus' ? labels.campus : labels.department).toLowerCase()}s`
+                              ? `Between ${pluralize((lvl === 'campus' ? labels.campus : labels.department).toLowerCase())}`
                               : meta.label}
                           </span>
                           <span className="block text-[12.5px] text-slate-500 dark:text-slate-400">

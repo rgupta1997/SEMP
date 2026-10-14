@@ -7,6 +7,7 @@ import {
   type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
   type FormatTemplate, type MatchOutcome, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
+import { Prisma } from '@prisma/client';
 import type { Db } from '../../infra/prisma.js';
 import { writeCategoryLines, type CategoryLineInput } from './category-lines.service.js';
 import type { FixtureParticipants } from '../fixtures/participants.js';
@@ -687,19 +688,16 @@ export async function recomputeCareerStatBags(
 
   let written = 0;
   const { foldCareerStats } = await import('@semp/shared');
+  // Every non-cricket bag goes out in ONE update below. Writing them one statement
+  // per (sport, tier, position) cost ~70 round trips for a multi-sport player, and a
+  // lock refreshes every player in the match one after another - a 22-a-side lock
+  // spent 1,700 queries here, after the commit but inside the same request.
+  const updates: Array<{ sportId: string; tier: string; grain: 'sport' | 'position'; position: string | null; stats: string }> = [];
   for (const { sportId, sport, tier, position, bags } of buckets.values()) {
     if (position) {
       const spec = statSpecFor(sport);
       if (!spec) continue;
-      written += await db.$executeRaw`
-        update career_stats
-        set stats = ${JSON.stringify(foldCareerStats(spec, bags))}::jsonb
-        where user_id = ${userId}::uuid
-          and organization_id = ${organizationId}::uuid
-          and sport_id = ${sportId}::uuid
-          and grain = 'position'
-          and position = ${position}
-          and tier = ${tier}`;
+      updates.push({ sportId, tier, grain: 'position', position, stats: JSON.stringify(foldCareerStats(spec, bags)) });
       continue;
     }
     // CRICKET HAS NO STAT SPEC, and correctly so: its figures come from three typed
@@ -714,19 +712,26 @@ export async function recomputeCareerStatBags(
     }
     const spec = statSpecFor(sport);
     if (!spec) continue;
-    const folded = foldCareerStats(spec, bags);
     // Only the 'sport' grain carries the bag: discipline and format grains would
     // fragment a career total into slices nobody has asked for yet, and an empty
     // jsonb on every row is noise.
-    const n = await db.$executeRaw`
-      update career_stats
-      set stats = ${JSON.stringify(folded)}::jsonb
-      where user_id = ${userId}::uuid
-        and organization_id = ${organizationId}::uuid
-        and sport_id = ${sportId}::uuid
-        and grain = 'sport'
-        and tier = ${tier}`;
-    written += n;
+    updates.push({ sportId, tier, grain: 'sport', position: null, stats: JSON.stringify(foldCareerStats(spec, bags)) });
+  }
+  if (updates.length) {
+    // A 'sport' bag matches its row by sport + tier; a 'position' bag also by position -
+    // exactly the two where-clauses the per-bucket updates used.
+    const values = Prisma.join(updates.map((u) =>
+      Prisma.sql`(${u.sportId}::uuid, ${u.tier}, ${u.grain}, ${u.position}::text, ${u.stats}::jsonb)`));
+    written += await db.$executeRaw`
+      update career_stats c
+      set stats = v.stats
+      from (values ${values}) as v(sport_id, tier, grain, position, stats)
+      where c.user_id = ${userId}::uuid
+        and c.organization_id = ${organizationId}::uuid
+        and c.sport_id = v.sport_id
+        and c.grain = v.grain
+        and c.tier = v.tier
+        and (v.grain = 'sport' or c.position = v.position)`;
   }
   return written;
 }

@@ -2,6 +2,7 @@ import type { Request } from 'express';
 import type { Prisma } from '../../infra/prisma.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { audit } from '../iam/audit.service.js';
+import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 
 // Championship templates - all of them, in one table.
 //
@@ -155,7 +156,7 @@ export async function saveTemplate(
   // after tweaking" is the common case, not a new template.
   const existing = await prisma.championship_templates.findFirst({
     where: {
-      name: { equals: name.trim(), mode: 'insensitive' },
+      name: equalsIgnoreCase(name.trim()),
       ...(organizationId ? { organization_id: organizationId } : { created_by: req.user!.id, organization_id: null }),
     },
     select: { id: true },

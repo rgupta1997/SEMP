@@ -63,6 +63,12 @@ function fakePrisma(seed: Partial<Row>[] = []) {
         return rows.splice(i, 1)[0];
       },
       count: async ({ where }: any) => rows.filter((r) => match(where, r)).length,
+      // Only the expired-code sweep calls this, always as { expires_at: { lt } }.
+      deleteMany: async ({ where }: any) => {
+        const before = rows.length;
+        for (let i = rows.length - 1; i >= 0; i--) if (rows[i].expires_at < where.expires_at.lt) rows.splice(i, 1);
+        return { count: before - rows.length };
+      },
     },
   } as any;
 }
@@ -96,6 +102,20 @@ describe('issueToken', () => {
     expect(prisma.rows[0].consumed_at).not.toBeNull();
     const stale = await verifyToken(prisma, { email: 'a@iimb.ac.in', kind: 'otp', code: first.code });
     expect(stale.ok).toBe(false);
+  });
+
+  it('sweeps codes that expired over a day ago, and only those', async () => {
+    const hour = 3_600_000;
+    const prisma = fakePrisma([
+      { id: 'old', expires_at: new Date(Date.now() - 25 * hour) },
+      { id: 'recent', expires_at: new Date(Date.now() - hour) },
+    ]);
+    await issueToken(prisma, { email: 'b@iimb.ac.in', kind: 'otp' });
+
+    const ids = prisma.rows.map((r: { id: string }) => r.id);
+    expect(ids).not.toContain('old');
+    expect(ids).toContain('recent');
+    expect(ids).toHaveLength(2);
   });
 });
 

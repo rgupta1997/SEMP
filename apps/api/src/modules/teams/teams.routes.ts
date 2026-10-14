@@ -22,6 +22,7 @@ import { assertOrgNotArchived } from '../iam/organization-archive.service.js';
 import { deriveProvisionedPassword, findUsersByPhones, phoneLast10 } from '../iam/users.helpers.js';
 import { assertWithinOrgLimit } from '@semp/entitlements/server';
 import { countPeople } from '../billing/usage.js';
+import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 
 // Validate that a discipline draw belongs to the given championship and (optionally)
 // matches the team's sport. Returns the loaded draw.
@@ -275,7 +276,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     // how it read before intra events - "Bangalore / Cricket XI" would have blocked
     // "Mumbai / Cricket XI", and the obvious name for a campus team is the sport.
     const nameClash = await prisma.teams.findFirst({
-      where: { organization_id, org_unit_id: orgUnitId, sport_id, name: { equals: name.trim(), mode: 'insensitive' } },
+      where: { organization_id, org_unit_id: orgUnitId, sport_id, name: equalsIgnoreCase(name.trim()) },
       select: { id: true },
     });
     if (nameClash) {

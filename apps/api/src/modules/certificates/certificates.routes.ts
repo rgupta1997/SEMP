@@ -354,50 +354,113 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     let issued = 0;
     let skipped = 0;
 
-    // One transaction PER certificate, not one for the batch. Three hundred rows in a
-    // single transaction holds the counter lock for the whole run and blows the 15s
-    // Lambda ceiling; and a failure at row 299 would throw away 298 good certificates.
-    // Per-row means a bad row is reported and the rest still issue - the same shape as
-    // bulk lock (J4-E1-S2).
-    for (const c of candidates) {
-      const code = (template.code || codeFor(c.sportName)).toUpperCase().slice(0, 8);
+    // The row one candidate becomes, given the number allocated to it.
+    const certificateRow = (c: (typeof candidates)[number], code: string, seq: number) => {
+      const serial = formatSerial(year, code, seq);
+      const facts: CertificateFacts = {
+        serial,
+        recipient_name: c.name,
+        organization_name: org.name,
+        championship_name: champ.name,
+        sport: c.sportName,
+        title: c.title,
+        issued_on: new Date().toISOString().slice(0, 10),
+      };
+      return {
+        organization_id: organizationId, template_id: template.id, championship_id: champ.id,
+        fixture_id: c.fixtureId, user_id: c.userId, recipient_name: facts.recipient_name,
+        recipient_category: body.category,
+        serial, seq, year, code,
+        payload: facts as unknown as object,
+        signature: signCertificate(facts),
+        token: newToken(),
+        issued_by: req.user!.id,
+        lock_version: c.lockVersion ?? null,
+      };
+    };
+
+    // Results land by candidate position, so the response keeps candidate order even
+    // though issuing is grouped by serial code below.
+    const byIndex: Array<{ user_id: string; ok: boolean; serial?: string; reason?: string }> = [];
+    const issuedCerts: Array<{ id: string; userId: string; title: string | null }> = [];
+
+    // One transaction per certificate in the worst case, never one for the whole batch
+    // (that would hold the counter lock for the whole run, and a failure at row 299
+    // would throw away 298 good certificates). Per-row means a bad row is reported and
+    // the rest still issue - the same shape as bulk lock (J4-E1-S2).
+    const issueOne = async (c: (typeof candidates)[number], i: number, code: string) => {
       try {
         const cert = await prisma.$transaction(async (tx) => {
           const seq = await allocateNumber(tx, organizationId, year, code);
-          const serial = formatSerial(year, code, seq);
-          const facts: CertificateFacts = {
-            serial,
-            recipient_name: c.name,
-            organization_name: org.name,
-            championship_name: champ.name,
-            sport: c.sportName,
-            title: c.title,
-            issued_on: new Date().toISOString().slice(0, 10),
-          };
-          return tx.certificates.create({
-            data: {
-              organization_id: organizationId, template_id: template.id, championship_id: champ.id,
-              fixture_id: c.fixtureId, user_id: c.userId, recipient_name: facts.recipient_name,
-              recipient_category: body.category,
-              serial, seq, year, code,
-              payload: facts as unknown as object,
-              signature: signCertificate(facts),
-              token: newToken(),
-              issued_by: req.user!.id,
-              lock_version: c.lockVersion ?? null,
-            },
-          });
+          return tx.certificates.create({ data: certificateRow(c, code, seq) });
         });
         issued++;
-        results.push({ user_id: c.userId, ok: true, serial: cert.serial });
-        await notifyCertificateGenerated(prisma, cert.id, c.userId, c.title, req.user!.id);
+        byIndex[i] = { user_id: c.userId, ok: true, serial: cert.serial };
+        issuedCerts.push({ id: cert.id, userId: c.userId, title: c.title });
       } catch (e: any) {
         // The partial unique index catches a re-run: somebody already has this
         // certificate, which is a skip and not an error.
         const dupe = e?.code === 'P2002';
         skipped++;
-        results.push({ user_id: c.userId, ok: false, reason: dupe ? 'already issued' : (e?.message ?? 'failed').slice(0, 120) });
+        byIndex[i] = { user_id: c.userId, ok: false, reason: dupe ? 'already issued' : (e?.message ?? 'failed').slice(0, 120) };
       }
+    };
+
+    // The fast path: everyone sharing a serial code is issued in ONE transaction - a
+    // block of consecutive numbers reserved in one statement, one insert for the lot.
+    // Per row that was a transaction, an allocation and an insert apiece, which on
+    // 300 rows ran up against the 15s Lambda ceiling. The block is reserved the way
+    // next_certificate_number() reserves one (same upsert, + k instead of + 1) and
+    // inside the same transaction as the inserts, so it is exactly as gapless: if
+    // anything in the group fails, the whole group rolls back, numbers included, and
+    // falls back to the per-row path - which reports each skip just as before.
+    const groups = new Map<string, Array<{ c: (typeof candidates)[number]; i: number }>>();
+    candidates.forEach((c, i) => {
+      const code = (template.code || codeFor(c.sportName)).toUpperCase().slice(0, 8);
+      const g = groups.get(code) ?? [];
+      g.push({ c, i });
+      groups.set(code, g);
+    });
+
+    for (const [code, group] of groups) {
+      let block: { first: number; rows: Array<{ id: string; serial: string }> } | null = null;
+      try {
+        block = await prisma.$transaction(async (tx) => {
+          const [{ last }] = await tx.$queryRaw<Array<{ last: number }>>`
+            insert into certificate_counters (organization_id, year, code, next_number)
+                 values (${organizationId}::uuid, ${year}::smallint, ${code}::varchar, ${group.length}::int)
+            on conflict (organization_id, year, code) do update
+                    set next_number = certificate_counters.next_number + ${group.length}::int
+              returning next_number as last`;
+          const first = last - group.length + 1;
+          const rows = await tx.certificates.createManyAndReturn({
+            data: group.map(({ c }, k) => certificateRow(c, code, first + k)),
+            select: { id: true, serial: true },
+          });
+          return { first, rows };
+        });
+      } catch {
+        block = null; // a clash somewhere in the group - fall back to row by row
+      }
+
+      if (!block) {
+        for (const { c, i } of group) await issueOne(c, i, code);
+        continue;
+      }
+      // Candidate k got number first + k, so its serial says which row is whose.
+      const idBySerial = new Map(block.rows.map((r) => [r.serial, r.id]));
+      group.forEach(({ c, i }, k) => {
+        const serial = formatSerial(year, code, block!.first + k);
+        issued++;
+        byIndex[i] = { user_id: c.userId, ok: true, serial };
+        issuedCerts.push({ id: idBySerial.get(serial)!, userId: c.userId, title: c.title });
+      });
+    }
+    results.push(...byIndex);
+
+    // Only after everything is committed - a notification cannot be taken back.
+    for (const cert of issuedCerts) {
+      await notifyCertificateGenerated(prisma, cert.id, cert.userId, cert.title, req.user!.id);
     }
 
     await audit(prisma, req, {
