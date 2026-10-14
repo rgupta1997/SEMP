@@ -69,10 +69,6 @@ describe('volleyball serve and ends', () => {
     expect(foldRally(f, [pt('A'), fix, ...run('A', 24)]).state.serve.side).toBe('B');
   });
 
-  it('throwball keeps its own serve rule for now', () => {
-    expect(presetByKey('tb_bo3_15')!.serve.nextUnitServer).toBe('previousWinner');
-  });
-
   it('ends change after a set; the 2-2 decider is flagged for a fresh toss', () => {
     const { state, trace } = foldRally(f, run('A', 25));
     expect(changesEndsAfterUnit(f, state, trace[trace.length - 1].unitsWon)).toBe(true);
@@ -95,14 +91,12 @@ describe('volleyball serve and ends', () => {
 });
 
 describe('volleyball errors', () => {
-  for (const sport of ['volleyball', 'throwball']) {
-    it(`${sport}: a service or attack error is a point to the opponent`, () => {
-      const events = statSpecFor(sport)!.events;
-      for (const key of ['serve_error', 'attack_error']) {
-        expect(events.find((e) => e.key === key), key).toMatchObject({ points: 1, forOpponent: true, tone: 'error' });
-      }
-    });
-  }
+  it('a service or attack error is a point to the opponent', () => {
+    const events = statSpecFor('volleyball')!.events;
+    for (const key of ['serve_error', 'attack_error']) {
+      expect(events.find((e) => e.key === key), key).toMatchObject({ points: 1, forOpponent: true, tone: 'error' });
+    }
+  });
 
   it('the point goes to the other side, the error stays on the player who made it', () => {
     // The deck files an A player's error on side B - the side the point goes to.

@@ -79,7 +79,7 @@ export async function myMatchStats(
     base.groups = await cricketGroups(db, row.id);
   } else {
     const family = lineFamilyFor(sport);
-    base.groups = family ? await familyGroups(db, family, row.id) : [];
+    base.groups = family ? await familyGroups(db, family, row.id, sport) : [];
   }
 
   if (!base.groups.length) {
@@ -219,6 +219,16 @@ const SHOW: Record<string, Array<[column: string, label: string]>> = {
   ],
 };
 
+/** A sport whose words differ from its family's: throwball stores in volleyball's columns. */
+const SPORT_SHOW: Record<string, Array<[column: string, label: string]>> = {
+  throwball: [
+    ['minutes', 'Minutes'], ['points_won', 'Points won'], ['points_lost', 'Points lost'], ['points_scored', 'Points scored'],
+    ['aces', 'Aces'], ['kills', 'Throw points'], ['digs', 'Catches'],
+    ['service_errors', 'Service faults'], ['reception_errors', 'Dropped catches'], ['attack_errors', 'Throw faults'],
+    ['sets_won', 'Sets won'], ['sets_lost', 'Sets lost'],
+  ],
+};
+
 const TABLE: Record<string, string> = {
   racquet: 'racquet_match_lines', invasion: 'invasion_match_lines',
   raid: 'raid_match_lines', net: 'net_match_lines',
@@ -238,9 +248,9 @@ const TITLE: Record<string, string> = {
  * what actually happened reads as a record. The one exception is a pair where the
  * other half is non-zero - "Points won 21, Points lost 0" is a real 21-0.
  */
-async function familyGroups(db: Db, family: string, lineId: string): Promise<StatGroup[]> {
+async function familyGroups(db: Db, family: string, lineId: string, sport?: string | null): Promise<StatGroup[]> {
   const table = TABLE[family];
-  const show = SHOW[family];
+  const show = SPORT_SHOW[(sport ?? '').toLowerCase()] ?? SHOW[family];
   if (!table || !show) return [];
 
   const columns = show.map(([c]) => c).join(', ');
