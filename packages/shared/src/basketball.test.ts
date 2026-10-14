@@ -49,22 +49,29 @@ describe('basketball has no draws', () => {
   });
 });
 
-describe('basketball shooting percentages', () => {
+describe('basketball free throw %', () => {
   const shot = (kind: string, pts: number, playerId = 'p1'): RallyEvent => ({ t: 'point', side: 'A', pts, kind, playerId });
   const bagOf = (log: RallyLog) => deriveTeamStats('basketball', log).players.find((p) => p.userId === 'p1')!.stats;
 
-  it('counts made and missed shots as attempts', () => {
-    const bag = bagOf([shot('fg2', 2), shot('fg2_miss', 0), shot('fg3', 3), shot('fg3_miss', 0), shot('fg1', 1), shot('ft_miss', 0)]);
-    expect(bag).toMatchObject({ points_scored: 6, fgm: 2, fga: 4, fg3m: 1, fg3a: 2, ftm: 1, fta: 2 });
+  it('counts made and missed free throws as attempts', () => {
+    const bag = bagOf([shot('fg2', 2), shot('fg3', 3), shot('fg1', 1), shot('ft_miss', 0)]);
+    expect(bag).toMatchObject({ points_scored: 6, fg_2: 1, fg_3: 1, ftm: 1, fta: 2 });
     const career = foldCareerStats(statSpecFor('basketball')!, [{ ...bag, matches: 1 }]);
-    expect(career).toMatchObject({ fg_pct: 50, fg3_pct: 50, ft_pct: 50, points_per_match: 6 });
+    expect(career).toMatchObject({ ft_pct: 50, points_per_match: 6 });
   });
 
-  it('a match with no misses logged keeps no attempts, so no fake 100%', () => {
+  it('a match with no missed free throw logged keeps no attempts, so no fake 100%', () => {
     const bag = bagOf([shot('fg2', 2), shot('fg1', 1)]);
-    expect(bag.fga).toBeUndefined();
-    expect(bag.fg_2).toBe(1);
-    expect(foldCareerStats(statSpecFor('basketball')!, [bag]).fg_pct).toBeUndefined();
+    expect(bag.fta).toBeUndefined();
+    expect(bag.fg_1).toBe(1);
+    expect(foldCareerStats(statSpecFor('basketball')!, [bag]).ft_pct).toBeUndefined();
+  });
+
+  it('field-goal misses are not offered, so there is no FG% or 3P%', () => {
+    const spec = statSpecFor('basketball')!;
+    expect(spec.events.map((e) => e.key)).not.toEqual(expect.arrayContaining(['fg2_miss']));
+    expect(spec.events.map((e) => e.key)).not.toEqual(expect.arrayContaining(['fg3_miss']));
+    expect(spec.metrics.map((m) => m.key)).not.toEqual(expect.arrayContaining(['fg_pct']));
   });
 
   it('per-match averages are plain averages, not percentages', () => {
@@ -73,6 +80,6 @@ describe('basketball shooting percentages', () => {
   });
 
   it('every new counter has a column', () => {
-    for (const k of ['ftm', 'fta', 'fgm', 'fga', 'fg3m', 'fg3a']) expect(COLUMN_MAP.invasion[k], k).toBeTruthy();
+    for (const k of ['ftm', 'fta']) expect(COLUMN_MAP.invasion[k], k).toBeTruthy();
   });
 });

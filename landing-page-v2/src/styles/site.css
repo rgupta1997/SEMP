@@ -1192,6 +1192,31 @@ section[data-landed] { animation: landed 2s ease-out both; }
 .field .err { margin-top: 6px; font-size: 0.8125rem; color: var(--live); }
 .consent { display: flex; gap: var(--sp-3); align-items: flex-start; font-size: 0.9375rem; color: var(--muted); font-weight: 400; }
 .consent input { width: 18px; height: 18px; min-height: 0; margin-top: 3px; flex: none; }
+/* The consent radio group: a fieldset for accessibility, styled like any other field. */
+fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: var(--sp-3); }
+/* The date picker's calendar icon and popup follow the theme, not the OS - the dark
+   theme only swaps variables, so without this the icon is dark on a dark field. */
+.field input[type='date'] { color-scheme: light; cursor: pointer; }
+.field input[type='date']::-webkit-calendar-picker-indicator { cursor: pointer; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .field input[type='date'] { color-scheme: dark; } }
+:root[data-theme='dark'] .field input[type='date'] { color-scheme: dark; }
+.consent-legend { padding: 0; margin-bottom: var(--sp-1, 4px); font-size: 0.8125rem; font-weight: 500; color: var(--faint); }
+/* `.field label` is display:block, which beat `.consent` - so wrapped text fell under the button. */
+.field .consent { display: flex; margin: 0; cursor: pointer; }
+.field .consent span { flex: 1; min-width: 0; }
+/* A drawn radio, not the field-input box: a ring, filled with a dot when chosen. */
+.field .consent input[type='radio'] {
+  appearance: none; -webkit-appearance: none;
+  width: 18px; height: 18px; min-height: 0; padding: 0; margin: 3px 0 0;
+  border: 2px solid var(--muted); border-radius: 50%; background: transparent;
+  cursor: pointer; transition: border-color .15s, box-shadow .15s;
+}
+.field .consent input[type='radio']:hover { border-color: var(--ink); }
+.field .consent input[type='radio']:checked {
+  border-color: var(--brand-600); box-shadow: inset 0 0 0 3px var(--card), inset 0 0 0 9px var(--brand-600);
+}
+.field .consent input[type='radio']:focus { outline: none; }
+.field .consent input[type='radio']:focus-visible { outline: 2px solid var(--brand-600); outline-offset: 2px; }
 
 /* ===== cta band ============================================================ */
 

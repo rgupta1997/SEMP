@@ -2,7 +2,11 @@ import { PrismaClient } from '@prisma/client';
 
 // Single PrismaClient, created here and shared with every persistence adapter
 // via the composition root. The domain/application layers never import this.
-export const prisma = new PrismaClient();
+// Interactive transactions default to 15s / 10s wait (Prisma's own is 5s / 2s): the
+// career-stats and standings refreshes after a lock ran out of time on slow pooled
+// connections. 15s matches the Lambda timeout - more is unreachable there.
+export const TX_DEFAULTS = { timeout: 15_000, maxWait: 10_000 } as const;
+export const prisma = new PrismaClient({ transactionOptions: TX_DEFAULTS });
 
 export type Prisma = typeof prisma;
 

@@ -47,7 +47,7 @@ const ALLOWED = new Set([
   'goals', 'assists', 'own_goals', 'shots', 'saves', 'clean_sheet', 'yellows', 'reds',
   'pens_scored', 'pens_missed', 'points_scored', 'fg_1', 'fg_2', 'fg_3', 'rebounds',
   'steals', 'blocks', 'turnovers', 'fouls', 'started',
-  'ftm', 'fta', 'fgm', 'fga', 'fg3m', 'fg3a',
+  'ftm', 'fta',
   // raid
   'raid_points', 'raids', 'successful_raids', 'super_raids', 'do_or_die_won',
   'tackle_points', 'tackles', 'super_tackles', 'bonus_points', 'all_outs',

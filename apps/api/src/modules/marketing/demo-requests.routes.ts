@@ -55,7 +55,9 @@ export function makeDemoRequestsRouter(prisma: Prisma): Router {
   // back to the anonymous caller. (The acknowledgement mail below is a different
   // thing entirely, and goes to the address rather than to the caller.)
   router.post('/', validateBody(createDemoRequestSchema), asyncHandler(async (req, res) => {
-    const lead = await prisma.demo_requests.create({ data: req.body });
+    // contact_consent is validated, not stored - there is no column for it.
+    const { contact_consent: _consent, ...data } = req.body;
+    const lead = await prisma.demo_requests.create({ data });
 
     // The row is the record - we read it at /platform/demo-requests - and this mail is
     // only the visitor's half of it. It runs AFTER the write and is not allowed to
