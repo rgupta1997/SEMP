@@ -5,9 +5,21 @@ import { Section, SHead, Shot, Split, Cells, Checks, Steps, Faq, Cta, TLink } fr
 import {
   playerPillars, recordItems, followItems, insightItems, parentItems,
   playerJourney, playerFaqs, plans, priceFactors, pricingFaqs, buyerQuestions,
-  demoPromises, demoFields, orgTypes, contactCards,
+  demoPromises, demoFields, orgTypes, consentLegend, consentChoices, contactCards,
 } from '../data/pages'
 import { SIGN_UP, SIGN_IN, CONTACT, API_URL } from '../data/site'
+
+/** yyyy-mm-dd (a date input's value) as dd/mm/yyyy; anything else passes through. */
+const toDdMmYyyy = (v) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || '')
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : v
+}
+
+/** Today in the visitor's own timezone, as a date input's min (not UTC's today). */
+const todayIso = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 function Opener({ label, title, lead, icon }) {
   return (
@@ -205,12 +217,15 @@ export function Demo() {
       organization: form.org?.trim(),
       role: form.orgType,
       city: form.city?.trim(),
-      event_date: form.date?.trim(),
+      // The picker gives 2026-11-05; the lead email and admin list show it as typed text.
+      event_date: toDdMmYyyy(form.date),
       sport_count: form.sports,
       participant_count: form.participants,
       source: form.source?.trim(),
       message: form.message?.trim(),
-      marketing_consent: !!form.marketingConsent,
+      // Both choices include contact; the API refuses a request without it.
+      contact_consent: !!form.consentChoice,
+      marketing_consent: form.consentChoice === 'all',
     }
     for (const k of Object.keys(body)) if (body[k] === '' || body[k] == null) delete body[k]
     return body
@@ -223,7 +238,7 @@ export function Demo() {
       if (f.required && !String(form[f.key] || '').trim()) errs[f.key] = 'This field is required'
     })
     if (form.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email)) errs.email = 'Enter a valid email address'
-    if (!form.consent) errs.consent = 'Please agree before submitting'
+    if (!form.consentChoice) errs.consentChoice = 'Please choose one before submitting'
     if (Object.keys(errs).length) {
       setErrors(errs)
       return
@@ -327,6 +342,8 @@ export function Demo() {
                       id={`f-${f.key}`}
                       type={f.type}
                       placeholder={f.ph}
+                      // An expected event is in the future: the calendar starts at today.
+                      min={f.type === 'date' ? todayIso() : undefined}
                       value={form[f.key] || ''}
                       onChange={set(f.key)}
                       aria-invalid={!!errors[f.key]}
@@ -346,30 +363,26 @@ export function Demo() {
                 />
               </div>
 
-              <div className="field field--full">
-                <label className="consent" htmlFor="f-consent">
-                  <input id="f-consent" type="checkbox" checked={!!form.consent} onChange={set('consent')} />
-                  <span>I agree to be contacted about this enquiry.</span>
-                </label>
-                {errors.consent && <p className="err">{errors.consent}</p>}
-              </div>
-
-              {/* Deliberately a SEPARATE checkbox from the one above, unchecked by
-                  default and never required. "Contacted about this enquiry" and
-                  "send me marketing" are two different purposes - bundling them
-                  either forces a marketing opt-in on everyone booking a demo, or
-                  leaves that opt-in unprovable as a specific, genuine choice. */}
-              <div className="field field--full">
-                <label className="consent" htmlFor="f-marketing-consent">
-                  <input
-                    id="f-marketing-consent"
-                    type="checkbox"
-                    checked={!!form.marketingConsent}
-                    onChange={set('marketingConsent')}
-                  />
-                  <span>I agree to receive marketing communication.</span>
-                </label>
-              </div>
+              {/* One required choice, NEITHER preselected: contact is needed to answer
+                  the enquiry either way, and marketing stays a genuine opt-in - a
+                  pre-selected marketing option is not valid consent (DPDP / GDPR). */}
+              <fieldset className="field field--full" role="radiogroup">
+                <legend className="consent-legend">{consentLegend}</legend>
+                {consentChoices.map(([value, label]) => (
+                  <label className="consent" htmlFor={`f-consent-${value}`} key={value}>
+                    <input
+                      id={`f-consent-${value}`}
+                      type="radio"
+                      name="consent"
+                      value={value}
+                      checked={form.consentChoice === value}
+                      onChange={set('consentChoice')}
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+                {errors.consentChoice && <p className="err">{errors.consentChoice}</p>}
+              </fieldset>
 
               <div className="field field--full">
                 <button type="submit" className="btn btn--primary btn--lg" disabled={sending}>

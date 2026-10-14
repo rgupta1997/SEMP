@@ -200,7 +200,7 @@ const SHOW: Record<string, Array<[column: string, label: string]>> = {
     ['bonus_points', 'Bonus points'], ['all_outs', 'All-outs'],
   ],
   net: [
-    ['minutes', 'Minutes'], ['points_won', 'Points won'], ['points_scored', 'Points scored'],
+    ['minutes', 'Minutes'], ['points_won', 'Points won'], ['points_lost', 'Points lost'], ['points_scored', 'Points scored'],
     ['aces', 'Aces'], ['kills', 'Kills'], ['blocks', 'Blocks'], ['digs', 'Digs'],
     ['service_errors', 'Service errors'], ['attack_errors', 'Attack errors'],
     ['sets_won', 'Sets won'], ['sets_lost', 'Sets lost'],

@@ -274,7 +274,13 @@ export interface TieBreakSpec {
    * played out; there is no golden goal, so a side that goes ahead in the first
    * still has to survive the second.
    */
-  extraTime?: { periods: number; minutes: number } | null;
+  extraTime?: {
+    periods: number; minutes: number;
+    /** Basketball: keep playing extra periods, one at a time, while the score stays level. */
+    repeat?: boolean;
+    /** What the period is called on the board - "Overtime" rather than "Extra time". */
+    label?: string;
+  } | null;
   /**
    * The shoot-out. `kicks` each in the first round; level after that goes to
    * sudden death, one pair of kicks at a time, until a pair is split.
@@ -399,6 +405,8 @@ export const tieBreakSpecSchema: z.ZodType<TieBreakSpec> = z.object({
   extraTime: z.object({
     periods: z.number().int().min(1).max(4),
     minutes: z.number().int().min(1).max(60),
+    repeat: z.boolean().optional(),
+    label: z.string().min(1).max(30).optional(),
   }).nullable().optional(),
   penalties: z.object({
     kicks: z.number().int().min(1).max(20),

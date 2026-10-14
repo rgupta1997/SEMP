@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  describeCricketFormat, describeTimeControl, formatLength, isChessSport, isCricketFormat, isPeriodShaped, knobModelFor, parseRoundFormats,
+  boardsOnly, carromRulesOf, describeCricketFormat, describeTimeControl, formatLength, isCarromSport, isChessSport, isCricketFormat, isPeriodShaped, knobModelFor, parseRoundFormats,
   pluralizePeriodLabel, resolveRounds, whyNotEditable,
   type AnyKnobSpec, type AnyKnobs, type MatchFormat, type RoundFormatRule,
 } from '@semp/shared';
@@ -83,6 +83,16 @@ export function describeFormat(f: MatchFormat): string {
     bits.push(games === 1 ? 'single game' : `${games}-game match`);
     const tc = describeTimeControl(f.rulesSheet?.timeControl);
     if (tc) bits.push(tc);
+    return bits.join(' · ');
+  }
+  // Carrom: games of points built board by board, or boards only.
+  if (isCarromSport(f.sport)) {
+    const r = carromRulesOf(f);
+    if (boardsOnly(r)) return `first to ${r.gamesToWin} boards · board winner only`;
+    bits.push(r.gamesToWin > 1 ? `best of ${r.gamesToWin * 2 - 1} games` : 'one game');
+    bits.push(`to ${r.gameTarget} points`);
+    if (r.maxBoards) bits.push(`${r.maxBoards} boards a game`);
+    bits.push(`queen ${r.queenPoints}${r.queenCutoff ? ` until ${r.queenCutoff}` : ''}`);
     return bits.join(' · ');
   }
   // Period-shaped (kho-kho, kabaddi, football...): a period ends on the clock,

@@ -1003,6 +1003,9 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
 
     case 'setServe':
       if (state.serve.side !== ev.side) { state.serve.turns += 1; state.serve.turnLead = rightIndex(state.serve, ev.side); }
+      // Set before the unit's first point (a toss), it IS the unit's first server - so
+      // an alternating next unit counts from the side that really started this one.
+      if (state.score[0][0] === 0 && state.score[0][1] === 0) state.serve.unitFirstServer = ev.side;
       state.serve.side = ev.side;
       state.serve.serverNo = ev.serverNo ?? 1;
       state.serve.turnCount = 0;

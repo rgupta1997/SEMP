@@ -70,9 +70,9 @@ export function MyChampionshipsPage() {
   const { data: rows = [], isLoading } = useApi<MyChampionship[]>('/championships/mine');
   // Where the event should send people back to when they are done with it.
   const open = (c: MyChampionship) => ws.enter(c.id, detailHref(c), pathname);
-  // ?tab=archived lets Settings land the host here right after archiving.
+  // Opens on All; ?tab=archived lets Settings land the host here right after archiving.
   const [params] = useSearchParams();
-  const initialTab = TABS.some((t) => t.key === params.get('tab')) ? params.get('tab') as TabKey : 'playing';
+  const initialTab = TABS.some((t) => t.key === params.get('tab')) ? params.get('tab') as TabKey : 'all';
   const [tab, setTab] = useState<TabKey>(initialTab);
   const retrieve = useApiMutation(
     (id: string) => api('POST', `/championships/${id}/retrieve`),

@@ -55,6 +55,9 @@ const RALLY_SERVE: ServeSpec = {
   nextUnitServer: 'previousWinner',
 };
 
+/** Volleyball: FIVB 7.1 - each set is served first by the team that did not serve first in the last. */
+const VOLLEY_SERVE: ServeSpec = { ...RALLY_SERVE, nextUnitServer: 'alternate' };
+
 /** The serve passes with the unit - carrom boards, snooker frames. */
 const PER_UNIT_SERVE: ServeSpec = { ...NO_SERVE, movement: 'perUnit' };
 
@@ -126,26 +129,26 @@ const vSet = (target: number, decider: number, switchEndsAt: number | null = nul
 const NET: ScoringFormat[] = [
   fmt({
     sport: 'volleyball', key: 'fivb_25_bo5', name: 'FIVB — best of 5 sets to 25 (decider 15)',
-    levels: [vSet(25, 15, 13), unitsMatch(3)], serve: RALLY_SERVE,
+    levels: [vSet(25, 15, 13), unitsMatch(3)], serve: VOLLEY_SERVE,
     changeEnds: 'atDeciderMidpoint',
     rulesSheet: { rotation: 'not tracked by the console', libero: 'not tracked', timeoutsPerSet: 2 },
   }),
   fmt({
     sport: 'volleyball', key: 'fivb_25_bo3', name: 'Best of 3 sets to 25 (decider 15)',
-    levels: [vSet(25, 15, 13), unitsMatch(2)], serve: RALLY_SERVE, changeEnds: 'atDeciderMidpoint',
+    levels: [vSet(25, 15, 13), unitsMatch(2)], serve: VOLLEY_SERVE, changeEnds: 'atDeciderMidpoint',
   }),
   fmt({
     sport: 'volleyball', key: 'corp_21_bo3', name: 'Corporate — best of 3 sets to 21 (decider 15)',
-    levels: [vSet(21, 15), unitsMatch(2)], serve: RALLY_SERVE, mode: 'selfScored', changeEnds: 'never',
+    levels: [vSet(21, 15), unitsMatch(2)], serve: VOLLEY_SERVE, mode: 'selfScored', changeEnds: 'never',
   }),
   fmt({
     sport: 'volleyball', key: 'single_set_25', name: 'Single set to 25',
-    levels: [vSet(25, 25), unitsMatch(1)], serve: RALLY_SERVE, mode: 'selfScored', changeEnds: 'never',
+    levels: [vSet(25, 25), unitsMatch(1)], serve: VOLLEY_SERVE, mode: 'selfScored', changeEnds: 'never',
   }),
   fmt({
     sport: 'volleyball', key: 'timecap_15min', name: 'Time-capped set — 15 minutes, highest score',
     levels: [{ key: 'set', label: 'Set', target: 25, winBy: 1, cap: null }, unitsMatch(1)],
-    serve: RALLY_SERVE, mode: 'selfScored', clock: cap(15), changeEnds: 'never', endStates: LEAGUE,
+    serve: VOLLEY_SERVE, mode: 'selfScored', clock: cap(15), changeEnds: 'never', endStates: LEAGUE,
   }),
 
   fmt({
@@ -180,6 +183,9 @@ const SHOOTOUT = { kicks: 5 };
 
 // Short halves want short extra time: five minutes each, both played out.
 const FEST_TIEBREAK = { extraTime: { periods: 2, minutes: 5 }, penalties: SHOOTOUT };
+
+// FIBA overtime: five minutes, then another, for as long as the score is level.
+const BASKETBALL_OVERTIME = { extraTime: { periods: 1, minutes: 5, repeat: true, label: 'Overtime' } };
 
 const INVASION: ScoringFormat[] = [
   // FIRST IN THE LIST IS THE SPORT DEFAULT (`defaultFormatFor` takes list[0]), and
@@ -244,13 +250,18 @@ const INVASION: ScoringFormat[] = [
   fmt({
     sport: 'basketball', key: 'fiba_4x10', name: 'FIBA — four quarters of 10 minutes',
     levels: [period('Quarter', 'quarter'), aggregateMatch(4)], clock: cap(40, 'leaderWins', 'organiserDecides'),
+    // Basketball has no draws: level after the 4th quarter plays 5-minute overtimes
+    // until someone leads (FIBA). No shoot-out.
+    tieBreak: BASKETBALL_OVERTIME,
     endStates: STRICT,
-    rulesSheet: { shotClockSeconds: 24, foulsToDisqualify: 5, timeoutsPerHalf: 2 },
+    rulesSheet: { shotClockSeconds: 24, foulsToDisqualify: 5, timeoutsPerHalf: 2, overtime: '5 minutes, repeated until a side leads' },
   }),
   fmt({
     sport: 'basketball', key: 'basketball_corp_2x10', name: 'Corporate — two halves of 10 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)], mode: 'selfScored',
-    clock: cap(20, 'leaderWins'), endStates: LEAGUE,
+    // No draws here either - a level game goes to overtime like any other.
+    clock: cap(20, 'leaderWins', 'organiserDecides'), tieBreak: BASKETBALL_OVERTIME, endStates: STRICT,
+    rulesSheet: { foulsToDisqualify: 5, overtime: '5 minutes, repeated until a side leads' },
   }),
   fmt({
     sport: 'basketball', key: 'street_21', name: 'Streetball — first to 21',
@@ -325,16 +336,26 @@ const RAID: ScoringFormat[] = [
 // ============================================================================
 
 const BOARD: ScoringFormat[] = [
+  // Carrom: the first level is a GAME of points (25 ICF), built board by board in
+  // carrom.ts - a board's points are the loser's coins left, plus the queen. Keys are
+  // unchanged so draws that already chose them keep their format.
   fmt({
-    sport: 'carrom', key: 'icf_bo3_boards', name: 'ICF — best of 3 boards to 25',
-    levels: [{ key: 'board', label: 'Board', target: 25, winBy: 1, cap: null }, unitsMatch(2)],
+    sport: 'carrom', key: 'icf_bo3_boards', name: 'ICF — best of 3 games to 25 (8 boards a game)',
+    levels: [{ key: 'game', label: 'Game', target: 25, winBy: 1, cap: null }, unitsMatch(2)],
     serve: PER_UNIT_SERVE, changeEnds: 'betweenUnits',
-    rulesSheet: { queenMustBeCovered: true, boardPointsCappedAt: 25 },
+    rulesSheet: { maxBoards: 8, queenPoints: 3, queenCutoff: 22, queenMustBeCovered: true },
   }),
   fmt({
-    sport: 'carrom', key: 'corp_bo3_21', name: 'Corporate — best of 3 boards to 21',
-    levels: [{ key: 'board', label: 'Board', target: 21, winBy: 1, cap: null }, unitsMatch(2)],
+    sport: 'carrom', key: 'corp_bo3_21', name: 'Corporate — best of 3 games to 21',
+    levels: [{ key: 'game', label: 'Game', target: 21, winBy: 1, cap: null }, unitsMatch(2)],
     serve: PER_UNIT_SERVE, mode: 'selfScored',
+    rulesSheet: { queenPoints: 3 },
+  }),
+  fmt({
+    sport: 'carrom', key: 'corp_single_29', name: 'Corporate — single game to 29',
+    levels: [{ key: 'game', label: 'Game', target: 29, winBy: 1, cap: null }, unitsMatch(1)],
+    serve: PER_UNIT_SERVE, mode: 'selfScored',
+    rulesSheet: { queenPoints: 3 },
   }),
   fmt({
     sport: 'carrom', key: 'boards_bo5', name: 'Best of 5 boards (board winner only)',

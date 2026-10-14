@@ -29,7 +29,8 @@ import { notifyUnitCreated, notifyUnitAdminAssigned, type UnitLike } from './org
 const createUnitSchema = z.object({
   type: z.enum(UNIT_TYPES),
   name: z.string().min(1).max(80),
-  code: z.string().max(24).optional(),
+  // Optional: the form sends null when it is left blank, and tiles fall back to initials.
+  code: z.string().max(24).nullable().optional(),
   // Required for a department, forbidden for a campus - checked in the handler where
   // a useful message can be given.
   parent_id: z.string().uuid().optional(),

@@ -58,6 +58,7 @@ function submit(overrides: Record<string, unknown> = {}) {
       organization: 'Northfield School',
       role: 'School',
       city: 'Pune',
+      contact_consent: true,
       ...overrides,
     }),
   });
@@ -81,6 +82,23 @@ describe('POST /demo-requests', () => {
     expect(acks).toEqual([
       { to: 'priya@example.com', leadId: 'lead-1', appUrl: 'https://events.sportagon.in' },
     ]);
+  });
+
+  // The endpoint is public, so the form's checkbox alone proves nothing: a request
+  // without the tick is refused and nothing is written.
+  it('refuses a request without contact consent', async () => {
+    for (const contact_consent of [undefined, false, 'yes']) {
+      created = null;
+      const res = await submit({ contact_consent });
+      expect(res.ok, String(contact_consent)).toBe(false);
+      expect(created).toBeNull();
+    }
+    expect(acks).toHaveLength(0);
+  });
+
+  it('checks contact consent but does not try to store it', async () => {
+    await submit();
+    expect(created).not.toHaveProperty('contact_consent');
   });
 
   // The whole point of catching: the row exists, so an error here would be a lie that

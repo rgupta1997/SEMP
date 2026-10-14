@@ -1,6 +1,7 @@
 import {
-  canonicalRacquetSport, chessLineStats, competitionTier, cricketCareerBag, deriveRacquetStats, type ChessGame,
-  deriveTeamStats, effectiveEventSpec, eventTemplateFor, foldCricketCareer, isChessSport, isCricketSport,
+  canonicalRacquetSport, carromLineStats, carromMatch, carromRulesOf, isCarromSport, type CarromBoard,
+  chessLineStats, competitionTier, cricketCareerBag, deriveRacquetStats, type ChessGame,
+  deriveTeamStats, netLineStats, effectiveEventSpec, eventTemplateFor, foldCricketCareer, isChessSport, isCricketSport,
   parseStoredFormat, playedContests, rankSubEvent, resolveFormat, seatIn, statSpecFor,
   type PlayedContest,
   type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
@@ -233,7 +234,7 @@ export async function buildPlayerStatRows(
   });
   if (played.kind === 'contests') {
     return contestRows(fx, played.contests, people, sideOf, {
-      sportId, occurred, racquet: !!canonical, chess: isChessSport(sportName),
+      sportId, occurred, racquet: !!canonical, chess: isChessSport(sportName), carrom: isCarromSport(sportName),
       singleOutcome: (side) => outcomeForFixture(fx, side),
     });
   }
@@ -279,6 +280,33 @@ export async function buildPlayerStatRows(
     const games = isChessSport(sportName) && Array.isArray(raw)
       ? (raw as ChessGame[]).filter((g) => g && (g.result === 'A' || g.result === 'B' || g.result === 'draw'))
       : [];
+    // Carrom: real boards, points, queens and games from the board console's results,
+    // under the rules the match froze. Replaces the headline-as-boards guess above.
+    const carrom = (fx.live_state as { carrom?: { boards?: unknown; firstBreak?: unknown } } | null)?.carrom;
+    if (isCarromSport(sportName) && Array.isArray(carrom?.boards) && carrom.boards.length) {
+      const frozen = parseStoredFormat((fx.live_state as { format?: unknown } | null)?.format);
+      const rules = carromRulesOf(frozen ?? resolveFormat({ round: fx.round, stage_sequence: fx.stage_sequence }, { sport: sportName }).format);
+      const boards = (carrom.boards as CarromBoard[]).filter((b) => b && (b.winner === 'A' || b.winner === 'B'));
+      const match = carromMatch(boards, rules, carrom.firstBreak === 'B' ? 'B' : 'A');
+      const base = statOf;
+      statOf = (userId) => {
+        const side = sideOf.get(userId);
+        return side ? { ...base(userId), ...carromLineStats(match, rules, side) } : base(userId);
+      };
+    }
+    // Volleyball / throwball: the side's sets and points go to everyone on its sheet.
+    if (statSpecFor(sportName)?.family === 'net') {
+      const frozen = parseStoredFormat((fx.live_state as { format?: unknown } | null)?.format);
+      const netFormat = frozen ?? resolveFormat({ round: fx.round, stage_sequence: fx.stage_sequence }, { sport: sportName }).format;
+      if (netFormat) {
+        const result = { home: fx.home_score, away: fx.away_score, winner: winnerSide() };
+        const base = statOf;
+        statOf = (userId) => {
+          const side = sideOf.get(userId);
+          return side ? { ...base(userId), ...netLineStats(netFormat, log, result, side) } : base(userId);
+        };
+      }
+    }
     if (games.length) {
       const base = statOf;
       const white = games.length === 1 ? games[0].white : null;
@@ -358,7 +386,7 @@ function contestRows(
   contests: PlayedContest[],
   people: FixtureParticipants['resolved'],
   sideOf: Map<string, Side>,
-  opts: { sportId: string | null; occurred: Date; racquet: boolean; chess?: boolean; singleOutcome: (side: Side) => MatchOutcome | null },
+  opts: { sportId: string | null; occurred: Date; racquet: boolean; chess?: boolean; carrom?: boolean; singleOutcome: (side: Side) => MatchOutcome | null },
 ): PlayerStatRow[] {
   // A chess board's line IS its result: half-points doubled (2 win, 1 draw, 0 loss),
   // the board it was played on, and the colour when the tie recorded one.
@@ -405,7 +433,13 @@ function contestRows(
           : c.winner ? (c.winner === seat.side ? 'won' : 'lost') : c.drawn ? 'drew' : null,
         stats: opts.chess && (c.winner || c.drawn)
           ? chessStats(c, seat.side)
-          : derived?.players.find((x) => x.userId === userId)?.stats ?? {},
+          // Carrom rubber: its boards under the rules it froze, the same counters a singles match writes.
+          : opts.carrom && c.carrom?.boards.length
+            ? (() => {
+              const rules = carromRulesOf(c.format);
+              return carromLineStats(carromMatch(c.carrom.boards, rules, c.carrom.firstBreak), rules, seat.side);
+            })()
+            : derived?.players.find((x) => x.userId === userId)?.stats ?? {},
         occurred_on: opts.occurred,
         lock_version: fx.lock_version,
       });

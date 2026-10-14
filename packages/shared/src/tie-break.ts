@@ -71,8 +71,8 @@ export function tieProgress(
   }
 
   // Regulation done and level. Extra time first, if the format declares any AND
-  // there is any left to play.
-  if (extraTotal > 0 && extraPlayed < extraTotal) {
+  // there is any left to play - or, for basketball overtime, for as long as it is level.
+  if (extraTotal > 0 && (extraPlayed < extraTotal || tb?.extraTime?.repeat)) {
     return { phase: 'extraTime', extraPlayed, extraTotal, periodMs: extraMs, levelAfterRegulation };
   }
 

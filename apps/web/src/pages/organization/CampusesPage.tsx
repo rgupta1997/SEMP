@@ -238,10 +238,11 @@ function LabelsModal({ orgId, labels, onClose, onSaved }: {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Top level">
+          {/* Singular: it is also read as "Add team" and "one team", not only as a heading. */}
+          <Field label="Top level" hint="One of them - e.g. Campus, not Campuses">
             <Input value={draft.campus} onChange={(e) => setDraft((d) => ({ ...d, campus: e.target.value }))} maxLength={24} />
           </Field>
-          <Field label="Level beneath it">
+          <Field label="Level beneath it" hint="One of them - e.g. Team, not Teams">
             <Input value={draft.department} onChange={(e) => setDraft((d) => ({ ...d, department: e.target.value }))} maxLength={24} />
           </Field>
         </div>

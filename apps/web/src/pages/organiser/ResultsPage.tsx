@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints, TBD_LABEL } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints, resultSummary, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
@@ -712,6 +712,8 @@ export function ResultsPage() {
                 // Stopped early (retired / disqualified / conceded): marked beside the side
                 // that stopped, so an unfinished score never reads as a match played out.
                 const early = earlyEndOf(f.live_state);
+                // How it went, home first: carrom game scores, chess game results or ending.
+                const summary = scored ? resultSummary(f.sport, f.live_state) : null;
                 const earlyNote = (won: boolean) => early && scored && !won && (homeWon || awayWon) && (
                   <span className="ml-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400">({EARLY_END_LABEL[early]})</span>
                 );
@@ -828,6 +830,7 @@ export function ResultsPage() {
                               </span>
                             </div>
                           ))}
+                          {summary && <span className="t-num truncate text-[12px] text-slate-500 dark:text-slate-400">{summary}</span>}
                         </div>
                       )}
 
@@ -856,6 +859,7 @@ export function ResultsPage() {
                     {/* Center cell (auto): home · score · away. Ranking/event fixtures
                         have no head-to-head matchup, so show the event (discipline) name
                         instead of two empty team chips. */}
+                    <div className="flex flex-col items-center gap-0.5">
                     <div className="flex items-center gap-2 sm:gap-3">
                       {rankingEvent ? (
                         <div className="flex w-[19rem] items-center justify-center gap-2 text-center sm:w-[27rem]">
@@ -885,6 +889,8 @@ export function ResultsPage() {
                           </div>
                         </>
                       )}
+                    </div>
+                    {summary && <span className="t-num text-xs text-slate-500 dark:text-slate-400">{summary}</span>}
                     </div>
 
                     {/* Right cell (1fr): status + actions.

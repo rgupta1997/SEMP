@@ -208,10 +208,17 @@ export const demoFields = [
   { key: 'org', label: 'Organization name', ph: 'School, college, company or club', type: 'text', required: true },
   { key: 'orgType', label: 'Organization type', type: 'select', required: true },
   { key: 'city', label: 'City', ph: 'City', type: 'text' },
-  { key: 'date', label: 'Expected event date', ph: 'DD / MM / YYYY', type: 'text' },
+  { key: 'date', label: 'Expected event date', type: 'date' },
   { key: 'sports', label: 'Approx. number of sports', ph: 'e.g. 8', type: 'number' },
   { key: 'participants', label: 'Approx. number of participants', ph: 'e.g. 600', type: 'number' },
   { key: 'source', label: 'How did you hear about EOS', ph: 'Optional', type: 'text' },
+]
+
+// The demo form's one consent choice. 'all' is contact + marketing; both include contact.
+export const consentLegend = 'Choose what you agree to'
+export const consentChoices = [
+  ['all', 'Contact me about this enquiry and send me marketing updates.'],
+  ['contact', 'Only contact me about this enquiry.'],
 ]
 
 /* ---- Contact ----------------------------------------------------------- */

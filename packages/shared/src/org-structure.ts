@@ -140,6 +140,9 @@ export const entrantUnitType = (level: EntryLevel): UnitType | null => ENTRY_LEV
 export function pluralise(word: string): string {
   const w = word.trim();
   if (!w) return w;
+  // Already plural - an institution may type "Teams" - so leave it, not "Teamses".
+  // Singular -s words (Campus, Class, Analysis, Gas) still take -es.
+  if (/[^s]s$/i.test(w) && !/(?:us|is|as|os)$/i.test(w)) return w;
   if (/(?:s|x|z|ch|sh)$/i.test(w)) return `${w}es`;
   if (/[^aeiou]y$/i.test(w)) return `${w.slice(0, -1)}ies`;
   return `${w}s`;

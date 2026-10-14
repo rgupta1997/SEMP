@@ -314,8 +314,20 @@ export function makeMeRouter(prisma: Prisma): Router {
     //
     // `entity_name` is what to print, resolved here rather than in each of the three
     // screens that render this list.
+    // For an internal event, the units it invited - the same test squadEntryRefusal
+    // applies - so the entry panel only offers events a squad can actually enter.
+    const intraIds = rows.filter((r) => r.championships && r.championships.entry_level !== 'organization').map((r) => r.championship_id);
+    const invitations = intraIds.length
+      ? await prisma.championship_invitations.findMany({
+        where: { championship_id: { in: intraIds }, org_unit_id: { not: null }, status: { in: ['pending', 'accepted'] } },
+        select: { championship_id: true, org_unit_id: true },
+      })
+      : [];
+    const invitedBy = new Map<string, string[]>();
+    for (const i of invitations) invitedBy.set(i.championship_id, [...(invitedBy.get(i.championship_id) ?? []), i.org_unit_id!]);
     res.json(rows.map((r) => ({
       ...r,
+      invited_unit_ids: invitedBy.get(r.championship_id) ?? [],
       entity_id: r.org_unit_id ?? r.organization_id,
       entity_name: r.org_units?.name ?? null,
       label: r.org_units

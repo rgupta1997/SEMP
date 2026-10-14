@@ -1009,6 +1009,9 @@ export const createDemoRequestSchema = z.object({
   // Defaults false rather than being required: the enquiry itself is answered
   // regardless, and marketing consent must stay a genuine, ungated choice.
   marketing_consent: z.boolean().optional().default(false),
+  // "I agree to be contacted about this enquiry" - required, and checked here as well as
+  // in the form, since this endpoint is public. Not stored: every saved row has it.
+  contact_consent: z.literal(true, { errorMap: () => ({ message: 'Please agree to be contacted about this enquiry' }) }),
 });
 
 // Admin-only triage update - move a lead through its lifecycle and/or annotate it.
