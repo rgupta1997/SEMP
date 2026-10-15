@@ -78,6 +78,9 @@ if (process.env.DB_SECRET_ARN || process.env.APP_SECRET_ARN) {
 
   process.env.JWT_SECRET = app.JWT_SECRET;
   process.env.MAIL_API_KEY = app.MAIL_API_KEY;
+  // Production refuses to boot without it (env.schema.ts) - phone sign-in codes go
+  // over AiSensy WhatsApp.
+  if (app.AISENSY_API_KEY) process.env.AISENSY_API_KEY = app.AISENSY_API_KEY;
 }
 
 const { handler: inner } = await import('./lambda-app.js');
