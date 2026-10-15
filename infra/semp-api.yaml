@@ -266,6 +266,17 @@ Resources:
                   - sqs:SendMessage
                   - sqs:SendMessageBatch
                 Resource: !GetAtt NotificationQueue.Arn
+        # Event Setup apply: POST /api/event-setups/:id/apply hands the run to an
+        # ASYNCHRONOUS invocation of this same function (apply-job.ts), because a job
+        # left running after the 202 is frozen with its request. The ARN is built from
+        # the name, not !GetAtt, which would be a circular reference.
+        - PolicyName: invoke-self-for-event-setup-apply
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${FunctionName}'
 
   # ---------------------------------------------------------------------------
   # The function
@@ -289,12 +300,19 @@ Resources:
       Architectures:
         - arm64
       MemorySize: !Ref MemorySize
-      # API Gateway HTTP API caps the integration at 30s, so anything above 29 is
-      # unreachable. Note this is ALSO why the two fire-and-forget background jobs
-      # (modules/demos, modules/reports) cannot work here - Lambda freezes the
-      # container when the response returns. They are a separate workstream and a
-      # hard gate before this stack serves production traffic.
-      Timeout: 15
+      # API Gateway HTTP API caps every HTTP request at 30s whatever this says, so
+      # requests behave as before. The 120s is for the one ASYNC job this function
+      # runs on itself: an Event Setup apply (a WNS-sized event, ~400 people, took
+      # 7.8s on beta; the headroom is for bigger ones). The fire-and-forget jobs in
+      # modules/demos and modules/reports still cannot work here - Lambda freezes the
+      # container when the response returns - and remain a separate workstream.
+      Timeout: 120
+      # The async apply must never be retried by Lambda: a retry of a half-finished
+      # run could create players with no ID or phone a second time. A failed run is
+      # marked failed and re-run from the dashboard, which reuses what it made.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        MaximumEventAgeInSeconds: 300
       Role: !GetAtt FunctionRole.Arn
       LoggingConfig:
         LogGroup: !Ref ApiLogGroup
