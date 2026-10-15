@@ -36,6 +36,7 @@ export * from './role-model.js';
 export * from './org-structure.js';
 export * from './sportagon-id.js';
 export * from './placeholder-contact.js';
+export * from './event-setup/index.js';
 export * from './championship-archive.js';
 export * from './organization-archive.js';
 

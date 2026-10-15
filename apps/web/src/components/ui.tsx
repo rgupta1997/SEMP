@@ -1134,6 +1134,11 @@ export interface ConfirmOptions {
   confirmLabel?: string;
   cancelLabel?: string;
   tone?: 'danger' | 'primary';
+  /**
+   * For actions that delete something real: the confirm button stays disabled until
+   * this exact text (case and outer spaces ignored) is typed into the dialog.
+   */
+  confirmText?: string;
 }
 let confirmEmit: ((opts: ConfirmOptions) => Promise<boolean>) | null = null;
 export function confirmDialog(opts: ConfirmOptions | string): Promise<boolean> {
@@ -1144,12 +1149,15 @@ export function confirmDialog(opts: ConfirmOptions | string): Promise<boolean> {
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<{ opts: ConfirmOptions; resolve: (v: boolean) => void } | null>(null);
-  const ask = useCallback((opts: ConfirmOptions) => new Promise<boolean>((resolve) => setState({ opts, resolve })), []);
+  const [typed, setTyped] = useState('');
+  const ask = useCallback((opts: ConfirmOptions) => new Promise<boolean>((resolve) => { setTyped(''); setState({ opts, resolve }); }), []);
   useEffect(() => { confirmEmit = ask; return () => { if (confirmEmit === ask) confirmEmit = null; }; }, [ask]);
 
   const settle = (value: boolean) => { state?.resolve(value); setState(null); };
   const o = state?.opts;
   const tone = o?.tone ?? 'danger';
+  const needsText = !!o?.confirmText;
+  const textMatches = !needsText || typed.trim().toLowerCase() === o!.confirmText!.trim().toLowerCase();
 
   return (
     <>
@@ -1165,11 +1173,25 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
           footer={(
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => settle(false)}>{o.cancelLabel ?? 'Cancel'}</Button>
-              <Button variant={tone} onClick={() => settle(true)} autoFocus>{o.confirmLabel ?? 'Confirm'}</Button>
+              <Button variant={tone} onClick={() => settle(true)} disabled={!textMatches} autoFocus={!needsText}>{o.confirmLabel ?? 'Confirm'}</Button>
             </div>
           )}
         >
           <div className="text-sm text-slate-600 dark:text-slate-300">{o.message ?? 'This action cannot be undone.'}</div>
+          {needsText && (
+            <label className="mt-4 flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-200" htmlFor="confirm-dialog-text">
+              <span>Type <b className="font-semibold">{o.confirmText}</b> to confirm</span>
+              <Input
+                id="confirm-dialog-text"
+                autoFocus
+                autoComplete="off"
+                spellCheck={false}
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && textMatches) settle(true); }}
+              />
+            </label>
+          )}
         </Modal>
       )}
     </>

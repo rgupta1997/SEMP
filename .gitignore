@@ -33,6 +33,11 @@ apps/api/scripts/.seed-*-results.json
 apps/api/.qa-*-manifest.json
 apps/api/scripts/.qa-*-manifest.json
 
+# Event setup: the client's sheets carry real names and phone numbers, and the
+# out/ folder holds manifests, credentials and plan reports built from them.
+apps/api/scripts/event-setup/data/
+apps/api/scripts/event-setup/out/
+
 # QA harness OUTPUT - never the harnesses themselves, which are source and are
 # committed. Globbed rather than listed per harness: every sweep writes a
 # `qa-<name>-shots/` directory of screenshots plus a `verdict.json`, and the three

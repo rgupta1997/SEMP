@@ -76,6 +76,8 @@ import { PlatformPlansPage } from './pages/platform/PlatformPlansPage';
 import { PlatformVerificationRequestsPage } from './pages/platform/PlatformVerificationRequestsPage';
 import { PlatformDemosPage } from './pages/platform/PlatformDemosPage';
 import { ChampionshipMatrixImportPage } from './pages/platform/ChampionshipMatrixImportPage';
+import { EventSetupListPage } from './pages/platform/EventSetupListPage';
+import { EventSetupDetailPage } from './pages/platform/EventSetupDetailPage';
 import { PublicChampionshipPage } from './pages/public/PublicChampionshipPage';
 
 function HomeRedirect() {
@@ -158,6 +160,8 @@ function AuthenticatedRoutes() {
         <Route path="/platform/demos" element={<RequireRole roles={SYSTEM}><PlatformDemosPage /></RequireRole>} />
         <Route path="/platform/organizations" element={<RequireRole roles={SYSTEM}><PlatformInstitutionsPage /></RequireRole>} />
         <Route path="/platform/import-setup" element={<RequireRole roles={SYSTEM}><ChampionshipMatrixImportPage /></RequireRole>} />
+        <Route path="/platform/event-setup" element={<RequireRole roles={SYSTEM}><EventSetupListPage /></RequireRole>} />
+        <Route path="/platform/event-setup/:id" element={<RequireRole roles={SYSTEM}><EventSetupDetailPage /></RequireRole>} />
         <Route path="/platform/:key" element={<RequireRole roles={SYSTEM}><PlatformResource /></RequireRole>} />
 
         {/* Notifications + help + design system - any authenticated user */}

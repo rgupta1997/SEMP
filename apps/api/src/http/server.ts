@@ -55,6 +55,7 @@ import { makeNotificationsRouter } from '../modules/notifications/notifications.
 import { makeDemoRequestsRouter } from '../modules/marketing/demo-requests.routes.js';
 import { makeFeedbackRouter } from '../modules/marketing/feedback.routes.js';
 import { makeDemosRouter } from '../modules/demos/demos.routes.js';
+import { makeEventSetupRouter } from '../modules/event-setup/event-setup.routes.js';
 import { makePlatformSettingsRouter } from '../modules/platform/platform-settings.routes.js';
 import { blockDrawWritesToArchived, blockFixtureWritesToArchived, blockWritesToArchived } from '../modules/championships/championship-archive.service.js';
 import { blockOrgWritesWhenArchived, blockTeamWritesWhenArchived } from '../modules/iam/organization-archive.service.js';
@@ -137,6 +138,9 @@ export function buildApp(prisma: Prisma) {
 
   // ----- Demo sandboxes - super-admin only (guards are inside the router) -----
   api.use('/demos', makeDemosRouter(prisma));
+
+  // ----- Event setup from the standard workbook - super-admin only (guard inside) -----
+  api.use('/event-setups', makeEventSetupRouter(prisma));
 
   // ----- Platform switches (plan enforcement) - super-admin only, guards inside -----
   api.use('/platform/settings', makePlatformSettingsRouter(prisma));
