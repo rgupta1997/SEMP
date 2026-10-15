@@ -222,7 +222,7 @@ function MatchFormatField({ fixture, tdId, value, onChange }: {
   );
 }
 
-interface Ground { id: string; name: string; venue_id?: string | null; venues?: { id?: string; name?: string } }
+interface Ground { id: string; name: string; venue_id?: string | null; is_active?: boolean; venues?: { id?: string; name?: string } }
 interface Venue { id: string; name: string }
 interface Official { id: string; name: string; account_type?: string }
 
@@ -388,8 +388,11 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
     return who ? `${t.name} — ${who}` : t.name;
   };
   // The grounds belonging to the chosen venue (venues come straight from the venues
-  // list, so a venue with no courts still shows and is selectable).
-  const venueGrounds = grounds.filter((g) => (g.venue_id ?? '') === venueId);
+  // list, so a venue with no courts still shows and is selectable). A ground switched
+  // off in Setup → Venue drops out - unless it's the one this fixture already sits on,
+  // so editing the fixture doesn't silently clear it.
+  const pickable = (g: Ground) => g.is_active !== false || g.id === fixture?.venue_ground_id;
+  const venueGrounds = grounds.filter((g) => (g.venue_id ?? '') === venueId && pickable(g));
 
   return (
     <Modal title={title} onClose={onClose} size="5xl" banner={banner}>
@@ -440,14 +443,14 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
                 const v = e.target.value;
                 setVenueId(v);
                 // Reset the ground when the venue changes; auto-pick if the venue has just one.
-                const inVenue = grounds.filter((g) => (g.venue_id ?? '') === v);
+                const inVenue = grounds.filter((g) => (g.venue_id ?? '') === v && pickable(g));
                 setGroundId(v && inVenue.length === 1 ? inVenue[0].id : '');
               }}>
                 <option value="">- unassigned -</option>
                 {venues.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
               </Select>
             </Field>
-            <Field compact label="Ground / court" hint={!venueId ? 'Unlocks once a venue is set' : venueGrounds.length === 0 ? 'This venue has no courts - assign at the venue level.' : undefined}>
+            <Field compact label="Ground / court" hint={!venueId ? 'Unlocks once a venue is set' : venueGrounds.length === 0 ? 'This venue has no grounds yet - add them in Setup → Venue.' : undefined}>
               <Select className="w-full" value={groundId} disabled={!venueId || venueGrounds.length === 0} onChange={(e) => setGroundId(e.target.value)}>
                 <option value="">{venueId ? '- any court -' : '- pick a venue first -'}</option>
                 {venueGrounds.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}

@@ -98,7 +98,7 @@ export const ORGANISER_GUIDE: StepContent[] = [
     id: 'venue',
     title: 'Add a venue',
     description: 'Add at least one venue so fixtures have somewhere to play.',
-    help: 'In Setup → Venue, add venues and grounds. Fixtures are scheduled against a venue ground.',
+    help: 'In Setup → Venue, add each venue, then open it to add its grounds or courts (one at a time, or paste a list). Every fixture is scheduled on a ground, picked on the Schedule page.',
   },
   {
     id: 'invite',

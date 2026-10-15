@@ -816,7 +816,7 @@ export function SportsTab({ eventId }: { eventId: string }) {
       )}
 
       {adding && <AddSportModal tournamentId={activeTournament} existingSportIds={new Set(tsports.map((t) => t.sport_id))} onClose={() => setAdding(false)} />}
-      {venues.length === 0 && <Badge tone="amber" className="mt-4">Tip: add venues in the Venues tab to assign disciplines to grounds.</Badge>}
+      {venues.length === 0 && <Badge tone="amber" className="mt-4">Tip: add venues (and the grounds or courts inside each) in the Venue tab - disciplines are assigned a venue, and each fixture a ground.</Badge>}
     </div>
   );
 }
