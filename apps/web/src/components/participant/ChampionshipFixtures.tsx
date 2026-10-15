@@ -27,7 +27,8 @@ interface FixtureRow {
 
 // Results shows concluded matches AND in-progress ones (live), so a live match with
 // a running score appears here (marked LIVE) instead of only on the Schedule.
-const RESULT_STATUSES = new Set(['live', 'completed', 'walkover', 'bye', 'cancelled']);
+// Not byes: one squad and no opponent is not a result, it read "Squad vs TBD".
+const RESULT_STATUSES = new Set(['live', 'completed', 'walkover', 'cancelled']);
 
 function teamLabel(t: TeamRef | null) { return t?.name ?? TBD_LABEL; }
 // Campus or batch first, organisation otherwise - the org alone showed the same

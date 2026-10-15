@@ -186,8 +186,13 @@ function StatusGlyph({ locked, rankingEvent, status }: { locked: boolean; rankin
  *
  * `scheduled` is Schedule's business, and `postponed` / `cancelled` will never
  * produce a result.
+ *
+ * `bye` is not a match either: one squad, no opponent, advanced by the generator
+ * the moment the draw was made. Listed here it read "Squad vs TBD" - a row with
+ * nothing to score, nothing to decide, and a lock that changes nothing (records
+ * skip byes, and the bracket already moved). The bracket and Schedule still show it.
  */
-const RESULTABLE = new Set(['live', 'completed', 'walkover', 'bye']);
+const RESULTABLE = new Set(['live', 'completed', 'walkover']);
 
 const teamShort = (t: Side | null) =>
   t?.short_name || t?.org_units?.code || t?.organizations?.short_name || teamLabel(t);
@@ -405,7 +410,8 @@ export function ResultsPage() {
    * `postponed` and `cancelled` go too: neither will produce a result.
    */
   const started = (f: ResultRow) => RESULTABLE.has(f.status);
-  const hiddenCount = useMemo(() => rows.length - rows.filter(started).length, [rows]);
+  // Byes are not counted: they are not waiting to be started, they will never be.
+  const hiddenCount = useMemo(() => rows.filter((f) => !started(f) && f.status !== 'bye').length, [rows]);
 
   const readyRows = useMemo(() => rows.filter(started).filter(lockable), [rows]);
   const lockedCount = useMemo(() => rows.filter(started).filter(locked).length, [rows]);
