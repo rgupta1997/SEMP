@@ -285,6 +285,9 @@ export const createUserSchema = z.object({
 });
 export const updateUserSchema = z.object({
   name: z.string().min(1).optional(),
+  // Super admin only - enforced in the route, not here, because the schema cannot
+  // see who is asking. Normalised so the stored value and the collision check agree.
+  email: z.string().trim().toLowerCase().email().optional(),
   phone: nullableOptionalPhone,
   is_active: z.boolean().optional(),
   organization_id: uuid.nullable().optional(),

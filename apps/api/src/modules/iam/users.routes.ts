@@ -5,8 +5,10 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
-import { ForbiddenError } from '../../shared/errors.js';
+import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 import { deriveProvisionedPassword, findUserByPhone, hashProvisionedPassword, maskEmail, maskPhone, phoneGroupKey, phoneLast10 } from './users.helpers.js';
+import { AUDIT_ACTIONS, audit } from './audit.service.js';
 import { notify } from '@semp/notifications/server/notify.js';
 
 // Fields safe to return to any caller (never the password hash).
@@ -225,11 +227,61 @@ export function makeUsersRouter(prisma: Prisma): Router {
   }));
 
   // Edit a user (super admin, or an owner/admin of the target's organization).
+  //
+  // Email is the account key, so changing it is super-admin only: it is how a
+  // provisioned login's placeholder address (see @semp/shared placeholder-contact)
+  // is swapped for the real one on registration day. The edit form echoes the
+  // current email back, so only a CHANGED email is refused to anyone else.
   router.patch('/:id', guards.manageUser, validateBody(updateUserSchema), asyncHandler(async (req, res) => {
-    const { password, ...rest } = req.body as Record<string, unknown> & { password?: string };
+    const actor = req.user!;
+    const id = req.params.id;
+    const { password, email, ...rest } = req.body as Record<string, unknown> & {
+      password?: string; email?: string; phone?: string | null;
+    };
     const data: Record<string, unknown> = { ...rest };
     if (typeof password === 'string' && password) data.password_hash = await bcrypt.hash(password, 10);
-    const user = await prisma.users.update({ where: { id: req.params.id }, data, select: PUBLIC_SELECT });
+
+    // Contact changes need the current row: to tell a real change from an echo, and
+    // to re-open verification of whichever contact actually moved.
+    const touchesContact = email !== undefined || rest.phone !== undefined;
+    const current = touchesContact
+      ? await prisma.users.findUnique({ where: { id }, select: { name: true, email: true, phone: true, organization_id: true } })
+      : null;
+    if (touchesContact && !current) throw new NotFoundError('User');
+
+    const emailChanged = email !== undefined && !!current && email !== current.email.trim().toLowerCase();
+    if (emailChanged) {
+      if (!actor.isSuperAdmin) throw new ForbiddenError('Only a super admin can change a user\'s email');
+      // Exact, case-insensitive (escaped - see exact-ci.ts); the DB unique index is
+      // case-sensitive, so it alone would let "A@x.in" sit beside "a@x.in".
+      const clash = await prisma.users.findFirst({
+        where: { email: equalsIgnoreCase(email), NOT: { id } },
+        select: { id: true },
+      });
+      if (clash) throw new ConflictError(`${email} is already the email of another account`);
+      data.email = email;
+      // The stamp attested the OLD address (signup stamps both columns separately
+      // precisely so an email change can re-open just this one).
+      data.email_verified_at = null;
+    }
+    const phoneChanged = rest.phone !== undefined && !!current && phoneLast10(rest.phone) !== phoneLast10(current.phone);
+    if (phoneChanged) data.phone_verified_at = null;
+
+    const user = await prisma.users.update({ where: { id }, data, select: PUBLIC_SELECT });
+
+    if (current && (emailChanged || phoneChanged)) {
+      // Masked: audit_log is append-only, and a contact is personal data.
+      const diff: Record<string, { from: unknown; to: unknown }> = {};
+      if (emailChanged) diff.email = { from: maskEmail(current.email), to: maskEmail(user.email) };
+      if (phoneChanged) diff.phone = { from: maskPhone(current.phone), to: maskPhone(user.phone) };
+      await audit(prisma, req, {
+        action: AUDIT_ACTIONS.userContactChanged,
+        target: { type: 'users', id, label: current.name },
+        organizationId: current.organization_id,
+        summary: `Changed ${Object.keys(diff).join(' and ')} for ${current.name}`,
+        diff,
+      });
+    }
     if (typeof password === 'string' && password) {
       try {
         await notify(prisma, { type: 'account_security_changed', userId: req.params.id, senderId: req.user!.id, data: {} });

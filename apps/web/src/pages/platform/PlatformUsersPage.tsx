@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pencil } from 'lucide-react';
+import { hasPlaceholderContact, isPlaceholderEmail, isPlaceholderPhone } from '@semp/shared';
 import { api } from '../../lib/api';
 import { fmtDate, useApi, useApiMutation, useTableControls } from '../../lib/hooks';
 import {
-  Avatar, Badge, Button, Card, confirmDialog, EmptyState, Field, ListToolbar, Pagination,
+  Avatar, Badge, Button, Card, Checkbox, confirmDialog, EmptyState, Field, ListToolbar, Pagination,
   SearchInput, Select, Spinner,
 } from '../../components/ui';
 import { BulkImportModal } from '../../components/BulkImportModal';
@@ -54,7 +55,15 @@ export function PlatformUsersPage() {
 
   const deactivate = useApiMutation((id: string) => api('DELETE', `/users/${id}`), ['/users']);
 
-  const filtered = users;
+  // Logins provisioned with a stand-in email/phone (@semp/shared placeholder-contact)
+  // still need their real contact before the person can sign in. The whole list is
+  // already loaded and searched client-side, so this filter is too.
+  const [onlyPlaceholder, setOnlyPlaceholder] = useState(false);
+  const placeholderCount = useMemo(() => users.filter(hasPlaceholderContact).length, [users]);
+  const filtered = useMemo(
+    () => (onlyPlaceholder ? users.filter(hasPlaceholderContact) : users),
+    [users, onlyPlaceholder],
+  );
   const t = useTableControls(filtered, {
     search: (u) => `${u.name} ${u.email} ${u.phone ?? ''} ${u.organizations?.name ?? ''}`,
     sorts: {
@@ -74,13 +83,19 @@ export function PlatformUsersPage() {
         <h2 className="text-xl font-semibold dark:text-slate-100">Users</h2>
         <ListToolbar inline>
           <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search users…" className="w-56" />
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+            <Checkbox checked={onlyPlaceholder} onChange={setOnlyPlaceholder} />
+            Only placeholder contacts ({placeholderCount})
+          </label>
           <Button variant="outline" onClick={() => setImporting(true)}>↑ Import users</Button>
           <Button onClick={() => setCreating(true)}>+ Add user</Button>
         </ListToolbar>
       </div>
 
       {filtered.length === 0 ? (
-        <EmptyState icon="◍" title="No users" description="Add a user or import a list to get started." />
+        onlyPlaceholder
+          ? <EmptyState icon="◍" title="No placeholder contacts" description="Every account has a real email and phone." />
+          : <EmptyState icon="◍" title="No users" description="Add a user or import a list to get started." />
       ) : (
         <Card className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-100 dark:divide-slate-800 text-sm">
@@ -102,11 +117,16 @@ export function PlatformUsersPage() {
                       <span className="font-medium text-slate-800 dark:text-slate-200">{u.name}</span>
                       {u.is_super_admin && <Badge tone="violet">admin</Badge>}
                       {!u.is_active && <Badge tone="rose">inactive</Badge>}
+                      {hasPlaceholderContact(u) && <Badge tone="amber">Placeholder contact</Badge>}
                     </div>
                   </td>
                   <td className="px-4 py-2 text-slate-600 dark:text-slate-300">
-                    <div>{u.email}</div>
-                    {u.phone && <div className="text-xs text-slate-400 dark:text-slate-500">{u.phone}</div>}
+                    <div className={isPlaceholderEmail(u.email) ? 'italic text-amber-700 dark:text-amber-300' : undefined}>{u.email}</div>
+                    {u.phone && (
+                      <div className={isPlaceholderPhone(u.phone) ? 'text-xs italic text-amber-700 dark:text-amber-300' : 'text-xs text-slate-400 dark:text-slate-500'}>
+                        {u.phone}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{u.organizations?.name ?? '-'}</td>
                   <td className="px-4 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{fmtDate(u.created_at)}</td>

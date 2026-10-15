@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useState, type FocusEvent, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Button, Field, Input, Modal, Select } from './ui';
+import { isPlaceholderEmail, isPlaceholderPhone } from '@semp/shared';
+import { useAuth } from '../lib/auth';
+import { Badge, Button, Field, Input, Modal, Select } from './ui';
 import { CredentialsPanel, PhoneLookupNotice, type Credentials } from './userProvisioning';
 
 export interface UserFormBody {
   name: string;
-  email: string;
+  /** Left out of an edit by anyone but a super admin - they may not change it. */
+  email?: string;
   phone?: string;
   password?: string;
   organization_id?: string | null;
@@ -31,6 +34,22 @@ function isValidPhone(phone: string): boolean {
   return digits.length >= 10 && digits.length <= 15;
 }
 
+// Shown under a contact that is still the provisioning stand-in (@semp/shared
+// placeholder-contact), so whoever opens the form sees what needs replacing.
+function PlaceholderNote({ children }: { children: ReactNode }) {
+  return (
+    <span className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+      <Badge tone="amber" className="shrink-0 px-2 py-0.5">placeholder</Badge>
+      <span>{children}</span>
+    </span>
+  );
+}
+
+// Focusing a stand-in selects it, so typing the real value replaces it outright.
+const selectIfPlaceholder = (isPlaceholder: boolean) => (e: FocusEvent<HTMLInputElement>) => {
+  if (isPlaceholder) e.currentTarget.select();
+};
+
 // Readable random password for provisioned logins.
 function generatePassword(): string {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -44,7 +63,11 @@ export function UserFormModal({
   lockInstitutionId, organizations, submitLabel, onClose, onSubmit,
 }: UserFormModalProps) {
   const qc = useQueryClient();
+  const { ctx } = useAuth();
   const isEdit = mode === 'edit';
+  // Email is the account key: anyone may set it on create, only a super admin may
+  // change it afterwards (the API enforces this too - this only hides the control).
+  const canEditEmail = !isEdit || !!ctx?.user.is_super_admin;
   const [name, setName] = useState(initial?.name ?? '');
   const [email, setEmail] = useState(initial?.email ?? '');
   const [phone, setPhone] = useState(initial?.phone ?? '');
@@ -61,14 +84,12 @@ export function UserFormModal({
   const submit = async () => {
     setError(null);
     if (!name.trim()) { setError('Name is required'); return; }
-    if (!isEdit && !email.trim()) { setError('Email is required'); return; }
+    if (canEditEmail && !email.trim()) { setError('Email is required'); return; }
+    if (canEditEmail && !/^\S+@\S+\.\S+$/.test(email.trim())) { setError('Enter a valid email address'); return; }
     if (!phone.trim()) { setError('Phone number is required'); return; }
     if (!isValidPhone(phone)) { setError('Enter a valid mobile number (at least 10 digits)'); return; }
-    const body: UserFormBody = {
-      name: name.trim(),
-      email: email.trim(),
-      phone: phone.trim(),
-    };
+    const body: UserFormBody = { name: name.trim(), phone: phone.trim() };
+    if (canEditEmail) body.email = email.trim();
     if (password) body.password = password;
     if (lockInstitutionId) body.organization_id = lockInstitutionId;
     else if (showInstitution) body.organization_id = institutionId || null;
@@ -99,8 +120,24 @@ export function UserFormModal({
   return (
     <Modal title={title ?? (isEdit ? 'Edit user' : 'Add user')} onClose={onClose}>
       <Field label="Full name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rohan Kulkarni" /></Field>
-      <Field label="Email"><Input type="email" value={email} disabled={isEdit} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" /></Field>
-      <Field label="Phone" hint="Required - 10-digit mobile number"><Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit mobile number" /></Field>
+      <Field label="Email" hint={canEditEmail ? undefined : 'Only a super admin can change the email.'}>
+        <Input type="email" value={email} disabled={!canEditEmail} onChange={(e) => setEmail(e.target.value)}
+          onFocus={selectIfPlaceholder(isPlaceholderEmail(email))} placeholder="name@example.com" />
+        {isPlaceholderEmail(email) && (
+          <PlaceholderNote>
+            {canEditEmail
+              ? "Stand-in address - mail to it never arrives. Enter the person's real email."
+              : 'Stand-in address - mail to it never arrives. A super admin can set the real one.'}
+          </PlaceholderNote>
+        )}
+      </Field>
+      <Field label="Phone" hint="Required - 10-digit mobile number">
+        <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
+          onFocus={selectIfPlaceholder(isPlaceholderPhone(phone))} placeholder="10-digit mobile number" />
+        {isPlaceholderPhone(phone) && (
+          <PlaceholderNote>Stand-in number - no sign-in code can reach it. Enter their real mobile so they can sign in.</PlaceholderNote>
+        )}
+      </Field>
       {!isEdit && <PhoneLookupNotice phone={phone} />}
       {showInstitution && (
         <Field label="Organization">

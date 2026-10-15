@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { Prisma as PrismaNS } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
+import { PLACEHOLDER_EMAIL_DOMAIN } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { assertWithinOrgLimit } from '@semp/entitlements/server';
@@ -234,7 +235,7 @@ export function makePeopleRouter(prisma: Prisma): Router {
     // 2,000 hashes inside an open transaction is a guaranteed Lambda timeout.
     const toCreate = await Promise.all(
       applicable.filter((r) => !r.user_id).map(async (r) => {
-        const email = r.email ?? `${phoneLast10(r.phone)}@placeholder.invalid`;
+        const email = r.email ?? `${phoneLast10(r.phone)}@${PLACEHOLDER_EMAIL_DOMAIN}`;
         const password = deriveProvisionedPassword(r.name ?? '', r.phone);
         // The plaintext is kept so it can be handed back ONCE, at the end of this
         // request, for the coordinator to distribute. Provisioning two thousand
@@ -417,7 +418,7 @@ export function makePeopleRouter(prisma: Prisma): Router {
     // nobody can be told about is not an account.
     let credential: { name: string; email: string; phone: string | null; password: string } | null = null;
     if (!userId) {
-      const email = row.email ?? `${phoneLast10(row.phone)}@placeholder.invalid`;
+      const email = row.email ?? `${phoneLast10(row.phone)}@${PLACEHOLDER_EMAIL_DOMAIN}`;
       const password = deriveProvisionedPassword(row.name!, row.phone);
       // Created on the organisation's behalf, so the ID carries its letters.
       const [sportagonId] = await mintSportagonIds(prisma, await orgIdPrefixFor(prisma, organizationId), 1);

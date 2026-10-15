@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { isPlaceholderPhone } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { env } from '../../config/env.js';
 import { normalizeEmail, normalizePhone, type TokenSubject } from './auth-tokens.service.js';
@@ -52,9 +53,17 @@ const toChoice = (u: ChoiceRow): AccountChoice => ({
  * number stored as "+91 98765 43210" is found by "9876543210" and the reverse.
  * Ordered oldest first so the chooser is stable between visits rather than
  * reshuffling as rows are touched.
+ *
+ * A placeholder PHONE (@semp/shared placeholder-contact) opens nothing. No code can
+ * reach it, and the numbers run 5000000000, 5000000001, ... - with a firstname@last4
+ * password that is an enumerable door, not a sign-in. The account opens by phone
+ * once a super admin sets the real number. Placeholder EMAILS are deliberately not
+ * refused: roster-import logins carry `<phone>@placeholder.invalid` and hand it out
+ * on their credentials sheet, so people already sign in with it.
  */
 export async function accountsForSubject(prisma: Prisma, subject: TokenSubject): Promise<AccountChoice[]> {
   if ('phone' in subject && subject.phone !== undefined) {
+    if (isPlaceholderPhone(subject.phone)) return [];
     const last10 = normalizePhone(subject.phone);
     const rows = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
       `select id from users

@@ -15,7 +15,7 @@ import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { resolveEntryRules, type EntryRules } from '../tournaments/domain/entry-rules.js';
 import { assertCanAddMember, assertCanLockRoster } from './domain/roster-policy.js';
 import { assertPlayerEligible, screenSquad, squadEntryRefusal } from '../championships/contingent.js';
-import { unitLabels } from '@semp/shared';
+import { PLACEHOLDER_EMAIL_DOMAIN, unitLabels } from '@semp/shared';
 import { tellUser, checkRosterIncomplete, notifyRosterLocked, notifyTeamCreated } from './teams.notifications.js';
 import { mintSportagonIds, orgIdPrefixFor } from '../iam/sportagon-id.js';
 import { assertOrgNotArchived } from '../iam/organization-archive.service.js';
@@ -857,7 +857,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     const toCreate = await Promise.all(pasted
       .filter((r) => {
         const key = phoneLast10(r.phone);
-        const email = r.email ?? `${key}@placeholder.invalid`;
+        const email = r.email ?? `${key}@${PLACEHOLDER_EMAIL_DOMAIN}`;
         if (existingId(r) || seenPhones.has(key) || seenEmails.has(email)) return false;
         seenPhones.add(key);
         seenEmails.add(email);
@@ -868,7 +868,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
         const password = deriveProvisionedPassword(name, r.phone);
         return {
           name, phone: r.phone!, password,
-          email: r.email ?? `${phoneLast10(r.phone)}@placeholder.invalid`,
+          email: r.email ?? `${phoneLast10(r.phone)}@${PLACEHOLDER_EMAIL_DOMAIN}`,
           password_hash: await bcrypt.hash(password, 10),
         };
       }));
