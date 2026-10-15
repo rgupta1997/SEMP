@@ -294,10 +294,10 @@ export function Badge({ tone = 'slate', className = '', children }: { tone?: Bad
 // Maps a status string to a sensible badge tone. `label` overrides the shown
 // text while keeping the tone derived from the real status (e.g. show a fixture's
 // 'scheduled' status as "matched" without changing the stored value).
-export function StatusBadge({ status, label }: { status?: string | null; label?: ReactNode }) {
+export function StatusBadge({ status, label, className }: { status?: string | null; label?: ReactNode; className?: string }) {
   const s = (status ?? '').toLowerCase();
   // Live matches get the broadcast pulse treatment.
-  if (s === 'live') return <Badge tone="live">{label ?? 'LIVE'}</Badge>;
+  if (s === 'live') return <Badge tone="live" className={className}>{label ?? 'LIVE'}</Badge>;
   const tone: BadgeTone =
     s === 'completed' ? 'teal'
       // A locked scorecard is the verified, official result - it reads as a
@@ -307,7 +307,7 @@ export function StatusBadge({ status, label }: { status?: string | null; label?:
         : ['rejected', 'cancelled'].includes(s) ? 'rose'
           : ['registration_open'].includes(s) ? 'brand'
             : 'slate';
-  return <Badge tone={tone}>{label ?? (status ? titleCase(status) : '-')}</Badge>;
+  return <Badge tone={tone} className={className}>{label ?? (status ? titleCase(status) : '-')}</Badge>;
 }
 
 // "Updated HH:MM:SS · ↻ Refresh now" control for auto-refreshing tables (e.g.

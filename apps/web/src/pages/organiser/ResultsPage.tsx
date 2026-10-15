@@ -194,6 +194,9 @@ function StatusGlyph({ locked, rankingEvent, status }: { locked: boolean; rankin
  */
 const RESULTABLE = new Set(['live', 'completed', 'walkover']);
 
+/** A filter Select that fills its grid column on a phone (Select's own wrapper never stretches). */
+const PHONE_FILL = 'min-w-0 max-sm:[&>div]:w-full max-sm:[&_select]:w-full';
+
 const teamShort = (t: Side | null) =>
   t?.short_name || t?.org_units?.code || t?.organizations?.short_name || teamLabel(t);
 
@@ -621,20 +624,26 @@ export function ResultsPage() {
       {/* Tournament, sport and sort - the axes that used to be split between the app
           header and here. One row, wrapping, on the page's own margin. */}
       {(tournamentOptions.length > 0 || sportOptions.length > 0 || playable.length > 1) && (
-        <div className="-mt-1 flex flex-wrap items-center gap-2">
+        // Phone: the two filters as equal columns (stacked at their own widths they read
+        // ragged), sort on its own line. From sm: one wrapping row, as before.
+        <div className="-mt-1 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
           {tournamentOptions.length > 0 && (
-            <Select value={tournamentId} onChange={(e) => setTournamentId(e.target.value)}
-              aria-label="Filter by tournament" className="!py-1.5 text-[13px]">
-              <option value="">All tournaments</option>
-              {tournamentOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </Select>
+            <div className={cn(PHONE_FILL, sportOptions.length === 0 && 'col-span-2')}>
+              <Select value={tournamentId} onChange={(e) => setTournamentId(e.target.value)}
+                aria-label="Filter by tournament" className="!py-1.5 text-[13px]">
+                <option value="">All tournaments</option>
+                {tournamentOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </Select>
+            </div>
           )}
           {sportOptions.length > 0 && (
-            <Select value={sportId} onChange={(e) => setSportId(e.target.value)}
-              aria-label="Filter by sport" className="!py-1.5 text-[13px]">
-              <option value="">All sports</option>
-              {sportOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </Select>
+            <div className={cn(PHONE_FILL, tournamentOptions.length === 0 && 'col-span-2')}>
+              <Select value={sportId} onChange={(e) => setSportId(e.target.value)}
+                aria-label="Filter by sport" className="!py-1.5 text-[13px]">
+                <option value="">All sports</option>
+                {sportOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </Select>
+            </div>
           )}
           {(tournamentId || sportId) && (
             <Button size="sm" variant="ghost" onClick={() => { setTournamentId(''); setSportId(''); }}>
@@ -642,7 +651,7 @@ export function ResultsPage() {
             </Button>
           )}
           {playable.length > 1 && (
-            <div className="ml-auto flex items-center gap-2">
+            <div className="col-span-2 flex items-center justify-end gap-2 sm:ml-auto">
               <label className="t-eyebrow" htmlFor="results-sort">Sort</label>
               <Select id="results-sort" value={sort} onChange={(e) => setSort(e.target.value)} className="!py-1.5 text-[13px]">
                 <option value="match">Match number</option>

@@ -191,8 +191,10 @@ export function usePocOnboarding(orgId: string, enabled = true): OnboardingState
  */
 export interface OnboardingEntry {
   intra: boolean;
-  /** The host's own noun - "Campuses", "Offices", "Departments". */
+  /** The host's own noun, singular - "Campus", "Office", "Department". */
   entrant_label: string;
+  /** The same noun, plural - "Campuses", "Offices", "Departments". */
+  entrant_label_plural?: string;
 }
 
 export function useOrganiserOnboarding(
@@ -211,8 +213,8 @@ export function useOrganiserOnboarding(
 
   const setupHref = `/championships/${eventId}/setup`;
 
-  // Singular of the entrant noun, for a button that acts on a list of them.
-  const entrants = entry?.entrant_label ?? 'Entrants';
+  // Plural - every sentence below talks about several of them ("Invite your teams").
+  const entrants = entry?.entrant_label_plural ?? entry?.entrant_label ?? 'Entrants';
 
   // The one step that is a different job in an internal championship. Everything
   // else - seasons, sports, venues, officials, opening - is the same work.

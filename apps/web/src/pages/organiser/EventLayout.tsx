@@ -19,8 +19,9 @@ export interface EventDetail {
   /**
    * What competes here, resolved by the server.
    *
-   * `entrant_label` is the host organisation's OWN noun - "Campuses", "Offices",
-   * "Departments" - so a screen never has to work out whether to say organisation
+   * `entrant_label` is the host organisation's OWN noun, SINGULAR - "Campus", "Office",
+   * "Department" (`entrant_label_plural` for headings and counts, "Campuses") - so a
+   * screen never has to work out whether to say organisation
    * or campus. It exists precisely because getting that wrong is invisible: a
    * summary card reading "Organizations: 12" above twelve campuses of one
    * institution is wrong in a way nobody reports as a bug.

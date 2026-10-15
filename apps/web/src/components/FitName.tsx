@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from './ui';
 
 const ALIGN = { left: 'text-left', center: 'text-center', right: 'text-right' } as const;
@@ -8,8 +8,12 @@ const ALIGN = { left: 'text-left', center: 'text-center', right: 'text-right' } 
  * when there is not (and "…" if even that is too long). The full name is always the
  * tooltip. Re-measured whenever the box resizes - a phone rotating, a panel opening.
  */
-export function FitName({ full, short, prefix = '', className, sub, fullBelow = false, belowClassName = 'text-[9px]', align = 'center' }: {
+export function FitName({ full, short, prefix = '', className, sub, fullBelow = false, belowClassName = 'text-[9px]', align = 'center', forceShort = false, onFitChange }: {
   full: string; short?: string | null; prefix?: string; className?: string;
+  /** Show the short code even though the full name fits - so two names in one row match. */
+  forceShort?: boolean;
+  /** Told whether the full name fits, so a row can switch both of its names together. */
+  onFitChange?: (fits: boolean) => void;
   /** Size of the second line - always smaller than the line above it. */
   belowClassName?: string;
   /** A tiny second line, e.g. "no player". */
@@ -32,9 +36,16 @@ export function FitName({ full, short, prefix = '', className, sub, fullBelow = 
     check();
     const ro = new ResizeObserver(check);
     ro.observe(el);
-    return () => ro.disconnect();
+    // Re-measure once web fonts arrive: measured in the narrower fallback font, a name
+    // "fitted" and was then cut with "…" when the real font loaded.
+    const fonts = typeof document !== 'undefined' ? document.fonts : undefined;
+    let live = true;
+    fonts?.ready.then(() => { if (live) check(); });
+    fonts?.addEventListener?.('loadingdone', check);
+    return () => { live = false; ro.disconnect(); fonts?.removeEventListener?.('loadingdone', check); };
   }, [full, prefix]);
-  const shortened = !fits && !!short && short !== full;
+  useEffect(() => { onFitChange?.(fits); }, [fits]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shortened = (forceShort || !fits) && !!short && short !== full;
   const below = [shortened && fullBelow ? full : null, sub].filter(Boolean).join(' · ');
   return (
     <>

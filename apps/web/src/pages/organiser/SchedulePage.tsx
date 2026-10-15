@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Pencil, Trash2 } from 'lucide-react';
+import { ClipboardList, ClipboardPen, Eye, Pencil, Trash2 } from 'lucide-react';
 import { FIXTURE_STATUS, inheritedOverrides, resolveFormat, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
@@ -11,6 +11,7 @@ import { usePageFilters, useFilterBar } from '../../lib/filters';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
 import { Badge, Button, Card, cn, confirmDialog, EmptyState, Field, Input, Modal, Segmented, Select, Spinner, StatusBadge, StatusLegend, toast } from '../../components/ui';
 import { Bracket, fixtureStatusLabel } from '../../components/Bracket';
+import { FitName } from '../../components/FitName';
 import { RoundRobinGrid } from '../../components/RoundRobinGrid';
 import { ScheduleTimeline } from '../../components/ScheduleTimeline';
 import { StageConfigWizard } from '../../components/StageConfigWizard';
@@ -31,7 +32,59 @@ import { isPoolShapedFormat, titleCase } from '../../lib/format';
  * The console handles the transition itself - the first scoring action moves a
  * `scheduled` fixture to `live` - so this only has to open it.
  */
-function ScoreButton({ fixture, sportName, onNavigate }: { fixture: any; sportName?: string; onNavigate?: () => void }) {
+/** A fixture row's status badge and score button, a size smaller on a phone. */
+const PHONE_BADGE = 'max-sm:px-2 max-sm:py-0.5 max-sm:text-[10px]';
+const PHONE_ICON_BUTTON = 'max-sm:h-7 max-sm:min-h-0 max-sm:w-7 max-sm:px-0 max-sm:py-0';
+
+/** One side of a fixture row: a team (fitted name) or an empty slot's label. */
+interface PairSide {
+  full: string | null;
+  short?: string | null;
+  /** Shown when there is no team yet - "Winner of QF1", TBD, or a blocked-tie warning. */
+  slotLabel: string;
+  org: string;
+  blocked?: boolean;
+  title?: string;
+}
+
+/**
+ * Home vs away with "vs" between equal columns. The two names switch to short codes
+ * TOGETHER - one side "ISFM" and the other a full name read as a lopsided row.
+ */
+function MatchPair({ home, away }: { home: PairSide; away: PairSide }) {
+  const [homeFits, setHomeFits] = useState(true);
+  const [awayFits, setAwayFits] = useState(true);
+  const shortBoth = !homeFits || !awayFits;
+  const cell = (s: PairSide, align: 'left' | 'right', onFit: (v: boolean) => void) => (
+    <div className={cn('min-w-0', align === 'right' ? 'text-right' : 'text-left', s.blocked && 'text-amber-600 dark:text-amber-400')}>
+      {s.full ? (
+        <>
+          {/* From sm: the full name on one line in its half of the match area (80% of
+              the row), wrapping only when it is genuinely longer than that. */}
+          <span className="hidden break-words leading-tight sm:block">{s.full}</span>
+          {/* Phone: short code + the full name tiny beneath, when it will not fit. */}
+          <div className="sm:hidden">
+            <FitName full={s.full} short={s.short} align={align} fullBelow belowClassName="text-[10px]" className="leading-tight"
+              forceShort={shortBoth} onFitChange={onFit} />
+          </div>
+        </>
+      ) : <span className="block truncate leading-tight" title={s.title}>{s.slotLabel}</span>}
+      {s.org && <span className="block truncate text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{s.org}</span>}
+    </div>
+  );
+  return (
+    // Stacked row: the match spans 80% of the row, centred. One-line row: it fills its
+    // middle column. Either way long names get the room rather than a narrow column.
+    <div className="mx-auto grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-2 font-medium text-slate-700 dark:text-slate-300 sm:w-4/5 @min-[46rem]:w-full">
+
+      {cell(home, 'right', setHomeFits)}
+      <span className="pt-px text-slate-400 dark:text-slate-500">vs</span>
+      {cell(away, 'left', setAwayFits)}
+    </div>
+  );
+}
+
+function ScoreButton({ fixture, sportName, onNavigate, iconOnPhone = false }: { fixture: any; sportName?: string; onNavigate?: () => void; iconOnPhone?: boolean }) {
   const navigate = useNavigate();
   const { eventId } = useParams();
   // A match with an unresolved bracket slot has nothing to score yet, and a
@@ -45,9 +98,16 @@ function ScoreButton({ fixture, sportName, onNavigate }: { fixture: any; sportNa
   const archived = !!championship.archived_at;
   if (!scorable) return null;
   const played = ['completed', 'walkover'].includes(fixture.status);
+  const label = archived ? 'View' : fixture.status === 'live' ? 'Resume' : played ? 'Scorecard' : 'Score';
+  // Icon on a phone row (the text pushed the row's buttons out of line), label from sm up.
+  // Clipboard + pen to enter a score, plain clipboard to read the finished scorecard.
+  const Icon = archived ? Eye : played ? ClipboardList : ClipboardPen;
   return (
     <Button
       size="sm"
+      aria-label={label}
+      title={label}
+      className={iconOnPhone ? PHONE_ICON_BUTTON : undefined}
       variant={fixture.status === 'live' ? 'primary' : played ? 'ghost' : 'outline'}
       onClick={() => {
         // Close the dialog we may have been opened from, so returning from the
@@ -59,7 +119,12 @@ function ScoreButton({ fixture, sportName, onNavigate }: { fixture: any; sportNa
         });
       }}
     >
-      {archived ? 'View' : fixture.status === 'live' ? 'Resume' : played ? 'Scorecard' : 'Score'}
+      {iconOnPhone ? (
+        <>
+          <Icon size={13} aria-hidden className="sm:hidden" />
+          <span className="hidden sm:inline">{label}</span>
+        </>
+      ) : label}
     </Button>
   );
 }
@@ -533,8 +598,8 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
   );
 }
 
-function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, formatLabel, teamName, teamOrg, grounds, venues, officials, canManage }:
-  { td: any; fixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
+function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, formatLabel, teamName, teamShort, teamOrg, grounds, venues, officials, canManage }:
+  { td: any; fixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; teamShort?: (id: string | null) => string | null; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
   // The championship-wide list is ordered by schedule; restore the per-draw
   // pool → bracket order the visual (bracket / grid) view needs for layout.
   const fixtures = [...drawFixtures].sort((a, b) => (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0));
@@ -689,7 +754,9 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
           </div>
           <div className="text-xs text-slate-500 dark:text-slate-400">{titleCase(td.entry_type)} Draw · {fixtures.length} fixture{fixtures.length === 1 ? '' : 's'}</div>
         </div>
-        <div className="flex items-center gap-2">
+        {/* Wraps: five controls do not fit one line on a narrow phone (Regenerate ran off
+            the card). Under 427px every button is also tightened so they fit one line. */}
+        <div className="flex flex-wrap items-center gap-2 max-[427px]:gap-1.5 max-[427px]:[&_button]:min-h-0 max-[427px]:[&_button]:px-2 max-[427px]:[&_button]:py-1.5 max-[427px]:[&_button]:text-[11px]">
           {fixtures.length > 0 && !isRanking && (
             <Segmented
               size="sm"
@@ -759,9 +826,9 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
                     Edit right) so they line up across rows regardless of name length;
                     from sm up they fall back to the inline end-of-row layout. */}
                 <div className="grid w-full grid-cols-2 items-center justify-items-center gap-2 sm:flex sm:w-auto sm:gap-3">
-                  <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
-                  {canManage && <ScoreButton fixture={f} sportName={sportName} />}
-                  {canManage && <Button size="sm" variant="ghost" disabled={archived} onClick={() => setEditing(f)} aria-label="Edit fixture" title={archivedTitle ?? 'Edit fixture'}><Pencil size={14} /></Button>}
+                  <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} className={PHONE_BADGE} />
+                  {canManage && <ScoreButton fixture={f} sportName={sportName} iconOnPhone />}
+                  {canManage && <Button size="sm" variant="ghost" className={PHONE_ICON_BUTTON} disabled={archived} onClick={() => setEditing(f)} aria-label="Edit fixture" title={archivedTitle ?? 'Edit fixture'}><Pencil size={13} /></Button>}
                 </div>
               </div>
             ))}
@@ -793,47 +860,47 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
             })}
           </div>
         ) : (
-          <div className="space-y-1.5">
-            {listFixtures.map((f) => (
-              <div key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-sm">
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 w-20">{f.round || 'Match'}</span>
-                <span className="flex flex-1 min-w-[180px] items-center gap-2 font-medium text-slate-700 dark:text-slate-300">
-                  <span className={cn('inline-flex flex-col', !f.home_team_id && isTieBlockedFor(f.home_slot_label, f.live_state?.tie_blocked) && 'text-amber-600 dark:text-amber-400')}>
-                    <span className="leading-tight">
-                      {f.home_team_id ? teamName(f.home_team_id) : (
-                        isTieBlockedFor(f.home_slot_label, f.live_state?.tie_blocked)
-                          ? `⚠ ${describeTieBlocked(f.live_state?.tie_blocked)}`
-                          : (describeSlot(f.home_slot_label) ?? TBD_LABEL)
-                      )}
-                    </span>
-                    {teamOrg(f.home_team_id) && <span className="text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{teamOrg(f.home_team_id)}</span>}
-                  </span>
-                  <span className="text-slate-400 dark:text-slate-500">vs</span>
-                  <span className={cn('inline-flex flex-col', !f.away_team_id && isTieBlockedFor(f.away_slot_label, f.live_state?.tie_blocked) && 'text-amber-600 dark:text-amber-400')}>
-                    <span className="leading-tight">
-                      {f.away_team_id ? teamName(f.away_team_id) : (
-                        isTieBlockedFor(f.away_slot_label, f.live_state?.tie_blocked)
-                          ? `⚠ ${describeTieBlocked(f.live_state?.tie_blocked)}`
-                          : (describeSlot(f.away_slot_label) ?? TBD_LABEL)
-                      )}
-                    </span>
-                    {teamOrg(f.away_team_id) && <span className="text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{teamOrg(f.away_team_id)}</span>}
-                  </span>
-                </span>
-                <span className="text-xs text-slate-500 dark:text-slate-400">
-                  {groundLabel(f.venue_ground_id) ?? 'No ground'} · {f.scheduled_at ? fmtDateTime(f.scheduled_at) : 'Unscheduled'}
-                  {officialName(f.official_id) ? ` · ${officialName(f.official_id)}` : ' · No official'}
-                </span>
-                {/* Status + Edit share one row on phone, split 50/50 (status left,
-                    Edit right) so they line up across rows regardless of name length;
-                    from sm up they fall back to the inline end-of-row layout. */}
-                <div className="grid w-full grid-cols-2 items-center justify-items-center gap-2 sm:flex sm:w-auto sm:gap-3">
-                  <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} />
-                  {canManage && <ScoreButton fixture={f} sportName={sportName} />}
-                  {canManage && <Button size="sm" variant="ghost" disabled={archived} onClick={() => setEditing(f)} aria-label="Edit fixture" title={archivedTitle ?? 'Edit fixture'}><Pencil size={14} /></Button>}
+          // Sized by the CARD (sidebar and display scaling change it), not the screen.
+          <div className="@container space-y-1.5">
+            {listFixtures.map((f) => {
+              // One side of the match: a team, or an empty slot saying what fills it
+              // (or why it is blocked).
+              const side = (s: 'home' | 'away'): PairSide => {
+                const teamId = s === 'home' ? f.home_team_id : f.away_team_id;
+                const slot = s === 'home' ? f.home_slot_label : f.away_slot_label;
+                const blocked = !teamId && isTieBlockedFor(slot, f.live_state?.tie_blocked);
+                const why = blocked ? describeTieBlocked(f.live_state?.tie_blocked) ?? undefined : undefined;
+                return {
+                  full: teamId ? teamName(teamId) : null,
+                  short: teamId ? teamShort?.(teamId) : null,
+                  slotLabel: blocked ? `⚠ ${why ?? ''}` : (describeSlot(slot) ?? TBD_LABEL),
+                  org: teamOrg(teamId),
+                  blocked,
+                  title: why,
+                };
+              };
+              return (
+                // Card 46rem+: ONE row - round | match | badge + buttons - with the side
+                // columns equal (so "vs" is centred in every row) and never under 14.5rem,
+                // the room "Completed + Scorecard + edit" needs. Narrower cards stack:
+                // round + badge on top, the match beneath - nothing can overlap.
+                <div key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800/60 @min-[46rem]:py-3.5 @min-[46rem]:grid @min-[46rem]:grid-cols-[minmax(14.5rem,1fr)_minmax(0,2fr)_minmax(14.5rem,1fr)]">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{f.round || 'Match'}</span>
+                  <div className="order-last min-w-0 basis-full @min-[46rem]:order-none @min-[46rem]:basis-auto">
+                    <MatchPair home={side('home')} away={side('away')} />
+                    <p className="mt-1 truncate text-center text-xs text-slate-500 dark:text-slate-400">
+                      {groundLabel(f.venue_ground_id) ?? 'No ground'} · {f.scheduled_at ? fmtDateTime(f.scheduled_at) : 'Unscheduled'}
+                      {officialName(f.official_id) ? ` · ${officialName(f.official_id)}` : ' · No official'}
+                    </p>
+                  </div>
+                  <div className="ml-auto flex items-center justify-end gap-1.5 sm:gap-2 @min-[46rem]:ml-0">
+                    <StatusBadge status={f.status} label={fixtureStatusLabel(f.status)} className={PHONE_BADGE} />
+                    {canManage && <ScoreButton fixture={f} sportName={sportName} iconOnPhone />}
+                    {canManage && <Button size="sm" variant="ghost" className={PHONE_ICON_BUTTON} disabled={archived} onClick={() => setEditing(f)} aria-label="Edit fixture" title={archivedTitle ?? 'Edit fixture'}><Pencil size={13} /></Button>}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -879,8 +946,8 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
   );
 }
 
-function SportBlock({ ts, draws, allFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, formatName, teamName, teamOrg, grounds, venues, officials, canManage }:
-  { ts: any; draws: any[]; allFixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
+function SportBlock({ ts, draws, allFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, formatName, teamName, teamShort, teamOrg, grounds, venues, officials, canManage }:
+  { ts: any; draws: any[]; allFixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; teamShort?: (id: string | null) => string | null; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
   if (draws.length === 0) return null;
   // Effective format: the draw's own format wins, else the sport's (matches the
   // generate route's fallback).
@@ -900,6 +967,7 @@ function SportBlock({ ts, draws, allFixtures, fixturesLoading, teamsLoading, fix
             sportName={sportName}
             formatLabel={formatName(td.format_id) ?? formatName(ts.format_id)}
             teamName={teamName}
+            teamShort={teamShort}
             teamOrg={teamOrg}
             grounds={grounds}
             venues={venues}
@@ -975,6 +1043,8 @@ export function SchedulePage() {
 
   const sportName = (id: string) => sports.find((s) => s.id === id)?.name ?? 'Sport';
   const teamName = (id: string | null) => (id ? teams.find((t) => t.id === id)?.name ?? TBD_LABEL : TBD_LABEL);
+  // The squad's abbreviation, for a phone row where the full name will not fit.
+  const teamShort = (id: string | null): string | null => (id ? teams.find((t) => t.id === id)?.short_name ?? null : null);
   // Organization sub-heading for a team (short name preferred), '' when unaffiliated -
   // shown under the team name on the bracket / grid / list so same-named draws read apart.
   const teamOrg = (id: string | null) => {
@@ -1054,7 +1124,7 @@ export function SchedulePage() {
         <EmptyState icon="⚑" title="No sports configured" description="Add sports & disciplines in Setup, then come back to generate fixtures." />
       ) : (
         <div className="space-y-6">
-          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} teamsLoading={teamsLoading} fixturesPath={fixturesPath} teamsPath={teamsPath} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManage} />)}
+          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} teamsLoading={teamsLoading} fixturesPath={fixturesPath} teamsPath={teamsPath} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} teamShort={teamShort} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManage} />)}
         </div>
       )}
     </div>
