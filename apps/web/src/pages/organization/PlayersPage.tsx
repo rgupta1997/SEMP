@@ -483,11 +483,16 @@ export function PlayersPage() {
                   onChange={async (e) => {
                     const unitId = e.target.value;
                     if (!unitId) return;                    // the placeholder
-                    const ids = [...selected];
+                    // Selection holds MEMBERSHIP ids (Verify/Reject need those); placing
+                    // a person needs their USER id - sending the former added nobody.
+                    const ids = people.filter((p) => selected.has(p.id)).map((p) => p.user_id);
                     setBusy(true);
                     try {
                       const r: any = await addToUnit(orgId, unitId, ids);
-                      toast.success(`Added ${r?.added ?? ids.length} ${(r?.added ?? ids.length) === 1 ? 'person' : 'people'}`);
+                      const added = r?.added ?? ids.length;
+                      const skipped = r?.skipped ?? 0;
+                      toast.success(`Added ${added} ${added === 1 ? 'person' : 'people'}`
+                        + (skipped ? ` · ${skipped} skipped (not an active member)` : ''));
                       setSelected(new Set());
                       await refetch();
                     } catch (err: any) {

@@ -513,15 +513,17 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
       {/* The hero panel carries a 64px tile and a 24px name, so it gets the wider
           inset - 20px reads as cramped against something that large. */}
       <CardBody className="sm:px-6 sm:pt-6 sm:pb-6">
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start' }}>
-          <span aria-hidden style={{
-            width: 64, height: 64, borderRadius: 16, background: 'var(--brand)', color: '#fff',
+        {/* Phone: tile beside the name, handle controls on their own row below.
+            From sm: the handle column sits on the right, as it always did. */}
+        <div className="flex flex-wrap items-start gap-4 sm:gap-5">
+          <span aria-hidden className="h-14 w-14 shrink-0 sm:h-16 sm:w-16" style={{
+            borderRadius: 16, background: 'var(--brand)', color: '#fff',
             display: 'grid', placeItems: 'center', fontFamily: POP, fontWeight: 900, fontSize: 22,
           }}>{initials(id.name)}</span>
 
-          <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+          <div className="min-w-0 flex-1">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h2 style={{ fontFamily: POP, fontWeight: 900, fontSize: 24, margin: 0, letterSpacing: '-.02em' }}>{id.name}</h2>
+              <h2 className="min-w-0 break-words text-xl sm:text-2xl" style={{ fontFamily: POP, fontWeight: 900, margin: 0, letterSpacing: '-.02em' }}>{id.name}</h2>
               <button onClick={() => setEditOpen(true)} title="Edit profile" aria-label="Edit profile" style={{
                 display: 'grid', placeItems: 'center', width: 26, height: 26, flexShrink: 0, cursor: 'pointer',
                 borderRadius: 7, border: '1px solid var(--line)', background: 'var(--surface-1)', color: 'var(--muted)',
@@ -554,7 +556,7 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
             )}
           </div>
 
-          <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+          <div className="flex w-full flex-col items-start gap-2 border-t border-line pt-3 sm:w-auto sm:items-end sm:border-t-0 sm:pt-0">
             <span style={{ fontFamily: MONO, fontSize: 12, color: 'var(--muted)' }}>
               {id.controlled.handle ? `@${id.controlled.handle}` : 'No handle set'}
             </span>
@@ -605,8 +607,8 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
               // A handle is a URL, so it has to exist before the profile can go
               // public - the server refuses otherwise. Pointing straight at Edit
               // profile is what makes that fixable instead of a dead-end error.
-              <button onClick={() => setEditOpen(true)} style={{
-                fontSize: 11.5, color: 'var(--brand)', textAlign: 'right', maxWidth: 200,
+              <button onClick={() => setEditOpen(true)} className="text-left sm:max-w-[200px] sm:text-right" style={{
+                fontSize: 11.5, color: 'var(--brand)',
                 border: 'none', background: 'none', cursor: 'pointer', padding: 0,
               }}>
                 Set a handle to make your profile public
@@ -614,7 +616,7 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
             )}
 
             {id.public_url && (
-              <button onClick={copy} style={{
+              <button onClick={copy} className="max-w-full break-all text-left" style={{
                 display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', border: 'none',
                 background: 'none', fontFamily: MONO, fontSize: 11.5, color: 'var(--brand)', padding: 0,
               }}>
@@ -689,12 +691,14 @@ export function SportsProfilePage() {
 
       <ProfileHeader id={id} onChanged={() => refetch()} />
 
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      {/* One swipeable row on a phone (seven pills wrapped to two ragged rows); wraps from sm up. */}
+      <div className="flex min-w-0 flex-nowrap gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] sm:flex-wrap sm:overflow-visible sm:pb-0 [&::-webkit-scrollbar]:hidden">
         {TABS.map((t) => {
           const isLocked = !!t.needs && !ws.granted.has(t.needs);
           const isActive = t.key === active.key;
           return (
             <button key={t.key} onClick={() => setParams({ tab: t.key })}
+              className="shrink-0 whitespace-nowrap"
               style={{
                 display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
                 padding: '7px 13px', borderRadius: 999, fontSize: 13.5, fontWeight: 600,

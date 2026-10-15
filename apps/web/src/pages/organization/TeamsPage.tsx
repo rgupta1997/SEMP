@@ -596,7 +596,7 @@ export function TeamsPage() {
   const { can } = usePermissions();
   const canManage = can('team.manage'); // POC only; captains are read-only
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { orgId } = useParams();
   const institutionId = orgId ?? ctx?.organization?.id ?? ctx?.user.organization_id ?? '';
   // Archived: its teams can be looked at, not created or entered.
@@ -640,7 +640,14 @@ export function TeamsPage() {
   //
   // Organisation first: it is the kind that existed before internal championships,
   // and the one an institution that runs none will only ever have.
-  const [playsFor, setPlaysFor] = useState<string>('organization');
+  // Kept in the URL (?tab=department) so "All teams" on a team's page comes back here.
+  const tabParam = searchParams.get('tab');
+  const [playsFor, setPlaysForState] = useState<string>(
+    tabParam === 'campus' || tabParam === 'department' ? tabParam : 'organization');
+  const setPlaysFor = (v: string) => {
+    setPlaysForState(v);
+    setSearchParams((p) => { const n = new URLSearchParams(p); if (v === 'organization') n.delete('tab'); else n.set('tab', v); return n; }, { replace: true });
+  };
 
   const { data: enrollments = [] } = useApi<any[]>(institutionId ? `/me/enrollments?organization_id=${institutionId}` : '/me/enrollments');
   // Approved entries this organisation holds. Internal championships are excluded:

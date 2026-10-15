@@ -3,11 +3,14 @@ import { Calendar, Flag } from 'lucide-react';
 import { EARLY_END_LABEL, earlyEndOf, formatPoints, TBD_LABEL } from '@semp/shared';
 import { useApi, fmtDateTime } from '../../lib/hooks';
 import { Badge, Card, EmptyState, ListToolbar, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
+import { FitName } from '../FitName';
 
 // A flattened fixture from GET /championships/:id/fixtures.
 interface TeamRef {
   id: string;
   name: string;
+  /** The squad's abbreviation, for a phone where the full name will not fit. */
+  short_name?: string | null;
   organizations?: { short_name: string | null; name: string } | null;
   /** The campus or batch this squad plays for, when it plays for one. */
   org_units?: { id: string; name: string; code?: string | null; type?: string | null } | null;
@@ -45,8 +48,9 @@ function isRankingEvent(f: FixtureRow) { return f.round === 'Event' && !f.home &
 // distinguishable across orgs on the schedule/results.
 function TeamName({ team, align, won }: { team: TeamRef | null; align: 'left' | 'right'; won: boolean }) {
   return (
-    <div className={cn('min-w-[7rem]', align === 'right' ? 'text-right' : 'text-left', won ? 'font-bold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-300')}>
-      <div className="truncate">{teamLabel(team)}</div>
+    <div className={cn('min-w-0', align === 'right' ? 'text-right' : 'text-left', won ? 'font-bold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-300')}>
+      {/* Full name when it fits; on a phone the short code, with the full name tiny beneath. */}
+      <FitName full={teamLabel(team)} short={team?.short_name} align={align} fullBelow belowClassName="text-[10px]" />
       {orgLabel(team) && <div className="truncate text-[11px] font-normal text-slate-400 dark:text-slate-500">{orgLabel(team)}</div>}
     </div>
   );
@@ -141,12 +145,15 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
             const awayWon = f.winner_team_id != null && f.winner_team_id === f.away?.id;
             const early = earlyEndOf(f.live_state);
             return (
-              <Card key={f.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 p-3 sm:p-4">
-                <div className="w-24 shrink-0 truncate text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400" title={f.round ?? undefined}>
+              // "v" dead centre, whatever the names: equal side columns around the match on
+              // wider screens, and two equal name columns around the score inside it.
+              <Card key={f.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 p-3 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(0,3fr)_minmax(0,1fr)] sm:p-4">
+                <div className="w-24 shrink-0 truncate text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 sm:w-auto" title={f.round ?? undefined}>
                   {f.round || '-'}
                 </div>
 
-                <div className="flex flex-1 items-center justify-center gap-3 text-sm">
+                <div className={cn('order-last basis-full text-sm sm:order-none sm:basis-auto',
+                  isRankingEvent(f) ? 'flex items-center justify-center' : 'grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-3')}>
                   {isRankingEvent(f) ? (
                     <div className="flex items-center justify-center gap-2 text-center">
                       <span className="truncate font-semibold text-slate-700 dark:text-slate-200" title={f.discipline ?? f.sport ?? undefined}>
@@ -173,7 +180,7 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
                   )}
                 </div>
 
-                <div className="ml-auto flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+                <div className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400 sm:ml-0">
                   {f.scorecard_url && (
                     <a href={f.scorecard_url} target="_blank" rel="noreferrer" className="font-semibold text-brand-600 hover:underline dark:text-brand-400" onClick={(e) => e.stopPropagation()}>
                       Scorecard ↗

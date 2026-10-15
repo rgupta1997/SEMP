@@ -8,6 +8,7 @@ import {
   type Side, type StatEventSpec,
 } from '@semp/shared';
 import { Button, Card, Input, cn, confirmDialog, toast } from '../../components/ui';
+import { FitName } from '../../components/FitName';
 
 // ============================================================================
 // The console for everything that is not a racquet sport.
@@ -47,6 +48,9 @@ export interface TeamDeckProps {
   sportName?: string | null;
   homeName: string;
   awayName: string;
+  /** Short codes for tight spots on a phone (own-goal note, +1 buttons). Default: the name. */
+  homeShort?: string;
+  awayShort?: string;
   homeOrg?: string | null;
   awayOrg?: string | null;
   /** Roster for each side, so an action can be attributed to a person. */
@@ -193,6 +197,7 @@ export function TeamDeck(p: TeamDeckProps) {
   };
 
   const nameOf = (s: Side) => (s === 'A' ? p.homeName : p.awayName);
+  const shortOf = (s: Side) => (s === 'A' ? p.homeShort : p.awayShort) || nameOf(s);
   const played = periodsPlayed(state);
   const totalPeriods = format.levels[format.levels.length - 1].target;
   // A sets match's target is sets to WIN: best of 5 is first to 3, so up to 5 are played.
@@ -485,7 +490,12 @@ export function TeamDeck(p: TeamDeckProps) {
 
       {/* ── The working region: everything swaps HERE ────────────────────── */}
       <div data-qa="team-region" className="relative min-h-0 flex-1">
-        {state.ended ? (
+        {/* The log first: after full time it is how the result gets checked before
+            confirming. With the result card first, Log did nothing once a match ended. */}
+        {surface === 'log' ? (
+          <Timeline log={log} nameOf={nameOf} nameFor={nameFor} fullMs={fullMs}
+            onClose={() => setSurface('act')} />
+        ) : state.ended ? (
           // TWO STAGES, NOT ONE. Confirming writes the score; it does not make the
           // result official and it does not say who won it for their side. While
           // this card offered "Confirm result" and nothing else, an official who
@@ -522,9 +532,6 @@ export function TeamDeck(p: TeamDeckProps) {
               Undo the last action
             </Button>
           </Card>
-        ) : surface === 'log' ? (
-          <Timeline log={log} nameOf={nameOf} nameFor={nameFor} fullMs={fullMs}
-            onClose={() => setSurface('act')} />
         ) : progress.phase === 'penalties' ? (
           <Shootout
             shoot={shoot} nameOf={nameOf} kicksEach={format.tieBreak?.penalties?.kicks ?? 5}
@@ -652,15 +659,15 @@ export function TeamDeck(p: TeamDeckProps) {
                       disabled={p.disabled || p.busy || !actor}
                       onClick={() => fire(ev)}
                       className={cn(
-                        'flex h-12 flex-col items-center justify-center rounded-lg px-1 text-center text-sm font-bold leading-tight transition',
+                        'flex h-12 min-w-0 flex-col items-center justify-center overflow-hidden rounded-lg px-1 text-center text-sm font-bold leading-tight transition',
                         'active:scale-[0.97] disabled:opacity-40',
                         toneOf(ev),
                       )}>
-                      <span>{ev.label}</span>
+                      <span className="max-w-full truncate">{ev.label}</span>
+                      {/* Full name when it fits the button, the short code when it would overrun. */}
                       {ev.forOpponent && (
-                        <span className="text-[9px] font-normal opacity-80">
-                          scores for {nameOf(side === 'A' ? 'B' : 'A')}
-                        </span>
+                        <FitName prefix="scores for " full={nameOf(side === 'A' ? 'B' : 'A')} short={shortOf(side === 'A' ? 'B' : 'A')}
+                          fullBelow belowClassName="mt-0.5 text-[7px]" className="text-[9px] font-normal leading-none opacity-80" />
                       )}
                     </button>
                   ))}
@@ -685,10 +692,13 @@ export function TeamDeck(p: TeamDeckProps) {
             {/* The escape hatch: a point nobody is named for. Small, and honest. */}
             <div className="grid shrink-0 grid-cols-2 gap-1.5 border-t border-line pt-1.5">
               {(['A', 'B'] as Side[]).map((s) => (
+                // Full name when it fits, the short code when it would overrun the button.
                 <Button key={s} size="sm" variant="outline" data-qa={`team-score-${s}-1`}
+                  className="min-w-0 flex-col !gap-0 overflow-hidden py-1"
                   disabled={p.disabled || p.busy}
                   onClick={() => push({ t: 'point', side: s })}>
-                  +1 {nameOf(s)}{canAttribute ? ' · no player' : ''}
+                  <FitName prefix="+1 " full={nameOf(s)} short={shortOf(s)} fullBelow
+                    sub={canAttribute ? 'no player' : undefined} />
                 </Button>
               ))}
             </div>
@@ -727,11 +737,14 @@ export function TeamDeck(p: TeamDeckProps) {
             onClick={() => setSurface(surface === 'log' ? 'act' : 'log')}>
             Log{log.length ? ` · ${log.length}` : ''}
           </Button>
-          <Button size="sm" variant="outline"
-            className={cn('h-9 shrink-0', surface === 'more' && PANEL_OPEN)}
-            onClick={() => setSurface(surface === 'more' ? 'act' : 'more')}>
-            More
-          </Button>
+          {/* Corrections and early endings - nothing to do once the match is over. */}
+          {!state.ended && (
+            <Button size="sm" variant="outline"
+              className={cn('h-9 shrink-0', surface === 'more' && PANEL_OPEN)}
+              onClick={() => setSurface(surface === 'more' ? 'act' : 'more')}>
+              More
+            </Button>
+          )}
         </div>
       </Card>
     </div>
@@ -763,8 +776,8 @@ const TONE: Record<EventTone, string> = {
   score: 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm',
   // An own goal must not read as "your team scored" - it is outlined rather than
   // filled, so it is legible as a goal that went the wrong way at a glance.
-  ownGoal: 'border-2 border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-500/70 dark:bg-amber-500/15 dark:text-amber-100',
-  good: 'border border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200',
+  ownGoal: 'border-2 border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-500/70 dark:bg-amber-500/15 dark:text-amber-100 dark:hover:bg-amber-500/25',
+  good: 'border border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200 dark:hover:bg-sky-500/20',
   caution: 'bg-yellow-400 text-yellow-950 hover:bg-yellow-500 shadow-sm dark:bg-yellow-400 dark:text-yellow-950',
   dismissal: 'bg-red-600 text-white hover:bg-red-700 shadow-sm',
   error: 'border border-line bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
