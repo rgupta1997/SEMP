@@ -25,10 +25,13 @@ import { validateBody } from '../../http/middleware/validate.js';
 import { requireSuperAdmin } from '../../http/middleware/auth.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../shared/errors.js';
 import {
-  CleanupRefusedError, applyBlueprint, cleanupBlueprint, createdCount, planPlatform, storableCredential,
-  verifyBlueprint, type CredentialRow,
+  CleanupRefusedError, cleanupBlueprint, createdCount, planPlatform,
+  verifyBlueprint,
 } from './engine.js';
 import { makeEventSetupRepo, type EventSetupListRow, type EventSetupRow } from './event-setup.repo.js';
+import { mergeCredentials, startApplyJob } from './apply-job.js';
+
+export { mergeCredentials };
 
 // A row may sit in 'applying' forever if the process died mid-job (or a Lambda was
 // frozen under it); after this long without progress (every manifest save refreshes
@@ -75,12 +78,6 @@ const hasErrors = (issues: SetupIssue[] | undefined | null) => !!issues?.some((i
 export const isUnreachable = (u: { phone: string | null; email: string | null }) =>
   !((u.phone && !isPlaceholderPhone(u.phone)) || (u.email && !isPlaceholderEmail(u.email)));
 
-/** A fresh credential replaces an older one for the same login; the rest are kept. */
-export function mergeCredentials(existing: CredentialRow[] | null | undefined, fresh: CredentialRow[]): CredentialRow[] {
-  const byLogin = new Map<string, CredentialRow>();
-  for (const c of [...(existing ?? []), ...fresh]) byLogin.set(c.email.toLowerCase(), storableCredential(c));
-  return [...byLogin.values()];
-}
 
 export function makeEventSetupRouter(prisma: Prisma): Router {
   const router = Router();
@@ -224,39 +221,20 @@ export function makeEventSetupRouter(prisma: Prisma): Router {
       { onlyIf: ['validated'], staleApplyingMs: STALE_APPLYING_MS });
     if (!moved) throw new ConflictError('This setup is already being applied.');
 
-    const bp = validation.blueprint;
     const actorId = req.user!.id;
-    const store = repo.manifestStore(row.id);
-    busy.add(row.id);
-    // Detached, like the demo sandboxes: the request returns and the dashboard polls.
-    void (async () => {
-      const credentials: CredentialRow[] = [];
-      try {
-        const result = await applyBlueprint(prisma, bp, store, { actorId, credentials });
-        const current = await repo.get(row.id);
-        await repo.update(row.id, {
-          status: 'applied', apply_report: result.reports, error: null,
-          credentials: mergeCredentials(current?.credentials, credentials),
-          organization_id: result.ids.orgId, championship_id: result.ids.champId, applied_at: new Date(),
-        });
-      } catch (e) {
-        console.error(`[event-setup] apply failed for ${row.id}:`, e);
-        try {
-          const current = await repo.get(row.id);
-          await repo.update(row.id, {
-            status: 'failed', error: e instanceof Error ? e.message : String(e),
-            // Accounts made before the failure exist: keep their logins.
-            ...(credentials.length ? { credentials: mergeCredentials(current?.credentials, credentials) } : {}),
-            organization_id: current?.manifest.keys.org ?? current?.organization_id ?? null,
-            championship_id: current?.manifest.keys.championship ?? current?.championship_id ?? null,
-          });
-        } catch (inner) {
-          console.error(`[event-setup] could not record the failure for ${row.id}:`, inner);
-        }
-      } finally {
-        busy.delete(row.id);
-      }
-    })();
+    try {
+      // Locally the job runs detached in this process; on Lambda it is a separate
+      // asynchronous invocation of this function (a request's container freezes once
+      // its response is sent, so a job left running here would never finish).
+      await startApplyJob(prisma, row.id, actorId, (job) => {
+        busy.add(row.id);
+        void job().finally(() => busy.delete(row.id));
+      });
+    } catch (e) {
+      console.error(`[event-setup] could not start the apply for ${row.id}:`, e);
+      await repo.update(row.id, { status: 'failed', error: `The apply could not be started: ${e instanceof Error ? e.message : String(e)}` });
+      throw new ConflictError('The apply could not be started - nothing was created. Try again.');
+    }
     res.status(202).json(await detail(row.id));
   }));
 

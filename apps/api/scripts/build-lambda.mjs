@@ -53,7 +53,8 @@ await build({
   // Prisma's generated client does its own runtime resolution of the native
   // query-engine binary next to it - it does not bundle cleanly with esbuild.
   // Keep it external and copy the real package in below instead.
-  external: ['@prisma/client', '.prisma/client'],
+  // @aws-sdk/* ships inside the Lambda Node.js runtime (v3); only apply-job.ts loads it.
+  external: ['@prisma/client', '.prisma/client', '@aws-sdk/client-lambda'],
   banner: { js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);" },
 });
 

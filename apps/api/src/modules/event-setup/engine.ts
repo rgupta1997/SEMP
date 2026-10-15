@@ -983,7 +983,11 @@ export async function applyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, st
     const rows: any[] = [];
     for (let i = 0; i < newUsers.length; i += 25) {
       const chunk = newUsers.slice(i, i + 25);
-      const hashes = await Promise.all(chunk.map((u) => bcrypt.hash(u.password, 10)));
+      // A placeholder account gets NO password hash: its random password is never
+      // handed to anyone (credentials drop it), and password sign-in refuses an
+      // account with none, so hashing it was most of an apply's time on Lambda
+      // (332 of WNS's 388 accounts). Phone OTP works once the contact is replaced.
+      const hashes = await Promise.all(chunk.map((u) => (u.contact === 'placeholder' ? null : bcrypt.hash(u.password, 10))));
       chunk.forEach((u, j) => rows.push({
         id: u.id, name: u.name, email: u.email, phone: u.phone, password_hash: hashes[j],
         organization_id: u.orgId, account_type: u.accountType, must_change_password: true,
@@ -993,7 +997,7 @@ export async function applyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, st
     await prisma.users.createMany({ data: rows });
     await created('users', rows.map((r) => r.id));
     for (const u of newUsers) {
-      const c: CredentialRow = { name: u.name, role: u.role, contact: u.contact, phone: u.phone, email: u.email, password: u.password };
+      const c: CredentialRow = { name: u.name, role: u.role, contact: u.contact, phone: u.phone, email: u.email, password: u.contact === 'placeholder' ? null : u.password };
       newCredentials.push(c);
       credentials.push(c);
     }

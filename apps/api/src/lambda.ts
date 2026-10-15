@@ -85,4 +85,17 @@ if (process.env.DB_SECRET_ARN || process.env.APP_SECRET_ARN) {
 
 const { handler: inner } = await import('./lambda-app.js');
 
-export const handler = inner;
+// Two kinds of invocation reach this function. API Gateway requests go to the
+// Express app. An Event Setup apply arrives as an ASYNCHRONOUS self-invocation
+// ({ eventSetupJob }) started by POST /api/event-setups/:id/apply, and runs to the
+// end here with the function's full timeout - a job left running after the request's
+// 202 would be frozen with that request's container and never finish.
+export const handler = async (event: unknown, context: unknown) => {
+  const job = await import('./modules/event-setup/apply-job.js');
+  if (job.isEventSetupJobEvent(event)) {
+    const { prisma } = await import('./infra/prisma.js');
+    await job.runApplyJob(prisma, event.eventSetupJob.setupId, event.eventSetupJob.actorId);
+    return { ok: true };
+  }
+  return (inner as (e: unknown, c: unknown) => Promise<unknown>)(event, context);
+};
