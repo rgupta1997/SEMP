@@ -68,6 +68,14 @@ passwords and cannot sign in until their contact is replaced.
 
 ## Findings for WNS to confirm
 
+- **URGENT: players booked in two matches at once** (found 15 Oct by the Event Setup
+  validator's clash check, which the original WNS build did not run). The
+  re-registered pairs are scheduled at the same time on different turfs, Sat 17 Oct:
+  - 10:20, B3-R55-3 Howdy (Turf 3) and B4-R55-3 Team Howden (Turf 4): 5 players in both.
+  - 11:00, B1-R55-4 Team Kiwi B, B2-R55-4 Kiwi Champions, B4-R55-4 Team Kiwi and
+    B3-R55-4 Kiwi Phoenix FC: the Kiwi squads share 1–6 players pairwise.
+  - 11:40, B3-R55-5 and B4-R55-5, the two NLMK GOAL DIGGERS: 5 players in both.
+  WNS must withdraw one squad of each pair or move a match.
 - **Re-registered squads** (all kept): Howdy / Team Howden, AU Recoveries / United
   Recoveries, the two NLMK GOAL DIGGERS, Team Kiwi / Kiwi Champions, Team Kiwi B / Kiwi
   Phoenix FC, IAG Warriors / Victory FC, IAG Shooters with Elite Strikers and Rising Stars.
