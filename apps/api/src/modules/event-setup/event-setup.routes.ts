@@ -315,7 +315,9 @@ export function makeEventSetupRouter(prisma: Prisma): Router {
     const row = await load(req.params.id);
     assertIdle(row);
     const empty = !createdCount(row.manifest);
-    const deletable = (['draft', 'invalid', 'undone'].includes(row.status) && empty) || (row.status === 'failed' && empty);
+    // Anything that has created nothing can go, including a validated setup the admin
+    // decided not to apply. Once a run has made rows, undo it first.
+    const deletable = ['draft', 'invalid', 'validated', 'undone', 'failed'].includes(row.status) && empty;
     if (!deletable) {
       throw new ConflictError(empty
         ? `A ${row.status} setup cannot be deleted.`

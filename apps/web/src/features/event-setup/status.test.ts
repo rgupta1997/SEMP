@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EventSetupBlueprint, SetupValidationResult } from '@semp/shared';
-import { canEditSteps, canUpload, contactProgress, isStaleApplying, sectionStates, STALE_APPLYING_MS } from './status';
+import { canDelete, canEditSteps, canUpload, contactProgress, isStaleApplying, sectionStates, STALE_APPLYING_MS } from './status';
 import { generatedDraws, matchPreviewRows, peopleCounts, squadPreviewRows } from './preview';
 import type { EventSetupStatus } from './types';
 
@@ -139,5 +139,12 @@ describe('previews', () => {
     expect(peopleCounts(bp)).toEqual({
       people: 2, withMobile: 1, withEmail: 1, withMemberCode: 1, staff: 2, organisers: 1, officials: 1, pocs: 0,
     });
+  });
+});
+
+describe('canDelete', () => {
+  it('offers delete for every status that has created nothing, a validated setup included', () => {
+    for (const s of ['draft', 'invalid', 'validated', 'undone'] as const) expect(canDelete(s)).toBe(true);
+    for (const s of ['applying', 'applied', 'failed'] as const) expect(canDelete(s)).toBe(false);
   });
 });

@@ -36,7 +36,8 @@ export const isStaleApplying = (s: StatusAt, now = Date.now()) =>
 /** Mid-run: nothing may change underneath it, unless the run is stale. */
 const running = (s: StatusAt, now?: number) => s.status === 'applying' && !isStaleApplying(s, now);
 
-export const canDelete = (s: EventSetupStatus) => s === 'draft' || s === 'invalid' || s === 'undone';
+/** Matches the API: a setup that has created nothing can be deleted (the API also checks it made no rows). */
+export const canDelete = (s: EventSetupStatus) => s === 'draft' || s === 'invalid' || s === 'validated' || s === 'undone';
 /**
  * "What to build" and the workbook are frozen once applied (undo first) and while
  * a run is live; the API refuses both then, with the same rule.

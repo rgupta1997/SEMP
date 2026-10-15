@@ -381,16 +381,17 @@ describe('DELETE /:id', () => {
     return d.id as string;
   };
 
-  it('deletes a draft, an invalid, an undone, and a failed setup that made nothing', async () => {
-    for (const s of ['draft', 'invalid', 'undone', 'failed']) {
+  it('deletes a draft, an invalid, a validated, an undone, and a failed setup that made nothing', async () => {
+    for (const s of ['draft', 'invalid', 'validated', 'undone', 'failed']) {
       const id = await withStatus(s);
       expect((await call('DELETE', `/${id}`)).status).toBe(200);
       expect(rows.has(id)).toBe(false);
     }
   });
 
-  it('refuses validated, applying and applied setups, and anything whose manifest lists rows', async () => {
-    for (const [s, made] of [['validated', false], ['applied', true], ['applying', false], ['failed', true], ['invalid', true]] as const) {
+  it('refuses applying and applied setups, and anything whose manifest lists rows', async () => {
+    // validated + rows: re-validated after a failed run that built part of the event.
+    for (const [s, made] of [['validated', true], ['applied', true], ['applying', false], ['failed', true], ['invalid', true]] as const) {
       const id = await withStatus(s, made);
       expect((await call('DELETE', `/${id}`)).status).toBe(409);
       expect(rows.has(id)).toBe(true);
