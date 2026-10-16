@@ -15,6 +15,9 @@ import { newTeamIds as newTeamIdsStorage } from '../../lib/browserStorage';
 import { Badge, Button, Card, Checkbox, cn, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchableSelect, SearchInput, Select, Skeleton, SortDirButton, Spinner, StatusBadge, Tabs, INSET} from '../../components/ui';
 
 
+/** A toolbar Select that fills its grid cell on a phone (Select's own wrapper never stretches). */
+const PHONE_FILL = 'min-w-0 max-sm:[&>div]:w-full max-sm:[&_select]:w-full';
+
 // A roster can be entered into several championships; these read its team_entries.
 function teamEntries(team: any): any[] { return team.team_entries ?? []; }
 function teamChampIds(team: any): string[] { return teamEntries(team).map((e: any) => e.championship_id); }
@@ -510,8 +513,8 @@ function InlineCreateTeam({ institutionId, kind, onClose }: {
           making Team name and Sport visibly sag below Short name. Top-aligning keeps
           every label (and so every input) on the same line regardless of what any
           one column has underneath it. */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-        <label className="block flex-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start">
+        <label className="block min-w-[12rem] flex-1">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Team name</span>
           <Input
             value={name}
@@ -560,9 +563,11 @@ function InlineCreateTeam({ institutionId, kind, onClose }: {
             preselected above. Batches are grouped by campus because two campuses can
             each have a "2026". */}
         {kind !== 'organization' && units.length > 1 && (
-          <label className="block sm:w-60">
+          <label className="block min-w-0 sm:w-60">
             <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">{noun}</span>
-            <Select value={playsFor} onChange={(e) => setPlaysFor(e.target.value)}>
+            {/* w-full: fills its 15rem slot. Sized to its longest option, a long
+                department name pushed the Create team button off the row. */}
+            <Select className="w-full truncate" value={playsFor} onChange={(e) => setPlaysFor(e.target.value)}>
               <option value="">- select a {noun.toLowerCase()} -</option>
               {kind === 'campus'
                 ? units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)
@@ -574,7 +579,7 @@ function InlineCreateTeam({ institutionId, kind, onClose }: {
             </Select>
           </label>
         )}
-        <div className="block">
+        <div className="block shrink-0">
           {/* Matches the real labels' height so the button lines up with the inputs,
               not with the labels above them. */}
           <span aria-hidden="true" className="invisible mb-1.5 block text-xs font-semibold">Create</span>
@@ -913,24 +918,35 @@ export function TeamsPage() {
           action={canManage ? <Button disabled={frozen} title={frozenTitle} onClick={() => setCreating(true)}>+ Create team</Button> : undefined} />
       ) : (
         <>
-          <ListToolbar>
-            <SearchInput value={tc.query} onChange={tc.setQuery} placeholder="Search teams…" className="w-full sm:w-64" />
+          {/* Phone only: search on its own row, then the filters as equal columns -
+              stacked at their own widths they read ragged. From sm: unchanged. */}
+          <ListToolbar className="max-sm:grid max-sm:grid-cols-2">
+            <SearchInput value={tc.query} onChange={tc.setQuery} placeholder="Search teams…" className="w-full sm:w-64 max-sm:col-span-2" />
             {tournamentOptions.length > 0 && (
-              <Select value={tournamentFilter} onChange={(e) => setTournamentFilter(e.target.value)} className="w-auto min-w-[11rem]">
-                <option value="all">All seasons</option>
-                {tournamentOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </Select>
+              <div className={PHONE_FILL}>
+                <Select value={tournamentFilter} onChange={(e) => setTournamentFilter(e.target.value)} className="w-auto min-w-[11rem] max-sm:min-w-0">
+                  <option value="all">All seasons</option>
+                  {tournamentOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </Select>
+              </div>
             )}
             {statusOptions.length > 2 && (
-              <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-auto">
-                {statusOptions.map((s) => <option key={s} value={s}>{s === 'all' ? 'All statuses' : titleCase(String(s))}</option>)}
-              </Select>
+              <div className={PHONE_FILL}>
+                <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-auto max-sm:min-w-0">
+                  {statusOptions.map((s) => <option key={s} value={s}>{s === 'all' ? 'All statuses' : titleCase(String(s))}</option>)}
+                </Select>
+              </div>
             )}
-            <Select value={tc.sortKey} onChange={(e) => tc.setSortKey(e.target.value)} className="w-auto">
-              <option value="name">Sort: Name</option>
-              <option value="championship">Sort: Championship</option>
-            </Select>
-            <SortDirButton dir={tc.dir} onToggle={() => tc.setDir(tc.dir === 'asc' ? 'desc' : 'asc')} />
+            {/* Sort and its direction stay together in one cell. */}
+            <div className="flex min-w-0 items-center gap-2">
+              <div className={cn(PHONE_FILL, 'max-sm:flex-1')}>
+                <Select value={tc.sortKey} onChange={(e) => tc.setSortKey(e.target.value)} className="w-auto max-sm:min-w-0">
+                  <option value="name">Sort: Name</option>
+                  <option value="championship">Sort: Championship</option>
+                </Select>
+              </div>
+              <SortDirButton dir={tc.dir} onToggle={() => tc.setDir(tc.dir === 'asc' ? 'desc' : 'asc')} />
+            </div>
           </ListToolbar>
           {tc.total === 0 ? (
             <EmptyState
