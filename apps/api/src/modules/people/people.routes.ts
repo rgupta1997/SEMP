@@ -14,6 +14,7 @@ import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import { deriveProvisionedPassword, phoneLast10 } from '../iam/users.helpers.js';
 import { mintSportagonIds, orgIdPrefixFor } from '../iam/sportagon-id.js';
 import { assertOrgNotArchived } from '../iam/organization-archive.service.js';
+import { notifyJoinApproved } from '../iam/organizations.notifications.js';
 import { GENDERS, validateRoster, type RosterContext, type RosterRow, type RosterRowResult } from './roster-import.js';
 
 // The student roll (J1-E5).
@@ -572,15 +573,28 @@ export function makePeopleRouter(prisma: Prisma): Router {
 
     const members = await prisma.organization_members.findMany({
       where: { id: { in: member_ids }, organization_id: organizationId },
-      select: { id: true, verification: true, users: { select: { id: true, name: true, email: true } } },
+      select: { id: true, user_id: true, status: true, verification: true, users: { select: { id: true, name: true, email: true } } },
     });
     // Ids that belong to another institution are silently absent rather than
     // reported - confirming which ids exist elsewhere would leak across the tenancy
     // boundary the rest of this router is built to hold.
     const changed = members.filter((m) => m.verification !== verification);
 
-    await prisma.$transaction(
-      changed.map((m) => prisma.organization_members.update({
+    // Verifying a pending join request accepts it too, as Approve does - otherwise the
+    // person stays "Pending" on their side while verified on ours. Only for someone who
+    // may approve members: a Sports Admin can verify but must not admit people.
+    const mayApprove = verification === 'verified' && await can(prisma, 'org.member.manage', {
+      user: { id: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin },
+      scope: { organizationId },
+      fallback: async () => !!(await prisma.organization_members.findFirst({
+        where: { user_id: req.user!.id, organization_id: organizationId, status: 'active', role: { in: ['owner', 'admin'] } },
+        select: { id: true },
+      })),
+    });
+    const admitted = mayApprove ? members.filter((m) => m.status === 'pending') : [];
+
+    await prisma.$transaction([
+      ...changed.map((m) => prisma.organization_members.update({
         where: { id: m.id },
         data: {
           verification,
@@ -589,7 +603,17 @@ export function makePeopleRouter(prisma: Prisma): Router {
           rejection_note: verification === 'rejected' ? (note ?? null) : null,
         },
       })),
-    );
+      ...(admitted.length ? [prisma.organization_members.updateMany({
+        where: { id: { in: admitted.map((m) => m.id) }, status: 'pending' },
+        data: { status: 'active' },
+      })] : []),
+    ]);
+
+    // The same "you're in" notification Approve sends.
+    if (admitted.length) {
+      const orgName = (await prisma.organizations.findUnique({ where: { id: organizationId }, select: { name: true } }))?.name ?? 'the organization';
+      for (const m of admitted) await notifyJoinApproved(prisma, m.user_id, orgName, req.user!.id);
+    }
 
     for (const m of changed) {
       await audit(prisma, req, {
@@ -608,6 +632,7 @@ export function makePeopleRouter(prisma: Prisma): Router {
       matched: members.length,
       changed: changed.length,
       already: members.length - changed.length,
+      admitted: admitted.length,
     });
   }));
 

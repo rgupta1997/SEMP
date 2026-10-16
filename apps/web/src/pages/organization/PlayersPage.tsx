@@ -398,8 +398,6 @@ export function PlayersPage() {
             </div>
           ) : undefined}
         />
-      ) : tc.total === 0 ? (
-        <EmptyState icon={<Users size={24} />} title="Nobody matches" description="Try another filter, or a different search." />
       ) : (
         <>
           <FilterBar
@@ -441,6 +439,13 @@ export function PlayersPage() {
             )}
           </FilterBar>
 
+          {/* No match: say so BELOW the search and filters, which stay put so the
+              search can be changed - replacing them stranded the user with no way back. */}
+          {tc.total === 0 ? (
+            <EmptyState icon={<Users size={24} />} title="Nobody matches" description="Try another filter, or a different search."
+              action={<Button variant="outline" onClick={() => { tc.setQuery(''); clearFilters(); }}>Clear search and filters</Button>} />
+          ) : (
+          <>
           {canSelect && (
             <BulkBar count={selected.size} onClear={() => setSelected(new Set())}>
               {/* Both narrowings are offered as ACTIONS, and neither is a bare
@@ -630,6 +635,8 @@ export function PlayersPage() {
             ]}
           />
           <Pagination page={tc.page} pageCount={tc.pageCount} total={tc.total} pageSize={tc.pageSize} onPage={tc.setPage} />
+          </>
+          )}
         </>
       )}
 
