@@ -29,6 +29,21 @@ describe('crediting an attributed event', () => {
     expect(r.players[0].stats).toMatchObject({ pens_scored: 1, goals: 1 });
   });
 
+  it('counts a named shoot-out kick for the kicker, never as a goal', () => {
+    const log: RallyLog = [
+      { t: 'penaltyKick', side: 'A', scored: true, playerId: 'p1' },
+      { t: 'penaltyKick', side: 'B', scored: false, playerId: 'p2' },
+      { t: 'penaltyKick', side: 'A', scored: true }, // unnamed: credits nobody
+    ];
+    const r = deriveTeamStats('football', log);
+    expect(r.players).toHaveLength(2);
+    expect(r.players.find((x) => x.userId === 'p1')).toMatchObject({ side: 'A', stats: { shootout_scored: 1 } });
+    expect(r.players.find((x) => x.userId === 'p2')).toMatchObject({ side: 'B', stats: { shootout_missed: 1 } });
+    expect(r.players.find((x) => x.userId === 'p1')!.stats.goals).toBeUndefined();
+    expect(toCategoryRow('football', { shootout_scored: 1, shootout_missed: 2 })!.row)
+      .toMatchObject({ shootout_scored: 1, shootout_missed: 2 });
+  });
+
   it('keeps an own goal off the scorer\'s goals', () => {
     const r = deriveTeamStats('football', [pt({ kind: 'own_goal', playerId: 'p1' })]);
     expect(r.players[0].stats).toMatchObject({ own_goals: 1 });

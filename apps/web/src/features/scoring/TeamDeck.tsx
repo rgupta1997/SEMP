@@ -506,10 +506,20 @@ export function TeamDeck(p: TeamDeckProps) {
             <p className="text-center text-lg font-semibold">
               {state.outcome === 'draw' ? 'Drawn' : `${nameOf(state.winner ?? 'A')} wins`}
             </p>
-            <p className="text-center text-sm text-muted">
-              {env.headline[0]}–{env.headline[1]}
-              {state.reason && state.reason !== 'normal' ? ` · ${state.reason}` : ''}
-            </p>
+            {state.reason === 'penalties' ? (
+              // Two labelled lines, so the match score and the kicks can't be mixed up.
+              <div className="grid grid-cols-[auto_auto] items-baseline gap-x-3 gap-y-0.5 text-sm">
+                <span className="text-right text-muted">Match</span>
+                <span className="font-semibold tabular-nums">{env.headline[0]}–{env.headline[1]}</span>
+                <span className="text-right text-muted">Penalties</span>
+                <span className="font-semibold tabular-nums">{shoot.scored[0]}–{shoot.scored[1]}</span>
+              </div>
+            ) : (
+              <p className="text-center text-sm text-muted">
+                {env.headline[0]}–{env.headline[1]}
+                {state.reason && state.reason !== 'normal' ? ` · ${state.reason}` : ''}
+              </p>
+            )}
             {p.recorded ? (
               <>
                 <p data-qa="team-recorded"
@@ -535,8 +545,11 @@ export function TeamDeck(p: TeamDeckProps) {
         ) : progress.phase === 'penalties' ? (
           <Shootout
             shoot={shoot} nameOf={nameOf} kicksEach={format.tieBreak?.penalties?.kicks ?? 5}
-            busy={!!p.disabled || !!p.busy} score={shown}
-            onKick={(side, scored) => push({ t: 'penaltyKick', side, scored })}
+            busy={!!p.disabled || !!p.busy} score={shown} roster={p.roster}
+            onKick={(side, scored, kicker) => push({
+              t: 'penaltyKick', side, scored,
+              ...(kicker ? { playerId: kicker.id, playerName: kicker.name } : {}),
+            })}
             onUndo={undo}
             // SIGN-OFF, not an ordinary change. The host only writes a completed
             // fixture when it is told the match is DONE - pushing the terminal event
@@ -737,8 +750,9 @@ export function TeamDeck(p: TeamDeckProps) {
             onClick={() => setSurface(surface === 'log' ? 'act' : 'log')}>
             Log{log.length ? ` · ${log.length}` : ''}
           </Button>
-          {/* Corrections and early endings - nothing to do once the match is over. */}
-          {!state.ended && (
+          {/* Corrections and early endings - nothing to do once the match is over. Hidden
+              in a shoot-out too: that panel always shows, so More could never open. */}
+          {!state.ended && progress.phase !== 'penalties' && (
             <Button size="sm" variant="outline"
               className={cn('h-9 shrink-0', surface === 'more' && PANEL_OPEN)}
               onClick={() => setSurface(surface === 'more' ? 'act' : 'more')}>
@@ -899,18 +913,28 @@ function ClockPanel({ clock, periodLabel, period, busy, onAdjust, onToggle, onCl
  * penalties, and the terminal `end` event carries that reason so a record can say
  * so rather than presenting it as a win in normal time.
  */
-function Shootout({ shoot, nameOf, kicksEach, busy, score, onKick, onUndo, onSettle }: {
+function Shootout({ shoot, nameOf, kicksEach, busy, score, roster, onKick, onUndo, onSettle }: {
   shoot: ShootoutState;
   nameOf: (s: Side) => string;
   kicksEach: number;
   busy: boolean;
   score: readonly [number, number];
-  onKick: (side: Side, scored: boolean) => void;
+  roster?: { A: Array<{ id: string; name: string }>; B: Array<{ id: string; name: string }> };
+  /** `kicker` is optional: an unnamed kick still counts, it just credits nobody. */
+  onKick: (side: Side, scored: boolean, kicker?: { id: string; name: string }) => void;
   onUndo: () => void;
   onSettle: (winner: Side) => void;
 }) {
-  const rounds = Math.max(kicksEach, shoot.taken[0], shoot.taken[1]);
+  // In sudden death, a level pair still shows the next empty slot - so it never looks over.
+  const taken = Math.max(shoot.taken[0], shoot.taken[1]);
+  const nextPair = !shoot.decided && shoot.taken[0] === shoot.taken[1] && taken >= kicksEach ? 1 : 0;
+  const rounds = Math.max(kicksEach, taken) + nextPair;
   const kicksOf = (side: Side) => shoot.kicks.filter((k) => k.side === side);
+  // The kicker is picked per kick; a new kick (or an undo) starts unpicked.
+  const squad = roster?.[shoot.next] ?? [];
+  const [kickerId, setKickerId] = useState('');
+  useEffect(() => setKickerId(''), [shoot.kicks.length]);
+  const kick = (scored: boolean) => onKick(shoot.next, scored, squad.find((x) => x.id === kickerId));
 
   return (
     <Card className={cn(SURFACE, 'gap-3 p-3')} data-qa="shootout">
@@ -972,13 +996,21 @@ function Shootout({ shoot, nameOf, kicksEach, busy, score, onKick, onUndo, onSet
           <div className="text-center text-[11px] text-muted">
             Next: <span className="font-semibold text-slate-700 dark:text-slate-200">{nameOf(shoot.next)}</span>
           </div>
+          {squad.length > 0 && (
+            <div className="space-y-1">
+              <div className="text-[10px] uppercase tracking-wide text-muted">Kicker (optional)</div>
+              <PeopleGrid qa="shootout-kicker" value={kickerId}
+                options={[['', 'Not named'], ...squad.map((x): [string, string] => [x.id, x.name])]}
+                onChange={setKickerId} />
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <Button className="h-12 text-sm font-bold" variant="primary" data-qa="shootout-scored"
-              disabled={busy} onClick={() => onKick(shoot.next, true)}>
+              disabled={busy} onClick={() => kick(true)}>
               Scored
             </Button>
             <Button className="h-12 text-sm font-bold" variant="outline" data-qa="shootout-missed"
-              disabled={busy} onClick={() => onKick(shoot.next, false)}>
+              disabled={busy} onClick={() => kick(false)}>
               Missed
             </Button>
           </div>
@@ -1320,6 +1352,7 @@ function Timeline({ log, nameOf, nameFor, fullMs, onClose }: {
                 ) : ev.t === 'penaltyKick' ? (
                   <>
                     <span className="font-medium">Shoot-out kick {ev.scored ? 'scored' : 'missed'}</span>
+                    {ev.playerId && <span> · {ev.playerName ?? nameFor(ev.playerId) ?? 'unknown'}</span>}
                     <span className="text-muted"> · {nameOf(ev.side)} · {tally[i][0]}–{tally[i][1]}</span>
                   </>
                 ) : ev.t === 'end' && ev.reason === 'penalties' && ev.winner ? (

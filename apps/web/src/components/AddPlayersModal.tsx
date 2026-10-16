@@ -387,7 +387,9 @@ export function AddPlayersModal({
     );
   }
 
-  const cols = 'sm:grid-cols-[1fr_1.4fr_1.6fr_0.9fr_1.3fr_auto]';
+  // minmax(0, …): a column must not grow to its content. A campus <select> is as wide as
+  // its longest option, so a long unit name squeezed every other column.
+  const cols = 'sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1.6fr)_minmax(0,0.9fr)_minmax(0,1.3fr)_auto]';
 
   return (
     <Modal
@@ -539,7 +541,7 @@ export function AddPlayersModal({
                     <div className="flex items-center truncate px-3 py-2 text-sm font-medium text-slate-800 dark:text-slate-200" title={u.name}>{u.name}</div>
                     <div className="flex items-center truncate px-3 py-2 text-sm text-slate-500 dark:text-slate-400" title={u.email}>{u.email}</div>
                     <Input placeholder="Roll no." value={u.member_code} onChange={(e) => setLinkedField(u.id, { member_code: e.target.value })} />
-                    <Select value={u.unit} onChange={(e) => setLinkedField(u.id, { unit: e.target.value })}>
+                    <Select className="w-full truncate" value={u.unit} onChange={(e) => setLinkedField(u.id, { unit: e.target.value })}>
                       <option value="">Unassigned</option>
                       {unitGroups.map((g) => (
                         <optgroup key={g.campus.id} label={g.campus.name}>
@@ -569,7 +571,7 @@ export function AddPlayersModal({
                     <Input placeholder="Full name" value={r.name} onChange={(e) => set(i, { name: e.target.value })} />
                     <Input placeholder="Email" value={r.email} onChange={(e) => set(i, { email: e.target.value })} />
                     <Input placeholder="Roll no." value={r.member_code} onChange={(e) => set(i, { member_code: e.target.value })} />
-                    <Select value={r.unit} onChange={(e) => set(i, { unit: e.target.value })}>
+                    <Select className="w-full truncate" value={r.unit} onChange={(e) => set(i, { unit: e.target.value })}>
                       <option value="">Unassigned</option>
                       {unitGroups.map((g) => (
                         <optgroup key={g.campus.id} label={g.campus.name}>

@@ -39,7 +39,8 @@ import { resolveFixtureParticipants, type FixtureParticipants } from './particip
  * maxWait (waiting for a pooled connection) comes first and counts toward the same
  * ceiling, so the two together stay at 15s.
  */
-const LOCK_TX = { timeout: 12_000, maxWait: 3_000 } as const;
+// TEMPORARY: raised from 12_000 / 3_000. Revert before release.
+const LOCK_TX = { timeout: 25_000, maxWait: 10_000 } as const;
 import { refreshCareerStatsForFixture } from '../records/career-stats.service.js';
 
 // The scorecard state machine - the spine of every "verified" claim in the product.
