@@ -182,9 +182,12 @@ export function SignInFlow({ dark, inputStyle, labelStyle, t, onHeading, onWantS
       </button>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
         {methods.includes('otp') ? (
-          <button type="button" onClick={requestCode} disabled={busy} style={ghost}>Send me a code instead</button>
+          // A phone's code goes by WhatsApp; an email's by email, so that keeps the generic label.
+          <button type="button" onClick={requestCode} disabled={busy} style={ghost}>
+            {isPhone ? 'Send me WhatsApp OTP instead' : 'Send me a code instead'}
+          </button>
         ) : <span />}
-        <button type="button" onClick={onWantReset} style={{ ...ghost, fontWeight: 600, color: t.body }}>Forgotten it?</button>
+        <button type="button" onClick={onWantReset} style={{ ...ghost, fontWeight: 600, color: t.body }}>Forgot password?</button>
       </div>
     </form>
   );

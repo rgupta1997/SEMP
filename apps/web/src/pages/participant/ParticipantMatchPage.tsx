@@ -139,7 +139,7 @@ export function ParticipantMatchPage() {
                   <li key={i} className="flex items-center justify-between py-2 text-sm">
                     <span>
                       <span className="font-medium text-slate-800 dark:text-slate-200">{t.name}</span>
-                      {t.phone && <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">{t.phone}</span>}
+                      {/* Teammates' phone numbers hidden here; the API still returns them. */}
                     </span>
                     <span className="text-slate-400 dark:text-slate-500">
                       {titleCase(t.role)}{t.jersey_number != null ? ` · #${t.jersey_number}` : ''}
