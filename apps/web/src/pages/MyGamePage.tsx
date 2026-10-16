@@ -15,6 +15,8 @@ interface Match {
   my_team: { id: string; name: string } | null;
   opponent: { id: string; name: string; organization: string | null } | null;
   my_score: number | null; opp_score: number | null;
+  /** Shoot-out kicks [mine, theirs] when a level match was settled on penalties. */
+  pens?: [number, number] | null;
   result: 'won' | 'lost' | 'drawn' | 'bye' | null;
   reason?: string;
 }
@@ -302,6 +304,7 @@ export function MyGamePage() {
                 }}>{(r.result ?? 'played').toUpperCase()}</span>
                 <span style={{ fontFamily: MONO, fontSize: 13, color: C.navy, minWidth: 62 }}>
                   {r.my_score != null ? formatPoints(r.my_score) : '–'} · {r.opp_score != null ? formatPoints(r.opp_score) : '–'}
+                  {r.pens && <span style={{ display: 'block', fontSize: 10, color: C.fg3 }} title="Penalty shoot-out">{r.pens[0]}–{r.pens[1]} pens</span>}
                 </span>
                 <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: C.fg2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {r.my_team?.name} vs {r.opponent?.name ?? 'TBC'}

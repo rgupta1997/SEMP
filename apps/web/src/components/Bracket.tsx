@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints, TBD_LABEL } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints, shootoutOf, TBD_LABEL } from '@semp/shared';
 import { cn, StatusBadge } from './ui';
 import { fmtDateTime } from '../lib/hooks';
 import { describeSlot, describeTieBlocked, isTieBlockedFor } from '../lib/stageTree';
@@ -55,8 +55,8 @@ function roundTitle(round: string | null, teamsInRound: number): string {
   }
 }
 
-function TeamRow({ name, org, score, isWinner, decided, warning, note }:
-  { name: string; org?: string; score: number | null | undefined; isWinner: boolean; decided: boolean; warning?: boolean; note?: string | null }) {
+function TeamRow({ name, org, score, isWinner, decided, warning, note, pens }:
+  { name: string; org?: string; score: number | null | undefined; isWinner: boolean; decided: boolean; warning?: boolean; note?: string | null; pens?: number | null }) {
   return (
     <div
       className={cn(
@@ -80,6 +80,8 @@ function TeamRow({ name, org, score, isWinner, decided, warning, note }:
           {/* Retired / DSQ / conceded: marked on the side that stopped. */}
           {note && <span className="mr-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">{note}</span>}
           {formatPoints(score)}
+          {/* Shoot-out kicks scored, beside a level score. */}
+          {pens != null && <span className="ml-1 text-[10px] font-semibold text-brand-600 dark:text-brand-400" title="Penalty shoot-out">({pens})</span>}
         </span>
       )}
     </div>
@@ -110,12 +112,13 @@ function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect, onScore }:
   const played = ['completed', 'walkover'].includes(fixture.status ?? '');
   const early = decided ? earlyEndOf(fixture.live_state) : null;
   const noteFor = (teamId: string | null) => (early && fixture.winner_team_id !== teamId ? EARLY_END_LABEL[early] : null);
+  const pens = decided ? shootoutOf(fixture.live_state) : null;
 
   const teamRows = (
     <div className="border-t border-slate-100 dark:border-slate-800">
-      <TeamRow name={home} org={homeOrg} score={fixture.home_score} isWinner={decided && fixture.winner_team_id === fixture.home_team_id} decided={decided} warning={!!homeTieMsg} note={noteFor(fixture.home_team_id)} />
+      <TeamRow name={home} org={homeOrg} score={fixture.home_score} isWinner={decided && fixture.winner_team_id === fixture.home_team_id} decided={decided} warning={!!homeTieMsg} note={noteFor(fixture.home_team_id)} pens={pens?.home} />
       <div className="border-t border-slate-100 dark:border-slate-800" />
-      <TeamRow name={away} org={awayOrg} score={isBye ? null : fixture.away_score} isWinner={decided && fixture.winner_team_id === fixture.away_team_id} decided={decided} warning={!!awayTieMsg} note={noteFor(fixture.away_team_id)} />
+      <TeamRow name={away} org={awayOrg} score={isBye ? null : fixture.away_score} isWinner={decided && fixture.winner_team_id === fixture.away_team_id} decided={decided} warning={!!awayTieMsg} note={noteFor(fixture.away_team_id)} pens={pens?.away} />
     </div>
   );
 

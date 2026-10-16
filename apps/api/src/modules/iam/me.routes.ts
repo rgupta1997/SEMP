@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { shootoutOf, type Shootout } from '@semp/shared';
 import { myMatchStats } from '../records/my-match-stats.service.js';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -25,6 +26,11 @@ const fixtureInclude = {
 type FixtureRow = any;
 
 type Result = 'won' | 'lost' | 'draw' | 'pending';
+
+/** Shoot-out kicks as [mine, theirs], or null when the match was not settled on penalties. */
+function pensFor(s: Shootout | null | undefined, isHome: boolean): [number, number] | null {
+  return s ? (isHome ? [s.home, s.away] : [s.away, s.home]) : null;
+}
 
 // W/L/D/pending for a fixture relative to the set of teams the user plays for.
 function resultFor(f: FixtureRow, myTeamIds: Set<string>): Result {
@@ -59,6 +65,7 @@ function toMatchSummary(f: FixtureRow, myTeamIds: Set<string>) {
       : null,
     my_score: myScore ?? null,
     opp_score: oppScore ?? null,
+    pens: pensFor(shootoutOf(f.live_state), isHome),
     result: resultFor(f, myTeamIds),
   };
 }
@@ -96,8 +103,8 @@ const matchSelect = {
   },
 } as const;
 
-// MatchSummary built from a `matchSelect` row.
-function summariseLean(f: FixtureRow, myTeamIds: Set<string>) {
+// MatchSummary built from a `matchSelect` row. `shootouts` comes from loadShootouts.
+function summariseLean(f: FixtureRow, myTeamIds: Set<string>, shootouts?: Map<string, Shootout>) {
   const isHome = f.home_team_id != null && myTeamIds.has(f.home_team_id);
   const mine = isHome ? f.teams_fixtures_home_team_idToteams : f.teams_fixtures_away_team_idToteams;
   const opp = isHome ? f.teams_fixtures_away_team_idToteams : f.teams_fixtures_home_team_idToteams;
@@ -112,6 +119,7 @@ function summariseLean(f: FixtureRow, myTeamIds: Set<string>) {
     opponent: opp ? { id: opp.id, name: opp.name, organization: opp.organizations?.short_name ?? opp.organizations?.name ?? null } : null,
     my_score: (isHome ? f.home_score : f.away_score) ?? null,
     opp_score: (isHome ? f.away_score : f.home_score) ?? null,
+    pens: pensFor(shootouts?.get(f.id), isHome),
     result: resultFor(f, myTeamIds),
   };
 }
@@ -168,6 +176,22 @@ function mapAward(a: any, myTeamIds: Set<string>) {
 
 export function makeMeRouter(prisma: Prisma): Router {
   const router = Router();
+
+  // Shoot-outs for a list of lean rows. Only a level score with a winner can be one, so
+  // the (large) live_state is read for those few rows, not the whole career.
+  async function loadShootouts(rows: FixtureRow[]): Promise<Map<string, Shootout>> {
+    const ids = rows
+      .filter((f) => f.winner_team_id && f.home_score != null && f.home_score === f.away_score)
+      .map((f) => f.id as string);
+    const out = new Map<string, Shootout>();
+    if (ids.length === 0) return out;
+    const logs = await prisma.fixtures.findMany({ where: { id: { in: ids } }, select: { id: true, live_state: true } });
+    for (const l of logs) {
+      const s = shootoutOf(l.live_state);
+      if (s) out.set(l.id, s);
+    }
+    return out;
+  }
 
   // Membership load shared by the dashboard + achievements: the user's teams with
   // their sport, organization, and the championships each roster is entered into.
@@ -466,7 +490,9 @@ export function makeMeRouter(prisma: Prisma): Router {
       .sort((a, b) => (b.start_date?.getTime() ?? 0) - (a.start_date?.getTime() ?? 0));
 
     const { wins, losses, draws } = tally(fixtures, teamIds);
-    const recent_matches = fixtures.slice(0, 5).map((f) => summariseLean(f, teamIds));
+    const recentRows = fixtures.slice(0, 5);
+    const recentPens = await loadShootouts(recentRows);
+    const recent_matches = recentRows.map((f) => summariseLean(f, teamIds, recentPens));
 
     // Achievements - awards this user has received, newest first, with match context.
     const awardRows = await prisma.fixture_awards.findMany({
@@ -552,6 +578,7 @@ export function makeMeRouter(prisma: Prisma): Router {
     // Counted from completed fixtures only, so the strip agrees with the record
     // rather than with what is merely scheduled.
     const wins = played.filter((f) => resultFor(f as FixtureRow, teamIds) === 'won').length;
+    const playedPens = await loadShootouts(played);
     const allPlayed = await prisma.fixtures.count({
       where: { ...mine, status: { in: ['completed', 'walkover'] } },
     });
@@ -562,7 +589,7 @@ export function makeMeRouter(prisma: Prisma): Router {
     res.json({
       next: upcoming[0] ? summariseLean(upcoming[0] as FixtureRow, teamIds) : null,
       live: live.map((f) => summariseLean(f as FixtureRow, teamIds)),
-      recent: played.map((f) => summariseLean(f as FixtureRow, teamIds)),
+      recent: played.map((f) => summariseLean(f as FixtureRow, teamIds, playedPens)),
       pending: officiating.map((f) => ({
         ...summariseLean(f as FixtureRow, teamIds),
         reason: f.scorecard_status === 'draft' ? 'Submit the scorecard' : 'Awaiting lock',
@@ -672,6 +699,7 @@ export function makeMeRouter(prisma: Prisma): Router {
         away_score: f.away_score,
         my_score: isHome ? f.home_score : f.away_score,
         opp_score: isHome ? f.away_score : f.home_score,
+        pens: pensFor(shootoutOf(f.live_state), isHome),
         result: resultFor(f, myTeamIds),
         venue: ground ? { ground: ground.name, venue_name: ground.venues?.name ?? null, city: ground.venues?.city ?? null } : null,
         sport: mine.sports?.name ?? ts?.sports?.name ?? null,
@@ -756,7 +784,8 @@ export function makeMeRouter(prisma: Prisma): Router {
       orderBy: [{ scheduled_at: 'desc' }, { created_at: 'desc' }],
     });
 
-    const matches = fixtures.map((f) => summariseLean(f, teamIds));
+    const eventPens = await loadShootouts(fixtures);
+    const matches = fixtures.map((f) => summariseLean(f, teamIds, eventPens));
     const { wins, losses, draws } = tally(fixtures, teamIds);
     // "Matches" on the Overview card means matches actually PLAYED - a
     // freshly-drawn fixture isn't a match yet, just a schedule slot.

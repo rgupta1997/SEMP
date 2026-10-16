@@ -1,5 +1,5 @@
 import { ChevronDown } from 'lucide-react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   aggregateScore, capLeader, changesEndsAfterUnit, effectiveLevel, foldRally, isDecider, isAggregate, periodsPlayed, resultEnvelope,
   clockReading, formatClock, minuteLabel, tieProgress, shootoutState, shootoutLine, shootoutEnd,
@@ -927,17 +927,19 @@ function Shootout({ shoot, nameOf, kicksEach, busy, score, onKick, onUndo, onSet
       </div>
 
       {/* The grid an official actually reads: a row per side, a mark per kick. */}
-      <div className="shrink-0 space-y-1">
+      {/* Name column as wide as the longer name, shrinking (then "…") only when the
+          kick marks would otherwise lose their room. */}
+      <div className="grid shrink-0 grid-cols-[minmax(0,auto)_minmax(7.5rem,1fr)] items-center gap-x-3 gap-y-1">
         {(['A', 'B'] as Side[]).map((side) => (
-          <div key={side} className="flex items-center gap-2">
-            <span className="w-20 shrink-0 truncate text-[11px] font-semibold">{nameOf(side)}</span>
-            <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+          <Fragment key={side}>
+            <span className="truncate text-[11px] font-semibold" title={nameOf(side)}>{nameOf(side)}</span>
+            <div className="flex min-w-0 flex-wrap gap-1">
               {Array.from({ length: rounds }, (_, i) => {
                 const k = kicksOf(side)[i];
                 return (
                   <span key={i} className={cn(
                     'grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold',
-                    !k ? 'border border-dashed border-line text-transparent'
+                    !k ? 'border border-dashed border-slate-300 text-transparent dark:border-slate-600'
                       : k.scored ? 'bg-emerald-600 text-white'
                         : 'bg-slate-300 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
                   )}>
@@ -946,7 +948,7 @@ function Shootout({ shoot, nameOf, kicksEach, busy, score, onKick, onUndo, onSet
                 );
               })}
             </div>
-          </div>
+          </Fragment>
         ))}
       </div>
 
@@ -1259,6 +1261,14 @@ function Timeline({ log, nameOf, nameFor, fullMs, onClose }: {
   onClose: () => void;
 }) {
   const rows = [...log.entries()].reverse();
+  // Shoot-out kicks scored up to and including each entry.
+  const tally: Array<[number, number]> = [];
+  log.reduce<[number, number]>((acc, ev, i) => {
+    const next: [number, number] = ev.t === 'penaltyKick' && ev.scored
+      ? (ev.side === 'A' ? [acc[0] + 1, acc[1]] : [acc[0], acc[1] + 1]) : acc;
+    tally[i] = next;
+    return next;
+  }, [0, 0]);
   return (
     <Card className={cn(SURFACE, 'gap-2 p-3')}>
       <div className="flex shrink-0 items-center justify-between">
@@ -1307,6 +1317,17 @@ function Timeline({ log, nameOf, nameFor, fullMs, onClose }: {
                       <span className="text-muted"> (was {formatClock(ev.fromMs)})</span>
                     )}
                   </span>
+                ) : ev.t === 'penaltyKick' ? (
+                  <>
+                    <span className="font-medium">Shoot-out kick {ev.scored ? 'scored' : 'missed'}</span>
+                    <span className="text-muted"> · {nameOf(ev.side)} · {tally[i][0]}–{tally[i][1]}</span>
+                  </>
+                ) : ev.t === 'end' && ev.reason === 'penalties' && ev.winner ? (
+                  <span className="font-semibold">
+                    {nameOf(ev.winner)} won {ev.winner === 'A' ? `${tally[i][0]}–${tally[i][1]}` : `${tally[i][1]}–${tally[i][0]}`} on penalties
+                  </span>
+                ) : ev.t === 'end' ? (
+                  <span className="font-semibold">— match ended —</span>
                 ) : (
                   <span className="text-muted">{ev.t}</span>
                 )}

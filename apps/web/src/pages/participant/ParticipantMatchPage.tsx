@@ -19,6 +19,7 @@ interface MatchDetail {
     away_score: number | null;
     my_score: number | null;
     opp_score: number | null;
+    pens?: [number, number] | null;
     result: MatchResult;
     venue: { ground: string | null; venue_name: string | null; city: string | null } | null;
     sport: string | null;
@@ -102,6 +103,11 @@ export function ParticipantMatchPage() {
             </div>
           </div>
 
+          {f.pens && (
+            <div className="mt-2 text-center text-sm font-semibold text-brand-600 dark:text-brand-400">
+              {f.result === 'won' ? 'Won' : 'Lost'} {f.pens[0]}–{f.pens[1]} on penalties
+            </div>
+          )}
           <div className="mt-4 flex justify-center">
             <ResultBadge result={f.result} />
           </div>

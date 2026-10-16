@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Calendar, Flag } from 'lucide-react';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints, TBD_LABEL } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
 import { useApi, fmtDateTime } from '../../lib/hooks';
 import { Badge, Card, EmptyState, ListToolbar, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
 import { FitName } from '../FitName';
@@ -144,6 +144,7 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
             const homeWon = f.winner_team_id != null && f.winner_team_id === f.home?.id;
             const awayWon = f.winner_team_id != null && f.winner_team_id === f.away?.id;
             const early = earlyEndOf(f.live_state);
+            const pens = scored ? shootoutOf(f.live_state) : null;
             return (
               // "v" dead centre, whatever the names: equal side columns around the match on
               // wider screens, and two equal name columns around the score inside it.
@@ -172,6 +173,11 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
                         {scored && early && (
                           <span className="text-[10px] font-semibold leading-3 text-amber-600 dark:text-amber-400">
                             {EARLY_END_LABEL[early]}
+                          </span>
+                        )}
+                        {pens && (
+                          <span className="whitespace-nowrap text-[10px] font-semibold leading-3 text-brand-600 dark:text-brand-400" title="Won on penalties">
+                            {shootoutLabel(pens.home, pens.away)}
                           </span>
                         )}
                       </span>

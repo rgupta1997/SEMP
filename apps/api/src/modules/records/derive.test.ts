@@ -643,3 +643,21 @@ describe('deriveRecords · a team tie with named players', () => {
     expect(legacy.entries).toHaveLength(TIE_SQUAD.length);
   });
 });
+
+describe('a match settled on penalties', () => {
+  const live_state = { rally: [
+    { t: 'penaltyKick', side: 'A', scored: true }, { t: 'penaltyKick', side: 'B', scored: false },
+    { t: 'penaltyKick', side: 'A', scored: true }, { t: 'penaltyKick', side: 'B', scored: true },
+    { t: 'end', outcome: 'win', winner: 'A', reason: 'penalties' },
+  ] };
+  const { entries } = deriveRecords(input({ home_score: 2, away_score: 2, live_state }));
+
+  it('says how it was won, each side reading its own kicks first', () => {
+    expect(entries.find((e) => e.user_id === 'u1')?.title).toBe('IIMB vs IIMA — Won 2-1 on penalties');
+    expect(entries.find((e) => e.user_id === 'u3')?.title).toBe('IIMA vs IIMB — Lost 1-2 on penalties');
+  });
+
+  it('carries the shoot-out beside the level score', () => {
+    expect((entries[0].detail as { score?: string }).score).toBe('2-2 (2-1 pens)');
+  });
+});
