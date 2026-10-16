@@ -293,6 +293,37 @@ export const EARLY_END_LABEL: Record<EarlyEnd, string> = {
   conceded: 'conceded',
 };
 
+/** A level match settled by a penalty shoot-out: kicks scored by each side (A = home). */
+export interface Shootout {
+  home: number;
+  away: number;
+  winner: Side;
+}
+
+/**
+ * The shoot-out that decided a match, read from its log. Null unless the last `end`
+ * is a penalties end - kicks never touch the score, so the headline stays level.
+ */
+export function shootoutOf(liveState: unknown): Shootout | null {
+  const log = readRallyLog(liveState);
+  let end: RallyEvent | undefined;
+  for (let i = log.length - 1; i >= 0 && !end; i--) if (log[i].t === 'end') end = log[i];
+  if (!end || end.t !== 'end' || end.reason !== 'penalties' || !end.winner) return null;
+  let home = 0;
+  let away = 0;
+  for (const ev of log) {
+    if (ev.t !== 'penaltyKick' || !ev.scored) continue;
+    if (ev.side === 'A') home++;
+    else away++;
+  }
+  return { home, away, winner: end.winner };
+}
+
+/** How a results line marks it: "7-7 (4-3 pens)". Pass the scores in display order. */
+export function shootoutLabel(first: number, second: number): string {
+  return `${first}–${second} pens`;
+}
+
 /** Who served the first point, as persisted. Defaults to the home side. */
 export function readFirstServer(liveState: unknown): Side {
   return ((liveState as { firstServer?: unknown } | null)?.firstServer === 'B' ? 'B' : 'A');

@@ -209,11 +209,12 @@ describe('1. the stat registry', () => {
     }
   });
 
-  it('1.6c A VOLLEYBALL KILL SCORES A POINT FOR THE PLAYER WHO MADE IT', () => {
+  it('1.6c A VOLLEYBALL KILL (OR A THROWBALL THROW POINT) SCORES FOR THE PLAYER WHO MADE IT', () => {
+    const taps: Record<string, string[]> = { volleyball: ['ace', 'kill', 'block_vb'], throwball: ['ace', 'throw_point'] };
     for (const sport of ['volleyball', 'throwball']) {
       const s = statSpecFor(sport)!;
       const keys = new Set(s.metrics.map((m) => m.key));
-      for (const tap of ['ace', 'kill', 'block_vb']) {
+      for (const tap of taps[sport]) {
         const e = s.events.find((x) => x.key === tap)!;
         expect(e, `${sport}: no ${tap} tap`).toBeTruthy();
         for (const mk of Object.keys(e.metrics)) {

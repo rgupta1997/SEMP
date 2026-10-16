@@ -444,6 +444,9 @@ export function RosterPage() {
   const takenRoles = new Set<string>(members.map((m: any) => m.role));
   const remaining = Math.max(0, rules.squad_max - activeCount);
   const pocs = (team.organizations?.organization_members ?? []).map((m: any) => m.users).filter(Boolean);
+  // Back to the tab this team lives on: a department squad returns to Departments.
+  const unitTab = team.org_units?.type === 'campus' || team.org_units?.type === 'department' ? team.org_units.type : null;
+  const teamsHref = `/organizations/${orgId ?? ''}/teams${unitTab ? `?tab=${unitTab}` : ''}`;
 
   const onDeleteTeam = async () => {
     const hasHistory = entries.length > 0;
@@ -465,14 +468,14 @@ export function RosterPage() {
     });
     if (!ok) return;
     deleteTeam.mutate(undefined, {
-      onSuccess: () => { toast.success('Team deleted'); navigate(`/organizations/${orgId ?? ''}/teams`); },
+      onSuccess: () => { toast.success('Team deleted'); navigate(teamsHref); },
       onError: (e: any) => toast.error(e.message),
     });
   };
 
   return (
     <div>
-      <BackButton onClick={() => navigate(`/organizations/${orgId ?? ''}/teams`)}>All teams</BackButton>
+      <BackButton onClick={() => navigate(teamsHref)}>All teams</BackButton>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3">
           <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-50 dark:bg-brand-500/10 text-2xl">{team.sports?.icon ?? '◇'}</span>

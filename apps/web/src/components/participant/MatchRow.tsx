@@ -20,10 +20,16 @@ export function MatchRow({ match, showEvent = true }: { match: MatchSummary; sho
 
   // Show both teams (your team first), each with its own score, so the result reads
   // unambiguously without opening the match.
-  const teamLine = (name: string, score: number | null, mine: boolean, winner: boolean) => (
+  // `kicks`: shoot-out penalties scored, shown beside a level score.
+  const teamLine = (name: string, score: number | null, mine: boolean, winner: boolean, kicks?: number) => (
     <div className="flex items-center justify-between gap-3">
       <span className={cn('min-w-0 truncate text-sm', winner ? 'font-bold text-slate-900 dark:text-slate-100' : mine ? 'font-semibold text-slate-700 dark:text-slate-300' : 'text-slate-600 dark:text-slate-400')}>{name}</span>
-      {hasScore && <span className={cn('flex-none tabular-nums text-sm', winner ? 'font-bold text-slate-900 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400')}>{formatPoints(score)}</span>}
+      {hasScore && (
+        <span className={cn('flex-none tabular-nums text-sm', winner ? 'font-bold text-slate-900 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400')}>
+          {formatPoints(score)}
+          {kicks != null && <span className="ml-1 text-xs font-semibold text-brand-600 dark:text-brand-400" title="Penalty shoot-out">({kicks})</span>}
+        </span>
+      )}
     </div>
   );
 
@@ -35,9 +41,10 @@ export function MatchRow({ match, showEvent = true }: { match: MatchSummary; sho
       <div className="min-w-0 flex-1">
         {context && <div className="truncate text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{context}</div>}
         <div className="mt-1 space-y-0.5">
-          {teamLine(myName, match.my_score, true, hasScore && won)}
-          {teamLine(oppName, match.opp_score, false, hasScore && lost)}
+          {teamLine(myName, match.my_score, true, hasScore && won, match.pens?.[0])}
+          {teamLine(oppName, match.opp_score, false, hasScore && lost, match.pens?.[1])}
         </div>
+        {match.pens && <div className="mt-0.5 text-xs font-semibold text-brand-600 dark:text-brand-400">{won ? 'Won' : 'Lost'} {match.pens[0]}–{match.pens[1]} on penalties</div>}
         {match.opponent?.organization && <div className="mt-0.5 truncate text-xs text-slate-400 dark:text-slate-500">{match.opponent.organization}</div>}
         <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{fmtDateTime(match.scheduled_at)}</div>
       </div>

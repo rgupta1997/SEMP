@@ -40,7 +40,9 @@ const TABS: Tab[] = [
   { key: 'members', label: 'Members' },
   { key: 'roles', label: 'Roles & Permissions' },
   { key: 'billing', label: 'Billing & Subscription' },
-  { key: 'security', label: 'Security' },
+  // Hidden until its policies are enforced - the panel itself says they are not yet.
+  // Restore this line to bring the tab back; the panel code below is untouched.
+  // { key: 'security', label: 'Security' },
   { key: 'audit', label: 'Audit Logs', needs: 'audit_logs' },
 ];
 

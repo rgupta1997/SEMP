@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  diffStats, isReconstructable, rallyLogToRows, rowsToRallyLog,
+  diffStats, isReconstructable, rallyLogToRows, rowsToRallyLog, shootoutOf,
 } from './rally-rows.js';
 import { presetByKey } from './racquet-presets.js';
 import { deriveRacquetStats } from './stat-registry.js';
@@ -140,5 +140,21 @@ describe('tennis serves survive the row round trip', () => {
     // The double fault's row is credited to the receiver; the fault is still the server's.
     expect(back).toEqual(log);
     expect(foldRally(f, back, 'A').state.score).toEqual(foldRally(f, log, 'A').state.score);
+  });
+});
+
+describe('shootoutOf', () => {
+  const kick = (side: Side, scored: boolean): RallyEvent => ({ t: 'penaltyKick', side, scored });
+  const kicks: RallyLog = [kick('A', true), kick('B', true), kick('A', false), kick('B', true), kick('A', true), kick('B', false)];
+
+  it('reads the kicks scored and the winner from a penalties end', () => {
+    const log = [...kicks, { t: 'end', outcome: 'win', winner: 'B', reason: 'penalties' } as RallyEvent];
+    expect(shootoutOf({ rally: log })).toEqual({ home: 2, away: 2, winner: 'B' });
+  });
+
+  it('is null for a shoot-out still in progress, or a match not settled by one', () => {
+    expect(shootoutOf({ rally: kicks })).toBeNull();
+    expect(shootoutOf({ rally: [{ t: 'end', outcome: 'win', winner: 'A', reason: 'retired' } as RallyEvent] })).toBeNull();
+    expect(shootoutOf(null)).toBeNull();
   });
 });

@@ -121,6 +121,9 @@ export const COLUMN_MAP: Record<Exclude<StatFamily, 'measured' | 'cricket'>, Rec
     points_won: 'points_won', points_lost: 'points_lost', points_scored: 'points_scored',
     aces: 'aces', kills: 'kills', blocks: 'blocks', digs: 'digs',
     service_errors: 'service_errors', attack_errors: 'attack_errors',
+    // Throwball's own names, kept in the same columns (as carrom/snooker share units_won).
+    throw_points: 'kills', catches: 'digs', service_faults: 'service_errors',
+    dropped_catches: 'reception_errors', throw_faults: 'attack_errors',
     sets_won: 'sets_won', sets_lost: 'sets_lost',
   },
   board: {

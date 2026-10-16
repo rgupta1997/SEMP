@@ -469,15 +469,19 @@ const NET_EVENTS: StatEventSpec[] = [
   ev('dig', 'Dig', { digs: 1 }, { tone: 'good' }),
 ];
 
-const NET_METRICS: StatMetric[] = [
-  ...UNIVERSAL,
-  // Team figures, credited to the whole team sheet (netLineStats).
+// Team figures, credited to the whole team sheet (netLineStats) - volleyball and throwball.
+const NET_TEAM_METRICS: StatMetric[] = [
   rally('points_won', 'Points won', 'Pts', { headline: true }),
   rally('points_lost', 'Points lost', 'PL', { higherIsBetter: false, hidden: true }),
   rally('sets_won', 'Sets won', 'SW'),
   rally('sets_lost', 'Sets lost', 'SL', { higherIsBetter: false }),
   share('set_win_pct', 'Set win %', 'Set%', ['sets_won', 'sets_lost'], true),
   share('point_win_pct', 'Point win %', 'Pt%', ['points_won', 'points_lost']),
+];
+
+const NET_METRICS: StatMetric[] = [
+  ...UNIVERSAL,
+  ...NET_TEAM_METRICS,
   // Declared, because ace/kill/block all credit it. Without it, three of the six
   // taps a volleyball official has scored nothing at all.
   count('points_scored', 'Points scored', 'PtsS', { fromEvents: ['ace', 'kill', 'block_vb'], headline: true }),
@@ -487,6 +491,30 @@ const NET_METRICS: StatMetric[] = [
   count('digs', 'Digs', 'Dig', { fromEvents: ['dig'] }),
   count('service_errors', 'Service errors', 'SE', { fromEvents: ['serve_error'], higherIsBetter: false }),
   count('attack_errors', 'Attack errors', 'AE', { fromEvents: ['attack_error'], higherIsBetter: false }),
+];
+
+// Throwball: a point is a throw the other side fails to catch, or the other side's
+// fault. There is no blocking. Faults score for the opponent and stay on the player.
+const THROW_EVENTS: StatEventSpec[] = [
+  ev('ace', 'Ace', { aces: 1, points_scored: 1 }, { points: 1 }),
+  ev('throw_point', 'Throw point', { throw_points: 1, points_scored: 1 }, { points: 1 }),
+  ev('service_fault', 'Service fault', { service_faults: 1 }, { points: 1, forOpponent: true, tone: 'error' }),
+  ev('dropped_catch', 'Dropped catch', { dropped_catches: 1 }, { points: 1, forOpponent: true, tone: 'error' }),
+  // Held over 3 seconds, a foot fault, touching the net, two players on one catch.
+  ev('throw_fault', 'Throw fault', { throw_faults: 1 }, { points: 1, forOpponent: true, tone: 'error' }),
+  ev('catch', 'Catch', { catches: 1 }, { tone: 'good' }),
+];
+
+const THROW_METRICS: StatMetric[] = [
+  ...UNIVERSAL,
+  ...NET_TEAM_METRICS,
+  count('points_scored', 'Points scored', 'PtsS', { fromEvents: ['ace', 'throw_point'], headline: true }),
+  count('aces', 'Aces', 'Ace', { fromEvents: ['ace'], headline: true }),
+  count('throw_points', 'Throw points', 'TP', { fromEvents: ['throw_point'], headline: true }),
+  count('catches', 'Catches', 'C', { fromEvents: ['catch'] }),
+  count('service_faults', 'Service faults', 'SF', { fromEvents: ['service_fault'], higherIsBetter: false }),
+  count('dropped_catches', 'Dropped catches', 'DC', { fromEvents: ['dropped_catch'], higherIsBetter: false }),
+  count('throw_faults', 'Throw faults', 'TF', { fromEvents: ['throw_fault'], higherIsBetter: false }),
 ];
 
 // ---- board & frame ---------------------------------------------------------
@@ -594,7 +622,7 @@ export const TEAM_STAT_SPECS: SportStatSpec[] = [
   spec('kho-kho', 'raid', RAID_METRICS, RAID_EVENTS, ['attacker', 'defender']),
   // net
   spec('volleyball', 'net', NET_METRICS, NET_EVENTS, ['setter', 'outside', 'middle', 'opposite', 'libero']),
-  spec('throwball', 'net', NET_METRICS, NET_EVENTS),
+  spec('throwball', 'net', THROW_METRICS, THROW_EVENTS),
   // board & frame
   spec('carrom', 'board', BOARD_METRICS, [
     ev('queen', 'Queen pocketed', { queens: 1 }),

@@ -44,7 +44,8 @@ export function StandingsPage() {
   // "Organizations" is only the right word for an inter-organisation event. The
   // server resolves the host's own noun so this cannot disagree with the entry form
   // or the approvals queue.
-  const entrants = championship.entry?.entrant_label ?? 'Organizations';
+  // Plural - "Teams scoring", "Batches scoring" (entrant_label is the singular noun).
+  const entrants = championship.entry?.entrant_label_plural ?? championship.entry?.entrant_label ?? 'Organizations';
   const { data: draws = [] } = useApi<DrawRow[]>(`/championships/${eventId}/draws`);
   // Which org's row is expanded to show its per-event points breakdown.
   const [expanded, setExpanded] = useState<string | null>(null);

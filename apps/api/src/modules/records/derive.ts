@@ -1,6 +1,6 @@
 import {
   PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor, playedContests, seatIn,
-  earlyEndOf, formatPoints, THIRD_PLACE_ROUND, type EarlyEnd, type PlayedContest,
+  earlyEndOf, formatPoints, shootoutOf, THIRD_PLACE_ROUND, type EarlyEnd, type PlayedContest,
   type AchievementKind, type EventSpec, type EventState, type FormatTemplate,
   type LifetimeEntryKind, type MatchOutcome, type Medal, type StandingsPlacement,
 } from '@semp/shared';
@@ -268,7 +268,11 @@ const outcomeFor = (fx: DerivableFixture, teamId: string | null): MatchOutcome |
 const contextLabel = (fx: DerivableFixture): string =>
   [fx.sport_name, fx.discipline_name].filter(Boolean).join(' · ') || 'Event';
 
-/** The headline on a timeline row: "IIMB vs IIMA — Won 3-1", or the event's name. */
+/** Between the match and its result in a timeline title: a plain hyphen, not a dash. */
+const TITLE_SEP = ' - ';
+const RESULT_SUFFIX = new RegExp(`${TITLE_SEP}(Won|Lost|Drew)$`);
+
+/** The headline on a timeline row: "IIMB vs IIMA - Won", or the event's name. */
 function entryTitle(fx: DerivableFixture, teamId: string | null): string {
   const context = contextLabel(fx);
   if (!fx.home_team_name && !fx.away_team_name) return context;
@@ -277,8 +281,8 @@ function entryTitle(fx: DerivableFixture, teamId: string | null): string {
   const theirs = teamId && teamId === fx.away_team_id ? fx.home_team_name : fx.away_team_name;
   const versus = `${mine ?? 'TBD'} vs ${theirs ?? 'TBD'}`;
 
-  if (fx.status === 'walkover') return `${versus} — Walkover`;
-  if (fx.status === 'bye') return `${versus} — Bye`;
+  if (fx.status === 'walkover') return `${versus}${TITLE_SEP}Walkover`;
+  if (fx.status === 'bye') return `${versus}${TITLE_SEP}Bye`;
 
   // No score in the headline - it doesn't fit every sport (a tie's rubber
   // count, say), and it's already on the fixture for anyone who wants it.
@@ -287,10 +291,24 @@ function entryTitle(fx: DerivableFixture, teamId: string | null): string {
   // Stopped early: "Won (opponent retired)" / "Lost (retired)" - never a match played out.
   const early = earlyEndOf(fx.live_state);
   const why = early && verb ? ` (${outcome === 'won' ? `opponent ${EARLY_END_WORD[early]}` : EARLY_END_WORD[early]})` : '';
-  return verb ? `${versus} — ${verb}${why}` : versus;
+  // Settled by a shoot-out: "Won 4-3 on penalties", my kicks first.
+  const pens = verb ? shootoutOf(fx.live_state) : null;
+  if (pens) {
+    const [a, b] = teamId && teamId === fx.away_team_id ? [pens.away, pens.home] : [pens.home, pens.away];
+    return `${versus}${TITLE_SEP}${verb} ${a}-${b} on penalties`;
+  }
+  return verb ? `${versus}${TITLE_SEP}${verb}${why}` : versus;
 }
 
 const EARLY_END_WORD: Record<EarlyEnd, string> = { retired: 'retired', disqualified: 'disqualified', conceded: 'conceded' };
+
+/** "7-7", or "7-7 (4-3 pens)" when a shoot-out settled it. Home first, like the fixture. */
+function fixtureScore(fx: DerivableFixture): string | null {
+  if (fx.home_score == null || fx.away_score == null) return null;
+  const pens = shootoutOf(fx.live_state);
+  const base = `${formatPoints(fx.home_score)}-${formatPoints(fx.away_score)}`;
+  return pens ? `${base} (${pens.home}-${pens.away} pens)` : base;
+}
 
 /**
  * Everything a locked fixture writes into the permanent record.
@@ -559,7 +577,7 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
           ? (p.team_id === fx.home_team_id ? fx.away_team_name : fx.home_team_name)
           : null,
         outcome,
-        score: fx.home_score != null && fx.away_score != null ? `${formatPoints(fx.home_score)}-${formatPoints(fx.away_score)}` : null,
+        score: fixtureScore(fx),
         round: fx.round,
         sport: fx.sport_name,
         discipline: fx.discipline_name,
@@ -607,7 +625,7 @@ function contestEntries(
       const base = entryTitle(fx, teamId);
       // A rubber's own result replaces the tie's in its title - a drawn chess board included.
       const title = c.rubberLabel
-        ? `${c.rubberLabel}: ${base.replace(/ — (Won|Lost|Drew)$/, '')}${outcome ? ` — ${outcome === 'won' ? 'Won' : outcome === 'drew' ? 'Drew' : 'Lost'}` : ''}`
+        ? `${c.rubberLabel}: ${base.replace(RESULT_SUFFIX, '')}${outcome ? `${TITLE_SEP}${outcome === 'won' ? 'Won' : outcome === 'drew' ? 'Drew' : 'Lost'}` : ''}`
         : base;
       entries.push({
         user_id: userId,
@@ -620,7 +638,7 @@ function contestEntries(
           team_name: teamId ? (teamId === fx.home_team_id ? fx.home_team_name : fx.away_team_name) : null,
           opponent_name: teamId === fx.home_team_id ? fx.away_team_name : fx.home_team_name,
           outcome,
-          score: c.score ? `${c.score[0]}-${c.score[1]}` : (fx.home_score != null && fx.away_score != null ? `${formatPoints(fx.home_score)}-${formatPoints(fx.away_score)}` : null),
+          score: c.score ? `${c.score[0]}-${c.score[1]}` : fixtureScore(fx),
           round: fx.round,
           sport: fx.sport_name,
           discipline: fx.discipline_name,
@@ -636,7 +654,7 @@ function contestEntries(
           ...(c.rubberKey !== null ? {
             rubber_key: c.rubberKey,
             rubber_label: c.rubberLabel,
-            tie_score: fx.home_score != null && fx.away_score != null ? `${formatPoints(fx.home_score)}-${formatPoints(fx.away_score)}` : null,
+            tie_score: fixtureScore(fx),
           } : {}),
         },
       });

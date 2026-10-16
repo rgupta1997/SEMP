@@ -58,6 +58,9 @@ const RALLY_SERVE: ServeSpec = {
 /** Volleyball: FIVB 7.1 - each set is served first by the team that did not serve first in the last. */
 const VOLLEY_SERVE: ServeSpec = { ...RALLY_SERVE, nextUnitServer: 'alternate' };
 
+/** Throwball (SGFI): a new set is served by the side that did not start the last one. */
+const THROW_SERVE: ServeSpec = { ...RALLY_SERVE, nextUnitServer: 'alternate' };
+
 /** The serve passes with the unit - carrom boards, snooker frames. */
 const PER_UNIT_SERVE: ServeSpec = { ...NO_SERVE, movement: 'perUnit' };
 
@@ -153,15 +156,20 @@ const NET: ScoringFormat[] = [
 
   fmt({
     sport: 'throwball', key: 'tb_bo3_15', name: 'Best of 3 sets to 15',
-    levels: [vSet(15, 15), unitsMatch(2)], serve: RALLY_SERVE, changeEnds: 'never',
+    levels: [vSet(15, 15), unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'never',
   }),
   fmt({
     sport: 'throwball', key: 'tb_bo3_21', name: 'Best of 3 sets to 21',
-    levels: [vSet(21, 21), unitsMatch(2)], serve: RALLY_SERVE, changeEnds: 'never',
+    levels: [vSet(21, 21), unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'never',
+  }),
+  // The international (ITF / USA) shape: sets to 25 by 2, a deciding third to 15.
+  fmt({
+    sport: 'throwball', key: 'tb_bo3_25', name: 'Best of 3 sets to 25 (decider 15)',
+    levels: [vSet(25, 15), unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'never',
   }),
   fmt({
     sport: 'throwball', key: 'tb_single_15', name: 'Single set to 15',
-    levels: [vSet(15, 15), unitsMatch(1)], serve: RALLY_SERVE, mode: 'selfScored', changeEnds: 'never',
+    levels: [vSet(15, 15), unitsMatch(1)], serve: THROW_SERVE, mode: 'selfScored', changeEnds: 'never',
   }),
 ];
 

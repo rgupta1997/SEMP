@@ -146,10 +146,10 @@ describe('deriveRecords · the timeline (J4-E2-S1)', () => {
     const winner = entries.find((e) => e.user_id === 'u1')!;
     const loser = entries.find((e) => e.user_id === 'u3')!;
 
-    expect(winner.title).toBe('IIMB vs IIMA — Won');
+    expect(winner.title).toBe('IIMB vs IIMA - Won');
     expect(winner.detail.outcome).toBe('won');
     // The same fixture, read from the other dressing room.
-    expect(loser.title).toBe('IIMA vs IIMB — Lost');
+    expect(loser.title).toBe('IIMA vs IIMB - Lost');
     expect(loser.detail.outcome).toBe('lost');
     expect(loser.detail.opponent_name).toBe('IIMB');
   });
@@ -609,12 +609,12 @@ describe('deriveRecords · a team tie with named players', () => {
   it('files one entry per rubber played, with that rubber’s own result', () => {
     const mine = (u: string) => out.entries.filter((e) => e.user_id === u).map((e) => [e.title, e.detail.outcome]);
     expect(mine('u1')).toEqual([
-      ["Men's Singles: IIMB vs IIMA — Won", 'won'],
-      ["Men's Doubles: IIMB vs IIMA — Lost", 'lost'],
+      ["Men's Singles: IIMB vs IIMA - Won", 'won'],
+      ["Men's Doubles: IIMB vs IIMA - Lost", 'lost'],
     ]);
     expect(mine('u3')).toEqual([
-      ["Men's Singles: IIMA vs IIMB — Lost", 'lost'],
-      ["Men's Doubles: IIMA vs IIMB — Won", 'won'],
+      ["Men's Singles: IIMA vs IIMB - Lost", 'lost'],
+      ["Men's Doubles: IIMA vs IIMB - Won", 'won'],
     ]);
   });
 
@@ -641,5 +641,23 @@ describe('deriveRecords · a team tie with named players', () => {
     const old = { tie: { ...tie.tie, rubbers: tie.tie.rubbers.map(({ lineup: _l, lineupSkipped: _s, ...r }) => r) } };
     const legacy = deriveRecords(input({ sport_name: 'Table Tennis', live_state: old }, { participants: TIE_SQUAD }));
     expect(legacy.entries).toHaveLength(TIE_SQUAD.length);
+  });
+});
+
+describe('a match settled on penalties', () => {
+  const live_state = { rally: [
+    { t: 'penaltyKick', side: 'A', scored: true }, { t: 'penaltyKick', side: 'B', scored: false },
+    { t: 'penaltyKick', side: 'A', scored: true }, { t: 'penaltyKick', side: 'B', scored: true },
+    { t: 'end', outcome: 'win', winner: 'A', reason: 'penalties' },
+  ] };
+  const { entries } = deriveRecords(input({ home_score: 2, away_score: 2, live_state }));
+
+  it('says how it was won, each side reading its own kicks first', () => {
+    expect(entries.find((e) => e.user_id === 'u1')?.title).toBe('IIMB vs IIMA - Won 2-1 on penalties');
+    expect(entries.find((e) => e.user_id === 'u3')?.title).toBe('IIMA vs IIMB - Lost 1-2 on penalties');
+  });
+
+  it('carries the shoot-out beside the level score', () => {
+    expect((entries[0].detail as { score?: string }).score).toBe('2-2 (2-1 pens)');
   });
 });

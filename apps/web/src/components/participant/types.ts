@@ -36,6 +36,8 @@ export interface MatchSummary {
   opponent: { id: string; name: string; organization: string | null } | null;
   my_score: number | null;
   opp_score: number | null;
+  /** Shoot-out kicks [mine, theirs] when a level match was settled on penalties. */
+  pens?: [number, number] | null;
   result: MatchResult;
 }
 

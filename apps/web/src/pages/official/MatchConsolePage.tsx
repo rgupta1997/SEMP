@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
 import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Select, Spinner, StatusBadge, Textarea, BackButton, cn, confirmDialog, toast } from '../../components/ui';
-import { awayTeam, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, orgTitle, sportName as sportNameOf, teamLabel, venueLabel } from './fixtureHelpers';
+import { awayTeam, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, orgTitle, sportName as sportNameOf, teamLabel, teamShort, venueLabel } from './fixtureHelpers';
 import {
   cricketScore, headline, hydrate, oversStr, oversToBalls, reduce, sportDef, subLine,
   type Action, type LogEntry, type MatchState, type SportDef,
@@ -998,12 +998,16 @@ function PostMatchActions({ fixture, fixtureId, invalidate }:
             <p className="mt-1 text-sm text-muted">Not recorded. The scorecard is locked, so it can no longer be added.</p>
           ) : (
             <div className="mt-1 flex items-center gap-2">
-              <Select className="min-w-0 flex-1" value={choice} data-qa="potm-select"
-                onChange={(e) => setChoice(e.target.value)}>
-                <option value="">Nobody</option>
-                {people.map((x) => <option key={x.id} value={x.id}>{x.name} · {x.team}</option>)}
-              </Select>
-              <Button size="sm" data-qa="potm-save" disabled={saveAwards.isPending} onClick={() => giveAward(choice)}>
+              {/* Its own shrinkable slot: Select's wrapper never shrinks and sizes to the
+                  longest option ("Name · Long team name"), which pushed Save out of the box. */}
+              <div className="min-w-0 flex-1">
+                <Select className="w-full" value={choice} data-qa="potm-select"
+                  onChange={(e) => setChoice(e.target.value)}>
+                  <option value="">Nobody</option>
+                  {people.map((x) => <option key={x.id} value={x.id}>{x.name} · {x.team}</option>)}
+                </Select>
+              </div>
+              <Button size="sm" className="shrink-0" data-qa="potm-save" disabled={saveAwards.isPending} onClick={() => giveAward(choice)}>
                 {saveAwards.isPending ? 'Saving…' : 'Save'}
               </Button>
             </div>
@@ -1697,6 +1701,8 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       sportName={sport}
       homeName={teamLabel(homeTeam(fixture))}
       awayName={teamLabel(awayTeam(fixture))}
+      homeShort={teamShort(homeTeam(fixture))}
+      awayShort={teamShort(awayTeam(fixture))}
       homeOrg={orgLabel(homeTeam(fixture))}
       awayOrg={orgLabel(awayTeam(fixture))}
       roster={roster}
@@ -1755,22 +1761,29 @@ function clockSnapshot(log: RallyLog): { elapsedMs: number; running: boolean; at
 function teamTimeline(log: RallyLog, homeName: string, awayName: string, fullMs = 0): LogEntry[] {
   const nameOf = (s: Side) => (s === 'A' ? homeName : awayName);
   const out: LogEntry[] = [];
+  // Shoot-out kicks scored so far, so the closing line can carry the tally.
+  const kicks: [number, number] = [0, 0];
   log.forEach((ev, i) => {
     const any = ev as any;
     const who = any.playerName ? ` · ${any.playerName}` : '';
+    if (ev.t === 'penaltyKick' && ev.scored) kicks[ev.side === 'A' ? 0 : 1] += 1;
     const txt = ev.t === 'point'
       ? `${any.label ?? 'Point'}${any.pts > 1 ? ` (+${any.pts})` : ''}${who}`
       : ev.t === 'endPeriod' ? 'Period ended'
         : ev.t === 'clockStart' ? 'Clock started'
           : ev.t === 'clockPause' ? 'Clock paused'
             : ev.t === 'clockAdjust' ? `Clock corrected to ${formatClock(any.toMs ?? 0)}`
-              : ev.t;
+              : ev.t === 'penaltyKick' ? `Shoot-out kick ${ev.scored ? 'scored' : 'missed'} (${kicks[0]}–${kicks[1]})${who}`
+                : ev.t === 'end' && ev.reason === 'penalties' && ev.winner
+                  ? `${nameOf(ev.winner)} won ${ev.winner === 'A' ? kicks[0] : kicks[1]}–${ev.winner === 'A' ? kicks[1] : kicks[0]} on penalties`
+                  : ev.t === 'end' ? 'Match ended'
+                    : ev.t;
     out.unshift({
       // THE MINUTE, not the entry number, once the match has a clock running. This
       // is what is persisted and what every read-only view renders, so a goal shows
       // as 23' on the public page and not as "#7".
       t: typeof any.clockMs === 'number' ? minuteLabel(any.clockMs, fullMs) : `#${i + 1}`,
-      team: (any.side as Side) ?? undefined,
+      team: (any.side as Side) ?? (ev.t === 'end' ? any.winner ?? undefined : undefined),
       txt,
       ...(any.playerName ? { player: any.playerName } : {}),
       ...(any.playerId ? { playerId: any.playerId } : {}),
