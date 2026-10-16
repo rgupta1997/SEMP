@@ -88,8 +88,8 @@ function tally(fixtures: FixtureRow[], myTeamIds: Set<string>) {
 const matchSelect = {
   id: true, round: true, status: true, scheduled_at: true,
   home_team_id: true, away_team_id: true, home_score: true, away_score: true, winner_team_id: true,
-  teams_fixtures_home_team_idToteams: { select: { id: true, name: true, organizations: { select: { short_name: true, name: true } } } },
-  teams_fixtures_away_team_idToteams: { select: { id: true, name: true, organizations: { select: { short_name: true, name: true } } } },
+  teams_fixtures_home_team_idToteams: { select: { id: true, name: true, short_name: true, organizations: { select: { short_name: true, name: true } } } },
+  teams_fixtures_away_team_idToteams: { select: { id: true, name: true, short_name: true, organizations: { select: { short_name: true, name: true } } } },
   tournament_disciplines: {
     select: {
       disciplines: { select: { name: true } },
@@ -115,8 +115,8 @@ function summariseLean(f: FixtureRow, myTeamIds: Set<string>, shootouts?: Map<st
     sport: ts?.sports?.name ?? null,
     discipline: f.tournament_disciplines?.disciplines?.name ?? null,
     championship: ev ? { id: ev.id, name: ev.name, slug: ev.slug } : null,
-    my_team: mine ? { id: mine.id, name: mine.name } : null,
-    opponent: opp ? { id: opp.id, name: opp.name, organization: opp.organizations?.short_name ?? opp.organizations?.name ?? null } : null,
+    my_team: mine ? { id: mine.id, name: mine.name, short_name: mine.short_name ?? null } : null,
+    opponent: opp ? { id: opp.id, name: opp.name, short_name: opp.short_name ?? null, organization: opp.organizations?.short_name ?? opp.organizations?.name ?? null } : null,
     my_score: (isHome ? f.home_score : f.away_score) ?? null,
     opp_score: (isHome ? f.away_score : f.home_score) ?? null,
     pens: pensFor(shootouts?.get(f.id), isHome),

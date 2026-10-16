@@ -118,6 +118,14 @@ export function deriveTeamStats(
   };
 
   for (const raw of log) {
+    // A shoot-out kick moves no score and is never a goal - only the kicker's own count.
+    if (raw.t === 'penaltyKick') {
+      if (raw.playerId && spec.metrics.some((m) => m.key === 'shootout_scored')) {
+        sideFound.set(raw.playerId, raw.side);
+        bump(bagFor(raw.playerId), raw.scored ? 'shootout_scored' : 'shootout_missed', 1);
+      }
+      continue;
+    }
     if (raw.t !== 'point') continue;
     const ev = raw as Extract<RallyEvent, { t: 'point' }>;
 

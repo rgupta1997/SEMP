@@ -393,6 +393,9 @@ const GOAL_METRICS: StatMetric[] = [
   count('reds', 'Red cards', 'RC', { fromEvents: ['red'], higherIsBetter: false }),
   count('pens_scored', 'Penalties scored', 'PS', { fromEvents: ['pen_scored'] }),
   count('pens_missed', 'Penalties missed', 'PM', { fromEvents: ['pen_missed'], higherIsBetter: false }),
+  // Shoot-out kicks: never goals. Counted from `penaltyKick` events in team-stats.ts.
+  count('shootout_scored', 'Shoot-out penalties scored', 'SoS', {}),
+  count('shootout_missed', 'Shoot-out penalties missed', 'SoM', { higherIsBetter: false }),
   perMatch('goals_per_match', 'Goals per match', 'G/M', 'goals'),
 ];
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../lib/hooks';
 import { useAuth } from '../lib/auth';
@@ -12,8 +12,8 @@ interface Match {
   id: string; round: string | null; status: string; scheduled_at: string | null;
   sport: string | null; discipline: string | null;
   championship: { id: string; name: string; slug: string } | null;
-  my_team: { id: string; name: string } | null;
-  opponent: { id: string; name: string; organization: string | null } | null;
+  my_team: { id: string; name: string; short_name?: string | null } | null;
+  opponent: { id: string; name: string; short_name?: string | null; organization: string | null } | null;
   my_score: number | null; opp_score: number | null;
   /** Shoot-out kicks [mine, theirs] when a level match was settled on penalties. */
   pens?: [number, number] | null;
@@ -50,6 +50,41 @@ const card: React.CSSProperties = {
 const cardTitle: React.CSSProperties = { fontFamily: POP, fontWeight: 800, fontSize: 15, marginBottom: 12 };
 
 const initials = (s: string | null) => (s ?? '?').split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+// The next-game matchup line. Full names read as written (no caps, lighter weight) -
+// all-caps black made them a wall of shouting; the short-name headline keeps that style.
+const MATCHUP_FULL_STYLE: React.CSSProperties = { fontFamily: POP, fontWeight: 700, letterSpacing: '-.01em' };
+const MATCHUP_SHORT_STYLE: React.CSSProperties = { fontFamily: POP, fontWeight: 900, letterSpacing: '-.02em', textTransform: 'uppercase' };
+const MATCHUP_FULL = 'clamp(20px,2.6vw,28px)';
+
+/** A team's short label: its own short name, else its initials. */
+const shortOf = (t: { name: string; short_name?: string | null } | null) => t?.short_name?.trim() || initials(t?.name ?? null);
+
+/**
+ * True while `probe` (the full text, wrapped at the box's width) takes at most `maxLines`
+ * lines. Re-checked on resize and once web fonts load.
+ */
+function useFits(maxLines: number, deps: unknown[]) {
+  const box = useRef<HTMLDivElement>(null);
+  const probe = useRef<HTMLDivElement>(null);
+  const [fits, setFits] = useState(true);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const check = () => {
+      const p = probe.current;
+      if (!p) return setFits(true);
+      const line = parseFloat(getComputedStyle(p).lineHeight) || 1;
+      setFits(p.getBoundingClientRect().height <= line * maxLines + 1);
+    };
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    let live = true;
+    document.fonts?.ready.then(() => { if (live) check(); });
+    return () => { live = false; ro.disconnect(); };
+  }, deps); // eslint-disable-line react-hooks/exhaustive-deps
+  return { box, probe, fits };
+}
 
 // Lists here grow without bound; cap each so this first screen stays a fixed-height overview.
 const ROW_LIMIT = 5;
@@ -107,6 +142,9 @@ function NextGameHero({ m }: { m: Match }) {
     when(m.scheduled_at),
     m.championship?.name,
   ].filter(Boolean) as string[];
+  const fullA = m.my_team?.name ?? 'Your team';
+  const fullB = m.opponent?.name ?? 'TBC';
+  const matchup = useFits(3, [fullA, fullB]);
 
   return (
     <div style={{
@@ -122,11 +160,20 @@ function NextGameHero({ m }: { m: Match }) {
       <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: '.12em', textTransform: 'uppercase', color: C.teal }}>
         Next game
       </div>
-      <div style={{
-        fontFamily: POP, fontWeight: 900, fontSize: 'clamp(25px,4.4vw,38px)', letterSpacing: '-.02em',
-        textTransform: 'uppercase', lineHeight: 1, marginTop: 16, position: 'relative',
+      {/* Full names, a size down and wrapping onto up to three lines. Only names too long
+          for that fall back to the short name (or initials), at the big headline size. */}
+      <div ref={matchup.box} title={`${fullA} vs ${fullB}`} style={{
+        ...(matchup.fits ? MATCHUP_FULL_STYLE : MATCHUP_SHORT_STYLE),
+        fontSize: matchup.fits ? MATCHUP_FULL : 'clamp(25px,4.4vw,38px)',
+        lineHeight: matchup.fits ? 1.15 : 1, marginTop: 16, position: 'relative', overflowWrap: 'anywhere',
       }}>
-        {initials(m.my_team?.name ?? null)} <span style={{ color: '#8FB2EE' }}>vs</span> {initials(m.opponent?.name ?? null)}
+        {matchup.fits ? fullA : shortOf(m.my_team)} <span style={{ color: '#8FB2EE' }}>vs</span> {matchup.fits ? fullB : shortOf(m.opponent)}
+        <div ref={matchup.probe} aria-hidden style={{
+          ...MATCHUP_FULL_STYLE, textTransform: 'none', fontSize: MATCHUP_FULL, lineHeight: 1.15,
+          position: 'absolute', left: 0, right: 0, top: 0, visibility: 'hidden', pointerEvents: 'none',
+        }}>
+          {fullA} vs {fullB}
+        </div>
       </div>
       <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', marginTop: 16, fontSize: 13.5, color: C.brandSoft, position: 'relative' }}>
         {meta.map((t) => <span key={t}>{t}</span>)}

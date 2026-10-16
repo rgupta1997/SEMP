@@ -25,8 +25,12 @@ export function EventCommunicationsPage() {
   // Refused by the server too; disabled here so nobody writes an announcement first.
   const archived = !!championship.archived_at;
   const announce = (
-    <Button disabled={archived} title={archived ? ARCHIVED_READ_ONLY_MESSAGE : undefined} onClick={() => setComposing(true)}>
-      <Megaphone size={15} aria-hidden />Make an announcement
+    // Up to 440px the full label wrapped to two lines and ran over the page title.
+    <Button className="whitespace-nowrap" disabled={archived} title={archived ? ARCHIVED_READ_ONLY_MESSAGE : undefined} onClick={() => setComposing(true)}>
+      <Megaphone size={15} aria-hidden />
+      {/* One breakpoint both sides (max = "< 441", min = ">= 441"), so no width shows both. */}
+      <span className="max-[441px]:hidden">Make an announcement</span>
+      <span className="min-[441px]:hidden">Announce</span>
     </Button>
   );
   const { data: rows = [], isLoading, refetch } = useApi<NotificationDto[]>(

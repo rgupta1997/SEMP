@@ -192,6 +192,7 @@ const SHOW: Record<string, Array<[column: string, label: string]>> = {
     ['points_scored', 'Points'], ['fg_1', 'Free throws'], ['fg_2', '2-pointers'], ['fg_3', '3-pointers'],
     ['rebounds', 'Rebounds'], ['steals', 'Steals'], ['blocks', 'Blocks'],
     ['turnovers', 'Turnovers'], ['fouls', 'Fouls'],
+    ['shootout_scored', 'Shoot-out penalties scored'], ['shootout_missed', 'Shoot-out penalties missed'],
   ],
   raid: [
     ['minutes', 'Minutes'], ['raid_points', 'Raid points'], ['raids', 'Raids'],
