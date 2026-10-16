@@ -268,7 +268,11 @@ const outcomeFor = (fx: DerivableFixture, teamId: string | null): MatchOutcome |
 const contextLabel = (fx: DerivableFixture): string =>
   [fx.sport_name, fx.discipline_name].filter(Boolean).join(' · ') || 'Event';
 
-/** The headline on a timeline row: "IIMB vs IIMA — Won 3-1", or the event's name. */
+/** Between the match and its result in a timeline title: a plain hyphen, not a dash. */
+const TITLE_SEP = ' - ';
+const RESULT_SUFFIX = new RegExp(`${TITLE_SEP}(Won|Lost|Drew)$`);
+
+/** The headline on a timeline row: "IIMB vs IIMA - Won", or the event's name. */
 function entryTitle(fx: DerivableFixture, teamId: string | null): string {
   const context = contextLabel(fx);
   if (!fx.home_team_name && !fx.away_team_name) return context;
@@ -277,8 +281,8 @@ function entryTitle(fx: DerivableFixture, teamId: string | null): string {
   const theirs = teamId && teamId === fx.away_team_id ? fx.home_team_name : fx.away_team_name;
   const versus = `${mine ?? 'TBD'} vs ${theirs ?? 'TBD'}`;
 
-  if (fx.status === 'walkover') return `${versus} — Walkover`;
-  if (fx.status === 'bye') return `${versus} — Bye`;
+  if (fx.status === 'walkover') return `${versus}${TITLE_SEP}Walkover`;
+  if (fx.status === 'bye') return `${versus}${TITLE_SEP}Bye`;
 
   // No score in the headline - it doesn't fit every sport (a tie's rubber
   // count, say), and it's already on the fixture for anyone who wants it.
@@ -291,9 +295,9 @@ function entryTitle(fx: DerivableFixture, teamId: string | null): string {
   const pens = verb ? shootoutOf(fx.live_state) : null;
   if (pens) {
     const [a, b] = teamId && teamId === fx.away_team_id ? [pens.away, pens.home] : [pens.home, pens.away];
-    return `${versus} — ${verb} ${a}-${b} on penalties`;
+    return `${versus}${TITLE_SEP}${verb} ${a}-${b} on penalties`;
   }
-  return verb ? `${versus} — ${verb}${why}` : versus;
+  return verb ? `${versus}${TITLE_SEP}${verb}${why}` : versus;
 }
 
 const EARLY_END_WORD: Record<EarlyEnd, string> = { retired: 'retired', disqualified: 'disqualified', conceded: 'conceded' };
@@ -621,7 +625,7 @@ function contestEntries(
       const base = entryTitle(fx, teamId);
       // A rubber's own result replaces the tie's in its title - a drawn chess board included.
       const title = c.rubberLabel
-        ? `${c.rubberLabel}: ${base.replace(/ — (Won|Lost|Drew)$/, '')}${outcome ? ` — ${outcome === 'won' ? 'Won' : outcome === 'drew' ? 'Drew' : 'Lost'}` : ''}`
+        ? `${c.rubberLabel}: ${base.replace(RESULT_SUFFIX, '')}${outcome ? `${TITLE_SEP}${outcome === 'won' ? 'Won' : outcome === 'drew' ? 'Drew' : 'Lost'}` : ''}`
         : base;
       entries.push({
         user_id: userId,
