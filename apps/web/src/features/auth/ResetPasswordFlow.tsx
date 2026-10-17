@@ -44,7 +44,7 @@ export function ResetPasswordFlow({ dark, inputStyle, labelStyle, t, onHeading, 
 
   useEffect(() => {
     const H: Record<Step, { title: string; sub: string }> = {
-      subject: { title: 'Reset your password', sub: 'Tell us the WhatsApp number or email on the account.' },
+      subject: { title: 'Reset your password', sub: 'Tell us the phone number or email on the account.' },
       code: { title: 'Check your messages', sub: `If that account exists, a 6-digit code is on its way to ${raw}.` },
       choose: { title: 'Which account?', sub: 'Choose the account whose password you want to change.' },
       password: { title: 'Choose a new password', sub: 'At least 6 characters.' },
@@ -118,7 +118,7 @@ export function ResetPasswordFlow({ dark, inputStyle, labelStyle, t, onHeading, 
   if (step === 'subject') return (
     <form onSubmit={submitSubject} style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 28 }}>
       <div>
-        <label htmlFor="rp-subject" style={labelStyle}>WhatsApp number or email</label>
+        <label htmlFor="rp-subject" style={labelStyle}>Phone number or email</label>
         <input id="rp-subject" className="field" style={inputStyle} value={raw} autoFocus
           onChange={(e) => setRaw(e.target.value)} placeholder="+91 98000 00000" autoComplete="username" required />
       </div>

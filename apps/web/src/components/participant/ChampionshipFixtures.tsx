@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Calendar, Flag } from 'lucide-react';
+import { Calendar, Flag, MapPin } from 'lucide-react';
 import { EARLY_END_LABEL, earlyEndOf, formatPoints, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
 import { useApi, fmtDateTime } from '../../lib/hooks';
 import { Badge, Card, EmptyState, ListToolbar, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
@@ -194,6 +194,13 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
                   )}
                   {mode === 'schedule' && f.scheduled_at && <span>{fmtDateTime(f.scheduled_at)}</span>}
                   {mode === 'schedule' && f.ground && <span className="hidden sm:inline">{f.ground.name}</span>}
+                  {/* Where it was played, when the organiser set a venue. */}
+                  {mode === 'results' && f.ground && (
+                    <span className="flex items-center gap-1" title="Venue">
+                      <MapPin size={12} aria-hidden />
+                      {[f.ground.venue, f.ground.name].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
                   <StatusBadge status={f.status} />
                 </div>
               </Card>

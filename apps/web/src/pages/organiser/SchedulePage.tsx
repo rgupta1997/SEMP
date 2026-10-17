@@ -452,6 +452,9 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
     const who = t.org_units?.name || t.organizations?.short_name || t.organizations?.name;
     return who ? `${t.name} — ${who}` : t.name;
   };
+  // A–Z by what the dropdown shows; case-blind, and "Team 2" before "Team 10".
+  const sortedTeams = [...teams].sort((a, b) =>
+    optLabel(a).localeCompare(optLabel(b), undefined, { sensitivity: 'base', numeric: true }));
   // The grounds belonging to the chosen venue (venues come straight from the venues
   // list, so a venue with no courts still shows and is selectable). A ground switched
   // off in Setup → Venue drops out - unless it's the one this fixture already sits on,
@@ -478,14 +481,14 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
             <Select className="w-full" value={homeId} onChange={(e) => setHomeId(e.target.value)}>
               <option value="">- TBD -</option>
               {/* Hide the team already picked as Away - a team can't play itself. */}
-              {teams.filter((t) => t.id !== awayId).map((t) => <option key={t.id} value={t.id}>{optLabel(t)}</option>)}
+              {sortedTeams.filter((t) => t.id !== awayId).map((t) => <option key={t.id} value={t.id}>{optLabel(t)}</option>)}
             </Select>
           </Field>
           <Field compact label="Away team">
             <Select className="w-full" value={awayId} onChange={(e) => setAwayId(e.target.value)}>
               <option value="">- TBD / bye -</option>
               {/* Hide the team already picked as Home - a team can't play itself. */}
-              {teams.filter((t) => t.id !== homeId).map((t) => <option key={t.id} value={t.id}>{optLabel(t)}</option>)}
+              {sortedTeams.filter((t) => t.id !== homeId).map((t) => <option key={t.id} value={t.id}>{optLabel(t)}</option>)}
             </Select>
           </Field>
         </div>
