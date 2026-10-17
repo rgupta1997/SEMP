@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
-  CheckCircle2, ChevronRight, Clock, Eye, Flag, Lock, LockOpen, Pencil, Radio, ShieldCheck, Users,
+  CheckCircle2, ChevronRight, Clock, Eye, Flag, Lock, LockOpen, MapPin, Pencil, Radio, ShieldCheck, Users,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -41,7 +41,15 @@ interface ResultRow {
   away: Side | null;
   /** The console's working state; read here only for how a match ended. */
   live_state?: unknown;
+  /** Where it is played, when the organiser set one. */
+  ground?: { id: string; name: string; venue: string | null } | null;
 }
+
+/** A side's name in the desktop row: up to two lines, then "…". */
+const DESKTOP_NAME = 'line-clamp-2 min-w-0 break-words text-sm font-medium leading-snug text-slate-700 dark:text-slate-200';
+
+/** "Turfup · Turf 1" - venue then ground, whichever are set. */
+const venueLabel = (g: ResultRow['ground']) => (g ? [g.venue, g.name].filter(Boolean).join(' · ') : '');
 
 interface Side {
   id: string;
@@ -207,7 +215,7 @@ function TeamChip({ team, winner }: { team: ResultRow['home']; winner?: boolean 
   if (!team) {
     return (
       <span
-        className="grid h-9 min-w-9 place-items-center rounded-lg border border-dashed border-slate-300 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:border-slate-800 dark:text-slate-500"
+        className="grid h-9 min-w-9 shrink-0 place-items-center rounded-lg border border-dashed border-slate-300 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:border-slate-800 dark:text-slate-500"
         title="To be decided"
       >
         TBD
@@ -217,7 +225,7 @@ function TeamChip({ team, winner }: { team: ResultRow['home']; winner?: boolean 
   return (
     <span
       className={cn(
-        'grid h-9 w-9 place-items-center rounded-lg font-bold tracking-tight',
+        'grid h-9 w-9 shrink-0 place-items-center rounded-lg font-bold tracking-tight',
         // Four characters need the smaller size to stay inside the square.
         teamCode(team).length > 3 ? 'text-[9px]' : 'text-[11px]',
         winner ? 'bg-brand-500 text-white' : 'bg-slate-900 text-slate-100 dark:bg-slate-800',
@@ -751,7 +759,7 @@ export function ResultsPage() {
                   // shape everybody already reads on a sports app, and it fits 390px
                   // with room left over. At sm+ the original three-column grid is
                   // untouched.
-                  <Card key={f.id} interactive={canScore(f)} onClick={() => open(f)} className="block p-0 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-center lg:gap-x-4 lg:p-4">
+                  <Card key={f.id} interactive={canScore(f)} onClick={() => open(f)} className="block p-0 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(max-content,1fr)] lg:items-center lg:gap-x-4 lg:p-4">
 
                     {/* ---------------- phone ---------------- */}
                     <div className="flex flex-col gap-1 px-3 py-2 lg:hidden">
@@ -769,8 +777,9 @@ export function ResultsPage() {
                             #{f.match_no}
                           </span>
                         )}
-                        <span className="t-meta min-w-0 flex-1 truncate text-[12px]">
-                          {[f.round || (rankingEvent ? 'Event' : ''), whenLabel(f.scheduled_at)].filter(Boolean).join(' · ')}
+                        <span className="t-meta min-w-0 flex-1 truncate text-[12px]"
+                          title={venueLabel(f.ground) || undefined}>
+                          {[f.round || (rankingEvent ? 'Event' : ''), whenLabel(f.scheduled_at), venueLabel(f.ground)].filter(Boolean).join(' · ')}
                         </span>
                         <StatusGlyph locked={isLocked} rankingEvent={rankingEvent} status={f.status} />
                         {canManage && (
@@ -875,13 +884,22 @@ export function ResultsPage() {
                           near the result being recorded, which is where somebody
                           checking "is this the right match?" is standing. */}
                       <div className="mt-0.5 truncate">{whenLabel(f.scheduled_at)}</div>
+                      {f.ground && (
+                        <div className="mt-0.5 flex min-w-0 items-center gap-1" title={venueLabel(f.ground)}>
+                          <MapPin size={11} className="shrink-0" aria-hidden />
+                          <span className="truncate">{venueLabel(f.ground)}</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Center cell (auto): home · score · away. Ranking/event fixtures
                         have no head-to-head matchup, so show the event (discipline) name
                         instead of two empty team chips. */}
                     <div className="flex flex-col items-center gap-0.5">
-                    <div className="flex items-center gap-2 sm:gap-3">
+                    {/* name | score | name: two EQUAL name columns, 7-16rem, so the score
+                        stays centred and short names never wrap just to match the other. */}
+                    <div className={rankingEvent ? 'flex items-center gap-2 sm:gap-3'
+                      : 'grid grid-cols-[minmax(7rem,16rem)_4rem_minmax(7rem,16rem)] items-center gap-x-3'}>
                       {rankingEvent ? (
                         <div className="flex w-[19rem] items-center justify-center gap-2 text-center sm:w-[27rem]">
                           <span className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200" title={f.discipline ?? f.sport ?? undefined}>
@@ -891,8 +909,9 @@ export function ResultsPage() {
                         </div>
                       ) : (
                         <>
-                          <div className="flex w-36 items-center justify-end gap-2 sm:w-52">
-                            {f.home && <span className="truncate text-right text-sm font-medium text-slate-700 dark:text-slate-200" title={teamLabel(f.home)}>{teamLabel(f.home)}</span>}
+                          {/* Full names, wrapping to a second line - "…" only past two lines. */}
+                          <div className="flex min-w-0 items-center justify-end gap-2">
+                            {f.home && <span className={cn(DESKTOP_NAME, 'text-right')} title={teamLabel(f.home)}>{teamLabel(f.home)}</span>}
                             <TeamChip team={f.home} winner={f.winner_team_id != null && f.winner_team_id === f.home?.id} />
                           </div>
                           <span className="flex w-16 shrink-0 flex-col items-center whitespace-nowrap text-center text-lg font-bold tabular-nums text-slate-800 dark:text-slate-100">
@@ -910,9 +929,9 @@ export function ResultsPage() {
                               </span>
                             )}
                           </span>
-                          <div className="flex w-36 items-center gap-2 sm:w-52">
+                          <div className="flex min-w-0 items-center gap-2">
                             <TeamChip team={f.away} winner={f.winner_team_id != null && f.winner_team_id === f.away?.id} />
-                            {f.away && <span className="truncate text-sm font-medium text-slate-700 dark:text-slate-200" title={teamLabel(f.away)}>{teamLabel(f.away)}</span>}
+                            {f.away && <span className={DESKTOP_NAME} title={teamLabel(f.away)}>{teamLabel(f.away)}</span>}
                           </div>
                         </>
                       )}
