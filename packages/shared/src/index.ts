@@ -14,6 +14,7 @@ export * from './format-overrides.js';
 export * from './format-ladder.js';
 export * from './format-knobs.js';
 export * from './rally-rows.js';
+export * from './host-cities.js';
 export * from './stage-config.js';
 export * from './event-scoring.js';
 export * from './event-templates.js';

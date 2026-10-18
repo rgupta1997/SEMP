@@ -1,11 +1,12 @@
 import { Router } from 'express';
-import { applyTemplateSchema, bulkAssignOfficialsSchema, type ChampionshipStatus, createChampionshipSchema, entrantLabel, entrantLabelPlural, type EntryLevel, isIntraLevel, saveTemplateSchema, unitLabels, updateChampionshipSchema, updateChampionshipStatusSchema } from '@semp/shared';
+import { applyTemplateSchema, bulkAssignOfficialsSchema, type ChampionshipStatus, citiesLabel, createChampionshipSchema, normaliseCities, entrantLabel, entrantLabelPlural, type EntryLevel, isIntraLevel, saveTemplateSchema, unitLabels, updateChampionshipSchema, updateChampionshipStatusSchema } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
 import { can } from '../../http/middleware/can.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { reconcileCityVenues } from '../venues/host-cities.service.js';
 import { assertChampionshipTransition } from './domain/championship-lifecycle.js';
 import { notifyStatusChanged, notifyChampionshipPublished } from './championships.notifications.js';
 import { recomputeStandingsAtomic } from '../standings/standings.service.js';
@@ -89,6 +90,12 @@ function lifecycleMessage(status: ChampionshipStatus): { title: string; body: st
     default:
       return undefined;
   }
+}
+
+/** The host cities a create/update body names: the list, else the older single `venue`. */
+function hostCitiesOf(body: Record<string, unknown>): string[] {
+  if (Array.isArray(body.host_cities)) return normaliseCities(body.host_cities as string[]);
+  return typeof body.venue === 'string' ? normaliseCities([body.venue]) : [];
 }
 
 export function makeEventsRouter(prisma: Prisma): Router {
@@ -412,10 +419,14 @@ export function makeEventsRouter(prisma: Prisma): Router {
     }
 
     const { host_participates: hostParticipates, ...body } = req.body as Record<string, unknown>;
+    const cities = hostCitiesOf(body);
+    if (!cities.length) throw new BusinessRuleError('Add at least one host city.');
 
     const championship = await prisma.championships.create({
       data: {
         ...body,
+        host_cities: cities,
+        venue: citiesLabel(cities),
         host_organization_id: hostOrgId,
         entry_level: entryLevel,
         entry_scope_unit_id: scopeUnitId,
@@ -476,13 +487,9 @@ export function makeEventsRouter(prisma: Prisma): Router {
     await prisma.tournaments.create({
       data: { championship_id: championship.id, name: championship.name, status: 'active' },
     });
-    // Seed a default venue from the host city so disciplines have a venue to assign
-    // right away (the organiser can rename it or add more on the Venues tab).
-    if (championship.venue) {
-      await prisma.venues.create({
-        data: { championship_id: championship.id, name: championship.venue, city: championship.venue },
-      });
-    }
+    // A placeholder venue per host city, so disciplines have somewhere to be assigned
+    // right away. From here on the cities follow the venues (host-cities.service).
+    await reconcileCityVenues(prisma, championship.id, cities);
     res.status(201).json(championship);
   }));
 
@@ -539,7 +546,20 @@ export function makeEventsRouter(prisma: Prisma): Router {
     // Not a column - the wizard re-sends its create-time answer on every save, and
     // Prisma rejects the whole update over one unknown key.
     const { host_participates: _hostParticipates, ...data } = req.body as Record<string, unknown>;
-    const championship = await prisma.championships.update({ where: { id: req.params.id }, data: data as never });
+    // Cities re-sent (the wizard's draft step): make the venues match them, then the
+    // cities are re-derived from those venues. Never written directly - they follow venues.
+    let cities: string[] | null = null;
+    if ('host_cities' in data || 'venue' in data) {
+      cities = hostCitiesOf(data);
+      if (!cities.length) throw new BusinessRuleError('Add at least one host city.');
+      delete data.host_cities;
+      delete data.venue;
+    }
+    let championship = await prisma.championships.update({ where: { id: req.params.id }, data: data as never });
+    if (cities) {
+      await reconcileCityVenues(prisma, championship.id, cities);
+      championship = (await prisma.championships.findUnique({ where: { id: championship.id } }))!;
+    }
 
     if (wasPrivate) {
       // Best-effort, matching every other side-effect notification in this codebase -

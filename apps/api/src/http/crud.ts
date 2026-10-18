@@ -27,6 +27,8 @@ interface CrudOptions {
   createGuards?: RequestHandler[]; // applied only to create; falls back to writeGuards when omitted
   beforeDelete?: (id: string) => Promise<void>; // run before delete: clean up children or block (throw)
   afterUpdate?: (id: string, before: any, after: any) => Promise<void>; // run after update: side effects like notifications
+  afterCreate?: (row: any) => Promise<void>; // run after create: keep derived data in step
+  afterDelete?: (before: any) => Promise<void>; // run after delete, with the row as it was
   /**
    * Last chance to reshape the validated body before it reaches Prisma.
    *
@@ -66,6 +68,7 @@ export function makeCrudRouter(delegate: Delegate, opts: CrudOptions): Router {
 
   router.post('/', ...createGuards, validateBody(opts.createSchema), asyncHandler(async (req, res) => {
     const row = await delegate.create({ data: opts.beforeWrite ? opts.beforeWrite(req.body) : req.body });
+    if (opts.afterCreate) await opts.afterCreate(row);
     res.status(201).json(row);
   }));
 
@@ -83,7 +86,10 @@ export function makeCrudRouter(delegate: Delegate, opts: CrudOptions): Router {
 
   router.delete('/:id', ...writeGuards, asyncHandler(async (req, res) => {
     if (opts.beforeDelete) await opts.beforeDelete(req.params.id);
+    // Only fetched when a caller opts into afterDelete, as with afterUpdate.
+    const before = opts.afterDelete ? await delegate.findUnique({ where: { id: req.params.id } }) : null;
     await delegate.delete({ where: { id: req.params.id } });
+    if (opts.afterDelete && before) await opts.afterDelete(before);
     res.status(204).send();
   }));
 
