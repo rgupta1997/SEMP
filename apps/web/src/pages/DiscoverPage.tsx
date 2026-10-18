@@ -3,14 +3,14 @@ import { Link } from 'react-router-dom';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/useWorkspace';
-import { ORG_ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
+import { citiesLabel, citiesShort, hostCitiesFor, ORG_ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useTableControls, fmtDateRange } from '../lib/hooks';
 import { Button, EmptyState, Field, Input, ListToolbar, Modal, PageHeader, Pagination, SearchInput, Select, Spinner, StatusBadge, SURFACE, toast } from '../components/ui';
 
 interface Championship {
   id: string; name: string; slug: string; status: string;
-  venue?: string | null; start_date: string; end_date: string;
+  venue?: string | null; host_cities?: string[] | null; start_date: string; end_date: string;
   sports?: string[];
   visibility?: string; // private ones appear only for people already involved
 }
@@ -268,6 +268,8 @@ export function DiscoverPage() {
               <tbody>
                 {tc.view.map((c) => {
                   const sports = c.sports ?? [];
+                  // Like sports: the first two cities, then "+N", all of them on hover.
+                  const cities = hostCitiesFor(c);
                   const applied = enrollmentStatusFor(c.id);
                   return (
                     <tr key={c.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
@@ -276,7 +278,8 @@ export function DiscoverPage() {
                           {c.name}
                         </Link>
                         <div className="text-xs text-slate-500">
-                          {c.venue || 'Venue TBD'} · {fmtDateRange(c.start_date, c.end_date)}
+                          <span title={citiesLabel(cities) || undefined}>{citiesShort(cities) || 'Venue TBD'}</span>
+                          {' · '}{fmtDateRange(c.start_date, c.end_date)}
                         </div>
                       </td>
                       {/* Sports were the card's third line; as a column they stay

@@ -7,6 +7,7 @@ import type { ChampionshipTemplate } from '@semp/shared';
 import { ENTRY_LEVEL_META, ENTRY_LEVELS, isIntraLevel, type EntryLevel } from '@semp/shared';
 import { useOrgUnits } from '../../lib/units';
 import { BackButton, Button, Card, Field, Input, Pills, Select, Spinner, Stepper, Textarea, cn, confirmDialog, toast } from '../../components/ui';
+import { CityChipsInput } from '../../components/CityChipsInput';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { SportsTab } from './setup/SportsTab';
 import { TemplateGallery } from './TemplateGallery';
@@ -48,7 +49,7 @@ export function CreateEventWizard() {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugTouched, setSlugTouched] = useState(false);
-  const [venue, setVenue] = useState('');
+  const [cities, setCities] = useState<string[]>([]);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [description, setDescription] = useState('');
@@ -115,10 +116,10 @@ export function CreateEventWizard() {
   const createDraft = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!venue.trim()) { setError('Host city is required'); return; }
+    if (!cities.length) { setError('Add at least one host city'); return; }
     if (!startDate || !endDate) { setError('Start and end dates are required'); return; }
     const body = {
-      name, slug: effectiveSlug, venue: venue.trim(), description: description || undefined,
+      name, slug: effectiveSlug, host_cities: cities, description: description || undefined,
       start_date: startDate, end_date: endDate, visibility,
       // Sent only when there was a choice to make. Omitted, the server infers it
       // from a sole administered organisation, or leaves it null for an individual.
@@ -236,7 +237,9 @@ export function CreateEventWizard() {
                 <Field label="Start date"><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} required /></Field>
                 <Field label="End date"><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} required /></Field>
               </div>
-              <Field label="Host city" hint="Required - used as your championship's default venue."><Input value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="Mumbai" required /></Field>
+              <Field label="Host cities" hint="At least one. Press Enter after each city - every city becomes a venue you can schedule matches at.">
+                <CityChipsInput value={cities} onChange={setCities} />
+              </Field>
               {hostable.length > 1 && (
                 <Field
                   label="Hosted by"

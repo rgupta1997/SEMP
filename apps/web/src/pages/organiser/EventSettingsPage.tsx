@@ -8,12 +8,15 @@ import { titleCase } from '../../lib/format';
 import { Button, Card, CardBody, CardHeader, confirmDialog, Field, Input, Pills, Progress, Select, StatusBadge, Textarea, toast } from '../../components/ui';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { StandingsRulesCard } from '../../components/StandingsRulesCard';
+import { Link } from 'react-router-dom';
+import { citiesLabel, hostCitiesFor } from '@semp/shared';
 
 export function EventSettingsPage() {
   const navigate = useNavigate();
   const { championship, eventId } = useEvent();
   const [name, setName] = useState(championship.name);
-  const [venue, setVenue] = useState(championship.venue ?? '');
+  // Read-only here: host cities follow the venues, so they are changed on the Venue tab.
+  const cities = hostCitiesFor(championship as { host_cities?: string[]; venue?: string | null });
   const [description, setDescription] = useState(championship.description ?? '');
   const [startDate, setStartDate] = useState(championship.start_date?.slice(0, 10) ?? '');
   const [endDate, setEndDate] = useState(championship.end_date?.slice(0, 10) ?? '');
@@ -55,7 +58,13 @@ export function EventSettingsPage() {
             <Field label="Start date"><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
             <Field label="End date"><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} /></Field>
           </div>
-          <Field label="Host city / venue"><Input value={venue} onChange={(e) => setVenue(e.target.value)} /></Field>
+          <div className="mb-4">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Host cities</span>
+            <p className="text-sm text-slate-800 dark:text-slate-200">{citiesLabel(cities) || 'None yet'}</p>
+            <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+              The cities your venues are in. To change them, add or edit venues on Setup → <Link to={`/championships/${eventId}/setup?tab=venues`} className="font-semibold text-brand-600 hover:underline dark:text-brand-400">Venue</Link>.
+            </p>
+          </div>
           {/* Only offered to somebody who could actually host on an organisation's
               behalf - the server refuses any other choice, and an option that is
               always rejected is worse than no option. */}
@@ -87,7 +96,7 @@ export function EventSettingsPage() {
             {saved && <span className="text-sm font-medium text-emerald-600">Saved ✓</span>}
             <Button disabled={save.isPending}
               onClick={() => save.mutate({
-                name, venue: venue || undefined, description: description || undefined,
+                name, description: description || undefined,
                 start_date: startDate, end_date: endDate, visibility,
                 ...(hostable.length > 0 ? { host_organization_id: hostOrgId || null } : {}),
               }, { onSuccess: () => toast.success('Championship saved'), onError: (e: any) => toast.error(e.message) })}>

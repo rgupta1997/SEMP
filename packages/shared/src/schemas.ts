@@ -10,6 +10,7 @@ import { disciplineFormatConfigSchema } from './scoring.js';
 import { stageConfigSchema } from './stage-config.js';
 import { formatOverridesSchema } from './format-overrides.js';
 import { ENTRY_LEVELS } from './org-structure.js';
+import { HOST_CITIES_MAX } from './host-cities.js';
 
 const uuid = z.string().uuid();
 
@@ -414,8 +415,11 @@ export const createChampionshipSchema = z.object({
   name: z.string().min(1),
   slug: z.string().min(1).regex(/^[a-z0-9-]+$/, 'lowercase letters, numbers, hyphens only'),
   description: z.string().optional(),
-  // The host city is required - it doubles as the championship's default venue.
-  venue: z.string().min(1, 'Host city is required'),
+  // Where it is played: one or more cities, each seeded as a venue. At least one is
+  // required - checked on the server, which also accepts the older single `venue`.
+  host_cities: z.array(z.string().max(80)).max(HOST_CITIES_MAX).optional(),
+  // Legacy single host city. Still accepted; the server derives it from host_cities.
+  venue: z.string().optional(),
   start_date: z.coerce.date(),
   end_date: z.coerce.date(),
   status: z.enum(CHAMPIONSHIP_STATUS).optional(),

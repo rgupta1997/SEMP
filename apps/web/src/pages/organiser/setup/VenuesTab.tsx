@@ -215,9 +215,12 @@ function VenueModal({ eventId, path, venue, onClose }: { eventId: string; path: 
   const { data: allGrounds = [] } = useApi<any[]>(groundsPath(eventId));
   const grounds = current ? allGrounds.filter((g) => g.venue_id === current.id) : [];
 
-  const create = useApiMutation((body: any) => api('POST', '/venues', body), [path], (created: any) => { setCurrent(created); setEditing(false); });
-  const update = useApiMutation((body: any) => api('PATCH', `/venues/${current?.id}`, body), [path], () => onClose());
-  const remove = useApiMutation(() => api('DELETE', `/venues/${current?.id}`), [path], () => onClose());
+  // A venue change re-derives the championship's host cities, so its header and the
+  // event lists refresh too - not just this tab.
+  const keys = [path, `/championships/${eventId}`, '/championships', '/championships/mine'];
+  const create = useApiMutation((body: any) => api('POST', '/venues', body), keys, (created: any) => { setCurrent(created); setEditing(false); });
+  const update = useApiMutation((body: any) => api('PATCH', `/venues/${current?.id}`, body), keys, () => onClose());
+  const remove = useApiMutation(() => api('DELETE', `/venues/${current?.id}`), keys, () => onClose());
   const pending = create.isPending || update.isPending;
 
   const save = () => {

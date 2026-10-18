@@ -77,6 +77,7 @@ model championships {
   slug                       String                       @unique(map: "events_slug_key") @db.VarChar
   description                String?
   venue                      String?                      @db.VarChar
+  host_cities                String[]                     @default([])
   start_date                 DateTime                     @db.Date
   end_date                   DateTime                     @db.Date
   status                     String                       @default("draft") @db.VarChar
