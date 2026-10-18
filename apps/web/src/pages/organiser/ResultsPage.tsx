@@ -759,7 +759,7 @@ export function ResultsPage() {
                   // shape everybody already reads on a sports app, and it fits 390px
                   // with room left over. At sm+ the original three-column grid is
                   // untouched.
-                  <Card key={f.id} interactive={canScore(f)} onClick={() => open(f)} className="block p-0 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(max-content,1fr)] lg:items-center lg:gap-x-4 lg:p-4">
+                  <Card key={f.id} interactive={canScore(f)} onClick={() => open(f)} className="block p-0 lg:grid lg:grid-cols-[minmax(min-content,1fr)_auto_minmax(max-content,1fr)] lg:items-center lg:gap-x-4 lg:p-4">
 
                     {/* ---------------- phone ---------------- */}
                     <div className="flex flex-col gap-1 px-3 py-2 lg:hidden">
@@ -777,9 +777,8 @@ export function ResultsPage() {
                             #{f.match_no}
                           </span>
                         )}
-                        <span className="t-meta min-w-0 flex-1 truncate text-[12px]"
-                          title={venueLabel(f.ground) || undefined}>
-                          {[f.round || (rankingEvent ? 'Event' : ''), whenLabel(f.scheduled_at), venueLabel(f.ground)].filter(Boolean).join(' · ')}
+                        <span className="t-meta min-w-0 flex-1 truncate text-[12px]">
+                          {[f.round || (rankingEvent ? 'Event' : ''), whenLabel(f.scheduled_at)].filter(Boolean).join(' · ')}
                         </span>
                         <StatusGlyph locked={isLocked} rankingEvent={rankingEvent} status={f.status} />
                         {canManage && (
@@ -812,6 +811,15 @@ export function ResultsPage() {
                           </span>
                         )}
                       </div>
+
+                      {/* The venue on its own line: at the end of the line above it was
+                          almost always the part cut off. Truncates only past the card's width. */}
+                      {f.ground && (
+                        <div className="t-meta -mt-0.5 flex min-w-0 items-center gap-1 text-[12px]" title={venueLabel(f.ground)}>
+                          <MapPin size={11} className="shrink-0" aria-hidden />
+                          <span className="truncate">{venueLabel(f.ground)}</span>
+                        </div>
+                      )}
 
                       {rankingEvent ? (
                         <div className="flex items-center gap-2">
@@ -871,21 +879,26 @@ export function ResultsPage() {
                     {/* Left cell (1fr): match type — always shown in full.
                         Both outer cells are equal 1fr so the auto center column is
                         always physically centered regardless of their content widths. */}
-                    <div className="min-w-0 text-xs text-slate-500 dark:text-slate-400" title={f.round ?? undefined}>
-                      <div className="flex items-center gap-1.5">
+                    {/* Each line carries its own tooltip, so a cut-off line shows ITS full text
+                        on hover - one tooltip on the block showed the round over every line. */}
+                    <div className="min-w-0 text-xs text-slate-500 dark:text-slate-400">
+                      {/* contain:inline-size on the round and venue lines: they fit the
+                          column and truncate, but never widen it - only the time sets its minimum. */}
+                      <div className="flex items-center gap-1.5 [contain:inline-size]">
                         {f.match_no != null && (
                           <span className="t-num rounded bg-slate-100 px-1.5 py-0.5 font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
                             #{f.match_no}
                           </span>
                         )}
-                        <span className="truncate font-semibold uppercase tracking-wide">{f.round || '-'}</span>
+                        <span className="truncate font-semibold uppercase tracking-wide" title={f.round ?? undefined}>{f.round || '-'}</span>
                       </div>
                       {/* When it is played. It was on the Schedule tab and nowhere
                           near the result being recorded, which is where somebody
                           checking "is this the right match?" is standing. */}
-                      <div className="mt-0.5 truncate">{whenLabel(f.scheduled_at)}</div>
+                      {/* Never cut: it is short, and the column is at least this wide. */}
+                      <div className="mt-0.5 whitespace-nowrap">{whenLabel(f.scheduled_at)}</div>
                       {f.ground && (
-                        <div className="mt-0.5 flex min-w-0 items-center gap-1" title={venueLabel(f.ground)}>
+                        <div className="mt-0.5 flex min-w-0 items-center gap-1 [contain:inline-size]" title={venueLabel(f.ground)}>
                           <MapPin size={11} className="shrink-0" aria-hidden />
                           <span className="truncate">{venueLabel(f.ground)}</span>
                         </div>
