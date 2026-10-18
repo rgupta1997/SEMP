@@ -152,8 +152,10 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
                 <div className="w-24 shrink-0 truncate text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 sm:w-auto" title={f.round ?? undefined}>
                   {f.round || '-'}
                 </div>
+                {/* Phone: status on the round's line, so the date and venue can sit BELOW the teams. */}
+                <span className="ml-auto sm:hidden"><StatusBadge status={f.status} /></span>
 
-                <div className={cn('order-last basis-full text-sm sm:order-none sm:basis-auto',
+                <div className={cn('basis-full text-sm sm:basis-auto',
                   isRankingEvent(f) ? 'flex items-center justify-center' : 'grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-3')}>
                   {isRankingEvent(f) ? (
                     <div className="flex items-center justify-center gap-2 text-center">
@@ -186,22 +188,23 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
                   )}
                 </div>
 
-                <div className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400 sm:ml-0">
+                {/* Phone: a full-width line under the teams. sm+: the right-hand column. */}
+                <div className="flex basis-full flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400 sm:basis-auto sm:justify-end">
                   {f.scorecard_url && (
                     <a href={f.scorecard_url} target="_blank" rel="noreferrer" className="font-semibold text-brand-600 hover:underline dark:text-brand-400" onClick={(e) => e.stopPropagation()}>
                       Scorecard ↗
                     </a>
                   )}
-                  {mode === 'schedule' && f.scheduled_at && <span>{fmtDateTime(f.scheduled_at)}</span>}
-                  {mode === 'schedule' && f.ground && <span className="hidden sm:inline">{f.ground.name}</span>}
-                  {/* Where it was played, when the organiser set a venue. */}
-                  {mode === 'results' && f.ground && (
+                  {/* When and where, on Schedule and Results alike and at every width -
+                      each only when the organiser set it. */}
+                  {f.scheduled_at && <span className="whitespace-nowrap">{fmtDateTime(f.scheduled_at)}</span>}
+                  {f.ground && (
                     <span className="flex items-center gap-1" title="Venue">
-                      <MapPin size={12} aria-hidden />
+                      <MapPin size={12} className="shrink-0" aria-hidden />
                       {[f.ground.venue, f.ground.name].filter(Boolean).join(' · ')}
                     </span>
                   )}
-                  <StatusBadge status={f.status} />
+                  <span className="hidden sm:inline-flex"><StatusBadge status={f.status} /></span>
                 </div>
               </Card>
             );
