@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, ClipboardPen, Eye, Pencil, Trash2 } from 'lucide-react';
+import { ClipboardList, ClipboardPen, Eye, Pencil, Trash2, Users } from 'lucide-react';
 import { FIXTURE_STATUS, inheritedOverrides, resolveFormat, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
@@ -9,9 +9,10 @@ import { ARCHIVED_READ_ONLY_MESSAGE, isRankingSport, isScoredSport } from '@semp
 import { FormatPicker } from '../../features/scoring/FormatPicker';
 import { usePageFilters, useFilterBar } from '../../lib/filters';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
-import { Badge, Button, Card, cn, confirmDialog, EmptyState, Field, Input, Modal, Segmented, Select, Spinner, StatusBadge, StatusLegend, toast } from '../../components/ui';
+import { Badge, Button, Card, cn, confirmDialog, EmptyState, Field, Input, Modal, SearchableSelect, Segmented, Select, Spinner, StatusBadge, StatusLegend, toast } from '../../components/ui';
 import { Bracket, fixtureStatusLabel } from '../../components/Bracket';
 import { FitName } from '../../components/FitName';
+import { useUrlState } from '../../components/primitives';
 import { RoundRobinGrid } from '../../components/RoundRobinGrid';
 import { ScheduleTimeline } from '../../components/ScheduleTimeline';
 import { StageConfigWizard } from '../../components/StageConfigWizard';
@@ -448,13 +449,8 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
   // organisation otherwise. Appending the organisation unconditionally
   // disambiguated nothing inside an internal championship, where every squad
   // belongs to the same one.
-  const optLabel = (t: any) => {
-    const who = t.org_units?.name || t.organizations?.short_name || t.organizations?.name;
-    return who ? `${t.name} — ${who}` : t.name;
-  };
-  // A–Z by what the dropdown shows; case-blind, and "Team 2" before "Team 10".
-  const sortedTeams = [...teams].sort((a, b) =>
-    optLabel(a).localeCompare(optLabel(b), undefined, { sensitivity: 'base', numeric: true }));
+  const optLabel = teamPickLabel;
+  const sortedTeams = sortTeamsForPicker(teams);
   // The grounds belonging to the chosen venue (venues come straight from the venues
   // list, so a venue with no courts still shows and is selectable). A ground switched
   // off in Setup → Venue drops out - unless it's the one this fixture already sits on,
@@ -601,8 +597,26 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
   );
 }
 
-function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, formatLabel, teamName, teamShort, teamOrg, grounds, venues, officials, canManage }:
-  { td: any; fixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; teamShort?: (id: string | null) => string | null; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
+/**
+ * A team as a picker shows it. Same-named squads (several "Badminton (Mixed)" draws) are
+ * told apart by who they play FOR - campus or batch, else organisation.
+ */
+function teamPickLabel(t: any): string {
+  const who = t.org_units?.name || t.organizations?.short_name || t.organizations?.name;
+  return who ? `${t.name} — ${who}` : t.name;
+}
+
+/** A–Z by that label; case-blind, and "Team 2" before "Team 10". */
+const sortTeamsForPicker = (teams: any[]) => [...teams].sort((a, b) =>
+  teamPickLabel(a).localeCompare(teamPickLabel(b), undefined, { sensitivity: 'base', numeric: true }));
+
+/** A fixture the given team plays in. */
+const involves = (f: any, teamId: string) => f.home_team_id === teamId || f.away_team_id === teamId;
+
+function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, formatLabel, teamName, teamShort, teamOrg, grounds, venues, officials, canManage, teamFilter = '' }:
+  { td: any; fixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; formatLabel?: string | null; teamName: (id: string | null) => string; teamShort?: (id: string | null) => string | null; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean;
+    /** Show only this team's matches. Display only - generate/regenerate still see the whole draw. */
+    teamFilter?: string }) {
   // The championship-wide list is ordered by schedule; restore the per-draw
   // pool → bracket order the visual (bracket / grid) view needs for layout.
   const fixtures = [...drawFixtures].sort((a, b) => (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0));
@@ -614,7 +628,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
     const ta = a.scheduled_at ? new Date(a.scheduled_at).getTime() : Infinity;
     const tb = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Infinity;
     return ta - tb || (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0);
-  });
+  }).filter((f) => !teamFilter || involves(f, teamFilter));
   // Team NAMES come from a separate, championship-wide query (teamsPath) - generating
   // a draw only invalidates the fixtures themselves, and a fixture's home/away team_id
   // is real the instant it's created. Rendering it before that other query has ever
@@ -681,7 +695,8 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
   // Knockout draws show a bracket; everything else (league / round-robin /
   // groups) shows a results grid. Both are the "visual" view.
   const visualLabel = hasBracket ? 'Bracket' : 'Grid';
-  const showVisual = !isRanking && fixtures.length > 0 && view === 'visual';
+  // A bracket / grid needs the whole draw, so a team filter shows the list instead.
+  const showVisual = !isRanking && fixtures.length > 0 && view === 'visual' && !teamFilter;
 
   // A discipline built with the stage-config wizard has more than one
   // stage_sequence (a pool stage + one or more knockout branches) - each stage is
@@ -760,7 +775,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
         {/* Wraps: five controls do not fit one line on a narrow phone (Regenerate ran off
             the card). Under 427px every button is also tightened so they fit one line. */}
         <div className="flex flex-wrap items-center gap-2 max-[427px]:gap-1.5 max-[427px]:[&_button]:min-h-0 max-[427px]:[&_button]:px-2 max-[427px]:[&_button]:py-1.5 max-[427px]:[&_button]:text-[11px]">
-          {fixtures.length > 0 && !isRanking && (
+          {fixtures.length > 0 && !isRanking && !teamFilter && (
             <Segmented
               size="sm"
               value={view}
@@ -949,8 +964,12 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
   );
 }
 
-function SportBlock({ ts, draws, allFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, formatName, teamName, teamShort, teamOrg, grounds, venues, officials, canManage }:
-  { ts: any; draws: any[]; allFixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; teamShort?: (id: string | null) => string | null; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean }) {
+function SportBlock({ ts, draws: allSportDraws, allFixtures, fixturesLoading, teamsLoading, fixturesPath, teamsPath, sportName, formatName, teamName, teamShort, teamOrg, grounds, venues, officials, canManage, teamFilter = '' }:
+  { ts: any; draws: any[]; allFixtures: any[]; fixturesLoading: boolean; teamsLoading: boolean; fixturesPath: string; teamsPath: string; sportName: string; formatName: (id: string | null | undefined) => string | null; teamName: (id: string | null) => string; teamShort?: (id: string | null) => string | null; teamOrg: (id: string | null) => string; grounds: Ground[]; venues: Venue[]; officials: Official[]; canManage: boolean; teamFilter?: string }) {
+  // With a team picked, only the draws it actually plays in.
+  const draws = teamFilter
+    ? allSportDraws.filter((td) => allFixtures.some((f) => f.tournament_discipline_id === td.id && involves(f, teamFilter)))
+    : allSportDraws;
   if (draws.length === 0) return null;
   // Effective format: the draw's own format wins, else the sport's (matches the
   // generate route's fallback).
@@ -976,6 +995,7 @@ function SportBlock({ ts, draws, allFixtures, fixturesLoading, teamsLoading, fix
             venues={venues}
             officials={officials}
             canManage={canManage}
+            teamFilter={teamFilter}
           />
         ))}
       </div>
@@ -1090,6 +1110,16 @@ export function SchedulePage() {
   });
   const visibleTsports = sportId ? tsports.filter((ts) => ts.sport_id === sportId) : tsports;
 
+  // Team filter: only teams that actually play a match here, A–Z. In the URL so
+  // opening a match and pressing Back keeps it.
+  const [teamFilter, setTeamFilter] = useUrlState<string>('team', '');
+  const teamOptions = useMemo(() => {
+    const inPlay = new Set(allFixtures.flatMap((f: any) => [f.home_team_id, f.away_team_id]).filter(Boolean));
+    return sortTeamsForPicker(teams.filter((t) => inPlay.has(t.id)));
+  }, [allFixtures, teams]);
+  const teamHasMatch = !teamFilter || visibleTsports.some((ts) => allDraws.some((d) => d.tournament_sport_id === ts.id
+    && allFixtures.some((f: any) => f.tournament_discipline_id === d.id && involves(f, teamFilter))));
+
   if (tournamentsLoading) {
     return <div className="grid h-40 place-items-center"><Spinner /></div>;
   }
@@ -1105,6 +1135,27 @@ export function SchedulePage() {
           onChange={setTopView}
           options={[{ value: 'manage', label: 'Fixtures' }, { value: 'timeline', label: 'Timeline' }]}
         />
+        {/* A compact filter, the height of the switch beside it; tinted while a team is
+            picked, so a filtered list never passes for the whole schedule. */}
+        {/* Searchable: a long team list is narrowed by typing, not scrolled. */}
+        {topView === 'manage' && teamOptions.length > 0 && (
+          <div className={cn('min-w-0 max-sm:flex-1 sm:ml-auto sm:w-64',
+            // `!` because cn() only joins: the trigger's own padding/colours must lose.
+            '[&>div>button]:!py-1.5 [&>div>button]:text-sm',
+            teamFilter && '[&>div>button]:!border-brand-300 [&>div>button]:!bg-brand-50 [&>div>button]:font-semibold [&>div>button]:!text-brand-700 dark:[&>div>button]:!border-brand-500/40 dark:[&>div>button]:!bg-brand-500/10 dark:[&>div>button]:!text-brand-300')}>
+            <SearchableSelect
+              className="w-full"
+              value={teamFilter}
+              onChange={setTeamFilter}
+              searchPlaceholder="Search teams…"
+              emptyLabel="No team matches"
+              options={[
+                { id: '', label: 'All teams', icon: <Users size={14} aria-hidden /> },
+                ...teamOptions.map((t) => ({ id: t.id, label: teamPickLabel(t) })),
+              ]}
+            />
+          </div>
+        )}
       </div>
       {topView === 'timeline' ? (
         fixturesLoading ? <div className="grid h-40 place-items-center"><Spinner /></div> : (
@@ -1125,9 +1176,12 @@ export function SchedulePage() {
         <div className="grid h-40 place-items-center"><Spinner /></div>
       ) : tsports.length === 0 ? (
         <EmptyState icon="⚑" title="No sports configured" description="Add sports & disciplines in Setup, then come back to generate fixtures." />
+      ) : !teamHasMatch ? (
+        <EmptyState icon="⚑" title="No matches for this team" description="Pick another team, or a different sport."
+          action={<Button variant="outline" onClick={() => setTeamFilter('')}>Show all teams</Button>} />
       ) : (
         <div className="space-y-6">
-          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} teamsLoading={teamsLoading} fixturesPath={fixturesPath} teamsPath={teamsPath} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} teamShort={teamShort} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManage} />)}
+          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} teamsLoading={teamsLoading} fixturesPath={fixturesPath} teamsPath={teamsPath} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} teamShort={teamShort} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManage} teamFilter={teamFilter} />)}
         </div>
       )}
     </div>

@@ -14,7 +14,7 @@ import { audit, AUDIT_ACTIONS } from '../iam/audit.service.js';
 import { deriveProvisionedPassword, phoneLast10 } from '../iam/users.helpers.js';
 import { mintSportagonIds, orgIdPrefixFor } from '../iam/sportagon-id.js';
 import { assertOrgNotArchived } from '../iam/organization-archive.service.js';
-import { notifyJoinApproved } from '../iam/organizations.notifications.js';
+import { notifyJoinApproved, notifyJoinDeclined } from '../iam/organizations.notifications.js';
 import { GENDERS, validateRoster, type RosterContext, type RosterRow, type RosterRowResult } from './roster-import.js';
 
 // The student roll (J1-E5).
@@ -580,10 +580,12 @@ export function makePeopleRouter(prisma: Prisma): Router {
     // boundary the rest of this router is built to hold.
     const changed = members.filter((m) => m.verification !== verification);
 
-    // Verifying a pending join request accepts it too, as Approve does - otherwise the
-    // person stays "Pending" on their side while verified on ours. Only for someone who
-    // may approve members: a Sports Admin can verify but must not admit people.
-    const mayApprove = verification === 'verified' && await can(prisma, 'org.member.manage', {
+    // A pending JOIN REQUEST is answered here too (the Members approval card is
+    // de-wired): Verify accepts it, as Approve did; Reject declines it, as Decline did -
+    // otherwise the person stays "Pending" on their side either way. Only for someone
+    // who may admit members: a Sports Admin can verify but must not admit or turn away.
+    const pendingRequests = members.filter((m) => m.status === 'pending');
+    const mayDecide = pendingRequests.length > 0 && await can(prisma, 'org.member.manage', {
       user: { id: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin },
       scope: { organizationId },
       fallback: async () => !!(await prisma.organization_members.findFirst({
@@ -591,7 +593,10 @@ export function makePeopleRouter(prisma: Prisma): Router {
         select: { id: true },
       })),
     });
-    const admitted = mayApprove ? members.filter((m) => m.status === 'pending') : [];
+    const admitted = mayDecide && verification === 'verified' ? pendingRequests : [];
+    // Kept as status 'rejected' (not deleted, as Decline did) so it stays under Rejected
+    // here; the person can ask again - /join re-opens a rejected row.
+    const declined = mayDecide && verification === 'rejected' ? pendingRequests : [];
 
     await prisma.$transaction([
       ...changed.map((m) => prisma.organization_members.update({
@@ -607,12 +612,17 @@ export function makePeopleRouter(prisma: Prisma): Router {
         where: { id: { in: admitted.map((m) => m.id) }, status: 'pending' },
         data: { status: 'active' },
       })] : []),
+      ...(declined.length ? [prisma.organization_members.updateMany({
+        where: { id: { in: declined.map((m) => m.id) }, status: 'pending' },
+        data: { status: 'rejected' },
+      })] : []),
     ]);
 
-    // The same "you're in" notification Approve sends.
-    if (admitted.length) {
+    // The same notifications Approve / Decline send.
+    if (admitted.length || declined.length) {
       const orgName = (await prisma.organizations.findUnique({ where: { id: organizationId }, select: { name: true } }))?.name ?? 'the organization';
       for (const m of admitted) await notifyJoinApproved(prisma, m.user_id, orgName, req.user!.id);
+      for (const m of declined) await notifyJoinDeclined(prisma, m.user_id, orgName, req.user!.id);
     }
 
     for (const m of changed) {
@@ -633,6 +643,7 @@ export function makePeopleRouter(prisma: Prisma): Router {
       changed: changed.length,
       already: members.length - changed.length,
       admitted: admitted.length,
+      declined: declined.length,
     });
   }));
 

@@ -180,10 +180,13 @@ export function PlayersPage() {
   const canEditPeople = perms.hasOrgPermission('people.edit', orgId);
   const canImport = perms.hasOrgPermission('people.import', orgId);
   const canVerify = perms.hasOrgPermission('people.verify', orgId);
+  // Removing someone is deciding who belongs - the same permission as approving a join
+  // request, which a Sports Admin deliberately does not hold.
+  const canRemove = perms.hasOrgPermission('org.member.manage', orgId);
   // Selection exists to drive the bulk bar, so the checkbox column and the Actions
   // column appear when there is at least one bulk action behind them. Without this a
   // reader gets two empty columns and a table that reflows for nothing.
-  const canSelect = canVerify || canEditPeople;
+  const canSelect = canVerify || canEditPeople || canRemove;
   const ws = useWorkspace();
   // Archived: the roll can be read, not changed - nobody added, verified or rejected.
   // The server refuses each of these too; the buttons say so before anyone tries.
@@ -339,6 +342,29 @@ export function PlayersPage() {
     }
   }
 
+  // Out of the organisation altogether. Their own record (certificates, stats, medals)
+  // is theirs and stays; what goes is this organisation's hold on them.
+  async function removePeople(ids: string[], subject: string) {
+    const ok = await confirmDialog({
+      title: `Remove ${subject} from the organisation?`,
+      message: `${subject} will leave this organisation: their roll number, verification, campus placement and any role here are removed, and they come off its squads. Their certificates, career stats and medals stay on their own profile. They can be added back later.`,
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const res = await api<{ removed: number }>('POST', `/organizations/${orgId}/members/remove`, { member_ids: ids });
+      toast.success(`${res.removed} ${res.removed === 1 ? 'person' : 'people'} removed`);
+      setSelected(new Set());
+      await refetch();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // Named in the confirmation so the number being acted on is stated once more,
   // in the one place that cannot be misread as a link to something else.
   const selectedLabel = selected.size === tc.total && tc.total > 0
@@ -469,6 +495,12 @@ export function PlayersPage() {
                     Reject {selected.size}
                   </Button>
                 </>
+              )}
+              {canRemove && (
+                <Button size="sm" variant="danger" disabled={busy || archived} title={archivedTitle}
+                  onClick={() => removePeople([...selected], selectedLabel)}>
+                  Remove {selected.size}
+                </Button>
               )}
               {/* Placing a whole intake at once. The commonest shape of this job is
                   "these 120 people are all Bangalore", and doing it a row at a time

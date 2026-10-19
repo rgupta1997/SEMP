@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Landmark } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/useWorkspace';
 import { api } from '../lib/api';
 import { useApiMutation } from '../lib/hooks';
+import { notificationHooks } from '../lib/notification';
 import { titleCase } from '../lib/format';
 import { InstitutionFormModal } from '../components/InstitutionFormModal';
 import { JoinOrgModal } from '../components/JoinOrgModal';
@@ -19,6 +20,24 @@ export function OrganizationsPage() {
 
   const memberships = ctx?.organizations ?? [];
   const pending = memberships.filter((m) => m.status === 'pending');
+
+  // A REQUEST ANSWERED ELSEWHERE shows here without a reload. The list comes from the
+  // login context, read once; the answer arrives as a notification. So while a request
+  // is pending, a rise in the unread count (live push, or the 2-minute poll) or coming
+  // back to the tab re-reads it - "Pending" turns into "Member", or goes on a reject.
+  const { data: unread } = notificationHooks.useUnreadCount();
+  const lastUnread = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const before = lastUnread.current;
+    lastUnread.current = unread;
+    if (pending.length && before !== undefined && unread !== undefined && unread > before) void refresh().catch(() => {});
+  }, [unread]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!pending.length) return;
+    const onFocus = () => { void refresh().catch(() => {}); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [pending.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const current = memberships.filter((m) => m.status !== 'past' && m.status !== 'pending' && m.status !== 'rejected');
   const past = memberships.filter((m) => m.status === 'past');
 

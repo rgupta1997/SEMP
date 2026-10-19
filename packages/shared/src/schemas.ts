@@ -405,6 +405,10 @@ export const bulkAddOrganizationMembersSchema = z.object({
   user_ids: z.array(uuid).min(1).max(200),
   role: z.enum(ORGANIZATION_MEMBER_ROLE).default('member'),
 });
+// Remove several people from an organisation at once (People page selection).
+export const removeOrganizationMembersSchema = z.object({
+  member_ids: z.array(uuid).min(1).max(500),
+});
 export const updateOrganizationMemberSchema = z.object({
   role: z.enum(ORGANIZATION_MEMBER_ROLE).optional(),
   status: z.enum(['pending', 'active', 'past', 'rejected'] as const).optional(),

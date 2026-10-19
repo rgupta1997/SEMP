@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useApi, useApiMutation } from '../../lib/hooks';
-import type { ChampionshipTemplate } from '@semp/shared';
+import type { ChampionshipTemplate, TemplateShape } from '@semp/shared';
 import { ENTRY_LEVEL_META, ENTRY_LEVELS, isIntraLevel, type EntryLevel } from '@semp/shared';
 import { useOrgUnits } from '../../lib/units';
 import { BackButton, Button, Card, Field, Input, Pills, Select, Spinner, Stepper, Textarea, cn, confirmDialog, toast } from '../../components/ui';
@@ -429,8 +429,12 @@ function WizardFooter({ onBack, right }: { onBack: () => void; right: ReactNode 
 function ReviewStep({ eventId, championshipName }: { eventId: string; championshipName?: string }) {
   const { data: draws = [] } = useApi<any[]>(`/championships/${eventId}/draws`);
   const { data: invites = [] } = useApi<any[]>(`/championships/${eventId}/invitations`);
+  // Every sport added, one entry each - the same request the template box below reads.
+  // Counting sports from the draws missed every sport that has no discipline yet.
+  const { data: shape } = useApi<TemplateShape>(`/championships/${eventId}/template-shape`);
 
-  const sportCount = new Set(draws.map((d: any) => d.tournament_sports?.sport_id).filter(Boolean)).size;
+  const sportCount = shape?.draws.length
+    ?? new Set(draws.map((d: any) => d.tournament_sports?.sport_id).filter(Boolean)).size;
   const rows = [
     { label: 'Sports', value: sportCount },
     { label: 'Disciplines', value: draws.length },

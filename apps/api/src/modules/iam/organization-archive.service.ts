@@ -97,8 +97,8 @@ export async function orgRemovalInfo(prisma: Prisma, orgId: string): Promise<Org
     ...(careerRows ? ["its players have career stats recorded under it"] : []),
   ];
   const blockers = [
-    ...hostingLive.map((c) => `“${c.name}” is still running — finish or archive it first.`),
-    ...playing.map((e) => `You're entered in “${e.championships.name}” — withdraw your teams from it first, then archive.`),
+    ...hostingLive.map((c) => `“${c.name}” is still running - finish or archive it first.`),
+    ...playing.map((e) => `You're entered in “${e.championships.name}” - withdraw your teams from it first, then archive.`),
   ];
   return { mode: reasons.length ? 'archive' : 'delete', reasons, blockers, archived_at: org.archived_at };
 }

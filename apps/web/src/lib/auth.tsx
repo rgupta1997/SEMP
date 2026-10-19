@@ -213,6 +213,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setJustLoggedIn(false);
   };
 
+  // OTHER TABS. The token lives in localStorage, which every tab shares, but each tab
+  // loads "who am I" once. So signing out or in elsewhere left this tab ACTING as the
+  // new account while SHOWING the old one (EOS-182). The browser tells us when another
+  // tab changes the token; follow it rather than keep a stale identity on screen.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      // `key` is null when another tab cleared all of localStorage.
+      if (e.storageArea !== localStorage || (e.key !== null && e.key !== tokenStore.key)) return;
+      if (!tokenStore.get()) {
+        // Signed out elsewhere: this tab signs out too (back to the sign-in screen).
+        logout();
+      } else if (e.key === null || e.newValue !== e.oldValue) {
+        // A different session elsewhere: start over as it, so nothing of the
+        // previous account - cached data, workspace, realtime - survives on screen.
+        window.location.reload();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const availableRoles = useMemo(() => (ctx ? rolesFor(ctx) : []), [ctx]);
 
   return (

@@ -14,6 +14,8 @@ const SIDEBAR_RAILED_KEY = 'semp_sidebar_railed';
  *  helper) by anything fetching an authenticated document, e.g. a certificate
  *  render - see apps/web/src/pages/organization/certificates/shared.tsx. */
 export const authToken = {
+  /** The storage key, so another tab's change to it can be recognised (auth.tsx). */
+  key: AUTH_TOKEN_KEY,
   get: (): string | null => localStorage.getItem(AUTH_TOKEN_KEY),
   set: (token: string): void => localStorage.setItem(AUTH_TOKEN_KEY, token),
   clear: (): void => localStorage.removeItem(AUTH_TOKEN_KEY),

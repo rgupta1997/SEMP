@@ -434,7 +434,7 @@ ${where}` : where;
     },
 
     bodyTemplate: () => {
-      return 'Review the request on your organization’s Members page.';
+      return 'Verify or reject them on your organization’s People page, under Awaiting verification.';
     },
   },
   org_join_approved: {

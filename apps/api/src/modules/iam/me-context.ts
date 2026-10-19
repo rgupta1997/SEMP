@@ -32,7 +32,7 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
     prisma.user_championship_roles.findMany({
       where: { user_id: user.id },
       include: {
-        championships: { select: { id: true, name: true, slug: true, status: true } },
+        championships: { select: { id: true, name: true, slug: true, status: true, archived_at: true } },
         roles: { select: { id: true, name: true, code: true } },
       },
       orderBy: { assigned_at: 'desc' },

@@ -78,8 +78,12 @@ export function ContextSwitcher({
 
   // Preserve the order the contexts arrived in within each group, so the list does
   // not reshuffle between visits.
+  // Nothing archived is offered - events are retrieved from My Events / the org's
+  // Events page, organisations from Organizations - unless it is the one open now,
+  // so the switcher still names it.
+  const offered = (c: WorkspaceContext) => !c.archived || c.id === active.id;
   const groups = ['Personal', 'Organizations', 'Events', 'Assignments']
-    .map((g) => ({ group: g, items: contexts.filter((c) => KIND_META[c.kind].group === g) }))
+    .map((g) => ({ group: g, items: contexts.filter((c) => KIND_META[c.kind].group === g && offered(c)) }))
     .filter((g) => g.items.length > 0);
 
   const meta = KIND_META[active.kind];
@@ -162,7 +166,8 @@ export function ContextSwitcher({
                         {c.kind === 'org' && c.verified && (
                           <Check size={12} style={{ color: 'var(--ok-ink)', flex: '0 0 auto' }} aria-label="Verified" />
                         )}
-                        {c.kind === 'org' && c.archived && (
+                        {/* Only ever the one open now - archived ones are not offered otherwise. */}
+                        {c.archived && (
                           <span style={{
                             flex: '0 0 auto', fontSize: 9.5, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase',
                             padding: '1px 6px', borderRadius: 999, background: 'var(--amber-soft)', color: 'var(--amber-ink)',

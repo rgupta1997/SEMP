@@ -47,6 +47,8 @@ interface MyEvent {
   id: string;
   name: string;
   status: string;
+  /** Set when archived - still listed for whoever can retrieve it. */
+  archived_at?: string | null;
   /** organiser / official / poc / captain / participant, plus player / member. */
   my_roles: string[];
 }
@@ -128,6 +130,7 @@ export function useWorkspace() {
       name: r.championship?.name ?? 'Event',
       roleCodes: r.role?.code ? [r.role.code] : [],
       sub: r.championship?.status ?? undefined,
+      archived: !!r.championship?.archived_at,
     }));
 
     // The rest of them. Assigned roles arrive with the auth context, so they are
@@ -162,6 +165,7 @@ export function useWorkspace() {
         existing.kind = (c.status === 'draft' ? 'eventDraft' : 'event') as ContextKind;
         existing.name = c.name;
         existing.sub = c.status;
+        existing.archived = !!c.archived_at;
         existing.roleCodes = [...new Set([...existing.roleCodes, ...roleCodes])];
         continue;
       }
@@ -171,6 +175,7 @@ export function useWorkspace() {
         name: c.name,
         roleCodes,
         sub: c.status,
+        archived: !!c.archived_at,
       };
       byId.set(c.id, built);
       events.push(built);
