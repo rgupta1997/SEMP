@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import {
   addOrganizationMemberSchema, bulkAddOrganizationMembersSchema, createOrganizationWithOwnerSchema,
-  updateOrganizationMemberSchema, updateOrganizationSchema,
+  removeOrganizationMembersSchema, updateOrganizationMemberSchema, updateOrganizationSchema,
 } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -13,6 +13,7 @@ import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/e
 import { findUserByPhone, hashProvisionedPassword } from './users.helpers.js';
 import { archiveOrganization, orgRemovalInfo, retrieveOrganization } from './organization-archive.service.js';
 import { audit, AUDIT_ACTIONS } from './audit.service.js';
+import { removeMembers } from './member-removal.service.js';
 import {
   notifyOrganizationCreated, notifyJoinRequested, notifyJoinApproved, notifyJoinDeclined,
   newlyAddedMembers, notifyNewOrgMembers,
@@ -418,14 +419,16 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     res.json(updated);
   }));
 
+  // Removing people: the membership and everything this organisation holds about them
+  // (placements, role grants, squad places) - never their own sports record.
   router.delete('/:id/members/:memberId', guards.orgPermission('org.member.manage'), asyncHandler(async (req, res) => {
-    const member = await prisma.organization_members.findFirst({
-      where: { id: req.params.memberId, organization_id: req.params.id },
-      select: { id: true, role: true },
-    });
-    if (member && ['owner', 'admin'].includes(member.role)) await assertNotLastAdmin(req.params.id, member.id);
-    await prisma.organization_members.deleteMany({ where: { id: req.params.memberId, organization_id: req.params.id } });
+    await removeMembers(prisma, req, req.params.id, [req.params.memberId]);
     res.status(204).send();
+  }));
+
+  // Several at once, from the People page's selection.
+  router.post('/:id/members/remove', guards.orgPermission('org.member.manage'), validateBody(removeOrganizationMembersSchema), asyncHandler(async (req, res) => {
+    res.json(await removeMembers(prisma, req, req.params.id, req.body.member_ids));
   }));
 
   // ---- Approve / decline a pending join request ----

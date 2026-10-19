@@ -961,7 +961,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   }));
 
   // -> locked. The transaction; organiser only.
-  router.post('/fixtures/:id/lock', fixtureOrganiser, asyncHandler(async (req, res) => {
+  // The match's own assigned official may lock it, as well as the organisers.
+  // Reopening (/unlock) and bulk-locking stay organiser-only.
+  router.post('/fixtures/:id/lock', guards.fixtureScorer, asyncHandler(async (req, res) => {
     res.json(await lockScorecard(prisma, req, req.params.id));
   }));
 

@@ -3335,9 +3335,8 @@ function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeT
 // achievements/certificates and freezes the result forever (see lock.service.ts).
 // Entering a score only gets a match to "completed"; nothing before this panel
 // ever called /fixtures/:id/lock, so a played match could sit unlocked forever
-// with no way to make it official. Lock is organiser-only server-side - an
-// official without that role gets the API's own clear error via the toast below
-// rather than a silently missing button.
+// with no way to make it official. The match's assigned official may lock it, as
+// can the organisers; only reopening a locked result is organiser-only.
 function LockScorecardPanel({ fixtureId, scorecardStatus, invalidate }:
   { fixtureId: string; scorecardStatus: string; invalidate: (string | null)[] }) {
   const mut = useApiMutation(() => api('POST', `/fixtures/${fixtureId}/lock`, {}), invalidate);
@@ -3352,7 +3351,7 @@ function LockScorecardPanel({ fixtureId, scorecardStatus, invalidate }:
   return (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
       <div className="text-sm text-amber-800 dark:text-amber-300">
-        <span className="font-semibold">Not locked yet.</span> Locking makes this result official and permanent (organiser only).
+        <span className="font-semibold">Not locked yet.</span> Locking makes this result official - only an organiser can reopen it.
       </div>
       <Button disabled={mut.isPending}
         onClick={() => mut.mutate(undefined, {

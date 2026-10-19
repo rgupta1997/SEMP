@@ -502,7 +502,7 @@ function OrgDangerZone({ orgId, orgName, onDelete, deleting }: {
           <div style={{ minWidth: 240, flex: 1 }}>
             {heading('Archive this organisation')}
             <p style={note}>
-              It can't be deleted because {data.reasons.join(', ')} — deleting would take its certificates,
+              It can't be deleted because {data.reasons.join(', ')} - deleting would take its certificates,
               its players' career stats and other hosts' results with it. Archiving hides it and archives the
               events it hosts, and you can retrieve it any time.
             </p>

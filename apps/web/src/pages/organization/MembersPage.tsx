@@ -130,6 +130,9 @@ function GrantModal({
   );
 }
 
+/** Off: join requests are answered on People (Verify accepts, Reject declines). */
+const SHOW_JOIN_REQUESTS = false;
+
 /**
  * Rendered standalone at its own route, and embedded inside the Administration
  * rail. `embedded` suppresses the page header and org tabs - the rail already
@@ -263,8 +266,10 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
 
       {/* Above the roster, because it is the only thing on this screen that is
           WAITING on somebody. A request buried in a list of two hundred members is
-          a request nobody answers. */}
-      {canManageMembers && pending.length > 0 && (
+          a request nobody answers.
+          DE-WIRED (SHOW_JOIN_REQUESTS): join requests are handled on People - Verify
+          accepts, Reject declines. Kept so it can be switched back on. */}
+      {SHOW_JOIN_REQUESTS && canManageMembers && pending.length > 0 && (
         <Card className="mb-4 border-amber-300 dark:border-amber-500/40">
           <CardBody>
             <h3 className="font-display text-[15px] font-extrabold text-slate-900 dark:text-slate-100">

@@ -12,6 +12,11 @@ import { useEffect, useRef } from 'react';
 export function useDialog(open: boolean, onClose: () => void) {
   const ref = useRef<HTMLDivElement>(null);
   const restoreTo = useRef<HTMLElement | null>(null);
+  // The latest onClose, read at call time. Callers pass a new arrow every render; with
+  // it in the effect's deps, each keystroke in a parent-held field re-ran the effect and
+  // re-focused the first control (the × button), throwing the cursor out of the input.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -28,6 +33,8 @@ export function useDialog(open: boolean, onClose: () => void) {
     // Focus the first thing worth focusing, not the container - a sheet that
     // opens with the panel focused reads as "dialog" and then says nothing.
     const t = window.setTimeout(() => {
+      // Something inside already has focus (an `autoFocus` field): leave it there.
+      if (ref.current?.contains(document.activeElement)) return;
       const first = ref.current?.querySelector<HTMLElement>(
         'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
       );
@@ -35,7 +42,7 @@ export function useDialog(open: boolean, onClose: () => void) {
     }, 40);
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
+      if (e.key === 'Escape') { e.stopPropagation(); onCloseRef.current(); return; }
       if (e.key !== 'Tab' || !ref.current) return;
       const focusable = [...ref.current.querySelectorAll<HTMLElement>(
         'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
@@ -56,7 +63,7 @@ export function useDialog(open: boolean, onClose: () => void) {
       window.clearTimeout(t);
       restoreTo.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   return ref;
 }

@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApi, fmtDate } from '../../lib/hooks';
+import { useAuth } from '../../lib/auth';
 import { BrandMark } from '../../components/BrandMark';
-import { Card, CardBody, EmptyState, Spinner, StatCard, StatusBadge, Tabs } from '../../components/ui';
+import { Card, CardBody, EmptyState, Spinner, StatCard, StatusBadge, Tabs, cn } from '../../components/ui';
 import { ChampionshipStandings } from '../../components/participant/ChampionshipStandings';
 import { ChampionshipFixtures } from '../../components/participant/ChampionshipFixtures';
 import { FeedbackWidget } from '../../components/FeedbackWidget';
@@ -19,6 +21,8 @@ interface PublicOverview {
 // Shows Overview + Standings, fetched from the public (no-auth) API.
 export function PublicChampionshipPage({ token }: { token: string }) {
   const [tab, setTab] = useState('overview');
+  const { ctx, loading: authLoading } = useAuth();
+  const signedOut = !authLoading && !ctx;
   const { data, isLoading } = useApi<PublicOverview>(token ? `/public/championships/${token}/overview` : null);
 
   if (isLoading) return <div className="grid h-screen place-items-center"><Spinner /></div>;
@@ -36,7 +40,20 @@ export function PublicChampionshipPage({ token }: { token: string }) {
       <header className="border-b border-slate-800 bg-slate-900 px-4 py-3">
         <div className="mx-auto flex max-w-4xl items-center justify-between">
           <BrandMark variant="white" />
-          <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Public view</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <span className={cn('text-xs font-medium uppercase tracking-wide text-slate-400', signedOut && 'hidden sm:inline')}>Public view</span>
+            {/* Signed-out visitors can join from here; signed-in ones already have an account. */}
+            {signedOut && (
+              <>
+                <Link to="/login" className="rounded-md px-3 py-1.5 text-sm font-semibold text-slate-200 hover:bg-white/10 hover:text-white">
+                  Sign in
+                </Link>
+                <Link to="/login?mode=signup" className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">
+                  Sign up
+                </Link>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
