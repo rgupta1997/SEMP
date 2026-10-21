@@ -53,8 +53,12 @@ export interface TeamDeckProps {
   awayShort?: string;
   homeOrg?: string | null;
   awayOrg?: string | null;
-  /** Roster for each side, so an action can be attributed to a person. */
+  /** Roster for each side, so an action can be attributed to a person - those on the field when there is a team sheet. */
   roster?: { A: Array<{ id: string; name: string }>; B: Array<{ id: string; name: string }> };
+  /** Team-sheet substitutes, one tap away behind "Select from subs". */
+  bench?: { A: Array<{ id: string; name: string }>; B: Array<{ id: string; name: string }> };
+  /** A substitute was credited and came on for `offId`. */
+  onSubstitute?: (side: Side, onId: string, offId: string) => void;
   log: RallyLog;
   onChange: (log: RallyLog, state: KernelState) => void;
   onSignOff: (log: RallyLog, state: KernelState) => void;
@@ -135,6 +139,10 @@ export function TeamDeck(p: TeamDeckProps) {
   // - most taps are recorded without one - so it starts shut and costs the officials
   // who never touch it nothing.
   const [assistOpen, setAssistOpen] = useState(false);
+  // Substitutes sit behind a tap: most actions belong to someone on the field.
+  const [subsOpen, setSubsOpen] = useState(false);
+  // Substitutes just credited with something, each waiting for "who went off for them?".
+  const [cameOn, setCameOn] = useState<Array<{ side: Side; id: string }>>([]);
   const [finishing, setFinishing] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const height = useDeckHeight(root);
@@ -223,8 +231,10 @@ export function TeamDeck(p: TeamDeckProps) {
       : `Change ends · ${state.score[0][0]}–${state.score[0][1]} in the deciding ${lv.label.toLowerCase()}`;
 
   const players = p.roster?.[side] ?? [];
+  const subs = p.bench?.[side] ?? [];
+  const isSub = (id: string) => subs.some((x) => x.id === id);
   const nameFor = (id: string) =>
-    [...(p.roster?.A ?? []), ...(p.roster?.B ?? [])].find((x) => x.id === id)?.name;
+    [...(p.roster?.A ?? []), ...(p.roster?.B ?? []), ...(p.bench?.A ?? []), ...(p.bench?.B ?? [])].find((x) => x.id === id)?.name;
   const events = spec?.events ?? [];
 
   /**
@@ -304,8 +314,19 @@ export function TeamDeck(p: TeamDeckProps) {
       ...(ev.secondPlayer && second ? { secondId: second, secondName: nameFor(second) } : {}),
       ...(ev.value ? { value: 1 } : {}),
     });
+    // A substitute credited with something has come on - ask who they replaced.
+    const fromBench = [actor, ev.secondPlayer ? second : ''].filter((id) => id && isSub(id));
+    if (fromBench.length && p.onSubstitute) setCameOn(fromBench.map((id) => ({ side, id })));
     // The assist is per goal; the scorer usually is not, so only the second clears.
     setSecond('');
+  };
+
+  /** Answer "who went off for them?" - or nobody, for a card shown on the bench. */
+  const settleSub = (offId: string | null) => {
+    const [next, ...rest] = cameOn;
+    if (next && offId) p.onSubstitute?.(next.side, next.id, offId);
+    setCameOn(rest);
+    setSubsOpen(false);
   };
 
   /**
@@ -490,9 +511,28 @@ export function TeamDeck(p: TeamDeckProps) {
 
       {/* ── The working region: everything swaps HERE ────────────────────── */}
       <div data-qa="team-region" className="relative min-h-0 flex-1">
-        {/* The log first: after full time it is how the result gets checked before
-            confirming. With the result card first, Log did nothing once a match ended. */}
-        {surface === 'log' ? (
+        {/* A substitute was just credited: who did they replace? Answered before the next tap. */}
+        {cameOn.length > 0 ? (
+          <Card className={cn(SURFACE, 'gap-2 p-2.5')} data-qa="sub-swap">
+            <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              Who went off for {nameFor(cameOn[0].id) ?? 'the substitute'}?
+            </div>
+            <p className="text-[11px] text-muted">They move to the substitutes; {nameFor(cameOn[0].id) ?? 'the substitute'} joins the players on the field.</p>
+            <div className="min-h-0 shrink overflow-y-auto">
+              <PeopleGrid
+                value="" qa="sub-off"
+                options={(p.roster?.[cameOn[0].side] ?? []).map((x) => [x.id, x.name] as [string, string])}
+                cards={playerCards}
+                onChange={(v) => settleSub(v)}
+              />
+            </div>
+            <Button size="sm" variant="outline" className="shrink-0" onClick={() => settleSub(null)}>
+              Still on the bench (a card from the bench)
+            </Button>
+          </Card>
+        ) : /* The log first: after full time it is how the result gets checked before
+            confirming. With the result card first, Log did nothing once a match ended. */
+        surface === 'log' ? (
           <Timeline log={log} nameOf={nameOf} nameFor={nameFor} fullMs={fullMs}
             onClose={() => setSurface('act')} />
         ) : state.ended ? (
@@ -580,7 +620,7 @@ export function TeamDeck(p: TeamDeckProps) {
             <div className="grid shrink-0 grid-cols-2 gap-1.5">
               {(['A', 'B'] as Side[]).map((s) => (
                 <button key={s} type="button" data-qa={`team-side-${s}`}
-                  onClick={() => { setSide(s); setActor(''); setSecond(''); setAssistOpen(false); }}
+                  onClick={() => { setSide(s); setActor(''); setSecond(''); setAssistOpen(false); setSubsOpen(false); }}
                   className={cn(
                     'min-h-[2.5rem] truncate rounded-lg px-2 text-sm font-semibold transition',
                     side === s
@@ -608,6 +648,26 @@ export function TeamDeck(p: TeamDeckProps) {
                     cards={playerCards} foulLimit={foulLimit}
                     onChange={(v) => { setActor(v); if (v === second) setSecond(''); setAssistOpen(false); }}
                   />
+                  {subs.length > 0 && (
+                    <div className="mt-1.5">
+                      <button type="button" data-qa={`subs-toggle-${side}`}
+                        onClick={() => setSubsOpen((v) => !v)}
+                        className="flex items-center gap-1 text-[11px] font-semibold text-brand-600 hover:underline dark:text-brand-300">
+                        {subsOpen ? 'Hide subs' : `Select from subs (${subs.length})`}
+                        <ChevronDown className={cn('h-3.5 w-3.5 transition', subsOpen && 'rotate-180')} />
+                      </button>
+                      {subsOpen && (
+                        <div className="mt-1">
+                          <PeopleGrid
+                            value={actor} qa={`actor-sub-${side}`}
+                            options={subs.map((x) => [x.id, x.name] as [string, string])}
+                            cards={playerCards} foulLimit={foulLimit}
+                            onChange={(v) => { setActor(v); if (v === second) setSecond(''); setAssistOpen(false); }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {foulLimit > 0 && actorFouls >= foulLimit - 1 && (
                     <p data-qa="foul-out-warning" role="status"
                       className={cn('mt-1 text-[11px] font-semibold',
@@ -640,7 +700,9 @@ export function TeamDeck(p: TeamDeckProps) {
                         <PeopleGrid
                           value={second} qa={`second-${side}`}
                           options={[['', 'Nobody'] as [string, string],
-                            ...players.filter((x) => x.id !== actor).map((x) => [x.id, x.name] as [string, string])]}
+                            ...players.filter((x) => x.id !== actor).map((x) => [x.id, x.name] as [string, string]),
+                            // Substitutes last, marked - an assist from someone just on is rare but real.
+                            ...subs.filter((x) => x.id !== actor).map((x) => [x.id, `${x.name} (sub)`] as [string, string])]}
                           cards={playerCards}
                           onChange={(v) => { setSecond(v); setAssistOpen(false); }}
                         />

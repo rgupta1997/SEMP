@@ -57,9 +57,14 @@ export interface CricketDeckProps {
   awayName: string;
   homeOrg?: string | null;
   awayOrg?: string | null;
-  /** Squads, so a batter, bowler and fielder can be named rather than typed. */
+  /** Squads, so a batter, bowler and fielder can be named rather than typed - the playing XI when there is a team sheet. */
   homeSquad?: CricketPerson[];
   awaySquad?: CricketPerson[];
+  /** Team-sheet substitutes: they may field (a catch, a run-out) but never bat or bowl. */
+  homeSubs?: CricketPerson[];
+  awaySubs?: CricketPerson[];
+  /** Everyone on both squads, so a name already in the scorecard still reads after a sheet change. */
+  everyone?: CricketPerson[];
   log: CricketLog;
   onChange: (log: CricketLog, state: CricketState) => void;
   onSignOff: (log: CricketLog, state: CricketState) => void;
@@ -199,11 +204,13 @@ export function CricketDeck(p: CricketDeckProps) {
   // fixed at mount.
   const batting = (inn?.battingSide === 'A' ? p.homeSquad : p.awaySquad) ?? [];
   const bowlingSide = (inn?.battingSide === 'A' ? p.awaySquad : p.homeSquad) ?? [];
+  // A substitute fields, so the wicket panel's fielder list carries them too.
+  const fielders = [...bowlingSide, ...((inn?.battingSide === 'A' ? p.awaySubs : p.homeSubs) ?? [])];
   const battingName = inn?.battingSide === 'A' ? p.homeName : p.awayName;
 
   const nameOf = (id?: string | null) => {
     if (!id) return null;
-    return [...(p.homeSquad ?? []), ...(p.awaySquad ?? [])].find((x) => x.id === id)?.name ?? null;
+    return (p.everyone ?? [...(p.homeSquad ?? []), ...(p.awaySquad ?? [])]).find((x) => x.id === id)?.name ?? null;
   };
 
   const out = new Set(inn?.batting.filter((b) => b.out).map((b) => b.playerId) ?? []);
@@ -460,7 +467,7 @@ export function CricketDeck(p: CricketDeckProps) {
           <WicketPanel
             format={format}
             freeHit={inn.freeHit}
-            fielders={bowlingSide}
+            fielders={fielders}
             nextBatters={availableBatters}
             strikerName={nameOf(inn.strikerId) ?? 'the striker'}
             nonStrikerName={nameOf(inn.nonStrikerId) ?? 'the non-striker'}

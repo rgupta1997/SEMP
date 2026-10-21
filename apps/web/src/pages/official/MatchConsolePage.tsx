@@ -26,6 +26,8 @@ import { LineupPanel } from '../../features/scoring/LineupPanel';
 import { ChessResult, EndingChips, chessGamesIn, chessSummary, hydrateChess, type ChessState } from '../../features/scoring/ChessResult';
 import { CricketDeck } from '../../features/scoring/CricketDeck';
 import { TeamDeck } from '../../features/scoring/TeamDeck';
+import { TeamSheetPanel } from '../../features/scoring/TeamSheetPanel';
+import { matchdaySquad, readTeamSheet, substitute, usualSide, type SheetPerson, type TeamSheet } from '@semp/shared';
 import { AUTOSAVE_MS, useLiveSave, useSaveStatus, useUnloadGuard, useDraftAutosave } from '../../features/scoring/useLiveSave';
 import { flushFixture, getStatus, readOutbox, type OutboxEntry } from '../../features/scoring/liveOutbox';
 
@@ -859,6 +861,13 @@ function rosterPeople(team: any): { id: string; name: string; team: string }[] {
     .filter((p: { id?: string }) => !!p.id);
 }
 
+/** A squad as the team sheet reads it - with shirt number and role, for its order. */
+function sheetSquad(team: any): SheetPerson[] {
+  return (team?.team_members ?? [])
+    .map((tm: any) => ({ id: tm.users?.id as string, name: tm.users?.name ?? '-', role: tm.role ?? null, jersey: tm.jersey_number ?? null }))
+    .filter((p: { id?: string }) => !!p.id);
+}
+
 // Free-text awards with a recipient picked from the two teams' rosters. Replace-all
 // save; these surface as the recipient's achievements on their dashboard.
 function AwardsPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixtureId: string; invalidate: (string | null)[] }) {
@@ -1303,17 +1312,22 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
   const [log, setLog] = useState<CricketLog>(() => hydrateCricket(live?.live_state));
   const [status, setStatus] = useState<string>(fixture.status);
   const [busy, setBusy] = useState(false);
+  // The team sheet, kept here and sent with every save (see TeamConsole).
+  const [sheet, setSheet] = useState<TeamSheet | null>(() => readTeamSheet(live?.live_state));
+  const [editingSheet, setEditingSheet] = useState(false);
   const seeded = useRef(false);
 
   useEffect(() => {
     if (!seeded.current && live) {
       setLog(hydrateCricket(live.live_state));
+      setSheet(readTeamSheet(live.live_state));
       seeded.current = true;
     }
   }, [live]);
 
   const persist = useLiveSave(fixtureId, invalidate);
   const format = resolved.format;
+  const squads = useMemo(() => ({ A: sheetSquad(homeTeam(fixture)), B: sheetSquad(awayTeam(fixture)) }), [fixture]);
 
   // The ladder returns the union; only a cricket format can drive this console. A
   // rally format here would mean the sport was mis-routed, which is worth saying
@@ -1351,6 +1365,7 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
           // Snapshot on first write, then leave alone - a played match stays
           // reproducible under the rules it was played under.
           format: (live?.live_state as any)?.format ?? format,
+          ...(sheet ? { teamSheet: sheet } : {}),
         },
         live_log: cricketTimeline(state, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
         // The headline is RUNS per side, which is what standings compare.
@@ -1368,7 +1383,63 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
     );
   };
 
+  // A cricket side is the format's own number - eleven, or six for a six-a-side - and a few
+  // substitutes, who may field but never bat or bowl.
+  const usual = { onField: format.playersPerSide, bench: 4 };
+  const locked = fixture.scorecard_status === 'locked';
+  const hasSquads = squads.A.length + squads.B.length > 0;
+
+  // The sheet on its own: no status or score, so confirming it does not start the match.
+  const saveSheet = (next: TeamSheet) => {
+    setSheet(next);
+    setEditingSheet(false);
+    persist.mutate(
+      {
+        live_state: { ...(live?.live_state ?? {}), cricket: log, teamSheet: next },
+        live_log: cricketTimeline(foldCricket(format, log).state, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
+      },
+      { onError: (e: any) => toast.error(e.message) },
+    );
+  };
+
+  const needsSheet = !sheet && log.length === 0 && !locked && hasSquads;
+  if (needsSheet || editingSheet) {
+    return (
+      <TeamSheetPanel
+        sportName={sport ?? 'Cricket'}
+        usual={usual}
+        sides={[
+          { side: 'A', name: teamLabel(homeTeam(fixture)), org: orgLabel(homeTeam(fixture)), squad: squads.A },
+          { side: 'B', name: teamLabel(awayTeam(fixture)), org: orgLabel(awayTeam(fixture)), squad: squads.B },
+        ]}
+        initial={sheet}
+        onSave={saveSheet}
+        onCancel={editingSheet ? () => setEditingSheet(false) : undefined}
+        disabled={busy}
+      />
+    );
+  }
+
+  // Batters and bowlers come from the playing XI; substitutes only field. No sheet: the whole squad, as before.
+  const named = (s: SheetPerson[], ids: string[]) => ids.map((id) => s.find((p) => p.id === id)).filter((p): p is SheetPerson => !!p)
+    .map((p) => ({ id: p.id, name: p.name }));
+  const xi = (side: 'A' | 'B') => (sheet ? named(squads[side], sheet[side].playing) : squads[side].map((p) => ({ id: p.id, name: p.name })));
+  const subs = (side: 'A' | 'B') => (sheet ? named(squads[side], sheet[side].bench) : []);
+
   return (
+    <>
+    {!locked && hasSquads && (
+      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+        <span>
+          {sheet
+            ? `Team sheet: ${sheet.A.playing.length} + ${sheet.A.bench.length} subs · ${sheet.B.playing.length} + ${sheet.B.bench.length} subs`
+            : 'No team sheet - the whole squads bat and bowl.'}
+        </span>
+        <button type="button" className="font-semibold text-brand-600 hover:underline dark:text-brand-300" onClick={() => setEditingSheet(true)}>
+          {sheet ? 'Change' : 'Add team sheet'}
+        </button>
+      </div>
+    )}
     <CricketDeck
       format={format}
       provenance={resolved.source}
@@ -1376,14 +1447,18 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
       awayName={teamLabel(awayTeam(fixture))}
       homeOrg={orgLabel(homeTeam(fixture))}
       awayOrg={orgLabel(awayTeam(fixture))}
-      homeSquad={rosterPeople(homeTeam(fixture))}
-      awaySquad={rosterPeople(awayTeam(fixture))}
+      homeSquad={xi('A')}
+      awaySquad={xi('B')}
+      homeSubs={subs('A')}
+      awaySubs={subs('B')}
+      everyone={[...squads.A, ...squads.B].map((p) => ({ id: p.id, name: p.name }))}
       log={log}
       busy={busy}
       onOpenAdmin={onOpenAdmin}
       onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
       onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
     />
+    </>
   );
 }
 
@@ -1596,20 +1671,41 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
   const [log, setLog] = useState<RallyLog>(() => hydrateRally(live?.live_state));
   const [status, setStatus] = useState<string>(fixture.status);
   const [busy, setBusy] = useState(false);
+  // The team sheet: kept here and sent with EVERY save, because a save replaces the
+  // whole live state and the fetched copy can be a step behind.
+  const [sheet, setSheet] = useState<TeamSheet | null>(() => readTeamSheet(live?.live_state));
+  const [editingSheet, setEditingSheet] = useState(false);
   const seeded = useRef(false);
   useEffect(() => {
-    if (!seeded.current && live) { setLog(hydrateRally(live.live_state)); seeded.current = true; }
+    if (!seeded.current && live) {
+      setLog(hydrateRally(live.live_state));
+      setSheet(readTeamSheet(live.live_state));
+      seeded.current = true;
+    }
   }, [live]);
 
   const persist = useLiveSave(fixtureId, invalidate);
   const format = resolved.format;
+  // Team sports whose actions are credited to a person - combat and board sports have
+  // nobody to pick, and netball or tug of war record no individual actions to narrow.
+  const usual = (statSpecFor(sport)?.events?.length ?? 0) > 0 ? usualSide(sport) : null;
 
+  const squads = useMemo(() => ({ A: sheetSquad(homeTeam(fixture)), B: sheetSquad(awayTeam(fixture)) }), [fixture]);
   // Full rosters, not just two: an invasion sport attributes to eleven people, so
-  // the pairing shortcut the racquet deck uses would drop most of the squad.
-  const roster = useMemo(() => ({
-    A: rosterPeople(homeTeam(fixture)).map((x) => ({ id: x.id, name: x.name })),
-    B: rosterPeople(awayTeam(fixture)).map((x) => ({ id: x.id, name: x.name })),
-  }), [fixture]);
+  // the pairing shortcut the racquet deck uses would drop most of the squad. With a
+  // team sheet, the pickers offer the players on the field, and the substitutes one
+  // tap away - never the rest of the squad. With none, the whole squad, as before.
+  const roster = useMemo(() => {
+    const pick = (side: 'A' | 'B') => (sheet
+      ? matchdaySquad(squads[side], { playing: sheet[side].playing, bench: [] })
+      : squads[side]).map((x) => ({ id: x.id, name: x.name }));
+    return { A: pick('A'), B: pick('B') };
+  }, [squads, sheet]);
+  const bench = useMemo(() => {
+    const pick = (side: 'A' | 'B') => (sheet ? matchdaySquad(squads[side], { playing: [], bench: sheet[side].bench }) : [])
+      .map((x) => ({ id: x.id, name: x.name }));
+    return { A: pick('A'), B: pick('B') };
+  }, [squads, sheet]);
 
   /**
    * A RUNNING CLOCK KEEPS SAYING SO.
@@ -1673,6 +1769,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
           // the readers that have no log to fold.
           clock: clockSnapshot(nextLog),
           format: (live?.live_state as any)?.format ?? format,
+          ...(sheet ? { teamSheet: sheet } : {}),
         },
         // The attributed actions ARE the timeline here, and what the fact writer
         // reads to fill fixture_events.
@@ -1694,7 +1791,56 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
   };
   saveRef.current = save;
 
+  // The sheet on its own: no status or score is sent, so confirming it before kick-off
+  // does not put the match live.
+  const saveSheet = (next: TeamSheet) => {
+    setSheet(next);
+    setEditingSheet(false);
+    persist.mutate(
+      {
+        live_state: { ...(live?.live_state ?? {}), rally: log, clock: clockSnapshot(log), teamSheet: next },
+        live_log: teamTimeline(log, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture)), (format.clock?.minutes ?? 0) * 60_000),
+      },
+      { onError: (e: any) => toast.error(e.message) },
+    );
+  };
+
+  const hasSquads = squads.A.length + squads.B.length > 0;
+  // Before the first event of a team sport, the sheet comes first - pre-filled, to change or confirm.
+  const needsSheet = !!usual && !sheet && log.length === 0 && !locked && hasSquads;
+  if (usual && (needsSheet || editingSheet)) {
+    return (
+      <TeamSheetPanel
+        sportName={sport ?? 'This sport'}
+        usual={usual}
+        sides={[
+          { side: 'A', name: teamLabel(homeTeam(fixture)), org: orgLabel(homeTeam(fixture)), squad: squads.A },
+          { side: 'B', name: teamLabel(awayTeam(fixture)), org: orgLabel(awayTeam(fixture)), squad: squads.B },
+        ]}
+        initial={sheet}
+        onSave={saveSheet}
+        onCancel={editingSheet ? () => setEditingSheet(false) : undefined}
+        disabled={busy}
+      />
+    );
+  }
+
+  const sheetBar = usual && !locked && hasSquads && (
+    <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+      <span>
+        {sheet
+          ? `Team sheet: ${sheet.A.playing.length} + ${sheet.A.bench.length} subs · ${sheet.B.playing.length} + ${sheet.B.bench.length} subs`
+          : 'No team sheet - the whole squads are in the pickers.'}
+      </span>
+      <button type="button" className="font-semibold text-brand-600 hover:underline dark:text-brand-300" onClick={() => setEditingSheet(true)}>
+        {sheet ? 'Change' : 'Add team sheet'}
+      </button>
+    </div>
+  );
+
   return (
+    <>
+    {sheetBar}
     <TeamDeck
       format={format}
       provenance={resolved.source}
@@ -1706,6 +1852,9 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       homeOrg={orgLabel(homeTeam(fixture))}
       awayOrg={orgLabel(awayTeam(fixture))}
       roster={roster}
+      bench={bench}
+      // A substitute credited with something came on: the sheet records the swap.
+      onSubstitute={(s, onId, offId) => sheet && saveSheet({ ...sheet, [s]: substitute(sheet[s], onId, offId) })}
       log={log}
       busy={busy}
       // A LOCKED RESULT IS READ-ONLY, and the console has to say so by being it.
@@ -1723,6 +1872,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       // The card below now carries both, and leaving is the official's own choice.
       onSignOff={(nextLog, state) => save(nextLog, state, true)}
     />
+    </>
   );
 }
 
