@@ -2,11 +2,7 @@ import { PrismaClient } from '@prisma/client';
 
 // Single PrismaClient, created here and shared with every persistence adapter
 // via the composition root. The domain/application layers never import this.
-// TEMPORARY: raised default transaction timeout (Prisma's is 5s). Revert before release.
-const TRANSACTION_TIMEOUT_MS = 120_000;
-export const prisma = new PrismaClient({
-  transactionOptions: { timeout: TRANSACTION_TIMEOUT_MS },
-});
+export const prisma = new PrismaClient();
 
 export type Prisma = typeof prisma;
 
