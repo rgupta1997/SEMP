@@ -1,6 +1,6 @@
 import { Navigate, Outlet, useLocation, useOutletContext, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { archiveDaysLeft, archivePurgeDate } from '@semp/shared';
+import { archiveDaysLeft, archivePurgeDate, citiesShort } from '@semp/shared';
 import { useApi, useApiMutation, fmtDate, fmtDateRange } from '../../lib/hooks';
 import { usePageTitle } from '../../lib/pageTitle';
 import { usePermissions } from '../../lib/permissions';
@@ -11,6 +11,8 @@ import { BackButton, Button, EmptyState, Spinner, StatusBadge, toast } from '../
 export interface EventDetail {
   id: string; name: string; slug: string; status: string;
   venue?: string; description?: string; start_date: string; end_date: string;
+  /** Every host city, in order; `venue` is the same list joined. */
+  host_cities?: string[];
   visibility?: string; // 'public' (default) | 'private'
   host_organization_id?: string | null;
   /** Set while archived: the event is read-only until retrieved. */
@@ -117,6 +119,15 @@ export function EventLayout() {
   const fromCtx = ws.contexts.find((c) => c.id === (/^\/organizations\/([0-9a-fA-F-]{36})/.exec(from)?.[1] ?? ''));
   const backLabel = fromCtx ? fromCtx.name : 'All events';
 
+  // Where: the first three host cities and "+N more" - an event can have twenty, and the
+  // whole list would push the dates off the line. Hover shows them all.
+  const cities = championship.host_cities ?? [];
+  const where = cities.length
+    ? `${citiesShort(cities, 3)}${cities.length > 3 ? ' more' : ''}`
+    : championship.venue || 'Venue TBD';
+  const whereWhen = `${where} · ${fmtDateRange(championship.start_date, championship.end_date)}`;
+  const allWhere = `${cities.length ? cities.join(', ') : championship.venue || 'Venue TBD'} · ${fmtDateRange(championship.start_date, championship.end_date)}`;
+
   return (
     <div>
       {/* COMPACT ON A PHONE.
@@ -140,7 +151,7 @@ export function EventLayout() {
             <h1 className="t-page-title min-w-0 text-slate-900 dark:text-slate-100">{championship.name}</h1>
             <StatusBadge status={championship.status} />
           </div>
-          <p className="t-meta mt-1">{championship.venue || 'Venue TBD'} · {fmtDateRange(championship.start_date, championship.end_date)}</p>
+          <p className="t-meta mt-1" title={allWhere}>{whereWhen}</p>
         </div>
         {canManage && next && (
           <Button
@@ -162,9 +173,7 @@ export function EventLayout() {
             date line sit side by side instead of being squeezed into a stack. */}
         <div className="order-last flex min-w-0 basis-full items-center gap-x-2.5 gap-y-1 sm:order-none sm:flex-1 sm:basis-auto">
           <StatusBadge status={championship.status} />
-          <p className="t-meta min-w-0 truncate" title={`${championship.venue || 'Venue TBD'} · ${fmtDateRange(championship.start_date, championship.end_date)}`}>
-            {championship.venue || 'Venue TBD'} · {fmtDateRange(championship.start_date, championship.end_date)}
-          </p>
+          <p className="t-meta min-w-0 truncate" title={allWhere}>{whereWhen}</p>
         </div>
         {canManage && next && (
           <Button
