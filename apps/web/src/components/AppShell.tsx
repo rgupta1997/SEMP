@@ -21,6 +21,7 @@ import { useFilterBar, FilterProvider } from '../lib/filters';
 import { useApi } from '../lib/hooks';
 import { useTheme } from '../lib/theme';
 import { sidebarRailed } from '../lib/browserStorage';
+import { useShellTitle } from '../lib/pageTitle';
 import { Avatar, Button, cn } from './ui';
 import { BrandMark } from './BrandMark';
 import { NotificationBell } from './NotificationBell';
@@ -185,6 +186,7 @@ export function AppShell() {
   // one - collapsing it on Fixtures and finding it expanded again on Standings
   // would read as the app forgetting.
   const [railed, setRailed] = useState(sidebarRailed.get);
+  const pageTitle = useShellTitle();
   const toggleRail = () => setRailed((v) => {
     const next = !v;
     sidebarRailed.set(next);
@@ -387,7 +389,12 @@ export function AppShell() {
                 aria-pressed={railed}
                 title={railed ? 'Expand sidebar' : 'Collapse sidebar'}
               >{railed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
-              <div className="truncate text-sm font-semibold text-slate-700 sm:font-medium sm:text-slate-600 dark:text-slate-300">{subtitle}</div>
+              {/* A page's own title when it set one (usePageTitle), else the workspace name. */}
+              {pageTitle ? (
+                <h1 className="truncate font-display text-lg font-extrabold tracking-tight text-slate-900 sm:text-xl dark:text-slate-100" title={subtitle ?? undefined}>{pageTitle}</h1>
+              ) : (
+                <div className="truncate text-sm font-semibold text-slate-700 sm:font-medium sm:text-slate-600 dark:text-slate-300">{subtitle}</div>
+              )}
             </div>
             <HeaderFilters />
             <div className="flex shrink-0 items-center gap-1 sm:gap-3">

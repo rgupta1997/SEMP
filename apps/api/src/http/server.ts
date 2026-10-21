@@ -208,8 +208,8 @@ export function buildApp(prisma: Prisma) {
     name: 'Tournament format', createSchema: createFormatSchema, updateSchema: updateFormatSchema,
     orderBy: { name: 'asc' }, writeGuards: [requireSuperAdmin],
   }));
-  // Organizations - open reads; any user can create (becomes owner); member
-  // management requires an owner/admin (see organizations.routes).
+  // Organizations - open reads, except the member list (its own people only); any user
+  // can create (becomes owner); member management requires an owner/admin (see organizations.routes).
   // An archived organisation is read-only across every router that lives under it.
   api.use('/organizations/:id', blockOrgWritesWhenArchived(prisma));
   api.use('/teams/:id', blockTeamWritesWhenArchived(prisma));

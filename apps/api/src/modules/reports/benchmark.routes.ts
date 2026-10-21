@@ -5,6 +5,7 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { can } from '../../http/middleware/can.js';
 import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { HELD_FOR_EVENT } from '../teams/squad-places.js';
 
 // Anonymised peer benchmark (J5-E4).
 //
@@ -72,7 +73,8 @@ export function makeBenchmarkRouter(prisma: Prisma): Router {
                count(distinct te.championship_id) as events
           from team_entries te
           join team_members tm on tm.team_id = te.team_id
-         where te.championship_id in (select id from season_champs)
+          join championships c on c.id = te.championship_id
+         where te.championship_id in (select id from season_champs) and ${HELD_FOR_EVENT}
          group by 1
       ),
       medals as (
@@ -86,8 +88,9 @@ export function makeBenchmarkRouter(prisma: Prisma): Router {
         select te.organization_id, count(distinct tm.user_id) as women
           from team_entries te
           join team_members tm on tm.team_id = te.team_id
+          join championships c on c.id = te.championship_id
           join users u on u.id = tm.user_id
-         where te.championship_id in (select id from season_champs) and u.gender = 'female'
+         where te.championship_id in (select id from season_champs) and u.gender = 'female' and ${HELD_FOR_EVENT}
          group by 1
       )
       select p.organization_id,

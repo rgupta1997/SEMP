@@ -9,6 +9,7 @@ import { makeGuards } from '../../http/middleware/permissions.js';
 import { NotFoundError } from '../../shared/errors.js';
 import { findEntrant } from '../championships/contingent.js';
 import { deriveProvisionedPassword, findUsersByPhones, maskPhone, phoneLast10 } from '../iam/users.helpers.js';
+import { ownerMembership, vouchedBy } from '../iam/member-removal.service.js';
 import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 
 // Champion­ship setup matrix import: turn one 2D spreadsheet (sections × sport/
@@ -157,6 +158,8 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
       owners_assigned: 0,
       captains_assigned: 0,
       pocs_assigned: 0,
+      /** Squad places left out: that person was removed from (or turned down by) the org. */
+      removed_skipped: 0,
     };
 
     await prisma.$transaction(async (tx) => {
@@ -311,8 +314,8 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
         const { orgId } = await ensureSection(o.section);
         await tx.organization_members.upsert({
           where: { user_id_organization_id: { user_id: user.id, organization_id: orgId } },
-          update: { role: 'owner', status: 'active' },
-          create: { user_id: user.id, organization_id: orgId, role: 'owner' },
+          update: ownerMembership(actorId),
+          create: { user_id: user.id, organization_id: orgId, ...ownerMembership(actorId) },
         });
         await tx.users.updateMany({ where: { id: user.id, organization_id: null }, data: { organization_id: orgId } });
         summary.owners_assigned++;
@@ -405,6 +408,23 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
         }
       }
 
+      // Nobody removed from (or turned down by) a team's organisation is put on its squad
+      // or made its member again by a sheet - re-adding is an owner's or admin's call.
+      const orgOfTeam = new Map([...entries.values()].map((e) => [e.team_id, e.organization_id]));
+      const memberUserIds = [...new Set([...members.values()].map((m) => m.user_id))];
+      const barred = new Set((memberUserIds.length
+        ? await tx.organization_members.findMany({
+          where: { user_id: { in: memberUserIds }, status: { in: ['past', 'rejected'] } },
+          select: { organization_id: true, user_id: true },
+        })
+        : []).map((x) => `${x.organization_id}|${x.user_id}`));
+      for (const [k, m] of members) {
+        if (barred.has(`${orgOfTeam.get(m.team_id)}|${m.user_id}`)) { members.delete(k); summary.removed_skipped++; }
+      }
+      for (const [k, m] of teamOrgMembers) {
+        if (barred.has(`${m.organization_id}|${m.user_id}`)) teamOrgMembers.delete(k);
+      }
+
       // 5d) Write them: one upsert statement each, behind a savepoint. One multi-row
       //     statement can trip team_entries' second unique index (org + draw) part-way
       //     through a reshuffle where row-at-a-time upserts would not, so if the batch
@@ -427,7 +447,7 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
               values ${PrismaNS.join([...members.values()].map((m) =>
                 PrismaNS.sql`(${m.team_id}::uuid, ${m.user_id}::uuid, ${m.role})`))}
               on conflict (team_id, user_id) do update
-                set role = excluded.role, is_active = true`;
+                set role = excluded.role, is_active = true, left_at = null`;
           }
           await tx.$executeRawUnsafe('release savepoint matrix_batch');
         } catch {
@@ -442,7 +462,7 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
           for (const m of members.values()) {
             await tx.team_members.upsert({
               where: { team_id_user_id: { team_id: m.team_id, user_id: m.user_id } },
-              update: { role: m.role, is_active: true },
+              update: { role: m.role, is_active: true, left_at: null },
               create: { team_id: m.team_id, user_id: m.user_id, role: m.role },
             });
           }
@@ -453,7 +473,7 @@ export function makeMatrixImportRouter(prisma: Prisma): Router {
       //    keeps existing rows (owners/admins) as-is, so nobody is downgraded.
       if (teamOrgMembers.size) {
         await tx.organization_members.createMany({
-          data: [...teamOrgMembers.values()].map((m) => ({ ...m, role: 'member' })),
+          data: [...teamOrgMembers.values()].map((m) => ({ ...m, role: 'member', ...vouchedBy(actorId) })),
           skipDuplicates: true,
         });
       }

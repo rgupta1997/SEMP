@@ -30,7 +30,9 @@ export function OrganizationsPage() {
   useEffect(() => {
     const before = lastUnread.current;
     lastUnread.current = unread;
-    if (pending.length && before !== undefined && unread !== undefined && unread > before) void refresh().catch(() => {});
+    // Any new notification, not only while a request is pending: a declined request
+    // can be reconsidered later, and that admission must show up here too.
+    if (before !== undefined && unread !== undefined && unread > before) void refresh().catch(() => {});
   }, [unread]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!pending.length) return;
@@ -43,7 +45,7 @@ export function OrganizationsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Your communities" subtitle="The organizations & groups you play for. Each fields teams per sport.">
+      <PageHeader inTopBar title="Organizations" subtitle="The organizations & groups you play for. Each fields teams per sport.">
         <Button variant="outline" onClick={() => setFinding(true)}>Join Organization</Button>
         <Button onClick={() => setCreating(true)}>+ Create organization</Button>
       </PageHeader>
@@ -64,7 +66,7 @@ export function OrganizationsPage() {
         <>
           {pending.length > 0 && <PendingSection memberships={pending} />}
           <Section title="Current" memberships={current} />
-          {past.length > 0 && <Section title="Past" memberships={past} />}
+          {past.length > 0 && <Section title="Past" memberships={past} past />}
         </>
       )}
 
@@ -120,7 +122,7 @@ function PendingSection({ memberships }: { memberships: any[] }) {
   );
 }
 
-function Section({ title, memberships }: { title: string; memberships: any[] }) {
+function Section({ title, memberships, past = false }: { title: string; memberships: any[]; past?: boolean }) {
   const ws = useWorkspace();
   const { pathname } = useLocation();
 
@@ -155,15 +157,25 @@ function Section({ title, memberships }: { title: string; memberships: any[] }) 
               <div className="flex flex-col items-end gap-2">
                 <div className="flex flex-wrap justify-end gap-1.5">
                   {archived && <span title="Hidden from everyone else until you retrieve it"><Badge tone="amber">Archived</Badge></span>}
-                  <Badge tone="brand">{titleCase(m.role)}</Badge>
+                  {past ? <Badge tone="slate">Past member</Badge> : <Badge tone="brand">{titleCase(m.role)}</Badge>}
                 </div>
-                {/* Owners/admins manage; members (and other roles) can still view the org's teams + members. */}
-                <button
-                  onClick={() => open(m.organization_id)}
-                  className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300"
-                >
-                  {canManage ? 'Manage →' : 'View →'}
-                </button>
+                {/* A past member has no access to the workspace - their own record from here is what's left to open. */}
+                {past ? (
+                  <Link
+                    to={`/profile/matches?org=${m.organization_id}`}
+                    className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300"
+                  >
+                    Your matches here →
+                  </Link>
+                ) : (
+                  // Owners/admins manage; members (and other roles) can still view the org's teams + members.
+                  <button
+                    onClick={() => open(m.organization_id)}
+                    className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300"
+                  >
+                    {canManage ? 'Manage →' : 'View →'}
+                  </button>
+                )}
               </div>
             </Card>
           );

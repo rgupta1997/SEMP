@@ -268,7 +268,8 @@ describe('screenSquad', () => {
   const db = fakeDb({
     organization_members: {
       findMany: async () => [
-        { user_id: 'u-asha' }, { user_id: 'u-meera' }, { user_id: 'u-sunil' },
+        { user_id: 'u-asha', status: 'active' }, { user_id: 'u-meera', status: 'active' }, { user_id: 'u-sunil', status: 'active' },
+        { user_id: 'u-ravi', status: 'past' },
       ],
     },
     org_unit_members: {
@@ -283,8 +284,20 @@ describe('screenSquad', () => {
         { id: 'u-asha', name: 'Asha' },
         { id: 'u-meera', name: 'Meera' },
         { id: 'u-sunil', name: 'Sunil' },
+        { id: 'u-ravi', name: 'Ravi' },
       ],
     },
+  });
+
+  it('refuses a removed person for a unit team, with the re-add reason', async () => {
+    const r = await screenSquad(db, { organization_id: ORG, org_unit_id: 'blr' }, ['u-ravi']);
+    expect(r.refused).toEqual([{ user_id: 'u-ravi', reason: expect.stringContaining('re-add them in People') }]);
+  });
+
+  it('refuses someone removed from the organisation, for an organisation team too', async () => {
+    const r = await screenSquad(db, { organization_id: ORG, org_unit_id: null }, ['u-asha', 'u-ravi']);
+    expect(r.ok).toEqual(['u-asha']);
+    expect(r.refused).toEqual([{ user_id: 'u-ravi', reason: expect.stringContaining('no longer a member') }]);
   });
 
   it('passes everybody through untouched for an organisation team', async () => {

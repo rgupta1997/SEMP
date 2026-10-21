@@ -34,8 +34,25 @@ export function OrgAchievementsPage() {
 
   return (
     <div className="grid gap-5">
-      <PageHeader title="Achievements" subtitle="Track and celebrate milestones across teams and individuals.">
-        <div className="flex rounded-lg border border-slate-200 p-0.5 dark:border-slate-800">
+      <PageHeader inTopBar title="Achievements" subtitle="Track and celebrate milestones across teams and individuals." />
+
+      {/* One row: the sport chips, and the Teams / Individuals switch on the right. */}
+      <div className="-mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+        {/* Only sports this institution has actually won something in. */}
+        <div className="min-w-0 flex-1">
+          {(data?.sports.length ?? 0) > 0 && (
+            <FilterChips
+              className="!mb-0"
+              value={sportId}
+              onChange={setSportId}
+              options={[
+                { key: '', label: 'All sports' },
+                ...[...data!.sports].sort((a, b) => a.name.localeCompare(b.name)).map((s) => ({ key: s.id, label: s.name })),
+              ]}
+            />
+          )}
+        </div>
+        <div className="flex shrink-0 rounded-lg border border-slate-200 p-0.5 dark:border-slate-800">
           {(['teams', 'individuals'] as const).map((s) => (
             <button
               key={s} type="button" onClick={() => setScope(s)} aria-current={scope === s}
@@ -44,20 +61,7 @@ export function OrgAchievementsPage() {
             >{s}</button>
           ))}
         </div>
-      </PageHeader>
-
-      {/* Only sports this institution has actually won something in. */}
-      {(data?.sports.length ?? 0) > 0 && (
-        <FilterChips
-          className="mb-0"
-          value={sportId}
-          onChange={setSportId}
-          options={[
-            { key: '', label: 'All sports' },
-            ...[...data!.sports].sort((a, b) => a.name.localeCompare(b.name)).map((s) => ({ key: s.id, label: s.name })),
-          ]}
-        />
-      )}
+      </div>
 
       {isLoading || !data ? <Skeleton className="h-56" /> : (
         <div className="grid gap-5 lg:grid-cols-[1.6fr_1fr]">

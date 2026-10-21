@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react';
 import { Calendar, Flag, MapPin } from 'lucide-react';
 import { EARLY_END_LABEL, earlyEndOf, formatPoints, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
 import { useApi, fmtDateTime } from '../../lib/hooks';
-import { Badge, Card, EmptyState, ListToolbar, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
+import { Badge, Card, EmptyState, ListToolbar, Segmented, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
 import { FitName } from '../FitName';
+import { Bracket } from '../Bracket';
 
 // A flattened fixture from GET /championships/:id/fixtures.
 interface TeamRef {
@@ -24,8 +25,16 @@ interface FixtureRow {
   scorecard_url: string | null;
   home: TeamRef | null;
   away: TeamRef | null;
-  /** Read here only for how a match ended (retired / disqualified / conceded). */
-  live_state?: unknown;
+  /** Read here for how a match ended (retired / disqualified / conceded), and by the bracket. */
+  live_state?: any;
+  // For the bracket view.
+  tournament_discipline_id?: string | null;
+  home_team_id: string | null;
+  away_team_id: string | null;
+  bracket_position: number | null;
+  pool_number?: number | null;
+  home_slot_label?: string | null;
+  away_slot_label?: string | null;
 }
 
 // Results shows concluded matches AND in-progress ones (live), so a live match with
@@ -64,6 +73,17 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
   const [sport, setSport] = useState('');
   // Status filter is driven by clicking the colour legend (empty = show all).
   const [legendStatus, setLegendStatus] = useState('');
+  // Groups shown as a bracket instead of a list (Schedule only), by group key.
+  const [asBracket, setAsBracket] = useState<Record<string, boolean>>({});
+
+  // Team names by id, for the bracket - it is drawn from ids, not the row objects.
+  const teamsById = useMemo(() => {
+    const m = new Map<string, TeamRef>();
+    for (const f of all) for (const t of [f.home, f.away]) if (t) m.set(t.id, t);
+    return m;
+  }, [all]);
+  const bracketTeamName = (id: string | null) => (id ? teamLabel(teamsById.get(id) ?? null) : TBD_LABEL);
+  const bracketTeamOrg = (id: string | null) => (id ? orgLabel(teamsById.get(id) ?? null) : '');
 
   // Schedule shows every fixture (the championship calendar); Results only those
   // that have concluded.
@@ -128,18 +148,38 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
         <StatusLegend className="px-1" statuses={legendStatuses} value={legendStatus} onSelect={setLegendStatus} />
       )}
 
-      {groups.map((g) => (
+      {groups.map((g) => {
+        // A bracket is drawn from the WHOLE knockout draw, whatever the status chip
+        // says - a filtered tree would have holes. Pool matches are not part of it.
+        const knockout = mode === 'schedule'
+          ? all.filter((f) => f.sport === g.sport && f.discipline === g.discipline && f.pool_number == null)
+          : [];
+        const hasBracket = knockout.some((f) => f.bracket_position != null);
+        const showBracket = hasBracket && !!asBracket[g.key];
+        return (
         <section key={g.key} className="space-y-2">
-          <div className="flex items-center gap-2 px-1">
+          <div className="flex flex-wrap items-center gap-2 px-1">
             <span className="text-base">{g.icon ?? '◇'}</span>
             <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">
               {g.sport ?? 'Sport'}
               {g.discipline && <span className="font-medium text-slate-400 dark:text-slate-500"> · {g.discipline}</span>}
             </h3>
             <Badge tone="slate">{g.rows.length}</Badge>
+            {hasBracket && (
+              <div className="ml-auto">
+                <Segmented size="sm" value={showBracket ? 'bracket' : 'list'}
+                  onChange={(v) => setAsBracket((s) => ({ ...s, [g.key]: v === 'bracket' }))}
+                  options={[{ value: 'list', label: 'List' }, { value: 'bracket', label: 'Bracket' }]} />
+              </div>
+            )}
           </div>
 
-          {g.rows.map((f) => {
+          {showBracket ? (
+            <Card className="p-3 sm:p-4">
+              {/* Read-only: no onSelect / onScore, so nothing in it can be edited. */}
+              <Bracket fixtures={knockout} teamName={bracketTeamName} teamOrg={bracketTeamOrg} />
+            </Card>
+          ) : g.rows.map((f) => {
             const scored = f.home_score != null && f.away_score != null;
             const homeWon = f.winner_team_id != null && f.winner_team_id === f.home?.id;
             const awayWon = f.winner_team_id != null && f.winner_team_id === f.away?.id;
@@ -210,7 +250,8 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
             );
           })}
         </section>
-      ))}
+        );
+      })}
     </div>
   );
 }

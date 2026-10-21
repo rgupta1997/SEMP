@@ -107,7 +107,7 @@ export function AdminPage() {
   if (visible.length === 0) {
     return (
       <>
-        <PageHeader title="Administration" />
+        <PageHeader inTopBar title="Administration" />
         <p className="text-sm text-slate-500 dark:text-slate-400">
           Your role in this organisation does not include any administration areas.
         </p>
@@ -125,7 +125,7 @@ export function AdminPage() {
 
   return (
     <>
-      <PageHeader title="Administration" subtitle={orgName ?? undefined} />
+      <PageHeader inTopBar title="Administration" subtitle={orgName ?? undefined} />
 
       <div className="flex flex-wrap items-start gap-[18px]">
         {/* ---- the rail ----

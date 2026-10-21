@@ -799,7 +799,7 @@ export function TeamsPage() {
 
   return (
     <div>
-      <PageHeader
+      <PageHeader inTopBar
         title={activeEvent ? `${activeEvent.championships?.name ?? 'Championship'} teams` : 'Teams'}
         subtitle={activeEvent ? 'Teams entered for this championship.' : 'Enter and manage teams across your approved championships.'}
       >

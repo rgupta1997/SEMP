@@ -729,7 +729,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
       prisma.teams.findMany({
         where: { team_entries: { some: { championship_id: req.params.id } } },
         include: {
-          team_members: { include: { users: { select: { id: true, name: true, email: true, phone: true } } } },
+          team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true, email: true, phone: true } } } },
           organizations: { select: { id: true, name: true, short_name: true } },
           sports: { select: { id: true, name: true, icon: true } },
         },
@@ -786,7 +786,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
     const team = await prisma.teams.findFirst({
       where: {
         team_entries: { some: { championship_id: req.params.id } },
-        team_members: { some: { user_id: user.id } },
+        team_members: { some: { user_id: user.id, is_active: true } },
       },
       include: { organizations: { select: { id: true, name: true } } },
     });

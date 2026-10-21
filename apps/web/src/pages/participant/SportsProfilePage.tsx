@@ -687,7 +687,7 @@ export function SportsProfilePage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 60 }}>
-      <PageHeader title="My sports profile" subtitle="Who you are, and what the record says you have done." />
+      <PageHeader inTopBar title="My Sports Profile" subtitle="Who you are, and what the record says you have done." />
 
       <ProfileHeader id={id} onChanged={() => refetch()} />
 

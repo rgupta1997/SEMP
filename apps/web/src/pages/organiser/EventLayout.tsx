@@ -2,6 +2,7 @@ import { Navigate, Outlet, useLocation, useOutletContext, useParams } from 'reac
 import { api } from '../../lib/api';
 import { archiveDaysLeft, archivePurgeDate } from '@semp/shared';
 import { useApi, useApiMutation, fmtDate, fmtDateRange } from '../../lib/hooks';
+import { usePageTitle } from '../../lib/pageTitle';
 import { usePermissions } from '../../lib/permissions';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { mayOpenSegment, parseEventSegment } from '../../lib/championship-nav';
@@ -68,6 +69,11 @@ export function EventLayout() {
     [`/championships/${eventId}`, `/championships/${eventId}/removal`, '/championships', '/championships/mine'],
   );
 
+  // Overview keeps the event's name as its own big heading; every other page of the
+  // event puts it in the top bar instead and opens on one compact line.
+  const isOverview = new RegExp(`^/championships/${eventId}/?$`).test(pathname);
+  usePageTitle(isOverview ? null : championship?.name ?? null);
+
   // A private event you are not in, an archived event you do not host, or one that
   // is gone all answer 404 - said plainly rather than spinning forever.
   if (!isLoading && !championship && error) {
@@ -125,6 +131,8 @@ export function EventLayout() {
           keeps its label because "Mark completed" is not a glyph anybody would
           guess. Venue and dates stay: they are what tells you which event this is
           when two have similar names. */}
+      {/* Overview: the event's name as a big heading, as it always was. */}
+      {isOverview ? (
       <div className="mb-4 flex items-start justify-between gap-3 sm:mb-5">
         <div className="min-w-0 flex-1">
           <BackButton onClick={() => ws.leaveTo(from)}>{backLabel}</BackButton>
@@ -145,6 +153,31 @@ export function EventLayout() {
           </Button>
         )}
       </div>
+      ) : (
+      // Every other page: the NAME is in the top bar (usePageTitle), and what stays is
+      // one line - back, status, where and when, and the lifecycle action.
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <BackButton className="!mb-0" onClick={() => ws.leaveTo(from)}>{backLabel}</BackButton>
+        {/* Phone: its own full-width row under back + action, so the badge and the
+            date line sit side by side instead of being squeezed into a stack. */}
+        <div className="order-last flex min-w-0 basis-full items-center gap-x-2.5 gap-y-1 sm:order-none sm:flex-1 sm:basis-auto">
+          <StatusBadge status={championship.status} />
+          <p className="t-meta min-w-0 truncate" title={`${championship.venue || 'Venue TBD'} · ${fmtDateRange(championship.start_date, championship.end_date)}`}>
+            {championship.venue || 'Venue TBD'} · {fmtDateRange(championship.start_date, championship.end_date)}
+          </p>
+        </div>
+        {canManage && next && (
+          <Button
+            size="sm"
+            className="ml-auto shrink-0"
+            onClick={() => statusMut.mutate(next.to, { onSuccess: () => toast.success('Championship status updated'), onError: (e: any) => toast.error(e.message) })}
+            disabled={statusMut.isPending}
+          >
+            {statusMut.isPending ? 'Updating…' : next.label}
+          </Button>
+        )}
+      </div>
+      )}
 
       {archivedAt && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-500/30 dark:bg-amber-500/10">

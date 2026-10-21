@@ -4,7 +4,7 @@ import { ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDate } from '../../lib/hooks';
-import { Avatar, Button, Card, confirmDialog, EmptyState, Spinner } from '../../components/ui';
+import { Avatar, Button, Card, confirmDialog, EmptyState, PHONE_COMPACT_BUTTON, Spinner } from '../../components/ui';
 import { PeoplePicker } from '../../components/PeoplePicker';
 import { EventOfficialsPage } from './EventOfficialsPage';
 
@@ -67,7 +67,7 @@ export function EventOrganisersPage() {
           <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">Organising team</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400">{organisers.length} organiser{organisers.length === 1 ? '' : 's'} on this championship.</p>
         </div>
-        <Button onClick={() => setAdding(true)} disabled={!organiserRoleId || archived} title={archivedTitle}>+ Add team members</Button>
+        <Button className={PHONE_COMPACT_BUTTON} onClick={() => setAdding(true)} disabled={!organiserRoleId || archived} title={archivedTitle}>+ Add team members</Button>
       </div>
 
       {organisers.length === 0 ? (

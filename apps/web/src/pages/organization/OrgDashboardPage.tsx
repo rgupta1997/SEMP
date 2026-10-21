@@ -1,12 +1,14 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Award, CalendarDays, ClipboardList, Mail, Radio, Shield, Users } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
+import { usePageTitle } from '../../lib/pageTitle';
 import { useApi } from '../../lib/hooks';
+import { ApiError } from '../../lib/api';
 import { usePermissions } from '../../lib/permissions';
 import { usePocOnboarding } from '../../lib/onboarding';
 import { useWorkspace } from '../../lib/useWorkspace';
 import { GettingStarted } from '../../components/onboarding/GettingStarted';
-import { Badge, Spinner, StatusBadge } from '../../components/ui';
+import { Badge, EmptyState, Spinner, StatusBadge } from '../../components/ui';
 import { titleCase } from '../../lib/format';
 
 // The organisation dashboard (PG-20): what needs attention, and what is happening.
@@ -61,7 +63,7 @@ export function OrgDashboardPage() {
   const canManage = usePermissions().canManageOrg(orgId);
   const ws = useWorkspace();
   const onboarding = usePocOnboarding(orgId, canManage);
-  const { data, isLoading } = useApi<Dash>(orgId ? `/organizations/${orgId}/dashboard` : null);
+  const { data, isLoading, error } = useApi<Dash>(orgId ? `/organizations/${orgId}/dashboard` : null);
 
   // An archived organisation hosts nothing new - the server refuses it too.
   const archived = !!ws.contexts.find((c) => c.id === orgId)?.archived;
@@ -86,8 +88,26 @@ export function OrgDashboardPage() {
   ] : [];
 
   const peak = Math.max(1, ...(data?.trend ?? []).map((t) => t.participants));
+  usePageTitle('Dashboard');
 
   if (isLoading) return <Spinner />;
+
+  // Refused (removed, or never a member - an old bookmark or notification link): say so,
+  // rather than drawing every card with its "nothing yet" text.
+  if (error instanceof ApiError && error.status === 403) {
+    return (
+      <EmptyState
+        icon={<Shield size={28} />}
+        title="You're not a member of this organisation"
+        description="Your own matches and awards from any time you played here are still in My Space."
+        action={(
+          <Link to="/organizations" className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300">
+            ← Back to Organizations
+          </Link>
+        )}
+      />
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 60 }}>

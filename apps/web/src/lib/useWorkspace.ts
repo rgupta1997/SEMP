@@ -5,7 +5,7 @@ import { useAuth } from './auth';
 import { useApi } from './hooks';
 import { membershipRoleCode, TBD_LABEL } from '@semp/shared';
 import { themeOf } from './tenant-theme';
-import { EVENT_ROLE_CODES, landingFor, type ContextKind, type NavFacts, type WorkspaceContext } from './workspace';
+import { EVENT_ROLE_CODES, PERSONAL_ONLY_ROUTE, landingFor, type ContextKind, type NavFacts, type WorkspaceContext } from './workspace';
 
 // Turning one account into the list of workspaces it can enter.
 //
@@ -82,6 +82,9 @@ export function useWorkspace() {
     const m = /^\/(?:organizations|championships)\/([0-9a-fA-F-]{36})(?:\/|$)/.exec(pathname);
     return m ? m[1] : null;
   }, [pathname]);
+  // Opening the app on a still-valid session lands on My Game without a sign-in, so
+  // the logout cleanup never runs - without this the saved org sidebar showed beside it.
+  const onPersonalPage = PERSONAL_ONLY_ROUTE.test(pathname);
 
   const contexts = useMemo<WorkspaceContext[]>(() => {
     if (!ctx?.user) return [];
@@ -234,9 +237,14 @@ export function useWorkspace() {
       setActiveId(routeContextId);
       return;
     }
+    if (onPersonalPage) {
+      localStorage.setItem(storeKey, 'me');
+      setActiveId('me');
+      return;
+    }
     const stored = localStorage.getItem(storeKey);
     setActiveId(stored && contexts.some((c) => c.id === stored) ? stored : contexts[0].id);
-  }, [storeKey, contexts.length, routeContextId]);
+  }, [storeKey, contexts.length, routeContextId, onPersonalPage]);
 
   const active = contexts.find((c) => c.id === activeId) ?? contexts[0] ?? null;
 

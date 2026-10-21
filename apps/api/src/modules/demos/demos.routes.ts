@@ -192,7 +192,7 @@ export function makeDemosRouter(prisma: Prisma): Router {
       // Captaincy is what makes a participant worth opening on screen - they have a
       // squad behind them and records to show.
       prisma.team_members.findMany({
-        where: { user_id: { in: userIds }, role: 'captain' },
+        where: { user_id: { in: userIds }, role: 'captain', is_active: true },
         select: { user_id: true, teams: { select: { name: true } } },
       }),
     ]);

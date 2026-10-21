@@ -8,10 +8,18 @@ import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, CircleDashed, Info, Search, SlidersHorizontal, X } from 'lucide-react';
 import { titleCase } from '../lib/format';
 import { useDialog } from '../lib/useDialog';
+import { usePageTitle } from '../lib/pageTitle';
 
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
 }
+
+/**
+ * A regular button, a touch smaller on a phone: text scales with the screen (12-14px),
+ * padding and height trimmed (38px still clears a thumb). sm+ is untouched. `!` because
+ * cn() only joins - these must beat the button's own size classes.
+ */
+export const PHONE_COMPACT_BUTTON = 'max-sm:!min-h-[38px] max-sm:!px-3 max-sm:!py-1.5 max-sm:!text-[length:clamp(12px,3.4vw,14px)]';
 
 /* ----------------------------- Button ----------------------------- */
 type ButtonVariant = 'primary' | 'ghost' | 'outline' | 'danger' | 'subtle';
@@ -638,7 +646,26 @@ export function Pills({ value, onChange, options, ariaLabel }: {
 }
 
 /* ----------------------------- PageHeader ----------------------------- */
-export function PageHeader({ title, subtitle, children }: { title: ReactNode; subtitle?: ReactNode; children?: ReactNode }) {
+export function PageHeader({ title, subtitle, children, inTopBar = false, noTitle = false }: {
+  title: ReactNode; subtitle?: ReactNode; children?: ReactNode;
+  /** Put the title in the app's top bar instead (usePageTitle); only the actions stay here. */
+  inTopBar?: boolean;
+  /** Drop the title altogether (the top bar already names the page - e.g. inside an
+   *  event, where it shows the event); the description and actions stay. */
+  noTitle?: boolean;
+}) {
+  usePageTitle(inTopBar && typeof title === 'string' ? title : null);
+  // Title in the top bar (or not shown); the short description stays here, small, with
+  // the actions on the same line - it tells a reader what the page is for.
+  if (noTitle || (inTopBar && typeof title === 'string')) {
+    if (!subtitle && !children) return null;
+    return (
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        {subtitle && <p className="t-meta min-w-0 flex-1 basis-64">{subtitle}</p>}
+        {children && <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">{children}</div>}
+      </div>
+    );
+  }
   return (
     // A 24px title plus a wrapped subtitle plus a row of full-size buttons was
     // ~150px of a 390px screen spent before the page began. Below sm the title

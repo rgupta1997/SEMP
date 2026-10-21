@@ -15,6 +15,8 @@ import { deriveProvisionedPassword, phoneLast10 } from '../iam/users.helpers.js'
 import { mintSportagonIds, orgIdPrefixFor } from '../iam/sportagon-id.js';
 import { assertOrgNotArchived } from '../iam/organization-archive.service.js';
 import { notifyJoinApproved, notifyJoinDeclined } from '../iam/organizations.notifications.js';
+import { vouchedBy } from '../iam/member-removal.service.js';
+import { HELD_FOR_EVENT } from '../teams/squad-places.js';
 import { GENDERS, validateRoster, type RosterContext, type RosterRow, type RosterRowResult } from './roster-import.js';
 
 // The student roll (J1-E5).
@@ -117,6 +119,21 @@ export function makePeopleRouter(prisma: Prisma): Router {
     });
 
   const canEditPeople = requirePeople('people.edit', 'You cannot add or edit people in this institution.');
+
+  /**
+   * May this person decide who BELONGS - accept a join request, bring back someone
+   * removed? Owners and admins (`org.member.manage`); a Sports Admin adds and edits
+   * people but deliberately does not hold this.
+   */
+  const mayAdmit = (req: { user?: { id: string; isSuperAdmin?: boolean } }, organizationId: string) =>
+    can(prisma, 'org.member.manage', {
+      user: { id: req.user!.id, isSuperAdmin: !!req.user!.isSuperAdmin },
+      scope: { organizationId },
+      fallback: async () => !!(await prisma.organization_members.findFirst({
+        where: { user_id: req.user!.id, organization_id: organizationId, status: 'active', role: { in: ['owner', 'admin'] } },
+        select: { id: true },
+      })),
+    });
   const canImportPeople = requirePeople('people.import', 'You cannot bulk-upload rosters for this institution.');
   const canVerifyPeople = requirePeople('people.verify', 'You cannot verify people in this institution.');
 
@@ -181,7 +198,7 @@ export function makePeopleRouter(prisma: Prisma): Router {
       prisma.org_units.findMany({ where: { organization_id: organizationId }, select: { id: true, name: true, type: true, parent_id: true } }),
       prisma.organization_members.findMany({
         where: { organization_id: organizationId },
-        select: { user_id: true, member_code: true },
+        select: { user_id: true, member_code: true, status: true },
       }),
       // Rows carrying an explicit `user_id` (the search-and-link picker) skip
       // phone/email matching entirely, so their account is looked up directly here.
@@ -196,6 +213,7 @@ export function makePeopleRouter(prisma: Prisma): Router {
       usersByEmail: new Map(byEmail.map((u) => [u.email.toLowerCase(), { id: u.id, name: u.name }])),
       unitsByName: new Map(units.map((u) => [u.name.trim().toLowerCase(), { id: u.id, type: u.type, parent_id: u.parent_id }])),
       memberUserIds: new Set(members.map((m) => m.user_id)),
+      removedUserIds: new Set(members.filter((m) => m.status === 'past' || m.status === 'rejected').map((m) => m.user_id)),
       memberCodeOwner: new Map(
         members.filter((m) => m.member_code).map((m) => [m.member_code!.trim().toLowerCase(), m.user_id]),
       ),
@@ -407,7 +425,8 @@ export function makePeopleRouter(prisma: Prisma): Router {
     // not leave an orphaned account behind it.
     await assertWithinOrgLimit(prisma, 'people', organizationId, await countPeople(prisma, organizationId));
     const rows = [req.body as RosterRow];
-    const report = validateRoster(rows, await loadContext(organizationId, rows));
+    // Adding by hand IS how a removed person comes back, so only a file refuses them.
+    const report = validateRoster(rows, { ...await loadContext(organizationId, rows), removedUserIds: undefined });
     const row = report.rows[0];
     // The same validator the bulk path uses, so a late joiner is held to exactly
     // the same rules as a spreadsheet row - including the member-code clash and
@@ -440,11 +459,21 @@ export function makePeopleRouter(prisma: Prisma): Router {
       credential = { name: row.name!, email, phone: row.phone, password };
     }
 
+    const memberKey = { user_id_organization_id: { user_id: userId, organization_id: organizationId } };
+    const before = await prisma.organization_members.findUnique({ where: memberKey, select: { status: true, role: true } });
+    // Already a member: only their details change. Bringing in someone removed, turned
+    // down or still asking is deciding who belongs - an owner's or admin's call.
+    const returning = !!before && before.status !== 'active';
+    if (returning && !await mayAdmit(req, organizationId)) {
+      throw new ForbiddenError('Only an owner or admin can bring back someone who was removed or is waiting to join.');
+    }
     const member = await prisma.organization_members.upsert({
-      where: { user_id_organization_id: { user_id: userId, organization_id: organizationId } },
+      where: memberKey,
       update: {
         ...(row.member_code ? { member_code: row.member_code } : {}),
         ...(row.scholarship != null ? { scholarship: row.scholarship } : {}),
+        // Coming back is as a vouched-for member, as with Re-add - never with an old admin role.
+        ...(returning ? { status: 'active', ...vouchedBy(req.user!.id), ...(before!.role === 'admin' ? { role: 'member' } : {}) } : {}),
       },
       create: {
         // An admin adding a person by hand is the institution vouching for them
@@ -452,11 +481,15 @@ export function makePeopleRouter(prisma: Prisma): Router {
         // (unlike a self-service join request, which stays pending for an
         // owner/admin to approve).
         user_id: userId, organization_id: organizationId, role: 'member', status: 'active',
-        member_code: row.member_code, scholarship: row.scholarship,
-        verification: 'verified', verified_by: req.user!.id, verified_at: new Date(),
+        member_code: row.member_code, scholarship: row.scholarship, ...vouchedBy(req.user!.id),
       },
       include: { users: { select: { name: true, email: true, phone: true } } },
     });
+    // Someone brought back is told, as Re-add and an accepted request tell them.
+    if (returning) {
+      const org = await prisma.organizations.findUnique({ where: { id: organizationId }, select: { name: true } });
+      await notifyJoinApproved(prisma, userId, org?.name ?? 'the organization', req.user!.id);
+    }
 
     // Placement is ADDITIVE on import. A sheet naming a campus and a batch places
     // the person in both, and re-importing a corrected sheet adds rather than
@@ -539,11 +572,13 @@ export function makePeopleRouter(prisma: Prisma): Router {
                  array_agg(distinct s.name) as sport_names
             from team_members tm
             join team_entries te on te.team_id = tm.team_id
+            join championships c on c.id = te.championship_id
             join tournament_disciplines td on td.id = te.tournament_discipline_id
             join tournament_sports ts on ts.id = td.tournament_sport_id
             left join sports s on s.id = ts.sport_id
            where te.organization_id = ${organizationId}::uuid
              and tm.user_id in (${PrismaNS.join(userIds.map((id) => PrismaNS.sql`${id}::uuid`))})
+             and ${HELD_FOR_EVENT}
            group by tm.user_id`)
       : [];
     const byUser = new Map(activity.map((a) => [a.user_id, a]));
@@ -578,25 +613,27 @@ export function makePeopleRouter(prisma: Prisma): Router {
     // Ids that belong to another institution are silently absent rather than
     // reported - confirming which ids exist elsewhere would leak across the tenancy
     // boundary the rest of this router is built to hold.
-    const changed = members.filter((m) => m.verification !== verification);
-
     // A pending JOIN REQUEST is answered here too (the Members approval card is
     // de-wired): Verify accepts it, as Approve did; Reject declines it, as Decline did -
     // otherwise the person stays "Pending" on their side either way. Only for someone
     // who may admit members: a Sports Admin can verify but must not admit or turn away.
     const pendingRequests = members.filter((m) => m.status === 'pending');
-    const mayDecide = pendingRequests.length > 0 && await can(prisma, 'org.member.manage', {
-      user: { id: req.user!.id, isSuperAdmin: req.user!.isSuperAdmin },
-      scope: { organizationId },
-      fallback: async () => !!(await prisma.organization_members.findFirst({
-        where: { user_id: req.user!.id, organization_id: organizationId, status: 'active', role: { in: ['owner', 'admin'] } },
-        select: { id: true },
-      })),
-    });
-    const admitted = mayDecide && verification === 'verified' ? pendingRequests : [];
-    // Kept as status 'rejected' (not deleted, as Decline did) so it stays under Rejected
-    // here; the person can ask again - /join re-opens a rejected row.
+    // Verifying someone whose request was DECLINED is changing your mind: it admits them
+    // too, with the same "approved" notification, so their side never shows a "Verified"
+    // person who is still out.
+    const declinedEarlier = verification === 'verified' ? members.filter((m) => m.status === 'rejected') : [];
+    const mayDecide = (pendingRequests.length > 0 || declinedEarlier.length > 0) && await mayAdmit(req, organizationId);
+    const admitted = mayDecide && verification === 'verified' ? [...pendingRequests, ...declinedEarlier] : [];
+    // Kept as status 'rejected' (not deleted, as Decline did); the person can ask
+    // again - /join re-opens a rejected row.
     const declined = mayDecide && verification === 'rejected' ? pendingRequests : [];
+
+    // Rejecting is declining a request - it never applies to someone already in. And a
+    // request is only verified by being accepted, so without the right to admit it is
+    // left as it is rather than becoming "verified but still waiting".
+    const decided = new Set([...admitted, ...declined].map((m) => m.id));
+    const changed = members.filter((m) => m.verification !== verification
+      && (decided.has(m.id) || (verification === 'verified' && m.status === 'active')));
 
     await prisma.$transaction([
       ...changed.map((m) => prisma.organization_members.update({
@@ -609,7 +646,7 @@ export function makePeopleRouter(prisma: Prisma): Router {
         },
       })),
       ...(admitted.length ? [prisma.organization_members.updateMany({
-        where: { id: { in: admitted.map((m) => m.id) }, status: 'pending' },
+        where: { id: { in: admitted.map((m) => m.id) }, status: { in: ['pending', 'rejected'] } },
         data: { status: 'active' },
       })] : []),
       ...(declined.length ? [prisma.organization_members.updateMany({

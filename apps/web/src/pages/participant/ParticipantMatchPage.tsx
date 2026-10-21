@@ -31,6 +31,7 @@ interface MatchDetail {
     my_role: string | null;
     jersey_number: number | null;
     teammates: { name: string; phone: string | null; role: string; jersey_number: number | null }[];
+    former_member?: boolean;
   };
   /**
    * The player's own numbers; null if not in the match. `played: false` = named but didn't
@@ -72,7 +73,10 @@ export function ParticipantMatchPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        {f.championship ? (
+        {/* The championship page stays closed to someone who has left the squad - their list of matches is where they go back to. */}
+        {f.former_member ? (
+          <BackButton to="/profile/matches" className="mb-0">Back to your matches</BackButton>
+        ) : f.championship ? (
           <BackButton to={`/profile/championships/${f.championship.id}`} className="mb-0">Back to championship</BackButton>
         ) : (
           <BackButton to="/profile/matches" className="mb-0">All matches</BackButton>
@@ -132,7 +136,9 @@ export function ParticipantMatchPage() {
           <CardHeader title="Your team" subtitle={f.my_team.name} />
           <CardBody className="pt-0">
             {f.teammates.length === 0 ? (
-              <p className="text-sm text-slate-400 dark:text-slate-500">No roster recorded.</p>
+              <p className="text-sm text-slate-400 dark:text-slate-500">
+                {f.former_member ? "You're no longer on this squad." : 'No roster recorded.'}
+              </p>
             ) : (
               <ul className="divide-y divide-slate-100 dark:divide-slate-800">
                 {f.teammates.map((t, i) => (

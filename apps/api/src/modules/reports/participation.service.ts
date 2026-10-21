@@ -2,6 +2,7 @@ import { Prisma as PrismaNS } from '@prisma/client';
 import { seasonOf, seasonStartMonthOf, type SeasonStartMonth } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
 import { NotFoundError } from '../../shared/errors.js';
+import { HELD_FOR_EVENT } from '../teams/squad-places.js';
 
 // Who counts as having taken part for an organisation, and in which season.
 //
@@ -84,8 +85,10 @@ export async function participantsIn(
       join tournament_sports ts on ts.id = td.tournament_sport_id
       join sports s on s.id = ts.sport_id
       join team_members tm on tm.team_id = te.team_id
+      join championships c on c.id = te.championship_id
       left join org_unit_members oum
              on oum.user_id = tm.user_id and oum.organization_id = ${organizationId}::uuid
      where te.organization_id = ${organizationId}::uuid
-       and te.championship_id in (${PrismaNS.join(champIds.map((id) => PrismaNS.sql`${id}::uuid`))})`);
+       and te.championship_id in (${PrismaNS.join(champIds.map((id) => PrismaNS.sql`${id}::uuid`))})
+       and ${HELD_FOR_EVENT}`);
 }

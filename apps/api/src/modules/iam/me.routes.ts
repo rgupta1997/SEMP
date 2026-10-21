@@ -25,6 +25,48 @@ const fixtureInclude = {
 
 type FixtureRow = any;
 
+// A match that has happened. A squad place the person no longer holds still counts for these.
+const PLAYED_STATUSES = ['completed', 'walkover'];
+
+/** A squad place as the history rules read it. */
+interface SquadPlace { team_id: string; is_active: boolean; left_at: Date | null }
+
+// Played on or before the day they left - finished time, else the scheduled one. A match
+// with neither date cannot be placed either side of it, so it stays theirs.
+const playedBy = (leftAt: Date) => ({
+  OR: [
+    { completed_at: { lte: leftAt } },
+    { completed_at: null, scheduled_at: { lte: leftAt } },
+    { completed_at: null, scheduled_at: null },
+  ],
+});
+
+/**
+ * Which fixtures are this person's. A current squad: all of its matches. A squad they
+ * have left: only matches played while they were on it - up to `left_at`, or every played
+ * match when the row predates that column and the date is unknown.
+ */
+export function myFixturesWhere(places: SquadPlace[]) {
+  const current = places.filter((p) => p.is_active).map((p) => p.team_id);
+  const clauses: object[] = current.length
+    ? [{ home_team_id: { in: current } }, { away_team_id: { in: current } }]
+    : [];
+  for (const p of places.filter((x) => !x.is_active)) {
+    const played = { status: { in: PLAYED_STATUSES }, ...(p.left_at ? playedBy(p.left_at) : {}) };
+    clauses.push({ home_team_id: p.team_id, ...played }, { away_team_id: p.team_id, ...played });
+  }
+  // Nothing at all matches an empty OR in Prisma, which is the right answer for no squads.
+  return { OR: clauses };
+}
+
+/** Did this fixture happen while they held this (now inactive) place? */
+export function playedWhileOn(f: { status: string; completed_at?: Date | null; scheduled_at?: Date | null }, leftAt: Date | null) {
+  if (!PLAYED_STATUSES.includes(f.status)) return false;
+  if (!leftAt) return true;
+  const when = f.completed_at ?? f.scheduled_at ?? null;
+  return !when || when <= leftAt;
+}
+
 type Result = 'won' | 'lost' | 'draw' | 'pending';
 
 /** Shoot-out kicks as [mine, theirs], or null when the match was not settled on penalties. */
@@ -203,6 +245,8 @@ export function makeMeRouter(prisma: Prisma): Router {
       where: { user_id: userId, ...(activeOnly ? { is_active: true } : {}) },
       select: {
         team_id: true,
+        is_active: true,
+        left_at: true,
         teams: {
           select: {
             sports: { select: { id: true, name: true, icon: true } },
@@ -271,7 +315,7 @@ export function makeMeRouter(prisma: Prisma): Router {
               },
               orderBy: { created_at: 'asc' },
             },
-            team_members: { include: { users: { select: { id: true, name: true, email: true, phone: true } } } },
+            team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true, email: true, phone: true } } } },
           },
         },
       },
@@ -309,6 +353,10 @@ export function makeMeRouter(prisma: Prisma): Router {
       // JWT may lack organizationId if the user self-created an org after their last login.
       // Fall back to their first active owner/admin membership derived from DB.
       let organizationId = req.user!.organizationId;
+      // The token's org is as old as the sign-in; someone removed since is not a member.
+      if (organizationId && !req.user!.isSuperAdmin && !await prisma.organization_members.findFirst({
+        where: { user_id: req.user!.id, organization_id: organizationId, status: 'active' }, select: { id: true },
+      })) organizationId = null;
       if (!organizationId) {
         const membership = await prisma.organization_members.findFirst({
           where: { user_id: req.user!.id, role: { in: ['owner', 'admin'] }, status: 'active' },
@@ -402,12 +450,12 @@ export function makeMeRouter(prisma: Prisma): Router {
   // Participant dashboard - cross-championship career view with on-demand drill-down.
   // -------------------------------------------------------------------------
 
-  // Resolve the user's active team memberships once: returns the membership rows
-  // (with team + sport + the championships/disciplines each roster is entered into)
-  // plus a Set of team ids for matching.
+  // Resolve the user's team memberships once - current and left (`is_active` says which):
+  // the membership rows (with team + sport + the championships/disciplines each roster is
+  // entered into) plus a Set of team ids for matching.
   async function loadMyTeams(userId: string) {
     const memberships = await prisma.team_members.findMany({
-      where: { user_id: userId, is_active: true },
+      where: { user_id: userId },
       include: {
         teams: {
           include: {
@@ -435,7 +483,7 @@ export function makeMeRouter(prisma: Prisma): Router {
   router.get('/me/dashboard', asyncHandler(async (req, res) => {
     // Every team ever played for, not just the ones still on the current roster -
     // this is a career summary, and leaving a team must not erase matches already
-    // locked while you were on it.
+    // locked while you were on it. Nor add the ones it played after.
     const { memberships, teamIds } = await loadMembershipMeta(req.user!.id, { activeOnly: false });
 
     if (teamIds.size === 0) {
@@ -443,9 +491,8 @@ export function makeMeRouter(prisma: Prisma): Router {
       return;
     }
 
-    const ids = [...teamIds];
     const fixtures = await prisma.fixtures.findMany({
-      where: { OR: [{ home_team_id: { in: ids } }, { away_team_id: { in: ids } }] },
+      where: myFixturesWhere(memberships),
       select: matchSelect,
       orderBy: [{ scheduled_at: 'desc' }, { created_at: 'desc' }],
     });
@@ -457,6 +504,8 @@ export function makeMeRouter(prisma: Prisma): Router {
       start_date: Date | null; end_date: Date | null; venue: string | null;
       team_count: number; match_count: number; win_count: number;
       _sports: Set<string>;
+      /** Still on one of the squads entered here. */
+      on_squad: boolean;
     };
     const eventMap = new Map<string, EventCard>();
     for (const m of memberships) {
@@ -465,10 +514,11 @@ export function makeMeRouter(prisma: Prisma): Router {
         if (!ev) continue;
         let card = eventMap.get(ev.id);
         if (!card) {
-          card = { id: ev.id, name: ev.name, slug: ev.slug, status: ev.status, start_date: ev.start_date, end_date: ev.end_date, venue: ev.venue, team_count: 0, match_count: 0, win_count: 0, _sports: new Set() };
+          card = { id: ev.id, name: ev.name, slug: ev.slug, status: ev.status, start_date: ev.start_date, end_date: ev.end_date, venue: ev.venue, team_count: 0, match_count: 0, win_count: 0, _sports: new Set(), on_squad: false };
           eventMap.set(ev.id, card);
         }
         card.team_count++;
+        if (m.is_active) card.on_squad = true;
         if (m.teams.sports?.name) card._sports.add(m.teams.sports.name);
       }
     }
@@ -479,6 +529,8 @@ export function makeMeRouter(prisma: Prisma): Router {
       card.match_count++;
       if (resultFor(f, teamIds) === 'won') card.win_count++;
     }
+    // An old squad's event with none of its matches theirs was entered after they left.
+    for (const [id, c] of eventMap) if (!c.on_squad && c.match_count === 0) eventMap.delete(id);
 
     const championships = [...eventMap.values()]
       .map((c) => ({
@@ -522,16 +574,22 @@ export function makeMeRouter(prisma: Prisma): Router {
   // empty arrays rather than an error - "you have not played yet" is a legitimate
   // state, and the screen says so rather than looking broken.
   router.get('/me/home', asyncHandler(async (req, res) => {
-    const { memberships, teamIds } = await loadMembershipMeta(req.user!.id);
-    const ids = [...teamIds];
+    // What is coming up and the teams list read the squads they are on now; the record
+    // (recent results, games, wins, events, sports) also keeps squads they have left, up
+    // to the day they left - the same rule as the profile.
+    const { memberships: places, teamIds } = await loadMembershipMeta(req.user!.id, { activeOnly: false });
+    const memberships = places.filter((m) => m.is_active);
+    const ids = memberships.map((m) => m.team_id);
 
     const empty = {
       next: null, live: [], pending: [], recent: [], teams: [],
       stats: { games: 0, events: 0, sports: 0, wins: 0 },
     };
-    if (ids.length === 0) { res.json(empty); return; }
+    if (places.length === 0) { res.json(empty); return; }
 
     const mine = { OR: [{ home_team_id: { in: ids } }, { away_team_id: { in: ids } }] };
+    const record = myFixturesWhere(places);
+    const leftPlaces = places.filter((m) => !m.is_active);
     // Archived events drop out of what is still to do - next, live, owed scorecards.
     // Played results stay: they are the player's history.
     const activeEvent = { tournament_disciplines: { tournament_sports: { tournaments: { championships: { archived_at: null } } } } };
@@ -548,7 +606,7 @@ export function makeMeRouter(prisma: Prisma): Router {
         select: matchSelect, orderBy: { scheduled_at: 'asc' }, take: 4,
       }),
       prisma.fixtures.findMany({
-        where: { ...mine, status: { in: ['completed', 'walkover'] } },
+        where: { ...record, status: { in: PLAYED_STATUSES } },
         select: matchSelect, orderBy: [{ scheduled_at: 'desc' }, { created_at: 'desc' }], take: 5,
       }),
       // Anything this person is the official on that still owes a scorecard. This is
@@ -574,16 +632,33 @@ export function makeMeRouter(prisma: Prisma): Router {
         if (e.championships?.id) eventIds.add(e.championships.id);
       }
     }
+    // A squad they left adds the events and sport of the matches they played for it -
+    // not every event it entered, some of which came after they had gone.
+    if (leftPlaces.length) {
+      const leftPlayed = await prisma.fixtures.findMany({
+        where: { ...myFixturesWhere(leftPlaces), tournament_disciplines: { tournament_sports: { tournaments: { championships: { archived_at: null } } } } },
+        select: { home_team_id: true, away_team_id: true, tournament_disciplines: { select: { tournament_sports: { select: { tournaments: { select: { championship_id: true } } } } } } },
+      });
+      const leftIds = new Set(leftPlaces.map((m) => m.team_id));
+      const sportOfTeam = new Map(leftPlaces.map((m) => [m.team_id, m.teams?.sports?.id]));
+      for (const f of leftPlayed) {
+        const ev = f.tournament_disciplines?.tournament_sports?.tournaments?.championship_id;
+        if (ev) eventIds.add(ev);
+        for (const t of [f.home_team_id, f.away_team_id]) {
+          const sport = t && leftIds.has(t) ? sportOfTeam.get(t) : undefined;
+          if (sport) sportIds.add(sport);
+        }
+      }
+    }
 
     // Counted from completed fixtures only, so the strip agrees with the record
     // rather than with what is merely scheduled.
-    const wins = played.filter((f) => resultFor(f as FixtureRow, teamIds) === 'won').length;
     const playedPens = await loadShootouts(played);
     const allPlayed = await prisma.fixtures.count({
-      where: { ...mine, status: { in: ['completed', 'walkover'] } },
+      where: { ...record, status: { in: PLAYED_STATUSES } },
     });
     const allWins = await prisma.fixtures.count({
-      where: { ...mine, status: { in: ['completed', 'walkover'] }, winner_team_id: { in: ids } },
+      where: { ...record, status: { in: PLAYED_STATUSES }, winner_team_id: { in: [...teamIds] } },
     });
 
     res.json({
@@ -606,7 +681,9 @@ export function makeMeRouter(prisma: Prisma): Router {
   }));
 
   router.get('/me/achievements', asyncHandler(async (req, res) => {
-    const { teamIds } = await loadMembershipMeta(req.user!.id);
+    // Past squads too, as on the dashboard: an award stays theirs after leaving the team,
+    // and mapAward needs the team to tell which side was theirs.
+    const { teamIds } = await loadMembershipMeta(req.user!.id, { activeOnly: false });
     if (teamIds.size === 0) {
       res.json({ achievements: [] });
       return;
@@ -619,20 +696,29 @@ export function makeMeRouter(prisma: Prisma): Router {
     res.json({ achievements: awardRows.map((a) => mapAward(a, teamIds)) });
   }));
 
-  // GET /me/matches - full match list, filterable by championship/status.
+  // GET /me/matches - full match list, filterable by championship/status/organisation.
+  //
+  // Current squads give every match; squads the person has left (dropped, or removed
+  // from the organisation) give the matches played while they were on it (myFixturesWhere).
   router.get('/me/matches', asyncHandler(async (req, res) => {
-    const { teamIds } = await loadMyTeams(req.user!.id);
+    const orgId = typeof req.query.organization_id === 'string' ? req.query.organization_id : undefined;
+    const places = await prisma.team_members.findMany({
+      where: { user_id: req.user!.id, ...(orgId ? { teams: { organization_id: orgId } } : {}) },
+      select: { team_id: true, is_active: true, left_at: true, teams: { select: { organizations: { select: { id: true, name: true } } } } },
+    });
+    // Named only from the person's own squads, so an id from elsewhere reveals nothing.
+    const org = orgId ? places[0]?.teams?.organizations ?? null : undefined;
+    const teamIds = new Set(places.map((p) => p.team_id));
     if (teamIds.size === 0) {
-      res.json({ matches: [], total: 0 });
+      res.json({ matches: [], total: 0, ...(org !== undefined ? { organization: org } : {}) });
       return;
     }
-    const ids = [...teamIds];
     const eventId = typeof req.query.championship_id === 'string' ? req.query.championship_id : undefined;
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
 
     const fixtures = await prisma.fixtures.findMany({
       where: {
-        OR: [{ home_team_id: { in: ids } }, { away_team_id: { in: ids } }],
+        ...myFixturesWhere(places),
         ...(status ? { status } : {}),
         ...(eventId
           ? { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: eventId } } } }
@@ -643,7 +729,7 @@ export function makeMeRouter(prisma: Prisma): Router {
     });
 
     const matches = fixtures.map((f) => toMatchSummary(f, teamIds));
-    res.json({ matches, total: matches.length });
+    res.json({ matches, total: matches.length, ...(org !== undefined ? { organization: org } : {}) });
   }));
 
   // GET /me/matches/:fixtureId - single match detail, scoped to the user's team.
@@ -670,11 +756,23 @@ export function makeMeRouter(prisma: Prisma): Router {
     });
     if (!f) throw new NotFoundError('Match');
 
-    // Verify the user is on one of the two teams.
+    // Verify the user is on one of the two teams - or was, for a match played while they
+    // were on it (the same rule as the matches list).
     const home = f.teams_fixtures_home_team_idToteams;
     const away = f.teams_fixtures_away_team_idToteams;
-    const homeMember = home?.team_members?.find((tm: any) => tm.user_id === req.user!.id);
-    const awayMember = away?.team_members?.find((tm: any) => tm.user_id === req.user!.id);
+    let homeMember = home?.team_members?.find((tm: any) => tm.user_id === req.user!.id);
+    let awayMember = away?.team_members?.find((tm: any) => tm.user_id === req.user!.id);
+    let formerMember = false;
+    if (!homeMember && !awayMember && PLAYED_STATUSES.includes(f.status)) {
+      const past = await prisma.team_members.findFirst({
+        where: { user_id: req.user!.id, is_active: false, team_id: { in: [f.home_team_id, f.away_team_id].filter(Boolean) } },
+      });
+      // Only a match from their time on the squad - not one the team played after they left.
+      if (past && playedWhileOn(f, past.left_at)) {
+        formerMember = true;
+        if (past.team_id === f.home_team_id) homeMember = past; else awayMember = past;
+      }
+    }
     if (!homeMember && !awayMember) throw new ForbiddenError('You are not part of this match');
 
     const isHome = !!homeMember;
@@ -709,8 +807,10 @@ export function makeMeRouter(prisma: Prisma): Router {
         my_team: { id: mine.id, name: mine.name, organization: mine.organizations?.name ?? null },
         opponent: opp ? { id: opp.id, name: opp.name, organization: opp.organizations?.name ?? null } : null,
         my_role: myMember?.role ?? null,
+        former_member: formerMember,
         jersey_number: myMember?.jersey_number ?? null,
-        teammates: (mine.team_members ?? [])
+        // The squad as it is today; someone who has left it is not shown its people.
+        teammates: (formerMember ? [] : mine.team_members ?? [])
           .map((tm: any) => ({ name: tm.users?.name ?? '-', phone: tm.users?.phone ?? null, role: tm.role, jersey_number: tm.jersey_number }))
           .sort((a: any, b: any) => (a.jersey_number ?? 999) - (b.jersey_number ?? 999)),
       },
@@ -728,11 +828,15 @@ export function makeMeRouter(prisma: Prisma): Router {
     const eventId = req.params.eventId;
     const { memberships, teamIds } = await loadMyTeams(req.user!.id);
 
-    // The user's rosters entered into this championship, paired with that entry.
-    const myMemberships = memberships
+    // The user's rosters entered into this championship, paired with that entry. A squad
+    // they have left still opens the page, for the matches they played on it - as a
+    // former member: their record only (Overview, My matches), no roster or standings.
+    const inEvent = memberships
       .map((m) => ({ m, entry: m.teams.team_entries.find((e) => e.championship_id === eventId) }))
       .filter((x): x is { m: typeof x.m; entry: NonNullable<typeof x.entry> } => !!x.entry);
-    if (myMemberships.length === 0) throw new NotFoundError('Championship');
+    if (inEvent.length === 0) throw new NotFoundError('Championship');
+    const myMemberships = inEvent.filter((x) => x.m.is_active);
+    const formerMember = myMemberships.length === 0;
 
     const championship = await prisma.championships.findUnique({
       where: { id: eventId },
@@ -774,15 +878,18 @@ export function makeMeRouter(prisma: Prisma): Router {
     });
 
     // Fixtures for the user's teams in THIS championship - a roster may also play
-    // in others, so filter by the fixture's championship via its discipline draw.
+    // in others, so filter by the fixture's championship via its discipline draw. A squad
+    // they left gives only the matches played while they were on it (myFixturesWhere).
     const fixtures = await prisma.fixtures.findMany({
       where: {
-        OR: [{ home_team_id: { in: [...myTeamIdsInEvent] } }, { away_team_id: { in: [...myTeamIdsInEvent] } }],
+        ...myFixturesWhere(inEvent.map((x) => x.m)),
         tournament_disciplines: { tournament_sports: { tournaments: { championship_id: eventId } } },
       },
       select: matchSelect,
       orderBy: [{ scheduled_at: 'desc' }, { created_at: 'desc' }],
     });
+    // Left before playing any of it: nothing here is theirs, the same as not having entered.
+    if (formerMember && fixtures.length === 0) throw new NotFoundError('Championship');
 
     const eventPens = await loadShootouts(fixtures);
     const matches = fixtures.map((f) => summariseLean(f, teamIds, eventPens));
@@ -793,7 +900,7 @@ export function makeMeRouter(prisma: Prisma): Router {
 
     // Championship-wide standings (read-only) - read the materialized championship-
     // scope table maintained by the standings engine.
-    const standings = await readStandings(prisma, eventId, 'championship', null);
+    const standings = formerMember ? [] : await readStandings(prisma, eventId, 'championship', null);
 
     res.json({
       championship,
@@ -801,6 +908,7 @@ export function makeMeRouter(prisma: Prisma): Router {
       teams,
       matches,
       standings,
+      former_member: formerMember,
     });
   }));
 

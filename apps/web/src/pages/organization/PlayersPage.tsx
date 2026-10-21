@@ -11,10 +11,11 @@ import { ORG_ARCHIVED_READ_ONLY_MESSAGE, pluralise } from '@semp/shared';
 import { useOrgUnits, unitPath } from '../../lib/units';
 import { titleCase } from '../../lib/format';
 import {
-  Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, PageHeader, Pagination,
+  Avatar, Badge, BulkBar, Button, Checkbox, EmptyState, Pagination,
   Modal, SearchInput, Select, cn, confirmDialog, toast, SURFACE, FilterChips,
 } from '../../components/ui';
 import { DataList, FilterBar, QueryState, SkeletonList, useUrlState } from '../../components/primitives';
+import { usePageTitle } from '../../lib/pageTitle';
 
 // Where somebody is PLACED is now a competitive fact, not filing.
 //
@@ -155,12 +156,27 @@ const VERIFY_TONE: Record<string, 'green' | 'amber' | 'rose' | 'slate'> = {
   verified: 'green', pending: 'amber', rejected: 'rose', unverified: 'slate',
 };
 
+/** What an empty verification tab says when nothing was searched or filtered. */
+const EMPTY_TAB = {
+  all: { title: 'Nobody here', description: 'People appear here once they join or are added.' },
+  pending: { title: 'Nobody is awaiting verification', description: 'Join requests and people you have not verified yet appear here.' },
+  verified: { title: 'Nobody verified yet', description: 'People you verify appear here.' },
+  removed: { title: 'Nobody removed', description: 'People you remove appear here, so you can re-add them later.' },
+} as const;
+
 const FILTERS = [
   { key: 'all', label: 'Everyone' },
   { key: 'pending', label: 'Awaiting verification' },
   { key: 'verified', label: 'Verified' },
-  { key: 'rejected', label: 'Rejected' },
+  // Removed, not Rejected: a turned-away request is not worth a tab, but someone taken
+  // out of the organisation may need bringing back.
+  { key: 'removed', label: 'Removed' },
 ] as const;
+
+/** Removed from the organisation - kept so they can be re-added. */
+const isRemoved = (p: { status: string }) => p.status === 'past';
+/** On the roll: members and open join requests. Removed people and turned-away requests are not. */
+const isOnRoll = (p: { status: string }) => p.status === 'active' || p.status === 'pending';
 
 export function PlayersPage() {
   const { ctx } = useAuth();
@@ -176,6 +192,8 @@ export function PlayersPage() {
   // three, and they are genuinely different risks: `people.import` is a file that can
   // create hundreds against a duplicate-matching rule, `people.verify` decides who is
   // a real member of the institution, and `people.edit` is one row at a time.
+  // The page's title lives in the top bar (instead of the workspace name).
+  usePageTitle('People');
   const perms = usePermissions();
   const canEditPeople = perms.hasOrgPermission('people.edit', orgId);
   const canImport = perms.hasOrgPermission('people.import', orgId);
@@ -246,16 +264,20 @@ export function PlayersPage() {
   const activeFilters = (campusId ? 1 : 0) + (deptId ? 1 : 0);
   const clearFilters = () => { setCampusId(''); setDeptId(''); setSelected(new Set()); };
 
+  // Everyone / Awaiting / Verified describe the roll; Removed is its own list.
+  const matchesTab = (p: Person, tab: string) => (tab === 'removed'
+    ? isRemoved(p)
+    : isOnRoll(p) && (tab === 'all' || p.verification === tab));
   const counts = useMemo(() => ({
-    all: scoped.length,
-    pending: scoped.filter((p) => p.verification === 'pending').length,
-    verified: scoped.filter((p) => p.verification === 'verified').length,
-    rejected: scoped.filter((p) => p.verification === 'rejected').length,
-  }), [scoped]);
+    all: scoped.filter((p) => matchesTab(p, 'all')).length,
+    pending: scoped.filter((p) => matchesTab(p, 'pending')).length,
+    verified: scoped.filter((p) => matchesTab(p, 'verified')).length,
+    removed: scoped.filter((p) => matchesTab(p, 'removed')).length,
+  }), [scoped]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = useMemo(
-    () => scoped.filter((p) => filter === 'all' || p.verification === filter),
-    [scoped, filter],
+    () => scoped.filter((p) => matchesTab(p, filter)),
+    [scoped, filter], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const tc = useTableControls(rows, {
@@ -312,7 +334,7 @@ export function PlayersPage() {
       title: verification === 'verified' ? `Verify ${subject}?` : `Reject ${subject}?`,
       message: verification === 'verified'
         ? `${subject} will be confirmed as belonging to your organisation. Every verification is recorded against your name.`
-        : `${subject} will be marked as not belonging to your organisation. They keep their account and their record; they simply are not yours.`,
+        : `The request to join from ${subject} will be declined. They keep their account and their record, and can ask again later.`,
       confirmLabel: verification === 'verified' ? 'Verify' : 'Reject',
       tone: verification === 'verified' ? 'primary' : 'danger',
     });
@@ -327,7 +349,9 @@ export function PlayersPage() {
       // server could not match at all is a bug worth surfacing, not swallowing.
       const missed = ids.length - res.matched;
       toast.success(
-        `${res.changed} of ${ids.length} ${ids.length === 1 ? 'person' : 'people'} ${verification === 'verified' ? 'verified' : 'rejected'}`,
+        verification === 'verified'
+          ? `${res.changed} of ${ids.length} ${ids.length === 1 ? 'person' : 'people'} verified`
+          : `${res.changed} of ${ids.length} ${ids.length === 1 ? 'request' : 'requests'} declined`,
         [
           res.already ? `${res.already} ${res.already === 1 ? 'was' : 'were'} already ${verification}.` : null,
           missed > 0 ? `${missed} could not be found in this organisation.` : null,
@@ -347,7 +371,7 @@ export function PlayersPage() {
   async function removePeople(ids: string[], subject: string) {
     const ok = await confirmDialog({
       title: `Remove ${subject} from the organisation?`,
-      message: `${subject} will leave this organisation: their roll number, verification, campus placement and any role here are removed, and they come off its squads. Their certificates, career stats and medals stay on their own profile. They can be added back later.`,
+      message: `${subject} will leave this organisation: their campus placement and any role here are removed, and they come off its squads. Their certificates, career stats and medals stay on their own profile. They move to the Removed tab, where you can re-add them.`,
       confirmLabel: 'Remove',
       tone: 'danger',
     });
@@ -365,11 +389,47 @@ export function PlayersPage() {
     }
   }
 
-  // Named in the confirmation so the number being acted on is stated once more,
-  // in the one place that cannot be misread as a link to something else.
-  const selectedLabel = selected.size === tc.total && tc.total > 0
-    ? `all ${tc.total} ${tc.total === 1 ? 'person' : 'people'} matching this view`
-    : `${selected.size} ${selected.size === 1 ? 'person' : 'people'}`;
+  // Back from the Removed tab: members again, and told so.
+  async function restorePeople(ids: string[], subject: string) {
+    const ok = await confirmDialog({
+      title: `Re-add ${subject} to the organisation?`,
+      message: `${subject} become members again and are notified. Campus placement, roles and squad places are not restored - give them again as needed.`,
+      confirmLabel: 'Re-add',
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const res = await api<{ restored: number }>('POST', `/organizations/${orgId}/members/restore`, { member_ids: ids });
+      toast.success(`${res.restored} ${res.restored === 1 ? 'person' : 'people'} re-added`);
+      setSelected(new Set());
+      await refetch();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Named in the confirmation so the number being acted on - only the people that
+  // action applies to - is stated once more.
+  const countLabel = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`;
+
+  // ONE JOB EACH. Reject declines a JOIN REQUEST - nothing else; Remove takes an existing
+  // MEMBER out. Everyone the organisation brings in starts verified, so a member is never
+  // rejected. Answering a request (accept or decline) is deciding who belongs, which a
+  // Sports Admin deliberately does not hold.
+  const selectedPeople = people.filter((p) => selected.has(p.id));
+  const isRequest = (p: Person) => p.status === 'pending';
+  const rejectableIds = canRemove ? selectedPeople.filter(isRequest).map((p) => p.id) : [];
+  // Removed people: the only thing to do with them is bring them back.
+  const restorableIds = selectedPeople.filter(isRemoved).map((p) => p.id);
+  // Verify: accepting a request (deciders only), or vouching for a member left unverified.
+  const verifiableIds = selectedPeople
+    .filter((p) => isOnRoll(p) && p.verification !== 'verified' && (isRequest(p) ? canRemove : true))
+    .map((p) => p.id);
+  // Anyone in or asking to be in, except owners (handed over, never removed). For an
+  // open join request, removing simply closes it.
+  const removableIds = selectedPeople.filter((p) => (p.status === 'active' || p.status === 'pending') && p.role !== 'owner').map((p) => p.id);
 
   // A page-wide `<Spinner/>` for a screen whose shape is entirely known, and no
   // branch at all for a failed request - `people` fell through to [] and the
@@ -377,7 +437,6 @@ export function PlayersPage() {
   if (isLoading || isError) {
     return (
       <div>
-        <PageHeader title="People" subtitle="Everyone who belongs to this organisation." />
         <QueryState query={{ isLoading, isError, error, refetch }} errorTitle="Could not load the directory"
           skeleton={<SkeletonList rows={8} />}>
           <span />
@@ -388,27 +447,33 @@ export function PlayersPage() {
 
   return (
     <div>
-      <PageHeader title="People" subtitle="Everyone who belongs to this organisation, and what they have played.">
-        {canImport && (
-          // Icon-only below sm: two full-width buttons under the title cost a whole
-          // row of a 390px screen, and "Bulk upload" is not a word anybody needs
-          // read to them next to an upload arrow.
-          <Button variant="outline" aria-label="Bulk upload" disabled={archived} title={archivedTitle} onClick={() => navigate(`/organizations/${orgId}/students/import`)}>
-            <Upload size={15} /> <span className="hidden sm:inline">Bulk upload</span>
-          </Button>
-        )}
-        {canEditPeople && (
-          <Button disabled={archived} title={archivedTitle} onClick={() => setAdding(true)}>
-            <UserPlus size={15} /> <span className="hidden sm:inline">Add Person</span><span className="sm:hidden">Add</span>
-          </Button>
-        )}
-      </PageHeader>
-
-      <FilterChips
-        value={filter}
-        onChange={(v) => { setFilter(v); setSelected(new Set()); }}
-        options={FILTERS.map((f) => ({ key: f.key, label: f.label, count: counts[f.key as keyof typeof counts] }))}
-      />
+      {/* No page heading: "People" is in the top bar (usePageTitle), and the two
+          actions sit on the filter row. The short description stays. */}
+      <p className="t-meta mb-3">Everyone who belongs to this organisation, and what they have played.</p>
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="min-w-0 flex-1">
+          <FilterChips
+            className="!mb-0"
+            value={filter}
+            onChange={(v) => { setFilter(v); setSelected(new Set()); }}
+            options={FILTERS.map((f) => ({ key: f.key, label: f.label, count: counts[f.key as keyof typeof counts] }))}
+          />
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {canImport && (
+            // Icon-only below sm: two full-width buttons cost a whole row of a 390px
+            // screen, and "Bulk upload" is not a word anybody needs next to an upload arrow.
+            <Button variant="outline" aria-label="Bulk upload" disabled={archived} title={archivedTitle} onClick={() => navigate(`/organizations/${orgId}/students/import`)}>
+              <Upload size={15} /> <span className="hidden sm:inline">Bulk upload</span>
+            </Button>
+          )}
+          {canEditPeople && (
+            <Button disabled={archived} title={archivedTitle} onClick={() => setAdding(true)}>
+              <UserPlus size={15} /> <span className="hidden sm:inline">Add Person</span><span className="sm:hidden">Add</span>
+            </Button>
+          )}
+        </div>
+      </div>
 
       {people.length === 0 ? (
         <EmptyState
@@ -468,8 +533,14 @@ export function PlayersPage() {
           {/* No match: say so BELOW the search and filters, which stay put so the
               search can be changed - replacing them stranded the user with no way back. */}
           {tc.total === 0 ? (
-            <EmptyState icon={<Users size={24} />} title="Nobody matches" description="Try another filter, or a different search."
-              action={<Button variant="outline" onClick={() => { tc.setQuery(''); clearFilters(); }}>Clear search and filters</Button>} />
+            // "Nobody matches" + Clear only when a search or campus/team filter narrowed
+            // the list. A tab that is simply empty says so, with nothing to clear.
+            tc.query.trim() || activeFilters > 0 ? (
+              <EmptyState icon={<Users size={24} />} title="Nobody matches" description="Try another filter, or a different search."
+                action={<Button variant="outline" onClick={() => { tc.setQuery(''); clearFilters(); }}>Clear search and filters</Button>} />
+            ) : (
+              <EmptyState icon={<Users size={24} />} {...EMPTY_TAB[filter as keyof typeof EMPTY_TAB] ?? EMPTY_TAB.all} />
+            )
           ) : (
           <>
           {canSelect && (
@@ -488,18 +559,32 @@ export function PlayersPage() {
               )}
               {canVerify && (
                 <>
-                  <Button size="sm" disabled={busy || archived} title={archivedTitle} onClick={() => review([...selected], 'verified', selectedLabel)}>
-                    Verify {selected.size}
-                  </Button>
-                  <Button size="sm" variant="outline" disabled={busy || archived} title={archivedTitle} onClick={() => review([...selected], 'rejected', selectedLabel)}>
-                    Reject {selected.size}
-                  </Button>
+                  {verifiableIds.length > 0 && (
+                    <Button size="sm" disabled={busy || archived} title={archivedTitle ?? 'Vouch for people not verified yet'}
+                      onClick={() => review(verifiableIds, 'verified', countLabel(verifiableIds.length))}>
+                      Verify {verifiableIds.length}
+                    </Button>
+                  )}
+                  {rejectableIds.length > 0 && (
+                    <Button size="sm" variant="outline" disabled={busy || archived}
+                      title={archivedTitle ?? 'Decline the selected join requests'}
+                      onClick={() => review(rejectableIds, 'rejected', countLabel(rejectableIds.length))}>
+                      Reject {rejectableIds.length}
+                    </Button>
+                  )}
                 </>
               )}
-              {canRemove && (
-                <Button size="sm" variant="danger" disabled={busy || archived} title={archivedTitle}
-                  onClick={() => removePeople([...selected], selectedLabel)}>
-                  Remove {selected.size}
+              {canRemove && restorableIds.length > 0 && (
+                <Button size="sm" disabled={busy || archived} title={archivedTitle ?? 'Make them members of the organisation again'}
+                  onClick={() => restorePeople(restorableIds, countLabel(restorableIds.length))}>
+                  Re-add {restorableIds.length}
+                </Button>
+              )}
+              {canRemove && removableIds.length > 0 && (
+                <Button size="sm" variant="danger" disabled={busy || archived}
+                  title={archivedTitle ?? 'Take existing members out of the organisation'}
+                  onClick={() => removePeople(removableIds, countLabel(removableIds.length))}>
+                  Remove {removableIds.length}
                 </Button>
               )}
               {/* Placing a whole intake at once. The commonest shape of this job is
@@ -592,7 +677,15 @@ export function PlayersPage() {
               {
                 key: 'status',
                 header: 'Status',
-                render: (row: Person) => <Badge tone={VERIFY_TONE[row.verification] ?? 'slate'}>{titleCase(row.verification)}</Badge>,
+                render: (row: Person) => (
+                  <span className="inline-flex flex-wrap items-center gap-1">
+                    {isRemoved(row)
+                      ? <Badge tone="slate">Removed</Badge>
+                      : <Badge tone={VERIFY_TONE[row.verification] ?? 'slate'}>{titleCase(row.verification)}</Badge>}
+                    {/* Asked to join and not yet a member - whatever the verification says. */}
+                    {row.status === 'pending' && <Badge tone="amber">Join request</Badge>}
+                  </span>
+                ),
               },
               {
                 key: 'units',
@@ -608,7 +701,8 @@ export function PlayersPage() {
                           {u.name}
                         </span>
                       ))}
-                    {canEditPeople && (
+                    {/* Not for someone removed: they are placed again once re-added. */}
+                    {canEditPeople && !isRemoved(row) && (
                       <button
                         type="button"
                         disabled={busy || archived}
@@ -649,18 +743,31 @@ export function PlayersPage() {
                 desktopOnly: true,
                 render: (row: Person) => <span className="t-num font-mono text-[13px] text-slate-700 dark:text-slate-300">{row.events}</span>,
               },
-              ...(canVerify ? [{
+              ...(canVerify || canRemove ? [{
                 key: 'actions',
                 header: '',
                 align: 'right' as const,
                 className: 'w-px',
                 actions: true,
-                render: (row: Person) => (row.verification === 'pending' ? (
+                // A removed person can only be re-added; a join request is accepted or
+                // declined (by whoever may decide); a member left unverified can be
+                // vouched for; anyone else needs nothing on the row.
+                render: (row: Person) => (isRemoved(row) ? (canRemove ? (
+                  <div className="flex flex-1 items-center gap-2 sm:justify-end">
+                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" disabled={busy || archived} title={archivedTitle ?? 'Make them a member again'}
+                      onClick={() => restorePeople([row.id], `“${row.name ?? 'this person'}”`)}>Re-add</Button>
+                  </div>
+                ) : null) : row.status === 'pending' ? (canRemove ? (
                   <div className="flex flex-1 items-center gap-2 sm:justify-end">
                     <Button size="sm" variant="outline" className="flex-1 sm:flex-none" disabled={busy || archived} title={archivedTitle}
                       onClick={() => review([row.id], 'verified', `“${row.name ?? 'this person'}”`)}>Verify</Button>
                     <Button size="sm" variant="ghost" className="flex-1 sm:flex-none" disabled={busy || archived} title={archivedTitle}
                       onClick={() => review([row.id], 'rejected', `“${row.name ?? 'this person'}”`)}>Reject</Button>
+                  </div>
+                ) : null) : canVerify && row.verification !== 'verified' ? (
+                  <div className="flex flex-1 items-center gap-2 sm:justify-end">
+                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" disabled={busy || archived} title={archivedTitle}
+                      onClick={() => review([row.id], 'verified', `“${row.name ?? 'this person'}”`)}>Verify</Button>
                   </div>
                 ) : null),
               }] : []),
