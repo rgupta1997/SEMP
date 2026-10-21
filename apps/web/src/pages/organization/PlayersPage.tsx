@@ -701,8 +701,9 @@ export function PlayersPage() {
                           {u.name}
                         </span>
                       ))}
-                    {/* Not for someone removed: they are placed again once re-added. */}
-                    {canEditPeople && !isRemoved(row) && (
+                    {/* Current members only: a join request is placed once accepted, someone
+                        removed once re-added - as the bulk "Add to…" already works. */}
+                    {canEditPeople && row.status === 'active' && (
                       <button
                         type="button"
                         disabled={busy || archived}
