@@ -679,11 +679,13 @@ export function PlayersPage() {
                 header: 'Status',
                 render: (row: Person) => (
                   <span className="inline-flex flex-wrap items-center gap-1">
+                    {/* A join request shows only that - a "Verified" beside it (left over from
+                        before Verify accepted requests) read as nothing left to do. */}
                     {isRemoved(row)
                       ? <Badge tone="slate">Removed</Badge>
-                      : <Badge tone={VERIFY_TONE[row.verification] ?? 'slate'}>{titleCase(row.verification)}</Badge>}
-                    {/* Asked to join and not yet a member - whatever the verification says. */}
-                    {row.status === 'pending' && <Badge tone="amber">Join request</Badge>}
+                      : row.status === 'pending'
+                        ? <Badge tone="amber">Join request</Badge>
+                        : <Badge tone={VERIFY_TONE[row.verification] ?? 'slate'}>{titleCase(row.verification)}</Badge>}
                   </span>
                 ),
               },
