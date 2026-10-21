@@ -51,6 +51,17 @@ describe('validateRoster · resolution', () => {
     });
     expect(validateRoster([row()], c).rows[0].verdict).toBe('update');
   });
+
+  it('refuses someone removed from the institution - a file never re-adds them', () => {
+    const c = ctx({
+      usersByPhone: new Map([['9876543210', { id: 'u1', name: 'Asha' }]]),
+      memberUserIds: new Set(['u1']),
+      removedUserIds: new Set(['u1']),
+    });
+    const r = validateRoster([row()], c).rows[0];
+    expect(r.verdict).toBe('reject');
+    expect(r.message).toContain('add them in People');
+  });
 });
 
 describe('validateRoster · linking a specific account (user_id)', () => {

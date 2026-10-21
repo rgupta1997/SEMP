@@ -1039,12 +1039,16 @@ export async function applyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, st
         : r);
     }
     const unique = [...merged.values()];
-    const have = unique.length
-      ? new Set((await prisma.organization_members.findMany({
+    const existingRows = unique.length
+      ? await prisma.organization_members.findMany({
         where: { organization_id: { in: uniq(unique.map((r) => r.org)) }, user_id: { in: uniq(unique.map((r) => r.user_id)) } },
-        select: { organization_id: true, user_id: true },
-      })).map((x) => `${x.organization_id}|${x.user_id}`))
-      : new Set<string>();
+        select: { organization_id: true, user_id: true, status: true },
+      })
+      : [];
+    const have = new Set(existingRows.map((x) => `${x.organization_id}|${x.user_id}`));
+    // Removed from (or turned down by) that organisation: the sheet does not bring them back.
+    const barred = new Set(existingRows.filter((x) => x.status === 'past' || x.status === 'rejected').map((x) => `${x.organization_id}|${x.user_id}`));
+    if (barred.size) rPeople.notes.push(`${barred.size} people left out: removed from the organisation - re-add them in People first`);
     const fresh = unique.filter((r) => !have.has(`${r.org}|${r.user_id}`)).map((r) => ({
       id: randomUUID(), organization_id: r.org, user_id: r.user_id, role: r.role, status: 'active',
       verification: 'verified', verified_by: verifier, verified_at: new Date(), member_code: r.member_code,
@@ -1063,7 +1067,7 @@ export async function applyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, st
     }
     rPeople.notes.push(`${added} memberships added`);
     if (campusId) {
-      const hostMembers = uniq(unique.filter((r) => r.org === orgId).map((r) => r.user_id));
+      const hostMembers = uniq(unique.filter((r) => r.org === orgId && !barred.has(`${r.org}|${r.user_id}`)).map((r) => r.user_id));
       await insertUnitMembers(prisma, hostMembers.map((user_id) => ({ id: randomUUID(), organization_id: orgId!, org_unit_id: campusId!, user_id })), created);
     }
   }
@@ -1247,6 +1251,15 @@ export async function applyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, st
     const competitorOf = new Map<string, SetupCompetitorSpec>(bp.competitors.map((x) => [x.key, x]));
     const teams: any[] = []; const members: any[] = []; const unitMembers: any[] = []; const invites: any[] = []; const entries: any[] = [];
     let leftOut = 0;
+    // Nobody removed from an organisation is put on its squads by a sheet.
+    const squadUids = uniq(bp.squads.flatMap((s) => s.members.map((m) => userIdOf.get(m.personKey)).filter((id): id is string => !!id)));
+    const removedFrom = new Set((squadUids.length
+      ? await prisma.organization_members.findMany({
+        where: { user_id: { in: squadUids }, status: { in: ['past', 'rejected'] } },
+        select: { organization_id: true, user_id: true },
+      })
+      : []).map((x) => `${x.organization_id}|${x.user_id}`));
+    let removedLeftOut = 0;
     for (const s of bp.squads) {
       const comp = competitorOf.get(s.competitorKey)!;
       const cid = competitorIdOf.get(s.competitorKey);
@@ -1267,6 +1280,7 @@ export async function applyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, st
       for (const mbr of s.members) {
         const uid = userIdOf.get(mbr.personKey);
         if (!uid) { leftOut++; continue; }
+        if (removedFrom.has(`${teamOrg}|${uid}`)) { removedLeftOut++; continue; }
         members.push({ id: randomUUID(), team_id: teamId, user_id: uid, role: mbr.role, is_active: true });
         if (unitId) unitMembers.push({ id: randomUUID(), organization_id: orgId, org_unit_id: unitId, user_id: uid });
       }
@@ -1288,9 +1302,18 @@ export async function applyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, st
         renamed++;
       }
       if (renamed) rSquads.notes.push(`${renamed} squads renamed to the sheet`);
-      const haveMembers = new Set((await prisma.team_members.findMany({ where: { team_id: { in: [...teamIdOf.values()] } }, select: { team_id: true, user_id: true } })).map((x) => `${x.team_id}|${x.user_id}`));
+      const existingPlaces = await prisma.team_members.findMany({ where: { team_id: { in: [...teamIdOf.values()] } }, select: { id: true, team_id: true, user_id: true, is_active: true } });
+      const haveMembers = new Set(existingPlaces.map((x) => `${x.team_id}|${x.user_id}`));
       const newMembers = [...new Map(members.filter((x) => !haveMembers.has(`${x.team_id}|${x.user_id}`)).map((x) => [`${x.team_id}|${x.user_id}`, x])).values()];
       if (newMembers.length) { await prisma.team_members.createMany({ data: newMembers }); await created('team_members', newMembers.map((x) => x.id)); }
+      // Someone the sheet names who had left the squad is put back on it. Not undone by
+      // deleting the setup: that removes only what the setup created.
+      const onSheet = new Set(members.map((x) => `${x.team_id}|${x.user_id}`));
+      const backOn = existingPlaces.filter((x) => !x.is_active && onSheet.has(`${x.team_id}|${x.user_id}`)).map((x) => x.id);
+      if (backOn.length) {
+        await prisma.team_members.updateMany({ where: { id: { in: backOn } }, data: { is_active: true, left_at: null } });
+        rSquads.notes.push(`${backOn.length} people put back on squads they had left`);
+      }
       await insertUnitMembers(prisma, unitMembers, created);
       let newInv: any[] = [];
       let newEntries: any[] = [];
@@ -1309,6 +1332,7 @@ export async function applyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, st
       }
       rSquads.notes.push(`${newMembers.length} roster places, ${newInv.length} ${inter ? 'invitations' : 'unit invitations'}, ${newEntries.length} entries`);
       if (leftOut) rSquads.notes.push(`${leftOut} roster places left out: those people are not on the platform`);
+      if (removedLeftOut) rSquads.notes.push(`${removedLeftOut} roster places left out: removed from the organisation - re-add them in People first`);
     }
     for (const [k, id] of teamIdOf) remember(`team:${k}`, id);
   }

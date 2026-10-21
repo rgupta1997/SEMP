@@ -288,6 +288,8 @@ interface Person {
   member_code: string | null;
   units: Array<{ id: string; name: string | null; type: string | null }>;
   verification: string;
+  /** active | pending (join request) | past (removed). */
+  status: string;
 }
 
 /**
@@ -425,7 +427,8 @@ export function CampusesPage() {
   // Everybody the organisation has NOT placed anywhere. Surfaced rather than left to
   // be discovered at squad selection, because an unplaced person is refused from
   // every internal team and the refusal happens far away from here.
-  const unplaced = (peopleQ.data ?? []).filter((p) => p.units.length === 0).length;
+  // Current members only: removed people lost their placements on purpose.
+  const unplaced = (peopleQ.data ?? []).filter((p) => p.status === 'active' && p.units.length === 0).length;
 
   const [editing, setEditing] = useState<null | {
     unit?: UnitNode & { parent?: UnitNode | null }; parentId?: string | null; type: 'campus' | 'department';
@@ -502,9 +505,9 @@ export function CampusesPage() {
 
   return (
     <>
-      <PageHeader
+      <PageHeader inTopBar
         title={`${pluralise(labels.campus)} & ${pluralise(labels.department)}`}
-        subtitle="Who belongs where — and who competes for whom in a championship run inside this organisation."
+        subtitle="Who belongs where - and who competes for whom in a championship run inside this organisation."
       />
 
       {unplaced > 0 && (
@@ -691,7 +694,8 @@ export function CampusesPage() {
       <PeoplePanel
         orgId={orgId}
         unit={selected}
-        people={peopleQ.data ?? []}
+        // Removed people can be placed again only once re-added.
+        people={(peopleQ.data ?? []).filter((p) => p.status !== 'past')}
         labels={labels}
         loading={peopleQ.isLoading}
       />

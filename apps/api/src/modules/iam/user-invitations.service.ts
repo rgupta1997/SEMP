@@ -1,4 +1,5 @@
 import type { Prisma } from '../../infra/prisma.js';
+import { vouchedBy } from './member-removal.service.js';
 
 // Normalize a free-form mobile to its last 10 digits (consistent with the
 // championship_invitations matching) so lookups are an indexed exact match.
@@ -106,10 +107,16 @@ export async function applyInvitation(
   userId: string,
 ): Promise<void> {
   if (inv.target_type === 'org_member') {
+    const key = { user_id_organization_id: { user_id: userId, organization_id: inv.target_id } };
+    const existing = await prisma.organization_members.findUnique({ where: key, select: { status: true } });
+    if (existing?.status === 'active') return; // already in - an invitation never changes their role
+    // Accepting brings back someone who was removed earlier, too - with the role this
+    // invitation offers, not whatever they held before.
+    // Invited by the organisation, so vouched for by it - verified from the start.
     await prisma.organization_members.upsert({
-      where: { user_id_organization_id: { user_id: userId, organization_id: inv.target_id } },
-      update: {},
-      create: { user_id: userId, organization_id: inv.target_id, role: inv.role ?? 'member' },
+      where: key,
+      update: { status: 'active', role: inv.role ?? 'member', ...vouchedBy(inv.invited_by) },
+      create: { user_id: userId, organization_id: inv.target_id, role: inv.role ?? 'member', ...vouchedBy(inv.invited_by) },
     });
     return;
   }

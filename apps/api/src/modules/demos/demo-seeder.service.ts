@@ -15,6 +15,7 @@ import {
 import type { Prisma } from '../../infra/prisma.js';
 import { recomputeStandingsAtomic } from '../standings/standings.service.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
+import { ownerMembership } from '../iam/member-removal.service.js';
 import { makeNamePool, type NamePool } from './demo-names.js';
 import { CHAMP_RECIPES, drawStructureFor, scorePair, type ChampRecipe } from './demo-recipes.js';
 
@@ -246,7 +247,7 @@ async function seedChampionship(prisma: Prisma, ctx: ChampCtx): Promise<void> {
 
   await prisma.users.createMany({ data: userData });
   track('users', userData.map((u) => u.id));
-  const omData = pocs.map((p) => ({ id: randomUUID(), user_id: p.id, organization_id: p.orgId, role: 'owner' }));
+  const omData = pocs.map((p) => ({ id: randomUUID(), user_id: p.id, organization_id: p.orgId, ...ownerMembership(null) }));
   await prisma.organization_members.createMany({ data: omData });
   track('organization_members', omData.map((o) => o.id));
 

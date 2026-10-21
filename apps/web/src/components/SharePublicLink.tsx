@@ -25,7 +25,9 @@ export function SharePublicLink({ eventId, className }: { eventId: string; class
     }
   };
   return (
-    <Button size="sm" variant="outline" disabled={busy} onClick={share} className={className}>
+    <Button size="sm" variant="outline" disabled={busy} onClick={share} className={className}
+      title="Share a read-only link (Overview, Schedule, Results & Standings) with anyone.">
+
       {busy ? 'Copying…' : '🔗 Copy public link'}
     </Button>
   );

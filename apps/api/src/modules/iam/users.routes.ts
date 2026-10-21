@@ -9,6 +9,7 @@ import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/error
 import { equalsIgnoreCase } from '../../shared/exact-ci.js';
 import { deriveProvisionedPassword, findUserByPhone, hashProvisionedPassword, maskEmail, maskPhone, phoneGroupKey, phoneLast10 } from './users.helpers.js';
 import { AUDIT_ACTIONS, audit } from './audit.service.js';
+import { vouchedBy } from './member-removal.service.js';
 import { notify } from '@semp/notifications/server/notify.js';
 
 // Fields safe to return to any caller (never the password hash).
@@ -117,7 +118,7 @@ export function makeUsersRouter(prisma: Prisma): Router {
           await tx.organization_members.upsert({
             where: { user_id_organization_id: { user_id: existing.id, organization_id: orgId } },
             update: {},
-            create: { user_id: existing.id, organization_id: orgId, role: 'member' },
+            create: { user_id: existing.id, organization_id: orgId, role: 'member', ...vouchedBy(actor.id) },
           });
         }
         return tx.users.findUnique({ where: { id: existing.id }, select: PUBLIC_SELECT });
@@ -143,7 +144,7 @@ export function makeUsersRouter(prisma: Prisma): Router {
         await tx.organization_members.upsert({
           where: { user_id_organization_id: { user_id: u.id, organization_id: orgId } },
           update: {},
-          create: { user_id: u.id, organization_id: orgId, role: 'member' },
+          create: { user_id: u.id, organization_id: orgId, role: 'member', ...vouchedBy(actor.id) },
         });
       }
       return u;
@@ -205,7 +206,7 @@ export function makeUsersRouter(prisma: Prisma): Router {
 
       if (orgId && ids.length) {
         await tx.organization_members.createMany({
-          data: ids.map((user_id) => ({ user_id, organization_id: orgId, role: 'member' })),
+          data: ids.map((user_id) => ({ user_id, organization_id: orgId, role: 'member', ...vouchedBy(actor.id) })),
           skipDuplicates: true,
         });
       }

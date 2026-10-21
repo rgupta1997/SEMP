@@ -392,28 +392,41 @@ export async function screenSquad(
   team: { organization_id: string; org_unit_id: string | null },
   userIds: string[],
 ): Promise<{ ok: string[]; refused: Array<{ user_id: string; reason: string }> }> {
-  if (!team.org_unit_id || userIds.length === 0) {
-    return { ok: userIds, refused: [] };
-  }
+  if (userIds.length === 0) return { ok: [], refused: [] };
 
-  const [units, members, placements, people, org] = await Promise.all([
+  const memberships = await db.organization_members.findMany({
+    where: { organization_id: team.organization_id, user_id: { in: userIds } },
+    select: { user_id: true, status: true },
+  });
+  const statusOf = new Map(memberships.map((m) => [m.user_id, m.status]));
+  // Removed from the organisation, or turned down: re-added through People first, for any squad.
+  const barred = userIds.filter((id) => ['past', 'rejected'].includes(statusOf.get(id) ?? ''));
+  const nameOf = new Map((barred.length || team.org_unit_id
+    ? await db.users.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } })
+    : []).map((p) => [p.id, p.name]));
+  const refused: Array<{ user_id: string; reason: string }> = barred.map((id) => ({
+    user_id: id,
+    reason: statusOf.get(id) === 'past'
+      ? `${nameOf.get(id) ?? 'This player'} is no longer a member of this organisation - re-add them in People first.`
+      : `${nameOf.get(id) ?? 'This player'}'s request to join this organisation was declined, so they cannot play for it.`,
+  }));
+  const candidates = userIds.filter((id) => !barred.includes(id));
+
+  // An organisation-level squad has no unit to check beyond that.
+  if (!team.org_unit_id) return { ok: candidates, refused };
+
+  const [units, placements, org] = await Promise.all([
     loadUnits(db, team.organization_id),
-    db.organization_members.findMany({
-      where: { organization_id: team.organization_id, user_id: { in: userIds } },
-      select: { user_id: true },
-    }),
-    loadPlacements(db, team.organization_id, userIds),
-    db.users.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }),
+    loadPlacements(db, team.organization_id, candidates),
     db.organizations.findUnique({ where: { id: team.organization_id }, select: { settings: true } }),
   ]);
 
   const labels = unitLabels(org?.settings);
-  const isMember = new Set(members.map((m) => m.user_id));
-  const nameOf = new Map(people.map((p) => [p.id, p.name]));
+  // A member or someone asking to join, as before; removed and declined were barred above.
+  const isMember = new Set(memberships.map((m) => m.user_id));
 
   const ok: string[] = [];
-  const refused: Array<{ user_id: string; reason: string }> = [];
-  for (const id of userIds) {
+  for (const id of candidates) {
     const verdict = checkPlayerEligible(
       units,
       team.org_unit_id,

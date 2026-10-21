@@ -39,7 +39,7 @@ export function EventCommunicationsPage() {
 
   return (
     <div className="pb-16">
-      <PageHeader
+      <PageHeader noTitle
         title="Communications"
         subtitle="Every announcement made about this event, newest first."
       >

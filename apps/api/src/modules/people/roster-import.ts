@@ -67,6 +67,8 @@ export interface RosterContext {
   unitsByName: Map<string, { id: string; type: string; parent_id: string | null }>;
   /** Members already in this institution, by user id. */
   memberUserIds: Set<string>;
+  /** Removed from (or turned down by) this institution - a file never brings them back. */
+  removedUserIds?: Set<string>;
   /** member_code (lowercased) -> the user id already holding it here. */
   memberCodeOwner: Map<string, string>;
 }
@@ -259,6 +261,10 @@ export function validateRoster(rows: RosterRow[], ctx: RosterContext): RosterRep
     };
 
     if (!matched) return { ...resolved, verdict: 'create', message: 'A new account will be created and added to your institution.' };
+    // Re-running an old file must not undo a removal; Re-add on People is the way back.
+    if (ctx.removedUserIds?.has(matched.id)) {
+      return { ...resolved, verdict: 'reject', message: 'Removed from your institution, or their request to join was declined - add them in People first.' };
+    }
     if (ctx.memberUserIds.has(matched.id)) {
       return { ...resolved, verdict: 'update', message: `Already in your institution - their placement and details will be updated.` };
     }

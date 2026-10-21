@@ -54,6 +54,12 @@ export interface NavFacts {
 export type NavFactKey = keyof NavFacts;
 
 /**
+ * Pages that exist only in My Space (My Game, My Sports Profile). Landing on one moves
+ * the workspace there, as an org or event URL moves it to that org or event.
+ */
+export const PERSONAL_ONLY_ROUTE = /^\/(?:home|profile)(?:\/|$)/;
+
+/**
  * What each kind of context offers, before role or tier is considered.
  *
  * Guest and draft are deliberately tiny. A non-member looking at an organisation

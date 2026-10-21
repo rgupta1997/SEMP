@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../lib/hooks';
 import { useAuth } from '../lib/auth';
+import { usePageTitle } from '../lib/pageTitle';
 import { Spinner } from '../components/ui';
 import { formatPoints } from '@semp/shared';
 
@@ -206,6 +207,8 @@ export function MyGamePage() {
   const [expandedPending, setExpandedPending] = useState(false);
   const [expandedTeams, setExpandedTeams] = useState(false);
   const [expandedRecent, setExpandedRecent] = useState(false);
+  // The title lives in the top bar, as on the organisation pages.
+  usePageTitle('My Game');
 
   if (isLoading) return <Spinner />;
   const d = data ?? { next: null, live: [], pending: [], recent: [], teams: [], stats: { games: 0, events: 0, sports: 0, wins: 0 } };
@@ -218,12 +221,8 @@ export function MyGamePage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div>
-        <h1 style={{ fontFamily: POP, fontWeight: 900, fontSize: 26, letterSpacing: '-.02em', color: C.navy, margin: 0 }}>
-          {first ? `${first}'s game` : 'My game'}
-        </h1>
-        <p style={{ margin: '4px 0 0', fontSize: 14, color: C.fg4 }}>Everything you are playing, officiating and owed.</p>
-      </div>
+      {/* No big heading - "My Game" is in the top bar; the short description stays. */}
+      <p className="t-meta" style={{ margin: 0 }}>Everything you are playing, officiating and owed.</p>
 
       {/* hero + activity */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) minmax(0,1fr)', gap: 16 }} className="mg-top">

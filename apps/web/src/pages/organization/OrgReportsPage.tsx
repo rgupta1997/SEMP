@@ -123,7 +123,7 @@ export function OrgReportsPage() {
   if (!entitled) {
     return (
       <div className="grid gap-5">
-        <PageHeader title="Reports" subtitle="Derived from locked results only." />
+        <PageHeader inTopBar title="Reports" subtitle="Derived from locked results only." />
         <CapabilityLock capability="advanced_reports" />
       </div>
     );
@@ -131,7 +131,7 @@ export function OrgReportsPage() {
 
   return (
     <div className="grid gap-5">
-      <PageHeader title="Reports" subtitle="Derived from locked results only." />
+      <PageHeader inTopBar title="Reports" subtitle="Derived from locked results only." />
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">

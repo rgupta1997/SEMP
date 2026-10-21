@@ -114,17 +114,14 @@ export function MyChampionshipsPage() {
   return (
     // pb-20 keeps the bottom pagination clear of the floating Feedback button.
     <div className="space-y-4 pb-20">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <PageHeader title="My events" subtitle="Everything you are playing in, hosting, or have finished." />
-        <div className="flex flex-wrap gap-2">
-          <Link to="/host" className="rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand-700">
-            Create Event
-          </Link>
-          <Link to="/discover" className="rounded-lg bg-white px-3.5 py-2 text-sm font-semibold text-brand-600 ring-1 ring-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:ring-slate-700">
-            Find events
-          </Link>
-        </div>
-      </div>
+      <PageHeader inTopBar title="My Events" subtitle="Everything you are playing in, hosting, or have finished.">
+        <Link to="/host" className="rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+          Create Event
+        </Link>
+        <Link to="/discover" className="rounded-lg bg-white px-3.5 py-2 text-sm font-semibold text-brand-600 ring-1 ring-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:ring-slate-700">
+          Find events
+        </Link>
+      </PageHeader>
 
       <InvitationsInbox />
 

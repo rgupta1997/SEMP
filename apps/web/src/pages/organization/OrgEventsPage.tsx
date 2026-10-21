@@ -101,7 +101,7 @@ export function OrgEventsPage() {
 
   return (
     <div className="pb-20">
-      <PageHeader title="Events" subtitle="Everything this organisation is entered in, hosting, or waiting on." />
+      <PageHeader inTopBar title="Events" subtitle="Everything this organisation is entered in, hosting, or waiting on." />
 
       <FilterChips
         value={tab}

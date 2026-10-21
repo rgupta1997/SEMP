@@ -54,9 +54,9 @@ export function CertificatesDashboard() {
 
   return (
     <div className="grid gap-5">
-      <PageHeader
+      <PageHeader inTopBar
         title="Certificates"
-        subtitle="Issue, withdraw and verify — every one carries a signature a stranger can check."
+        subtitle="Issue, withdraw and verify - every one carries a signature a stranger can check."
       >
         {SHOW_QR_VERIFIER && (
           <Button variant="ghost" onClick={() => window.open('/verify', '_blank', 'noopener')}>

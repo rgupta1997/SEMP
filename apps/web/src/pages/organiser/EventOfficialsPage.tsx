@@ -4,7 +4,7 @@ import { ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { useApi, useApiMutation, useTableControls, fmtDate } from '../../lib/hooks';
 import { api } from '../../lib/api';
-import { Card, Spinner, Button, Avatar, SearchInput, Pagination, ListToolbar, confirmDialog } from '../../components/ui';
+import { Card, Spinner, Button, Avatar, SearchInput, Pagination, ListToolbar, confirmDialog, PHONE_COMPACT_BUTTON } from '../../components/ui';
 import { PeoplePicker } from '../../components/PeoplePicker';
 import { DataList } from '../../components/primitives';
 
@@ -83,7 +83,7 @@ export function EventOfficialsPage() {
         </div>
         <ListToolbar inline>
           {list.length > 0 && <SearchInput value={t.query} onChange={t.setQuery} placeholder="Search officials…" className="w-56" />}
-          <Button onClick={() => setAssigning(true)} disabled={archived} title={archivedTitle}>+ Assign Official</Button>
+          <Button className={PHONE_COMPACT_BUTTON} onClick={() => setAssigning(true)} disabled={archived} title={archivedTitle}>+ Assign Official</Button>
         </ListToolbar>
       </div>
 
@@ -171,7 +171,7 @@ export function EventOfficialsPage() {
           <p className="text-sm mb-4">
             Assign officials to this championship so they can score matches and manage fixtures.
           </p>
-          <Button onClick={() => setAssigning(true)} disabled={archived} title={archivedTitle}>+ Assign Official</Button>
+          <Button className={PHONE_COMPACT_BUTTON} onClick={() => setAssigning(true)} disabled={archived} title={archivedTitle}>+ Assign Official</Button>
         </Card>
       )}
 

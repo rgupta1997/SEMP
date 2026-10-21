@@ -435,8 +435,9 @@ export function makeOrgRolesRouter(prisma: Prisma): Router {
         where: { id: role_id },
         select: { id: true, name: true, code: true, permission_ids: true, organization_id: true },
       }),
+      // A current member only - a removed person must be re-added before holding a role here.
       prisma.organization_members.findFirst({
-        where: { user_id, organization_id: req.params.id },
+        where: { user_id, organization_id: req.params.id, status: 'active' },
         select: { id: true },
       }),
       prisma.organizations.findUnique({ where: { id: req.params.id }, select: { name: true } }),

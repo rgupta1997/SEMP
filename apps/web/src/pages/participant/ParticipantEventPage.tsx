@@ -29,6 +29,8 @@ interface EventDetail {
     organization_id: string; organization: any;
     played: number; won: number; drawn: number; lost: number; points: number;
   }[];
+  /** Off every squad they had here - their own record only. */
+  former_member?: boolean;
 }
 
 const RANK_COLORS = [
@@ -61,6 +63,23 @@ export function ParticipantEventPage() {
   }
 
   const { championship, stats, teams, matches } = data;
+  // Someone who left the squad sees what they played here, not the event around it.
+  const former = !!data.former_member;
+  const tabs = former
+    ? [
+      { id: 'overview', label: 'Overview' },
+      { id: 'matches', label: 'My matches', badge: <Badge tone="slate">{matches.length}</Badge> },
+    ]
+    : [
+      { id: 'overview', label: 'Overview' },
+      { id: 'teams', label: 'My teams', badge: <Badge tone="slate">{teams.length}</Badge> },
+      { id: 'matches', label: 'My matches', badge: <Badge tone="slate">{matches.length}</Badge> },
+      { id: 'participants', label: 'Participants' },
+      { id: 'schedule', label: 'Schedule' },
+      { id: 'results', label: 'Results' },
+      { id: 'standings', label: 'Standings' },
+    ];
+  const shown = tabs.some((t) => t.id === tab) ? tab : 'overview';
 
   return (
     <div className="space-y-5">
@@ -69,21 +88,9 @@ export function ParticipantEventPage() {
         <StatusBadge status={championship.status} />
       </PageHeader>
 
-      <Tabs
-        active={tab}
-        onChange={setTab}
-        tabs={[
-          { id: 'overview', label: 'Overview' },
-          { id: 'teams', label: 'My teams', badge: <Badge tone="slate">{teams.length}</Badge> },
-          { id: 'matches', label: 'My matches', badge: <Badge tone="slate">{matches.length}</Badge> },
-          { id: 'participants', label: 'Participants' },
-          { id: 'schedule', label: 'Schedule' },
-          { id: 'results', label: 'Results' },
-          { id: 'standings', label: 'Standings' },
-        ]}
-      />
+      <Tabs active={shown} onChange={setTab} tabs={tabs} />
 
-      {tab === 'overview' && (
+      {shown === 'overview' && (
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <StatCard label="Matches" value={stats.matches} />
@@ -100,7 +107,7 @@ export function ParticipantEventPage() {
         </div>
       )}
 
-      {tab === 'teams' && (
+      {shown === 'teams' && (
         <div className="space-y-4">
           {teams.length === 0 ? (
             <EmptyState icon="⚇" title="No teams" />
@@ -141,7 +148,7 @@ export function ParticipantEventPage() {
         </div>
       )}
 
-      {tab === 'matches' && (
+      {shown === 'matches' && (
         matches.length === 0 ? (
           <EmptyState icon={<Calendar size={24} />} title="No matches yet" description="Fixtures appear here once your teams are drawn." />
         ) : (
@@ -151,13 +158,13 @@ export function ParticipantEventPage() {
         )
       )}
 
-      {tab === 'participants' && championshipId && <ChampionshipParticipants championshipId={championshipId} />}
+      {shown === 'participants' && championshipId && <ChampionshipParticipants championshipId={championshipId} />}
 
-      {tab === 'schedule' && championshipId && <ChampionshipFixtures championshipId={championshipId} mode="schedule" />}
+      {shown === 'schedule' && championshipId && <ChampionshipFixtures championshipId={championshipId} mode="schedule" />}
 
-      {tab === 'results' && championshipId && <ChampionshipFixtures championshipId={championshipId} mode="results" />}
+      {shown === 'results' && championshipId && <ChampionshipFixtures championshipId={championshipId} mode="results" />}
 
-      {tab === 'standings' && championshipId && <ChampionshipStandings championshipId={championshipId} />}
+      {shown === 'standings' && championshipId && <ChampionshipStandings championshipId={championshipId} />}
     </div>
   );
 }

@@ -13,13 +13,13 @@ import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/e
 import { findUserByPhone, hashProvisionedPassword } from './users.helpers.js';
 import { archiveOrganization, orgRemovalInfo, retrieveOrganization } from './organization-archive.service.js';
 import { audit, AUDIT_ACTIONS } from './audit.service.js';
-import { removeMembers } from './member-removal.service.js';
+import { ownerMembership, removeMembers, restoreMembers, vouchedBy } from './member-removal.service.js';
 import {
   notifyOrganizationCreated, notifyJoinRequested, notifyJoinApproved, notifyJoinDeclined,
   newlyAddedMembers, notifyNewOrgMembers,
 } from './organizations.notifications.js';
 import { equalsIgnoreCase } from '../../shared/exact-ci.js';
-// Organizations router: list/get are open reads. Any authenticated user can
+// Organizations router: list/get are open reads (the member list is not - see it). Any authenticated user can
 // create an organization (they become its first `owner`). Edits, deletes and
 // member management require an owner/admin of that org (or super admin).
 export function makeOrganizationsRouter(prisma: Prisma): Router {
@@ -132,7 +132,7 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
       const org = await tx.organizations.create({ data: { ...organization, status: organization.status ?? true } });
       // The authenticated creator is always an owner of the new org.
       await tx.organization_members.create({
-        data: { user_id: req.user!.id, organization_id: org.id, role: 'owner' },
+        data: { user_id: req.user!.id, organization_id: org.id, ...ownerMembership(req.user!.id) },
       });
       // If the creator has no primary org yet, set it so their next JWT/context reflects the org.
       await tx.users.updateMany({
@@ -149,8 +149,8 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
         }
         await tx.organization_members.upsert({
           where: { user_id_organization_id: { user_id: pocUserId, organization_id: org.id } },
-          update: { role: 'owner' },
-          create: { user_id: pocUserId, organization_id: org.id, role: 'owner' },
+          update: ownerMembership(req.user!.id),
+          create: { user_id: pocUserId, organization_id: org.id, ...ownerMembership(req.user!.id) },
         });
       }
       return org;
@@ -276,8 +276,12 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
 
     // No row yet, or a past/rejected one being re-opened.
     const member = existing
-      ? await prisma.organization_members.update({ where: { id: existing.id }, data: { status: 'pending', role: 'member' } })
-      : await prisma.organization_members.create({ data: { user_id: userId, organization_id: orgId, role: 'member', status: 'pending' } });
+      // A request is the one membership nobody has vouched for yet.
+      ? await prisma.organization_members.update({
+        where: { id: existing.id },
+        data: { status: 'pending', role: 'member', verification: 'pending', verified_by: null, verified_at: null },
+      })
+      : await prisma.organization_members.create({ data: { user_id: userId, organization_id: orgId, role: 'member', status: 'pending', verification: 'pending' } });
 
     const actor = await prisma.users.findUnique({ where: { id: userId }, select: { name: true, email: true } });
     const who = actor?.name || actor?.email || 'Someone';
@@ -295,12 +299,35 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   }));
 
   // ---- Members ----
+  // The member list carries contact details, so it is for the organisation's own people:
+  // staff (owner/admin, anyone granted a role here, a campus administrator) get it whole;
+  // a plain member gets current members' names only; anyone else nothing.
   router.get('/:id/members', asyncHandler(async (req, res) => {
-    const rows = await prisma.organization_members.findMany({
-      where: { organization_id: req.params.id },
-      include: { users: { select: { id: true, name: true, email: true, phone: true } } },
-      orderBy: { joined_at: 'asc' },
-    });
+    const orgId = req.params.id;
+    const u = req.user!;
+    let staff = !!u.isSuperAdmin;
+    if (!staff) {
+      const me = await prisma.organization_members.findFirst({
+        where: { organization_id: orgId, user_id: u.id, status: 'active' },
+        select: { role: true },
+      });
+      if (!me) throw new ForbiddenError('You are not a member of this organisation');
+      staff = me.role === 'owner' || me.role === 'admin'
+        || !!await prisma.user_org_roles.findFirst({ where: { organization_id: orgId, user_id: u.id, status: 'ACTIVE' }, select: { id: true } })
+        || !!await prisma.org_units.findFirst({ where: { organization_id: orgId, admin_user_id: u.id }, select: { id: true } });
+    }
+    const rows = staff
+      ? await prisma.organization_members.findMany({
+        where: { organization_id: orgId },
+        include: { users: { select: { id: true, name: true, email: true, phone: true } } },
+        orderBy: { joined_at: 'asc' },
+      })
+      // Who is in it, nothing more: no roll numbers, scholarships or verification notes.
+      : await prisma.organization_members.findMany({
+        where: { organization_id: orgId, status: 'active' },
+        select: { id: true, user_id: true, role: true, status: true, joined_at: true, users: { select: { id: true, name: true } } },
+        orderBy: { joined_at: 'asc' },
+      });
     res.json(rows);
   }));
 
@@ -343,8 +370,8 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
 
     const member = await prisma.organization_members.upsert({
       where: { user_id_organization_id: { user_id: resolvedUserId, organization_id: req.params.id } },
-      update: { role, status: 'active' },
-      create: { user_id: resolvedUserId, organization_id: req.params.id, role },
+      update: { role, status: 'active', ...(existingMember?.status === 'active' ? {} : vouchedBy(req.user!.id)) },
+      create: { user_id: resolvedUserId, organization_id: req.params.id, role, ...vouchedBy(req.user!.id) },
       include: { users: { select: { id: true, name: true, email: true, phone: true } } },
     });
     res.status(201).json({ ...member, poc_credentials: credentials });
@@ -363,11 +390,12 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     // to be one.
     const newlyAddedIds = await newlyAddedMembers(prisma, orgId, uniqueIds);
 
+    const joining = new Set(newlyAddedIds);
     const members = await prisma.$transaction(
       uniqueIds.map((user_id) => prisma.organization_members.upsert({
         where: { user_id_organization_id: { user_id, organization_id: orgId } },
-        update: { role, status: 'active' },
-        create: { user_id, organization_id: orgId, role },
+        update: { role, status: 'active', ...(joining.has(user_id) ? vouchedBy(req.user!.id) : {}) },
+        create: { user_id, organization_id: orgId, role, ...vouchedBy(req.user!.id) },
         include: { users: { select: { id: true, name: true, email: true, phone: true } } },
       })),
     );
@@ -411,9 +439,10 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     // routes (PUT /organizations/:id/people/:userId/units). Leaving a single
     // `org_unit_id` on this endpoint would have been a second way to express
     // placement that could only ever hold one of the several answers.
+    const becomesMember = req.body.status === 'active' && member.status !== 'active';
     const updated = await prisma.organization_members.update({
       where: { id: member.id },
-      data: req.body,
+      data: { ...req.body, ...(becomesMember ? vouchedBy(req.user!.id) : {}) },
       include: { users: { select: { id: true, name: true, email: true, phone: true } } },
     });
     res.json(updated);
@@ -431,6 +460,11 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
     res.json(await removeMembers(prisma, req, req.params.id, req.body.member_ids));
   }));
 
+  // Bring removed people back (the People page's Removed tab).
+  router.post('/:id/members/restore', guards.orgPermission('org.member.manage'), validateBody(removeOrganizationMembersSchema), asyncHandler(async (req, res) => {
+    res.json(await restoreMembers(prisma, req, req.params.id, req.body.member_ids));
+  }));
+
   // ---- Approve / decline a pending join request ----
   // Resolve the org name once for the requester-facing notification.
   async function orgName(id: string): Promise<string> {
@@ -438,13 +472,15 @@ export function makeOrganizationsRouter(prisma: Prisma): Router {
   }
 
   router.post('/:id/members/:memberId/approve', guards.orgPermission('org.member.manage'), asyncHandler(async (req, res) => {
+    // A join request only. Bringing back someone removed is Re-add, which never
+    // returns an old admin role.
     const member = await prisma.organization_members.findFirst({
-      where: { id: req.params.memberId, organization_id: req.params.id },
+      where: { id: req.params.memberId, organization_id: req.params.id, status: 'pending' },
     });
     if (!member) throw new NotFoundError('Member');
     const updated = await prisma.organization_members.update({
       where: { id: member.id },
-      data: { status: 'active' },
+      data: { status: 'active', ...vouchedBy(req.user!.id) },
       include: { users: { select: { id: true, name: true, email: true, phone: true } } },
     });
     await notifyJoinApproved(prisma, member.user_id, await orgName(req.params.id), req.user!.id);

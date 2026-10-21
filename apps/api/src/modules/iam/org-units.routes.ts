@@ -511,8 +511,10 @@ export function makeOrgUnitsRouter(prisma: Prisma): Router {
   router.put('/:id/people/:userId/units', placement, validateBody(z.object({
     unit_ids: z.array(z.string().uuid()).max(50),
   })), asyncHandler(async (req, res) => {
+    // A member or someone asking to join - never a removed or turned-down person, whom a
+    // placement would make eligible for this unit's squads again.
     const member = await prisma.organization_members.findFirst({
-      where: { organization_id: req.params.id, user_id: req.params.userId },
+      where: { organization_id: req.params.id, user_id: req.params.userId, status: { in: ['active', 'pending'] } },
       select: { id: true },
     });
     if (!member) throw new NotFoundError('Member');

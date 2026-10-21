@@ -17,6 +17,8 @@ import { assertCanAddMember, assertCanLockRoster } from './domain/roster-policy.
 import { assertPlayerEligible, screenSquad, squadEntryRefusal } from '../championships/contingent.js';
 import { PLACEHOLDER_EMAIL_DOMAIN, unitLabels } from '@semp/shared';
 import { tellUser, checkRosterIncomplete, notifyRosterLocked, notifyTeamCreated } from './teams.notifications.js';
+import { joinSquad, leaveSquadsWhere } from './squad-places.js';
+import { can } from '../../http/middleware/can.js';
 import { mintSportagonIds, orgIdPrefixFor } from '../iam/sportagon-id.js';
 import { assertOrgNotArchived } from '../iam/organization-archive.service.js';
 import { deriveProvisionedPassword, findUsersByPhones, phoneLast10 } from '../iam/users.helpers.js';
@@ -89,7 +91,8 @@ const entryInclude = {
 } as const;
 
 const teamFullInclude = {
-  team_members: { include: { users: { select: publicUserSelect } } },
+  // The squad as it stands; people who left keep their row for history, off the roster.
+  team_members: { where: { is_active: true }, include: { users: { select: publicUserSelect } } },
   organizations: organizationWithOwnersInclude,
   sports: true,
   team_entries: entryInclude,
@@ -745,7 +748,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     if (!team) throw new NotFoundError('Team');
 
     const members = await prisma.organization_members.findMany({
-      where: { organization_id: team.organization_id, status: { notIn: ['pending', 'past'] } },
+      where: { organization_id: team.organization_id, status: 'active' },
       select: {
         user_id: true,
         users: {
@@ -779,7 +782,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
 
   router.get('/teams/:id/members', asyncHandler(async (req, res) => {
     const rows = await prisma.team_members.findMany({
-      where: { team_id: req.params.id },
+      where: { team_id: req.params.id, is_active: true },
       include: { users: { select: publicUserSelect } },
       orderBy: { joined_at: 'asc' },
     });
@@ -804,14 +807,16 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     // other. A no-op for inter-organisation teams, whose unit is null.
     await assertPlayerEligible(prisma, team, data.user_id);
     if (data.role === 'captain' || data.role === 'vice_captain') {
-      const existing = await prisma.team_members.findFirst({ where: { team_id: teamId, role: data.role }, select: { id: true } });
+      const existing = await prisma.team_members.findFirst({ where: { team_id: teamId, role: data.role, is_active: true }, select: { id: true } });
       if (existing) throw new BusinessRuleError(`This team already has a ${data.role === 'vice_captain' ? 'vice-captain' : 'captain'}`);
+    }
+    if (await prisma.team_members.findFirst({ where: { team_id: teamId, user_id: data.user_id, is_active: true }, select: { id: true } })) {
+      throw new BusinessRuleError('Already on this squad');
     }
     const count = await prisma.team_members.count({ where: { team_id: teamId, is_active: true } });
     assertCanAddMember(looseAddRules(entries), count);
-    const created = await prisma.team_members.create({
-      data: { team_id: teamId, user_id: data.user_id, role: data.role, jersey_number: data.jersey_number ?? null },
-    });
+    // Someone who left this squad earlier gets their old place back.
+    const created = await joinSquad(prisma, { team_id: teamId, ...data });
     await tellUser(prisma, actorId, data.user_id, 'team_player_added', { teamName: team.name });
     return created;
   }
@@ -873,6 +878,17 @@ export function makeTeamsRouter(prisma: Prisma): Router {
         };
       }));
 
+    // May this person bring back someone removed or still asking? Read OUTSIDE the
+    // transaction: on Lambda the pool is one connection, which the transaction holds.
+    const mayAdmit = await can(prisma, 'org.member.manage', {
+      user: { id: req.user!.id, isSuperAdmin: !!req.user!.isSuperAdmin },
+      scope: { organizationId: team.organization_id },
+      fallback: async () => !!(await prisma.organization_members.findFirst({
+        where: { user_id: req.user!.id, organization_id: team.organization_id, status: 'active', role: { in: ['owner', 'admin'] } },
+        select: { id: true },
+      })),
+    });
+
     const result = await prisma.$transaction(async (tx) => {
       // Ineligible players are SKIPPED with a reason, not thrown on. A captain
       // pasting thirty names wants the list of who cannot play and the other
@@ -897,13 +913,29 @@ export function makeTeamsRouter(prisma: Prisma): Router {
       // organisation's People, verified, exactly as People -> Add people does.
       // Someone already a member keeps their membership and placement untouched.
       const pastedIds = [...new Set(pasted.map(userIdFor).filter((id): id is string => !!id))];
-      const alreadyMembers = new Set((pastedIds.length
+      const existing = pastedIds.length
         ? await tx.organization_members.findMany({
           where: { organization_id: team.organization_id, user_id: { in: pastedIds } },
-          select: { user_id: true },
+          select: { id: true, user_id: true, status: true },
         })
-        : []).map((m) => m.user_id));
+        : [];
+      const alreadyMembers = new Set(existing.map((m) => m.user_id));
       const joining = pastedIds.filter((id) => !alreadyMembers.has(id));
+      // Someone removed, turned down or still asking is brought in as Add person does it -
+      // a verified member, never with their old admin role back - but only by an owner or
+      // admin: deciding who belongs is not a captain's call (`mayAdmit`, read before the
+      // transaction). Otherwise they stay as they are, and the squad check below names
+      // why a removed person was skipped.
+      const returning = mayAdmit ? existing.filter((m) => m.status !== 'active') : [];
+      if (returning.length) {
+        await assertWithinOrgLimit(tx, 'people', team.organization_id, (await countPeople(tx, team.organization_id)) + returning.length - 1);
+        const ids = returning.map((m) => m.id);
+        await tx.organization_members.updateMany({ where: { id: { in: ids }, role: 'admin' }, data: { role: 'member' } });
+        await tx.organization_members.updateMany({
+          where: { id: { in: ids } },
+          data: { status: 'active', verification: 'verified', verified_by: req.user!.id, verified_at: new Date() },
+        });
+      }
       if (joining.length) {
         // Same roll ceiling People enforces - adding people here must not bypass it.
         await assertWithinOrgLimit(tx, 'people', team.organization_id, (await countPeople(tx, team.organization_id)) + joining.length - 1);
@@ -914,23 +946,26 @@ export function makeTeamsRouter(prisma: Prisma): Router {
           })),
           skipDuplicates: true,
         });
-        // A unit squad only picks people placed in that unit, so newcomers are placed
-        // there (and in its campus). Existing members are never moved: someone in
-        // Mumbai pasted into a Bangalore squad is still refused as Mumbai's.
-        if (team.org_unit_id) {
-          const unit = await tx.org_units.findUnique({ where: { id: team.org_unit_id }, select: { id: true, parent_id: true } });
-          const unitIds = unit ? [unit.id, ...(unit.parent_id ? [unit.parent_id] : [])] : [];
-          await tx.org_unit_members.createMany({
-            data: joining.flatMap((user_id) => unitIds.map((org_unit_id) => ({ organization_id: team.organization_id, org_unit_id, user_id }))),
-            skipDuplicates: true,
-          });
-        }
+      }
+      // A unit squad only picks people placed in that unit, so newcomers - and people
+      // coming back, whose placements went with them - are placed there (and in its
+      // campus). Current members are never moved: someone in Mumbai pasted into a
+      // Bangalore squad is still refused as Mumbai's.
+      const placing = [...joining, ...returning.map((m) => m.user_id)];
+      if (team.org_unit_id && placing.length) {
+        const unit = await tx.org_units.findUnique({ where: { id: team.org_unit_id }, select: { id: true, parent_id: true } });
+        const unitIds = unit ? [unit.id, ...(unit.parent_id ? [unit.parent_id] : [])] : [];
+        await tx.org_unit_members.createMany({
+          data: placing.flatMap((user_id) => unitIds.map((org_unit_id) => ({ organization_id: team.organization_id, org_unit_id, user_id }))),
+          skipDuplicates: true,
+        });
       }
 
-      // Existing roster ids in one query; a running count enforces the squad cap.
-      const onRoster = new Set(
-        (await tx.team_members.findMany({ where: { team_id: team.id }, select: { user_id: true } })).map((m) => m.user_id),
-      );
+      // Existing roster ids in one query; a running count enforces the squad cap. Someone
+      // who left the squad is not on it - they come back through their old row.
+      const places = await tx.team_members.findMany({ where: { team_id: team.id }, select: { user_id: true, is_active: true } });
+      const onRoster = new Set(places.filter((m) => m.is_active).map((m) => m.user_id));
+      const leftEarlier = new Set(places.filter((m) => !m.is_active).map((m) => m.user_id));
 
       // Screened AFTER the auto-create step above, so a person the import just
       // created is judged on the membership it gave them rather than on not having
@@ -959,7 +994,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
         if (row.role === 'captain' || row.role === 'vice_captain') {
           const roleLabel = row.role === 'vice_captain' ? 'vice-captain' : 'captain';
           const takenInBatch = newMembers.some((m) => m.role === row.role);
-          const takenInDb = !takenInBatch && await tx.team_members.findFirst({ where: { team_id: team.id, role: row.role }, select: { id: true } });
+          const takenInDb = !takenInBatch && await tx.team_members.findFirst({ where: { team_id: team.id, role: row.role, is_active: true }, select: { id: true } });
           if (takenInBatch || takenInDb) { skipped.push({ label, reason: `team already has a ${roleLabel}` }); continue; }
         }
         onRoster.add(userId);
@@ -968,7 +1003,9 @@ export function makeTeamsRouter(prisma: Prisma): Router {
         added.push({ name: label, email: row.email });
       }
 
-      if (newMembers.length) await tx.team_members.createMany({ data: newMembers });
+      const fresh = newMembers.filter((m) => !leftEarlier.has(m.user_id));
+      if (fresh.length) await tx.team_members.createMany({ data: fresh });
+      for (const m of newMembers) if (leftEarlier.has(m.user_id)) await joinSquad(tx, m);
       return { added: added.length, skipped, total: count, newMembers };
     });
 
@@ -999,11 +1036,11 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     const team = await prisma.teams.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!team) throw new NotFoundError('Team');
     await assertRosterEditable(prisma, team.id);
-    const member = await prisma.team_members.findFirst({ where: { id: req.params.memberId, team_id: team.id } });
+    const member = await prisma.team_members.findFirst({ where: { id: req.params.memberId, team_id: team.id, is_active: true } });
     if (!member) throw new NotFoundError('Team member');
     if (req.body.role && (req.body.role === 'captain' || req.body.role === 'vice_captain') && req.body.role !== member.role) {
       const existing = await prisma.team_members.findFirst({
-        where: { team_id: team.id, role: req.body.role, id: { not: member.id } },
+        where: { team_id: team.id, role: req.body.role, id: { not: member.id }, is_active: true },
         select: { id: true },
       });
       if (existing) throw new BusinessRuleError(`This team already has a ${req.body.role === 'vice_captain' ? 'vice-captain' : 'captain'}`);
@@ -1030,9 +1067,10 @@ export function makeTeamsRouter(prisma: Prisma): Router {
     // authorizes the actor against :id, not against whatever team memberId actually
     // belongs to, so an unscoped lookup/delete here would let a manager of team A
     // reach into team B's roster via its own member id.
-    const member = await prisma.team_members.findFirst({ where: { id: req.params.memberId, team_id: team.id }, select: { user_id: true } });
+    const member = await prisma.team_members.findFirst({ where: { id: req.params.memberId, team_id: team.id, is_active: true }, select: { user_id: true } });
     if (!member) throw new NotFoundError('Team member');
-    await prisma.team_members.delete({ where: { id: req.params.memberId } });
+    // Kept, inactive and dated - deleting it erased the matches they played for this squad.
+    await leaveSquadsWhere(prisma, { team_id: team.id, user_id: member.user_id });
     await tellUser(prisma, req.user!.id, member.user_id, 'team_player_removed', { teamName: team.name });
     res.status(204).send();
   }));

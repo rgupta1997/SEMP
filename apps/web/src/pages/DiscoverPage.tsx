@@ -225,7 +225,7 @@ export function DiscoverPage() {
   return (
     // pb-20 keeps the bottom pagination clear of the floating Feedback button.
     <div className="pb-20">
-      <PageHeader
+      <PageHeader inTopBar
         title="Discover"
         subtitle={activeOrg
           ? `Championships open to ${activeOrg.organization?.name ?? 'your organisation'} - registering enters this organisation.`

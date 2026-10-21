@@ -195,7 +195,8 @@ export function MembersPage({ embedded, orgId: orgIdProp }: { embedded?: boolean
   // changed the person's VERIFICATION and left the request exactly where it was.
   const all = members.data ?? [];
   const pending = all.filter((m) => m.status === 'pending');
-  const rows = all.filter((m) => m.status !== 'pending');
+  // Current members only - removed and turned-down people live on the People page.
+  const rows = all.filter((m) => m.status === 'active');
   // Paged, like every other roster in the product.
   //
   // It was not, and `useTableControls` pages by default, so this table rendered

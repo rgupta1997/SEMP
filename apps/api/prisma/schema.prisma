@@ -343,6 +343,7 @@ model team_members {
   jersey_number Int?     @db.SmallInt
   is_active     Boolean  @default(true)
   joined_at     DateTime @default(now()) @db.Timestamptz(6)
+  left_at       DateTime? @db.Timestamptz(6)
   teams         teams    @relation(fields: [team_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users         users    @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 

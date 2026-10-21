@@ -66,8 +66,10 @@ export function StandingsPage() {
     return [...map].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [draws]);
 
+  // No tournament dropdown here: standings read the whole championship (or one sport).
+  // Not passing `tournaments` also makes tournamentId '' - a choice made on Schedule
+  // can never narrow this table unseen.
   const { tournamentId, sportId } = usePageFilters({
-    tournaments: tournamentOptions.length ? tournamentOptions : undefined,
     sports: sportOptions.length ? sportOptions : undefined,
   });
 
