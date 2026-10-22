@@ -101,7 +101,7 @@ export function toDerivableFixture(fx: any): DerivableFixture {
 /** Resolve award rows to catalogue labels in one round trip. */
 export async function toDerivableAwards(
   db: Db,
-  rows: Array<{ recipient_user_id: string; award_name: string; award_type_id: string | null }>,
+  rows: Array<{ recipient_user_id: string | null; recipient_team_id?: string | null; award_name: string; award_type_id: string | null }>,
 ): Promise<DerivableAward[]> {
   const typeIds = [...new Set(rows.map((a) => a.award_type_id).filter((x): x is string => !!x))];
   const types = typeIds.length
@@ -112,6 +112,7 @@ export async function toDerivableAwards(
     const t = a.award_type_id ? typeById.get(a.award_type_id) : undefined;
     return {
       recipient_user_id: a.recipient_user_id,
+      recipient_team_id: a.recipient_team_id ?? null,
       award_name: a.award_name,
       award_type_code: t?.code ?? null,
       award_type_label: t?.label ?? null,
@@ -123,9 +124,10 @@ async function snapshot(db: Db, fixtureId: string): Promise<{ fixture: Derivable
   const fx = await db.fixtures.findUnique({ where: { id: fixtureId }, ...FIXTURE_FOR_RECORDS });
   if (!fx) return null;
 
+  // Player and team awards; deriveRecords expands a team award to its members.
   const awardRows = await db.fixture_awards.findMany({
     where: { fixture_id: fixtureId },
-    select: { recipient_user_id: true, award_name: true, award_type_id: true },
+    select: { recipient_user_id: true, recipient_team_id: true, award_name: true, award_type_id: true },
   });
 
   return {

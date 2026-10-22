@@ -498,6 +498,8 @@ async function seed() {
 
   const fixtures: any[] = [];
   const awards: any[] = [];
+  // A match award is a catalogue type, not free text (award system, rds-migrations/017).
+  const potmTypeId = (await prisma.award_types.findFirst({ where: { code: 'player_of_the_match', championship_id: null }, select: { id: true } }))?.id ?? null;
   let liveBudget = 6; // a handful of day-3 matches in progress, for the live demo
 
   teamDraws.forEach((d, di) => {
@@ -570,7 +572,7 @@ async function seed() {
     // awards surface has content without inventing one for an unplayed match.
     if (finishesOn <= PLAYED && di % 4 === 0) {
       const cap = squads.find((s) => s.team_id === fw && s.role === 'captain');
-      if (cap) awards.push({ id: randomUUID(), fixture_id: finalId, recipient_user_id: cap.user_id, award_name: 'Player of the Match' });
+      if (cap) awards.push({ id: randomUUID(), fixture_id: finalId, recipient_user_id: cap.user_id, award_name: 'Player of the Match', award_type_id: potmTypeId });
     }
   });
 

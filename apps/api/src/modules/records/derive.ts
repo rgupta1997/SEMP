@@ -47,7 +47,10 @@ export interface DerivableParticipant {
 }
 
 export interface DerivableAward {
-  recipient_user_id: string;
+  /** A player award. Exactly one of this and recipient_team_id is set. */
+  recipient_user_id: string | null;
+  /** A team award: every participant of that team in this fixture earns it. */
+  recipient_team_id?: string | null;
   /** The free text as recorded - the fallback when nothing was picked. */
   award_name: string;
   /** Catalogue code, when the official chose from the catalogue (J4-E4-S2). */
@@ -518,28 +521,36 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
   // ---- 3 · awards (J4-E4-S2) ----------------------------------------------
   const participantById = new Map(participants.map((p) => [p.user_id, p]));
   for (const a of awards) {
-    const p = participantById.get(a.recipient_user_id);
     // The award's own name is the title: a catalogue label when one was picked,
     // otherwise the free text exactly as typed. `award_type_code` is what a report
     // groups on, so "POTM" typed by hand stays visible without ever being counted
     // as something it was not.
     const label = a.award_type_label ?? a.award_name;
-    achievements.push({
-      user_id: a.recipient_user_id,
-      team_id: null,
-      organization_id: p?.organization_id ?? null,
-      kind: 'award',
-      medal: null,
-      title: `${label} - ${eventLabel}`,
-      detail: {
-        award_type_code: a.award_type_code,
-        award_name: a.award_name,
-        sport: fx.sport_name,
-        discipline: fx.discipline_name,
-        championship_name: fx.championship_name,
-      },
-    });
-    addChip(a.recipient_user_id, { kind: 'award', title: label });
+    // A team award is every member's honour - one achievement each. team_id stays
+    // null on those rows (the team is in `detail`): a team_id row means "the team's
+    // own achievement", and there is one live row per team per title.
+    const recipients = a.recipient_team_id
+      ? participants.filter((p) => p.team_id === a.recipient_team_id)
+      : a.recipient_user_id ? [participantById.get(a.recipient_user_id) ?? { user_id: a.recipient_user_id, organization_id: null }] : [];
+    for (const p of recipients) {
+      achievements.push({
+        user_id: p.user_id,
+        team_id: null,
+        organization_id: p.organization_id ?? null,
+        kind: 'award',
+        medal: null,
+        title: `${label} - ${eventLabel}`,
+        detail: {
+          award_type_code: a.award_type_code,
+          award_name: a.award_name,
+          ...(a.recipient_team_id ? { team_award: true, award_team_id: a.recipient_team_id } : {}),
+          sport: fx.sport_name,
+          discipline: fx.discipline_name,
+          championship_name: fx.championship_name,
+        },
+      });
+      addChip(p.user_id, { kind: 'award', title: label });
+    }
   }
 
   // ---- 4 · the timeline -----------------------------------------------------

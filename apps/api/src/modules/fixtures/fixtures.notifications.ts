@@ -10,8 +10,12 @@ import { notify } from '@semp/notifications/server/notify.js';
 export interface AwardInput {
   award_name: string;
   award_type_id?: string | null;
-  recipient_user_id: string;
+  recipient_user_id?: string | null;
+  recipient_team_id?: string | null;
 }
+
+const awardKey = (a: AwardInput) =>
+  `${a.recipient_user_id ?? ''}|${a.recipient_team_id ?? ''}|${a.award_name}|${a.award_type_id ?? ''}`;
 
 // Which of this save's awards are genuinely NEW. The awards route replaces the
 // whole list on every save, so a re-save of an unchanged award must not
@@ -22,10 +26,10 @@ export async function newlyAwarded(
 ): Promise<AwardInput[]> {
   const existing = await prisma.fixture_awards.findMany({
     where: { fixture_id: fixtureId },
-    select: { recipient_user_id: true, award_name: true, award_type_id: true },
+    select: { recipient_user_id: true, recipient_team_id: true, award_name: true, award_type_id: true },
   });
-  const existingKeys = new Set(existing.map((e) => `${e.recipient_user_id}|${e.award_name}|${e.award_type_id ?? ''}`));
-  return awards.filter((a) => !existingKeys.has(`${a.recipient_user_id}|${a.award_name}|${a.award_type_id ?? ''}`));
+  const existingKeys = new Set(existing.map(awardKey));
+  return awards.filter((a) => !existingKeys.has(awardKey(a)));
 }
 
 // Best-effort: the awards are already committed by the time this runs. Player of
@@ -55,18 +59,28 @@ export async function notifyNewAwards(
     const home = withNames?.teams_fixtures_home_team_idToteams?.name ?? 'TBD';
     const away = withNames?.teams_fixtures_away_team_idToteams?.name ?? 'TBD';
     const label = `${home} vs ${away}`;
+    // A team award tells every member of that team.
+    const teamIds = [...new Set(newAwards.map((a) => a.recipient_team_id).filter((id): id is string => !!id))];
+    const members = teamIds.length
+      ? await prisma.team_members.findMany({ where: { team_id: { in: teamIds }, is_active: true }, select: { team_id: true, user_id: true } })
+      : [];
     for (const a of newAwards) {
       const code = a.award_type_id ? codeById.get(a.award_type_id) : null;
-      try {
-        await notify(prisma, {
-          type: code === 'player_of_the_match' ? 'player_of_the_match' : 'tournament_award',
-          championshipId,
-          userId: a.recipient_user_id,
-          senderId,
-          data: { label, awardName: a.award_name },
-        });
-      } catch (err) {
-        console.error(`[fixtures] award notification failed for ${a.recipient_user_id} on fixture ${fixtureId}:`, err);
+      const userIds = a.recipient_team_id
+        ? members.filter((m) => m.team_id === a.recipient_team_id).map((m) => m.user_id)
+        : a.recipient_user_id ? [a.recipient_user_id] : [];
+      for (const userId of userIds) {
+        try {
+          await notify(prisma, {
+            type: code === 'player_of_the_match' ? 'player_of_the_match' : 'tournament_award',
+            championshipId,
+            userId,
+            senderId,
+            data: { label, awardName: a.award_name },
+          });
+        } catch (err) {
+          console.error(`[fixtures] award notification failed for ${userId} on fixture ${fixtureId}:`, err);
+        }
       }
     }
   } catch (err) {

@@ -169,7 +169,7 @@ function summariseLean(f: FixtureRow, myTeamIds: Set<string>, shootouts?: Map<st
 // fixture_awards select for the achievement views. championship + sport + tournament
 // all come from the fixture's own discipline draw (a roster spans championships).
 const awardSelect = {
-  id: true, award_name: true, created_at: true,
+  id: true, award_name: true, created_at: true, recipient_team_id: true,
   fixtures: {
     select: {
       id: true, round: true, status: true,
@@ -213,11 +213,57 @@ function mapAward(a: any, myTeamIds: Set<string>) {
     round: f?.round ?? null,
     result: f ? resultFor(f, myTeamIds) : 'pending',
     fixture_id: f?.id ?? null,
+    level: 'match' as const,
+    team_award: !!a.recipient_team_id,
+  };
+}
+
+// Sport / tournament / event awards, in the same shape as a match award so every
+// achievement view lists them side by side. There is no match, so no opponent or result.
+const championshipAwardSelect = {
+  id: true, award_name: true, created_at: true, level: true, recipient_team_id: true,
+  teams: { select: { name: true } },
+  championships: { select: { id: true, name: true } },
+  tournaments: { select: { id: true, name: true } },
+  tournament_sports: { select: { sports: { select: { name: true } } } },
+} as const;
+
+const LEVEL_ROUND: Record<string, string> = {
+  tournament_sport: 'Sport award', tournament: 'Tournament award', championship: 'Event award',
+};
+
+function mapChampionshipAward(a: any) {
+  return {
+    id: a.id,
+    award_name: a.award_name,
+    date: a.created_at,
+    championship: a.championships ? { id: a.championships.id, name: a.championships.name } : null,
+    tournament: a.tournaments ? { id: a.tournaments.id, name: a.tournaments.name } : null,
+    sport: a.tournament_sports?.sports?.name ?? null,
+    discipline: null,
+    opponent_team_name: null,
+    my_team_name: a.teams?.name ?? null,
+    round: LEVEL_ROUND[a.level] ?? null,
+    result: 'pending' as const,
+    fixture_id: null,
+    level: a.level as 'tournament_sport' | 'tournament' | 'championship',
+    team_award: !!a.recipient_team_id,
   };
 }
 
 export function makeMeRouter(prisma: Prisma): Router {
   const router = Router();
+
+  // Every award this person holds: their own, and their teams', at every level.
+  async function loadMyAwards(userId: string, myTeamIds: Set<string>) {
+    const mine = { OR: [{ recipient_user_id: userId }, { recipient_team_id: { in: [...myTeamIds] } }] };
+    const [matchRows, eventRows] = await Promise.all([
+      prisma.fixture_awards.findMany({ where: mine, select: awardSelect, orderBy: { created_at: 'desc' } }),
+      prisma.championship_awards.findMany({ where: mine, select: championshipAwardSelect, orderBy: { created_at: 'desc' } }),
+    ]);
+    return [...matchRows.map((a) => mapAward(a, myTeamIds)), ...eventRows.map(mapChampionshipAward)]
+      .sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime());
+  }
 
   // Shoot-outs for a list of lean rows. Only a level score with a winner can be one, so
   // the (large) live_state is read for those few rows, not the whole career.
@@ -547,12 +593,7 @@ export function makeMeRouter(prisma: Prisma): Router {
     const recent_matches = recentRows.map((f) => summariseLean(f, teamIds, recentPens));
 
     // Achievements - awards this user has received, newest first, with match context.
-    const awardRows = await prisma.fixture_awards.findMany({
-      where: { recipient_user_id: req.user!.id },
-      select: awardSelect,
-      orderBy: { created_at: 'desc' },
-    });
-    const achievements = awardRows.map((a) => mapAward(a, teamIds));
+    const achievements = await loadMyAwards(req.user!.id, teamIds);
 
     res.json({
       stats: { total_events: eventMap.size, total_matches: fixtures.length, wins, losses, draws },
@@ -688,12 +729,7 @@ export function makeMeRouter(prisma: Prisma): Router {
       res.json({ achievements: [] });
       return;
     }
-    const awardRows = await prisma.fixture_awards.findMany({
-      where: { recipient_user_id: req.user!.id },
-      select: awardSelect,
-      orderBy: { created_at: 'desc' },
-    });
-    res.json({ achievements: awardRows.map((a) => mapAward(a, teamIds)) });
+    res.json({ achievements: await loadMyAwards(req.user!.id, teamIds) });
   }));
 
   // GET /me/matches - full match list, filterable by championship/status/organisation.

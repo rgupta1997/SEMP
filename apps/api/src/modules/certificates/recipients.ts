@@ -1,9 +1,12 @@
 import { ACHIEVEMENT_KIND, isFixtureScopedCategory, needsTeamFilter, RECIPIENT_CATEGORY, WINNER_ACHIEVEMENT_KINDS, type RecipientCategory } from '@semp/shared';
+import type { AwardLevel } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
+import { awardCandidates } from './award-recipients.js';
 
 // Recipients step (Games, Disciplines, Teams -> six categories).
 //
-// Winners and Special awards still come from locked achievements, exactly as before.
+// Winners still come from locked achievements. Special awards are read from the awards
+// themselves (award-recipients.ts) so they cover every level and team awards.
 // The other four are read straight from the roster/role tables that already exist for
 // other reasons - none of them needed new schema, only a new query:
 //   - Participation: everyone active on a roster-locked team entry, no win required.
@@ -29,6 +32,8 @@ export interface RecipientFilters {
   sportId?: string;
   tournamentDisciplineId?: string;
   teamId?: string;
+  /** Special awards only: match, tournament_sport, tournament or championship. */
+  awardLevel?: AwardLevel;
 }
 
 export interface Candidate {
@@ -41,6 +46,11 @@ export interface Candidate {
   sportName: string | null;
   achievementId?: string;
   lockVersion?: number | null;
+  /** Special awards: which award this certificate is for (the dedup key - rds-migrations/018). */
+  awardRef?: string;
+  /** Special awards: where it was won, and the team for a team award. */
+  scope?: string;
+  team?: string | null;
 }
 
 
@@ -62,7 +72,7 @@ async function lockedFixtureIds(prisma: Db, championshipId: string, filters: Rec
 }
 
 async function winnersAndAwards(
-  prisma: Db, championshipId: string, category: 'winners' | 'awards', filters: RecipientFilters, limit: number,
+  prisma: Db, championshipId: string, category: 'winners', filters: RecipientFilters, limit: number,
 ): Promise<Candidate[]> {
   const lockedIds = await lockedFixtureIds(prisma, championshipId, filters);
   if (!lockedIds.length) return [];
@@ -71,7 +81,7 @@ async function winnersAndAwards(
     where: {
       championship_id: championshipId,
       superseded_at: null, user_id: { not: null },
-      kind: { in: category === 'awards' ? ['award'] : [...WINNER_ACHIEVEMENT_KINDS] },
+      kind: { in: [...WINNER_ACHIEVEMENT_KINDS] },
       fixture_id: { in: lockedIds },
       ...(filters.teamId ? { team_id: filters.teamId } : {}),
     },
@@ -220,7 +230,8 @@ export async function candidatesFor(
 ): Promise<Candidate[]> {
   switch (category) {
     case 'winners': return winnersAndAwards(prisma, championshipId, 'winners', filters, limit);
-    case 'awards': return winnersAndAwards(prisma, championshipId, 'awards', filters, limit);
+    // Read from the awards themselves - every level, team awards expanded to members.
+    case 'awards': return awardCandidates(prisma, championshipId, { ...filters, level: filters.awardLevel }, limit);
     case 'participation': return participation(prisma, championshipId, filters, limit);
     case 'coaches': return coaches(prisma, championshipId, filters, limit);
     // Event-wide by construction - filters have nothing to match against for these two.
@@ -232,7 +243,8 @@ export async function candidatesFor(
 
 /** A candidate's dedup key, matching whichever partial unique index applies to its
  *  category (fixture-scoped for winners/awards, championship-scoped otherwise). */
-export const candidateKey = (c: Pick<Candidate, 'userId' | 'fixtureId'>) => `${c.userId}:${c.fixtureId ?? ''}`;
+export const candidateKey = (c: Pick<Candidate, 'userId' | 'fixtureId' | 'awardRef'>) =>
+  c.awardRef ? `${c.userId}:award:${c.awardRef}` : `${c.userId}:${c.fixtureId ?? ''}`;
 
 /** Who, in this category, already holds a live certificate for this run's scope -
  *  so the Review step can default them to excluded rather than let the generate
@@ -242,7 +254,7 @@ export async function alreadyIssued(
 ): Promise<Set<string>> {
   const rows = await prisma.certificates.findMany({
     where: { organization_id: organizationId, championship_id: championshipId, recipient_category: category, revoked_at: null, superseded_at: null },
-    select: { user_id: true, fixture_id: true },
+    select: { user_id: true, fixture_id: true, award_ref: true },
   });
-  return new Set(rows.map((r) => `${r.user_id}:${r.fixture_id ?? ''}`));
+  return new Set(rows.map((r) => candidateKey({ userId: r.user_id!, fixtureId: r.fixture_id, awardRef: r.award_ref ?? undefined })));
 }

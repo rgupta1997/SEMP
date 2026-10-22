@@ -83,8 +83,9 @@ export async function provisionalEntriesFor(db: Db, userId: string, limit = 200)
   // One query for every award across every fixture - the alternative is one per
   // fixture, and a season is a lot of fixtures.
   const awardRows = await db.fixture_awards.findMany({
-    where: { fixture_id: { in: fixtures.map((f) => f.id) }, recipient_user_id: userId },
-    select: { fixture_id: true, recipient_user_id: true, award_name: true, award_type_id: true },
+    // Theirs, or their team's.
+    where: { fixture_id: { in: fixtures.map((f) => f.id) }, OR: [{ recipient_user_id: userId }, { recipient_team_id: { in: teamIds } }] },
+    select: { fixture_id: true, recipient_user_id: true, recipient_team_id: true, award_name: true, award_type_id: true },
   });
   const awards = await toDerivableAwards(db, awardRows);
   const awardsByFixture = new Map<string, typeof awards>();

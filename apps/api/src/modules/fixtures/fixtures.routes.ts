@@ -11,7 +11,9 @@ import { makeCrudRouter } from '../../http/crud.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
-import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
+import { BusinessRuleError, NotFoundError, ValidationError } from '../../shared/errors.js';
+import { allowedAwardTypes } from '../awards/award-types.service.js';
+import { resolveMatchAwards, type MatchAwardInput } from '../awards/match-awards.service.js';
 import { generateFixtures, type TeamRef } from './domain/generators/index.js';
 import { generateAllStages } from './domain/stage-orchestrator.js';
 import { resolveStageAdvancement } from './domain/stage-resolver.js';
@@ -22,7 +24,7 @@ import { Rules } from '@semp/notifications/core/rules.js';
 import { matchAudience, notifyMatch } from './match-audience.js';
 import { newlyAwarded, notifyNewAwards, notifyOfficialAssignment, type AwardInput } from './fixtures.notifications.js';
 import { advanceWinner, propagateByes } from './bracket.js';
-import { ROLE_CODES, roleWhereByCode, formatIdsForDraw } from '@semp/shared';
+import { AWARD_LEVEL, ROLE_CODES, roleWhereByCode, formatIdsForDraw, type AwardLevel } from '@semp/shared';
 import {
   assertNotLocked, lockScorecard, lockScorecardsBulk, lockStatusForChampionship,
   retractScorecard, submitScorecard, unlockScorecard,
@@ -641,37 +643,47 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   }));
 
   // ---- Awards (player-of-the-match etc.) ----
-  // Free-text award name + a recipient who plays for one of the two teams. Read +
+  const awardInclude = {
+    users: { select: { name: true } },
+    teams: { select: { name: true } },
+    award_types: { select: { code: true, recipient_kind: true } },
+  } as const;
+  // Catalogue award types + a recipient: a player on either roster, or one of the two teams. Read +
   // replace-all write, both authorized like scoring. These surface as the
   // recipient's "achievements" on their participant dashboard.
   const awardView = (a: {
     id: string; award_name: string; award_type_id?: string | null;
-    recipient_user_id: string; users?: { name: string } | null;
+    recipient_user_id: string | null; recipient_team_id?: string | null;
+    users?: { name: string } | null; teams?: { name: string } | null;
+    award_types?: { code: string; recipient_kind: string } | null;
   }) => ({
     id: a.id,
     award_name: a.award_name,
     award_type_id: a.award_type_id ?? null,
+    award_type_code: a.award_types?.code ?? null,
+    recipient_kind: (a.award_types?.recipient_kind ?? (a.recipient_team_id ? 'team' : 'player')) as 'player' | 'team',
     recipient_user_id: a.recipient_user_id,
-    recipient_name: a.users?.name ?? null,
+    recipient_team_id: a.recipient_team_id ?? null,
+    recipient_name: a.users?.name ?? a.teams?.name ?? null,
   });
 
-  // The catalogue an official picks from (J4-E4-S2). Sport-agnostic entries plus
-  // anything registered for this sport; free text stays available as a fallback,
-  // so this list narrows the common case rather than gating it.
+  // The catalogue an official or organiser picks from: active types offered for this
+  // sport (all-sports or mapped) at this level, plus the event's own extras.
   router.get('/award-types', asyncHandler(async (req, res) => {
-    const sportId = typeof req.query.sport_id === 'string' ? req.query.sport_id : null;
-    const rows = await prisma.award_types.findMany({
-      where: { is_active: true, ...(sportId ? { OR: [{ sport_id: null }, { sport_id: sportId }] } : { sport_id: null }) },
-      select: { id: true, code: true, label: true, sport_id: true },
-      orderBy: [{ sort_order: 'asc' }, { label: 'asc' }],
-    });
-    res.json(rows);
+    const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
+    const level = str(req.query.level);
+    if (level && !(AWARD_LEVEL as readonly string[]).includes(level)) throw new ValidationError('Unknown award level');
+    res.json(await allowedAwardTypes(prisma, {
+      sportId: str(req.query.sport_id),
+      level: (level as AwardLevel | null) ?? undefined,
+      championshipId: str(req.query.championship_id),
+    }));
   }));
 
   router.get('/fixtures/:id/awards', guards.fixtureScorer, asyncHandler(async (req, res) => {
     const rows = await prisma.fixture_awards.findMany({
       where: { fixture_id: req.params.id },
-      include: { users: { select: { name: true } } },
+      include: awardInclude,
       orderBy: { created_at: 'asc' },
     });
     res.json(rows.map(awardView));
@@ -686,9 +698,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     // against a championship still in draft (J2-E5-S1).
     await assertChampionshipStarted(prisma, req.params.id);
     const fixtureId = req.params.id;
-    const fixture = await prisma.fixtures.findUnique({ where: { id: fixtureId } });
-    if (!fixture) throw new NotFoundError('Fixture');
-    const awards = req.body.awards as AwardInput[];
+    // Type offered for this sport at match level, right kind of recipient, and the
+    // recipient is in this match. The award name is the type's label, not typed.
+    const awards: AwardInput[] = await resolveMatchAwards(prisma, fixtureId, req.body.awards as MatchAwardInput[]);
 
     // Must be captured before the replace-all below - a re-save of an unchanged
     // award must not re-notify its recipient.
@@ -703,14 +715,15 @@ export function makeFixturesRouter(prisma: Prisma): Router {
             fixture_id: fixtureId,
             award_name: a.award_name,
             award_type_id: a.award_type_id ?? null,
-            recipient_user_id: a.recipient_user_id,
+            recipient_user_id: a.recipient_user_id ?? null,
+            recipient_team_id: a.recipient_team_id ?? null,
           })),
         })]
         : []),
     ]);
     const rows = await prisma.fixture_awards.findMany({
       where: { fixture_id: fixtureId },
-      include: { users: { select: { name: true } } },
+      include: awardInclude,
       orderBy: { created_at: 'asc' },
     });
 
