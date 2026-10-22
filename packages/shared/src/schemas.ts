@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   AUTH_METHOD, PUBLIC_EMAIL_DOMAINS,
   DEMO_REQUEST_STATUS, FEEDBACK_STATUS, ENTRY_TYPE, ENROLLMENT_STATUS, CHAMPIONSHIP_STATUS, CHAMPIONSHIP_VISIBILITY, FIXTURE_STATUS, GROUND_TYPE,
+  AWARD_LEVEL, AWARD_RECIPIENT_KIND,
   CHAMPIONSHIP_TYPE, NOTIFICATION_AUDIENCE, NOTIFICATION_REACTIONS, ORGANIZATION_MEMBER_ROLE,
   STANDINGS_RULE_SCOPE, STANDINGS_TIEBREAKER, TEAM_MEMBER_ROLE,
   TEAM_STATUS, TOURNAMENT_DISCIPLINE_STATUS, TOURNAMENT_STATUS,
@@ -807,21 +808,61 @@ export const fixturePointsSchema = z.object({
   away_points: z.number().int().min(0).nullable().optional(),
 });
 
-// Per-match awards entered by the scorer: an award name + a recipient who is a
-// player on one of the two competing teams. Saved with replace-all semantics.
-//
-// `award_type_id` points at the catalogue, and is what makes "MVP awards" a
-// countable number rather than three spellings of one thing (J4-E4-S2).
-// `award_name` stays required and free: an official who needs an award the
-// catalogue does not have must not be blocked mid-match, and the free text they
-// type is preserved untyped rather than guessed at.
+// Per-match awards entered by the scorer: an award type from the catalogue (offered
+// for this sport at match level) + a recipient, which is a player on one of the two
+// teams or one of the two teams, as the type says. Saved with replace-all semantics.
+// The award name is not sent - the server snapshots the type's label, so the same
+// award can't be spelt three ways.
 export const fixtureAwardSchema = z.object({
-  award_name: z.string().min(1).max(120),
-  award_type_id: uuid.nullable().optional(),
-  recipient_user_id: uuid,
+  award_type_id: uuid,
+  recipient_user_id: uuid.nullable().optional(),
+  recipient_team_id: uuid.nullable().optional(),
+}).refine((a) => !!a.recipient_user_id !== !!a.recipient_team_id, {
+  message: 'Give the award to a player or a team, not both',
 });
 export const fixtureAwardsSchema = z.object({
   awards: z.array(fixtureAwardSchema).max(50).default([]),
+});
+
+// Awards above match level: one sport within a tournament, a whole tournament, or
+// the whole championship. Saved per scope with replace-all semantics, like match awards.
+export const championshipAwardScopeSchema = z.object({
+  level: z.enum(['tournament_sport', 'tournament', 'championship']),
+  tournament_id: uuid.nullable().optional(),
+  tournament_sport_id: uuid.nullable().optional(),
+});
+export const championshipAwardSchema = z.object({
+  award_type_id: uuid,
+  recipient_user_id: uuid.nullable().optional(),
+  recipient_team_id: uuid.nullable().optional(),
+  notes: z.string().trim().max(500).nullable().optional(),
+}).refine((a) => !!a.recipient_user_id !== !!a.recipient_team_id, {
+  message: 'Give the award to a player or a team, not both',
+});
+export const championshipAwardsSchema = championshipAwardScopeSchema.extend({
+  awards: z.array(championshipAwardSchema).max(100).default([]),
+});
+
+// ---------- Award types (catalogue) ----------
+// Global types are managed by the super admin; an organiser can add extras that
+// exist only in their own championship. `code` is the stable key reports group on.
+export const awardTypeSchema = z.object({
+  code: z.string().trim().min(2).max(60).regex(/^[a-z0-9_]+$/, 'Use lowercase letters, digits and _'),
+  label: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(500).nullable().optional(),
+  levels: z.array(z.enum(AWARD_LEVEL)).min(1),
+  recipient_kind: z.enum(AWARD_RECIPIENT_KIND).default('player'),
+  is_active: z.boolean().default(true),
+  sort_order: z.number().int().min(0).max(10000).default(100),
+  /** true = offered for every sport, including sports added later. */
+  all_sports: z.boolean().default(false),
+  /** Ignored when all_sports is true. */
+  sport_ids: z.array(uuid).max(200).default([]),
+});
+export const updateAwardTypeSchema = awardTypeSchema.partial().omit({ code: true });
+export const awardTypeSportsSchema = z.object({
+  all_sports: z.boolean(),
+  sport_ids: z.array(uuid).max(200).default([]),
 });
 
 // ---------- Notifications ----------
