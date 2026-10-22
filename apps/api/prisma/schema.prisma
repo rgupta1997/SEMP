@@ -113,6 +113,9 @@ model championships {
   user_championship_roles    user_championship_roles[]
   venues                     venues[]
 
+  award_types         award_types[]
+  championship_awards championship_awards[]
+
   @@index([entry_level], map: "idx_championships_entry_level")
 }
 
@@ -332,6 +335,7 @@ model sports {
   scoring_formats    scoring_formats[]
   teams              teams[]
   tournament_sports  tournament_sports[]
+  award_type_sports  award_type_sports[]
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -380,6 +384,9 @@ model teams {
   organizations                                          organizations        @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "teams_institution_id_fkey")
   org_units                                              org_units?           @relation(fields: [org_unit_id], references: [id], onUpdate: NoAction)
   sports                                                 sports               @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  fixture_awards      fixture_awards[]
+  championship_awards championship_awards[]
 
   @@index([organization_id], map: "idx_teams_institution_id")
   @@index([sport_id], map: "idx_teams_sport_id")
@@ -466,6 +473,8 @@ model tournament_sports {
   sports                 sports                   @relation(fields: [sport_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   tournaments            tournaments              @relation(fields: [tournament_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  championship_awards championship_awards[]
+
   @@unique([tournament_id, sport_id])
   @@index([format_id], map: "idx_tournament_sports_format_id")
   @@index([sport_id], map: "idx_tournament_sports_sport_id")
@@ -483,6 +492,8 @@ model tournaments {
   updated_at        DateTime            @default(now()) @db.Timestamptz(6)
   tournament_sports tournament_sports[]
   championships     championships       @relation(fields: [championship_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "tournaments_event_id_fkey")
+
+  championship_awards championship_awards[]
 
   @@index([championship_id], map: "idx_tournaments_event_id")
 }
@@ -600,6 +611,10 @@ model users {
   user_org_roles_user_org_roles_assigned_byTousers                         user_org_roles[]             @relation("user_org_roles_assigned_byTousers")
   user_org_roles_user_org_roles_user_idTousers                             user_org_roles[]             @relation("user_org_roles_user_idTousers")
   organizations                                                            organizations?               @relation(fields: [organization_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "users_institution_id_fkey")
+
+  award_types_created          award_types[]         @relation("award_types_created_by")
+  championship_awards_received championship_awards[] @relation("championship_awards_recipient")
+  championship_awards_given    championship_awards[] @relation("championship_awards_awarded_by")
 
   @@index([organization_id], map: "idx_users_organization_id")
   @@index([organization_id, account_type], map: "idx_users_institution_account_type")
@@ -778,16 +793,19 @@ model user_invitations {
   @@index([target_type, target_id], map: "idx_user_invitations_target")
 }
 
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model fixture_awards {
   id                String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   fixture_id        String       @db.Uuid
-  recipient_user_id String       @db.Uuid
+  recipient_user_id String?      @db.Uuid
   award_name        String       @db.VarChar(120)
   created_at        DateTime     @default(now()) @db.Timestamptz(6)
   award_type_id     String?      @db.Uuid
+  recipient_team_id String?      @db.Uuid
   award_types       award_types? @relation(fields: [award_type_id], references: [id], onUpdate: NoAction)
   fixtures          fixtures     @relation(fields: [fixture_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users             users        @relation(fields: [recipient_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users             users?       @relation(fields: [recipient_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  teams             teams?       @relation(fields: [recipient_team_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([fixture_id], map: "idx_fixture_awards_fixture")
   @@index([recipient_user_id], map: "idx_fixture_awards_recipient")
@@ -1035,19 +1053,71 @@ model auth_tokens {
   @@index([expires_at], map: "idx_auth_tokens_expires")
 }
 
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model award_types {
-  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  code           String           @unique
-  label          String
-  sport_id       String?          @db.Uuid
-  is_active      Boolean          @default(true)
-  sort_order     Int              @default(100)
-  created_at     DateTime         @default(now()) @db.Timestamptz(6)
-  sports         sports?          @relation(fields: [sport_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  fixture_awards fixture_awards[]
+  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                String
+  label               String
+  /// Deprecated - use award_type_sports. Kept until a later migration drops it.
+  sport_id            String?               @db.Uuid
+  is_active           Boolean               @default(true)
+  sort_order          Int                   @default(100)
+  created_at          DateTime              @default(now()) @db.Timestamptz(6)
+  levels              String[]              @default(["match"])
+  recipient_kind      String                @default("player")
+  all_sports          Boolean               @default(false)
+  championship_id     String?               @db.Uuid
+  description         String?
+  created_by          String?               @db.Uuid
+  updated_at          DateTime              @default(now()) @db.Timestamptz(6)
+  sports              sports?               @relation(fields: [sport_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  championships       championships?        @relation(fields: [championship_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  creator             users?                @relation("award_types_created_by", fields: [created_by], references: [id], onUpdate: NoAction)
+  fixture_awards      fixture_awards[]
+  award_type_sports   award_type_sports[]
+  championship_awards championship_awards[]
 
   @@index([sport_id, sort_order], map: "idx_award_types_sport")
+}
+
+model award_type_sports {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  award_type_id String      @db.Uuid
+  sport_id      String      @db.Uuid
+  sort_order    Int         @default(100)
+  created_at    DateTime    @default(now()) @db.Timestamptz(6)
+  award_types   award_types @relation(fields: [award_type_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sports        sports      @relation(fields: [sport_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([award_type_id, sport_id], map: "uq_award_type_sports")
+  @@index([sport_id, sort_order], map: "idx_award_type_sports_sport")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model championship_awards {
+  id                  String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  award_type_id       String             @db.Uuid
+  level               String
+  championship_id     String             @db.Uuid
+  tournament_id       String?            @db.Uuid
+  tournament_sport_id String?            @db.Uuid
+  award_name          String             @db.VarChar(120)
+  recipient_user_id   String?            @db.Uuid
+  recipient_team_id   String?            @db.Uuid
+  notes               String?
+  awarded_by          String?            @db.Uuid
+  created_at          DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime           @default(now()) @db.Timestamptz(6)
+  award_types         award_types        @relation(fields: [award_type_id], references: [id], onUpdate: NoAction)
+  championships       championships      @relation(fields: [championship_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tournaments         tournaments?       @relation(fields: [tournament_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tournament_sports   tournament_sports? @relation(fields: [tournament_sport_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  recipient           users?             @relation("championship_awards_recipient", fields: [recipient_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  awarder             users?             @relation("championship_awards_awarded_by", fields: [awarded_by], references: [id], onUpdate: NoAction)
+  teams               teams?             @relation(fields: [recipient_team_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([championship_id, level], map: "idx_championship_awards_championship")
+  @@index([award_type_id], map: "idx_championship_awards_type")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -1153,6 +1223,8 @@ model certificates {
   lock_version                         Int?
   superseded_at                        DateTime?                   @db.Timestamptz(6)
   recipient_category                   String                      @default("winners") @db.VarChar(24)
+  /// Which award a Special awards certificate is for (see rds-migrations/018). Null for every other category.
+  award_ref                            String?                     @db.VarChar(160)
   certificate_verifications            certificate_verifications[]
   championships                        championships?              @relation(fields: [championship_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   fixtures                             fixtures?                   @relation(fields: [fixture_id], references: [id], onDelete: NoAction, onUpdate: NoAction)

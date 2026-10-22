@@ -247,6 +247,9 @@ export function makePublicRouter(prisma: Prisma): Router {
         event: cert.championships?.name ?? facts?.championship_name ?? null,
         sport: facts?.sport ?? null,
         title: facts?.title ?? null,
+        // Award certificates only: where it was won, and the team for a team award.
+        scope: facts?.scope ?? null,
+        team: facts?.team ?? null,
         issued_on: cert.issued_at,
         issued_by: cert.organizations?.name ?? null,
         issuer_verified: cert.organizations?.verified ?? false,

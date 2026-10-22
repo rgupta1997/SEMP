@@ -273,6 +273,8 @@ async function seed() {
 
   const fixtures: any[] = [];
   const awards: any[] = [];
+  // A match award is a catalogue type, not free text (award system, rds-migrations/017).
+  const potmTypeId = (await prisma.award_types.findFirst({ where: { code: 'player_of_the_match', championship_id: null }, select: { id: true } }))?.id ?? null;
   const base = (tdId: string, extra: any) => ({ id: randomUUID(), tournament_discipline_id: tdId, official_id: nextOfficial(), venue_ground_id: nextGround(), scheduled_at: slotAt(), ...extra });
 
   teamDraws.forEach((d, di) => {
@@ -321,7 +323,7 @@ async function seed() {
     // Player-of-the-match award on a completed final (showcase)
     if (pattern === 0) {
       const champMember = memberData.find((m) => m.team_id === sfWinners[0]);
-      if (champMember) awards.push({ id: randomUUID(), fixture_id: finalId, recipient_user_id: champMember.user_id, award_name: 'Player of the Tournament' });
+      if (champMember) awards.push({ id: randomUUID(), fixture_id: finalId, recipient_user_id: champMember.user_id, award_name: 'Player of the Match', award_type_id: potmTypeId });
     }
   });
 

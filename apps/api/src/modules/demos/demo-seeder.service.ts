@@ -14,6 +14,8 @@ import {
 } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { recomputeStandingsAtomic } from '../standings/standings.service.js';
+import { catalogAwardTypeIds } from '../awards/award-types.service.js';
+import { syncScopeAchievements } from '../awards/award-achievements.service.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { ownerMembership } from '../iam/member-removal.service.js';
 import { makeNamePool, type NamePool } from './demo-names.js';
@@ -185,7 +187,7 @@ async function seedChampionship(prisma: Prisma, ctx: ChampCtx): Promise<void> {
   const drawStatus = pattern === 'completed' ? 'completed' : pattern === 'fresh' ? 'upcoming' : 'ongoing';
   const tsData: any[] = [];
   const tdData: any[] = [];
-  const draws: { sport: string; structure: ReturnType<typeof drawStructureFor>; tdId: string }[] = [];
+  const draws: { sport: string; structure: ReturnType<typeof drawStructureFor>; tdId: string; tsId: string; sportId: string }[] = [];
   sports.forEach((sport, i) => {
     const tsId = randomUUID();
     tsData.push({ id: tsId, tournament_id: tournamentId, sport_id: ctx.sportId.get(sport.toLowerCase()), format_id: ctx.knockoutId, display_order: i });
@@ -196,7 +198,7 @@ async function seedChampionship(prisma: Prisma, ctx: ChampCtx): Promise<void> {
       id: tdId, tournament_sport_id: tsId, discipline_id: null, format_id: ctx.knockoutId,
       venue_id: venueId, status: drawStatus, display_order: i, format_config: scoring ? { scoring } : {},
     });
-    draws.push({ sport, structure, tdId });
+    draws.push({ sport, structure, tdId, tsId, sportId: ctx.sportId.get(sport.toLowerCase())! });
   });
   await prisma.tournament_sports.createMany({ data: tsData });
   track('tournament_sports', tsData.map((t) => t.id));
@@ -297,6 +299,10 @@ async function seedChampionship(prisma: Prisma, ctx: ChampCtx): Promise<void> {
 
   const fixtures: any[] = [];
   const awards: any[] = [];
+  // Sport-level awards (Player of the Tournament), given by the organiser rather
+  // than on a match.
+  const eventAwards: any[] = [];
+  const awardType = await catalogAwardTypeIds(prisma, ['player_of_the_match', 'player_of_the_tournament']);
   const base = (tdId: string, extra: any) => ({
     id: randomUUID(), tournament_discipline_id: tdId, official_id: nextOfficial(),
     venue_ground_id: nextGround(), scheduled_at: slotAt(), ...extra,
@@ -358,7 +364,20 @@ async function seedChampionship(prisma: Prisma, ctx: ChampCtx): Promise<void> {
 
     if (finalDecided) {
       const champMember = memberData.find((m) => m.team_id === sfWinners[0] && m.role === 'captain');
-      if (champMember) awards.push({ id: randomUUID(), fixture_id: finalId, recipient_user_id: champMember.user_id, award_name: 'Player of the Tournament' });
+      if (champMember) {
+        awards.push({
+          id: randomUUID(), fixture_id: finalId, recipient_user_id: champMember.user_id,
+          award_name: 'Player of the Match', award_type_id: awardType.get('player_of_the_match') ?? null,
+        });
+        const potTypeId = awardType.get('player_of_the_tournament');
+        if (potTypeId) {
+          eventAwards.push({
+            id: randomUUID(), award_type_id: potTypeId, award_name: 'Player of the Tournament', level: 'tournament_sport',
+            championship_id: champId, tournament_id: tournamentId, tournament_sport_id: d.tsId,
+            recipient_user_id: champMember.user_id, awarded_by: ctx.organiserId,
+          });
+        }
+      }
     }
   });
 
@@ -395,6 +414,18 @@ async function seedChampionship(prisma: Prisma, ctx: ChampCtx): Promise<void> {
   if (awards.length) {
     await prisma.fixture_awards.createMany({ data: awards });
     track('fixture_awards', awards.map((a) => a.id));
+  }
+  if (eventAwards.length) {
+    await prisma.championship_awards.createMany({ data: eventAwards });
+    track('championship_awards', eventAwards.map((a) => a.id));
+    // The honours list and career stats see them as they would an organiser's save.
+    for (const a of eventAwards) {
+      const d = draws.find((x) => x.tsId === a.tournament_sport_id)!;
+      await syncScopeAchievements(prisma, {
+        level: 'tournament_sport', championshipId: champId, tournamentId, tournamentSportId: d.tsId,
+        sportIds: [d.sportId], where: 'this sport',
+      });
+    }
   }
   await flush();
 

@@ -202,6 +202,12 @@ export async function wipeSandbox(prisma: Prisma, sandbox: SandboxRow): Promise<
       ...(userList.length ? [{ target_user_id: { in: userList } }, { sender_id: { in: userList } }] : []),
     ] } });
   }
+  // Sport / tournament / event awards and the event's own award types (they would
+  // cascade with the championship; explicit, like everything else here).
+  if (champList.length) {
+    await prisma.championship_awards.deleteMany({ where: { championship_id: { in: champList } } });
+    await prisma.award_types.deleteMany({ where: { championship_id: { in: champList } } });
+  }
   if (tdIds.length) await prisma.tournament_disciplines.deleteMany({ where: { id: { in: tdIds } } });
   if (tsIds.length) await prisma.tournament_sports.deleteMany({ where: { id: { in: tsIds } } });
   if (venueIds.length) {

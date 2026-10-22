@@ -12,7 +12,7 @@ function callsOfType(type: string) {
 }
 
 describe('newlyAwarded', () => {
-  function fakePrisma(existing: Array<{ recipient_user_id: string; award_name: string; award_type_id: string | null }>) {
+  function fakePrisma(existing: Array<{ recipient_user_id: string | null; recipient_team_id?: string | null; award_name: string; award_type_id: string | null }>) {
     return { fixture_awards: { findMany: async () => existing } } as any;
   }
 
@@ -79,6 +79,17 @@ describe('notifyNewAwards', () => {
 
     expect(callsOfType('player_of_the_match')).toHaveLength(0);
     expect(callsOfType('tournament_award')).toHaveLength(2);
+  });
+
+  it('a team award tells every active member of that team', async () => {
+    const prisma = {
+      ...fakePrisma({ awardTypeCode: 'fair_play' }),
+      team_members: {
+        findMany: async () => [{ team_id: 't1', user_id: 'u1' }, { team_id: 't1', user_id: 'u2' }, { team_id: 't2', user_id: 'u9' }],
+      },
+    } as any;
+    await notifyNewAwards(prisma, 'fx1', [{ award_name: 'Fair Play', award_type_id: 'type1', recipient_team_id: 't1' }], 'actor1');
+    expect(callsOfType('tournament_award').map((s: any) => s.userId)).toEqual(['u1', 'u2']);
   });
 
   // The exact regression this test guards: one recipient's notify() throwing must
