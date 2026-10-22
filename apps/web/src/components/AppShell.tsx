@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   BadgeCheck, Compass, FileSpreadsheet, Flag, FlaskConical, Landmark, Layers, LayoutGrid, LayoutList, Lock,
-  Mail, Medal, Menu, MessageSquare, Moon, Plus, Sun, Trophy, Upload, User, Users, X, CreditCard,
+  Award, Mail, Medal, Menu, MessageSquare, Moon, Plus, Sun, Trophy, Upload, User, Users, X, CreditCard,
   Zap,
 } from 'lucide-react';
 import { ROLE_LABELS, useAuth, type AppRole } from '../lib/auth';
@@ -46,6 +46,7 @@ function navFor(role: AppRole): NavGroup[] {
         { to: '/platform/sports', label: 'Sports', icon: <Medal size={16} /> },
         { to: '/platform/disciplines', label: 'Disciplines', icon: <Layers size={16} /> },
         { to: '/platform/tournament-formats', label: 'Formats', icon: <LayoutList size={16} /> },
+        { to: '/platform/award-types', label: 'Award Types', icon: <Award size={16} /> },
         { to: '/platform/organizations', label: 'Organizations', icon: <Landmark size={16} /> },
         // Beside Organizations rather than under Platform: the queue is about an
         // organisation's identity, and the reviewer moves between the two.

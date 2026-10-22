@@ -19,6 +19,7 @@ import { ResultsPage } from './pages/organiser/ResultsPage';
 import { StandingsPage } from './pages/organiser/StandingsPage';
 import { EventSettingsPage } from './pages/organiser/EventSettingsPage';
 import { EventCommunicationsPage } from './pages/organiser/EventCommunicationsPage';
+import { EventAwardsPage } from './pages/organiser/EventAwardsPage';
 import { EventCertificatesPage } from './pages/organiser/EventCertificatesPage';
 import { EventParticipantsPage } from './pages/organiser/EventParticipantsPage';
 import { EventOrganisersPage } from './pages/organiser/EventOrganisersPage';
@@ -76,6 +77,7 @@ import { PlatformPlansPage } from './pages/platform/PlatformPlansPage';
 import { PlatformVerificationRequestsPage } from './pages/platform/PlatformVerificationRequestsPage';
 import { PlatformDemosPage } from './pages/platform/PlatformDemosPage';
 import { ChampionshipMatrixImportPage } from './pages/platform/ChampionshipMatrixImportPage';
+import { AwardTypesPage } from './pages/platform/AwardTypesPage';
 import { EventSetupListPage } from './pages/platform/EventSetupListPage';
 import { EventSetupDetailPage } from './pages/platform/EventSetupDetailPage';
 import { PublicChampionshipPage } from './pages/public/PublicChampionshipPage';
@@ -142,6 +144,7 @@ function AuthenticatedRoutes() {
           <Route path="results" element={<ResultsPage />} />
           <Route path="standings" element={<StandingsPage />} />
           <Route path="communications" element={<EventCommunicationsPage />} />
+          <Route path="awards" element={<EventAwardsPage />} />
           <Route path="certificates" element={<EventCertificatesPage />} />
           <Route path="settings" element={<EventSettingsPage />} />
         </Route>
@@ -161,6 +164,7 @@ function AuthenticatedRoutes() {
         <Route path="/platform/organizations" element={<RequireRole roles={SYSTEM}><PlatformInstitutionsPage /></RequireRole>} />
         <Route path="/platform/import-setup" element={<RequireRole roles={SYSTEM}><ChampionshipMatrixImportPage /></RequireRole>} />
         <Route path="/platform/event-setup" element={<RequireRole roles={SYSTEM}><EventSetupListPage /></RequireRole>} />
+        <Route path="/platform/award-types" element={<RequireRole roles={SYSTEM}><AwardTypesPage /></RequireRole>} />
         <Route path="/platform/event-setup/:id" element={<RequireRole roles={SYSTEM}><EventSetupDetailPage /></RequireRole>} />
         <Route path="/platform/:key" element={<RequireRole roles={SYSTEM}><PlatformResource /></RequireRole>} />
 

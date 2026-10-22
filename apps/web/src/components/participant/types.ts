@@ -54,6 +54,10 @@ export interface Achievement {
   round: string | null;
   result: MatchResult;
   fixture_id: string | null;
+  /** Where it was given: a match, a sport in a tournament, a tournament, or the event. */
+  level?: 'match' | 'tournament_sport' | 'tournament' | 'championship';
+  /** Given to their team rather than to them by name. */
+  team_award?: boolean;
 }
 
 // One occurrence inside a grouped award (shown in the dashboard hover + details page).
@@ -66,6 +70,8 @@ export interface AchievementInstance {
   opponent_team_name: string | null;
   date: string | null;
   fixture_id: string | null;
+  /** Set for a team award: the team it was given to. */
+  team?: string | null;
 }
 
 // Achievements collapsed by award name for the dashboard, so e.g. seven "Player of
