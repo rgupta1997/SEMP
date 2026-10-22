@@ -26,6 +26,7 @@ interface Result {
   certificate?: {
     serial: string; recipient: string; event: string | null; sport: string | null;
     title: string | null; issued_on: string; issued_by: string | null; issuer_verified: boolean;
+    scope?: string | null; team?: string | null;
   };
 }
 
@@ -166,6 +167,8 @@ export function VerifyCertificatePage({ token }: { token?: string }) {
                 <Field label="Recipient" value={c.recipient} />
                 <Field label="Event" value={c.event ?? '—'} />
                 <Field label="Sport" value={c.sport ?? '—'} />
+                {c.scope && <Field label="Won at" value={c.scope} />}
+                {c.team && <Field label="Team" value={c.team} />}
                 <Field label="Issue date" value={new Date(c.issued_on).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })} />
                 <div className="col-span-2"><Field label="Issued by" value={c.issued_by ?? '—'} /></div>
               </dl>

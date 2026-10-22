@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import {
-  CERTIFICATE_ISSUE_TRIGGER_LABEL, DEFAULT_TEMPLATE_LABEL, isEventWideCategory, RECIPIENT_CATEGORY,
-  type CertificateIssueTrigger, type RecipientCategory,
+  AWARD_LEVEL, CERTIFICATE_ISSUE_TRIGGER_LABEL, DEFAULT_TEMPLATE_LABEL, isEventWideCategory, RECIPIENT_CATEGORY,
+  type AwardLevel, type CertificateIssueTrigger, type RecipientCategory,
 } from '@semp/shared';
 import { useApi, useApiMutation } from '../../../lib/hooks';
 import { api } from '../../../lib/api';
@@ -31,7 +31,7 @@ interface GenerateResult { issued: number; skipped: number; note?: string; resul
 
 const CATEGORY_META: Record<RecipientCategory, { label: string; desc: string; source: string; tone: BadgeTone }> = {
   winners: { label: 'Winners & medals', desc: 'Gold, silver and bronze per game and discipline', source: 'From locked results', tone: 'amber' },
-  awards: { label: 'Special awards', desc: 'Player of the match and the rest', source: 'From locked results', tone: 'brand' },
+  awards: { label: 'Special awards', desc: 'Match awards, plus sport, tournament and event awards - team awards certify every member', source: 'From locked matches and the Awards tab', tone: 'brand' },
   participation: { label: 'Participation', desc: 'Everyone on a locked roster who played - no win required', source: 'From confirmed roster', tone: 'slate' },
   organising: { label: 'Organising team & volunteers', desc: "Members added to this event's organising team", source: 'From the event organising team', tone: 'teal' },
   officials: { label: 'Officials & referees', desc: 'Umpires, referees and technical officials', source: 'From officials assigned to this event', tone: 'teal' },
@@ -52,7 +52,7 @@ const TRIGGER_OPTIONS: Array<{ value: Trigger; label: string }> = [
   { value: 'manual', label: CERTIFICATE_ISSUE_TRIGGER_LABEL.manual },
 ];
 
-interface Filters { sportId: string; tournamentDisciplineId: string; teamId: string }
+interface Filters { sportId: string; tournamentDisciplineId: string; teamId: string; awardLevel: '' | AwardLevel }
 
 /** One category's candidate pool, as the footer needs it. */
 interface CategoryCount { total: number; already: number }
@@ -61,7 +61,19 @@ const candidatesPath = (orgId: string, championshipId: string, category: Recipie
   `/organizations/${orgId}/certificates/candidates?championship_id=${championshipId}&category=${category}`
   + (!isEventWide(category) && filters.sportId ? `&sport_id=${filters.sportId}` : '')
   + (!isEventWide(category) && filters.tournamentDisciplineId ? `&tournament_discipline_id=${filters.tournamentDisciplineId}` : '')
-  + (!isEventWide(category) && filters.teamId ? `&team_id=${filters.teamId}` : '');
+  + (!isEventWide(category) && filters.teamId ? `&team_id=${filters.teamId}` : '')
+  + (category === 'awards' && filters.awardLevel ? `&award_level=${filters.awardLevel}` : '');
+
+/** One candidate as the Review step lists it. `key` is per certificate - one person
+ *  can be several rows (Player of the Match and Best Raider are two certificates). */
+interface CandidateRow {
+  key: string; user_id: string; name: string; title: string; sport: string | null;
+  scope: string | null; team: string | null; already_issued: boolean;
+}
+
+const AWARD_LEVEL_LABEL: Record<AwardLevel, string> = {
+  match: 'Match awards', tournament_sport: 'Sport awards', tournament: 'Tournament awards', championship: 'Event awards',
+};
 
 /* ----------------------------- Wizard chrome ----------------------------- */
 
@@ -188,6 +200,15 @@ function RecipientsStep({ orgId, championship, filters, setFilter, enabled, onTo
         <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
           Team only narrows Winners, Awards, Participation and Coaches — Organising team and Officials are event-wide.
         </p>
+        {enabled.awards && (
+          <label className="mt-3 grid max-w-xs gap-1 text-xs">
+            <span className="font-medium text-slate-600 dark:text-slate-400">Special awards</span>
+            <Select value={filters.awardLevel} data-qa="award-level-filter" onChange={(e) => setFilter({ awardLevel: e.target.value as Filters['awardLevel'] })}>
+              <option value="">All award levels</option>
+              {AWARD_LEVEL.map((l) => <option key={l} value={l}>{AWARD_LEVEL_LABEL[l]}</option>)}
+            </Select>
+          </label>
+        )}
       </div>
 
       <div>
@@ -307,10 +328,10 @@ function TemplatesStep({ orgId, enabledCategories, templates, hasDefault, missin
 function CategoryReview({ orgId, championshipId, category, filters, templateName, triggerLabel, excluded, onToggle, onSeed }: {
   orgId: string; championshipId: string; category: RecipientCategory; filters: Filters;
   templateName: string; triggerLabel: string;
-  excluded: Set<string>; onToggle: (userId: string, alreadyIssued: boolean) => void;
-  onSeed: (rows: Array<{ user_id: string; already_issued: boolean }>) => void;
+  excluded: Set<string>; onToggle: (key: string, alreadyIssued: boolean) => void;
+  onSeed: (rows: CandidateRow[]) => void;
 }) {
-  const { data, isLoading } = useApi<{ rows: Array<{ user_id: string; name: string; title: string; sport: string | null; already_issued: boolean }> }>(
+  const { data, isLoading } = useApi<{ rows: CandidateRow[] }>(
     candidatesPath(orgId, championshipId, category, filters),
   );
   const meta = CATEGORY_META[category];
@@ -319,7 +340,7 @@ function CategoryReview({ orgId, championshipId, category, filters, templateName
 
   if (isLoading) return <div className="flex items-center gap-2 py-3 text-sm text-slate-500"><Spinner /> Loading {meta.label.toLowerCase()}…</div>;
   if (!rows.length) return null;
-  const included = rows.filter((r) => !excluded.has(r.user_id)).length;
+  const included = rows.filter((r) => !excluded.has(r.key)).length;
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
@@ -331,12 +352,15 @@ function CategoryReview({ orgId, championshipId, category, filters, templateName
       </div>
       <div className="divide-y divide-slate-100 dark:divide-slate-800">
         {rows.map((r) => {
-          const isExcluded = excluded.has(r.user_id);
+          const isExcluded = excluded.has(r.key);
           return (
-            <label key={r.user_id} className={cn('flex items-center gap-3 px-3.5 py-2.5 text-sm', isExcluded && 'opacity-45')}>
-              <Checkbox checked={!isExcluded} onChange={() => onToggle(r.user_id, r.already_issued)} />
+            <label key={r.key} data-qa="review-row" className={cn('flex items-center gap-3 px-3.5 py-2.5 text-sm', isExcluded && 'opacity-45')}>
+              <Checkbox checked={!isExcluded} onChange={() => onToggle(r.key, r.already_issued)} />
               <span className="w-40 shrink-0 truncate font-semibold text-slate-800 dark:text-slate-200">{r.name}</span>
-              <span className="min-w-0 flex-1 truncate text-slate-600 dark:text-slate-400">{r.title}</span>
+              <span className="min-w-0 flex-1 truncate text-slate-600 dark:text-slate-400">
+                {r.title}
+                {r.scope && <span className="text-slate-400 dark:text-slate-500"> · {r.scope}{r.team ? ` · ${r.team}` : ''}</span>}
+              </span>
               <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">
                 {r.already_issued ? 'already certified' : r.sport ?? ''}
               </span>
@@ -355,7 +379,7 @@ function Wizard({ orgId, championship, templates, templatesLoading, onClose, inv
   onClose: () => void; invalidate: (string | null)[];
 }) {
   const [step, setStep] = useState(0);
-  const [filters, setFilters] = useState<Filters>({ sportId: '', tournamentDisciplineId: '', teamId: '' });
+  const [filters, setFilters] = useState<Filters>({ sportId: '', tournamentDisciplineId: '', teamId: '', awardLevel: '' });
   const [enabled, setEnabled] = useState<Record<RecipientCategory, boolean>>({
     winners: true, awards: true, participation: true, organising: false, officials: false, coaches: false,
   });
@@ -363,7 +387,7 @@ function Wizard({ orgId, championship, templates, templatesLoading, onClose, inv
   const [trigger, setTriggerState] = useState<Record<RecipientCategory, Trigger>>(
     Object.fromEntries(CATEGORIES.map((c) => [c, 'manual'])) as any,
   );
-  // category -> excluded user_ids, seeded the first time that category is reviewed
+  // category -> excluded candidate keys, seeded the first time that category is reviewed
   // (already-certified people start excluded, everyone else starts included).
   const [excluded, setExcluded] = useState<Record<string, Set<string>>>({});
   const [seeded, setSeeded] = useState<Set<string>>(new Set());
@@ -387,17 +411,17 @@ function Wizard({ orgId, championship, templates, templatesLoading, onClose, inv
 
   const excludedFor = (category: RecipientCategory) => excluded[category] ?? new Set<string>();
   const totalExcluded = enabledManualCategories.reduce((n, c) => n + excludedFor(c).size, 0);
-  const onToggleRecipient = (category: RecipientCategory, userId: string) => {
+  const onToggleRecipient = (category: RecipientCategory, key: string) => {
     setExcluded((cur) => {
       const set = new Set(cur[category] ?? new Set<string>());
-      if (set.has(userId)) set.delete(userId); else set.add(userId);
+      if (set.has(key)) set.delete(key); else set.add(key);
       return { ...cur, [category]: set };
     });
   };
-  const seedIfNeeded = (category: RecipientCategory, rows: Array<{ user_id: string; already_issued: boolean }>) => {
+  const seedIfNeeded = (category: RecipientCategory, rows: CandidateRow[]) => {
     if (seeded.has(category)) return;
     setSeeded((s) => new Set(s).add(category));
-    const already = rows.filter((r) => r.already_issued).map((r) => r.user_id);
+    const already = rows.filter((r) => r.already_issued).map((r) => r.key);
     if (already.length) setExcluded((cur) => ({ ...cur, [category]: new Set(already) }));
   };
 
@@ -415,8 +439,9 @@ function Wizard({ orgId, championship, templates, templatesLoading, onClose, inv
               ...(filters.sportId ? { sport_id: filters.sportId } : {}),
               ...(filters.tournamentDisciplineId ? { tournament_discipline_id: filters.tournamentDisciplineId } : {}),
               ...(filters.teamId ? { team_id: filters.teamId } : {}),
+              ...(category === 'awards' && filters.awardLevel ? { award_level: filters.awardLevel } : {}),
             },
-            excluded_user_ids: [...excludedFor(category)],
+            excluded_keys: [...excludedFor(category)],
           }) as GenerateResult;
           combined[category] = r;
         } catch (e: any) {
@@ -550,7 +575,7 @@ function Wizard({ orgId, championship, templates, templatesLoading, onClose, inv
                 templateName={templates.find((t) => t.id === templateId[c])?.name ?? DEFAULT_TEMPLATE_LABEL}
                 triggerLabel={TRIGGER_OPTIONS.find((o) => o.value === trigger[c])!.label}
                 excluded={excludedFor(c)}
-                onToggle={(userId) => onToggleRecipient(c, userId)}
+                onToggle={(key) => onToggleRecipient(c, key)}
                 onSeed={(rows) => {
                   seedIfNeeded(c, rows);
                   setCount(c, { total: rows.length, already: rows.filter((r) => r.already_issued).length });

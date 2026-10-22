@@ -45,6 +45,7 @@ export function ParticipantDashboard() {
         id: a.id, championship: a.championship?.name ?? null, tournament: a.tournament?.name ?? null,
         sport: a.sport, discipline: a.discipline, opponent_team_name: a.opponent_team_name,
         date: a.date, fixture_id: a.fixture_id,
+        team: a.team_award ? a.my_team_name : null,
       });
     }
     return [...map.values()].sort((a, b) => b.count - a.count || a.award_name.localeCompare(b.award_name));
