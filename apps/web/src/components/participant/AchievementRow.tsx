@@ -9,6 +9,7 @@ function instanceLine(it: AchievementInstance): string {
     it.tournament,
     [it.sport, it.discipline].filter(Boolean).join(' ') || null,
     it.opponent_team_name ? `vs ${it.opponent_team_name}` : null,
+    it.team ? `with ${it.team}` : null,
   ].filter(Boolean).join(' · ');
 }
 

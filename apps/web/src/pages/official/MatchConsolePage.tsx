@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
 import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Select, Spinner, StatusBadge, Textarea, BackButton, cn, confirmDialog, toast } from '../../components/ui';
-import { awayTeam, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, orgTitle, sportName as sportNameOf, teamLabel, teamShort, venueLabel } from './fixtureHelpers';
+import { awayTeam, championshipIdOf, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, orgTitle, sportIdOf, sportName as sportNameOf, teamLabel, teamShort, venueLabel } from './fixtureHelpers';
 import {
   cricketScore, headline, hydrate, oversStr, oversToBalls, reduce, sportDef, subLine,
   type Action, type LogEntry, type MatchState, type SportDef,
@@ -850,8 +850,14 @@ function ScorecardPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixt
 }
 
 /* ----------------------------- Awards ----------------------------- */
-type AwardItem = { award_name: string; recipient_user_id: string };
-type AwardRow = AwardItem & { id: string; recipient_name: string | null };
+type AwardItem = { award_type_id: string; recipient_user_id: string | null; recipient_team_id: string | null };
+type AwardRow = AwardItem & {
+  id: string; award_name: string; award_type_id: string | null; award_type_code: string | null;
+  recipient_kind: 'player' | 'team'; recipient_name: string | null;
+};
+type MatchAwardType = { id: string; code: string; label: string; recipient_kind: 'player' | 'team' };
+
+const POTM_CODE = 'player_of_the_match';
 
 function rosterPeople(team: any): { id: string; name: string; team: string }[] {
   return (team?.team_members ?? [])
@@ -859,59 +865,121 @@ function rosterPeople(team: any): { id: string; name: string; team: string }[] {
     .filter((p: { id?: string }) => !!p.id);
 }
 
-// Free-text awards with a recipient picked from the two teams' rosters. Replace-all
-// save; these surface as the recipient's achievements on their dashboard.
-function AwardsPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixtureId: string; invalidate: (string | null)[] }) {
+function matchSides(fixture: any) {
   const people = [...rosterPeople(homeTeam(fixture)), ...rosterPeople(awayTeam(fixture))];
+  const teams = [homeTeam(fixture), awayTeam(fixture)]
+    .filter((t: any) => !!t?.id)
+    .map((t: any) => ({ id: t.id as string, name: teamLabel(t) }));
+  return { people, teams };
+}
+
+/** The award types offered for this fixture's sport at match level (plus the event's own). */
+function useMatchAwardTypes(fixture: any) {
+  const sportId = sportIdOf(fixture);
+  const champId = championshipIdOf(fixture);
+  const qs = new URLSearchParams({ level: 'match', ...(sportId ? { sport_id: sportId } : {}), ...(champId ? { championship_id: champId } : {}) });
+  return useApi<MatchAwardType[]>(`/award-types?${qs}`);
+}
+
+/** What the server expects for one award, from a saved row. */
+const toInput = (a: AwardItem) => ({
+  award_type_id: a.award_type_id,
+  recipient_user_id: a.recipient_user_id || null,
+  recipient_team_id: a.recipient_team_id || null,
+});
+
+// Awards picked from the catalogue (the award types the super admin offers for this
+// sport) with a recipient from the two rosters, or one of the two teams when the
+// award goes to a team. Replace-all save; these surface as the recipient's
+// achievements on their dashboard.
+function AwardsPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixtureId: string; invalidate: (string | null)[] }) {
+  const { people, teams } = matchSides(fixture);
+  const { data: types = [], isLoading: typesLoading } = useMatchAwardTypes(fixture);
+  const typeById = new Map(types.map((t) => [t.id, t]));
   const { data: existing } = useApi<AwardRow[]>(`/fixtures/${fixtureId}/awards`);
-  const [rows, setRows] = useState<AwardItem[]>([]);
+  const [rows, setRows] = useState<Array<AwardItem & { legacy?: string }>>([]);
   const seeded = useRef(false);
   useEffect(() => {
     if (!seeded.current && existing) {
-      setRows(existing.map((a) => ({ award_name: a.award_name, recipient_user_id: a.recipient_user_id })));
+      setRows(existing.map((a) => ({
+        award_type_id: a.award_type_id ?? '',
+        recipient_user_id: a.recipient_user_id,
+        recipient_team_id: a.recipient_team_id,
+        // Typed before the catalogue: the scorer has to pick its award type to keep it.
+        legacy: a.award_type_id ? undefined : a.award_name,
+      })));
       seeded.current = true;
     }
   }, [existing]);
 
   const saveAwards = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/awards`, body), [`/fixtures/${fixtureId}/awards`, ...invalidate]);
 
-  const addRow = () => setRows((r) => [...r, { award_name: '', recipient_user_id: people[0]?.id ?? '' }]);
+  const recipientFor = (type: MatchAwardType | undefined, current?: AwardItem): Pick<AwardItem, 'recipient_user_id' | 'recipient_team_id'> =>
+    type?.recipient_kind === 'team'
+      ? { recipient_user_id: null, recipient_team_id: current?.recipient_team_id && teams.some((t) => t.id === current.recipient_team_id) ? current.recipient_team_id : teams[0]?.id ?? null }
+      : { recipient_team_id: null, recipient_user_id: current?.recipient_user_id && people.some((p) => p.id === current.recipient_user_id) ? current.recipient_user_id : people[0]?.id ?? null };
+
+  const addRow = () => {
+    const first = types[0];
+    setRows((r) => [...r, { award_type_id: first?.id ?? '', ...recipientFor(first) }]);
+  };
+  const changeType = (i: number, typeId: string) => setRows((r) => r.map((row, idx) =>
+    idx === i ? { ...row, award_type_id: typeId, legacy: undefined, ...recipientFor(typeById.get(typeId), row) } : row));
   const update = (i: number, patch: Partial<AwardItem>) => setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
   const remove = (i: number) => setRows((r) => r.filter((_, idx) => idx !== i));
+
+  const problem = rows.some((r) => !r.award_type_id || !typeById.has(r.award_type_id))
+    ? 'Pick an award for every row, or remove it'
+    : rows.some((r) => !r.recipient_user_id && !r.recipient_team_id) ? 'Pick who gets each award' : null;
+
   const save = () => {
-    const awards = rows
-      .filter((r) => r.award_name.trim() && r.recipient_user_id)
-      .map((r) => ({ award_name: r.award_name.trim(), recipient_user_id: r.recipient_user_id }));
-    saveAwards.mutate({ awards }, { onSuccess: () => toast.success('Awards saved'), onError: (e: any) => toast.error(e.message) });
+    if (problem) { toast.error(problem); return; }
+    saveAwards.mutate({ awards: rows.map(toInput) }, { onSuccess: () => toast.success('Awards saved'), onError: (e: any) => toast.error(e.message) });
   };
 
   return (
     <Card>
-      <CardHeader title="Awards" subtitle="Recognise players - e.g. Player of the Match. Multiple allowed." />
+      <CardHeader title="Awards" subtitle="Pick an award and who gets it - e.g. Player of the Match. Multiple allowed." />
       <CardBody className="space-y-3">
-        {people.length === 0 ? (
+        {people.length === 0 && teams.length === 0 ? (
           <p className="text-sm text-slate-400 dark:text-slate-500">No players on the team rosters yet - add players to a team to give awards.</p>
+        ) : !typesLoading && types.length === 0 ? (
+          <p className="text-sm text-slate-400 dark:text-slate-500">No awards are set up for this sport yet. A platform admin can add them under Award Types.</p>
         ) : (
           <>
             {rows.length === 0 && <p className="text-sm text-slate-400 dark:text-slate-500">No awards yet.</p>}
-            {rows.map((row, i) => (
-              <div key={i} className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
-                <Field label="Award">
-                  <Input value={row.award_name} onChange={(e) => update(i, { award_name: e.target.value })} placeholder="Player of the Match" />
-                </Field>
-                <Field label="Recipient">
-                  <Select value={row.recipient_user_id} onChange={(e) => update(i, { recipient_user_id: e.target.value })}>
-                    {people.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.team}</option>)}
-                  </Select>
-                </Field>
-                <Button variant="ghost" size="sm" className="mb-1" onClick={() => remove(i)} aria-label="Remove award" title="Remove">
-                  <Trash2 size={14} />
-                </Button>
-              </div>
-            ))}
+            {rows.map((row, i) => {
+              const type = typeById.get(row.award_type_id);
+              return (
+                <div key={i} data-qa="award-row" className="grid grid-cols-1 items-start gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                  <Field label="Award" hint={row.legacy ? `Was typed as "${row.legacy}" - pick its award to keep it` : undefined}>
+                    <Select className="w-full" data-qa="award-type-select" value={type ? row.award_type_id : ''} onChange={(e) => changeType(i, e.target.value)}>
+                      <option value="" disabled>Choose an award…</option>
+                      {types.map((t) => <option key={t.id} value={t.id}>{t.label}{t.recipient_kind === 'team' ? ' (team)' : ''}</option>)}
+                    </Select>
+                  </Field>
+                  <Field label={type?.recipient_kind === 'team' ? 'Team' : 'Player'}>
+                    {type?.recipient_kind === 'team' ? (
+                      <Select className="w-full" data-qa="award-team-select" value={row.recipient_team_id ?? ''} onChange={(e) => update(i, { recipient_team_id: e.target.value })}>
+                        {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </Select>
+                    ) : (
+                      <Select className="w-full" data-qa="award-player-select" value={row.recipient_user_id ?? ''} disabled={!type} onChange={(e) => update(i, { recipient_user_id: e.target.value })}>
+                        {people.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.team}</option>)}
+                      </Select>
+                    )}
+                  </Field>
+                  <Button variant="ghost" size="sm" className="sm:mt-7" onClick={() => remove(i)} aria-label="Remove award" title="Remove">
+                    <Trash2 size={14} />
+                  </Button>
+                </div>
+              );
+            })}
             <div className="flex items-center justify-between pt-1">
-              <Button variant="outline" size="sm" onClick={addRow}>+ Add award</Button>
-              <Button size="sm" disabled={saveAwards.isPending} onClick={save}>{saveAwards.isPending ? 'Saving…' : 'Save awards'}</Button>
+              <Button variant="outline" size="sm" onClick={addRow} disabled={types.length === 0}>+ Add award</Button>
+              <Button size="sm" data-qa="awards-save" disabled={saveAwards.isPending || !!problem} title={problem ?? undefined} onClick={save}>
+                {saveAwards.isPending ? 'Saving…' : 'Save awards'}
+              </Button>
             </div>
           </>
         )}
@@ -942,11 +1010,13 @@ function AwardsPanel({ fixture, fixtureId, invalidate }: { fixture: any; fixture
  */
 function PostMatchActions({ fixture, fixtureId, invalidate }:
   { fixture: any; fixtureId: string; invalidate: (string | null)[] }) {
-  const POTM = 'Player of the Match';
-  const people = [...rosterPeople(homeTeam(fixture)), ...rosterPeople(awayTeam(fixture))];
+  const { people } = matchSides(fixture);
+  const { data: types } = useMatchAwardTypes(fixture);
+  // Only when the super admin offers Player of the Match for this sport.
+  const potmType = types?.find((t) => t.code === POTM_CODE && t.recipient_kind === 'player');
   const { data: existing } = useApi<AwardRow[]>(`/fixtures/${fixtureId}/awards`);
   const locked = fixture.scorecard_status === 'locked';
-  const potm = existing?.find((a) => a.award_name.trim().toLowerCase() === POTM.toLowerCase());
+  const potm = potmType ? existing?.find((a) => a.award_type_id === potmType.id) : undefined;
   const [picking, setPicking] = useState(false);
   const [choice, setChoice] = useState('');
 
@@ -955,10 +1025,17 @@ function PostMatchActions({ fixture, fixtureId, invalidate }:
   const lock = useApiMutation(() => api('POST', `/fixtures/${fixtureId}/lock`, {}), invalidate);
 
   const giveAward = (recipient: string) => {
-    const others = (existing ?? [])
-      .filter((a) => a.award_name.trim().toLowerCase() !== POTM.toLowerCase())
-      .map((a) => ({ award_name: a.award_name, recipient_user_id: a.recipient_user_id }));
-    const awards = recipient ? [...others, { award_name: POTM, recipient_user_id: recipient }] : others;
+    if (!potmType) return;
+    // A replace-all save: carry every other award through untouched. An award typed
+    // before the catalogue has no type, and can't be re-saved until one is picked.
+    if ((existing ?? []).some((a) => !a.award_type_id)) {
+      toast.error('Pick an award type for the older awards first', 'Use the Awards panel below the scoreboard.');
+      return;
+    }
+    const others = (existing ?? []).filter((a) => a.award_type_id !== potmType.id).map(toInput);
+    const awards = recipient
+      ? [...others, { award_type_id: potmType.id, recipient_user_id: recipient, recipient_team_id: null }]
+      : others;
     saveAwards.mutate({ awards }, {
       onSuccess: () => { setPicking(false); toast.success(recipient ? 'Player of the match recorded' : 'Award removed'); },
       onError: (e: any) => toast.error(e.message),
@@ -966,7 +1043,7 @@ function PostMatchActions({ fixture, fixtureId, invalidate }:
   };
 
   const doLock = async () => {
-    if (!potm && !locked) {
+    if (potmType && !potm && !locked) {
       const ok = await confirmDialog({
         title: 'Lock without a player of the match?',
         message: 'A locked scorecard cannot be changed, and that includes its awards — this match would keep no player of the match unless it is unlocked again.',
@@ -983,7 +1060,7 @@ function PostMatchActions({ fixture, fixtureId, invalidate }:
   return (
     <div data-qa="post-match" className="w-full max-w-sm space-y-2">
       {/* ---- the award ---- */}
-      {people.length > 0 && (
+      {potmType && people.length > 0 && (
         <div className="rounded-xl border border-line bg-white p-2.5 dark:bg-slate-800/60">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Player of the match</p>
           {potm && !picking ? (
@@ -991,7 +1068,7 @@ function PostMatchActions({ fixture, fixtureId, invalidate }:
               <span className="truncate text-sm font-semibold">🏅 {potm.recipient_name ?? 'Recorded'}</span>
               {!locked && (
                 <Button variant="subtle" size="sm" data-qa="potm-change"
-                  onClick={() => { setChoice(potm.recipient_user_id); setPicking(true); }}>Change</Button>
+                  onClick={() => { setChoice(potm.recipient_user_id ?? ''); setPicking(true); }}>Change</Button>
               )}
             </div>
           ) : locked ? (

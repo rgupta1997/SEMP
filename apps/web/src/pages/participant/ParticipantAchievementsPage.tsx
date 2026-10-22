@@ -56,6 +56,7 @@ export function ParticipantAchievementsPage() {
                       a.tournament?.name,
                       [a.sport, a.discipline].filter(Boolean).join(' ') || null,
                       a.round,
+                      a.team_award && a.my_team_name ? `Team award · ${a.my_team_name}` : null,
                     ].filter(Boolean).join(' · ');
                     const row = (
                       <div className="flex items-center justify-between gap-3 py-2.5">

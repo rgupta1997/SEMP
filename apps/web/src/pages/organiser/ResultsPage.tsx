@@ -6,6 +6,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { EARLY_END_LABEL, earlyEndOf, formatPoints, resultSummary, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
+import { AwardsBoard, MatchAwardsLine, type AwardsBoardData, type BoardMatchAward } from '../../features/awards/AwardsBoard';
 import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
@@ -283,6 +284,12 @@ export function ResultsPage() {
   // the server refuses it too, so the controls are off rather than failing on click.
   const archived = !!championship.archived_at;
   const { data: fixtures = [], isLoading, isFetching } = useApi<ResultRow[]>(`/championships/${eventId}/fixtures`);
+  const { data: board } = useApi<AwardsBoardData>(`/championships/${eventId}/awards/board`);
+  const awardsByFixture = useMemo(() => {
+    const m = new Map<string, BoardMatchAward[]>();
+    for (const a of board?.match ?? []) m.set(a.fixture_id, [...(m.get(a.fixture_id) ?? []), a]);
+    return m;
+  }, [board]);
   // Is this championship awarding custom (hand-entered) points anywhere? If so, the
   // organiser is reminded to add points per result. Rules are organiser-only.
   const { data: rulesData } = useApi<{ default: { scheme: string }; rules: { scope_type: string; config: { scheme: string } }[] }>(
@@ -605,6 +612,8 @@ export function ResultsPage() {
           </Button>
         </div>
       )}
+
+      <AwardsBoard awards={board?.event ?? []} />
 
       {/* The queue. An organiser mid-event wants the ones that need them. */}
       {playable.length > 0 && (
@@ -971,6 +980,12 @@ export function ResultsPage() {
                       )}
                     </div>
                     </div>
+                    {/* Who won what in this match - full width under both layouts. */}
+                    {awardsByFixture.has(f.id) && (
+                      <div className="border-t border-slate-100 px-3 py-1.5 lg:col-span-3 lg:mt-2 lg:border-0 lg:px-0 lg:py-0 dark:border-slate-800">
+                        <MatchAwardsLine awards={awardsByFixture.get(f.id)!} />
+                      </div>
+                    )}
                   </Card>
                 );
               })}

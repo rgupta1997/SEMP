@@ -1,6 +1,6 @@
 import {
   Award, BarChart3, Building2, CalendarDays, Compass, FileBadge, LayoutGrid, Layers,
-  ListChecks, type LucideIcon, Settings, Shield, Trophy, Users, Zap,
+  ListChecks, type LucideIcon, Medal, Settings, Shield, Trophy, Users, Zap,
 } from 'lucide-react';
 
 /**
@@ -25,6 +25,7 @@ export const NAV_ICONS: Record<string, LucideIcon> = {
   discover: Compass,
   achievements: Award,
   certificates: FileBadge,
+  awards: Medal,
   reports: BarChart3,
   admin: Settings,
   profile: Users,
