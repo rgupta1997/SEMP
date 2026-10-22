@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
 import { describeSlot } from '../lib/stageTree';
@@ -167,12 +167,12 @@ function KnockoutEditor({ node, onChange, entrants }: { node: KnockoutDraft; onC
           {node.manualPairs.map((p, i) => (
             <div key={i} className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
               <Select value={p.home ?? ''} onChange={(e) => setPair(i, 'home', e.target.value)}>
-                <option value="">— bye —</option>
+                <option value="">- bye -</option>
                 {entrants.map((t) => <option key={t.token} value={t.token}>{t.label}</option>)}
               </Select>
               <span className="text-center text-xs text-slate-400 dark:text-slate-500">vs</span>
               <Select value={p.away ?? ''} onChange={(e) => setPair(i, 'away', e.target.value)}>
-                <option value="">— bye —</option>
+                <option value="">- bye -</option>
                 {entrants.map((t) => <option key={t.token} value={t.token}>{t.label}</option>)}
               </Select>
             </div>
@@ -243,7 +243,7 @@ function GroupEditor({ node, onChange, entrants, depth }: { node: GroupDraft; on
                 </div>
                 <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
                   <div className="mb-2 text-xs text-slate-400 dark:text-slate-500">
-                    Feeds into ({childEntrants.length} qualifier{childEntrants.length === 1 ? '' : 's'}: {childEntrants.map((e) => e.label).join(', ') || '—'}):
+                    Feeds into ({childEntrants.length} qualifier{childEntrants.length === 1 ? '' : 's'}: {childEntrants.map((e) => e.label).join(', ') || '-'}):
                   </div>
                   <StageNodeEditor node={b.childStage} onChange={(n) => updateBranch(b.id, { childStage: n })} entrants={childEntrants} depth={depth + 1} />
                 </div>
@@ -269,21 +269,34 @@ export function StageConfigWizard({ tournamentDisciplineId, onGenerated }: { tou
   const teamsPath = `/teams?tournament_discipline_id=${tournamentDisciplineId}`;
   const { data: teams = [], isLoading: teamsLoading } = useApi<any[]>(teamsPath);
   const [root, setRoot] = useState<GroupDraft>(() => ({ ...newGroup(), branches: [newBranch('Cup')] }));
-  const [manualAllocation, setManualAllocation] = useState<Record<number, string>>({});
+  // teamId -> pool (1-based). Converted to slot indexes only at submit, so the UI
+  // stays one picker row however many teams/pools there are.
+  const [pins, setPins] = useState<Record<string, number>>({});
+  const [pickTeam, setPickTeam] = useState('');
+  const [pickPool, setPickPool] = useState('');
   const [showManualAllocation, setShowManualAllocation] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const rootEntrants: TokenEntrant[] = teams.map((t) => ({
     token: t.id,
-    label: t.organizations?.short_name || t.organizations?.name ? `${t.name} — ${t.organizations.short_name || t.organizations.name}` : t.name,
+    label: t.organizations?.short_name || t.organizations?.name ? `${t.name} - ${t.organizations.short_name || t.organizations.name}` : t.name,
   }));
 
-  const usedTeamIds = new Set(Object.values(manualAllocation).filter(Boolean));
-  const setSlotTeam = (slotIndex: number, teamId: string) => setManualAllocation((m) => {
-    const next = { ...m };
-    if (teamId) next[slotIndex] = teamId; else delete next[slotIndex];
-    return next;
-  });
+  const numGroups = Math.max(1, root.numGroups || 1);
+  const poolLetter = (pool: number) => String.fromCharCode(64 + pool);
+  const teamLabel = (id: string) => rootEntrants.find((e) => e.token === id)?.label ?? id;
+  // Slots each pool owns under snake seeding = how many teams can be pinned there.
+  const slotsByPool: number[][] = Array.from({ length: numGroups }, () => []);
+  for (let s = 1; s <= teams.length; s++) slotsByPool[poolForSlot(s, numGroups) - 1].push(s);
+  // Pins to a pool that no longer exists (pool count lowered) are ignored, not lost.
+  const activePins = Object.entries(pins).filter(([id, pool]) => pool <= numGroups && teams.some((t: any) => t.id === id));
+  const pinnedIn = (pool: number) => activePins.filter(([, p]) => p === pool).map(([id]) => id);
+  const addPin = () => {
+    if (!pickTeam || !pickPool) return;
+    setPins((m) => ({ ...m, [pickTeam]: Number(pickPool) }));
+    setPickTeam('');
+  };
+  const removePin = (teamId: string) => setPins((m) => { const next = { ...m }; delete next[teamId]; return next; });
 
   const generateAll = useApiMutation(
     (body: any) => api('POST', `/tournament-disciplines/${tournamentDisciplineId}/fixtures/generate-all`, body),
@@ -295,7 +308,12 @@ export function StageConfigWizard({ tournamentDisciplineId, onGenerated }: { tou
     setError(null);
     const err = validateNode(root, rootEntrants, 'Pools');
     if (err) { setError(err); return; }
-    const manualAllocationEntries = Object.entries(manualAllocation).map(([slotIndex, teamId]) => ({ slotIndex: Number(slotIndex), teamId }));
+    // Each pinned team takes the next free slot of its pool.
+    const nextSlot = slotsByPool.map(() => 0);
+    const manualAllocationEntries = activePins.flatMap(([teamId, pool]) => {
+      const slotIndex = slotsByPool[pool - 1][nextSlot[pool - 1]++];
+      return slotIndex ? [{ slotIndex, teamId }] : [];
+    });
     generateAll.mutate({ config: { root: toStageNode(root), manualAllocation: manualAllocationEntries } }, { onError: (e: any) => setError(e.message) });
   };
 
@@ -323,26 +341,54 @@ export function StageConfigWizard({ tournamentDisciplineId, onGenerated }: { tou
           {showManualAllocation && (
             <div className="mt-3 space-y-2">
               <p className="text-xs text-slate-400 dark:text-slate-500">
-                Pin specific teams to specific slots before pools are drawn - e.g. keep two
-                strong teams apart. Every unpinned team fills the remaining slots
+                Pin specific teams to a pool before pools are drawn - e.g. keep two strong
+                teams apart. Every unpinned team fills the remaining places
                 automatically, in registration order.
               </p>
-              {teams.map((_: any, i: number) => {
-                const slotIndex = i + 1;
-                const pool = poolForSlot(slotIndex, root.numGroups);
-                const current = manualAllocation[slotIndex] ?? '';
-                return (
-                  <div key={slotIndex} className="grid grid-cols-[110px_1fr] items-center gap-2">
-                    <span className="text-xs text-slate-500 dark:text-slate-400">Slot {slotIndex} → Pool {String.fromCharCode(64 + pool)}</span>
-                    <Select value={current} onChange={(e) => setSlotTeam(slotIndex, e.target.value)}>
-                      <option value="">— auto —</option>
-                      {teams.filter((t: any) => t.id === current || !usedTeamIds.has(t.id)).map((t: any) => (
-                        <option key={t.id} value={t.id}>{rootEntrants.find((e) => e.token === t.id)?.label ?? t.name}</option>
-                      ))}
-                    </Select>
-                  </div>
-                );
-              })}
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={pickTeam} onChange={(e) => setPickTeam(e.target.value)}>
+                  <option value="">Choose a team…</option>
+                  {teams.filter((t: any) => !activePins.some(([id]) => id === t.id)).map((t: any) => (
+                    <option key={t.id} value={t.id}>{teamLabel(t.id)}</option>
+                  ))}
+                </Select>
+                <Select value={pickPool} onChange={(e) => setPickPool(e.target.value)}>
+                  <option value="">Choose a pool…</option>
+                  {slotsByPool.map((slots, i) => {
+                    const used = pinnedIn(i + 1).length;
+                    return <option key={i} value={i + 1} disabled={used >= slots.length}>Pool {poolLetter(i + 1)} ({used}/{slots.length} pinned)</option>;
+                  })}
+                </Select>
+                <Button size="sm" variant="outline" onClick={addPin}
+                  disabled={!pickTeam || !pickPool || pinnedIn(Number(pickPool)).length >= (slotsByPool[Number(pickPool) - 1]?.length ?? 0)}>
+                  Pin
+                </Button>
+              </div>
+              {activePins.length > 0 && (
+                <div className="!mt-4 divide-y divide-slate-100 dark:divide-slate-800">
+                  {slotsByPool.map((_, i) => {
+                    const ids = pinnedIn(i + 1);
+                    if (!ids.length) return null;
+                    return (
+                      // Label in its own column so wrapped chips line up under the first chip.
+                      <div key={i} className="flex items-start gap-1.5 py-2 first:pt-0 last:pb-0">
+                        <span className="w-14 shrink-0 text-xs font-medium leading-5 text-slate-500 dark:text-slate-400">Pool {poolLetter(i + 1)}</span>
+                        <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+                          {ids.map((id) => (
+                            <span key={id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 py-0.5 pl-2.5 pr-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                              {teamLabel(id)}
+                              <button type="button" aria-label={`Unpin ${teamLabel(id)}`} onClick={() => removePin(id)}
+                                className="rounded-full p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-600 dark:hover:bg-slate-700">
+                                <X size={12} />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>

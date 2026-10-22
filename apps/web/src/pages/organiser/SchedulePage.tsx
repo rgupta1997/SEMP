@@ -946,7 +946,18 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
         />
       )}
       {configuringStages && (
-        <Modal title="Configure stages" onClose={() => setConfiguringStages(false)} wide>
+        <Modal
+          title="Configure stages"
+          onClose={() => setConfiguringStages(false)}
+          wide
+          // Same navy banner as the Setup > Sports entry point (SportsTab.tsx).
+          banner={(
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-300">Configure stages</div>
+              <div className="mt-1 truncate text-lg font-bold text-white">{td.disciplines?.name ?? sportName}</div>
+            </div>
+          )}
+        >
           <StageConfigWizard
             tournamentDisciplineId={td.id}
             onGenerated={() => {
