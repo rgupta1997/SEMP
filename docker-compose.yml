@@ -1,0 +1,28 @@
+# Local Postgres for development - same major version as RDS semp-prod (17).
+#
+#   npm run db:up       start it (and build the schema on first run)
+#   npm run db:reset    wipe the volume and rebuild from scratch
+#
+# Host port is 5433, not 5432, so it never collides with Postgres.app / brew postgres.
+# Credentials are throwaway and only reachable from this machine.
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: semp-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: semp
+      POSTGRES_PASSWORD: semp
+      POSTGRES_DB: semp
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - semp-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U semp -d semp"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  semp-pgdata:
