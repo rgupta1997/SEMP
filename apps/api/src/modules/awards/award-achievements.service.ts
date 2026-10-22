@@ -27,6 +27,8 @@ export interface ScopeAward {
   recipient_user_id: string | null;
   recipient_team_id: string | null;
   notes: string | null;
+  /** When the organiser gave it - the achievement's date. */
+  given_at: Date;
 }
 
 export interface ScopeTeamInfo {
@@ -43,6 +45,7 @@ export interface AwardAchievementRow {
   sport_id: string | null;
   title: string;
   detail: Record<string, unknown>;
+  occurred_on: Date;
 }
 
 /** One achievement per person an award reaches. Pure. */
@@ -75,6 +78,7 @@ export function awardAchievementRows(
           ...(team ? { team_award: true, award_team_id: team.id, team_name: team.name } : {}),
           ...(a.notes ? { notes: a.notes } : {}),
         },
+        occurred_on: a.given_at,
       });
     }
   }
@@ -93,12 +97,12 @@ export async function syncScopeAchievements(db: Db, scope: AwardScope): Promise<
   const [awards, participants, before, champ, tournament, ts] = await Promise.all([
     db.championship_awards.findMany({
       where: scopeWhere(scope),
-      select: { award_name: true, recipient_user_id: true, recipient_team_id: true, notes: true, award_types: { select: { code: true } } },
+      select: { award_name: true, recipient_user_id: true, recipient_team_id: true, notes: true, created_at: true, award_types: { select: { code: true } } },
       orderBy: { created_at: 'asc' },
     }),
     scopeParticipants(db, scope),
     db.achievements.findMany({ where: liveScopeRows(scope), select: { user_id: true, organization_id: true } }),
-    db.championships.findUnique({ where: { id: scope.championshipId }, select: { name: true, end_date: true } }),
+    db.championships.findUnique({ where: { id: scope.championshipId }, select: { name: true } }),
     scope.tournamentId ? db.tournaments.findUnique({ where: { id: scope.tournamentId }, select: { name: true } }) : null,
     scope.tournamentSportId
       ? db.tournament_sports.findUnique({ where: { id: scope.tournamentSportId }, select: { sports: { select: { name: true } } } })
@@ -115,11 +119,10 @@ export async function syncScopeAchievements(db: Db, scope: AwardScope): Promise<
 
   const scopeLabel = [ts?.sports?.name, scope.level === 'championship' ? null : tournament?.name, champ?.name].filter(Boolean).join(' · ');
   const rows = awardAchievementRows(
-    awards.map((a) => ({ ...a, award_type_code: a.award_types.code })),
+    // Dated the day it was given, the same date the player's awards list shows.
+    awards.map(({ award_types, created_at, ...a }) => ({ ...a, award_type_code: award_types.code, given_at: created_at })),
     teams, scope, scopeLabel,
   );
-  // The event's last day when it has one: that is when an event award is won.
-  const occurredOn = champ?.end_date ?? new Date();
 
   await db.achievements.updateMany({ where: liveScopeRows(scope), data: { superseded_at: new Date() } });
   if (rows.length) {
@@ -132,7 +135,6 @@ export async function syncScopeAchievements(db: Db, scope: AwardScope): Promise<
         team_id: null,
         kind: 'award',
         medal: null,
-        occurred_on: occurredOn,
         source: AWARD_ACHIEVEMENT_SOURCE,
       })),
     });
