@@ -15,6 +15,12 @@
     "prisma:generate": "npm run prisma:generate --workspace @semp/api",
     "test": "npm run test --workspace @semp/notifications && npm run test --workspace @semp/api && npm run test --workspace @semp/web",
     "build:site": "npm run build --workspace @semp/web && npm run build --prefix landing-page-v2 && node tools/assemble-site.mjs",
-    "dev:landing": "npm run dev --prefix landing-page-v2"
+    "dev:landing": "npm run dev --prefix landing-page-v2",
+    "db:up": "./infra/local-db/setup.sh",
+    "db:reset": "./infra/local-db/setup.sh --reset",
+    "db:down": "docker compose down",
+    "db:psql": "docker compose exec db psql -U semp -d semp",
+    "db:seed": "cd apps/api && npx tsx --env-file=../../infra/local-db/local.env scripts/bootstrap-catalog.ts && npx tsx --env-file=../../infra/local-db/local.env scripts/seed-local-admin.ts",
+    "dev:api:local": "cd apps/api && npx tsx watch --env-file=../../infra/local-db/local.env src/main.ts"
   }
 }

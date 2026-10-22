@@ -195,6 +195,17 @@ export type AchievementKind = (typeof ACHIEVEMENT_KIND)[number];
  *  kind is included by default instead of needing a second, hand-kept list. */
 export const WINNER_ACHIEVEMENT_KINDS = ACHIEVEMENT_KIND.filter((k) => k !== 'award');
 
+// ---------- Awards ----------
+
+/** Where an award is given: one match, one sport inside a tournament, a whole
+ *  tournament, or the whole championship (event). */
+export const AWARD_LEVEL = ['match', 'tournament_sport', 'tournament', 'championship'] as const;
+export type AwardLevel = (typeof AWARD_LEVEL)[number];
+
+/** Who an award type goes to. */
+export const AWARD_RECIPIENT_KIND = ['player', 'team'] as const;
+export type AwardRecipientKind = (typeof AWARD_RECIPIENT_KIND)[number];
+
 export const MEDALS = ['gold', 'silver', 'bronze'] as const;
 export type Medal = (typeof MEDALS)[number];
 
