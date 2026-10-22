@@ -312,7 +312,7 @@ const LAYOUT_BODY: Record<LayoutId, (p: Parts) => string> = {
     <div class="recipient">${p.recipient}</div>
     <p class="body">${p.body}</p>
     <dl class="grid">
-      <div><dt>Achievement</dt><dd>${p.title}</dd></div>
+      <div><dt>Achievement</dt><dd>${p.title}${p.facts.scope ? `<br><small>${esc(p.facts.scope)}${p.facts.team ? ` &middot; ${esc(p.facts.team)}` : ''}</small>` : ''}</dd></div>
       <div><dt>Event</dt><dd>${esc(p.facts.championship_name ?? '—')}</dd></div>
       <div><dt>Sport</dt><dd>${esc(p.facts.sport ?? '—')}</dd></div>
     </dl>
@@ -348,7 +348,14 @@ export async function renderCertificateHtml(input: RenderInput): Promise<string>
     body: esc(body || DEFAULT_CERTIFICATE_BODY),
     title: esc(facts.title),
     meta: [
-      ...[facts.championship_name, facts.sport].filter(Boolean).map((v) => esc(v)),
+      // An award certificate says where it was won, and for which team. The sport is
+      // left out when the scope already names it ("Kabaddi · Main").
+      ...[
+        facts.scope,
+        facts.team ? `with ${facts.team}` : null,
+        facts.championship_name,
+        facts.sport && !facts.scope?.includes(facts.sport) ? facts.sport : null,
+      ].filter(Boolean).map((v) => esc(v)),
       `Issued ${esc(new Date(facts.issued_on).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))}`,
     ].join(' &middot; '),
     signatory: esc(design?.signatory_name || facts.organization_name),

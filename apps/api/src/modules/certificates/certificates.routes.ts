@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { AWARD_LEVEL } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
@@ -32,6 +33,8 @@ const recipientFiltersSchema = z.object({
   sport_id: z.string().uuid().nullish(),
   tournament_discipline_id: z.string().uuid().nullish(),
   team_id: z.string().uuid().nullish(),
+  /** Special awards only. */
+  award_level: z.enum(AWARD_LEVEL).nullish(),
 }).default({});
 
 const candidatesQuerySchema = z.object({
@@ -40,6 +43,7 @@ const candidatesQuerySchema = z.object({
   sport_id: z.string().uuid().optional(),
   tournament_discipline_id: z.string().uuid().optional(),
   team_id: z.string().uuid().optional(),
+  award_level: z.enum(AWARD_LEVEL).optional(),
 });
 
 const generateSchema = z.object({
@@ -53,6 +57,9 @@ const generateSchema = z.object({
   // The Review step's per-recipient toggle: candidates the caller has switched off,
   // even though the scope+category above would otherwise include them.
   excluded_user_ids: z.array(z.string().uuid()).default([]),
+  // The same toggle by candidate key - needed where one person is several candidates
+  // (two awards, two certificates). Keys come from the candidates endpoint.
+  excluded_keys: z.array(z.string().max(240)).max(2000).default([]),
   // Capped at one championship's worth. The 15s Lambda ceiling is the reason this is
   // chunked by the caller rather than run as one unbounded job (see DEPLOYMENT.md).
   limit: z.number().int().min(1).max(500).optional(),
@@ -293,6 +300,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     const q = candidatesQuerySchema.parse({
       championship_id: req.query.championship_id, category: req.query.category,
       sport_id: req.query.sport_id, tournament_discipline_id: req.query.tournament_discipline_id, team_id: req.query.team_id,
+      award_level: req.query.award_level || undefined,
     });
     const champ = await prisma.championships.findUnique({ where: { id: q.championship_id }, select: { id: true } });
     if (!champ) throw new NotFoundError('Championship');
@@ -302,6 +310,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
       // Organising team and Officials have no sport/discipline/team column to match
       // against - Team only makes sense for the four roster/achievement categories.
       teamId: needsTeamFilter(q.category) ? q.team_id : undefined,
+      awardLevel: q.category === 'awards' ? q.award_level : undefined,
     };
     const [candidates, already] = await Promise.all([
       candidatesFor(prisma, q.championship_id, q.category, filters),
@@ -310,7 +319,8 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
 
     res.json({
       rows: candidates.map((c) => ({
-        user_id: c.userId, name: c.name, title: c.title, sport: c.sportName,
+        key: candidateKey(c), user_id: c.userId, name: c.name, title: c.title, sport: c.sportName,
+        scope: c.scope ?? null, team: c.team ?? null,
         already_issued: already.has(candidateKey(c)),
       })),
       count: candidates.length,
@@ -341,10 +351,12 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
       sportId: body.filters.sport_id ?? undefined,
       tournamentDisciplineId: body.filters.tournament_discipline_id ?? undefined,
       teamId: needsTeamFilter(body.category) ? body.filters.team_id ?? undefined : undefined,
+      awardLevel: body.category === 'awards' ? body.filters.award_level ?? undefined : undefined,
     };
     const excluded = new Set(body.excluded_user_ids);
+    const excludedKeys = new Set(body.excluded_keys);
     const candidates = (await candidatesFor(prisma, champ.id, body.category, filters, body.limit ?? 500))
-      .filter((c) => !excluded.has(c.userId));
+      .filter((c) => !excluded.has(c.userId) && !excludedKeys.has(candidateKey(c)));
     if (!candidates.length) {
       return void res.json({ issued: 0, skipped: 0, results: [], note: 'Nothing in scope to certify for this category and filter set.' });
     }
@@ -365,6 +377,9 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
         sport: c.sportName,
         title: c.title,
         issued_on: new Date().toISOString().slice(0, 10),
+        // Only on award certificates: absent keys leave every other signature unchanged.
+        ...(c.scope ? { scope: c.scope } : {}),
+        ...(c.team ? { team: c.team } : {}),
       };
       return {
         organization_id: organizationId, template_id: template.id, championship_id: champ.id,
@@ -376,6 +391,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
         token: newToken(),
         issued_by: req.user!.id,
         lock_version: c.lockVersion ?? null,
+        award_ref: c.awardRef ?? null,
       };
     };
 

@@ -217,6 +217,18 @@ describe('deriveRecords · awards (J4-E4-S2)', () => {
     expect(row).toBeDefined();
     expect(row.organization_id).toBeNull();
   });
+
+  it('gives a team award to every member of that team, and only them', () => {
+    const { achievements, entries } = deriveRecords(input({}, {
+      awards: [{ recipient_user_id: null, recipient_team_id: 'tA', award_name: 'Fair Play', award_type_code: 'fair_play', award_type_label: 'Fair Play' }],
+    }));
+    const rows = achievements.filter((a) => a.kind === 'award');
+    expect(rows.map((a) => a.user_id)).toEqual(['u1', 'u2']);
+    // A member's own row, not the team's: team_id stays null, the team is in detail.
+    expect(rows.every((a) => a.team_id === null && a.detail.team_award === true && a.detail.award_team_id === 'tA')).toBe(true);
+    const u3 = entries.find((e) => e.user_id === 'u3')!;
+    expect(u3.detail.chips ?? []).not.toContainEqual(expect.objectContaining({ kind: 'award' }));
+  });
 });
 
 // ---------------------------------------------------------------------------

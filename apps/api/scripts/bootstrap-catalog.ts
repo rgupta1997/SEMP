@@ -282,6 +282,33 @@ async function bootstrapRoles() {
     );
 }
 
+// Award types are seeded by the 017_award_system migration, but on a fresh local DB
+// that runs before the sports exist, so the sport-specific mappings land here.
+const AWARD_SPORTS: Record<string, string[]> = {
+    best_goalkeeper: ["Football", "Futsal", "Hockey", "Handball"],
+};
+
+async function bootstrapAwardTypeSports() {
+    console.log("\n🏆 Mapping award types to sports...\n");
+    const hasTable = await prisma.$queryRaw<Array<{ ok: boolean }>>`select to_regclass('public.award_type_sports') is not null as ok`;
+    if (!hasTable[0]?.ok) {
+        console.log("• Skipped: award_type_sports does not exist (migration 017 not applied)");
+        return;
+    }
+    const sports = await prisma.sports.findMany({ select: { id: true, name: true } });
+    const sportId = new Map(sports.map((s) => [s.name, s.id]));
+    for (const [code, names] of Object.entries(AWARD_SPORTS)) {
+        const type = await prisma.award_types.findFirst({ where: { code, championship_id: null }, select: { id: true } });
+        if (!type) { console.log(`• Skipped ${code}: award type missing`); continue; }
+        const ids = names.map((n) => sportId.get(n)).filter((x): x is string => !!x);
+        const { count } = await prisma.award_type_sports.createMany({
+            data: ids.map((sport_id) => ({ award_type_id: type.id, sport_id })),
+            skipDuplicates: true,
+        });
+        console.log(`✓ ${code}: ${count} new sport mapping(s)`);
+    }
+}
+
 async function bootstrap() {
     console.log("==================================");
     console.log("Bootstrapping Global Catalog");
@@ -291,6 +318,7 @@ async function bootstrap() {
     await bootstrapTournamentFormats();
     await bootstrapDisciplines();
     await bootstrapRoles();
+    await bootstrapAwardTypeSports();
 
     console.log("==================================");
     console.log("Global catalog bootstrap completed.");

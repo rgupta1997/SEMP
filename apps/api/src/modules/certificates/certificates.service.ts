@@ -19,6 +19,11 @@ export interface CertificateFacts {
   sport: string | null;
   title: string;
   issued_on: string;
+  /** Award certificates only - where it was won ("Riders vs Blasters", "Kabaddi · Main",
+   *  "Whole event"). Left out entirely otherwise, so older signatures still verify. */
+  scope?: string;
+  /** Award certificates only - the team, for a team award. */
+  team?: string;
 }
 
 /**

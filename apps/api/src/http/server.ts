@@ -56,6 +56,8 @@ import { makeDemoRequestsRouter } from '../modules/marketing/demo-requests.route
 import { makeFeedbackRouter } from '../modules/marketing/feedback.routes.js';
 import { makeDemosRouter } from '../modules/demos/demos.routes.js';
 import { makeEventSetupRouter } from '../modules/event-setup/event-setup.routes.js';
+import { makeAwardTypesAdminRouter } from '../modules/awards/award-types.admin.routes.js';
+import { makeChampionshipAwardsRouter } from '../modules/awards/championship-awards.routes.js';
 import { makePlatformSettingsRouter } from '../modules/platform/platform-settings.routes.js';
 import { blockDrawWritesToArchived, blockFixtureWritesToArchived, blockWritesToArchived } from '../modules/championships/championship-archive.service.js';
 import { blockOrgWritesWhenArchived, blockTeamWritesWhenArchived } from '../modules/iam/organization-archive.service.js';
@@ -145,6 +147,9 @@ export function buildApp(prisma: Prisma) {
   // ----- Platform switches (plan enforcement) - super-admin only, guards inside -----
   api.use('/platform/settings', makePlatformSettingsRouter(prisma));
 
+  // ----- Award catalogue + sport mapping - super-admin only, guard inside -----
+  api.use('/platform/award-types', makeAwardTypesAdminRouter(prisma));
+
   // ----- "Me"-scoped read endpoints (resolved from the authenticated user) -----
   api.use('/', makeMeRouter(prisma));
 
@@ -229,6 +234,8 @@ export function buildApp(prisma: Prisma) {
   api.use('/championship-templates', makeChampionshipTemplatesRouter(prisma));
   // Standings (materialized tables + scoring rules) - also under /championships/:id.
   api.use('/championships', makeStandingsRouter(prisma));
+  // Awards above match level + the event's own award types - organisers only, guard inside.
+  api.use('/championships', makeChampionshipAwardsRouter(prisma));
   // Matrix import (sections × sport/discipline) - builds the whole setup from a sheet.
   api.use('/championships', makeMatrixImportRouter(prisma));
   api.use('/venues', makeVenuesRouter(prisma));

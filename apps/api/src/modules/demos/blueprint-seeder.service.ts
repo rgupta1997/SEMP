@@ -21,6 +21,7 @@ import type { Prisma } from '../../infra/prisma.js';
 import { recomputeStandings } from '../standings/standings.service.js';
 import { resolveFixtureParticipants } from '../fixtures/participants.js';
 import { writeLifetimeEntries, deriveAchievements, writeStatLines } from '../fixtures/downstream.js';
+import { catalogAwardTypeIds } from '../awards/award-types.service.js';
 import { refreshCareerStatsForFixture } from '../records/career-stats.service.js';
 
 /**
@@ -425,6 +426,7 @@ export async function buildFromBlueprint(
 
   const fixtures: any[] = [];
   const awards: any[] = [];
+  const potmTypeId = (await catalogAwardTypeIds(prisma, ['player_of_the_match'])).get('player_of_the_match') ?? null;
   let liveBudget = bp.championship.live_finals;
 
   teamDraws.forEach((d, di) => {
@@ -496,7 +498,7 @@ export async function buildFromBlueprint(
 
     if (finishesOn <= PLAYED && di % 4 === 0) {
       const cap = squads.find((s) => s.team_id === fw && s.role === 'captain');
-      if (cap) awards.push({ id: randomUUID(), fixture_id: finalId, recipient_user_id: cap.user_id, award_name: 'Player of the Match' });
+      if (cap) awards.push({ id: randomUUID(), fixture_id: finalId, recipient_user_id: cap.user_id, award_name: 'Player of the Match', award_type_id: potmTypeId });
     }
   });
 
