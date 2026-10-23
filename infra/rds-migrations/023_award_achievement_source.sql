@@ -2,7 +2,7 @@
 --
 -- STATUS: NOT APPLIED to RDS. Local Docker only - written 2026-10-20.
 -- Do not apply to Supabase or RDS until the award feature is signed off locally.
--- Depends on 017_award_system.sql.
+-- Depends on 021_award_system.sql.
 --
 -- Match awards reach achievements through the scorecard lock (source
 -- 'locked_result'). Awards above match level have no lock behind them - the

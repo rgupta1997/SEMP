@@ -1,6 +1,6 @@
 -- Award system: award types mapped to sports, four award levels, team recipients.
 --
--- Supabase twin of infra/rds-migrations/017_award_system.sql - same SQL, kept in step so both
+-- Supabase twin of infra/rds-migrations/021_award_system.sql - same SQL, kept in step so both
 -- tracks describe the same schema.
 --
 -- STATUS: NOT APPLIED. Written 2026-10-22. Do not run against Supabase (beta or

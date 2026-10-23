@@ -7,7 +7,7 @@
 -- infra/rds-repair-20260926.sql (originally supabase/migrations/20260815010000_audit_log.sql,
 -- 20260816040000_rate_limits.sql and 20260817010000_certificates.sql), but no
 -- numbered file here ever created it, so the local Docker DB (built only from this
--- folder) lacked it. Same gap as 020_next_certificate_number_fn.sql.
+-- folder) lacked it. Same gap as 024_next_certificate_number_fn.sql.
 --
 -- With the triggers in place, update/delete on audit_log and certificate_verifications
 -- raises locally exactly as it does on RDS - including the cascade from deleting a
