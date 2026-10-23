@@ -2,7 +2,7 @@
 --
 -- STATUS: NOT APPLIED to RDS. Local Docker only - written 2026-10-20.
 -- Do not apply to Supabase or RDS until the award feature is signed off locally.
--- Depends on 017_award_system.sql.
+-- Depends on 021_award_system.sql.
 --
 -- Until now an award certificate was deduped like every other: one per person per
 -- fixture (match awards) or one per person per event. With several award levels

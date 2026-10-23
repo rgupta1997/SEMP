@@ -282,7 +282,7 @@ async function bootstrapRoles() {
     );
 }
 
-// Award types are seeded by the 017_award_system migration, but on a fresh local DB
+// Award types are seeded by the 021_award_system migration, but on a fresh local DB
 // that runs before the sports exist, so the sport-specific mappings land here.
 const AWARD_SPORTS: Record<string, string[]> = {
     best_goalkeeper: ["Football", "Futsal", "Hockey", "Handball"],

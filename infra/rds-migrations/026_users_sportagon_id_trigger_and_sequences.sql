@@ -6,7 +6,7 @@
 -- infra/rds-repair-20260926.sql (originally supabase/migrations/20260826000040_plans_and_billing.sql
 -- and 20260829000000_issue_sportagon_id.sql), but no numbered file here ever
 -- created them, so the local Docker DB (built only from this folder) lacked them.
--- Same gap as 020 and 021.
+-- Same gap as 024 and 025.
 --
 -- What each fixes locally:
 --   invoice_number_seq   issueInvoice() (apps/api/src/modules/billing/invoice.ts)

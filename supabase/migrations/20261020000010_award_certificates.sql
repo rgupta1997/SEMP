@@ -1,6 +1,6 @@
 -- Award certificates: one live certificate per person per AWARD.
 --
--- Supabase twin of infra/rds-migrations/018_award_certificates.sql - same SQL, kept in step so both
+-- Supabase twin of infra/rds-migrations/022_award_certificates.sql - same SQL, kept in step so both
 -- tracks describe the same schema.
 --
 -- STATUS: NOT APPLIED. Written 2026-10-22. Do not run against Supabase (beta or

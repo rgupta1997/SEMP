@@ -1,6 +1,6 @@
 -- Achievements from organiser-given awards (sport / tournament / event level).
 --
--- Supabase twin of infra/rds-migrations/019_award_achievement_source.sql - same SQL, kept in step so both
+-- Supabase twin of infra/rds-migrations/023_award_achievement_source.sql - same SQL, kept in step so both
 -- tracks describe the same schema.
 --
 -- STATUS: NOT APPLIED. Written 2026-10-22. Do not run against Supabase (beta or
