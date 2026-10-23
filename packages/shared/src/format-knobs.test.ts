@@ -269,8 +269,8 @@ describe('period-shaped formats (kho-kho, kabaddi...)', () => {
     // this whole knob split exists: a period-shaped match's clock is one
     // whole-match total, and typing that without seeing what it works out to
     // per period is how a 4-period match quietly gets a 1-minute period.
-    expect(describeKnobs(readKnobs(fmt('kho_4turns')))).toBe('4 turns · 36 min cap (9/period)');
-    expect(describeKnobs(readKnobs(fmt('kho_2x9')))).toBe('2 innings · 18 min cap (9/period)');
+    expect(describeKnobs(readKnobs(fmt('kho_4turns')))).toBe('4 turns · 36 min cap (9/period) · minimum chase');
+    expect(describeKnobs(readKnobs(fmt('kho_2x9')))).toBe('2 turns · 18 min cap (9/period) · minimum chase');
   });
 
   it('offers "Minutes per period" instead of "Minutes" for a period-shaped format, and round-trips through the total it actually stores', () => {

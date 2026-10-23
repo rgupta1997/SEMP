@@ -1,7 +1,7 @@
 import type { RallyEvent, RallyLog } from './rally-kernel.js';
 import type { Side } from './scoring-rules.js';
 import { isChessSport } from './chess.js';
-import { statSpecFor, type SportStatSpec, type StatBag, type StatEventSpec } from './stat-registry.js';
+import { statSpecFor, type MetricAmount, type SportStatSpec, type StatBag, type StatEventSpec } from './stat-registry.js';
 
 // ============================================================================
 // Team-sport statistics, derived from the attributed event log.
@@ -82,11 +82,14 @@ const magnitudeOf = (ev: Extract<RallyEvent, { t: 'point' }>): number => {
 
 function applyMetrics(
   bag: StatBag,
-  metrics: Record<string, number | 'value'>,
+  metrics: Record<string, MetricAmount>,
   ev: Extract<RallyEvent, { t: 'point' }>,
 ): void {
   for (const [key, amount] of Object.entries(metrics)) {
-    bump(bag, key, amount === 'value' ? magnitudeOf(ev) : amount);
+    if (amount === 'value') bump(bag, key, magnitudeOf(ev));
+    else if (typeof amount === 'number') bump(bag, key, amount);
+    else if ('ifValueAtLeast' in amount) bump(bag, key, magnitudeOf(ev) >= amount.ifValueAtLeast ? 1 : 0);
+    else bump(bag, key, ev.flags?.includes(amount.ifFlag) ? 1 : 0);
   }
 }
 
@@ -156,9 +159,12 @@ export function deriveTeamStats(
     }
 
     if (ev.secondId && declared?.secondPlayerMetrics) {
-      // The second person is on the SAME side as the primary - an assist comes from
-      // a team-mate. Recorded from the event's side, not guessed.
-      sideFound.set(ev.secondId, ev.side);
+      // The second person is a team-mate of the primary (an assist) unless the action
+      // names an opponent - kho kho's chaser on an out, kabaddi's raider on a tackle.
+      const other: Side = ev.side === 'A' ? 'B' : 'A';
+      const primarySide: Side = declared.forOpponent ? other : ev.side;
+      const secondSide: Side = declared.secondPlayer?.fromOpponent ? (primarySide === 'A' ? 'B' : 'A') : primarySide;
+      sideFound.set(ev.secondId, secondSide);
       applyMetrics(bagFor(ev.secondId), declared.secondPlayerMetrics, ev);
     }
   }

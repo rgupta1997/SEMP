@@ -26,7 +26,8 @@ const USUAL: Record<string, { onField: number; bench: number }> = {
   volleyball: { onField: 6, bench: 6 },
   throwball: { onField: 7, bench: 5 },
   kabaddi: { onField: 7, bench: 5 },
-  'kho-kho': { onField: 9, bench: 3 },
+  // 9 on the field; squads run to 15 (KKFI competition guidelines 5.1), so up to 6 subs.
+  'kho-kho': { onField: 9, bench: 6 },
   frisbee: { onField: 7, bench: 7 },
   'tug of war': { onField: 8, bench: 2 },
 };

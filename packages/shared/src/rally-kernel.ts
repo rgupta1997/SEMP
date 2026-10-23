@@ -57,6 +57,8 @@ export type RallyEvent =
     kind?: string; label?: string;
     /** A magnitude the metric sums, where it differs from the points scored. */
     value?: number;
+    /** Circumstances a metric can key on - kabaddi's 'dod' (a do-or-die raid). */
+    flags?: string[];
   }
   /** Replayed rally: no score, no serve movement. */
   | { t: 'let'; at?: string }
@@ -133,6 +135,21 @@ export type RallyEvent =
    * a single `end` carrying reason 'penalties'.
    */
   | { t: 'penaltyKick'; side: Side; scored: boolean; playerId?: string; playerName?: string; at?: string; by?: string }
+  /**
+   * KHO KHO, read by kho-kho.ts, never scored. `chaseFirst`: the toss, who chases turn 1.
+   * `followOn`: the side `side` leads after the first innings and sends the other in to
+   * chase again. `minChase`: one side's time to its first out in the minimum chase
+   * (`ms` null = no out inside the limit).
+   */
+  | { t: 'chaseFirst'; side: Side; at?: string; by?: string }
+  | { t: 'followOn'; side: Side; at?: string; by?: string }
+  | { t: 'minChase'; side: Side; ms: number | null; at?: string; by?: string }
+  /**
+   * KABADDI, read by kabaddi.ts, never scored. `raidFirst`: the toss, who raids first.
+   * `raidTurn`: an official's correction - `side` raids next.
+   */
+  | { t: 'raidFirst'; side: Side; at?: string; by?: string }
+  | { t: 'raidTurn'; side: Side; at?: string; by?: string }
   | { t: 'clockStart'; at?: string; by?: string }
   | { t: 'clockPause'; at?: string; by?: string }
   /** An official's correction. `toMs` is the elapsed time the clock now reads. */

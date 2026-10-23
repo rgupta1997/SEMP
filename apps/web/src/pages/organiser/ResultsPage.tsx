@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints, resultSummary, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints, KHO_END_LABEL, KHO_END_SHORT, khoSettlementOf, resultSummary, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { AwardsBoard, MatchAwardsLine, type AwardsBoardData, type BoardMatchAward } from '../../features/awards/AwardsBoard';
 import { useAuth } from '../../lib/auth';
@@ -757,6 +757,8 @@ export function ResultsPage() {
                 );
                 // Level after play and settled on penalties: the kicks sit beside the score.
                 const pens = scored ? shootoutOf(f.live_state) : null;
+                // Kho kho: a minimum chase (score still level) or a win by an innings.
+                const khoEnd = scored ? khoSettlementOf(f.live_state) : null;
                 const pensNote = (kicks: number) => pens && (
                   <span className="ml-1 text-[11px] font-semibold text-brand-600 dark:text-brand-400" title="Penalty shoot-out">({kicks})</span>
                 );
@@ -954,6 +956,12 @@ export function ResultsPage() {
                               <span className="text-[10px] font-semibold leading-3 text-brand-600 dark:text-brand-400"
                                 title={`${teamLabel(pens.winner === 'A' ? f.home : f.away)} won on penalties`}>
                                 {shootoutLabel(pens.home, pens.away)}
+                              </span>
+                            )}
+                            {khoEnd && (
+                              <span className="text-[10px] font-semibold leading-3 text-brand-600 dark:text-brand-400"
+                                title={`${teamLabel(khoEnd.winner === 'A' ? f.home : f.away)} ${KHO_END_LABEL[khoEnd.reason]}`}>
+                                {KHO_END_SHORT[khoEnd.reason]}
                               </span>
                             )}
                           </span>

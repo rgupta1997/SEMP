@@ -318,24 +318,43 @@ const INVASION: ScoringFormat[] = [
 // picked player away before it reached the log.
 // ============================================================================
 
+/** Printed on the draw sheet. followOnLead is also read by kho-kho.ts. */
+const KHO_RULES = { pointsPerOut: 1, followOnLead: 9 };
+
 const RAID: ScoringFormat[] = [
   fmt({
     sport: 'kabaddi', key: 'pkl_2x20', name: 'Two halves of 20 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(40, 'leaderWins'), endStates: LEAGUE,
     rulesSheet: { doOrDieRaid: 'every third empty raid', superTackle: 'defenders 3 or fewer', matSize: '13x10m' },
   }),
+  // AKFI: women, junior girls and sub-juniors play two halves of 15.
+  fmt({
+    sport: 'kabaddi', key: 'kabaddi_2x15', name: 'Two halves of 15 minutes (women and juniors)',
+    levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(30, 'leaderWins'), endStates: LEAGUE,
+  }),
   fmt({
     sport: 'kabaddi', key: 'kabaddi_corp_2x10', name: 'Corporate — two halves of 10 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)], mode: 'selfScored',
     clock: cap(20, 'leaderWins'), endStates: LEAGUE,
   }),
+  // Kho kho: a period is one TURN (one side chases), two turns make an innings. No
+  // draws: a level match goes to the minimum chase (kho-kho.ts), as KKFI-style
+  // tournaments decide it. Keys predate the names and are kept, so saved draws hold.
   fmt({
-    sport: 'kho-kho', key: 'kho_2x9', name: 'Two innings of 9 minutes',
-    levels: [period('Innings', 'innings'), aggregateMatch(2)], clock: cap(18, 'leaderWins'), endStates: LEAGUE,
+    sport: 'kho-kho', key: 'kho_4turns', name: 'Two innings - 9-minute turns',
+    levels: [period('Turn', 'turn'), aggregateMatch(4)], clock: cap(36, 'leaderWins'),
+    endStates: STRICT, tieBreak: { minimumChase: true }, rulesSheet: KHO_RULES,
   }),
   fmt({
-    sport: 'kho-kho', key: 'kho_4turns', name: 'Four turns (two each)',
-    levels: [period('Turn', 'turn'), aggregateMatch(4)], clock: cap(36, 'leaderWins'), endStates: LEAGUE,
+    sport: 'kho-kho', key: 'kho_2x7', name: 'Two innings - 7-minute turns',
+    levels: [period('Turn', 'turn'), aggregateMatch(4)], clock: cap(28, 'leaderWins'),
+    endStates: STRICT, tieBreak: { minimumChase: true }, rulesSheet: KHO_RULES,
+  }),
+  // Each side chases once - the short format. Was mislabelled "Two innings of 9 minutes".
+  fmt({
+    sport: 'kho-kho', key: 'kho_2x9', name: 'One innings - 9-minute turns',
+    levels: [period('Turn', 'turn'), aggregateMatch(2)], clock: cap(18, 'leaderWins'),
+    endStates: STRICT, tieBreak: { minimumChase: true }, rulesSheet: { pointsPerOut: 1 },
   }),
 ];
 

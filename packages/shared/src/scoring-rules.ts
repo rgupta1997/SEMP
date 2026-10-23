@@ -289,6 +289,11 @@ export interface TieBreakSpec {
    * recorded 2-2, won on penalties, which is how every record of it reads.
    */
   penalties?: { kicks: number } | null;
+  /**
+   * Kho kho: still level, each side chases once more and the faster first out wins.
+   * Like a shoot-out it leaves the scoreline level (see kho-kho.ts).
+   */
+  minimumChase?: boolean | null;
 }
 
 export interface ScoringFormat {
@@ -333,6 +338,8 @@ export const END_REASONS = [
   // decided it. Kept distinct from 'normal' so a record can say "won on penalties"
   // rather than quietly presenting a shoot-out win as a win in normal time.
   'extra_time', 'penalties',
+  // Kho kho: the faster first out after a level match, and a follow-on side still behind.
+  'minimum_chase', 'innings',
 ] as const;
 export type EndReason = (typeof END_REASONS)[number];
 
@@ -411,6 +418,7 @@ export const tieBreakSpecSchema: z.ZodType<TieBreakSpec> = z.object({
   penalties: z.object({
     kicks: z.number().int().min(1).max(20),
   }).nullable().optional(),
+  minimumChase: z.boolean().nullable().optional(),
 });
 
 export const scoringFormatSchema = z.object({

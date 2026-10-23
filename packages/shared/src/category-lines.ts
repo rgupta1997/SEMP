@@ -116,6 +116,12 @@ export const COLUMN_MAP: Record<Exclude<StatFamily, 'measured' | 'cricket'>, Rec
     raid_points: 'raid_points', raids: 'raids', successful_raids: 'successful_raids',
     tackle_points: 'tackle_points', tackles: 'tackles', super_tackles: 'super_tackles',
     bonus_points: 'bonus_points', all_outs: 'all_outs',
+    super_raids: 'super_raids', do_or_die_won: 'do_or_die_won',
+    // Kho kho shares the table (rds-migrations 027).
+    touch_points: 'touch_points', pole_dive_outs: 'pole_dive_outs', dive_outs: 'dive_outs',
+    sudden_attack_outs: 'sudden_attack_outs', times_out: 'times_out',
+    out_of_field_outs: 'out_of_field_outs', late_entries: 'late_entries', kho_fouls: 'kho_fouls',
+    yellows: 'yellows', reds: 'reds',
   },
   net: {
     minutes: 'minutes',

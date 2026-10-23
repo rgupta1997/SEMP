@@ -1,6 +1,7 @@
 import { isPeriodShaped, pluralizePeriodLabel } from './match-format.js';
 import { expediteConfig, ITTF_EXPEDITE } from './rally-kernel.js';
 import { isChessSport } from './chess.js';
+import { isKhoKhoFormat } from './kho-kho.js';
 import type {
   CapAction, CapTieRule, ChangeEndsRule, LevelSpec, OfficiatingMode,
   ScoringFormat, ServeMovement, PointScoring,
@@ -83,6 +84,10 @@ export interface FormatKnobs {
   shootoutEnabled: boolean;
   /** Kicks each in the opening round. Level after that goes to sudden death. */
   shootoutKicks: number;
+  /** Kho kho: still level, the faster first out in one more chase each wins. */
+  minimumChaseEnabled: boolean;
+  /** Read-only. Kho kho offers the minimum chase instead of a shoot-out. */
+  khoKho: boolean;
 
   // ---- how it is run
   officiatingMode: OfficiatingMode;
@@ -310,10 +315,13 @@ export const KNOB_SPECS: KnobSpec[] = [
     applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled },
   { key: 'shootoutEnabled', label: 'Penalty shoot-out', group: 'tieBreak', type: 'bool',
     hint: 'Settles it when the scores are still level after extra time. The scoreline is not changed — a 1-1 won on kicks is recorded 1-1.',
-    applies: (k) => k.periodShaped && !k.drawsAllowed },
+    applies: (k) => k.periodShaped && !k.drawsAllowed && !k.khoKho },
   { key: 'shootoutKicks', label: 'Kicks each', group: 'tieBreak', type: 'int', min: 1, max: 20,
     hint: 'The opening round. Still level after that goes to sudden death, a pair at a time.',
-    applies: (k) => k.periodShaped && !k.drawsAllowed && k.shootoutEnabled },
+    applies: (k) => k.periodShaped && !k.drawsAllowed && k.shootoutEnabled && !k.khoKho },
+  { key: 'minimumChaseEnabled', label: 'Minimum chase', group: 'tieBreak', type: 'bool',
+    hint: 'Still level: each side chases once more and the faster first out wins. The score stays level.',
+    applies: (k) => k.khoKho && !k.drawsAllowed },
 
   // ---- run
   { key: 'officiatingMode', label: 'Who scores', group: 'run', type: 'enum',
@@ -412,6 +420,8 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
     extraTimeMinutes: f.tieBreak?.extraTime?.minutes ?? 5,
     shootoutEnabled: !!f.tieBreak?.penalties,
     shootoutKicks: f.tieBreak?.penalties?.kicks ?? 5,
+    minimumChaseEnabled: !!f.tieBreak?.minimumChase,
+    khoKho: isKhoKhoFormat(f),
 
     officiatingMode: f.officiatingMode,
     drawsAllowed: f.endStates.drawsAllowed,
@@ -534,7 +544,7 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
         pauseOnStoppage: f.clock?.pauseOnStoppage ?? false,
       }
       : null,
-    tieBreak: k.extraTimeEnabled || k.shootoutEnabled
+    tieBreak: k.extraTimeEnabled || k.shootoutEnabled || k.minimumChaseEnabled
       ? {
         extraTime: k.extraTimeEnabled
           ? {
@@ -542,7 +552,9 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
             minutes: Math.max(1, k.extraTimeMinutes),
           }
           : null,
-        penalties: k.shootoutEnabled ? { kicks: Math.max(1, k.shootoutKicks) } : null,
+        penalties: k.shootoutEnabled && !k.khoKho ? { kicks: Math.max(1, k.shootoutKicks) } : null,
+        // Carried through, or saving a kho kho format from the editor would drop it.
+        ...(k.minimumChaseEnabled && k.khoKho ? { minimumChase: true } : {}),
       }
       : null,
     endStates: { ...f.endStates, drawsAllowed: k.drawsAllowed },
@@ -584,10 +596,13 @@ export function describeKnobs(k: FormatKnobs): string {
   }
   // What settles it, on the row itself - so an organiser scanning a shelf of
   // formats can see which one goes to kicks without opening it.
-  if (!k.drawsAllowed && (k.extraTimeEnabled || k.shootoutEnabled)) {
+  const minChase = k.khoKho && k.minimumChaseEnabled;
+  const kicks = k.shootoutEnabled && !k.khoKho;
+  if (!k.drawsAllowed && (k.extraTimeEnabled || kicks || minChase)) {
     const chain: string[] = [];
     if (k.extraTimeEnabled) chain.push(`ET ${k.extraTimePeriods}x${k.extraTimeMinutes} min`);
-    if (k.shootoutEnabled) chain.push(`${k.shootoutKicks} kicks`);
+    if (kicks) chain.push(`${k.shootoutKicks} kicks`);
+    if (minChase) chain.push('minimum chase');
     bits.push(chain.join(' then '));
   }
   return bits.join(' · ');

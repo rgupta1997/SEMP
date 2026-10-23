@@ -16,7 +16,7 @@ import type { ScoringFormat, Side, TieBreakSpec } from './scoring-rules.js';
  *   penalties    kicks, which do NOT move the scoreline
  *   done         somebody has won, or the match is drawable and drawn
  */
-export type TiePhase = 'regulation' | 'extraTime' | 'penalties' | 'done';
+export type TiePhase = 'regulation' | 'extraTime' | 'penalties' | 'minimumChase' | 'done';
 
 export interface TieProgress {
   phase: TiePhase;
@@ -79,6 +79,10 @@ export function tieProgress(
   // Extra time exhausted (or never offered) and still level: kicks.
   if (tb?.penalties) {
     return { phase: 'penalties', extraPlayed, extraTotal, periodMs: extraMs, levelAfterRegulation };
+  }
+  // Kho kho's equivalent of the kicks: each side chases once more, fastest first out wins.
+  if (tb?.minimumChase) {
+    return { phase: 'minimumChase', extraPlayed, extraTotal, periodMs: extraMs, levelAfterRegulation };
   }
 
   // Nothing declared to settle it - the match stays open for an organiser, which is

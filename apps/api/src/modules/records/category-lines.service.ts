@@ -52,6 +52,7 @@ const ALLOWED = new Set([
   'raid_points', 'raids', 'successful_raids', 'super_raids', 'do_or_die_won',
   'tackle_points', 'tackles', 'super_tackles', 'bonus_points', 'all_outs',
   'touch_points', 'dream_run_seconds',
+  'pole_dive_outs', 'dive_outs', 'sudden_attack_outs', 'times_out', 'out_of_field_outs', 'late_entries', 'kho_fouls',
   // net
   'kills', 'digs', 'service_errors', 'attack_errors', 'reception_errors', 'sets_played',
   // board

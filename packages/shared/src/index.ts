@@ -21,6 +21,8 @@ export * from './event-scoring.js';
 export * from './event-templates.js';
 export * from './chess.js';
 export * from './carrom.js';
+export * from './kho-kho.js';
+export * from './kabaddi.js';
 export * from './result-summary.js';
 export * from './tie.js';
 export * from './played-contests.js';

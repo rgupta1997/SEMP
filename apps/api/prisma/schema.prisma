@@ -1940,6 +1940,15 @@ model raid_match_lines {
   dream_run_seconds  Int                @default(0)
   created_at         DateTime           @default(now()) @db.Timestamptz(6)
   minutes            Int?
+  pole_dive_outs     Int                @default(0)
+  dive_outs          Int                @default(0)
+  sudden_attack_outs Int                @default(0)
+  times_out          Int                @default(0)
+  out_of_field_outs  Int                @default(0)
+  late_entries       Int                @default(0)
+  kho_fouls          Int                @default(0)
+  yellows            Int                @default(0)
+  reds               Int                @default(0)
   player_match_stats player_match_stats @relation(fields: [line_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([line_id], map: "idx_raid_lines_line")

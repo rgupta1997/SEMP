@@ -989,6 +989,19 @@ describe('the buzzer', () => {
   });
 
   it('still draws a level aggregate at the cap when the format allows one', () => {
+    const f = fmtOf('pkl_2x20');
+    const log: RallyEvent[] = [
+      ...Array.from({ length: 8 }, () => ({ t: 'point', side: 'A' }) as RallyEvent),
+      { t: 'endPeriod' },
+      ...Array.from({ length: 8 }, () => ({ t: 'point', side: 'B' }) as RallyEvent),
+      { t: 'capFired' },
+    ];
+    const r = foldRally(f, log);
+    expect(r.state.outcome).toBe('draw');
+    expect(r.state.winner).toBeNull();
+  });
+
+  it('kho kho allows no draw: level at the cap stays open for the minimum chase', () => {
     const f = fmtOf('kho_4turns');
     const log: RallyEvent[] = [
       ...Array.from({ length: 8 }, () => ({ t: 'point', side: 'A' }) as RallyEvent),
@@ -998,8 +1011,8 @@ describe('the buzzer', () => {
       { t: 'capFired' },
     ];
     const r = foldRally(f, log);
-    expect(r.state.outcome).toBe('draw');
-    expect(r.state.winner).toBeNull();
+    expect(r.state.ended).toBe(false);
+    expect(r.state.outcome).toBeNull();
   });
 });
 
