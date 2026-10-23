@@ -39,6 +39,9 @@ interface FormatRow {
   created_at: Date;
 }
 
+/** Round labels the round-robin generator gives each match (generators/round-robin.ts), plus a league's added matches. */
+const POOL_OR_LEAGUE_ROUND = /^Round \d+$|- Match \d+$|^Added$/;
+
 const saveFormatSchema = z.object({
   name: z.string().min(1).max(160),
   sportId: z.string().uuid().optional(),
@@ -145,29 +148,34 @@ export function makeScoringFormatsRouter(prisma: Prisma): Router {
     // Not generated: PREDICT them from how many squads have entered, which is
     // exactly knowable for a bracket. Either way the editor only ever offers rounds
     // that will exist.
-    let rounds: Array<{ round: string; matches: number; stageSequence: number }> = [];
+    let rounds: Array<{ round: string; matches: number; stageSequence: number; stageWide?: boolean }> = [];
     let entrants = 0;
     try {
       entrants = await prisma.team_entries.count({ where: { tournament_discipline_id: req.params.id } });
       const fx = await prisma.fixtures.findMany({
         where: { tournament_discipline_id: req.params.id },
-        select: { round: true, stage_sequence: true, bracket_position: true, scheduled_at: true },
+        select: { round: true, stage_sequence: true, bracket_position: true, scheduled_at: true, pool_number: true },
       });
       if (fx.length) {
-        const seen = new Map<string, { round: string; matches: number; stageSequence: number; order: number }>();
+        const seen = new Map<string, { round: string; matches: number; stageSequence: number; order: number; stageWide?: boolean }>();
         fx.forEach((f, i) => {
           if (!f.round) return;
           const stage = f.stage_sequence ?? 1;
-          const key = `${stage}|${f.round}`;
+          // Pool and league matches are each labelled on their own ("Pool A - Match 3",
+          // "Round 5") - one row per stage for them, which a stage-wide rule covers.
+          const pooled = f.pool_number != null || POOL_OR_LEAGUE_ROUND.test(f.round);
+          const key = pooled ? `${stage}|*` : `${stage}|${f.round}`;
           const existing = seen.get(key);
           if (existing) { existing.matches += 1; return; }
-          seen.set(key, { round: f.round, matches: 1, stageSequence: stage, order: i });
+          seen.set(key, pooled
+            ? { round: f.pool_number != null ? 'Pool stage' : 'League matches', matches: 1, stageSequence: stage, order: i, stageWide: true }
+            : { round: f.round, matches: 1, stageSequence: stage, order: i });
         });
         // Play order: a bracket's rounds should read R16 -> QF -> SF -> Final, which
         // is descending match count, not insertion order.
         rounds = [...seen.values()]
           .sort((a, b) => a.stageSequence - b.stageSequence || b.matches - a.matches || a.order - b.order)
-          .map(({ round, matches, stageSequence }) => ({ round, matches, stageSequence }));
+          .map(({ round, matches, stageSequence, stageWide }) => ({ round, matches, stageSequence, ...(stageWide ? { stageWide } : {}) }));
       } else if (entrants >= 2) {
         rounds = predictKnockoutRounds(entrants).map((round, i) => ({
           // A predicted round's match count halves each time from the bracket size.

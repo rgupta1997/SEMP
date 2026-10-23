@@ -948,6 +948,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
         deciderReceiverSwitch(spec, lv, state, before, base.inDecider);
         base.unitsWon = cascade(format, state, state.pointLevel);
         base.unitsWon = [...base.unitsWon, ...afterBuzzer(format, state, base.unitsWon.length > 0)];
+        if (!state.ended) aggregateFinish(format, state);
       }
       break;
     }
@@ -1094,6 +1095,28 @@ export function isDecider(format: ScoringFormat, state: KernelState, i: number):
  * match stays open so extra time or a shoot-out can settle it, which is the honest
  * behaviour rather than inventing a winner.
  */
+/**
+ * Two ways an aggregate match ends on a point rather than a whistle (ultimate):
+ * the first side to `firstTo` wins at once, and once every period - extra time
+ * included - is played level, the next point wins (`universalPoint`).
+ */
+function aggregateFinish(format: ScoringFormat, state: KernelState): void {
+  const top = format.levels[format.levels.length - 1];
+  if (top?.decide !== 'aggregate') return;
+  const [a, b] = aggregateScore(state);
+  if (a === b) return;
+  const lead: Side = a > b ? 'A' : 'B';
+  const reachedTarget = !!top.firstTo && Math.max(a, b) >= top.firstTo;
+  const played = state.finished.filter((u) => u.level === 0).length;
+  const allPlayed = played >= top.target + (format.tieBreak?.extraTime?.periods ?? 0);
+  const universal = !!format.tieBreak?.universalPoint && allPlayed;
+  if (!reachedTarget && !universal) return;
+  state.ended = true;
+  state.outcome = 'win';
+  state.winner = lead;
+  state.reason = state.reason ?? 'normal';
+}
+
 function endPeriod(format: ScoringFormat, state: KernelState): FinishedUnit[] {
   const at = state.pointLevel;
   const spec = effectiveLevel(format, state, at);
@@ -1127,6 +1150,10 @@ function endPeriod(format: ScoringFormat, state: KernelState): FinishedUnit[] {
 
   const played = state.finished.filter((u) => u.level === 0).length;
   if (played < topSpec.target) return [unit];
+  // Extra time is played out in full - a lead after its first half is not a win yet
+  // (TieBreakSpec.extraTime). A repeating overtime (basketball) decides every period.
+  const extra = format.tieBreak?.extraTime;
+  if (extra && !extra.repeat && played > topSpec.target && played < topSpec.target + extra.periods) return [unit];
 
   // Last period done: decide on the total.
   const total = aggregateScore(state);

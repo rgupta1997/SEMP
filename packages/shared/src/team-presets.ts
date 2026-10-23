@@ -303,10 +303,22 @@ const INVASION: ScoringFormat[] = [
     mode: 'selfScored', changeEnds: 'never', endStates: STRICT,
     rulesSheet: { selfRefereed: true, spiritOfTheGame: 'scored separately, not by the console' },
   }),
+  // Ultimate with a time cap (IIMK, most college events): first to 13, else whoever
+  // leads after two halves of 20. Level at the cap: the universal point - next goal wins.
+  // Key predates the name; it was a plain timed match that could end drawn.
   fmt({
-    sport: 'frisbee', key: 'ultimate_2x20', name: 'Two halves of 20 minutes',
-    levels: [period('Half', 'half'), aggregateMatch(2)], mode: 'selfScored',
-    clock: cap(40, 'leaderWins'), endStates: LEAGUE,
+    sport: 'frisbee', key: 'ultimate_2x20', name: 'First to 13, 40-minute cap (two halves of 20)',
+    levels: [period('Half', 'half'), { ...aggregateMatch(2), firstTo: 13 }],
+    clock: cap(40, 'leaderWins'), endStates: STRICT, tieBreak: { universalPoint: true },
+    rulesSheet: { timeoutsPerTeam: 1, timeoutSeconds: 60, halftimeMinutes: 5 },
+  }),
+  // The final: still level at the cap plays extra time of 8 + 8 first.
+  fmt({
+    sport: 'frisbee', key: 'ultimate_final_2x20', name: 'Final - first to 13, 40-minute cap, extra time 8 + 8',
+    levels: [period('Half', 'half'), { ...aggregateMatch(2), firstTo: 13 }],
+    clock: cap(40, 'leaderWins'), endStates: STRICT,
+    tieBreak: { extraTime: { periods: 2, minutes: 8 }, universalPoint: true },
+    rulesSheet: { timeoutsPerTeam: 1, timeoutSeconds: 60, extraTime: 'two halves of 8, then universal point' },
   }),
 ];
 

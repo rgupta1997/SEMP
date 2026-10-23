@@ -4,7 +4,7 @@ import {
   aggregateScore, capLeader, changesEndsAfterUnit, effectiveLevel, foldRally, isDecider, isAggregate, periodsPlayed, resultEnvelope,
   clockReading, formatClock, minuteLabel, tieProgress, shootoutState, shootoutLine, shootoutEnd,
   isKhoKhoFormat, khoStatus, khoTurnLines, minChaseState, minChaseEnd, inningsEnd, formatChaseTime, parseChaseTime, KHO_END_LABEL,
-  isKabaddiFormat, kabaddiStatus,
+  isKabaddiFormat, kabaddiStatus, canonicalTeamSport,
   type ClockReading, type ShootoutState, type MinChaseState,
   statSpecFor, type EventTone, type KernelState, type RallyEvent, type RallyLog, type ScoringFormat,
   type Side, type StatEventSpec,
@@ -410,7 +410,9 @@ export function TeamDeck(p: TeamDeckProps) {
           ? `Still ${shown[0]}–${shown[1]} after extra time. This goes to a penalty shoot-out.`
           : level && !inExtra && format.tieBreak?.extraTime
             ? `Level at ${shown[0]}–${shown[1]}. This goes to ${(extraSpec?.label ?? 'extra time').toLowerCase()}${extraSpec?.repeat ? ` (${extraSpec.minutes} min, repeated until someone leads)` : ''}.`
-            : `This is the last ${periodName.toLowerCase()}. The match is decided on the total, currently ${shown[0]}–${shown[1]}.`,
+            : level && format.tieBreak?.universalPoint
+              ? `Level at ${shown[0]}-${shown[1]}. Universal point: the next goal wins the match.`
+              : `This is the last ${periodName.toLowerCase()}. The match is decided on the total, currently ${shown[0]}–${shown[1]}.`,
     });
     if (ok) push({ t: 'endPeriod' });
   };
@@ -448,6 +450,7 @@ export function TeamDeck(p: TeamDeckProps) {
               {progress.phase === 'penalties'
                 ? 'Penalties'
                 : progress.phase === 'minimumChase' ? 'Minimum chase'
+                : progress.phase === 'universalPoint' ? 'Universal point'
                 : aggregate ? (repeatingExtra ? `${periodName} ${periodNo}` : `${periodName} ${periodNo} of ${periodOf}`) : lv.label}
             </div>
 
@@ -456,7 +459,8 @@ export function TeamDeck(p: TeamDeckProps) {
                 not have to go hunting for where to fix it. */}
             {/* No clock in a shoot-out - kicks are not timed, and a running clock
                 with a KICK OFF button under it invites an official to start one. */}
-            {clockPeriods && !state.ended && progress.phase !== 'penalties' && progress.phase !== 'minimumChase' && !khoNow?.wonByInnings ? (
+            {clockPeriods && !state.ended && progress.phase !== 'penalties' && progress.phase !== 'minimumChase'
+              && progress.phase !== 'universalPoint' && !khoNow?.wonByInnings ? (
               <>
                 <button type="button" data-qa="clock-face"
                   onClick={() => setSurface(surface === 'clock' ? 'act' : 'clock')}
@@ -478,12 +482,14 @@ export function TeamDeck(p: TeamDeckProps) {
                       ? 'bg-red-600 text-white hover:bg-red-700'
                       : 'bg-emerald-500 text-white hover:bg-emerald-600',
                   )}>
-                  {clock.running ? 'Stop' : clock.started ? 'Start' : kho ? 'Start turn' : kab ? 'Start half' : 'Kick off'}
+                  {clock.running ? 'Stop' : clock.started ? 'Start' : kho ? 'Start turn'
+                    : kab || canonicalTeamSport(format.sport) === 'frisbee' ? 'Start half' : 'Kick off'}
                 </button>
               </>
             ) : (
               <div className="font-mono text-[10px] uppercase tracking-wider text-on-brand">
-                {progress.phase === 'penalties' || progress.phase === 'minimumChase' ? 'Level' : aggregate ? 'Total' : lv.label}
+                {progress.phase === 'universalPoint' ? 'Next goal wins'
+                  : progress.phase === 'penalties' || progress.phase === 'minimumChase' ? 'Level' : aggregate ? 'Total' : lv.label}
               </div>
             )}
             {!aggregate && maxUnits > 1 && (
@@ -961,7 +967,7 @@ export function TeamDeck(p: TeamDeckProps) {
                 // still does not blow itself - stoppage time is the official's call,
                 // and a clock that ended halves would end them mid-added-time.
                 clock.overrun && 'animate-pulse ring-2 ring-amber-400 ring-offset-1 dark:ring-offset-slate-900')}
-              disabled={p.disabled || p.busy} onClick={endPeriod}>
+              disabled={p.disabled || p.busy || progress.phase === 'universalPoint'} onClick={endPeriod}>
               End {periodName.toLowerCase()} {periodNo}
             </Button>
           )}

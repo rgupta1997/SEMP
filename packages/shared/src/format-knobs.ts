@@ -86,6 +86,10 @@ export interface FormatKnobs {
   shootoutKicks: number;
   /** Kho kho: still level, the faster first out in one more chase each wins. */
   minimumChaseEnabled: boolean;
+  /** Ultimate: still level, the next point wins. */
+  universalPointEnabled: boolean;
+  /** Timed match that also ends when a side reaches this total. 0 = no target. */
+  firstTo: number;
   /** Read-only. Kho kho offers the minimum chase instead of a shoot-out. */
   khoKho: boolean;
 
@@ -322,6 +326,12 @@ export const KNOB_SPECS: KnobSpec[] = [
   { key: 'minimumChaseEnabled', label: 'Minimum chase', group: 'tieBreak', type: 'bool',
     hint: 'Still level: each side chases once more and the faster first out wins. The score stays level.',
     applies: (k) => k.khoKho && !k.drawsAllowed },
+  { key: 'universalPointEnabled', label: 'Universal point', group: 'tieBreak', type: 'bool',
+    hint: 'Still level after the last period (and any extra time): the next point wins.',
+    applies: (k) => k.periodShaped && !k.drawsAllowed && !k.khoKho },
+  { key: 'firstTo', label: 'Win at this score', group: 'shape', type: 'int', min: 0, max: 99,
+    hint: 'The first side to this total wins straight away, even before time is up (ultimate: 13). 0 = off.',
+    applies: (k) => k.periodShaped && !k.khoKho },
 
   // ---- run
   { key: 'officiatingMode', label: 'Who scores', group: 'run', type: 'enum',
@@ -421,6 +431,8 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
     shootoutEnabled: !!f.tieBreak?.penalties,
     shootoutKicks: f.tieBreak?.penalties?.kicks ?? 5,
     minimumChaseEnabled: !!f.tieBreak?.minimumChase,
+    universalPointEnabled: !!f.tieBreak?.universalPoint,
+    firstTo: top.firstTo ?? 0,
     khoKho: isKhoKhoFormat(f),
 
     officiatingMode: f.officiatingMode,
@@ -516,9 +528,13 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
   // score, not units won. Rebuilding it from scratch silently dropped that flag
   // on every save, turning a kho-kho format's four-turns-decided-by-aggregate
   // into a nonsensical best-of-seven the moment anyone touched its rules.
+  // `firstTo` only means something on an aggregate match; dropped when set to 0.
+  const topRest: LevelSpec = { ...baseTop };
+  delete topRest.firstTo;
+  const firstTo = k.periodShaped && k.firstTo > 0 ? { firstTo: k.firstTo } : {};
   const levels: LevelSpec[] = k.unitsToWin > 1
-    ? [inner, { ...baseTop, target: k.unitsToWin, winBy: 1, cap: null }]
-    : [inner, { ...baseTop, target: 1, winBy: 1, cap: null }];
+    ? [inner, { ...topRest, ...firstTo, target: k.unitsToWin, winBy: 1, cap: null }]
+    : [inner, { ...topRest, ...firstTo, target: 1, winBy: 1, cap: null }];
 
   return {
     ...f,
@@ -544,8 +560,9 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
         pauseOnStoppage: f.clock?.pauseOnStoppage ?? false,
       }
       : null,
-    tieBreak: k.extraTimeEnabled || k.shootoutEnabled || k.minimumChaseEnabled
+    tieBreak: k.extraTimeEnabled || k.shootoutEnabled || k.minimumChaseEnabled || k.universalPointEnabled
       ? {
+        ...(k.universalPointEnabled && !k.khoKho ? { universalPoint: true } : {}),
         extraTime: k.extraTimeEnabled
           ? {
             periods: Math.max(1, k.extraTimePeriods),
@@ -580,6 +597,7 @@ export function describeKnobs(k: FormatKnobs): string {
   if (k.periodShaped) {
     const label = pluralizePeriodLabel(k.periodLabel || 'period', k.unitsToWin).toLowerCase();
     bits.push(`${k.unitsToWin} ${label}`);
+    if (k.firstTo > 0 && !k.khoKho) bits.push(`first to ${k.firstTo}`);
   } else {
     bits.push(k.unitsToWin > 1 ? `best of ${k.unitsToWin * 2 - 1} to ${k.target}` : `single game to ${k.target}`);
     bits.push(k.winBy > 1 ? `win by ${k.winBy}` : 'sudden death');
@@ -598,11 +616,13 @@ export function describeKnobs(k: FormatKnobs): string {
   // formats can see which one goes to kicks without opening it.
   const minChase = k.khoKho && k.minimumChaseEnabled;
   const kicks = k.shootoutEnabled && !k.khoKho;
-  if (!k.drawsAllowed && (k.extraTimeEnabled || kicks || minChase)) {
+  const universal = k.universalPointEnabled && !k.khoKho;
+  if (!k.drawsAllowed && (k.extraTimeEnabled || kicks || minChase || universal)) {
     const chain: string[] = [];
     if (k.extraTimeEnabled) chain.push(`ET ${k.extraTimePeriods}x${k.extraTimeMinutes} min`);
     if (kicks) chain.push(`${k.shootoutKicks} kicks`);
     if (minChase) chain.push('minimum chase');
+    if (universal) chain.push('universal point');
     bits.push(chain.join(' then '));
   }
   return bits.join(' · ');

@@ -167,6 +167,11 @@ export interface LevelSpec {
   terminator?: Terminator;
   /** How this level is decided from the units below. Defaults to `units`. */
   decide?: Decider;
+  /**
+   * Aggregate match only: the first side to this TOTAL wins at once, clock or not -
+   * ultimate's "first to 13 within a 40-minute cap".
+   */
+  firstTo?: number;
   /** Hard ceiling - reaching it wins regardless of margin. null = unbounded deuce. */
   cap: number | null;
   /** Handicap start, applied at the beginning of every unit at this level. */
@@ -294,6 +299,11 @@ export interface TieBreakSpec {
    * Like a shoot-out it leaves the scoreline level (see kho-kho.ts).
    */
   minimumChase?: boolean | null;
+  /**
+   * Ultimate: still level after the last period (and any extra time), the next point
+   * wins - the "universal point". Decided by the kernel on that point.
+   */
+  universalPoint?: boolean | null;
 }
 
 export interface ScoringFormat {
@@ -381,6 +391,7 @@ export const levelSpecSchema: z.ZodType<LevelSpec, z.ZodTypeDef, unknown> = z.la
   winBy: z.number().int().positive(),
   terminator: z.enum(TERMINATORS).optional(),
   decide: z.enum(DECIDERS).optional(),
+  firstTo: z.number().int().positive().optional(),
   cap: z.number().int().positive().nullable(),
   startingScore: z.tuple([z.number().int(), z.number().int()]).optional(),
   pointLabels: z.array(z.string()).optional(),
@@ -419,6 +430,7 @@ export const tieBreakSpecSchema: z.ZodType<TieBreakSpec> = z.object({
     kicks: z.number().int().min(1).max(20),
   }).nullable().optional(),
   minimumChase: z.boolean().nullable().optional(),
+  universalPoint: z.boolean().nullable().optional(),
 });
 
 export const scoringFormatSchema = z.object({

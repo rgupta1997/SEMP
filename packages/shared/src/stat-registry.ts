@@ -452,6 +452,29 @@ const BASKET_METRICS: StatMetric[] = [
   perMatch('points_per_match', 'Points per match', 'P/M', 'points_scored'),
 ];
 
+// Ultimate (WFDF): a goal is a catch in the end zone, the assist is the throw. No
+// cards, no penalties, no keeper - football's set was wrong here. A Callahan is a
+// defender's catch in the end zone they attack: a goal and a block in one.
+const ULTIMATE_EVENTS: StatEventSpec[] = [
+  ev('goal', 'Goal', { goals: 1 }, {
+    points: 1, tone: 'score',
+    secondPlayer: { key: 'assist', label: 'Assisted by (thrower)', optional: true },
+    secondPlayerMetrics: { assists: 1 },
+  }),
+  ev('callahan', 'Callahan', { goals: 1, blocks: 1 }, { points: 1, tone: 'score' }),
+  ev('ul_block', 'Block (D)', { blocks: 1 }, { tone: 'good' }),
+  ev('ul_turnover', 'Turnover', { turnovers: 1 }, { tone: 'error' }),
+];
+
+const ULTIMATE_METRICS: StatMetric[] = [
+  ...UNIVERSAL,
+  count('goals', 'Goals', 'G', { fromEvents: ['goal', 'callahan'], headline: true }),
+  count('assists', 'Assists', 'A', { fromEvents: ['goal'], headline: true }),
+  count('blocks', 'Blocks (Ds)', 'D', { fromEvents: ['ul_block', 'callahan'], headline: true }),
+  count('turnovers', 'Turnovers', 'TO', { fromEvents: ['ul_turnover'], higherIsBetter: false }),
+  perMatch('goals_per_match', 'Goals per match', 'G/M', 'goals'),
+];
+
 // ---- raid & tag ------------------------------------------------------------
 
 // Kabaddi (AKFI / IIMK rules). The raiding side records how the raid ended, the
@@ -705,7 +728,7 @@ export const TEAM_STAT_SPECS: SportStatSpec[] = [
   spec('futsal', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['GK', 'DEF', 'MID', 'FWD']),
   spec('hockey', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['GK', 'DEF', 'MID', 'FWD']),
   spec('handball', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['GK', 'BACK', 'WING', 'PIVOT']),
-  spec('frisbee', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['handler', 'cutter']),
+  spec('frisbee', 'invasion', ULTIMATE_METRICS, ULTIMATE_EVENTS, ['handler', 'cutter']),
   {
     ...spec('basketball', 'invasion', BASKET_METRICS, BASKET_EVENTS, ['PG', 'SG', 'SF', 'PF', 'C']),
     attempts: { missEvents: ['ft_miss'], metrics: ['ftm', 'fta'] },
