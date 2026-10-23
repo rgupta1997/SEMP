@@ -673,3 +673,23 @@ describe('a match settled on penalties', () => {
     expect((entries[0].detail as { score?: string }).score).toBe('2-2 (2-1 pens)');
   });
 });
+
+describe('a kho kho match settled beyond the score', () => {
+  const settled = (reason: 'minimum_chase' | 'innings', home: number, away: number) => deriveRecords(input({
+    home_score: home, away_score: away,
+    live_state: { rally: [{ t: 'end', outcome: 'win', winner: 'A', reason }] },
+  })).entries;
+
+  it('says it was won on minimum chase, beside the level score', () => {
+    const entries = settled('minimum_chase', 8, 8);
+    expect(entries.find((e) => e.user_id === 'u1')?.title).toBe('IIMB vs IIMA - Won on minimum chase');
+    expect(entries.find((e) => e.user_id === 'u3')?.title).toBe('IIMA vs IIMB - Lost on minimum chase');
+    expect((entries[0].detail as { score?: string }).score).toBe('8-8 (min. chase)');
+  });
+
+  it('says it was won by an innings', () => {
+    const entries = settled('innings', 12, 5);
+    expect(entries.find((e) => e.user_id === 'u1')?.title).toBe('IIMB vs IIMA - Won by an innings');
+    expect((entries[0].detail as { score?: string }).score).toBe('12-5 (by an innings)');
+  });
+});

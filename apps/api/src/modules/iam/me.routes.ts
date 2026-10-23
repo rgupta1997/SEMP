@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { shootoutOf, type Shootout } from '@semp/shared';
+import { canonicalTeamSport, khoSettlementOf, shootoutOf, type Shootout } from '@semp/shared';
 import { myMatchStats } from '../records/my-match-stats.service.js';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -108,6 +108,7 @@ function toMatchSummary(f: FixtureRow, myTeamIds: Set<string>) {
     my_score: myScore ?? null,
     opp_score: oppScore ?? null,
     pens: pensFor(shootoutOf(f.live_state), isHome),
+    settled: khoSettlementOf(f.live_state)?.reason ?? null,
     result: resultFor(f, myTeamIds),
   };
 }
@@ -145,8 +146,11 @@ const matchSelect = {
   },
 } as const;
 
+/** How a match was settled beyond its score: shoot-out kicks, or a kho kho minimum chase / innings win. */
+interface Settlement { pens: Shootout | null; settled: 'minimum_chase' | 'innings' | null }
+
 // MatchSummary built from a `matchSelect` row. `shootouts` comes from loadShootouts.
-function summariseLean(f: FixtureRow, myTeamIds: Set<string>, shootouts?: Map<string, Shootout>) {
+function summariseLean(f: FixtureRow, myTeamIds: Set<string>, shootouts?: Map<string, Settlement>) {
   const isHome = f.home_team_id != null && myTeamIds.has(f.home_team_id);
   const mine = isHome ? f.teams_fixtures_home_team_idToteams : f.teams_fixtures_away_team_idToteams;
   const opp = isHome ? f.teams_fixtures_away_team_idToteams : f.teams_fixtures_home_team_idToteams;
@@ -161,7 +165,8 @@ function summariseLean(f: FixtureRow, myTeamIds: Set<string>, shootouts?: Map<st
     opponent: opp ? { id: opp.id, name: opp.name, short_name: opp.short_name ?? null, organization: opp.organizations?.short_name ?? opp.organizations?.name ?? null } : null,
     my_score: (isHome ? f.home_score : f.away_score) ?? null,
     opp_score: (isHome ? f.away_score : f.home_score) ?? null,
-    pens: pensFor(shootouts?.get(f.id), isHome),
+    pens: pensFor(shootouts?.get(f.id)?.pens, isHome),
+    settled: shootouts?.get(f.id)?.settled ?? null,
     result: resultFor(f, myTeamIds),
   };
 }
@@ -267,16 +272,19 @@ export function makeMeRouter(prisma: Prisma): Router {
 
   // Shoot-outs for a list of lean rows. Only a level score with a winner can be one, so
   // the (large) live_state is read for those few rows, not the whole career.
-  async function loadShootouts(rows: FixtureRow[]): Promise<Map<string, Shootout>> {
+  async function loadShootouts(rows: FixtureRow[]): Promise<Map<string, Settlement>> {
+    // Level-score winners (shoot-out, minimum chase), plus any decided kho kho match (innings win).
     const ids = rows
-      .filter((f) => f.winner_team_id && f.home_score != null && f.home_score === f.away_score)
+      .filter((f) => f.winner_team_id && ((f.home_score != null && f.home_score === f.away_score)
+        || canonicalTeamSport(f.tournament_disciplines?.tournament_sports?.sports?.name) === 'kho-kho'))
       .map((f) => f.id as string);
-    const out = new Map<string, Shootout>();
+    const out = new Map<string, Settlement>();
     if (ids.length === 0) return out;
     const logs = await prisma.fixtures.findMany({ where: { id: { in: ids } }, select: { id: true, live_state: true } });
     for (const l of logs) {
-      const s = shootoutOf(l.live_state);
-      if (s) out.set(l.id, s);
+      const pens = shootoutOf(l.live_state);
+      const settled = khoSettlementOf(l.live_state)?.reason ?? null;
+      if (pens || settled) out.set(l.id, { pens, settled });
     }
     return out;
   }
@@ -834,6 +842,7 @@ export function makeMeRouter(prisma: Prisma): Router {
         my_score: isHome ? f.home_score : f.away_score,
         opp_score: isHome ? f.away_score : f.home_score,
         pens: pensFor(shootoutOf(f.live_state), isHome),
+        settled: khoSettlementOf(f.live_state)?.reason ?? null,
         result: resultFor(f, myTeamIds),
         venue: ground ? { ground: ground.name, venue_name: ground.venues?.name ?? null, city: ground.venues?.city ?? null } : null,
         sport: mine.sports?.name ?? ts?.sports?.name ?? null,

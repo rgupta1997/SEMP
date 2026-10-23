@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Calendar, Flag, MapPin } from 'lucide-react';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints, KHO_END_LABEL, KHO_END_SHORT, khoSettlementOf, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
 import { useApi, fmtDateTime } from '../../lib/hooks';
 import { Badge, Card, EmptyState, ListToolbar, Segmented, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
 import { FitName } from '../FitName';
@@ -185,6 +185,8 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
             const awayWon = f.winner_team_id != null && f.winner_team_id === f.away?.id;
             const early = earlyEndOf(f.live_state);
             const pens = scored ? shootoutOf(f.live_state) : null;
+            // Kho kho: a level score settled on minimum chase, or a win by an innings.
+            const khoEnd = scored ? khoSettlementOf(f.live_state) : null;
             return (
               // "v" dead centre, whatever the names: equal side columns around the match on
               // wider screens, and two equal name columns around the score inside it.
@@ -220,6 +222,12 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
                         {pens && (
                           <span className="whitespace-nowrap text-[10px] font-semibold leading-3 text-brand-600 dark:text-brand-400" title="Won on penalties">
                             {shootoutLabel(pens.home, pens.away)}
+                          </span>
+                        )}
+                        {khoEnd && (
+                          <span className="whitespace-nowrap text-[10px] font-semibold leading-3 text-brand-600 dark:text-brand-400"
+                            title={KHO_END_LABEL[khoEnd.reason]}>
+                            {KHO_END_SHORT[khoEnd.reason]}
                           </span>
                         )}
                       </span>

@@ -885,6 +885,11 @@ export function ResultsPage() {
                               </span>
                             </div>
                           ))}
+                          {khoEnd && (
+                            <span className="truncate text-[12px] font-semibold text-brand-600 dark:text-brand-400">
+                              {teamLabel(khoEnd.winner === 'A' ? f.home : f.away)} {KHO_END_LABEL[khoEnd.reason]}
+                            </span>
+                          )}
                           {summary && <span className="t-num truncate text-[12px] text-slate-500 dark:text-slate-400">{summary}</span>}
                         </div>
                       )}

@@ -1,6 +1,6 @@
 import {
   PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor, playedContests, seatIn,
-  earlyEndOf, formatPoints, shootoutOf, THIRD_PLACE_ROUND, type EarlyEnd, type PlayedContest,
+  earlyEndOf, formatPoints, KHO_END_SHORT, KHO_RESULT_WORDS, khoSettlementOf, shootoutOf, THIRD_PLACE_ROUND, type EarlyEnd, type PlayedContest,
   type AchievementKind, type EventSpec, type EventState, type FormatTemplate,
   type LifetimeEntryKind, type MatchOutcome, type Medal, type StandingsPlacement,
 } from '@semp/shared';
@@ -300,6 +300,9 @@ function entryTitle(fx: DerivableFixture, teamId: string | null): string {
     const [a, b] = teamId && teamId === fx.away_team_id ? [pens.away, pens.home] : [pens.home, pens.away];
     return `${versus}${TITLE_SEP}${verb} ${a}-${b} on penalties`;
   }
+  // Kho kho: "Won on minimum chase", "Lost by an innings".
+  const kho = verb ? khoSettlementOf(fx.live_state) : null;
+  if (kho) return `${versus}${TITLE_SEP}${verb} ${KHO_RESULT_WORDS[kho.reason]}`;
   return verb ? `${versus}${TITLE_SEP}${verb}${why}` : versus;
 }
 
@@ -310,7 +313,9 @@ function fixtureScore(fx: DerivableFixture): string | null {
   if (fx.home_score == null || fx.away_score == null) return null;
   const pens = shootoutOf(fx.live_state);
   const base = `${formatPoints(fx.home_score)}-${formatPoints(fx.away_score)}`;
-  return pens ? `${base} (${pens.home}-${pens.away} pens)` : base;
+  if (pens) return `${base} (${pens.home}-${pens.away} pens)`;
+  const kho = khoSettlementOf(fx.live_state);
+  return kho ? `${base} (${KHO_END_SHORT[kho.reason]})` : base;
 }
 
 /**

@@ -1947,7 +1947,9 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       // list, which is what made the award and the lock unreachable from the match
       // that had just finished: the console was gone before either was offered.
       // The card below now carries both, and leaving is the official's own choice.
-      onSignOff={(nextLog, state) => save(nextLog, state, true)}
+      // Keep the deck's log too: an innings, minimum-chase or shoot-out sign-off adds
+      // the ending event, and without it the deck kept showing the confirm card.
+      onSignOff={(nextLog, state) => { setLog(nextLog); save(nextLog, state, true); }}
     />
     </>
   );

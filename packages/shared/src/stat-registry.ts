@@ -533,7 +533,9 @@ const RAID_METRICS: StatMetric[] = [
 
 // Kho kho: every way out on the KKFI score sheet, tapped on the DEFENDER who went out.
 // The point goes to the chasing side; the chaser who made the out rides along.
-const KHO_CHASER = { key: 'chaser', label: 'Out by (chaser)', optional: true, fromOpponent: true };
+// Required: the console asks for the chaser on every such out ("Not sure" is allowed),
+// or the chasers' career stats would only fill when a scorer remembered to open a row.
+const KHO_CHASER = { key: 'chaser', label: 'Out by (chaser)', optional: false, fromOpponent: true };
 const khoOut = (key: string, label: string, metrics: Record<string, number>, chaserMetrics?: Record<string, number>) =>
   ev(key, label, { times_out: 1, ...metrics }, {
     points: 1, forOpponent: true, tone: 'ownGoal', role: 'defend',

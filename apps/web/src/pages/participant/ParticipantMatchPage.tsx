@@ -5,7 +5,7 @@ import { titleCase } from '../../lib/format';
 import { BackButton, Card, CardBody, CardHeader, EmptyState, Spinner, StatusBadge } from '../../components/ui';
 import { ResultBadge } from '../../components/participant/ResultBadge';
 import type { MatchResult } from '../../components/participant/types';
-import { formatPoints, TBD_LABEL, type MatchOutcome } from '@semp/shared';
+import { formatPoints, KHO_RESULT_WORDS, TBD_LABEL, type MatchOutcome } from '@semp/shared';
 
 interface MatchDetail {
   fixture: {
@@ -20,6 +20,7 @@ interface MatchDetail {
     my_score: number | null;
     opp_score: number | null;
     pens?: [number, number] | null;
+    settled?: 'minimum_chase' | 'innings' | null;
     result: MatchResult;
     venue: { ground: string | null; venue_name: string | null; city: string | null } | null;
     sport: string | null;
@@ -110,6 +111,11 @@ export function ParticipantMatchPage() {
           {f.pens && (
             <div className="mt-2 text-center text-sm font-semibold text-brand-600 dark:text-brand-400">
               {f.result === 'won' ? 'Won' : 'Lost'} {f.pens[0]}–{f.pens[1]} on penalties
+            </div>
+          )}
+          {f.settled && (f.result === 'won' || f.result === 'lost') && (
+            <div className="mt-2 text-center text-sm font-semibold text-brand-600 dark:text-brand-400">
+              {f.result === 'won' ? 'Won' : 'Lost'} {KHO_RESULT_WORDS[f.settled]}
             </div>
           )}
           <div className="mt-4 flex justify-center">

@@ -38,6 +38,8 @@ export interface MatchSummary {
   opp_score: number | null;
   /** Shoot-out kicks [mine, theirs] when a level match was settled on penalties. */
   pens?: [number, number] | null;
+  /** Kho kho: settled on minimum chase or won by an innings. */
+  settled?: 'minimum_chase' | 'innings' | null;
   result: MatchResult;
 }
 

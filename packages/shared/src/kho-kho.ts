@@ -162,6 +162,12 @@ export const KHO_END_SHORT: Record<'minimum_chase' | 'innings', string> = {
   innings: 'by an innings',
 };
 
+/** After a player's own "Won"/"Lost": "Won on minimum chase", "Lost by an innings". */
+export const KHO_RESULT_WORDS: Record<'minimum_chase' | 'innings', string> = {
+  minimum_chase: 'on minimum chase',
+  innings: 'by an innings',
+};
+
 /** How a finished kho kho match was settled, read from its saved log; null for a plain win. */
 export function khoSettlementOf(liveState: unknown): { reason: 'minimum_chase' | 'innings'; winner: Side } | null {
   const raw = (liveState as { rally?: unknown } | null)?.rally;

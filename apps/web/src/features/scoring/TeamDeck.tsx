@@ -1,9 +1,9 @@
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Undo2 } from 'lucide-react';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   aggregateScore, capLeader, changesEndsAfterUnit, effectiveLevel, foldRally, isDecider, isAggregate, periodsPlayed, resultEnvelope,
   clockReading, formatClock, minuteLabel, tieProgress, shootoutState, shootoutLine, shootoutEnd,
-  isKhoKhoFormat, khoStatus, khoTurnLines, minChaseState, minChaseEnd, inningsEnd, formatChaseTime, parseChaseTime, KHO_END_LABEL,
+  isKhoKhoFormat, khoStatus, khoTurnLines, minChaseState, minChaseEnd, inningsEnd, formatChaseTime, parseChaseTime, KHO_END_LABEL, MIN_CHASE_GRACE_MS,
   isKabaddiFormat, kabaddiStatus, canonicalTeamSport,
   type ClockReading, type ShootoutState, type MinChaseState,
   statSpecFor, type EventTone, type KernelState, type RallyEvent, type RallyLog, type ScoringFormat,
@@ -143,6 +143,7 @@ export function TeamDeck(p: TeamDeckProps) {
   const [assistOpen, setAssistOpen] = useState(false);
   // Substitutes sit behind a tap: most actions belong to someone on the field.
   const [subsOpen, setSubsOpen] = useState(false);
+  const [secondSubsOpen, setSecondSubsOpen] = useState(false);
   // Substitutes just credited with something, each waiting for "who went off for them?".
   const [cameOn, setCameOn] = useState<Array<{ side: Side; id: string }>>([]);
   const [finishing, setFinishing] = useState(false);
@@ -328,6 +329,10 @@ export function TeamDeck(p: TeamDeckProps) {
   const canAttribute = events.length > 0 && players.length > 0;
   // Only a goal-shaped action offers a second person; nothing else does.
   const wantsSecond = sideEvents.some((e) => e.secondPlayer);
+  // A required second person (kho kho's chaser on an out): asked on every such tap,
+  // with "Not sure" so a scorer is never blocked - it records the out, credits nobody.
+  const needsSecond = (ev: StatEventSpec) => !!ev.secondPlayer && !ev.secondPlayer.optional;
+  const secondRequired = sideEvents.some(needsSecond);
 
   /**
    * Fire one declared action.
@@ -353,16 +358,24 @@ export function TeamDeck(p: TeamDeckProps) {
       kind: ev.key,
       label: ev.scoresValue && n ? `${ev.label} +${n}` : ev.label,
       ...(actor && !teamAction ? { playerId: actor, playerName: nameFor(actor) } : {}),
-      ...(ev.secondPlayer && second && !teamAction ? { secondId: second, secondName: nameFor(second) } : {}),
+      ...(ev.secondPlayer && second && second !== UNSURE && !teamAction ? { secondId: second, secondName: nameFor(second) } : {}),
       ...(n !== undefined ? { value: n } : {}),
       // Scored in a do-or-die: the raider's do-or-die wins key on this.
       ...(kabNow?.doOrDie && (ev.key === 'raid' || ev.key === 'bonus_raid') ? { flags: ['dod'] } : {}),
     });
     // A substitute credited with something has come on - ask who they replaced.
-    const fromBench = [actor, ev.secondPlayer && !ev.secondPlayer.fromOpponent ? second : ''].filter((id) => id && isSub(id));
-    if (fromBench.length && p.onSubstitute) setCameOn(fromBench.map((id) => ({ side, id })));
+    // A chaser or raider is on the other team, so their swap is asked for that side.
+    const secondSide = ev.secondPlayer?.fromOpponent ? otherOf(side) : side;
+    const fromBench = [
+      ...(actor && !teamAction && isSub(actor) ? [{ side, id: actor }] : []),
+      ...(ev.secondPlayer && second && second !== UNSURE && !teamAction && secondSubs.some((x) => x.id === second)
+        ? [{ side: secondSide, id: second }] : []),
+    ];
+    if (fromBench.length && p.onSubstitute) setCameOn(fromBench);
     // The assist is per goal; the scorer usually is not, so only the second clears.
+    // A Kho Kho out is different: that defender has left the field, so start over.
     setSecond('');
+    if (needsSecond(ev)) setActor('');
   };
 
   /** Answer "who went off for them?" - or nobody, for a card shown on the bench. */
@@ -371,6 +384,7 @@ export function TeamDeck(p: TeamDeckProps) {
     if (next && offId) p.onSubstitute?.(next.side, next.id, offId);
     setCameOn(rest);
     setSubsOpen(false);
+    setSecondSubsOpen(false);
   };
 
   /**
@@ -693,9 +707,14 @@ export function TeamDeck(p: TeamDeckProps) {
                 match, which is the only way to correct a mis-tapped final action.
                 Not after it is LOCKED - `disabled` carries that, and this button
                 was the one place in the deck that did not consult it. */}
-            <Button variant="subtle" size="sm" disabled={!log.length || p.disabled || p.busy} onClick={undo}>
-              Undo the last action
-            </Button>
+            {/* Hidden once locked: undo can no longer do anything. shrink-0, or the
+                flex card squeezes it thinner than its own text. */}
+            {!p.disabled && (
+              <Button variant="outline" className="h-10 shrink-0 gap-1.5 self-center px-5" data-qa="team-undo-final"
+                disabled={!log.length || p.busy} onClick={undo}>
+                <Undo2 className="h-4 w-4" /> Undo the last action
+              </Button>
+            )}
           </Card>
         ) : khoNow?.wonByInnings ? (
           // The follow-on side is still behind after chasing twice: the leader does
@@ -712,9 +731,12 @@ export function TeamDeck(p: TeamDeckProps) {
               }}>
               {p.busy ? 'Saving…' : 'Confirm result'}
             </Button>
-            <Button variant="subtle" size="sm" disabled={!log.length || p.disabled || p.busy} onClick={undo}>
-              Undo the last action
-            </Button>
+            {!p.disabled && (
+              <Button variant="outline" className="h-10 shrink-0 gap-1.5 self-center px-5"
+                disabled={!log.length || p.busy} onClick={undo}>
+                <Undo2 className="h-4 w-4" /> Undo the last action
+              </Button>
+            )}
           </Card>
         ) : progress.phase === 'minimumChase' && minChase ? (
           <MinimumChase
@@ -759,12 +781,13 @@ export function TeamDeck(p: TeamDeckProps) {
             onFinishing={setFinishing} onEvent={push} onClose={() => setSurface('act')}
           />
         ) : (
-          <Card className={cn(SURFACE, 'gap-2 p-2.5')}>
+          // Scrolls as a last resort, so a short screen never clips the bottom buttons.
+          <Card className={cn(SURFACE, 'gap-2 overflow-y-auto p-2.5')}>
             {/* WHOSE ACTION. Two big tabs, so the next question is about one team. */}
             <div className="grid shrink-0 grid-cols-2 gap-1.5">
               {(['A', 'B'] as Side[]).map((s) => (
                 <button key={s} type="button" data-qa={`team-side-${s}`}
-                  onClick={() => { setSide(s); setActor(''); setSecond(''); setAssistOpen(false); setSubsOpen(false); }}
+                  onClick={() => { setSide(s); setActor(''); setSecond(''); setAssistOpen(false); setSubsOpen(false); setSecondSubsOpen(false); }}
                   className={cn(
                     'min-h-[2.5rem] truncate rounded-lg px-2 text-sm font-semibold transition',
                     side === s
@@ -789,7 +812,13 @@ export function TeamDeck(p: TeamDeckProps) {
             {canAttribute ? (
               // The floor is the "Who" label plus one whole row of chips: below that the
               // names were sliced in half when a banner above took the height.
-              <div className="min-h-[3.25rem] shrink grow-0 space-y-1.5 overflow-y-auto">
+              // While picking a chaser the box keeps its full height: the folded defender
+              // line plus the chaser rows are short, and slicing them made names unreadable.
+              <div className={cn('min-h-[3.25rem] grow-0 space-y-1.5 overflow-y-auto',
+                secondRequired && actor ? 'shrink-0' : 'shrink')}>
+                {/* Once the defender is picked their grid folds into the chaser header
+                    below, so the chaser list gets the room instead of a sliver. */}
+                {secondRequired && actor ? null : (
                 <Group label="Who">
                   <PeopleGrid
                     value={actor} qa={`actor-${side}`}
@@ -827,8 +856,54 @@ export function TeamDeck(p: TeamDeckProps) {
                     </p>
                   )}
                 </Group>
+                )}
 
-                {wantsSecond && actor && (
+                {secondRequired && actor ? (
+                  <div>
+                    <div data-qa={`actor-picked-${side}`} className="mb-1 flex items-center justify-between gap-2">
+                      <span className="text-[10px] uppercase tracking-wide text-muted">{secondSpec?.label ?? 'Second player'}</span>
+                      <span className="flex min-w-0 items-center gap-2 text-xs">
+                        <span className="truncate">
+                          <span className="text-muted">Who: </span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-100">{nameFor(actor)}</span>
+                        </span>
+                        <button type="button" data-qa={`actor-change-${side}`}
+                          onClick={() => { setActor(''); setSecond(''); }}
+                          className="shrink-0 font-semibold text-brand-600 hover:underline dark:text-brand-300">
+                          Change
+                        </button>
+                      </span>
+                    </div>
+                    <PeopleGrid
+                      value={second} qa={`second-${side}`}
+                      options={[[UNSURE, 'Not sure'] as [string, string],
+                        ...secondPool.map((x) => [x.id, x.name] as [string, string])]}
+                      cards={playerCards}
+                      onChange={(v) => setSecond(v)}
+                    />
+                    {/* Same as the defender picker: a chaser off the bench is the rare case. */}
+                    {secondSubs.length > 0 && (
+                      <div className="mt-1.5">
+                        <button type="button" data-qa={`second-subs-toggle-${side}`}
+                          onClick={() => setSecondSubsOpen((v) => !v)}
+                          className="flex items-center gap-1 text-[11px] font-semibold text-brand-600 hover:underline dark:text-brand-300">
+                          {secondSubsOpen ? 'Hide subs' : `Select from subs (${secondSubs.length})`}
+                          <ChevronDown className={cn('h-3.5 w-3.5 transition', secondSubsOpen && 'rotate-180')} />
+                        </button>
+                        {secondSubsOpen && (
+                          <div className="mt-1">
+                            <PeopleGrid
+                              value={second} qa={`second-sub-${side}`}
+                              options={secondSubs.map((x) => [x.id, x.name] as [string, string])}
+                              cards={playerCards}
+                              onChange={(v) => setSecond(v)}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : wantsSecond && actor && (
                   <div>
                     {/* Shut, this is one line that still SAYS who is credited, so an
                         official can see an assist was recorded without opening it. */}
@@ -898,7 +973,7 @@ export function TeamDeck(p: TeamDeckProps) {
                 <div className="grid grid-cols-3 gap-1.5">
                   {tapEvents.filter((e) => (e.points ?? 0) > 0).map((ev) => (
                     <button key={ev.key} type="button" data-qa={`act-${side}-${ev.key}`}
-                      disabled={p.disabled || p.busy || (!actor && ev.perPlayer !== false)}
+                      disabled={p.disabled || p.busy || (!actor && ev.perPlayer !== false) || (needsSecond(ev) && !second)}
                       onClick={() => fire(ev)}
                       className={cn(
                         'flex h-12 min-w-0 flex-col items-center justify-center overflow-hidden rounded-lg px-1 text-center text-sm font-bold leading-tight transition',
@@ -917,7 +992,7 @@ export function TeamDeck(p: TeamDeckProps) {
                 <div className="grid grid-cols-4 gap-1.5">
                   {tapEvents.filter((e) => !(e.points ?? 0)).map((ev) => (
                     <button key={ev.key} type="button" data-qa={`act-${side}-${ev.key}`}
-                      disabled={p.disabled || p.busy || (!actor && ev.perPlayer !== false)}
+                      disabled={p.disabled || p.busy || (!actor && ev.perPlayer !== false) || (needsSecond(ev) && !second)}
                       onClick={() => fire(ev)}
                       className={cn(
                         'flex h-9 items-center justify-center rounded-lg px-1 text-center text-[11px] font-semibold leading-tight transition',
@@ -1000,6 +1075,9 @@ export function TeamDeck(p: TeamDeckProps) {
 const SURFACE = 'absolute inset-0 flex flex-col overflow-hidden';
 
 /** Events that are not play, so a change-ends prompt reads past them. */
+/** The "Not sure" choice for a required second person: records the action, credits nobody. */
+const UNSURE = '?';
+
 const PASSIVE: ReadonlySet<string> = new Set(['clockStart', 'clockPause', 'clockAdjust', 'timeout', 'setServe', 'chaseFirst', 'followOn', 'minChase', 'raidFirst', 'raidTurn']);
 
 /** A panel toggle that is currently open - readable as "on" without going solid. */
@@ -1270,49 +1348,145 @@ function MinimumChase({ mc, nameOf, busy, score, onRecord, onUndo, onSettle }: {
   const [text, setText] = useState('');
   const ms = parseChaseTime(text);
   const recorded = mc.rounds.some((r) => r.A !== undefined || r.B !== undefined);
-  const record = (value: number | null) => { onRecord(mc.next, value); setText(''); };
+  // An optional stopwatch on the console; the referee's own watch can be typed in instead.
+  // Local only: a reload loses a running chase, so the typed time stays the fallback.
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (startedAt == null) return;
+    const id = window.setInterval(() => setNow(Date.now()), 100);
+    return () => window.clearInterval(id);
+  }, [startedAt]);
+  const elapsed = startedAt == null ? 0 : Math.max(0, now - startedAt);
+  const overLimit = mc.limitMs != null && elapsed >= mc.limitMs;
+
+  const record = (value: number | null) => { onRecord(mc.next, value); setText(''); setStartedAt(null); };
   const timeOf = (v: number | null | undefined) => (v === undefined ? '-' : formatChaseTime(v));
 
+  const round = mc.rounds[mc.rounds.length - 1];
+  // The round on show: the open one, or a fresh one when the last round was tied.
+  const current = round && !(mc.winner == null && round.A !== undefined && round.B !== undefined) ? round : {};
+  const roundNo = mc.rounds.length + (round && current !== round ? 1 : 0) || 1;
+  const earlier = mc.rounds.slice(0, current === round ? -1 : undefined);
+  const beat = mc.limitMs != null ? mc.limitMs - MIN_CHASE_GRACE_MS : null;
+
+  const tile = (s: Side) => {
+    const t = current[s];
+    const chasing = !mc.winner && mc.next === s;
+    const won = mc.winner === s;
+    return (
+      <div key={s} data-qa={`kho-min-chase-tile-${s}`}
+        className={cn('rounded-xl border p-3 text-center transition',
+          won ? 'border-emerald-500 bg-emerald-50 dark:border-emerald-400/60 dark:bg-emerald-500/10'
+            : chasing ? 'border-brand-500 bg-brand-50 dark:border-brand-400/60 dark:bg-brand-500/10'
+            : 'border-line')}>
+        <div className="truncate text-sm font-semibold">{nameOf(s)}</div>
+        <div className={cn('mt-1 font-mono text-2xl font-bold tabular-nums',
+          t === undefined && 'text-muted', t === null && 'text-base text-red-600 dark:text-red-400')}>
+          {t === undefined ? '-:--.-' : formatChaseTime(t)}
+        </div>
+        <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide">
+          {won ? <span className="text-emerald-600 dark:text-emerald-400">Winner</span>
+            : chasing ? <span className="text-brand-600 dark:text-brand-300">Chasing now</span>
+            : t === undefined ? <span className="text-muted">Waiting</span>
+            : <span className="text-muted">Done</span>}
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <Card className={cn(SURFACE, 'gap-3 p-3')} data-qa="kho-min-chase">
+    <Card className={cn(SURFACE, 'gap-3 overflow-y-auto p-3')} data-qa="kho-min-chase">
       <div className="shrink-0 text-center">
-        <div className="text-[10px] uppercase tracking-wide text-muted">Minimum chase · time to the first out</div>
-        <div className="text-[11px] text-muted">match level at {score[0]}–{score[1]}</div>
+        <div className="text-sm font-bold uppercase tracking-wide">Minimum chase{roundNo > 1 ? ` · Round ${roundNo}` : ''}</div>
+        <div className="text-xs text-muted">Level at {score[0]}–{score[1]}. Each side chases once - the fastest first out wins.</div>
       </div>
 
-      <div className="shrink-0 space-y-1 text-sm">
-        {mc.rounds.map((r, i) => (
-          <div key={i} className="grid grid-cols-[auto_1fr_1fr] items-baseline gap-x-3">
-            <span className="text-[10px] uppercase tracking-wide text-muted">Round {i + 1}</span>
-            <span className="truncate">{nameOf('A')}: <span className="font-mono font-semibold tabular-nums">{timeOf(r.A)}</span></span>
-            <span className="truncate">{nameOf('B')}: <span className="font-mono font-semibold tabular-nums">{timeOf(r.B)}</span></span>
-          </div>
-        ))}
-      </div>
+      <div className="grid shrink-0 grid-cols-2 gap-2">{(['A', 'B'] as Side[]).map(tile)}</div>
 
-      <div className="min-h-0 flex-1" />
+      {earlier.length > 0 && (
+        <div className="shrink-0 space-y-0.5 text-center text-[11px] text-muted">
+          {earlier.map((r, i) => (
+            <div key={i}>Round {i + 1}: {timeOf(r.A)} vs {timeOf(r.B)} - level, chased again</div>
+          ))}
+        </div>
+      )}
 
       {mc.winner ? (
         <div className="shrink-0 space-y-2">
-          <p className="text-center text-sm font-semibold">{nameOf(mc.winner)} win on minimum chase</p>
-          <Button className="w-full" data-qa="kho-min-chase-settle" disabled={busy} onClick={() => onSettle(mc.winner as Side)}>
+          <p className="text-center text-sm">
+            <span className="font-semibold">{nameOf(mc.winner)}</span> win on minimum chase
+          </p>
+          <Button className="h-11 w-full font-bold" data-qa="kho-min-chase-settle" disabled={busy} onClick={() => onSettle(mc.winner as Side)}>
             Record the result
           </Button>
-          <Button className="w-full" size="sm" variant="outline" disabled={busy} onClick={onUndo}>Undo the last time</Button>
+          <Button className="h-10 w-full gap-1.5" variant="outline" disabled={busy} onClick={onUndo}>
+            <Undo2 className="h-4 w-4" /> Undo the last time
+          </Button>
         </div>
       ) : (
-        <div className="shrink-0 space-y-2">
-          <div className="text-center text-[11px] text-muted">
-            Now chasing: <span className="font-semibold text-slate-700 dark:text-slate-200">{nameOf(mc.next)}</span>
-            {mc.limitMs != null && <> · stop at {formatChaseTime(mc.limitMs)} if there is no out</>}
+        <div className="shrink-0 space-y-3">
+          <div className="text-center text-sm">
+            <span className="font-semibold">{nameOf(mc.next)}</span> chasing
+            {beat != null && (
+              <span className="block text-xs text-muted">
+                Time to beat <span className="font-mono font-semibold text-slate-700 dark:text-slate-200">{formatChaseTime(beat)}</span>
+                {' '}· stop at {formatChaseTime(mc.limitMs)} if there is no out
+              </span>
+            )}
           </div>
-          <Input value={text} onChange={(e) => setText(e.target.value)} inputMode="decimal"
-            placeholder="Time to first out, e.g. 1:23.4" data-qa="kho-min-chase-time" />
+
+          {/* Stopwatch */}
+          <div className="rounded-xl border border-line p-3">
+            <div className={cn('text-center font-mono text-4xl font-bold tabular-nums',
+              overLimit ? 'text-red-600 dark:text-red-400' : startedAt == null && 'text-muted')}>
+              {formatChaseTime(elapsed)}
+            </div>
+            {overLimit && <p className="text-center text-xs font-semibold text-red-600 dark:text-red-400">Time up - stop the chase</p>}
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {startedAt == null ? (
+                <Button className="col-span-2 h-11 font-bold" data-qa="kho-min-chase-start" disabled={busy}
+                  onClick={() => { setStartedAt(Date.now()); setNow(Date.now()); }}>
+                  Start chase
+                </Button>
+              ) : (
+                <>
+                  <Button className="h-11 font-bold" data-qa="kho-min-chase-out" disabled={busy}
+                    onClick={() => record(Date.now() - startedAt)}>
+                    First out
+                  </Button>
+                  <Button className="h-11" variant="outline" disabled={busy} onClick={() => setStartedAt(null)}>
+                    Reset
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Or the referee's time, typed */}
+          <div>
+            <div className="mb-1 text-[10px] uppercase tracking-wide text-muted">Or type the referee's time</div>
+            <div className="flex gap-2">
+              <Input value={text} onChange={(e) => setText(e.target.value)} inputMode="decimal"
+                onKeyDown={(e) => { if (e.key === 'Enter' && ms != null && !busy) record(ms); }}
+                placeholder="e.g. 1:23.4 or 83" data-qa="kho-min-chase-time" className="flex-1" />
+              <Button className="h-10 shrink-0 px-4" variant="outline" disabled={busy || ms == null} onClick={() => record(ms)}>
+                Record
+              </Button>
+            </div>
+            {text.trim() !== '' && (
+              <p className={cn('mt-1 text-[11px]', ms == null ? 'text-red-600 dark:text-red-400' : 'text-muted')}>
+                {ms == null ? 'Not a time - use minutes:seconds (1:23.4) or seconds (83).' : `Reads as ${formatChaseTime(ms)}`}
+              </p>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
-            <Button className="h-11 font-bold" disabled={busy || ms == null} onClick={() => record(ms)}>Record time</Button>
-            <Button className="h-11 font-bold" variant="outline" disabled={busy} onClick={() => record(null)}>No out (stopped)</Button>
+            <Button className="h-10" variant="outline" disabled={busy} onClick={() => record(null)}>No out (stopped)</Button>
+            <Button className="h-10 gap-1.5" variant="outline" disabled={busy || !recorded} onClick={onUndo}>
+              <Undo2 className="h-4 w-4" /> Undo last time
+            </Button>
           </div>
-          <Button className="w-full" size="sm" variant="outline" disabled={busy || !recorded} onClick={onUndo}>Undo the last time</Button>
         </div>
       )}
     </Card>
@@ -1461,7 +1635,10 @@ const NAME_BUDGET = 14;
  * printing too much costs a hover and printing too little costs a wrong scorer.
  */
 function shortNames(names: string[]): string[] {
-  const full = names.map((n) => n.trim());
+  // A trailing tag like "(sub)" is not a surname: set it aside, shorten, put it back.
+  const tagOf = (n: string) => / \([^)]*\)$/.exec(n)?.[0] ?? '';
+  const tags = names.map((n) => tagOf(n.trim()));
+  const full = names.map((n, i) => n.trim().slice(0, n.trim().length - tags[i].length));
 
   /** Two letters or more - enough to read as a name rather than as a marker. */
   const isWord = (t: string) => t.replace(/[^\p{L}]/gu, '').length >= 2;
@@ -1481,12 +1658,12 @@ function shortNames(names: string[]): string[] {
     seen.set(k, (seen.get(k) ?? 0) + 1);
   }
 
-  return full.map((n) => {
-    if (n.length <= NAME_BUDGET) return n;
+  return full.map((n, i) => {
+    if (n.length + tags[i].length <= NAME_BUDGET) return n + tags[i];
     const sn = surname(n);
-    if ((seen.get(sn.toLowerCase()) ?? 0) < 2) return sn;
+    if ((seen.get(sn.toLowerCase()) ?? 0) < 2) return sn + tags[i];
     const first = n.split(/\s+/)[0] ?? '';
-    return first ? `${first[0]}. ${sn}` : sn;
+    return (first ? `${first[0]}. ${sn}` : sn) + tags[i];
   });
 }
 
