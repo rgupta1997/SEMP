@@ -51,7 +51,7 @@ export function EventCommunicationsPage() {
           icon={<Megaphone size={24} />}
           title="Nothing announced yet"
           description={organises
-            ? 'Announcements you make here reach the audience you choose — everyone, or just captains, officials or points of contact.'
+            ? 'Announcements you make here reach the audience you choose - everyone, or just captains, officials or points of contact.'
             : 'Announcements from the organising team will appear here.'}
           action={organises ? announce : undefined}
         />

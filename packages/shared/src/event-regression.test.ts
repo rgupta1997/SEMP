@@ -121,7 +121,7 @@ describe('1. the event templates on the shelf', () => {
     }
   });
 
-  it('1.3 every medal scale is descending — gold is never worth less than silver', () => {
+  it('1.3 every medal scale is descending - gold is never worth less than silver', () => {
     for (const { sport, event: e } of SHELF) {
       const scales = [e.result.medalPoints, ...e.subEvents.map((x) => x.medalPoints)];
       for (const scale of scales) {
@@ -192,7 +192,7 @@ describe('2. ranking one sub-event', () => {
     expectRankingSound(r, 3);
   });
 
-  it('2.3 A DEAD HEAT SHARES THE PLACE and consumes the one below — 1,1,3', () => {
+  it('2.3 A DEAD HEAT SHARES THE PLACE and consumes the one below - 1,1,3', () => {
     // Two equal firsts both take gold and there is no silver. "1,1,2" would invent a
     // silver medallist and shift everybody behind them up a place.
     const st = state(P('a', { '50free': 28 }), P('b', { '50free': 28 }), P('c', { '50free': 31 }));
@@ -227,7 +227,7 @@ describe('2. ranking one sub-event', () => {
     expectRankingSound(r, 4);
   });
 
-  it('2.6 NOBODY WITHOUT A MARK IS RANKED — a did-not-start is not last', () => {
+  it('2.6 NOBODY WITHOUT A MARK IS RANKED - a did-not-start is not last', () => {
     const st = state(
       P('a', { '50free': 28 }), P('b', { '50free': null }), P('c', {}),
     );
@@ -306,7 +306,7 @@ describe('4. the event total', () => {
     expect(rows.find((r) => r.key === 'o2')?.points).toBe(8);
   });
 
-  it('4.2 A SUB-EVENT MAY OVERRIDE THE SCALE — a relay can pay more than a heat', () => {
+  it('4.2 A SUB-EVENT MAY OVERRIDE THE SCALE - a relay can pay more than a heat', () => {
     const s = spec({
       subEvents: [SE('heat'), { ...SE('relay'), medalPoints: [10, 7, 3] }],
     });

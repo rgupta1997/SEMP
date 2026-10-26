@@ -10,7 +10,7 @@ import type { ScoringFormat, Side } from './scoring-rules.js';
 import type { RallyEvent, RallyLog } from './rally-kernel.js';
 
 // ============================================================================
-// PLAYER STATISTICS REGRESSION SUITE — everything that is not cricket.
+// PLAYER STATISTICS REGRESSION SUITE - everything that is not cricket.
 //
 // Cricket's figures are hand-entered by a scorer who can see them. EVERY OTHER
 // SPORT'S are DERIVED: nobody taps "that was a service point won on a break point
@@ -427,7 +427,7 @@ describe('2. what one match produces', () => {
 });
 
 // ============================================================================
-// 3. TENNIS — the sport with the richest derived stats
+// 3. TENNIS - the sport with the richest derived stats
 // ============================================================================
 
 describe('3. tennis break points and tie-breaks', () => {
@@ -502,7 +502,7 @@ describe('3. tennis break points and tie-breaks', () => {
 });
 
 // ============================================================================
-// 4. ATTRIBUTION — who gets the credit in doubles
+// 4. ATTRIBUTION - who gets the credit in doubles
 // ============================================================================
 
 describe('4. attributing to people', () => {

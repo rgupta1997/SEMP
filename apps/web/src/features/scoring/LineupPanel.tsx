@@ -52,7 +52,7 @@ export function LineupPanel({ title, size, sides, initial, usedElsewhere, onSave
   return (
     <Card className="grid gap-4 p-4">
       <div>
-        <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{title} — who is playing?</div>
+        <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{title} - who is playing?</div>
         <div className="text-xs text-slate-500 dark:text-slate-400">
           Tap {size === 1 ? 'one player' : `${size} players`} a side. Only the players named here get this result in their career.
         </div>
@@ -108,7 +108,7 @@ export function LineupPanel({ title, size, sides, initial, usedElsewhere, onSave
           <button type="button" disabled={disabled}
             className="ml-auto text-xs text-slate-400 underline underline-offset-2 hover:text-slate-600 dark:text-slate-500"
             onClick={onSkip}>
-            Skip — no names (counts for the team only)
+            Skip - no names (counts for the team only)
           </button>
         )}
       </div>

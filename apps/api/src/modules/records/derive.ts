@@ -1,9 +1,4 @@
-import {
-  PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor, playedContests, seatIn,
-  earlyEndOf, formatPoints, KHO_END_SHORT, KHO_RESULT_WORDS, khoSettlementOf, shootoutOf, THIRD_PLACE_ROUND, type EarlyEnd, type PlayedContest,
-  type AchievementKind, type EventSpec, type EventState, type FormatTemplate,
-  type LifetimeEntryKind, type MatchOutcome, type Medal, type StandingsPlacement,
-} from '@semp/shared';
+import { KNOCKOUT_ROUND, PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor, playedContests, seatIn, earlyEndOf, formatPoints, KHO_END_SHORT, KHO_RESULT_WORDS, khoSettlementOf, shootoutOf, THIRD_PLACE_ROUND, type EarlyEnd, type PlayedContest, type AchievementKind, type EventSpec, type EventState, type FormatTemplate, type LifetimeEntryKind, type MatchOutcome, type Medal, type StandingsPlacement } from '@semp/shared';
 
 // What a locked result MEANS - as pure functions, with no database anywhere in
 // sight (J4-E2, J4-E4).
@@ -153,7 +148,7 @@ export function verdictsOf(fx: Pick<DerivableFixture, 'round' | 'status' | 'winn
   const round = (fx.round ?? '').trim();
 
   switch (round) {
-    case 'Final':
+    case KNOCKOUT_ROUND.final:
       return [
         { team_id: winner, kind: 'medal', medal: 'gold', placement: 'winner' },
         ...(loser ? [{ team_id: loser, kind: 'medal', medal: 'silver', placement: 'runner_up' } as Verdict] : []),
@@ -164,9 +159,9 @@ export function verdictsOf(fx: Pick<DerivableFixture, 'round' | 'status' | 'winn
         ...(loser ? [{ team_id: loser, kind: 'placement', placement: 'fourth_place' } as Verdict] : []),
       ];
     // The eliminated side, and only them. The winner goes on to be judged later.
-    case 'SF':
+    case KNOCKOUT_ROUND.semiFinal:
       return loser ? [{ team_id: loser, kind: 'placement', placement: 'semi_finalist' }] : [];
-    case 'QF':
+    case KNOCKOUT_ROUND.quarterFinal:
       return loser ? [{ team_id: loser, kind: 'placement', placement: 'quarter_finalist' }] : [];
     // League fixtures and early rounds (R16, R32, …) decide no placement - a
     // league is settled by the standings table, not by any one match.

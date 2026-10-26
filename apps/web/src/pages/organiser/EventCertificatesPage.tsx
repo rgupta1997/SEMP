@@ -135,7 +135,7 @@ export function EventCertificatesPage() {
         <EmptyState
           icon={<Award size={24} />}
           title="Nothing issued for this event yet"
-          description="Certificates are generated from locked results — never typed in by hand. Lock a scorecard and the medals, placements and awards behind it become issuable."
+          description="Certificates are generated from locked results - never typed in by hand. Lock a scorecard and the medals, placements and awards behind it become issuable."
           action={canManage ? generateButton : undefined}
         />
       ) : (

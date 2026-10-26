@@ -1,11 +1,11 @@
 /*
- * WHAT A WORKBOOK HOLDS FOR ONE SETUP — which sheets, which columns, which of them
- * must be filled — given the event type AND the setup's step switches.
+ * WHAT A WORKBOOK HOLDS FOR ONE SETUP - which sheets, which columns, which of them
+ * must be filled - given the event type AND the setup's step switches.
  *
  * One function, read by three things that must agree: the template download, the
  * sample download, and the validator. Turn Fixtures to Skip and the template loses
  * its Schedule sheet, the sample loses its matches, and the validator stops asking
- * for one — never one without the others.
+ * for one - never one without the others.
  */
 import type { SetupEventType, SetupStepKey, SetupStepMode, SetupSteps } from './blueprint.js';
 import {
@@ -33,7 +33,7 @@ const VENUE_FIELDS = new Set(['venue', 'grounds', 'ground_type']);
 /** Venue and Fixtures both skipped: no grounds exist for this setup, so none are asked for. */
 export const setupGroundsUnused = (steps: SetupSteps) => steps.venue === 'skip' && steps.fixtures === 'skip';
 
-/** Whether the Squads sheet is read at all — the validator's rule, stated once. */
+/** Whether the Squads sheet is read at all - the validator's rule, stated once. */
 export const setupSquadsNeeded = (steps: SetupSteps) =>
   !(steps.squads === 'skip' && steps.competitors === 'skip' && steps.people === 'skip');
 

@@ -693,7 +693,7 @@ export function ResultsPage() {
           every row now, and this links straight there. */}
       {hiddenCount > 0 && (
         <p className="t-meta">
-          {hiddenCount} scheduled {hiddenCount === 1 ? 'match is' : 'matches are'} not shown here —
+          {hiddenCount} scheduled {hiddenCount === 1 ? 'match is' : 'matches are'} not shown here -
           they appear once scoring starts.{' '}
           <Link to={`/championships/${eventId}/schedule`} className="font-medium underline underline-offset-2">
             Score a match from Schedule
@@ -898,7 +898,7 @@ export function ResultsPage() {
 
                     {/* ---------------- lg+ : the three-column row ---------------- */}
                     <div className="hidden items-center gap-x-2 lg:contents">
-                    {/* Left cell (1fr): match type — always shown in full.
+                    {/* Left cell (1fr): match type - always shown in full.
                         Both outer cells are equal 1fr so the auto center column is
                         always physically centered regardless of their content widths. */}
                     {/* Each line carries its own tooltip, so a cut-off line shows ITS full text

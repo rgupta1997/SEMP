@@ -274,7 +274,7 @@ export async function squadEntryRefusal(
     const parent = unit.parent_id ? units.get(unit.parent_id) : null;
     const theirs = labels[unit.type as UnitType] ?? unit.type;
     return `“${championshipName}” is contested between ${pluralise(labels[wanted]).toLowerCase()}, and this squad plays for ${unit.name}, which is a ${theirs.toLowerCase()}${parent ? ` of ${parent.name}` : ''}. `
-      + `Enter a squad that plays for ${parent ? parent.name : `the ${labels[wanted].toLowerCase()} itself`} — it can pick players from ${unit.name} — or run this championship between ${pluralise(theirs).toLowerCase()} instead.`;
+      + `Enter a squad that plays for ${parent ? parent.name : `the ${labels[wanted].toLowerCase()} itself`} - it can pick players from ${unit.name} - or run this championship between ${pluralise(theirs).toLowerCase()} instead.`;
   }
 
   // 2 · the INVITATION. Only asked once the level is right, so it can never be the

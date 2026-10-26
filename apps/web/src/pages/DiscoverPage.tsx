@@ -286,7 +286,7 @@ export function DiscoverPage() {
                           scannable down the list instead of per-tile. */}
                       <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
                         {sports.length === 0 ? (
-                          <span className="text-slate-400 dark:text-slate-600">—</span>
+                          <span className="text-slate-400 dark:text-slate-600">-</span>
                         ) : (
                           <span title={sports.join(', ')}>
                             {sports.slice(0, 3).join(' · ')}{sports.length > 3 ? ` +${sports.length - 3}` : ''}

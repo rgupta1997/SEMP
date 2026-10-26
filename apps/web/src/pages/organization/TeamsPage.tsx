@@ -589,7 +589,7 @@ function InlineCreateTeam({ institutionId, kind, onClose }: {
       <p className="mt-2.5 text-xs text-slate-500 dark:text-slate-400">
         {kind === 'organization'
           ? `This squad represents the whole institution and plays other institutions. It cannot enter a championship contested between your own ${pluralise(labels.campus).toLowerCase()}.`
-          : `This squad represents one ${noun.toLowerCase()}${playsFor ? ` — ${units.find((u) => u.id === playsFor)?.name ?? ''}` : ''}. It plays championships contested between ${pluralise(noun).toLowerCase()}, and only people who belong to it can be picked.`}
+          : `This squad represents one ${noun.toLowerCase()}${playsFor ? ` - ${units.find((u) => u.id === playsFor)?.name ?? ''}` : ''}. It plays championships contested between ${pluralise(noun).toLowerCase()}, and only people who belong to it can be picked.`}
       </p>
       {error && <p className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
     </Card>
@@ -844,7 +844,7 @@ export function TeamsPage() {
                   title={frozenTitle ?? (canEnterTeams ? undefined
                     : approved.length === 0
                       ? 'You have no approved championship entry yet.'
-                      : 'This championship has no discipline draws yet — set up its sports first.')}
+                      : 'This championship has no discipline draws yet - set up its sports first.')}
                 >+ Enter multiple</Button>
                 <Button disabled={frozen} title={frozenTitle} onClick={() => setCreating(true)}>
                   + Create {playsFor === 'organization' ? 'team' : (playsFor === 'campus' ? labels.campus : labels.department).toLowerCase() + ' squad'}
@@ -886,7 +886,7 @@ export function TeamsPage() {
         <p className="mb-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
           {playsFor === 'organization'
             ? 'You need an approved championship registration before entering teams. Apply via “Browse championships”.'
-            : `No championship is being contested between your ${pluralise(playsFor === 'campus' ? labels.campus : labels.department).toLowerCase()} yet. You can still build squads here — they can be entered once one exists and this ${(playsFor === 'campus' ? labels.campus : labels.department).toLowerCase()} is added to it.`}
+            : `No championship is being contested between your ${pluralise(playsFor === 'campus' ? labels.campus : labels.department).toLowerCase()} yet. You can still build squads here - they can be entered once one exists and this ${(playsFor === 'campus' ? labels.campus : labels.department).toLowerCase()} is added to it.`}
         </p>
       )}
       {approved.length > 0 && eventId && eventDraws.length === 0 && (

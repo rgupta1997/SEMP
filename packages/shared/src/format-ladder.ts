@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { knockoutRoundLabel } from './enums.js';
 import {
   RALLY_FAMILY, familyForSport, type FormatFamily, type MatchFormat,
 } from './match-format.js';
@@ -325,7 +326,7 @@ export function predictKnockoutRounds(entrants: number): string[] {
   while (size < entrants) size *= 2;
   const rounds: string[] = [];
   for (let inRound = size; inRound >= 2; inRound /= 2) {
-    rounds.push(inRound === 2 ? 'Final' : inRound === 4 ? 'SF' : inRound === 8 ? 'QF' : `R${inRound}`);
+    rounds.push(knockoutRoundLabel(inRound));
   }
   return rounds;
 }

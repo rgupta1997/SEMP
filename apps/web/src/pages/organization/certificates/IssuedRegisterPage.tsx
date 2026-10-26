@@ -100,7 +100,7 @@ export function IssuedRegisterPage() {
             title={filters.toString() ? 'Nothing matches those filters' : 'Nothing issued yet'}
             description={filters.toString()
               ? 'Clear a filter to widen the search.'
-              : 'Certificates are generated from locked results — never typed in by hand.'}
+              : 'Certificates are generated from locked results - never typed in by hand.'}
             action={filters.toString()
               ? <Button variant="ghost" onClick={() => reset(() => { setQ(''); setSport(''); setChamp(''); setStatus(''); })}>Clear filters</Button>
               : <Button disabled={archived} title={archivedTitle} onClick={() => setGen(true)}><Sparkles size={15} aria-hidden />Generate certificates</Button>}
@@ -119,8 +119,8 @@ export function IssuedRegisterPage() {
                   <TR key={c.id} onClick={() => nav(`/organizations/${orgId}/certificates/${c.id}`)}>
                     <TD className="font-mono text-xs">{c.serial}</TD>
                     <TD className="font-medium text-slate-800 dark:text-slate-200">{c.recipient_name}</TD>
-                    <TD className="text-slate-600 dark:text-slate-400">{c.championships?.name ?? '—'}</TD>
-                    <TD className="text-slate-600 dark:text-slate-400">{c.sport ?? '—'}</TD>
+                    <TD className="text-slate-600 dark:text-slate-400">{c.championships?.name ?? '-'}</TD>
+                    <TD className="text-slate-600 dark:text-slate-400">{c.sport ?? '-'}</TD>
                     <TD className="tabular-nums text-slate-500 dark:text-slate-400">{shortDate(c.issued_at)}</TD>
                     <TD><CertStatus status={c.status} /></TD>
                     <TD className="text-right">

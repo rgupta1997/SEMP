@@ -1,5 +1,5 @@
 /*
- * THE STANDARD EVENT SETUP TEMPLATE — the workbook a client fills in, described once.
+ * THE STANDARD EVENT SETUP TEMPLATE - the workbook a client fills in, described once.
  *
  * The dashboard builds the downloadable .xlsx from SETUP_TEMPLATE_SHEETS; the
  * validator (validate.ts) reads an uploaded one back through the same description,
@@ -236,7 +236,7 @@ export const setupExample = (c: SetupTemplateColumn, type: SetupEventType) =>
 export const setupHeaderKey = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 // ---------------------------------------------------------------------------
-// validation — the contract between the validator, the API and the dashboard
+// validation - the contract between the validator, the API and the dashboard
 // ---------------------------------------------------------------------------
 /**
  * The workbook as the browser read it: every sheet as a grid of strings (SheetJS

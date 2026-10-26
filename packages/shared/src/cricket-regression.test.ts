@@ -12,7 +12,7 @@ import {
 import { cricketScorecard, foldCricketCareer } from './cricket-stats.js';
 
 // ============================================================================
-// CRICKET REGRESSION SUITE — the match-day one.
+// CRICKET REGRESSION SUITE - the match-day one.
 //
 // The unit tests next door pin single behaviours down. This file plays WHOLE
 // MATCHES, in every format on the shelf, and asserts the things a scorer would be
@@ -30,7 +30,7 @@ import { cricketScorecard, foldCricketCareer } from './cricket-stats.js';
 //             never exceeds its overs.
 //   PROGRESS  a live innings always has somebody able to face the next ball, or has
 //             ended. A console that can be neither scored nor closed is the worst
-//             failure mode there is — it strands a real match.
+//             failure mode there is - it strands a real match.
 // ============================================================================
 
 const fmt = (k: string): CricketFormat => cricketPresetByKey(k)!;
@@ -79,7 +79,7 @@ const battedRuns = (inn: InningsState) => inn.batting.reduce((n, b) => n + b.run
 const itemisedExtras = (inn: InningsState) =>
   inn.wides + inn.noBalls + inn.byes + inn.legByes + inn.penaltyRuns;
 
-/** BALANCE — a scorecard that does not add up cannot be printed. */
+/** BALANCE - a scorecard that does not add up cannot be printed. */
 function expectBalance(inn: InningsState, note = '') {
   expect(
     battedRuns(inn) + itemisedExtras(inn),
@@ -88,7 +88,7 @@ function expectBalance(inn: InningsState, note = '') {
   ).toBe(inn.runs);
 }
 
-/** BOWLING — every run in the innings is charged somewhere, and only once. */
+/** BOWLING - every run in the innings is charged somewhere, and only once. */
 function expectBowlingBalance(inn: InningsState, note = '') {
   const charged = inn.bowling.reduce((n, b) => n + b.runsConceded, 0);
   expect(
@@ -98,7 +98,7 @@ function expectBowlingBalance(inn: InningsState, note = '') {
   ).toBe(inn.runs);
 }
 
-/** LEGALITY — the over count and the bowling figures are the same count. */
+/** LEGALITY - the over count and the bowling figures are the same count. */
 function expectLegality(f: CricketFormat, inn: InningsState) {
   const bowled = inn.bowling.reduce((n, b) => n + b.ballsBowled, 0);
   expect(bowled, `LEGALITY innings ${inn.innings}: bowlers bowled ${bowled}, innings counted ${inn.balls}`)
@@ -109,7 +109,7 @@ function expectLegality(f: CricketFormat, inn: InningsState) {
   }
 }
 
-/** PROGRESS — a live innings can always be given another ball. */
+/** PROGRESS - a live innings can always be given another ball. */
 function expectPlayable(f: CricketFormat, s: CricketState) {
   const inn = s.innings[s.current];
   if (!inn || inn.ended || s.ended) return;
@@ -121,7 +121,7 @@ function expectPlayable(f: CricketFormat, s: CricketState) {
   expect(
     atCrease,
     `PROGRESS innings ${inn.innings}: ${inn.wickets} down, innings open, but only `
-    + `${atCrease} batter(s) at the crease — the console cannot accept another ball`,
+    + `${atCrease} batter(s) at the crease - the console cannot accept another ball`,
   ).toBeGreaterThanOrEqual(needed);
 }
 
@@ -141,7 +141,7 @@ const bowlOf = (inn: InningsState, id: string): BowlingLine =>
   inn.bowling.find((b) => b.playerId === id)!;
 
 // ============================================================================
-// 1. THE SHELF — every format on it is one somebody could actually play
+// 1. THE SHELF - every format on it is one somebody could actually play
 // ============================================================================
 
 describe('1. the shelf every format is picked from', () => {
@@ -190,7 +190,7 @@ describe('1. the shelf every format is picked from', () => {
 });
 
 // ============================================================================
-// 2. THE DELIVERY — every outcome one ball can have
+// 2. THE DELIVERY - every outcome one ball can have
 // ============================================================================
 
 describe('2. one delivery, every outcome it can have', () => {
@@ -292,7 +292,7 @@ describe('2. one delivery, every outcome it can have', () => {
     expectSound(f, s);
   });
 
-  it('2.10 a bye is not a dot for the bowler — runs were scored off the over', () => {
+  it('2.10 a bye is not a dot for the bowler - runs were scored off the over', () => {
     const s = play(f, [...open('b1', 'b2', 'o1'), bye(2)]);
     expect(bowlOf(s.innings[0], 'o1').dots).toBe(0);
   });
@@ -307,7 +307,7 @@ describe('2. one delivery, every outcome it can have', () => {
 });
 
 // ============================================================================
-// 3. THE OVER — six legal balls, and what does and does not advance it
+// 3. THE OVER - six legal balls, and what does and does not advance it
 // ============================================================================
 
 describe('3. the over', () => {
@@ -417,7 +417,7 @@ describe('3. the over', () => {
 });
 
 // ============================================================================
-// 4. THE STRIKE — who faces the next ball
+// 4. THE STRIKE - who faces the next ball
 // ============================================================================
 
 describe('4. the strike', () => {
@@ -430,7 +430,7 @@ describe('4. the strike', () => {
     expect(play(f, [...open('b1', 'b2', 'o1'), run(4)]).innings[0].strikerId).toBe('b1');
   });
 
-  it('4.2 a single bye crosses the batters — they ran it', () => {
+  it('4.2 a single bye crosses the batters - they ran it', () => {
     expect(play(f, [...open('b1', 'b2', 'o1'), bye(1)]).innings[0].strikerId).toBe('b2');
   });
 
@@ -438,7 +438,7 @@ describe('4. the strike', () => {
     expect(play(f, [...open('b1', 'b2', 'o1'), legbye(1)]).innings[0].strikerId).toBe('b2');
   });
 
-  it('4.4 a plain wide does not cross — nobody ran', () => {
+  it('4.4 a plain wide does not cross - nobody ran', () => {
     expect(play(f, [...open('b1', 'b2', 'o1'), wide()]).innings[0].strikerId).toBe('b1');
   });
 
@@ -478,7 +478,7 @@ describe('4. the strike', () => {
 });
 
 // ============================================================================
-// 5. WICKETS — all ten of them, and who gets the credit
+// 5. WICKETS - all ten of them, and who gets the credit
 // ============================================================================
 
 describe('5. wickets', () => {
@@ -526,7 +526,7 @@ describe('5. wickets', () => {
     expectSound(f, s);
   });
 
-  it('5.6 A CAUGHT BATTER IS CREDITED NO RUNS — they never completed them', () => {
+  it('5.6 A CAUGHT BATTER IS CREDITED NO RUNS - they never completed them', () => {
     // If the console lets a "runs completed" value survive a change of dismissal, a
     // catch will silently award runs that were never made.
     const s = play(f, [...open('b1', 'b2', 'o1'),
@@ -572,7 +572,7 @@ describe('5. wickets', () => {
     expect(line.out).toBe(false);
   });
 
-  it('5.11 a wicket off a no-ball can only be a run-out — the delivery was illegal', () => {
+  it('5.11 a wicket off a no-ball can only be a run-out - the delivery was illegal', () => {
     // A batter cannot be bowled off a no-ball. This is the scorer's commonest illegal
     // entry, and the console must not accept it.
     const s = play(f, [...open('b1', 'b2', 'o1'),
@@ -580,7 +580,7 @@ describe('5. wickets', () => {
     expect(s.innings[0].wickets, 'a batter was bowled off a no-ball').toBe(0);
   });
 
-  it('5.12 a batter cannot be stumped or caught off a WIDE either — only run out or stumped', () => {
+  it('5.12 a batter cannot be stumped or caught off a WIDE either - only run out or stumped', () => {
     // Stumped off a wide is legal cricket; caught off a wide is not, because the bat
     // never touched it.
     const s = play(f, [...open('b1', 'b2', 'o1'),
@@ -633,7 +633,7 @@ describe('6. the free hit', () => {
     expect(s.innings[0].wickets, 'a batter was caught off a free hit').toBe(0);
   });
 
-  it('6.7 a RUN-OUT off a free hit stands — that one is still on', () => {
+  it('6.7 a RUN-OUT off a free hit stands - that one is still on', () => {
     const s = play(f, [...open('b1', 'b2', 'o1'), noball(), out('run_out', { next: 'b3', fielder: 'f3' })]);
     expect(s.innings[0].wickets).toBe(1);
   });
@@ -720,7 +720,7 @@ describe('7. how an innings ends', () => {
 });
 
 // ============================================================================
-// 8. THE RESULT — phrased the way cricket phrases it
+// 8. THE RESULT - phrased the way cricket phrases it
 // ============================================================================
 
 describe('8. the result', () => {
@@ -852,7 +852,7 @@ describe('9. box cricket', () => {
     const s = play(b, log);
     const inn = s.innings[0];
     expect(inn.wickets).toBe(5);
-    expect(inn.ended, 'the innings ended early — last man stands was ignored').toBe(false);
+    expect(inn.ended, 'the innings ended early - last man stands was ignored').toBe(false);
     expectPlayable(b, s);
   });
 
@@ -935,7 +935,7 @@ describe('9. box cricket', () => {
 });
 
 // ============================================================================
-// 10. CORRECTIONS — what a scorer does when they mis-tap
+// 10. CORRECTIONS - what a scorer does when they mis-tap
 // ============================================================================
 
 describe('10. corrections', () => {
@@ -1071,7 +1071,7 @@ describe('10. corrections', () => {
     expect(bowlOf(inn, 'o9').runsConceded).toBe(4);
   });
 
-  it('10.10 the fold is pure — replaying the same log gives the same state', () => {
+  it('10.10 the fold is pure - replaying the same log gives the same state', () => {
     const log: CricketLog = [...open('b1', 'b2', 'o1'), run(4), wide(2), noball(6),
       out('caught', { next: 'b3', fielder: 'f2' }), bye(1), ...dots(4)];
     expect(JSON.stringify(play(f, log))).toBe(JSON.stringify(play(f, log)));
@@ -1079,7 +1079,7 @@ describe('10. corrections', () => {
 });
 
 // ============================================================================
-// 11. THE TEST MATCH — two innings a side
+// 11. THE TEST MATCH - two innings a side
 // ============================================================================
 
 describe('11. two innings a side', () => {
@@ -1274,7 +1274,7 @@ describe("12. the scorecard and what reaches a player's record", () => {
 });
 
 // ============================================================================
-// 13. FULL MATCHES — the whole thing, start to sign-off
+// 13. FULL MATCHES - the whole thing, start to sign-off
 // ============================================================================
 
 describe('13. whole matches', () => {
@@ -1340,9 +1340,9 @@ describe('13. whole matches', () => {
 
   const CASES: Array<[string, () => CricketFormat]> = [
     ['T20', T20], ['T10', T10], ['ODI', ODI], ['super over', SUPER],
-    ['box — 6 overs, 8 a side', BOX8],
-    ['box — 4-ball overs', BOX4],
-    ['box — last man stands', BOXLMS],
+    ['box - 6 overs, 8 a side', BOX8],
+    ['box - 4-ball overs', BOX4],
+    ['box - last man stands', BOXLMS],
   ];
 
   for (const [name, make] of CASES) {

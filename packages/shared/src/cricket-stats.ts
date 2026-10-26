@@ -339,13 +339,13 @@ export function foldCricketCareer(
 
 /** "84*" / "17" - how a high score is printed. */
 export function highScoreLine(c: CricketCareer): string {
-  if (c.inningsBatted === 0) return '—';
+  if (c.inningsBatted === 0) return '-';
   return `${c.highScore}${c.highScoreNotOut ? '*' : ''}`;
 }
 
 /** "5/23" - how best bowling is printed. */
 export function bestBowlingLine(c: CricketCareer): string {
-  if (c.inningsBowled === 0) return '—';
+  if (c.inningsBowled === 0) return '-';
   return `${c.bestInningsWickets}/${c.bestInningsRuns}`;
 }
 

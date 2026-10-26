@@ -110,7 +110,7 @@ export function VerifyCertificatePage({ token }: { token?: string }) {
     return (
       <main className="mx-auto max-w-lg px-6 py-20 text-center">
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          We could not reach the verification service. That is a problem at our end, not with the certificate — please try again shortly.
+          We could not reach the verification service. That is a problem at our end, not with the certificate - please try again shortly.
         </p>
       </main>
     );
@@ -165,12 +165,12 @@ export function VerifyCertificatePage({ token }: { token?: string }) {
               <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Certificate summary</h2>
               <dl className="mt-4 grid grid-cols-2 gap-4 border-t border-slate-200 pt-4 dark:border-slate-800">
                 <Field label="Recipient" value={c.recipient} />
-                <Field label="Event" value={c.event ?? '—'} />
-                <Field label="Sport" value={c.sport ?? '—'} />
+                <Field label="Event" value={c.event ?? '-'} />
+                <Field label="Sport" value={c.sport ?? '-'} />
                 {c.scope && <Field label="Won at" value={c.scope} />}
                 {c.team && <Field label="Team" value={c.team} />}
                 <Field label="Issue date" value={new Date(c.issued_on).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })} />
-                <div className="col-span-2"><Field label="Issued by" value={c.issued_by ?? '—'} /></div>
+                <div className="col-span-2"><Field label="Issued by" value={c.issued_by ?? '-'} /></div>
               </dl>
               <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-4 dark:border-slate-800">
                 <span className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Digital signature</span>

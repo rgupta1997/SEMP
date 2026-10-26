@@ -1055,7 +1055,7 @@ function PostMatchActions({ fixture, fixtureId, invalidate }:
     if (potmType && !potm && !locked) {
       const ok = await confirmDialog({
         title: 'Lock without a player of the match?',
-        message: 'A locked scorecard cannot be changed, and that includes its awards — this match would keep no player of the match unless it is unlocked again.',
+        message: 'A locked scorecard cannot be changed, and that includes its awards - this match would keep no player of the match unless it is unlocked again.',
         confirmLabel: 'Lock anyway',
       });
       if (!ok) return;
@@ -1105,7 +1105,7 @@ function PostMatchActions({ fixture, fixtureId, invalidate }:
       {locked ? (
         <div className="rounded-xl border border-line bg-slate-50 px-3 py-2 text-center text-sm dark:bg-slate-800/60">
           <span className="font-semibold">🔒 Scorecard locked</span>
-          <span className="text-muted"> — official and permanent.</span>
+          <span className="text-muted"> - official and permanent.</span>
         </div>
       ) : (
         <>
@@ -1113,7 +1113,7 @@ function PostMatchActions({ fixture, fixtureId, invalidate }:
             {lock.isPending ? 'Locking…' : 'Lock scorecard'}
           </Button>
           <p className="text-center text-[11px] text-muted">
-            Locking makes the result official and permanent, and is the last step — awards cannot be changed afterwards. Organiser only.
+            Locking makes the result official and permanent, and is the last step - awards cannot be changed afterwards. Organiser only.
           </p>
         </>
       )}
@@ -1279,7 +1279,7 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
       {squadIsBigger && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
           {who.source === 'skipped'
-            ? <span>Players not named — this result counts for the team only.</span>
+            ? <span>Players not named - this result counts for the team only.</span>
             : <span>Players: {namesOf(who.lineup?.A)?.join(' / ')} vs {namesOf(who.lineup?.B)?.join(' / ')}</span>}
           <button type="button" className="font-semibold underline underline-offset-2" onClick={() => setPickingPlayers(true)}>
             {who.source === 'skipped' ? 'Name players' : 'Change players'}
@@ -1443,6 +1443,8 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
           // reproducible under the rules it was played under.
           format: (live?.live_state as any)?.format ?? format,
           ...(sheet ? { teamSheet: sheet } : {}),
+          // Abandoned or drawn: standings share the points whatever the runs.
+          noResult: reallyDone && (state.outcome === 'void' || state.outcome === 'draw'),
         },
         live_log: cricketTimeline(state, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
         // The headline is RUNS per side, which is what standings compare.
@@ -1535,6 +1537,7 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
       onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
       onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
     />
+    <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} />
     </>
   );
 }
@@ -1555,7 +1558,7 @@ function cricketTimeline(state: CricketState, homeName: string, awayName: string
       t: `Innings ${inn.innings}`,
       team: inn.battingSide,
       txt: `${side} ${inningsLine(inn, state.format.ballsPerOver)}`
-        + (inn.endedBy ? ` — ${inn.endedBy.replace('_', ' ')}` : ''),
+        + (inn.endedBy ? ` - ${inn.endedBy.replace('_', ' ')}` : ''),
       kind: 'innings',
     });
   }
@@ -1586,11 +1589,11 @@ function rallyTimeline(format: any, log: RallyLog, firstServer: Side, homeName: 
     const ev = t.event;
     const other = (s: Side): Side => (s === 'A' ? 'B' : 'A');
     const txt = ev.t === 'point'
-      ? (t.scored ? `${ev.kind === 'ace' ? 'Ace — point' : 'Point'} to ${nameOf(t.scored)}` : `${nameOf(ev.side)} won the rally — no point`)
-      : ev.t === 'fault' ? (t.scored ? `Double fault · ${nameOf(ev.side)} — point to ${nameOf(t.scored)}` : `Fault · ${nameOf(ev.side)}`)
+      ? (t.scored ? `${ev.kind === 'ace' ? 'Ace - point' : 'Point'} to ${nameOf(t.scored)}` : `${nameOf(ev.side)} won the rally - no point`)
+      : ev.t === 'fault' ? (t.scored ? `Double fault · ${nameOf(ev.side)} - point to ${nameOf(t.scored)}` : `Fault · ${nameOf(ev.side)}`)
       : ev.t === 'card' ? `${misconductTerms(format?.sport).warning} to ${nameOf(ev.against)}`
-      : ev.t === 'timeout' ? `Timeout — ${nameOf(ev.side)}`
-      : ev.t === 'penalty' && ev.card === 'red' ? `${misconductTerms(format?.sport).foul} to ${nameOf(other(ev.side))} — point to ${nameOf(ev.side)}`
+      : ev.t === 'timeout' ? `Timeout - ${nameOf(ev.side)}`
+      : ev.t === 'penalty' && ev.card === 'red' ? `${misconductTerms(format?.sport).foul} to ${nameOf(other(ev.side))} - point to ${nameOf(ev.side)}`
       : ev.t === 'end' && ev.reason === 'disqualified' && ev.winner ? `${nameOf(other(ev.winner))} disqualified`
       : RALLY_EVENT_TEXT[ev.t] ?? ev.t;
     out.unshift({
@@ -1674,9 +1677,12 @@ function ChessConsole({ fixture, fixtureId, live, invalidate, onDone }:
   };
 
   return (
-    <ChessResult homeName={homeName} awayName={awayName} gamesInMatch={gamesInMatch} needsWinner={isKnockoutFixture(fixture ?? {})}
-      timeControl={timeControl} initial={initial}
-      busy={persist.isPending} onSave={save} />
+    <>
+      <ChessResult homeName={homeName} awayName={awayName} gamesInMatch={gamesInMatch} needsWinner={isKnockoutFixture(fixture ?? {})}
+        timeControl={timeControl} initial={initial}
+        busy={persist.isPending} onSave={save} />
+      <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} />
+    </>
   );
 }
 
@@ -1723,8 +1729,13 @@ function CarromConsole({ fixture, fixtureId, live, invalidate, onDone }:
     );
   };
 
-  return <CarromResult homeName={homeName} awayName={awayName} rules={rules} formatName={format?.name} provenance={resolved.source}
-    initial={initial} busy={persist.isPending} onSave={save} />;
+  return (
+    <>
+      <CarromResult homeName={homeName} awayName={awayName} rules={rules} formatName={format?.name} provenance={resolved.source}
+        initial={initial} busy={persist.isPending} onSave={save} />
+      <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} />
+    </>
+  );
 }
 
 function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
@@ -1847,6 +1858,8 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
           clock: clockSnapshot(nextLog),
           format: (live?.live_state as any)?.format ?? format,
           ...(sheet ? { teamSheet: sheet } : {}),
+          // Abandoned as "no result": standings share the points whatever the score.
+          noResult: reallyDone && state.outcome === 'void',
         },
         // The attributed actions ARE the timeline here, and what the fact writer
         // reads to fill fixture_events.
@@ -1951,6 +1964,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       // the ending event, and without it the deck kept showing the confirm card.
       onSignOff={(nextLog, state) => { setLog(nextLog); save(nextLog, state, true); }}
     />
+    <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} defaultScore={formatWalkoverScore(format)} />
     </>
   );
 }
@@ -2409,10 +2423,12 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
     const { a, b } = tieScore(spec, next);
     const w = tieOutcome(spec, next).winner;
     const winner_team_id = done ? (w === 'A' ? fixture.home_team_id : w === 'B' ? fixture.away_team_id : null) : null;
+    // A finished tie with no winner shares the points even if the score is not level.
+    const noResult = done && w == null && a !== b;
     persist.mutate(
       // Keep other live_state keys (tie_blocked). Chess: home has white on board 1 by default
       // (FIDE "team named first"), saved so colour stats don't depend on a tap never made.
-      { live_state: { ...(live?.live_state ?? {}), tie: spec.boardPoints && !next.firstWhite ? { ...next, firstWhite: 'A' } : next, tieSpec: spec }, live_log: buildLog(next), home_score: a, away_score: b, status: st, winner_team_id },
+      { live_state: { ...(live?.live_state ?? {}), tie: spec.boardPoints && !next.firstWhite ? { ...next, firstWhite: 'A' } : next, tieSpec: spec, noResult }, live_log: buildLog(next), home_score: a, away_score: b, status: st, winner_team_id },
       { onSuccess, onError: (e: any) => { onErr?.(); toast.error(e.message); } },
     );
   };
@@ -2710,7 +2726,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                         {active.lineup
                           ? <span>Players: {namesOf(active.lineup.A)!.join(' / ')} vs {namesOf(active.lineup.B)!.join(' / ')}</span>
-                          : <span>Players not named — this rubber counts for the team only.</span>}
+                          : <span>Players not named - this rubber counts for the team only.</span>}
                         <button type="button" className="font-semibold underline underline-offset-2" onClick={() => setEditingLineup(state.activeRubber)}>
                           {active.lineup ? 'Change players' : 'Name players'}
                         </button>
@@ -2974,7 +2990,7 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
       <Card>
-        <CardHeader title="Team ranking" subtitle={`Set each team's finishing place — points are awarded by placement (${medalPoints.join(' / ')}).`} />
+        <CardHeader title="Team ranking" subtitle={`Set each team's finishing place - points are awarded by placement (${medalPoints.join(' / ')}).`} />
         <CardBody className="space-y-2">
           {orgs.length === 0 ? (
             <p className="text-sm text-slate-400 dark:text-slate-500">No teams have joined this championship yet.</p>
@@ -2983,7 +2999,7 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{o.name}</span>
               <div className="flex items-center gap-2">
                 <Select value={places[o.id] ?? ''} onChange={(e) => setPlace(o.id, e.target.value ? Number(e.target.value) : null)} className="w-28">
-                  <option value="">— place —</option>
+                  <option value="">- place -</option>
                   {Array.from({ length: n }, (_, i) => i + 1).map((pl) => <option key={pl} value={pl}>{ordinal(pl)}</option>)}
                 </Select>
                 <span className="w-8 text-right text-sm font-bold tabular-nums text-slate-500 dark:text-slate-400">{pointsFor(o.id)}</span>
@@ -3171,7 +3187,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const scoringText = spec.result.aggregate === 'sumBest'
     ? `Each org's points are the sum of its athletes' marks.`
     : spec.result.aggregate === 'medals'
-      ? `Each ${nounLower} is ranked (${best} wins) — the top finishers earn ${pts} points for their org. An org's total is the sum across every ${nounLower}.`
+      ? `Each ${nounLower} is ranked (${best} wins) - the top finishers earn ${pts} points for their org. An org's total is the sum across every ${nounLower}.`
       : `Each ${nounLower} awards placement points down the order to each finisher's org; an org's total is the sum across every ${nounLower}.`;
   const subtitle = pickOne
     ? isNamedDiscipline
@@ -3197,7 +3213,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
           {pickOne && !isNamedDiscipline && (
             <Field label={noun} hint={!category ? `Choose a ${nounLower} before scoring anyone in this session.` : undefined}>
               <Select value={category ?? ''} onChange={(e) => setGlobalCategory(e.target.value)}>
-                <option value="" disabled>— Choose {nounLower} —</option>
+                <option value="" disabled>- Choose {nounLower} -</option>
                 {spec.subEvents.map((se) => <option key={se.key} value={se.key}>{se.label}</option>)}
               </Select>
             </Field>
@@ -3515,23 +3531,32 @@ function DirectResult({ def, homeName, awayName, homeOrg, awayOrg, initialA, ini
 // Walkover needs a winner and a reason - a plain status flip would leave the match
 // with no result. Opens a popup to capture both, then records it via /live (which
 // also advances the winner in a bracket draw).
-function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeTeamId, awayTeamId, invalidate, onDone }:
-  { fixtureId: string; homeName: string; awayName: string; homeOrg?: string; awayOrg?: string; homeTeamId: string | null; awayTeamId: string | null; invalidate: (string | null)[]; onDone: () => void }) {
+function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeTeamId, awayTeamId, invalidate, onDone, defaultScore, className }:
+  { fixtureId: string; homeName: string; awayName: string; homeOrg?: string; awayOrg?: string; homeTeamId: string | null; awayTeamId: string | null; invalidate: (string | null)[]; onDone: () => void;
+    /** The format's walkover scoreline, winner first (e.g. 21-0). Blank = none recorded unless typed. */
+    defaultScore?: [number, number] | null; className?: string }) {
   const [open, setOpen] = useState(false);
   const [winner, setWinner] = useState<'home' | 'away'>('home');
   const [reason, setReason] = useState('');
+  const [winScore, setWinScore] = useState(defaultScore ? String(defaultScore[0]) : '');
+  const [loseScore, setLoseScore] = useState(defaultScore ? String(defaultScore[1]) : '');
   const mut = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
   const submit = () => {
     if (!reason.trim()) { toast.error('Add a walkover reason'); return; }
     const winner_team_id = winner === 'home' ? homeTeamId : awayTeamId;
+    // A scoreline only when both numbers are given; it never counts toward score difference.
+    const score = winScore !== '' && loseScore !== ''
+      ? (winner === 'home' ? { home_score: Number(winScore), away_score: Number(loseScore) } : { home_score: Number(loseScore), away_score: Number(winScore) })
+      : {};
     mut.mutate(
-      { status: 'walkover', winner_team_id, notes: reason.trim() },
+      { status: 'walkover', winner_team_id, notes: reason.trim(), ...score },
       { onSuccess: () => { setOpen(false); onDone(); }, onError: (e: any) => toast.error(e.message) },
     );
   };
+  const digits = (v: string) => v.replace(/[^\d]/g, '').slice(0, 3);
   return (
     <>
-      <Button variant="outline" className="w-full justify-start" onClick={() => setOpen(true)}>Walkover</Button>
+      <Button variant="outline" className={className ?? 'w-full justify-start'} onClick={() => setOpen(true)}>Walkover</Button>
       {open && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4" onClick={() => setOpen(false)}>
           <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
@@ -3540,9 +3565,18 @@ function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeT
             <div className="mt-4">
               <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Winner</span>
               <Select value={winner} onChange={(e) => setWinner(e.target.value as 'home' | 'away')}>
-                <option value="home">{homeOrg ? `${homeName} — ${homeOrg}` : homeName}</option>
-                <option value="away">{awayOrg ? `${awayName} — ${awayOrg}` : awayName}</option>
+                <option value="home">{homeOrg ? `${homeName} - ${homeOrg}` : homeName}</option>
+                <option value="away">{awayOrg ? `${awayName} - ${awayOrg}` : awayName}</option>
               </Select>
+            </div>
+            <div className="mt-3">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Walkover score (optional)</span>
+              <div className="flex items-center gap-2">
+                <Input className="w-20 text-center" inputMode="numeric" value={winScore} onChange={(e) => setWinScore(digits(e.target.value))} placeholder="Winner" aria-label="Winner score" />
+                <span className="text-slate-400">-</span>
+                <Input className="w-20 text-center" inputMode="numeric" value={loseScore} onChange={(e) => setLoseScore(digits(e.target.value))} placeholder="Loser" aria-label="Loser score" />
+              </div>
+              <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">The rulebook's walkover score, e.g. 2-0 in football. Left out of score difference.</p>
             </div>
             <div className="mt-3">
               <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Reason</span>
@@ -3556,6 +3590,33 @@ function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeT
         </div>
       )}
     </>
+  );
+}
+
+/** The walkover scoreline a kernel format implies, winner first. Null when the organiser enters it. */
+function formatWalkoverScore(format: ScoringFormat | null | undefined): [number, number] | null {
+  const rule = format?.endStates?.walkoverScoreline;
+  if (!format || !rule || rule === 'organiserEnters') return null;
+  if (rule === 'zeroZero') return [0, 0];
+  const top = format.levels.length - 1;
+  if (format.levels[top]?.decide === 'aggregate') return null;
+  const lv = top > 0 && format.levels[top].target <= 1 ? format.levels[top - 1] : format.levels[top];
+  return lv ? [lv.target, 0] : null;
+}
+
+/** "No-show?" row under a console that has no walkover control of its own. */
+function WalkoverRow({ fixture, fixtureId, invalidate, onDone, defaultScore }:
+  { fixture: any; fixtureId: string; invalidate: (string | null)[]; onDone: () => void; defaultScore?: [number, number] | null }) {
+  const open = !['completed', 'walkover', 'cancelled', 'bye'].includes(fixture.status) && fixture.scorecard_status !== 'locked';
+  if (!open || !fixture.home_team_id || !fixture.away_team_id) return null;
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm dark:border-slate-800">
+      <span className="text-slate-500 dark:text-slate-400">A side didn't turn up or withdrew?</span>
+      <WalkoverButton fixtureId={fixtureId} homeName={teamLabel(homeTeam(fixture))} awayName={teamLabel(awayTeam(fixture))}
+        homeOrg={orgLabel(homeTeam(fixture))} awayOrg={orgLabel(awayTeam(fixture))}
+        homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id}
+        invalidate={invalidate} onDone={onDone} defaultScore={defaultScore} className="justify-center" />
+    </div>
   );
 }
 
@@ -3573,7 +3634,7 @@ function LockScorecardPanel({ fixtureId, scorecardStatus, invalidate }:
     return (
       <div className="mb-4 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-800/60">
         <span className="font-semibold text-slate-600 dark:text-slate-300">🔒 Scorecard locked</span>
-        <span className="text-slate-400 dark:text-slate-500">— this result is now official and permanent.</span>
+        <span className="text-slate-400 dark:text-slate-500">- this result is now official and permanent.</span>
       </div>
     );
   }
@@ -3704,7 +3765,7 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
     winner === 'draw' || (hs != null && as != null) ? 'Draw' : '-';
 
   const submit = (status: 'live' | 'completed') => {
-    saveResult.mutate({ home_score: hs, away_score: as, winner_team_id: winnerId, status, notes: notes || undefined },
+    saveResult.mutate({ home_score: hs, away_score: as, winner_team_id: winnerId, draw: winner === 'draw' || undefined, status, notes: notes || undefined },
       { onSuccess: status === 'completed' ? onDone : undefined, onError: (e: any) => toast.error(e.message) });
   };
 
@@ -3748,8 +3809,8 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
           {/* Both buttons, not just complete: an impossible games tally (2-3 in a
               best-of-3) is never a valid state to save, live or final - the match
               would already be over the moment either side reached the threshold. */}
-          <Button variant="outline" disabled={saveResult.isPending || !gamesValid} onClick={() => submit('live')}>Save (keep live)</Button>
-          <Button disabled={saveResult.isPending || !gamesValid} onClick={() => submit('completed')}>{saveResult.isPending ? 'Saving…' : 'Save & complete'}</Button>
+          <Button variant="outline" disabled={saveResult.isPending || (!gamesValid && winner !== 'draw')} onClick={() => submit('live')}>Save (keep live)</Button>
+          <Button disabled={saveResult.isPending || (!gamesValid && winner !== 'draw')} onClick={() => submit('completed')}>{saveResult.isPending ? 'Saving…' : 'Save & complete'}</Button>
         </div>
       </CardBody>
     </Card>
@@ -3805,7 +3866,7 @@ function CricketManualResult({ fixture, fixtureId, live, invalidate, onDone }:
   const submit = (status: 'live' | 'completed') => {
     const ns: MatchState = { ...hydrate(live?.live_state), runsA, wktA: num(wA), ballsA: oversToBalls(oA), runsB, wktB: num(wB), ballsB: oversToBalls(oB) };
     save.mutate(
-      { live_state: ns, live_log: live?.live_log ?? [], home_score: runsA, away_score: runsB, status, winner_team_id: winnerId, notes: notes || null },
+      { live_state: { ...ns, noResult: winner === 'draw' && runsA !== runsB }, live_log: live?.live_log ?? [], home_score: runsA, away_score: runsB, status, winner_team_id: winnerId, notes: notes || null },
       { onSuccess: status === 'completed' ? onDone : undefined, onError: (e: any) => toast.error(e.message) },
     );
   };

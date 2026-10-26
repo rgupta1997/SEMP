@@ -1,5 +1,5 @@
 /*
- * THE EVENT SETUP ENGINE — turns an EventSetupBlueprint into rows, step by step.
+ * THE EVENT SETUP ENGINE - turns an EventSetupBlueprint into rows, step by step.
  *
  * It knows nothing about any sheet (the standard template's validator, or a
  * per-client adapter, made the blueprint) and makes no judgement calls about the
@@ -248,7 +248,7 @@ export function generatedFixturesOf(formatName: string, squadTokens: string[], t
 }
 
 // ===========================================================================
-// resolution — what is already on the platform, in one batched pass
+// resolution - what is already on the platform, in one batched pass
 // ===========================================================================
 interface StepNeed {
   mode: SetupStepMode;
@@ -360,7 +360,7 @@ export async function resolvePlatform(prisma: Prisma, bp: EventSetupBlueprint, m
   add('org', orgId, bp.org.name);
   steps.org.notes.push(orgId ? `found "${bp.org.name}"` : `"${bp.org.name}" is new`);
   if (!orgId && bp.steps.org === 'skip') {
-    issue('error', 'needed_but_skipped', `Host organisation "${bp.org.name}" is not on the platform, and the step is skipped — every other step hangs off it`, 'org');
+    issue('error', 'needed_but_skipped', `Host organisation "${bp.org.name}" is not on the platform, and the step is skipped - every other step hangs off it`, 'org');
   }
 
   // ---- competitors: organisations (inter) -------------------------------------
@@ -693,7 +693,7 @@ export async function resolvePlatform(prisma: Prisma, bp: EventSetupBlueprint, m
         const gen = generatedFixturesOf(d.format, tokens, d.thirdPlace);
         planned = gen.length;
         const byes = gen.filter((g) => g.status === 'bye').length;
-        steps.fixtures.notes.push(`${label}: ${d.format} generated over ${tokens.length} squads — ${gen.length - byes} matches${byes ? ` + ${byes} byes` : ''}, no times or grounds`);
+        steps.fixtures.notes.push(`${label}: ${d.format} generated over ${tokens.length} squads - ${gen.length - byes} matches${byes ? ` + ${byes} byes` : ''}, no times or grounds`);
       }
     } catch (e) {
       issue('error', 'bad_bracket', `${label}: ${(e as Error).message}`, 'fixtures');
@@ -702,7 +702,7 @@ export async function resolvePlatform(prisma: Prisma, bp: EventSetupBlueprint, m
     if (!used('fixtures')) continue;
     if (existing) {
       steps.fixtures.found += existing;
-      steps.fixtures.notes.push(`${label}: the draw already has ${existing} fixtures — left as they are`);
+      steps.fixtures.notes.push(`${label}: the draw already has ${existing} fixtures - left as they are`);
     } else if (bp.steps.fixtures === 'sheet') steps.fixtures.create += planned;
     else if (bp.steps.fixtures === 'existing') { steps.fixtures.missing += 1; steps.fixtures.missingNames.push(label); }
     else steps.fixtures.absent += 1;
@@ -716,7 +716,7 @@ export async function resolvePlatform(prisma: Prisma, bp: EventSetupBlueprint, m
       const list = n.missingNames.slice(0, 10).join(', ') + (n.missingNames.length > 10 ? `, and ${n.missingNames.length - 10} more` : '');
       issue('error', 'not_on_platform', `${label}: ${plural(n.missing, 'row')} marked "Already exists" ${n.missing === 1 ? 'is' : 'are'} not on the platform: ${list}`, k);
     }
-    if (n.absent && n.mode === 'skip') n.notes.push(`${n.absent} not on the platform — left alone (step skipped)`);
+    if (n.absent && n.mode === 'skip') n.notes.push(`${n.absent} not on the platform - left alone (step skipped)`);
   }
 
   return {
@@ -1383,7 +1383,7 @@ export async function applyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, st
       }));
       rFix.notes.push(`${label}: ${draw.format} generated over ${squads.length} squads (${rows.length} fixtures)`);
     }
-    if (existing) { rFix.found += existing; rFix.notes.push(`${label}: the draw already has ${existing} fixtures — left as they are`); continue; }
+    if (existing) { rFix.found += existing; rFix.notes.push(`${label}: the draw already has ${existing} fixtures - left as they are`); continue; }
     if (!sheet('fixtures')) continue;
     if (!drawId || !champId) throw new Error(`fixtures: the ${label} draw was not built`);
     const unbuilt = bp.squads.filter((s) => s.drawKey === f.drawKey && !teamIdOf.has(s.key)).map((s) => s.name);
@@ -1416,11 +1416,11 @@ async function insertUnitMembers(prisma: Prisma, rows: any[], created: (t: strin
 }
 
 // ===========================================================================
-// verify — read the built event back and check it against the blueprint
+// verify - read the built event back and check it against the blueprint
 // ===========================================================================
 /**
  * Every scheduled match, checked on what a person would check on the day: the date
- * and kickoff, the ground, the official, the two sides, and — for "Winner of" sides —
+ * and kickoff, the ground, the official, the two sides, and - for "Winner of" sides -
  * that the earlier match really feeds this one, using the product's own advancement
  * arithmetic rather than this file's. Generated draws are checked for every squad
  * being drawn; every squad for its entry in its draw.
@@ -1483,7 +1483,7 @@ export async function verifyBlueprint(prisma: Prisma, bp: EventSetupBlueprint, s
 }
 
 // ===========================================================================
-// cleanup — exactly what was created, in FK order, and never after play starts
+// cleanup - exactly what was created, in FK order, and never after play starts
 // ===========================================================================
 export const CLEANUP_ORDER = [
   'fixtures', 'team_entries', 'championship_invitations', 'team_members', 'teams',

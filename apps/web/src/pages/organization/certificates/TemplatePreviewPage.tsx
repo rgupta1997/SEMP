@@ -127,7 +127,7 @@ export function TemplatePreviewPage() {
       // Certificates already issued from it keep their own frozen copy of the facts,
       // so archiving a template never disturbs a document somebody is holding.
       message: tpl.used_count > 0
-        ? `${tpl.used_count} certificate${tpl.used_count === 1 ? '' : 's'} were issued from it. Those are unaffected — they keep the wording they were issued with. You just cannot issue new ones from this template.`
+        ? `${tpl.used_count} certificate${tpl.used_count === 1 ? '' : 's'} were issued from it. Those are unaffected - they keep the wording they were issued with. You just cannot issue new ones from this template.`
         : 'It has not been used yet, so nothing is affected.',
       confirmLabel: 'Archive',
       tone: 'danger',
@@ -225,7 +225,7 @@ export function TemplatePreviewPage() {
               <div className="mt-1 border-t border-slate-200 pt-3 dark:border-slate-800">
                 <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
                   Used for Participation, Organising, Officials &amp; Coaches. Leave blank to reuse the
-                  wording above — a medal claims a result, so a participation or officiating certificate
+                  wording above - a medal claims a result, so a participation or officiating certificate
                   should not say "Champion".
                 </p>
                 <label className="grid gap-1 text-sm">

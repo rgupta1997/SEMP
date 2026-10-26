@@ -118,7 +118,7 @@ export function PlanComparison({
                 <div className="min-h-[1.25rem]">
                   {saving !== null && (
                     <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
-                      Two months free — save {saving}%
+                      Two months free - save {saving}%
                     </span>
                   )}
                 </div>

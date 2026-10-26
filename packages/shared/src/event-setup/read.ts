@@ -1,5 +1,5 @@
 /*
- * READING A WORKBOOK GRID — the mechanical half of the validator.
+ * READING A WORKBOOK GRID - the mechanical half of the validator.
  *
  * Nothing here knows what an event is. It finds sheets, finds the header row, maps
  * a client's headers onto the template's columns, and turns cells into dates, times,
@@ -19,7 +19,7 @@ export type IssueSink = (issue: SetupIssue) => void;
 // cells
 // ---------------------------------------------------------------------------
 /** The words sheets use for "nothing here". */
-const BLANK = /^(?:null|nil|none|na|n\/a|n\.a\.?|tbd|tba|-+|–|—)$/i;
+const BLANK = /^(?:null|nil|none|na|n\/a|n\.a\.?|tbd|tba|-+|–|-)$/i;
 
 /** A cell as text: trimmed, whitespace collapsed, and the blank-ish words read as empty. */
 export function cleanCell(v: unknown): string {
@@ -83,7 +83,7 @@ export interface TableRead {
 const quoteList = (xs: string[]) => xs.map((x) => `"${x}"`).join(', ');
 
 /**
- * Read a 'table' sheet. The header row is the first non-empty row — unless that row
+ * Read a 'table' sheet. The header row is the first non-empty row - unless that row
  * is a title (fewer than two known headers) and one of the next few rows is the real
  * header row. `extra` maps headers the template does not list (Player 13, Player 1
  * mobile) onto keys of the caller's own.
@@ -186,7 +186,7 @@ export function readTable(
         missing.push(c.key);
         sink({
           severity: 'error', code: 'missing_column', sheet: sheet.name, column: c.header,
-          message: `The ${sheet.name} sheet has no "${c.header}" column. Add a column headed "${c.header}" (or rename yours to it)${c.hint ? ` — ${c.hint}` : '.'}`,
+          message: `The ${sheet.name} sheet has no "${c.header}" column. Add a column headed "${c.header}" (or rename yours to it)${c.hint ? ` - ${c.hint}` : '.'}`,
         });
       }
     }
@@ -291,7 +291,7 @@ function ymd(y: number, m: number, d: number): string | null {
  * "Oct 17, 2026", a weekday in front of any of those, and an Excel serial number.
  */
 /**
- * A TEXT date that reads both ways — "10/11/2026" is 10 November day-first and 11
+ * A TEXT date that reads both ways - "10/11/2026" is 10 November day-first and 11
  * October month-first. parseDate reads it day-first (the Indian convention); the
  * caller warns, because the sheet cannot say which was meant. Real Excel date cells
  * never get here ambiguous: the shared reader turns them into YYYY-MM-DD.

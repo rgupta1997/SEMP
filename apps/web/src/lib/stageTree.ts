@@ -51,7 +51,7 @@ export function describeTieBlocked(tieBlocked: { pool: number; rank: number } | 
   const letter = String.fromCharCode(64 + tieBlocked.pool);
   const rank = tieBlocked.rank;
   const ord = rank === 1 ? '1st' : rank === 2 ? '2nd' : rank === 3 ? '3rd' : `${rank}th`;
-  return `Pool ${letter} tied for ${ord} - needs manual resolution`;
+  return `Pool ${letter} tied for ${ord} - resolve it on the pool table`;
 }
 
 // A fixture's live_state.tie_blocked doesn't say which of its two sides it applies

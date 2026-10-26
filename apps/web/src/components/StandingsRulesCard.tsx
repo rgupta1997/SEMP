@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Pencil } from 'lucide-react';
-import { DEFAULT_STANDINGS_RULE, type StandingsRule, type StandingsScheme } from '@semp/shared';
+import { DEFAULT_STANDINGS_RULE, defaultGroupRanking, tiebreakerLabel, type GroupRanking, type StandingsRule, type StandingsScheme } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
+import { MatchPointsFields, TiebreakerPicker } from './TiebreakerPicker';
 import { Badge, Button, Card, CardBody, CardHeader, Select, Spinner, toast } from './ui';
 
 // Scoring-rules editor (organiser-only). Lets the host set the championship default
@@ -10,37 +11,47 @@ import { Badge, Button, Card, CardBody, CardHeader, Select, Spinner, toast } fro
 // standings server-side; we refresh all queries so the Standings tab reflects it.
 
 interface RuleRow { id: string; scope_type: 'championship' | 'format' | 'discipline'; scope_id: string | null; config: StandingsRule }
-interface ScopeOption { id: string; name: string; sport?: string | null; entry_type?: string | null; format?: string | null }
+interface ScopeOption { id: string; name: string; sport?: string | null; entry_type?: string | null; format?: string | null; default_ranking?: GroupRanking }
 interface RulesResponse { default: StandingsRule; rules: RuleRow[]; formats: ScopeOption[]; disciplines: ScopeOption[] }
 
+type PlacementRule = Extract<StandingsRule, { scheme: 'placement' }>;
+type RankingRule = Extract<StandingsRule, { scheme: 'ranking' }>;
+
+// What the organiser picks. "both" is a placement rule that also counts match points.
+type Choice = 'placement' | 'both' | 'league_points' | 'custom' | 'ranking' | 'medal';
+const CHOICES: { value: Choice; label: string }[] = [
+  { value: 'placement', label: 'Placings (1st, 2nd, 3rd...)' },
+  { value: 'both', label: 'Placings + match points' },
+  { value: 'league_points', label: 'Match points only (W/D/L)' },
+  { value: 'custom', label: 'Custom points (entered per match)' },
+  { value: 'ranking', label: 'Event ranking (swimming, powerlifting)' },
+];
+const choiceOf = (r: StandingsRule): Choice => (r.scheme === 'placement' && r.include_match_points ? 'both' : r.scheme);
+
+const PLACEMENT_DEFAULT: PlacementRule = {
+  scheme: 'placement', points: { winner: 7, runner_up: 5, third_place: 0, fourth_place: 0, semi_finalist: 3, quarter_finalist: 1 },
+  participation: 0, table_placings: true,
+};
+function ruleForChoice(choice: Choice, prev: StandingsRule): StandingsRule {
+  const participation = prev.participation;
+  const placement = prev.scheme === 'placement' ? prev : PLACEMENT_DEFAULT;
+  switch (choice) {
+    case 'placement': return { ...placement, participation, include_match_points: false };
+    case 'both': return { ...placement, participation, include_match_points: true };
+    case 'league_points': return { ...DEFAULT_STANDINGS_RULE, participation } as StandingsRule;
+    case 'custom': return { scheme: 'custom', participation };
+    case 'ranking': return { scheme: 'ranking', places: [5, 3, 1], participation };
+    case 'medal': return { scheme: 'medal', gold: 5, silver: 3, bronze: 1, participation };
+  }
+}
+
 const SCHEME_LABEL: Record<StandingsScheme, string> = {
-  league_points: 'League points (W/D/L)',
-  placement: 'Knockout',
+  league_points: 'Match points (W/D/L)',
+  placement: 'Placings',
   medal: 'Medals (top 3)',
   custom: 'Custom points',
-  ranking: 'Ranking (by place)',
+  ranking: 'Event ranking',
 };
-
-const SCHEME_DEFAULTS: Record<StandingsScheme, StandingsRule> = {
-  league_points: DEFAULT_STANDINGS_RULE,
-  placement: { scheme: 'placement', points: { winner: 7, runner_up: 5, semi_finalist: 3, quarter_finalist: 1 }, participation: 0 },
-  medal: { scheme: 'medal', gold: 5, silver: 3, bronze: 1, participation: 0 },
-  custom: { scheme: 'custom', participation: 0 },
-  ranking: { scheme: 'ranking', places: [5, 3, 1], participation: 0 },
-};
-
-// Organisers pick one of these point systems. Legacy league/medal rules still compute,
-// but the picker only offers these - and editing coerces anything else to Knockout so the
-// dropdown always shows a supported option. "Ranking" is for the ranking sports
-// (swimming/powerlifting/athletics) - best set per format/discipline, not as the
-// championship default (it gives head-to-head sports no points).
-const POINT_SYSTEM_OPTIONS: { value: StandingsScheme; label: string }[] = [
-  { value: 'placement', label: 'Knockout' },
-  { value: 'custom', label: 'Custom points' },
-  { value: 'ranking', label: 'Ranking (by place)' },
-];
-const coerceScheme = (r: StandingsRule): StandingsRule =>
-  r.scheme === 'placement' || r.scheme === 'custom' || r.scheme === 'ranking' ? r : SCHEME_DEFAULTS.placement;
 
 // 1 -> "1st", 2 -> "2nd", … for the ranking place labels.
 function ordinal(n: number): string {
@@ -49,18 +60,32 @@ function ordinal(n: number): string {
   return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
 }
 
-const PLACEMENT_KEYS = ['winner', 'runner_up', 'semi_finalist', 'quarter_finalist'] as const;
+const PLACEMENT_KEYS = ['winner', 'runner_up', 'third_place', 'fourth_place', 'semi_finalist', 'quarter_finalist'] as const;
 const PLACEMENT_LABEL: Record<(typeof PLACEMENT_KEYS)[number], string> = {
-  winner: 'Winner', runner_up: 'Runner-up', semi_finalist: 'Semi-finalist', quarter_finalist: 'Quarter-finalist',
+  winner: 'Winner', runner_up: 'Runner-up', third_place: '3rd place', fourth_place: '4th place',
+  semi_finalist: 'Semi-finalist', quarter_finalist: 'Quarter-finalist',
 };
 
+// A league / round-robin style format, where placings can only come from the table.
+const isTableFormat = (format?: string | null) => !!format && /league|round[\s-]?robin|group|pool|swiss/i.test(format);
+
 // A compact, read-only summary of a saved rule - shown when the editor is frozen.
-function ruleSummary(rule: StandingsRule): string {
-  const parts: string[] = [SCHEME_LABEL[rule.scheme]];
+export function ruleSummary(rule: StandingsRule, sport?: string | null, entryType?: string | null): string {
+  const parts: string[] = [rule.scheme === 'placement' && rule.include_match_points ? 'Placings + match points' : SCHEME_LABEL[rule.scheme]];
   if (rule.scheme === 'league_points') parts.push(`Win ${rule.win} · Draw ${rule.draw} · Loss ${rule.loss}`);
-  else if (rule.scheme === 'placement') parts.push(PLACEMENT_KEYS.map((k) => `${PLACEMENT_LABEL[k]} ${rule.points[k] ?? 0}`).join(' · '));
-  else if (rule.scheme === 'medal') parts.push(`Gold ${rule.gold} · Silver ${rule.silver} · Bronze ${rule.bronze}`);
-  else if (rule.scheme === 'ranking') parts.push(rule.places.map((p, i) => `${ordinal(i + 1)} ${p}`).join(' · '));
+  else if (rule.scheme === 'placement') {
+    parts.push(PLACEMENT_KEYS.filter((k) => (rule.points[k] ?? 0) > 0).map((k) => `${PLACEMENT_LABEL[k]} ${rule.points[k]}`).join(' · '));
+    if (rule.table_placings) parts.push('placings from tables');
+    if (rule.rank_semi_losers) parts.push('semi-final losers ranked');
+    if (rule.ranking) {
+      const r = rule.ranking;
+      parts.push(`league / group ${r.win}/${r.draw}/${r.loss}${r.tiebreakers ? `, ${r.tiebreakers.map((t) => tiebreakerLabel(t, sport, entryType)).join(', ')}` : ''}`);
+    }
+  } else if (rule.scheme === 'medal') parts.push(`Gold ${rule.gold} · Silver ${rule.silver} · Bronze ${rule.bronze}`);
+  else if (rule.scheme === 'ranking') {
+    parts.push(rule.places.map((p, i) => `${ordinal(i + 1)} ${p}`).join(' · '));
+    if (rule.convert) parts.push(`sport placing ${rule.convert.places.join('/')} (${rule.convert.groups.map((g) => g.share < 1 ? `${g.name} x${g.share}` : g.name).join(', ')})`);
+  }
   if (rule.participation) parts.push(`Participation ${rule.participation}`);
   return parts.join('  ·  ');
 }
@@ -90,56 +115,220 @@ function NumberField({ label, value, onChange }: { label: string; value: number;
   );
 }
 
-// One editable rule (point-system picker + scheme-specific point fields). The picker
-// offers two options: Knockout (placement points) and Custom points (entered per
-// match). `value` is always coerced to one of these before it reaches here.
-function RuleForm({ value, onChange }: { value: StandingsRule; onChange: (r: StandingsRule) => void }) {
+function Check({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
+  return (
+    <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-200">
+      <input type="checkbox" className="mt-0.5" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span>{label}{hint && <span className="block text-xs text-slate-400 dark:text-slate-500">{hint}</span>}</span>
+    </label>
+  );
+}
+
+const Section = ({ title, children }: { title: string; children: ReactNode }) => (
+  <div className="space-y-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-800/40">
+    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{title}</div>
+    {children}
+  </div>
+);
+
+type TableRanking = NonNullable<PlacementRule['ranking']>;
+/** What a rule inherits when it sets no table ranking: its parent's, or each sport's default. */
+export interface InheritedRanking { ranking?: TableRanking; from: string }
+
+// Match points and tie-breakers for league / group tables. The default and format rows
+// may leave tie-breakers unset so each sport keeps its own order.
+function RankingSection({ rule, onChange, option, inherited }: {
+  rule: PlacementRule; onChange: (r: StandingsRule) => void; option?: ScopeOption; inherited: InheritedRanking;
+}) {
+  const sport = option?.sport ?? null;
+  const entryType = option?.entry_type ?? null;
+  const sportDefault = option?.default_ranking ?? defaultGroupRanking(sport);
+  const parent = inherited.ranking;
+  const own = rule.ranking;
+  const shown = own ?? parent;
+  const points = shown ?? sportDefault;
+  const order = shown?.tiebreakers ?? sportDefault.tiebreakers;
+  const inheritLabel = parent
+    ? `Same as ${inherited.from} (${parent.win} / ${parent.draw} / ${parent.loss})`
+    : sport ? `${sport} default (${sportDefault.win} / ${sportDefault.draw} / ${sportDefault.loss})` : "Each sport's default (e.g. football 3 / 1 / 0, basketball 2 / 1 / 0)";
+  return (
+    <Section title="League / group match points">
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Points per league or group match: they order the tables{rule.include_match_points ? ' and are added to the overall table' : ''}. Configure stages can still set them per stage.
+      </p>
+      <Select className="w-full max-w-sm" value={own ? 'own' : 'inherit'}
+        onChange={(e) => onChange({ ...rule, ranking: e.target.value === 'own' ? { win: points.win, draw: points.draw, loss: points.loss, ...(sport ? { tiebreakers: order } : {}) } : undefined })}>
+        <option value="inherit">{inheritLabel}</option>
+        <option value="own">Set my own</option>
+      </Select>
+      {own && (
+        <>
+          <MatchPointsFields value={own} onChange={(p) => onChange({ ...rule, ranking: { ...own, ...p } })} />
+          {sport ? (
+            <TiebreakerPicker sport={sport} entryType={entryType} value={order} onChange={(t) => onChange({ ...rule, ranking: { ...own, tiebreakers: t } })} />
+          ) : (
+            <>
+              <Check checked={!!own.tiebreakers} onChange={(v) => onChange({ ...rule, ranking: { ...own, tiebreakers: v ? order : undefined } })}
+                label="Also set the tie-breaker order"
+                hint="Off: each sport keeps its own order (e.g. goal difference in football, run difference in cricket)." />
+              {own.tiebreakers && <TiebreakerPicker value={own.tiebreakers} onChange={(t) => onChange({ ...rule, ranking: { ...own, tiebreakers: t } })} />}
+            </>
+          )}
+        </>
+      )}
+      {!own && sport && <p className="text-xs text-slate-400 dark:text-slate-500">Tie-breakers: {order.map((t) => tiebreakerLabel(t, sport, entryType)).join(', ')}.</p>}
+    </Section>
+  );
+}
+
+// Event sports: sum the event points per group and award a sport placing instead.
+function ConversionSection({ rule, onChange }: { rule: RankingRule; onChange: (r: StandingsRule) => void }) {
+  const conv = rule.convert;
+  if (!conv) {
+    return (
+      <Check checked={false} label="Convert to a sport placing"
+        hint="Add up each institute's event points, rank them, and award placing points (e.g. 10/7/4/1) to the overall table."
+        onChange={() => onChange({ ...rule, convert: { groups: [{ name: 'Overall', share: 1 }], places: [10, 7, 4, 1], participation: 0 } })} />
+    );
+  }
+  const set = (c: Partial<NonNullable<RankingRule['convert']>>) => onChange({ ...rule, convert: { ...conv, ...c } });
+  return (
+    <Section title="Sport placing">
+      <Check checked label="Convert to a sport placing" onChange={() => onChange({ ...rule, convert: undefined })} />
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        The sport table keeps the event points. The overall table gets the placing below for each group this discipline counts toward. Use the same group name on every discipline that adds up together (e.g. Men, Women); a mixed event can count half toward each.
+      </p>
+      {conv.groups.map((g, i) => (
+        <div key={i} className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Group</span>
+            <input value={g.name} maxLength={60} onChange={(e) => set({ groups: conv.groups.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })}
+              className="w-36 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Counts</span>
+            <Select value={String(g.share)} onChange={(e) => set({ groups: conv.groups.map((x, j) => (j === i ? { ...x, share: Number(e.target.value) } : x)) })}>
+              <option value="1">In full</option>
+              <option value="0.5">Half</option>
+            </Select>
+          </label>
+          {conv.groups.length > 1 && <Button size="sm" variant="ghost" onClick={() => set({ groups: conv.groups.filter((_, j) => j !== i) })}>Remove</Button>}
+        </div>
+      ))}
+      {conv.groups.length < 4 && <Button size="sm" variant="ghost" onClick={() => set({ groups: [...conv.groups, { name: '', share: 1 }] })}>+ Add group</Button>}
+      <div className="flex flex-wrap items-end gap-3">
+        {conv.places.map((p, i) => (
+          <NumberField key={i} label={ordinal(i + 1)} value={p} onChange={(n) => set({ places: conv.places.map((x, j) => (j === i ? n : x)) })} />
+        ))}
+        <NumberField label="Others" value={conv.participation} onChange={(n) => set({ participation: n })} />
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" variant="ghost" onClick={() => set({ places: [...conv.places, 0] })}>+ Add place</Button>
+        {conv.places.length > 1 && <Button size="sm" variant="ghost" onClick={() => set({ places: conv.places.slice(0, -1) })}>- Remove last</Button>}
+      </div>
+      <p className="text-xs text-slate-400 dark:text-slate-500">Level totals are split by more golds, then more silvers; still level, they share the better place.</p>
+    </Section>
+  );
+}
+
+// One editable rule: the point-system choice and its fields. `option` is set for a
+// format / discipline row, so the form can speak to that sport and format.
+function RuleForm({ value, onChange, option, inherited }: {
+  value: StandingsRule; onChange: (r: StandingsRule) => void; option?: ScopeOption; inherited: InheritedRanking;
+}) {
+  const choice = choiceOf(value);
+  const choices = choice === 'medal' ? [...CHOICES, { value: 'medal' as const, label: 'Medals (legacy)' }] : CHOICES;
+  const tableFormat = isTableFormat(option?.format ?? (option?.sport ? null : option?.name));
+  const discipline = !!option?.sport;
   return (
     <div className="space-y-3">
       <label className="flex flex-col gap-1">
-        <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Point system</span>
-        <Select
-          className="w-full max-w-xs"
-          value={POINT_SYSTEM_OPTIONS.some((o) => o.value === value.scheme) ? value.scheme : 'placement'}
-          // Preserve the participation point when switching schemes.
-          onChange={(e) => onChange({ ...SCHEME_DEFAULTS[e.target.value as StandingsScheme], participation: value.participation })}
-        >
-          {POINT_SYSTEM_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+        <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">What counts toward the overall table</span>
+        <Select className="w-full max-w-sm" value={choice} onChange={(e) => onChange(ruleForChoice(e.target.value as Choice, value))}>
+          {choices.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
         </Select>
       </label>
 
-      <div className="flex flex-wrap items-end gap-4">
-        {value.scheme === 'placement' && PLACEMENT_KEYS.map((k) => (
-          <NumberField
-            key={k} label={PLACEMENT_LABEL[k]} value={value.points[k] ?? 0}
-            onChange={(n) => onChange({ ...value, points: { ...value.points, [k]: n } })}
-          />
-        ))}
-        {value.scheme === 'ranking' && value.places.map((p, i) => (
-          <NumberField
-            key={i} label={ordinal(i + 1)} value={p}
-            onChange={(n) => onChange({ ...value, places: value.places.map((x, j) => (j === i ? n : x)) })}
-          />
-        ))}
-        {/* Awarded to every org that takes part, on top of the scheme above. */}
+      {value.scheme === 'placement' && (
+        <>
+          <div className="flex flex-wrap items-end gap-4">
+            {PLACEMENT_KEYS.map((k) => (
+              <NumberField key={k} label={PLACEMENT_LABEL[k]} value={value.points[k] ?? 0}
+                onChange={(n) => onChange({ ...value, points: { ...value.points, [k]: n } })} />
+            ))}
+            <NumberField label="Participation" value={value.participation} onChange={(n) => onChange({ ...value, participation: n })} />
+          </div>
+          <div className="space-y-2">
+            <Check checked={!!value.table_placings} onChange={(v) => onChange({ ...value, table_placings: v })}
+              label="Placings from league / group tables"
+              hint="When the league or groups finish, places no knockout match decides come from the table (e.g. 3rd and 4th when only a final is played)." />
+            <Check checked={!!value.rank_semi_losers} onChange={(v) => onChange({ ...value, rank_semi_losers: v })}
+              label="No 3rd-place match: rank the semi-final losers by group record"
+              hint="The better group record takes 3rd. Level records are ordered by hand on the group table." />
+          </div>
+          {tableFormat && !value.table_placings && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+              This is a {option?.format ?? option?.name} draw. Without placings from the table, {value.include_match_points ? 'its teams earn no placing points, only their match points and participation.' : 'its teams earn only the participation point.'}
+            </p>
+          )}
+          <RankingSection rule={value} onChange={onChange} option={option} inherited={inherited} />
+        </>
+      )}
+
+      {value.scheme === 'league_points' && (
+        <>
+          <MatchPointsFields value={value} onChange={(p) => onChange({ ...value, ...p })} />
+          <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Tie-breakers, in order</span>
+          <TiebreakerPicker sport={option?.sport} entryType={option?.entry_type} value={value.tiebreakers} onChange={(t) => onChange({ ...value, tiebreakers: t })} />
+          {!discipline && (
+            <p className="text-xs text-slate-400 dark:text-slate-500">
+              {option ? 'Shown with general names here; each discipline reads them in its own terms (goal difference, game difference...).' : 'These also order the overall table when two totals are level.'}
+            </p>
+          )}
+          <NumberField label="Participation" value={value.participation} onChange={(n) => onChange({ ...value, participation: n })} />
+        </>
+      )}
+
+      {value.scheme === 'medal' && (
+        <div className="flex flex-wrap items-end gap-4">
+          <NumberField label="Gold" value={value.gold} onChange={(n) => onChange({ ...value, gold: n })} />
+          <NumberField label="Silver" value={value.silver} onChange={(n) => onChange({ ...value, silver: n })} />
+          <NumberField label="Bronze" value={value.bronze} onChange={(n) => onChange({ ...value, bronze: n })} />
+          <NumberField label="Participation" value={value.participation} onChange={(n) => onChange({ ...value, participation: n })} />
+        </div>
+      )}
+
+      {value.scheme === 'custom' && (
         <NumberField label="Participation" value={value.participation} onChange={(n) => onChange({ ...value, participation: n })} />
-      </div>
+      )}
 
       {value.scheme === 'ranking' && (
-        <div className="flex gap-2">
-          <Button size="sm" variant="ghost" onClick={() => onChange({ ...value, places: [...value.places, 0] })}>+ Add place</Button>
-          {value.places.length > 1 && (
-            <Button size="sm" variant="ghost" onClick={() => onChange({ ...value, places: value.places.slice(0, -1) })}>− Remove last</Button>
-          )}
-        </div>
+        <>
+          <div className="flex flex-wrap items-end gap-4">
+            {value.places.map((p, i) => (
+              <NumberField key={i} label={ordinal(i + 1)} value={p}
+                onChange={(n) => onChange({ ...value, places: value.places.map((x, j) => (j === i ? n : x)) })} />
+            ))}
+            <NumberField label="Participation" value={value.participation} onChange={(n) => onChange({ ...value, participation: n })} />
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="ghost" onClick={() => onChange({ ...value, places: [...value.places, 0] })}>+ Add place</Button>
+            {value.places.length > 1 && (
+              <Button size="sm" variant="ghost" onClick={() => onChange({ ...value, places: value.places.slice(0, -1) })}>- Remove last</Button>
+            )}
+          </div>
+          <ConversionSection rule={value} onChange={onChange} />
+        </>
       )}
 
       <p className="text-xs text-slate-400 dark:text-slate-500">
         {value.scheme === 'custom'
           ? 'Custom points: award championship points to each side after every result, from the Results page. A reminder is sent while a completed match still has no points.'
           : value.scheme === 'ranking'
-            ? 'Ranking points are awarded by finishing place once the official saves & signs off the event ranking (swimming / powerlifting / athletics). Places beyond the list score only the participation point.'
-            : "Knockout points are awarded by how far a team advances, once the discipline's final has been played. Participation counts as soon as an org plays."}
+            ? 'Event points are awarded by finishing place once the official saves and signs off the event ranking. Places beyond the list score only the participation point.'
+            : value.scheme === 'league_points'
+              ? 'Every match adds its win / draw / loss points to the overall table as soon as it is played.'
+              : 'Placing points build up as teams advance (reaching the semis banks the semi-finalist points) and settle when the final is played. A placing worth 0 counts as no placing. Participation goes to teams with no placing; a team that only lost walkovers gets nothing.'}
       </p>
     </div>
   );
@@ -148,7 +337,7 @@ function RuleForm({ value, onChange }: { value: StandingsRule; onChange: (r: Sta
 // The championship-wide default rule. Frozen (read-only summary) once a rule has
 // been saved; "Edit" re-opens the editor.
 function DefaultRuleEditor({ eventId, initial, saved }: { eventId: string; initial: StandingsRule; saved: boolean }) {
-  const [rule, setRule] = useState<StandingsRule>(coerceScheme(initial));
+  const [rule, setRule] = useState<StandingsRule>(initial);
   const [frozen, setFrozen] = useState(saved);
   const save = useApiMutation(
     (config: StandingsRule) => api('PUT', `/championships/${eventId}/standings-rules`, { scope_type: 'championship', config }),
@@ -159,7 +348,13 @@ function DefaultRuleEditor({ eventId, initial, saved }: { eventId: string; initi
       <div className="mb-3 flex items-center gap-2">
         <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">Championship default</span>
         <Badge tone="slate">applies unless overridden</Badge>
+        {!saved && <Badge tone="amber">built-in, not saved</Badge>}
       </div>
+      {!saved && (
+        <p className="mb-3 text-xs text-amber-700 dark:text-amber-300">
+          No point system is saved yet, so every match counts {initial.scheme === 'league_points' ? `${initial.win} / ${initial.draw} / ${initial.loss}` : 'as below'} toward the overall table. Pick and save the system this event uses.
+        </p>
+      )}
       {frozen ? (
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm text-slate-600 dark:text-slate-300">{ruleSummary(rule)}</p>
@@ -167,7 +362,7 @@ function DefaultRuleEditor({ eventId, initial, saved }: { eventId: string; initi
         </div>
       ) : (
         <>
-          <RuleForm value={rule} onChange={setRule} />
+          <RuleForm value={rule} onChange={setRule} inherited={{ from: "each sport's default" }} />
           <div className="mt-3 flex justify-end">
             <Button disabled={save.isPending}
               onClick={() => save.mutate(rule, { onSuccess: () => { toast.success('Point system saved'); setFrozen(true); }, onError: (e: any) => toast.error(e.message) })}>
@@ -181,12 +376,14 @@ function DefaultRuleEditor({ eventId, initial, saved }: { eventId: string; initi
 }
 
 // A per-format / per-discipline override that inherits the default until customized.
-function ScopeRuleEditor({ eventId, scopeType, option, override, fallback }: {
-  eventId: string; scopeType: 'format' | 'discipline'; option: ScopeOption; override?: RuleRow; fallback: StandingsRule;
+function ScopeRuleEditor({ eventId, scopeType, option, override, fallback, inherited }: {
+  eventId: string; scopeType: 'format' | 'discipline'; option: ScopeOption; override?: RuleRow; fallback: StandingsRule; inherited: InheritedRanking;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [rule, setRule] = useState<StandingsRule>(coerceScheme(override?.config ?? fallback));
+  const [rule, setRule] = useState<StandingsRule>(override?.config ?? fallback);
+  // Close the form and drop unsaved edits.
+  const cancel = () => { setRule(override?.config ?? fallback); setEditing(false); setOpen(false); };
   const save = useApiMutation(
     (config: StandingsRule) => api('PUT', `/championships/${eventId}/standings-rules`, { scope_type: scopeType, scope_id: option.id, config }),
     [],
@@ -223,15 +420,17 @@ function ScopeRuleEditor({ eventId, scopeType, option, override, fallback }: {
             </Button>
           )}
           {!override && !open && <Button variant="ghost" onClick={() => setOpen(true)}>Customize</Button>}
+          {showForm && <Button variant="ghost" onClick={cancel}>Cancel</Button>}
         </div>
       </div>
 
-      {frozen && <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{ruleSummary(override!.config)}</p>}
+      {frozen && <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{ruleSummary(override!.config, option.sport, option.entry_type)}</p>}
 
       {showForm && (
         <div className="mt-3">
-          <RuleForm value={rule} onChange={setRule} />
+          <RuleForm value={rule} onChange={setRule} option={option} inherited={inherited} />
           <div className="mt-3 flex justify-end gap-2">
+            <Button variant="ghost" onClick={cancel}>Cancel</Button>
             {override && (
               <Button variant="ghost" disabled={reset.isPending}
                 onClick={() => reset.mutate(undefined, { onSuccess: () => { toast.success('Override removed'); setEditing(false); setOpen(false); }, onError: (e: any) => toast.error(e.message) })}>
@@ -261,6 +460,18 @@ export function StandingsRulesCard({ eventId }: { eventId: string }) {
   const championshipRule = data.rules.find((r) => r.scope_type === 'championship');
   const defaultRule = championshipRule?.config ?? data.default;
   const findOverride = (type: 'format' | 'discipline', id: string) => data.rules.find((r) => r.scope_type === type && r.scope_id === id);
+  const rankingOf = (r?: StandingsRule) => (r?.scheme === 'placement' ? r.ranking : undefined);
+  const defaultInherited: InheritedRanking = { ranking: rankingOf(defaultRule), from: 'the championship default' };
+  // A discipline sits under its format's override when there is one, as the engine resolves it.
+  const parentOf = (d: ScopeOption) => {
+    const fmt = data.formats.find((f) => f.name === d.format);
+    const fmtRule = fmt ? findOverride('format', fmt.id)?.config : undefined;
+    const fmtRanking = rankingOf(fmtRule);
+    return {
+      rule: fmtRule ?? defaultRule,
+      inherited: fmtRanking ? { ranking: fmtRanking, from: `the ${fmt!.name} format` } : defaultInherited,
+    };
+  };
 
   return (
     <Card>
@@ -275,7 +486,7 @@ export function StandingsRulesCard({ eventId }: { eventId: string }) {
           <div className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">By format</h4>
             {data.formats.map((f) => (
-              <ScopeRuleEditor key={f.id} eventId={eventId} scopeType="format" option={f} override={findOverride('format', f.id)} fallback={defaultRule} />
+              <ScopeRuleEditor key={f.id} eventId={eventId} scopeType="format" option={f} override={findOverride('format', f.id)} fallback={defaultRule} inherited={defaultInherited} />
             ))}
           </div>
         )}
@@ -284,7 +495,7 @@ export function StandingsRulesCard({ eventId }: { eventId: string }) {
           <div className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">By discipline</h4>
             {data.disciplines.map((d) => (
-              <ScopeRuleEditor key={d.id} eventId={eventId} scopeType="discipline" option={d} override={findOverride('discipline', d.id)} fallback={defaultRule} />
+              <ScopeRuleEditor key={d.id} eventId={eventId} scopeType="discipline" option={d} override={findOverride('discipline', d.id)} fallback={parentOf(d).rule} inherited={parentOf(d).inherited} />
             ))}
           </div>
         )}

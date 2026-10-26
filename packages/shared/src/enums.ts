@@ -39,6 +39,25 @@ export const isNoResult = (liveState: unknown): boolean =>
 /** The round label the knockout generators give the play-off for third. */
 export const THIRD_PLACE_ROUND = '3rd Place';
 
+/** Round names the knockout generators stamp on fixtures.round. Never write them as raw strings. */
+export const KNOCKOUT_ROUND = { final: 'Final', semiFinal: 'SF', quarterFinal: 'QF', thirdPlace: THIRD_PLACE_ROUND } as const;
+const ROUND_BY_SIZE: Record<number, string> = { 2: KNOCKOUT_ROUND.final, 4: KNOCKOUT_ROUND.semiFinal, 8: KNOCKOUT_ROUND.quarterFinal };
+const ROUND_OF = /^R(\d+)$/;
+
+/** The round label for a knockout round with `teams` still in it: Final, SF, QF, then R16, R32... */
+export const knockoutRoundLabel = (teams: number): string => ROUND_BY_SIZE[teams] ?? `R${teams}`;
+
+/** Teams in a knockout round by its label (Final 2, SF 4, QF 8, R16 16); 0 when not a sized round. */
+export function knockoutRoundSize(round?: string | null): number {
+  if (!round) return 0;
+  const sized = Object.entries(ROUND_BY_SIZE).find(([, label]) => label === round);
+  return sized ? Number(sized[0]) : Number(round.match(ROUND_OF)?.[1]) || 0;
+}
+
+/** A knockout round by its generator label, the 3rd-place play-off included. */
+export const isKnockoutRound = (round?: string | null): boolean =>
+  round === THIRD_PLACE_ROUND || knockoutRoundSize(round) > 0;
+
 /** A bracket match (final and 3rd place included): someone must win, so a level result needs a tie-break. */
 export const isKnockoutFixture = (f: { bracket_position?: number | null; round?: string | null }): boolean =>
   f.bracket_position != null || f.round === THIRD_PLACE_ROUND;
@@ -136,8 +155,9 @@ export type NotificationReaction = (typeof NOTIFICATION_REACTIONS)[number];
 export const STANDINGS_SCHEME = ['league_points', 'placement', 'medal', 'custom', 'ranking'] as const;
 export type StandingsScheme = (typeof STANDINGS_SCHEME)[number];
 
-// Ordered tiebreakers for the league_points scheme (applied left-to-right).
-export const STANDINGS_TIEBREAKER = ['points', 'wins', 'lost', 'head_to_head', 'score_diff'] as const;
+// Ordered tiebreakers for a group / league table (applied left-to-right). score_diff and
+// score_for read each match's headline score, so they mean goals, sets or rubbers by sport.
+export const STANDINGS_TIEBREAKER = ['points', 'wins', 'lost', 'head_to_head', 'score_diff', 'score_for'] as const;
 export type StandingsTiebreaker = (typeof STANDINGS_TIEBREAKER)[number];
 
 // Where an editable scoring rule applies. Resolution is most-specific-wins:

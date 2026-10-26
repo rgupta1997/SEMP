@@ -12,6 +12,7 @@ import { stageConfigSchema } from './stage-config.js';
 import { formatOverridesSchema } from './format-overrides.js';
 import { ENTRY_LEVELS } from './org-structure.js';
 import { HOST_CITIES_MAX } from './host-cities.js';
+import { groupRankingSchema } from './standings-ranking.js';
 
 const uuid = z.string().uuid();
 
@@ -813,6 +814,8 @@ export const fixtureResultSchema = z.object({
   home_score: matchScore.nullable().optional(),
   away_score: matchScore.nullable().optional(),
   winner_team_id: uuid.nullable().optional(),
+  /** The scorer chose "Tie / draw": no winner is derived and the points are shared. */
+  draw: z.boolean().optional(),
   status: z.enum(FIXTURE_STATUS).optional(),
   notes: z.string().optional(),
 });
@@ -920,6 +923,15 @@ export const placementRuleSchema = z.object({
   scheme: z.literal('placement'),
   points: z.record(z.number().int().min(0)).default({ winner: 7, runner_up: 5, semi_finalist: 3, quarter_finalist: 1 }),
   participation,
+  // How league / group tables are ranked. Unset = inherited (format, then championship
+  // default), else the sport's default. Tie-breakers unset = each sport's own order.
+  ranking: groupRankingSchema.extend({ tiebreakers: groupRankingSchema.shape.tiebreakers.optional() }).optional(),
+  // Award placings from the final league / group table where no knockout match decides them.
+  table_placings: z.boolean().optional(),
+  // No 3rd-place match: rank the two semi-final losers by their group record instead.
+  rank_semi_losers: z.boolean().optional(),
+  // "Both": league / group match points also count toward the tally.
+  include_match_points: z.boolean().optional(),
 });
 
 export const medalRuleSchema = z.object({
@@ -940,10 +952,21 @@ export const customRuleSchema = z.object({
 // Ranking events (swimming/powerlifting/athletics): `places[i]` is the championship
 // points for finishing place i+1 (places[0] = 1st, places[1] = 2nd, …). Places beyond
 // the array score 0 (or `participation`). The event console's final ranking awards these.
+// Event sports (swimming, powerlifting) can convert their summed event points into a
+// sport placing: totals per group (e.g. Men / Women) are ranked and `places` awarded.
+// `share` lets a mixed event count half toward each group. Unset = raw points, as before.
+export const eventConversionSchema = z.object({
+  groups: z.array(z.object({ name: z.string().trim().min(1).max(60), share: z.number().min(0).max(1).default(1) })).min(1).max(4),
+  places: z.array(z.number().int().min(0)).min(1).max(16),
+  participation: z.number().int().min(0).default(0),
+});
+export type EventConversion = z.infer<typeof eventConversionSchema>;
+
 export const rankingRuleSchema = z.object({
   scheme: z.literal('ranking'),
   places: z.array(z.number().int().min(0)).min(1).default([5, 3, 1]),
   participation,
+  convert: eventConversionSchema.optional(),
 });
 
 export const standingsRuleSchema = z.discriminatedUnion('scheme', [

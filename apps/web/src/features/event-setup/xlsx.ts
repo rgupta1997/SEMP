@@ -56,7 +56,7 @@ export const usedRange = (XLSX: XLSXModule, ws: WorkSheet): string | null => set
 /**
  * Every sheet of a workbook as a grid of strings, keyed by the sheet's own name.
  * The shared reader is the one the CLI uses too, so the dashboard and the CLI can
- * never read one file differently — including real date cells, which it writes as
+ * never read one file differently - including real date cells, which it writes as
  * YYYY-MM-DD from the cell's value whatever their display format.
  */
 export const workbookToSheets = (XLSX: XLSXModule, wb: WorkBook): Record<string, string[][]> =>

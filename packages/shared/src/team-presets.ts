@@ -131,7 +131,7 @@ const vSet = (target: number, decider: number, switchEndsAt: number | null = nul
 
 const NET: ScoringFormat[] = [
   fmt({
-    sport: 'volleyball', key: 'fivb_25_bo5', name: 'FIVB — best of 5 sets to 25 (decider 15)',
+    sport: 'volleyball', key: 'fivb_25_bo5', name: 'FIVB - best of 5 sets to 25 (decider 15)',
     levels: [vSet(25, 15, 13), unitsMatch(3)], serve: VOLLEY_SERVE,
     changeEnds: 'atDeciderMidpoint',
     rulesSheet: { rotation: 'not tracked by the console', libero: 'not tracked', timeoutsPerSet: 2 },
@@ -141,7 +141,7 @@ const NET: ScoringFormat[] = [
     levels: [vSet(25, 15, 13), unitsMatch(2)], serve: VOLLEY_SERVE, changeEnds: 'atDeciderMidpoint',
   }),
   fmt({
-    sport: 'volleyball', key: 'corp_21_bo3', name: 'Corporate — best of 3 sets to 21 (decider 15)',
+    sport: 'volleyball', key: 'corp_21_bo3', name: 'Corporate - best of 3 sets to 21 (decider 15)',
     levels: [vSet(21, 15), unitsMatch(2)], serve: VOLLEY_SERVE, mode: 'selfScored', changeEnds: 'never',
   }),
   fmt({
@@ -149,7 +149,7 @@ const NET: ScoringFormat[] = [
     levels: [vSet(25, 25), unitsMatch(1)], serve: VOLLEY_SERVE, mode: 'selfScored', changeEnds: 'never',
   }),
   fmt({
-    sport: 'volleyball', key: 'timecap_15min', name: 'Time-capped set — 15 minutes, highest score',
+    sport: 'volleyball', key: 'timecap_15min', name: 'Time-capped set - 15 minutes, highest score',
     levels: [{ key: 'set', label: 'Set', target: 25, winBy: 1, cap: null }, unitsMatch(1)],
     serve: VOLLEY_SERVE, mode: 'selfScored', clock: cap(15), changeEnds: 'never', endStates: LEAGUE,
   }),
@@ -201,7 +201,7 @@ const INVASION: ScoringFormat[] = [
   // to get through a bracket in a day, and a full settlement chain, because a
   // knockout cannot go home level.
   fmt({
-    sport: 'football', key: 'fest_2x10', name: 'Fest — two halves of 10 minutes',
+    sport: 'football', key: 'fest_2x10', name: 'Fest - two halves of 10 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)],
     clock: cap(20, 'leaderWins'),
     // The settlement chain rides along even here, and stays INERT: draws are
@@ -215,7 +215,7 @@ const INVASION: ScoringFormat[] = [
   // The same match, in a bracket. A knockout cannot go home level, so this is the
   // one that actually runs extra time and kicks.
   fmt({
-    sport: 'football', key: 'fest_2x10_ko', name: 'Fest knockout — two halves of 10 minutes',
+    sport: 'football', key: 'fest_2x10_ko', name: 'Fest knockout - two halves of 10 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)],
     clock: cap(20, 'leaderWins', 'organiserDecides'),
     tieBreak: FEST_TIEBREAK,
@@ -233,12 +233,12 @@ const INVASION: ScoringFormat[] = [
     rulesSheet: { offside: 'not adjudicated', substitutions: 5, addedTime: 'at the referee’s discretion' },
   }),
   fmt({
-    sport: 'football', key: 'football_corp_2x20', name: 'Corporate — two halves of 20 minutes',
+    sport: 'football', key: 'football_corp_2x20', name: 'Corporate - two halves of 20 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)], mode: 'selfScored',
     clock: cap(40, 'leaderWins'), endStates: LEAGUE,
   }),
   fmt({
-    sport: 'football', key: 'knockout_2x45_no_draw', name: 'Knockout — two halves, no draw',
+    sport: 'football', key: 'knockout_2x45_no_draw', name: 'Knockout - two halves, no draw',
     levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(90, 'leaderWins', 'organiserDecides'),
     // Full-length extra time is the real thing: two halves of fifteen.
     tieBreak: { extraTime: { periods: 2, minutes: 15 }, penalties: SHOOTOUT },
@@ -256,7 +256,7 @@ const INVASION: ScoringFormat[] = [
   }),
 
   fmt({
-    sport: 'basketball', key: 'fiba_4x10', name: 'FIBA — four quarters of 10 minutes',
+    sport: 'basketball', key: 'fiba_4x10', name: 'FIBA - four quarters of 10 minutes',
     levels: [period('Quarter', 'quarter'), aggregateMatch(4)], clock: cap(40, 'leaderWins', 'organiserDecides'),
     // Basketball has no draws: level after the 4th quarter plays 5-minute overtimes
     // until someone leads (FIBA). No shoot-out.
@@ -265,24 +265,24 @@ const INVASION: ScoringFormat[] = [
     rulesSheet: { shotClockSeconds: 24, foulsToDisqualify: 5, timeoutsPerHalf: 2, overtime: '5 minutes, repeated until a side leads' },
   }),
   fmt({
-    sport: 'basketball', key: 'basketball_corp_2x10', name: 'Corporate — two halves of 10 minutes',
+    sport: 'basketball', key: 'basketball_corp_2x10', name: 'Corporate - two halves of 10 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)], mode: 'selfScored',
     // No draws here either - a level game goes to overtime like any other.
     clock: cap(20, 'leaderWins', 'organiserDecides'), tieBreak: BASKETBALL_OVERTIME, endStates: STRICT,
     rulesSheet: { foulsToDisqualify: 5, overtime: '5 minutes, repeated until a side leads' },
   }),
   fmt({
-    sport: 'basketball', key: 'street_21', name: 'Streetball — first to 21',
+    sport: 'basketball', key: 'street_21', name: 'Streetball - first to 21',
     levels: [{ key: 'game', label: 'Game', target: 21, winBy: 2, cap: null }, unitsMatch(1)],
     mode: 'selfScored', changeEnds: 'never', endStates: STRICT,
   }),
 
   fmt({
-    sport: 'hockey', key: 'fih_4x15', name: 'FIH — four quarters of 15 minutes',
+    sport: 'hockey', key: 'fih_4x15', name: 'FIH - four quarters of 15 minutes',
     levels: [period('Quarter', 'quarter'), aggregateMatch(4)], clock: cap(60, 'leaderWins'), endStates: LEAGUE,
   }),
   fmt({
-    sport: 'hockey', key: 'hockey_corp_2x20', name: 'Corporate — two halves of 20 minutes',
+    sport: 'hockey', key: 'hockey_corp_2x20', name: 'Corporate - two halves of 20 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)], mode: 'selfScored',
     clock: cap(40, 'leaderWins'), endStates: LEAGUE,
   }),
@@ -292,13 +292,13 @@ const INVASION: ScoringFormat[] = [
     levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(60, 'leaderWins'), endStates: LEAGUE,
   }),
   fmt({
-    sport: 'handball', key: 'corp_2x15', name: 'Corporate — two halves of 15 minutes',
+    sport: 'handball', key: 'corp_2x15', name: 'Corporate - two halves of 15 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)], mode: 'selfScored',
     clock: cap(30, 'leaderWins'), endStates: LEAGUE,
   }),
 
   fmt({
-    sport: 'frisbee', key: 'ultimate_to_15', name: 'Ultimate — first to 15',
+    sport: 'frisbee', key: 'ultimate_to_15', name: 'Ultimate - first to 15',
     levels: [{ key: 'game', label: 'Game', target: 15, winBy: 1, cap: null }, unitsMatch(1)],
     mode: 'selfScored', changeEnds: 'never', endStates: STRICT,
     rulesSheet: { selfRefereed: true, spiritOfTheGame: 'scored separately, not by the console' },
@@ -345,7 +345,7 @@ const RAID: ScoringFormat[] = [
     levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(30, 'leaderWins'), endStates: LEAGUE,
   }),
   fmt({
-    sport: 'kabaddi', key: 'kabaddi_corp_2x10', name: 'Corporate — two halves of 10 minutes',
+    sport: 'kabaddi', key: 'kabaddi_corp_2x10', name: 'Corporate - two halves of 10 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)], mode: 'selfScored',
     clock: cap(20, 'leaderWins'), endStates: LEAGUE,
   }),
@@ -379,19 +379,19 @@ const BOARD: ScoringFormat[] = [
   // carrom.ts - a board's points are the loser's coins left, plus the queen. Keys are
   // unchanged so draws that already chose them keep their format.
   fmt({
-    sport: 'carrom', key: 'icf_bo3_boards', name: 'ICF — best of 3 games to 25 (8 boards a game)',
+    sport: 'carrom', key: 'icf_bo3_boards', name: 'ICF - best of 3 games to 25 (8 boards a game)',
     levels: [{ key: 'game', label: 'Game', target: 25, winBy: 1, cap: null }, unitsMatch(2)],
     serve: PER_UNIT_SERVE, changeEnds: 'betweenUnits',
     rulesSheet: { maxBoards: 8, queenPoints: 3, queenCutoff: 22, queenMustBeCovered: true },
   }),
   fmt({
-    sport: 'carrom', key: 'corp_bo3_21', name: 'Corporate — best of 3 games to 21',
+    sport: 'carrom', key: 'corp_bo3_21', name: 'Corporate - best of 3 games to 21',
     levels: [{ key: 'game', label: 'Game', target: 21, winBy: 1, cap: null }, unitsMatch(2)],
     serve: PER_UNIT_SERVE, mode: 'selfScored',
     rulesSheet: { queenPoints: 3 },
   }),
   fmt({
-    sport: 'carrom', key: 'corp_single_29', name: 'Corporate — single game to 29',
+    sport: 'carrom', key: 'corp_single_29', name: 'Corporate - single game to 29',
     levels: [{ key: 'game', label: 'Game', target: 29, winBy: 1, cap: null }, unitsMatch(1)],
     serve: PER_UNIT_SERVE, mode: 'selfScored',
     rulesSheet: { queenPoints: 3 },
@@ -430,13 +430,13 @@ const BOARD: ScoringFormat[] = [
     rulesSheet: { timeControl: '90+30', drawByAgreement: true },
   }),
   fmt({
-    sport: 'chess', key: 'rapid_single', name: 'Rapid — single game, 15+10',
+    sport: 'chess', key: 'rapid_single', name: 'Rapid - single game, 15+10',
     levels: [{ key: 'game', label: 'Game', target: 1, winBy: 1, cap: null }, unitsMatch(1)],
     serve: PER_UNIT_SERVE, mode: 'selfScored', endStates: { ...LEAGUE, drawsAllowed: true },
     rulesSheet: { timeControl: '15+10', drawByAgreement: true },
   }),
   fmt({
-    sport: 'chess', key: 'blitz_single', name: 'Blitz — single game, 3+2',
+    sport: 'chess', key: 'blitz_single', name: 'Blitz - single game, 3+2',
     levels: [{ key: 'game', label: 'Game', target: 1, winBy: 1, cap: null }, unitsMatch(1)],
     serve: PER_UNIT_SERVE, mode: 'selfScored', endStates: { ...LEAGUE, drawsAllowed: true },
     rulesSheet: { timeControl: '3+2', drawByAgreement: true },
@@ -448,7 +448,7 @@ const BOARD: ScoringFormat[] = [
     rulesSheet: { timeControl: '15+10' },
   }),
   fmt({
-    sport: 'chess', key: 'blitz_bo5', name: 'Blitz — best of 5 games',
+    sport: 'chess', key: 'blitz_bo5', name: 'Blitz - best of 5 games',
     levels: [{ key: 'game', label: 'Game', target: 1, winBy: 1, cap: null }, unitsMatch(3)],
     serve: PER_UNIT_SERVE, mode: 'selfScored', endStates: { ...LEAGUE, drawsAllowed: true },
     rulesSheet: { timeControl: '3+2' },
@@ -493,12 +493,12 @@ const COMBAT: ScoringFormat[] = [
   }),
 
   fmt({
-    sport: 'fencing', key: 'fie_to_15', name: 'FIE bout — first to 15 touches',
+    sport: 'fencing', key: 'fie_to_15', name: 'FIE bout - first to 15 touches',
     levels: [{ key: 'bout', label: 'Bout', target: 15, winBy: 1, cap: null }, unitsMatch(1)],
     endStates: STRICT, rulesSheet: { periods: '3 x 3 minutes', priorityAtTie: 'drawn by lot' },
   }),
   fmt({
-    sport: 'fencing', key: 'pool_to_5', name: 'Pool bout — first to 5 touches',
+    sport: 'fencing', key: 'pool_to_5', name: 'Pool bout - first to 5 touches',
     levels: [{ key: 'bout', label: 'Bout', target: 5, winBy: 1, cap: null }, unitsMatch(1)],
     endStates: STRICT,
   }),

@@ -51,7 +51,7 @@ interface Member {
 }
 
 const initials = (s: string) =>
-  s.split(/[^A-Za-z0-9]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '—';
+  s.split(/[^A-Za-z0-9]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '-';
 
 const STATUS_TONE = { ACTIVE: 'green', SETUP: 'amber', ARCHIVED: 'slate' } as const;
 
@@ -160,7 +160,7 @@ function UnitModal({
         </Field>
 
         {canAppoint ? (
-          <Field label="Administrator" hint="Optional. The person who runs it — they must already be a member here.">
+          <Field label="Administrator" hint="Optional. The person who runs it - they must already be a member here.">
             <Select value={adminId} onChange={(e) => setAdminId(e.target.value)}>
               <option value="">Nobody assigned</option>
               {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -361,7 +361,7 @@ function PeoplePanel({ orgId, unit, people, labels, loading }: {
           <EmptyState
             icon={<Users size={20} />}
             title={`Nobody in ${unit.name} yet`}
-            description={`Assign people to it from the Players screen — a player can only be picked for the ${noun.toLowerCase()} they belong to, so an empty one cannot field a team.`}
+            description={`Assign people to it from the Players screen - a player can only be picked for the ${noun.toLowerCase()} they belong to, so an empty one cannot field a team.`}
           />
         ) : (
           <ul className="max-h-[26rem] divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
@@ -474,7 +474,7 @@ export function CampusesPage() {
       // Refused by the server too - this just says so without a round trip.
       await confirmDialog({
         title: `${node.name} has competed`,
-        message: `It has been entered into ${impact.entries} championship${impact.entries === 1 ? '' : 's'}, and its results point at it. Archive it instead — archiving keeps every result and simply stops it being offered as an entrant.`,
+        message: `It has been entered into ${impact.entries} championship${impact.entries === 1 ? '' : 's'}, and its results point at it. Archive it instead - archiving keeps every result and simply stops it being offered as an entrant.`,
         confirmLabel: 'I understand',
       });
       return;
@@ -515,7 +515,7 @@ export function CampusesPage() {
           <strong className="font-semibold">{unplaced}</strong>{' '}
           {unplaced === 1 ? 'person is' : 'people are'} not assigned to a {labels.campus.toLowerCase()} or{' '}
           {labels.department.toLowerCase()} yet. They cannot be picked for any team in an internal
-          championship until they are — assign them on the Players screen.
+          championship until they are - assign them on the Players screen.
         </div>
       )}
 
@@ -528,7 +528,7 @@ export function CampusesPage() {
                 {pluralise(labels.campus)} &amp; {pluralise(labels.department)}
               </h3>
               <p className="mt-0.5 text-[13px] leading-relaxed text-slate-500 dark:text-slate-400">
-                The structure a scoped role is granted against — and the entrants of a
+                The structure a scoped role is granted against - and the entrants of a
                 championship contested inside this organisation.
               </p>
             </div>
@@ -714,7 +714,7 @@ export function CampusesPage() {
             </li>
             <li className="flex gap-2.5">
               <Building2 size={15} className="mt-0.5 flex-none text-brand-600 dark:text-brand-400" aria-hidden />
-              Running championships inside the organisation — {labels.campus.toLowerCase()} against
+              Running championships inside the organisation - {labels.campus.toLowerCase()} against
               {' '}{labels.campus.toLowerCase()}, or {labels.department.toLowerCase()} against {labels.department.toLowerCase()}.
             </li>
             <li className="flex gap-2.5">

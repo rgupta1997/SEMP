@@ -1,9 +1,14 @@
-import { useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Trash2, X } from 'lucide-react';
+import { defaultGroupRanking, type StandingsTiebreaker } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
 import { describeSlot } from '../lib/stageTree';
+import { MatchPointsFields, TiebreakerPicker } from './TiebreakerPicker';
 import { Button, Card, Field, Input, Segmented, Select, Spinner, toast } from './ui';
+
+// The draw's sport, so pool rankings default to and are named in its own terms.
+const SportContext = createContext<{ sport: string | null; entryType: string | null }>({ sport: null, entryType: null });
 
 // Full wizard: configures an arbitrary-depth stage tree (a pool stage whose branches
 // feed either a knockout or ANOTHER pool stage, recursively), with optional manual
@@ -25,6 +30,9 @@ interface GroupDraft {
   type: 'group';
   numGroups: number;
   doubleRound: boolean;
+  tiebreakers: StandingsTiebreaker[];
+  /** Null = the discipline's ranking from the Point System, or the sport default. */
+  points: { win: number; draw: number; loss: number } | null;
   branches: BranchDraft[];
 }
 interface BranchDraft {
@@ -40,7 +48,9 @@ let nextLocalId = 1;
 const newId = () => `n-${nextLocalId++}`;
 
 const newKnockout = (): KnockoutDraft => ({ type: 'knockout', eliminationType: 'single', seeding: 'auto', thirdPlaceMatch: false, manualPairs: [] });
-const newGroup = (): GroupDraft => ({ type: 'group', numGroups: 2, doubleRound: false, branches: [] });
+const newGroup = (sport?: string | null): GroupDraft => ({
+  type: 'group', numGroups: 2, doubleRound: false, tiebreakers: defaultGroupRanking(sport).tiebreakers, points: null, branches: [],
+});
 const newBranch = (label: string): BranchDraft => ({ id: newId(), label, rankFrom: 1, rankTo: 1, childStage: newKnockout() });
 
 const isPow2 = (n: number) => n >= 2 && (n & (n - 1)) === 0;
@@ -106,16 +116,15 @@ function validateNode(node: StageNodeDraft, entrants: TokenEntrant[], label: str
   return null;
 }
 
-// Serializes a draft node to the wire shape stage-config.ts expects. Tiebreakers
-// aren't exposed in this UI - every pool stage uses the standard points/wins/lost
-// order.
+// Serializes a draft node to the wire shape stage-config.ts expects.
 function toStageNode(draft: StageNodeDraft): any {
   if (draft.type === 'group') {
     return {
       type: 'group',
       numGroups: draft.numGroups,
       doubleRound: draft.doubleRound,
-      tiebreakers: ['points', 'wins', 'lost'],
+      tiebreakers: draft.tiebreakers,
+      ...(draft.points ? { points: draft.points } : {}),
       branches: draft.branches.map((b) => ({
         id: b.id, label: b.label || undefined, rankFrom: b.rankFrom, rankTo: b.rankTo,
         childStage: toStageNode(b.childStage),
@@ -156,6 +165,11 @@ function KnockoutEditor({ node, onChange, entrants }: { node: KnockoutDraft; onC
         <input type="checkbox" checked={node.thirdPlaceMatch} onChange={(e) => onChange({ ...node, thirdPlaceMatch: e.target.checked })} />
         Play a 3rd place match
       </label>
+      {!node.thirdPlaceMatch && (
+        <p className="text-xs text-slate-400 dark:text-slate-500">
+          Without it, both semi-final losers get the semi-finalist points, or turn on "rank the semi-final losers" in the Point System to split them by group record.
+        </p>
+      )}
 
       <Field label="Seeding" hint={pow2 ? 'Auto seeds by draw order; manual lets you pick every first-round pairing.' : `Manual seeding needs a power-of-two entrant count (2, 4, 8, …) - this bracket has ${n}, so it will auto-seed.`}>
         <Segmented size="sm" value={node.seeding} onChange={setSeeding}
@@ -190,7 +204,8 @@ function KnockoutEditor({ node, onChange, entrants }: { node: KnockoutDraft; onC
 // (which itself has branches, each recursing again) - this is what makes
 // group → group → knockout chains possible.
 function StageNodeEditor({ node, onChange, entrants, depth }: { node: StageNodeDraft; onChange: (n: StageNodeDraft) => void; entrants: TokenEntrant[]; depth: number }) {
-  const setType = (type: 'group' | 'knockout') => { if (type !== node.type) onChange(type === 'group' ? newGroup() : newKnockout()); };
+  const { sport } = useContext(SportContext);
+  const setType = (type: 'group' | 'knockout') => { if (type !== node.type) onChange(type === 'group' ? newGroup(sport) : newKnockout()); };
 
   return (
     <div className="space-y-2">
@@ -207,6 +222,8 @@ function GroupEditor({ node, onChange, entrants, depth }: { node: GroupDraft; on
   const removeBranch = (id: string) => onChange({ ...node, branches: node.branches.filter((b) => b.id !== id) });
   const updateBranch = (id: string, patch: Partial<BranchDraft>) => onChange({ ...node, branches: node.branches.map((b) => (b.id === id ? { ...b, ...patch } : b)) });
   const poolSize = entrants.length ? Math.floor(entrants.length / node.numGroups) : null;
+  const { sport, entryType } = useContext(SportContext);
+  const sportPoints = defaultGroupRanking(sport);
 
   return (
     <div className="space-y-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800">
@@ -222,6 +239,19 @@ function GroupEditor({ node, onChange, entrants, depth }: { node: GroupDraft; on
       <p className="text-xs text-slate-400 dark:text-slate-500">
         {entrants.length} entrant{entrants.length === 1 ? '' : 's'} into {node.numGroups} pool{node.numGroups === 1 ? '' : 's'}{poolSize != null ? ` (~${poolSize} each)` : ''}.
       </p>
+
+      <div className="space-y-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-800/40">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Pool ranking</span>
+        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+          <input type="checkbox" checked={!!node.points} onChange={(e) => onChange({ ...node, points: e.target.checked ? { win: sportPoints.win, draw: sportPoints.draw, loss: sportPoints.loss } : null })} />
+          Set match points for these pools
+        </label>
+        {node.points
+          ? <MatchPointsFields value={node.points} onChange={(p) => onChange({ ...node, points: p })} />
+          : <p className="text-xs text-slate-400 dark:text-slate-500">Uses the discipline's group ranking from the Point System, or the {sport ?? 'sport'} default ({sportPoints.win} / {sportPoints.draw} / {sportPoints.loss}).</p>}
+        <span className="block pt-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Tie-breakers, in order</span>
+        <TiebreakerPicker sport={sport} entryType={entryType} value={node.tiebreakers} onChange={(t) => onChange({ ...node, tiebreakers: t })} />
+      </div>
 
       <div>
         <div className="mb-2 flex items-center justify-between">
@@ -268,7 +298,15 @@ function poolForSlot(slotIndex: number, numGroups: number): number {
 export function StageConfigWizard({ tournamentDisciplineId, onGenerated }: { tournamentDisciplineId: string; onGenerated: () => void }) {
   const teamsPath = `/teams?tournament_discipline_id=${tournamentDisciplineId}`;
   const { data: teams = [], isLoading: teamsLoading } = useApi<any[]>(teamsPath);
+  const { data: tables } = useApi<{ sport: string | null; entry_type: string | null }>(`/tournament-disciplines/${tournamentDisciplineId}/standings-tables`);
+  const sport = tables?.sport ?? null;
+  const entryType = tables?.entry_type ?? null;
   const [root, setRoot] = useState<GroupDraft>(() => ({ ...newGroup(), branches: [newBranch('Cup')] }));
+  // Once the sport is known, start the pools from its tie-breaker order (until edited).
+  const rootEdited = useRef(false);
+  useEffect(() => {
+    if (sport && !rootEdited.current) setRoot((r) => ({ ...r, tiebreakers: defaultGroupRanking(sport).tiebreakers }));
+  }, [sport]);
   // teamId -> pool (1-based). Converted to slot indexes only at submit, so the UI
   // stays one picker row however many teams/pools there are.
   const [pins, setPins] = useState<Record<string, number>>({});
@@ -330,7 +368,9 @@ export function StageConfigWizard({ tournamentDisciplineId, onGenerated }: { tou
         <p className="text-xs text-slate-400 dark:text-slate-500">{teams.length} team{teams.length === 1 ? '' : 's'} registered to this draw.</p>
       )}
 
-      <GroupEditor node={root} onChange={setRoot} entrants={rootEntrants} depth={0} />
+      <SportContext.Provider value={{ sport, entryType }}>
+        <GroupEditor node={root} onChange={(n) => { rootEdited.current = true; setRoot(n); }} entrants={rootEntrants} depth={0} />
+      </SportContext.Provider>
 
       {teams.length > 0 && (
         <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">

@@ -1,5 +1,5 @@
 /*
- * THE EVENT SETUP BLUEPRINT — one plain object that says what an event needs, step
+ * THE EVENT SETUP BLUEPRINT - one plain object that says what an event needs, step
  * by step, and for each step whether a run builds it, finds it, or leaves it alone.
  *
  * It is the contract between three things that never import each other:
@@ -9,9 +9,9 @@
  *   - the super-admin Event Setup dashboard that shows both.
  *
  * Every step carries a MODE:
- *   sheet     build it from the blueprint — reuse what already exists (matched by
+ *   sheet     build it from the blueprint - reuse what already exists (matched by
  *             name, member code, phone), create only what is missing
- *   existing  it is already on the platform — look it up, fail if it is not there
+ *   existing  it is already on the platform - look it up, fail if it is not there
  *   skip      this run does not touch it (a later run, or a person, does)
  */
 
@@ -42,9 +42,9 @@ export interface SetupOrgSpec {
 
 /**
  * WHO COMPETES. One shape for all three event types:
- *   intra   kind 'department' — a batch / process / department under `campus`
- *   campus  kind 'campus'     — a campus of the host organisation
- *   inter   kind 'organization' — a separate organisation
+ *   intra   kind 'department' - a batch / process / department under `campus`
+ *   campus  kind 'campus'     - a campus of the host organisation
+ *   inter   kind 'organization' - a separate organisation
  * A competitor fields at most ONE squad per draw (the database enforces it).
  */
 export interface SetupCompetitorSpec {
@@ -160,7 +160,7 @@ export interface SetupMatchRowSpec {
 
 /**
  * FIXTURES. Either the client's own match list, read back into a bracket
- * ('knockout-rows' — first-round pairings, later rounds as "Winner of <match>", a
+ * ('knockout-rows' - first-round pairings, later rounds as "Winner of <match>", a
  * squad appearing one round up is a bye), or the product's generator over the
  * draw's squads in sheet order ('generate').
  */

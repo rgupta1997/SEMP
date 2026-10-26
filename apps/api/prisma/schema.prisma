@@ -107,6 +107,7 @@ model championships {
   feedback                   feedback[]
   notifications              notifications[]
   standings                  standings[]
+  standings_adjustments      standings_adjustments[]
   standings_rules            standings_rules[]
   team_entries               team_entries[]
   tournaments                tournaments[]
@@ -231,6 +232,7 @@ model organizations {
   roles                                 roles[]
   scoring_formats                       scoring_formats[]
   standings                             standings[]
+  standings_adjustments                 standings_adjustments[]
   subscriptions                         subscriptions[]
   team_entries                          team_entries[]
   teams                                 teams[]
@@ -448,6 +450,7 @@ model tournament_disciplines {
   @@index([tournament_sport_id], map: "idx_tournament_disciplines_tournament_sport_id")
   @@index([venue_id], map: "idx_tournament_disciplines_venue_id")
   @@index([scoring_format_id], map: "idx_td_scoring_format")
+  standings_adjustments standings_adjustments[]
 }
 
 model tournament_formats {
@@ -620,6 +623,7 @@ model users {
   @@index([organization_id], map: "idx_users_organization_id")
   @@index([organization_id, account_type], map: "idx_users_institution_account_type")
   @@index([personal_plan], map: "idx_users_personal_plan")
+  standings_adjustments standings_adjustments[]
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -824,7 +828,7 @@ model standings {
   won             Int           @default(0)
   drawn           Int           @default(0)
   lost            Int           @default(0)
-  points          Int           @default(0)
+  points          Float         @default(0)
   detail          Json          @default("{}")
   rank            Int?
   computed_at     DateTime      @default(now()) @db.Timestamptz(6)
@@ -839,6 +843,25 @@ model standings {
 }
 
 /// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model standings_adjustments {
+  id                       String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  championship_id          String                  @db.Uuid
+  organization_id          String                  @db.Uuid
+  org_unit_id              String?                 @db.Uuid
+  tournament_discipline_id String?                 @db.Uuid
+  points                   Float
+  reason                   String
+  created_by               String?                 @db.Uuid
+  created_at               DateTime                @default(now()) @db.Timestamptz(6)
+  championships            championships           @relation(fields: [championship_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations            organizations           @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  org_units                org_units?              @relation(fields: [org_unit_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tournament_disciplines   tournament_disciplines? @relation(fields: [tournament_discipline_id], references: [id], onUpdate: NoAction)
+  users                    users?                  @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+
+  @@index([championship_id], map: "idx_standings_adjustments_championship")
+}
+
 model standings_rules {
   id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   championship_id String        @db.Uuid
@@ -1340,6 +1363,7 @@ model org_units {
   org_units                  org_units?                   @relation("org_unitsToorg_units", fields: [parent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   other_org_units            org_units[]                  @relation("org_unitsToorg_units")
   standings                  standings[]
+  standings_adjustments      standings_adjustments[]
   team_entries               team_entries[]
   teams                      teams[]
 

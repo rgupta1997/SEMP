@@ -10,7 +10,7 @@ import { statSpecFor } from './stat-registry.js';
 import { toCategoryRow } from './category-lines.js';
 
 // ============================================================================
-// FOOTBALL, END TO END — every aspect of scoring a match.
+// FOOTBALL, END TO END - every aspect of scoring a match.
 //
 // Football is the sport an event is most likely to be judged on, and it exercises
 // more of the platform at once than anything else on the shelf:

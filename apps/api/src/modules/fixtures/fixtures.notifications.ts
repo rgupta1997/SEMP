@@ -120,7 +120,7 @@ export async function notifyOfficialAssignment(
     .filter(Boolean).join(' · ');
   const where = fx.venue_grounds ? [fx.venue_grounds.venues?.name, fx.venue_grounds.name].filter(Boolean).join(' · ') : null;
   const when = fx.scheduled_at ? new Date(fx.scheduled_at).toISOString() : null;
-  const label = [`${home} vs ${away}`, sport].filter(Boolean).join(' — ');
+  const label = [`${home} vs ${away}`, sport].filter(Boolean).join(' - ');
 
   if (newOfficialId) {
     const details = [when ? `Scheduled for ${when}.` : 'Not scheduled yet.', where ? `At ${where}.` : null]

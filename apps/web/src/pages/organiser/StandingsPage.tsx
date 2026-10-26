@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
+import { formatPoints } from '@semp/shared';
 import { ChevronDown, Trophy } from 'lucide-react';
 import { useEvent } from './EventLayout';
 import { usePageFilters } from '../../lib/filters';
@@ -6,6 +7,7 @@ import { useApi } from '../../lib/hooks';
 import { Avatar, Badge, Card, CardBody, CardHeader, EmptyState, RefreshBar, Spinner, StatCard, Table, Tabs, cn } from '../../components/ui';
 import { SharePublicLink } from '../../components/SharePublicLink';
 import { StandingsBreakdown } from '../../components/StandingsBreakdown';
+import { StandingsAdjustments, StandingsCalculation } from '../../components/StandingsAdjustments';
 import { RankBadge } from '../../components/RankBadge';
 import { StandingsMedalTable, rankMedals } from '../../components/StandingsMedalTable';
 
@@ -32,6 +34,8 @@ interface StandingsResponse { scope: string; scope_id: string | null; standings:
 // A draw row (subset of GET /:id/draws) - used only to source the tournament + sport
 // filter options (with their UUIDs, which the materialized scopes are keyed by).
 interface DrawRow {
+  id: string;
+  disciplines?: { name: string } | null;
   tournament_sports: {
     sports: { id: string; name: string } | null;
     tournaments: { id: string; name: string } | null;
@@ -40,7 +44,7 @@ interface DrawRow {
 
 
 export function StandingsPage() {
-  const { eventId, championship } = useEvent();
+  const { eventId, championship, canManage } = useEvent();
   // "Organizations" is only the right word for an inter-organisation event. The
   // server resolves the host's own noun so this cannot disagree with the entry form
   // or the approvals queue.
@@ -176,7 +180,7 @@ export function StandingsPage() {
                           <span className="text-rose-500 dark:text-rose-400">L{r.lost}</span>
                         </span>
                       </span>
-                      <Badge tone="brand">{r.points}</Badge>
+                      <Badge tone="brand">{formatPoints(r.points)}</Badge>
                       <ChevronDown size={15} className={cn('shrink-0 text-slate-400 transition-transform', isOpen && 'rotate-180')} />
                     </button>
                     {isOpen && (
@@ -229,7 +233,7 @@ export function StandingsPage() {
                     <td className="px-3 py-3 text-center font-semibold text-emerald-600">{r.won}</td>
                     <td className="px-3 py-3 text-center text-slate-500 dark:text-slate-400">{r.drawn}</td>
                     <td className="px-3 py-3 text-center text-rose-500">{r.lost}</td>
-                    <td className="px-4 py-3 text-center"><Badge tone="brand">{r.points}</Badge></td>
+                    <td className="px-4 py-3 text-center"><Badge tone="brand">{formatPoints(r.points)}</Badge></td>
                   </tr>
                   {isOpen && (
                     <tr className="bg-slate-50/60 dark:bg-slate-800/20">
@@ -248,6 +252,9 @@ export function StandingsPage() {
           )}
         </CardBody>
       </Card>
+
+      {canManage && <StandingsCalculation eventId={eventId} />}
+      {canManage && scope === 'championship' && rows.length > 0 && <StandingsAdjustments eventId={eventId} rows={rows} draws={draws} />}
     </div>
   );
 }

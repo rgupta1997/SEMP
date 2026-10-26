@@ -179,7 +179,7 @@ function RecipientsStep({ orgId, championship, filters, setFilter, enabled, onTo
             <span className="font-medium text-slate-600 dark:text-slate-400">Game</span>
             <Select value={filters.sportId} onChange={(e) => setFilter({ sportId: e.target.value, tournamentDisciplineId: '', teamId: '' })}>
               <option value="">All games</option>
-              {sportOptions.map((ts: any) => <option key={ts.sport_id} value={ts.sport_id}>{sportName.get(ts.sport_id) ?? '—'}</option>)}
+              {sportOptions.map((ts: any) => <option key={ts.sport_id} value={ts.sport_id}>{sportName.get(ts.sport_id) ?? '-'}</option>)}
             </Select>
           </label>
           <label className="grid gap-1 text-xs">
@@ -198,7 +198,7 @@ function RecipientsStep({ orgId, championship, filters, setFilter, enabled, onTo
           </label>
         </div>
         <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
-          Team only narrows Winners, Awards, Participation and Coaches — Organising team and Officials are event-wide.
+          Team only narrows Winners, Awards, Participation and Coaches - Organising team and Officials are event-wide.
         </p>
         {enabled.awards && (
           <label className="mt-3 grid max-w-xs gap-1 text-xs">
@@ -312,7 +312,7 @@ function TemplatesStep({ orgId, enabledCategories, templates, hasDefault, missin
           <div className="font-semibold text-sky-900 dark:text-sky-300">Automated rules aren't wired up yet</div>
           <p className="mt-0.5 text-sm text-sky-800/80 dark:text-sky-300/70">
             A category set to a rule other than "Manual run only" will be skipped when you click Generate, rather than
-            issue on its own — set it back to manual to include it in this run.
+            issue on its own - set it back to manual to include it in this run.
           </p>
         </div>
       )}
@@ -538,7 +538,7 @@ function Wizard({ orgId, championship, templates, templatesLoading, onClose, inv
             {Object.entries(outcome).map(([category, r]) => (
               <div key={category} className="flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
                 <span className="font-medium text-slate-700 dark:text-slate-300">{CATEGORY_META[category as RecipientCategory].label}</span>
-                <span className="text-slate-500 dark:text-slate-400">{r.issued} issued{r.skipped ? `, ${r.skipped} skipped` : ''}{r.note ? ` — ${r.note}` : ''}</span>
+                <span className="text-slate-500 dark:text-slate-400">{r.issued} issued{r.skipped ? `, ${r.skipped} skipped` : ''}{r.note ? ` - ${r.note}` : ''}</span>
               </div>
             ))}
           </div>
@@ -565,7 +565,7 @@ function Wizard({ orgId, championship, templates, templatesLoading, onClose, inv
           </div>
           {enabledDeferredCategories.length > 0 && (
             <p className="rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:bg-sky-500/10 dark:text-sky-300/80">
-              {enabledDeferredCategories.map((c) => CATEGORY_META[c].label).join(', ')} — set to an automatic issuing rule, so not included in this manual run.
+              {enabledDeferredCategories.map((c) => CATEGORY_META[c].label).join(', ')} - set to an automatic issuing rule, so not included in this manual run.
             </p>
           )}
           <div className="grid gap-3">

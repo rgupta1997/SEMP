@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints, KHO_END_SHORT, khoSettlementOf, shootoutOf, TBD_LABEL } from '@semp/shared';
+import { knockoutRoundSize, KNOCKOUT_ROUND, EARLY_END_LABEL, earlyEndOf, formatPoints, KHO_END_SHORT, khoSettlementOf, shootoutOf, TBD_LABEL } from '@semp/shared';
 import { cn, StatusBadge } from './ui';
 import { fmtDateTime } from '../lib/hooks';
 import { describeSlot, describeTieBlocked, isTieBlockedFor } from '../lib/stageTree';
@@ -46,11 +46,11 @@ export function fixtureStatusLabel(status?: string | null): string | undefined {
 // Human-friendly column heading from the generator's terse round labels.
 function roundTitle(round: string | null, teamsInRound: number): string {
   switch (round) {
-    case 'Final': return 'Final';
-    case 'SF': return 'Semi-finals';
-    case 'QF': return 'Quarter-finals';
+    case KNOCKOUT_ROUND.final: return 'Final';
+    case KNOCKOUT_ROUND.semiFinal: return 'Semi-finals';
+    case KNOCKOUT_ROUND.quarterFinal: return 'Quarter-finals';
     default:
-      if (round && /^R\d+$/.test(round)) return `Round of ${round.slice(1)}`;
+      if (knockoutRoundSize(round) > 0) return `Round of ${knockoutRoundSize(round)}`;
       return round ?? `Round of ${teamsInRound}`;
   }
 }

@@ -232,7 +232,7 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
         where: { championship_id: req.params.eventId, teams: { org_unit_id: inv.org_unit_id } },
       });
       if (squads > 0) {
-        throw new BusinessRuleError(`${inv.org_name} has ${squads} squad${squads === 1 ? '' : 's'} in this championship. Remove them first — withdrawing now would leave people picked for a campus that is no longer taking part.`);
+        throw new BusinessRuleError(`${inv.org_name} has ${squads} squad${squads === 1 ? '' : 's'} in this championship. Remove them first - withdrawing now would leave people picked for a campus that is no longer taking part.`);
       }
     }
 

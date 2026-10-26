@@ -385,7 +385,7 @@ export function CricketDeck(p: CricketDeckProps) {
 
       {inn.freeHit && (
         <div className="shrink-0 rounded bg-warning-soft px-2 py-1 text-center text-xs font-semibold">
-          FREE HIT — only a run-out can take a wicket off this delivery.
+          FREE HIT - only a run-out can take a wicket off this delivery.
         </div>
       )}
 
@@ -404,7 +404,7 @@ export function CricketDeck(p: CricketDeckProps) {
             title="Who is on strike?"
             people={availableBatters}
             empty={format.lastManStands
-              ? 'Nobody left to come in — the last batter carries on alone.'
+              ? 'Nobody left to come in - the last batter carries on alone.'
               : 'Nobody left to bat.'}
             onPick={(id) => push({ t: 'setBatter', end: 'striker', batterId: id })}
           />
@@ -575,7 +575,7 @@ function OverStrip({ format, log, inn }: { format: CricketFormat; log: CricketLo
     }
     marks.unshift(markOf(ev));
   }
-  if (!marks.length) return <div className="text-sm text-muted">—</div>;
+  if (!marks.length) return <div className="text-sm text-muted">-</div>;
   return (
     <div className="flex flex-wrap items-center gap-1">
       {marks.map((m, i) => (
@@ -656,7 +656,7 @@ function RunPad({ busy, ended, result, canUndo, freeHit, wideRuns, noBallRuns, o
   }
   return (
     <Card className={cn(SURFACE_BOX, 'gap-1.5 p-1.5')}>
-      {/* runs off the bat — the two rows a thumb knows by heart */}
+      {/* runs off the bat - the two rows a thumb knows by heart */}
       <div className="grid min-h-0 flex-1 grid-cols-3 gap-1.5">
         {RUNS.map((r) => (
           <button key={r} type="button" disabled={busy} data-qa={`run-${r}`}
@@ -768,7 +768,7 @@ function squadWarning(
     if (n > 0 && n < format.playersPerSide) short.push(`${name} has ${n}`);
   }
   if (!short.length) return null;
-  return `${format.name} is played ${format.playersPerSide} a side — ${short.join(', ')}. `
+  return `${format.name} is played ${format.playersPerSide} a side - ${short.join(', ')}. `
     + 'The innings will close when a side runs out of batters.';
 }
 
@@ -850,7 +850,7 @@ function WicketPanel({ format, freeHit, fielders, nextBatters, strikerName, nonS
       <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto">
         {freeHit && !extra && (
           <p className="rounded bg-warning-soft px-2 py-1 text-xs font-medium">
-            Free hit — only a run-out or obstruction can take a wicket.
+            Free hit - only a run-out or obstruction can take a wicket.
           </p>
         )}
 
@@ -902,8 +902,8 @@ function WicketPanel({ format, freeHit, fielders, nextBatters, strikerName, nonS
           ) : (
             <p className="text-xs text-muted">
               {format.lastManStands
-                ? 'Nobody left to come in — the last batter carries on alone.'
-                : 'Nobody left to come in — this ends the innings.'}
+                ? 'Nobody left to come in - the last batter carries on alone.'
+                : 'Nobody left to come in - this ends the innings.'}
             </p>
           )}
         </Group>
@@ -1027,7 +1027,7 @@ function MorePanel({ state, inn, format, busy, homeName, awayName, lone, onClose
           </div>
         ) : (
           <p className="text-xs text-muted">
-            The result is signed off automatically once the match ends — a chase
+            The result is signed off automatically once the match ends - a chase
             completed, or the last innings closed.
           </p>
         )}
@@ -1138,10 +1138,10 @@ function FinishPanel({ drawsAllowed, homeName, awayName, onCancel, onEnd }: {
           value={why}
           stacked
           options={[
-            ['abandoned', 'Abandoned — no result'],
-            ['conceded_A', `${awayName} conceded — ${homeName} win`],
-            ['conceded_B', `${homeName} conceded — ${awayName} win`],
-            ...(drawsAllowed ? [['draw', 'Drawn — time ran out'] as [string, string]] : []),
+            ['abandoned', 'Abandoned - no result'],
+            ['conceded_A', `${awayName} conceded - ${homeName} win`],
+            ['conceded_B', `${homeName} conceded - ${awayName} win`],
+            ...(drawsAllowed ? [['draw', 'Drawn - time ran out'] as [string, string]] : []),
           ]}
           onChange={(v) => setWhy(v as typeof why)}
         />
@@ -1174,7 +1174,7 @@ function Scorecard({ state, nameOf, ballsPerOver, onClose }: {
         {state.innings.map((inn) => (
           <div key={inn.innings} className="space-y-2">
             <div className="text-xs font-semibold uppercase tracking-wide">
-              Innings {inn.innings} — {inningsLine(inn, ballsPerOver)}
+              Innings {inn.innings} - {inningsLine(inn, ballsPerOver)}
               {inn.endedBy ? <span className="font-normal text-muted"> ({inn.endedBy.replace('_', ' ')})</span> : null}
             </div>
 
@@ -1217,7 +1217,7 @@ function Scorecard({ state, nameOf, ballsPerOver, onClose }: {
                         <td className="text-center">{b.maidens}</td>
                         <td className="text-center">{b.runsConceded}</td>
                         <td className="text-center font-semibold">{b.wickets}</td>
-                        <td className="text-center">{b.ballsBowled ? economy(b, ballsPerOver).toFixed(2) : '—'}</td>
+                        <td className="text-center">{b.ballsBowled ? economy(b, ballsPerOver).toFixed(2) : '-'}</td>
                       </tr>
                     ))}
                   </tbody>

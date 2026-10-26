@@ -564,7 +564,7 @@ function decide(state: CricketState): void {
   if (a === b) {
     state.outcome = 'tie';
     state.winner = null;
-    state.margin = f.superOverOnTie ? 'tied — super over to follow' : 'tied';
+    state.margin = f.superOverOnTie ? 'tied - super over to follow' : 'tied';
     return;
   }
 

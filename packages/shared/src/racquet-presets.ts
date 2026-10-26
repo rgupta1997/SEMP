@@ -204,13 +204,13 @@ const ttGame = (target: number, winBy = 2, capAt: number | null = null,
 
 const TABLE_TENNIS: ScoringFormat[] = [
   fmt({
-    sport: 'table tennis', key: 'ittf_bo5_11', name: 'ITTF Standard — best of 5 games to 11',
+    sport: 'table tennis', key: 'ittf_bo5_11', name: 'ITTF Standard - best of 5 games to 11',
     levels: [ttGame(11, 2, null, 5), match(3)], serve: ttServe(2, 10), mode: 'officiated',
     // ITTF law for every officiated match, not only championship best-of-7s.
     plugins: { expedite: { ...ITTF_EXPEDITE } },
   }),
   fmt({
-    sport: 'table tennis', key: 'ittf_bo7_11', name: 'ITTF Championship — best of 7 games to 11',
+    sport: 'table tennis', key: 'ittf_bo7_11', name: 'ITTF Championship - best of 7 games to 11',
     levels: [ttGame(11, 2, null, 5), match(4)], serve: ttServe(2, 10), mode: 'officiated',
     plugins: {
       // The expedite system is a table-tennis-only module: the point is awarded by a
@@ -222,7 +222,7 @@ const TABLE_TENNIS: ScoringFormat[] = [
     rulesSheet: { ballDiameterMm: 40, netHeightCm: 15.25, towelBreakEveryPoints: 6, timeoutsPerSidePerMatch: 1 },
   }),
   fmt({
-    sport: 'table tennis', key: 'legacy_21_bo3', name: 'Classic 21-point — best of 3 games to 21',
+    sport: 'table tennis', key: 'legacy_21_bo3', name: 'Classic 21-point - best of 3 games to 21',
     levels: [ttGame(21, 2, null, 10), match(2)], serve: ttServe(5, 20), mode: 'officiated',
   }),
   fmt({
@@ -231,7 +231,7 @@ const TABLE_TENNIS: ScoringFormat[] = [
     changeEnds: 'never',
   }),
   fmt({
-    sport: 'table tennis', key: 'corp_single_15_suddendeath', name: 'Fast knockout — single game to 15, no deuce',
+    sport: 'table tennis', key: 'corp_single_15_suddendeath', name: 'Fast knockout - single game to 15, no deuce',
     levels: [ttGame(15, 1), match(1)], serve: ttServe(2, 14), mode: 'selfScored',
     changeEnds: 'never', endStates: STRICT,
   }),
@@ -243,12 +243,12 @@ const TABLE_TENNIS: ScoringFormat[] = [
   // The user's own custom format, expressible with zero new code: the server is a pure
   // function of the point index, so undo and correction fall out for free.
   fmt({
-    sport: 'table tennis', key: 'sprint_9_serve3', name: 'Sportagon Sprint — best of 3 to 9, serve every 3rd',
+    sport: 'table tennis', key: 'sprint_9_serve3', name: 'Sportagon Sprint - best of 3 to 9, serve every 3rd',
     levels: [ttGame(9, 2, 11), match(2)], serve: ttServe(3, 8), mode: 'selfScored',
     changeEnds: 'never',
   }),
   fmt({
-    sport: 'table tennis', key: 'blitz_7', name: 'Blitz — best of 3 games to 7, serve every point',
+    sport: 'table tennis', key: 'blitz_7', name: 'Blitz - best of 3 games to 7, serve every point',
     levels: [ttGame(7, 2, 9), match(2)], serve: ttServe(1, 6), mode: 'selfScored',
     changeEnds: 'never',
   }),
@@ -263,24 +263,24 @@ const bwfGame = (target: number, capAt: number | null, switchEndsAt: number | nu
 
 const BADMINTON: ScoringFormat[] = [
   fmt({
-    sport: 'badminton', key: 'bwf_official_3x21', name: 'BWF Official — best of 3 games to 21',
+    sport: 'badminton', key: 'bwf_official_3x21', name: 'BWF Official - best of 3 games to 21',
     // 21, win by 2, unbounded deuce up to the 30-point cap: 30-29 ends it, margin ignored.
     // Switch ends at 11 in the decider only.
     levels: [bwfGame(21, 30, 11), match(2)], serve: bwfServe, mode: 'officiated',
     rulesSheet: { serviceHeightM: 1.15, intervalAt: 11, intervalSeconds: 60, betweenGamesSeconds: 120, shuttleType: 'feather' },
   }),
   fmt({
-    sport: 'badminton', key: 'bwf_bo5_11', name: 'BWF experimental — best of 5 games to 11',
+    sport: 'badminton', key: 'bwf_bo5_11', name: 'BWF experimental - best of 5 games to 11',
     levels: [bwfGame(11, 15, 6), match(3)], serve: bwfServe, mode: 'officiated',
   }),
   fmt({
-    sport: 'badminton', key: 'classic_15_sideout', name: 'Classic 15 — side-out (service) scoring, best of 3 games',
+    sport: 'badminton', key: 'classic_15_sideout', name: 'Classic 15 - side-out (service) scoring, best of 3 games',
     // Heritage, and BUILT rather than stubbed. `setting` (the 13-all election to extend
     // the game by 5) is a documented non-goal: if the players set, the score is recorded
     // manually. Stated on the draw sheet rather than approximated.
     levels: [bwfGame(15, null, 8, 1), match(2)], serve: bwfClassicServe, mode: 'officiated',
     changeEnds: 'betweenUnits',
-    rulesSheet: { setting: 'not scored by the console — record the final score manually' },
+    rulesSheet: { setting: 'not scored by the console - record the final score manually' },
   }),
   fmt({
     sport: 'badminton', key: 'corporate_single_21', name: 'Corporate single game to 21',
@@ -292,16 +292,16 @@ const BADMINTON: ScoringFormat[] = [
     clock: cap(20), changeEnds: 'never',
   }),
   fmt({
-    sport: 'badminton', key: 'college_bo3_to_11', name: 'College fest — best of 3 games to 11',
+    sport: 'badminton', key: 'college_bo3_to_11', name: 'College fest - best of 3 games to 11',
     levels: [bwfGame(11, 15, 6), match(2)], serve: bwfServe, mode: 'selfScored',
   }),
   fmt({
-    sport: 'badminton', key: 'corporate_single_21_doubles', name: 'Corporate mixed doubles — single game to 21',
+    sport: 'badminton', key: 'corporate_single_21_doubles', name: 'Corporate mixed doubles - single game to 21',
     levels: [bwfGame(21, 30, null), match(1)], serve: bwfServe, mode: 'selfScored',
     changeEnds: 'never', doubles: true,
   }),
   fmt({
-    sport: 'badminton', key: 'box_sprint_11', name: 'Box-league sprint — single game to 11, sudden death',
+    sport: 'badminton', key: 'box_sprint_11', name: 'Box-league sprint - single game to 11, sudden death',
     levels: [bwfGame(11, null, null, 1), match(1)], serve: bwfServe, mode: 'selfScored',
     changeEnds: 'never', endStates: STRICT,
   }),
@@ -342,62 +342,62 @@ const matchTiebreakDecider = (to: number, winBy = 2) => ({
 
 const TENNIS: ScoringFormat[] = [
   fmt({
-    sport: 'tennis', key: 'itf_standard_bo3', name: 'ITF / AITA Standard — best of 3 sets, tie-break at 6-6',
+    sport: 'tennis', key: 'itf_standard_bo3', name: 'ITF / AITA Standard - best of 3 sets, tie-break at 6-6',
     levels: [tennisGame(), tennisSet(6, 6), match(2)], serve: tennisServe, mode: 'officiated',
     changeEnds: 'oddCumulativeUnits',
     rulesSheet: { ballChangeAfterGames: [9, 11], changeoverSeconds: 90, setBreakSeconds: 120 },
   }),
   fmt({
-    sport: 'tennis', key: 'grand_slam_bo5', name: "Grand Slam men's — best of 5, 10-point tie-break in the fifth",
+    sport: 'tennis', key: 'grand_slam_bo5', name: "Grand Slam men's - best of 5, 10-point tie-break in the fifth",
     // A full fifth set; only its 6-6 tie-break changes, to 10 points (Grand Slam rule since 2022).
     levels: [tennisGame(), { ...tennisSet(6, 6), deciderOverride: { substitute: { atUnits: 6, spec: tiebreakUnit(10) } } }, match(3)],
     serve: tennisServe, mode: 'officiated', changeEnds: 'oddCumulativeUnits',
   }),
   fmt({
-    sport: 'tennis', key: 'no_ad_match_tb_bo3', name: 'League standard — no-ad, best of 3 with a 10-point match tie-break',
+    sport: 'tennis', key: 'no_ad_match_tb_bo3', name: 'League standard - no-ad, best of 3 with a 10-point match tie-break',
     levels: [tennisGame(true), { ...tennisSet(6, 6), deciderOverride: matchTiebreakDecider(10) }, match(2)],
     serve: tennisServe, mode: 'selfScored', changeEnds: 'oddCumulativeUnits', doubles: true,
   }),
   fmt({
-    sport: 'tennis', key: 'fast4_bo3', name: 'Fast4 — 4-game sets, no-ad, tie-break at 3-3',
+    sport: 'tennis', key: 'fast4_bo3', name: 'Fast4 - 4-game sets, no-ad, tie-break at 3-3',
     levels: [tennisGame(true), tennisSet(4, 3, 5, 1, 1), match(2)],
     serve: tennisServe, mode: 'selfScored', changeEnds: 'oddCumulativeUnits',
   }),
   fmt({
-    sport: 'tennis', key: 'itf_short_sets_bo3', name: 'ITF short sets — best of 3 sets to 4, match tie-break third',
+    sport: 'tennis', key: 'itf_short_sets_bo3', name: 'ITF short sets - best of 3 sets to 4, match tie-break third',
     levels: [tennisGame(), { ...tennisSet(4, 4), deciderOverride: matchTiebreakDecider(10) }, match(2)],
     serve: tennisServe, mode: 'officiated', changeEnds: 'oddCumulativeUnits',
   }),
   fmt({
-    sport: 'tennis', key: 'pro_set_8', name: '8-game pro set — first to 8 games by 2, tie-break at 8-8',
+    sport: 'tennis', key: 'pro_set_8', name: '8-game pro set - first to 8 games by 2, tie-break at 8-8',
     levels: [tennisGame(), tennisSet(8, 8), match(1)],
     serve: tennisServe, mode: 'selfScored', changeEnds: 'oddCumulativeUnits', doubles: true,
   }),
   fmt({
-    sport: 'tennis', key: 'single_set_6_noad', name: 'One set to 6 — no-ad, tie-break at 5-5',
+    sport: 'tennis', key: 'single_set_6_noad', name: 'One set to 6 - no-ad, tie-break at 5-5',
     levels: [tennisGame(true), tennisSet(6, 5, 7, 2, 1), match(1)],
     serve: tennisServe, mode: 'selfScored', changeEnds: 'oddCumulativeUnits', doubles: true,
   }),
   fmt({
-    sport: 'tennis', key: 'match_tb_10_shootout', name: '10-point shootout — one championship tie-break',
+    sport: 'tennis', key: 'match_tb_10_shootout', name: '10-point shootout - one championship tie-break',
     // Flat: the tie-break IS the match. No games, no sets - the level array collapses
     // to one unit, which is the same recursion the other formats use.
     levels: [tiebreakUnit(10), match(1)], serve: tennisTiebreakServe, mode: 'selfScored',
     changeEnds: 'everyNPoints', changeEndsAt: 6, doubles: true,
   }),
   fmt({
-    sport: 'tennis', key: 'flat_single_game_21', name: 'Single game to 21 — flat points, cap 25, serve every 5',
+    sport: 'tennis', key: 'flat_single_game_21', name: 'Single game to 21 - flat points, cap 25, serve every 5',
     levels: [{ key: 'game', label: 'Game', target: 21, winBy: 2, cap: 25, switchEndsAt: 11 }, match(1)],
     serve: { ...tennisTiebreakServe, every: 5, firstTurnEvery: undefined }, mode: 'selfScored',
   }),
   fmt({
-    sport: 'tennis', key: 'flat_bo3_to_11', name: 'Best of 3 games to 11 — flat points, cap 15',
+    sport: 'tennis', key: 'flat_bo3_to_11', name: 'Best of 3 games to 11 - flat points, cap 15',
     levels: [{ key: 'game', label: 'Game', target: 11, winBy: 2, cap: 15 }, match(2)],
     serve: { ...tennisTiebreakServe, every: 2, firstTurnEvery: undefined }, mode: 'selfScored',
     changeEnds: 'betweenUnits', doubles: true,
   }),
   fmt({
-    sport: 'tennis', key: 'timed_rubber_20', name: 'Timed rubber — 20-minute buzzer, most games leads',
+    sport: 'tennis', key: 'timed_rubber_20', name: 'Timed rubber - 20-minute buzzer, most games leads',
     levels: [tennisGame(true), { key: 'set', label: 'Set', target: 99, winBy: 1, cap: null }, match(1)],
     serve: tennisServe, mode: 'selfScored', clock: cap(20, 'leaderWins', 'suddenDeathPoint'),
     changeEnds: 'oddCumulativeUnits', doubles: true,
@@ -416,7 +416,7 @@ const pbGame = (target: number, winBy = 2, capAt: number | null = null, switchEn
 
 const PICKLEBALL: ScoringFormat[] = [
   fmt({
-    sport: 'pickleball', key: 'usap_tournament_bo3_11', name: 'USA Pickleball Standard — best 2 of 3 games to 11',
+    sport: 'pickleball', key: 'usap_tournament_bo3_11', name: 'USA Pickleball Standard - best 2 of 3 games to 11',
     levels: [pbGame(11, 2, null, 6), match(2)], serve: pickleSideOutServe, mode: 'officiated',
     doubles: true,
     rulesSheet: { nonVolleyZone: 'not adjudicated by the console', twoBounceRule: 'not adjudicated', serveClockSeconds: 10 },
@@ -430,26 +430,26 @@ const PICKLEBALL: ScoringFormat[] = [
     levels: [pbGame(21, 2, null, 11), match(1)], serve: pickleSideOutServe, mode: 'officiated', doubles: true,
   }),
   fmt({
-    sport: 'pickleball', key: 'mlp_rally_21', name: 'MLP-style rally scoring — game to 21',
+    sport: 'pickleball', key: 'mlp_rally_21', name: 'MLP-style rally scoring - game to 21',
     levels: [pbGame(21, 2, null, 11), match(1)], serve: pickleRallyServe, mode: 'officiated', doubles: true,
   }),
   fmt({
-    sport: 'pickleball', key: 'corp_rally_15_cap_17', name: 'Corporate rally — single game to 15, hard cap 17',
+    sport: 'pickleball', key: 'corp_rally_15_cap_17', name: 'Corporate rally - single game to 15, hard cap 17',
     levels: [pbGame(15, 2, 17), match(1)], serve: pickleRallyServe, mode: 'selfScored',
     changeEnds: 'never', doubles: true,
   }),
   fmt({
-    sport: 'pickleball', key: 'pool_11_straight', name: 'Pool play — single game to 11, sudden death at 10-10',
+    sport: 'pickleball', key: 'pool_11_straight', name: 'Pool play - single game to 11, sudden death at 10-10',
     levels: [pbGame(11, 1), match(1)], serve: pickleRallyServe, mode: 'selfScored',
     changeEnds: 'never', endStates: STRICT, doubles: true,
   }),
   fmt({
-    sport: 'pickleball', key: 'timecap_10min_game', name: 'Time-capped game — 10 minutes, highest score wins',
+    sport: 'pickleball', key: 'timecap_10min_game', name: 'Time-capped game - 10 minutes, highest score wins',
     levels: [pbGame(21, 1), match(1)], serve: pickleRallyServe, mode: 'selfScored',
     clock: cap(10, 'finishPointThenLeader', 'draw'), changeEnds: 'never', doubles: true,
   }),
   fmt({
-    sport: 'pickleball', key: 'college_bo3_rally_11_cap15', name: 'Best of 3 rally games to 11, cap 15 — 45-minute slot',
+    sport: 'pickleball', key: 'college_bo3_rally_11_cap15', name: 'Best of 3 rally games to 11, cap 15 - 45-minute slot',
     levels: [pbGame(11, 2, 15), match(2)], serve: pickleRallyServe, mode: 'selfScored',
     clock: cap(45), doubles: true,
   }),
@@ -464,26 +464,26 @@ const sqGame = (target: number, winBy = 2, capAt: number | null = null): LevelSp
 
 const SQUASH: ScoringFormat[] = [
   fmt({
-    sport: 'squash', key: 'wsf_pars11_bo5', name: 'WSF / PSA Standard — PARS 11, best of 5',
+    sport: 'squash', key: 'wsf_pars11_bo5', name: 'WSF / PSA Standard - PARS 11, best of 5',
     levels: [sqGame(11), match(3)], serve: squashParsServe, mode: 'officiated',
     changeEnds: 'never',
     rulesSheet: { letStrokeNoLet: 'outcome recorded, reasoning never inferred', betweenGamesSeconds: 90 },
   }),
   fmt({
-    sport: 'squash', key: 'pars11_bo3', name: 'Club / league — PARS 11, best of 3',
+    sport: 'squash', key: 'pars11_bo3', name: 'Club / league - PARS 11, best of 3',
     levels: [sqGame(11), match(2)], serve: squashParsServe, mode: 'selfScored', changeEnds: 'never',
   }),
   fmt({
-    sport: 'squash', key: 'english9_bo5', name: 'English / hand-in-hand-out — 9 points, best of 5',
+    sport: 'squash', key: 'english9_bo5', name: 'English / hand-in-hand-out - 9 points, best of 5',
     // Only the server scores; the serve still moves to the rally winner. Expressible
     // ONLY because pointScoring and movement are separate params.
     // "Set two" at 8-8: first to 9 by two, capped at 10 - so 8-8 plays to 10 (10-8 or
     // 10-9), exactly the traditional set two. Best of 5 needs the match level it lacked.
     levels: [sqGame(9, 2, 10), match(3)], serve: squashEnglishServe, mode: 'officiated', changeEnds: 'never',
-    rulesSheet: { setChoiceAt8All: 'set two always played — the receiver election is not offered' },
+    rulesSheet: { setChoiceAt8All: 'set two always played - the receiver election is not offered' },
   }),
   fmt({
-    sport: 'squash', key: 'english9_bo3', name: 'English 9 — best of 3',
+    sport: 'squash', key: 'english9_bo3', name: 'English 9 - best of 3',
     levels: [sqGame(9, 2, 10), match(2)], serve: squashEnglishServe, mode: 'selfScored', changeEnds: 'never',
   }),
   fmt({
@@ -495,22 +495,22 @@ const SQUASH: ScoringFormat[] = [
     levels: [sqGame(21, 2, 25), match(1)], serve: squashParsServe, mode: 'selfScored', changeEnds: 'never',
   }),
   fmt({
-    sport: 'squash', key: 'timecap_10min_game_sq', name: 'Time-capped game — 10 minutes, highest score wins',
+    sport: 'squash', key: 'timecap_10min_game_sq', name: 'Time-capped game - 10 minutes, highest score wins',
     levels: [sqGame(11), match(1)], serve: squashParsServe, mode: 'selfScored',
     clock: cap(10, 'finishPointThenLeader', 'draw'), changeEnds: 'never',
   }),
   fmt({
-    sport: 'squash', key: 'flash_bo3_to_7', name: 'Flash format — best of 3 games to 7 (play all)',
+    sport: 'squash', key: 'flash_bo3_to_7', name: 'Flash format - best of 3 games to 7 (play all)',
     levels: [{ ...sqGame(7, 2, 9), playAll: true }, match(2)], serve: squashParsServe,
     mode: 'selfScored', changeEnds: 'never',
   }),
   fmt({
-    sport: 'squash', key: 'doubles_pars11_bo3', name: 'Doubles / mixed doubles — PARS 11, best of 3',
+    sport: 'squash', key: 'doubles_pars11_bo3', name: 'Doubles / mixed doubles - PARS 11, best of 3',
     levels: [sqGame(11, 2, 15), match(2)], serve: squashParsServe, mode: 'selfScored',
     changeEnds: 'never', doubles: true,
   }),
   fmt({
-    sport: 'squash', key: 'handicap_pars11', name: 'Handicap — PARS 11 with a 5-0 start, best of 3',
+    sport: 'squash', key: 'handicap_pars11', name: 'Handicap - PARS 11 with a 5-0 start, best of 3',
     // Handicap start is a level param, used heavily in Indian corporate box leagues.
     levels: [{ ...sqGame(11, 2, 15), startingScore: [5, 0] }, match(2)],
     serve: squashParsServe, mode: 'selfScored', changeEnds: 'never',

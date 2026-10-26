@@ -175,39 +175,39 @@ const base = (o: Partial<CricketFormat> & { sport: string; key: string; name: st
 
 export const CRICKET_PRESETS: CricketFormat[] = [
   base({
-    sport: 'cricket', key: 'cricket_t20', name: 'T20 — 20 overs',
+    sport: 'cricket', key: 'cricket_t20', name: 'T20 - 20 overs',
     oversPerInnings: 20, maxOversPerBowler: 4, powerplayOvers: 6,
     freeHitAfterNoBall: true, superOverOnTie: true,
     rulesSheet: { fieldingRestrictions: 'not enforced by the console', dls: 'not computed' },
   }),
   base({
-    sport: 'cricket', key: 'cricket_t10', name: 'T10 — 10 overs',
+    sport: 'cricket', key: 'cricket_t10', name: 'T10 - 10 overs',
     oversPerInnings: 10, maxOversPerBowler: 2, powerplayOvers: 3,
     freeHitAfterNoBall: true, superOverOnTie: true,
   }),
   base({
-    sport: 'cricket', key: 'cricket_odi', name: 'ODI — 50 overs',
+    sport: 'cricket', key: 'cricket_odi', name: 'ODI - 50 overs',
     oversPerInnings: 50, maxOversPerBowler: 10, powerplayOvers: 10,
     freeHitAfterNoBall: true,
   }),
   base({
-    sport: 'cricket', key: 'cricket_corp_15', name: 'Corporate — 15 overs',
+    sport: 'cricket', key: 'cricket_corp_15', name: 'Corporate - 15 overs',
     oversPerInnings: 15, maxOversPerBowler: 3,
     officiatingMode: 'selfScored', entryMode: 'summary',
   }),
   base({
-    sport: 'cricket', key: 'cricket_corp_8', name: 'Corporate — 8 overs a side',
+    sport: 'cricket', key: 'cricket_corp_8', name: 'Corporate - 8 overs a side',
     oversPerInnings: 8, maxOversPerBowler: 2, playersPerSide: 8, wicketsToEndInnings: 7,
     officiatingMode: 'selfScored', entryMode: 'summary',
   }),
   base({
-    sport: 'cricket', key: 'cricket_test', name: 'Test / multi-day — unlimited overs, two innings',
+    sport: 'cricket', key: 'cricket_test', name: 'Test / multi-day - unlimited overs, two innings',
     oversPerInnings: null, inningsPerSide: 2, maxOversPerBowler: null,
     drawsAllowed: true, rainRule: 'organiser_decides',
     rulesSheet: { declarations: 'recorded as an innings end', followOn: 'not automated' },
   }),
   base({
-    sport: 'cricket', key: 'cricket_super_over', name: 'Super over — 1 over a side',
+    sport: 'cricket', key: 'cricket_super_over', name: 'Super over - 1 over a side',
     oversPerInnings: 1, maxOversPerBowler: 1, wicketsToEndInnings: 2,
   }),
 
@@ -215,20 +215,20 @@ export const CRICKET_PRESETS: CricketFormat[] = [
   // ways that matter - a smaller side, fewer balls an over, and the last batter
   // often carrying on alone because there is nobody left to bat with.
   base({
-    sport: 'box cricket', key: 'box_6ov_8', name: 'Box cricket — 6 overs, 8 a side',
+    sport: 'box cricket', key: 'box_6ov_8', name: 'Box cricket - 6 overs, 8 a side',
     oversPerInnings: 6, ballsPerOver: 6, maxOversPerBowler: 2,
     playersPerSide: 8, wicketsToEndInnings: 7,
     officiatingMode: 'selfScored', entryMode: 'summary',
     rulesSheet: { wallRuns: 'house rule - record as runs off the bat', oneHandOneBounce: 'house rule' },
   }),
   base({
-    sport: 'box cricket', key: 'box_5ov_6_lms', name: 'Box cricket — 5 overs, 6 a side, last man stands',
+    sport: 'box cricket', key: 'box_5ov_6_lms', name: 'Box cricket - 5 overs, 6 a side, last man stands',
     oversPerInnings: 5, ballsPerOver: 6, maxOversPerBowler: 1,
     playersPerSide: 6, wicketsToEndInnings: 6, lastManStands: true,
     officiatingMode: 'selfScored', entryMode: 'summary',
   }),
   base({
-    sport: 'box cricket', key: 'box_4ov_4ball', name: 'Box cricket — 4 overs of 4 balls, 6 a side',
+    sport: 'box cricket', key: 'box_4ov_4ball', name: 'Box cricket - 4 overs of 4 balls, 6 a side',
     oversPerInnings: 4, ballsPerOver: 4, maxOversPerBowler: 1,
     playersPerSide: 6, wicketsToEndInnings: 5, wideRuns: 2,
     officiatingMode: 'selfScored', entryMode: 'summary',

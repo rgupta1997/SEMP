@@ -17,9 +17,9 @@ const POP = "'Poppins',ui-sans-serif,system-ui,sans-serif";
 const MONO = "'JetBrains Mono',ui-monospace,monospace";
 
 const RULES = [
-  ['Login', 'Identifies the human. One account, every side of sport — player, official, admin.'],
+  ['Login', 'Identifies the human. One account, every side of sport - player, official, admin.'],
   ['Context', 'Decides what you see. Switching to an organisation or an event changes the whole workspace.'],
-  ['Role', 'Decides what you can do, and at which scope — the whole organisation, one campus, one event.'],
+  ['Role', 'Decides what you can do, and at which scope - the whole organisation, one campus, one event.'],
   ['Subscription', 'Decides what is available at all. A locked page names the capability it needs, never a price.'],
 ] as const;
 
@@ -183,7 +183,7 @@ export function HelpPage() {
         <div>
           <div style={{ fontFamily: POP, fontWeight: 800, fontSize: 15 }}>Still stuck?</div>
           <p style={{ margin: '2px 0 0', fontSize: 13.5, color: 'var(--muted)' }}>
-            play@sportagon.in · +91 72760 88888 — WhatsApp on the same number.
+            play@sportagon.in · +91 72760 88888 - WhatsApp on the same number.
           </p>
         </div>
         <Link to="/profile" style={{ fontFamily: POP, fontWeight: 700, fontSize: 13.5, color: 'var(--brand)', textDecoration: 'none' }}>

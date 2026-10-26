@@ -87,7 +87,7 @@ function PlacementModal({ orgId, person, units, labels, onClose, onSaved }: {
       </p>
       {units.length === 0 ? (
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          No {labels.campus.toLowerCase()} exists yet — add one on the Campuses &amp; Units screen.
+          No {labels.campus.toLowerCase()} exists yet - add one on the Campuses &amp; Units screen.
         </p>
       ) : (
         <div className="grid max-h-[24rem] gap-1 overflow-y-auto">
@@ -725,7 +725,7 @@ export function PlayersPage() {
                 header: 'Sportagon ID',
                 render: (row: Person) => (
                   <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
-                    {row.sportagon_id ?? <span className="text-slate-400">—</span>}
+                    {row.sportagon_id ?? <span className="text-slate-400">-</span>}
                   </span>
                 ),
               },

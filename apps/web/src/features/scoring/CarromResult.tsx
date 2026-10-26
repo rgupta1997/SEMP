@@ -20,7 +20,7 @@ export function hydrateCarrom(raw: unknown): CarromState {
 export function CarromResult({ homeName, awayName, rules, initial, disabled, busy, onSave, rubber, formatName, provenance }: {
   homeName: string; awayName: string;
   rules: CarromRules;
-  /** The format being scored ("ICF — best of 3 games to 25"), and where it came from. */
+  /** The format being scored ("ICF - best of 3 games to 25"), and where it came from. */
   formatName?: string;
   provenance?: string;
   /** A rubber of a team tie: confirming it settles the rubber, not the fixture. */

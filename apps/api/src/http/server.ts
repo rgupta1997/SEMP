@@ -31,6 +31,7 @@ import { makeOrganizationsRouter } from '../modules/iam/organizations.routes.js'
 import { makeEventsRouter } from '../modules/championships/championships.routes.js';
 import { makeChampionshipTemplatesRouter } from '../modules/championships/templates.routes.js';
 import { makeStandingsRouter } from '../modules/standings/standings.routes.js';
+import { makeStandingsTablesRouter } from '../modules/standings/tables.routes.js';
 import { makeEnrollmentRouter } from '../modules/enrollment/enrollment.routes.js';
 import { makeInvitationsRouter } from '../modules/enrollment/invitations.routes.js';
 import { makeUserInvitationsRouter, makePublicInviteRouter, makeInviteAcceptRouter } from '../modules/iam/user-invitations.routes.js';
@@ -318,6 +319,7 @@ export function buildApp(prisma: Prisma) {
 
   // ----- Phase 5: fixtures -----
   api.use('/', makeFixturesRouter(prisma));
+  api.use('/', makeStandingsTablesRouter(prisma));
   api.use('/', makeScoringFormatsRouter(prisma));
 
   // ----- Records, certificates, people and reports (lifted from the wave branch) -----

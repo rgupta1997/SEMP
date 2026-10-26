@@ -211,7 +211,7 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
                   <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/40">
                     <p className="flex-1 text-[13.5px] text-slate-600 dark:text-slate-300">
                       This is the platform's definition, shared by every organisation. Take a copy to change it
-                      here — the copy starts identical, so nothing is lost by customising.
+                      here - the copy starts identical, so nothing is lost by customising.
                     </p>
                     <Button onClick={takeOwnership} disabled={busy}>
                       <ShieldCheck size={14} /> Customise for this organisation
@@ -223,7 +223,7 @@ export function RolesPage({ embedded, orgId: orgIdProp }: { embedded?: boolean; 
                   <p className="mb-4 flex items-start gap-2 text-[13px] text-slate-500 dark:text-slate-400">
                     <Lock size={13} className="mt-0.5 shrink-0" />
                     A padlocked permission is one you do not hold yourself. You can take it
-                    off a role but not add it — otherwise anyone who can edit roles could
+                    off a role but not add it - otherwise anyone who can edit roles could
                     edit their way past the person who appointed them.
                   </p>
                 )}

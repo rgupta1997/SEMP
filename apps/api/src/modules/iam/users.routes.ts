@@ -177,7 +177,7 @@ export function makeUsersRouter(prisma: Prisma): Router {
     const existing = await prisma.users.findMany({ where: { email: { in: emails } }, select: { email: true } });
     const existingEmails = new Set(existing.map((u) => u.email));
 
-    // Build the new logins, hashing passwords OUTSIDE the transaction — bcrypt is
+    // Build the new logins, hashing passwords OUTSIDE the transaction - bcrypt is
     // CPU-bound and doing it inside would hold the transaction open and time out.
     const toCreate = await Promise.all(
       rows.filter((r) => !existingEmails.has(r.email)).map(async (r) => {

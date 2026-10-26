@@ -246,7 +246,7 @@ export function CreateEventWizard() {
                   hint="Whose event this is. It decides which organisation's name and signature go on its certificates."
                 >
                   <Select value={hostOrgId} onChange={(e) => setHostOrgId(e.target.value)}>
-                    <option value="">Just me — no organisation</option>
+                    <option value="">Just me - no organisation</option>
                     {hostable.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                   </Select>
                 </Field>
@@ -294,11 +294,11 @@ export function CreateEventWizard() {
                           <span className="block text-[12.5px] text-slate-500 dark:text-slate-400">
                             {/* A disabled option says WHY, or it reads as broken. */}
                             {needsHost
-                              ? 'Pick a hosting organisation first — an internal championship runs inside one.'
+                              ? 'Pick a hosting organisation first - an internal championship runs inside one.'
                               : loading
                                 ? 'Checking your structure…'
                                 : noUnits
-                                  ? `No active ${(lvl === 'campus' ? labels.campus : labels.department).toLowerCase()} yet. Add one — or set an existing one to Active — under the organisation's Campuses & Units screen.`
+                                  ? `No active ${(lvl === 'campus' ? labels.campus : labels.department).toLowerCase()} yet. Add one - or set an existing one to Active - under the organisation's Campuses & Units screen.`
                                   : meta.description}
                           </span>
                         </span>

@@ -117,15 +117,15 @@ const S = (label: string): TieRubberDraft => ({ label, size: 1 });
 const D = (label: string): TieRubberDraft => ({ label, size: 2 });
 
 const RACQUET_LAYOUTS: TieLayout[] = [
-  { key: 'five', name: 'Five rubbers — MS, WS, MD, WD, XD',
+  { key: 'five', name: 'Five rubbers - MS, WS, MD, WD, XD',
     rubbers: [S("Men's Singles"), S("Women's Singles"), D("Men's Doubles"), D("Women's Doubles"), D('Mixed Doubles')] },
-  { key: 'three_mixed', name: 'Three rubbers — MS, MD, XD',
+  { key: 'three_mixed', name: 'Three rubbers - MS, MD, XD',
     rubbers: [S("Men's Singles"), D("Men's Doubles"), D('Mixed Doubles')] },
   { key: 'singles_doubles_singles', name: 'Singles, Doubles, Singles',
     rubbers: [S('Singles 1'), D('Doubles'), S('Singles 2')] },
-  { key: 'swaythling', name: 'Swaythling — five singles (A-X, B-Y, C-Z, A-Y, B-X)',
+  { key: 'swaythling', name: 'Swaythling - five singles (A-X, B-Y, C-Z, A-Y, B-X)',
     rubbers: [S('Singles A v X'), S('Singles B v Y'), S('Singles C v Z'), S('Singles A v Y'), S('Singles B v X')] },
-  { key: 'corbillon', name: 'Corbillon — four singles and a doubles',
+  { key: 'corbillon', name: 'Corbillon - four singles and a doubles',
     rubbers: [S('Singles A v X'), S('Singles B v Y'), D('Doubles'), S('Singles A v Y'), S('Singles B v X')] },
   { key: 'thomas_uber', name: 'Three singles, two doubles',
     rubbers: [S('Singles 1'), D('Doubles 1'), S('Singles 2'), D('Doubles 2'), S('Singles 3')] },

@@ -290,7 +290,7 @@ export function MyGamePage() {
                   display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: MONO, fontSize: 11, fontWeight: 700,
                 }}>!</span>
                 <span style={{ flex: 1, fontSize: 13.5, color: C.fg2 }}>
-                  {p.reason} — {[p.sport, p.championship?.name].filter(Boolean).join(' · ')}
+                  {p.reason} - {[p.sport, p.championship?.name].filter(Boolean).join(' · ')}
                 </span>
                 <span aria-hidden style={{ color: C.faint }}>›</span>
               </div>

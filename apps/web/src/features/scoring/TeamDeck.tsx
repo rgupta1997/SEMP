@@ -851,8 +851,8 @@ export function TeamDeck(p: TeamDeckProps) {
                       className={cn('mt-1 text-[11px] font-semibold',
                         actorFouls >= foulLimit ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400')}>
                       {actorFouls >= foulLimit
-                        ? `Fouled out — ${actorFouls} fouls. They must be substituted.`
-                        : `${actorFouls} fouls — one more and they foul out.`}
+                        ? `Fouled out - ${actorFouls} fouls. They must be substituted.`
+                        : `${actorFouls} fouls - one more and they foul out.`}
                     </p>
                   )}
                 </Group>
@@ -931,7 +931,7 @@ export function TeamDeck(p: TeamDeckProps) {
                           onChange={(v) => { setSecond(v); setAssistOpen(false); }}
                         />
                         <p className="mt-1 text-[10px] text-muted">
-                          {fromOpponent ? 'Optional - the chaser who made the out, on the same tap.' : 'Optional — recorded on the same tap as the goal.'}
+                          {fromOpponent ? 'Optional - the chaser who made the out, on the same tap.' : 'Optional - recorded on the same tap as the goal.'}
                         </p>
                       </div>
                     )}
@@ -942,7 +942,7 @@ export function TeamDeck(p: TeamDeckProps) {
               <p className="min-h-0 flex-1 text-sm text-muted">
                 {players.length === 0
                   ? 'No team sheet for this side, so actions cannot be attributed. The score can still be kept below.'
-                  : 'This sport records no individual actions — the result is the record.'}
+                  : 'This sport records no individual actions - the result is the record.'}
               </p>
             )}
 
@@ -1172,7 +1172,7 @@ function ClockPanel({ clock, periodLabel, period, busy, onAdjust, onToggle, onCl
       </div>
       <p className="shrink-0 text-center text-[11px] text-muted">
         {clock.overrun
-          ? `Past ${formatClock(clock.fullMs)} — ${formatClock(clock.stoppageMs)} of added time.`
+          ? `Past ${formatClock(clock.fullMs)} - ${formatClock(clock.stoppageMs)} of added time.`
           : clock.fullMs > 0 ? `of ${formatClock(clock.fullMs)}` : 'No fixed length.'}
       </p>
 
@@ -1750,9 +1750,9 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0 }: {
             data-fouled-out={fouledOut || undefined}
             // The tooltip is the only place the name is guaranteed whole, so it now
             // carries the booking too rather than just repeating the label.
-            title={fouledOut ? `${label} — fouled out (${marks!.caution} fouls)`
+            title={fouledOut ? `${label} - fouled out (${marks!.caution} fouls)`
               : marks
-              ? `${label} — ${[marks.caution && `${marks.caution} ${foulLimit ? 'foul' : 'caution'}${marks.caution > 1 ? 's' : ''}`,
+              ? `${label} - ${[marks.caution && `${marks.caution} ${foulLimit ? 'foul' : 'caution'}${marks.caution > 1 ? 's' : ''}`,
                   marks.dismissal && `${marks.dismissal} dismissal${marks.dismissal > 1 ? 's' : ''}`]
                   .filter(Boolean).join(', ')}${onLastFoul ? ', one from fouling out' : ''}`
               : label}
@@ -1823,7 +1823,7 @@ function Timeline({ log, nameOf, nameFor, fullMs, onClose }: {
               </span>
               <span className="min-w-0 flex-1">
                 {ev.t === 'endPeriod' ? (
-                  <span className="font-semibold">— end of the period —</span>
+                  <span className="font-semibold">- end of the period -</span>
                 ) : ev.t === 'point' ? (
                   <>
                     <span className="font-medium">{ev.label ?? 'Point'}</span>
@@ -1873,7 +1873,7 @@ function Timeline({ log, nameOf, nameFor, fullMs, onClose }: {
                 ) : ev.t === 'end' && (ev.reason === 'minimum_chase' || ev.reason === 'innings') && ev.winner ? (
                   <span className="font-semibold">{nameOf(ev.winner)} {KHO_END_LABEL[ev.reason]}</span>
                 ) : ev.t === 'end' ? (
-                  <span className="font-semibold">— match ended —</span>
+                  <span className="font-semibold">- match ended -</span>
                 ) : (
                   <span className="text-muted">{ev.t}</span>
                 )}
@@ -1976,11 +1976,11 @@ function MorePanel({
                   <Button size="sm" variant="outline" data-qa="time-up"
                     onClick={async () => {
                       if (leader === null && !drawOnTime) {
-                        toast.error('Scores are level and this format does not allow a draw — play the next point.');
+                        toast.error('Scores are level and this format does not allow a draw - play the next point.');
                         return;
                       }
                       const ok = await confirmDialog({
-                        title: leader ? `Time up — ${nameOf(leader)} leads?` : 'Time up — record a draw?',
+                        title: leader ? `Time up - ${nameOf(leader)} leads?` : 'Time up - record a draw?',
                         confirmLabel: 'Record it',
                         message: leader ? `${nameOf(leader)} takes the match on the score at the buzzer.` : 'The match is recorded as drawn.',
                       });
@@ -1989,7 +1989,7 @@ function MorePanel({
                       onEvent(leader ? { t: 'end', outcome: 'win', reason: 'cap', winner: leader }
                         : { t: 'end', outcome: 'draw', reason: 'cap', winner: null });
                     }}>
-                    Time up ({format.clock!.minutes} min) — {leader ? `${nameOf(leader)} leads` : 'level'}
+                    Time up ({format.clock!.minutes} min) - {leader ? `${nameOf(leader)} leads` : 'level'}
                   </Button>
                 );
               })()}
@@ -2013,7 +2013,7 @@ function MorePanel({
                   });
                   if (ok) { onFinishing(false); onEvent({ t: 'end', outcome: 'void', reason: 'abandoned', winner: null }); }
                 }}>
-                Abandoned — no result
+                Abandoned - no result
               </Button>
               <Button size="sm" variant="subtle" onClick={() => onFinishing(false)}>Keep scoring</Button>
             </div>

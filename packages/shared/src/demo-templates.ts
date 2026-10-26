@@ -1,9 +1,9 @@
-// Naming templates for demo sandboxes. Data, not logic — they live here so the
+// Naming templates for demo sandboxes. Data, not logic - they live here so the
 // create-form (web) can live-preview the exact defaults the seeder (API) will use.
 
 import type { DemoChampKind } from './enums.js';
 
-// Team names are "<Client> <Suffix>" — Tata Strikers, Tata Hunters, …
+// Team names are "<Client> <Suffix>" - Tata Strikers, Tata Hunters, …
 export const DEMO_TEAM_SUFFIXES = [
   'Strikers', 'Hunters', 'Titans', 'Warriors', 'Falcons', 'Panthers',
   'Riders', 'Blasters', 'Chargers', 'Kings', 'Gladiators', 'Spartans',

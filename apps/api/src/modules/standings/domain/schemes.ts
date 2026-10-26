@@ -1,4 +1,8 @@
-import { FINALIST_DETAIL_KEY, THIRD_PLACE_ROUND, type StandingsRule, type StandingsPlacement, type StandingsTiebreaker } from '@semp/shared';
+import {
+  knockoutRoundSize, KNOCKOUT_ROUND, FINALIST_DETAIL_KEY, THIRD_PLACE_ROUND, findTieResolution,
+  groupRankingFor, isKnockoutRound, type GroupRanking, type StandingsRule, type StandingsPlacement,
+  type StandingsTiebreaker, type TieResolution,
+} from '@semp/shared';
 
 // Pure standings computation. A scheme turns a single draw's (tournament_discipline)
 // completed fixtures into per-CONTINGENT tallies. The service aggregates these
@@ -32,6 +36,9 @@ export interface SchemeFixture {
   away_points?: number | null;
   /** Abandoned as "no result": both sides share the draw points, whatever the score. */
   no_result?: boolean;
+  /** Stage metadata: which pool and which stage of a multi-stage draw. */
+  pool_number?: number | null;
+  stage_sequence?: number | null;
 }
 
 export interface EntityTally {
@@ -44,6 +51,8 @@ export interface EntityTally {
   // Internal sort aids (goals for/against) - not persisted as columns.
   gf: number;
   ga: number;
+  // Walkovers lost - a side whose every result is one is a no-show (no participation).
+  wo: number;
   // Scheme-specific counts surfaced to the UI (e.g. { gold: 2 }, { semi_finalist: 1 }).
   detail: Record<string, number>;
   // Assigned by rankBy once a scope is fully accumulated.
@@ -51,7 +60,7 @@ export interface EntityTally {
 }
 
 function emptyTally(entity_id: string): EntityTally {
-  return { entity_id, played: 0, won: 0, drawn: 0, lost: 0, points: 0, gf: 0, ga: 0, detail: {} };
+  return { entity_id, played: 0, won: 0, drawn: 0, lost: 0, points: 0, gf: 0, ga: 0, wo: 0, detail: {} };
 }
 
 // A result that counts: a played match, or a walkover with its winner (a forfeit is a
@@ -91,10 +100,86 @@ function leagueTally(fixtures: SchemeFixture[], win: number, draw: number, loss:
       const homeWon = f.winner_team_id === f.home_team_id;
       if (home) { if (homeWon) { home.won++; home.points += win; } else { home.lost++; home.points += loss; } }
       if (away) { if (!homeWon) { away.won++; away.points += win; } else { away.lost++; away.points += loss; } }
+      if (!played) { const loser = homeWon ? away : home; if (loser) loser.wo++; }
     }
   }
   return table;
 }
+
+const isNoShow = (t: EntityTally) => t.played > 0 && t.wo === t.played;
+
+// ---------- Group / league table ranking ----------
+
+function metric(r: EntityTally, t: StandingsTiebreaker): number {
+  switch (t) {
+    case 'points': return r.points;
+    case 'wins': return r.won;
+    case 'lost': return -r.lost; // fewer losses ranks higher
+    case 'score_diff': return r.gf - r.ga;
+    case 'score_for': return r.gf;
+    case 'head_to_head': return 0; // needs the fixtures - handled by rankGroup
+  }
+}
+
+// Stable split of a block into runs of equal value, best first.
+function splitBy(block: EntityTally[], value: (r: EntityTally) => number): EntityTally[][] {
+  const sorted = [...block].sort((a, b) => value(b) - value(a));
+  const out: EntityTally[][] = [];
+  for (const r of sorted) {
+    const last = out[out.length - 1];
+    if (last && value(last[0]) === value(r)) last.push(r); else out.push([r]);
+  }
+  return out;
+}
+
+// Head-to-head = a mini-table of only the matches between the tied teams. If it splits
+// them into a smaller tie, the mini-table is re-run for just those teams.
+function headToHead(block: EntityTally[], fixtures: SchemeFixture[], pts: GroupRanking): EntityTally[][] {
+  const ids = new Set(block.map((r) => r.entity_id));
+  const mini = leagueTally(fixtures.filter((f) => ids.has(f.home_entity_id ?? '') && ids.has(f.away_entity_id ?? '')), pts.win, pts.draw, pts.loss);
+  const parts = splitBy(block, (r) => mini.get(r.entity_id)?.points ?? 0);
+  if (parts.length === 1) return parts;
+  return parts.flatMap((p) => (p.length > 1 ? headToHead(p, fixtures, pts) : [p]));
+}
+
+/** Orders rows into blocks; a block of 2+ is still level on every tie-breaker. */
+export function tieBlocks(rows: EntityTally[], tiebreakers: StandingsTiebreaker[], fixtures: SchemeFixture[] = [], pts?: GroupRanking): EntityTally[][] {
+  let blocks = [rows];
+  for (const tb of tiebreakers) {
+    if (tb === 'head_to_head' && (!pts || fixtures.length === 0)) continue;
+    blocks = blocks.flatMap((b) => (b.length < 2 ? [b] : tb === 'head_to_head' ? headToHead(b, fixtures, pts!) : splitBy(b, (r) => metric(r, tb))));
+  }
+  return blocks;
+}
+
+export interface RankedGroup {
+  /** Best first, ranks 1..n. Inside an unresolved tie the order is arbitrary. */
+  rows: EntityTally[];
+  /** Blocks still level after tie-breakers and with no hand-picked order. */
+  ties: string[][];
+}
+
+/** A hand-picked order for a tied set, or undefined when none is saved. */
+export type TieResolver = (entities: string[]) => string[] | undefined;
+
+/** Ranks one group / league table: match points, the tie-breaker order, then saved resolutions. */
+export function rankGroup(fixtures: SchemeFixture[], ranking: GroupRanking, resolve?: TieResolver): RankedGroup {
+  const table = leagueTally(fixtures, ranking.win, ranking.draw, ranking.loss);
+  const rows: EntityTally[] = [];
+  const ties: string[][] = [];
+  for (const block of tieBlocks([...table.values()], ranking.tiebreakers, fixtures, ranking)) {
+    if (block.length === 1) { rows.push(block[0]); continue; }
+    const ids = block.map((r) => r.entity_id);
+    const order = resolve?.(ids);
+    if (order) rows.push(...order.map((id) => block.find((r) => r.entity_id === id)!));
+    else { ties.push(ids); rows.push(...block); }
+  }
+  rows.forEach((r, i) => { r.rank = i + 1; });
+  return { rows, ties };
+}
+
+export const resolverFor = (resolutions: TieResolution[] | undefined, scope: 'pool' | 'placing', stage: number, pool: number | null): TieResolver =>
+  (entities) => findTieResolution(resolutions ?? [], scope, stage, pool, entities)?.order;
 
 // Map each team to the contingent it plays for, across all fixtures in the draw
 // (either side).
@@ -124,8 +209,8 @@ function placementCandidates(f: SchemeFixture): Array<[string, StandingsPlacemen
     const team = f.home_team_id ?? f.away_team_id;
     if (!team) return [];
     switch (f.round) {
-      case 'SF': return [[team, 'runner_up']]; // bye into the final
-      case 'QF': return [[team, 'semi_finalist']]; // bye into the semis
+      case KNOCKOUT_ROUND.semiFinal: return [[team, 'runner_up']]; // bye into the final
+      case KNOCKOUT_ROUND.quarterFinal: return [[team, 'semi_finalist']]; // bye into the semis
       default: return []; // earlier rounds (R16, R32, …) have no canonical placement
     }
   }
@@ -134,7 +219,7 @@ function placementCandidates(f: SchemeFixture): Array<[string, StandingsPlacemen
   const loser = f.home_team_id === winner ? f.away_team_id : f.home_team_id;
   const out: Array<[string, StandingsPlacement]> = [];
   switch (f.round) {
-    case 'Final':
+    case KNOCKOUT_ROUND.final:
       out.push([winner, 'winner']);
       if (loser) out.push([loser, 'runner_up']);
       break;
@@ -142,11 +227,11 @@ function placementCandidates(f: SchemeFixture): Array<[string, StandingsPlacemen
       out.push([winner, 'third_place']);
       if (loser) out.push([loser, 'fourth_place']);
       break;
-    case 'SF':
+    case KNOCKOUT_ROUND.semiFinal:
       out.push([winner, 'runner_up']); // reached the final → runner-up floor
       if (loser) out.push([loser, 'semi_finalist']);
       break;
-    case 'QF':
+    case KNOCKOUT_ROUND.quarterFinal:
       out.push([winner, 'semi_finalist']); // reached the semis → semi-finalist floor
       if (loser) out.push([loser, 'quarter_finalist']);
       break;
@@ -170,57 +255,225 @@ const PLACEMENT_SPECIFICITY: StandingsPlacement[] = [
   'winner', 'runner_up', 'third_place', 'fourth_place', 'semi_finalist', 'quarter_finalist',
 ];
 
-function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'placement' }>): EntityTally[] {
-  // Base P/W/L from the knockout results (no league points), then layer placement
-  // points. Unlike the medal scheme these accrue progressively round by round - each
-  // team holds the floor of the highest stage it has reached (see placementCandidates),
-  // so the table is live throughout the bracket rather than blank until the final.
+export interface SchemeContext {
+  /** Ranking for a table stage (by stage_sequence). Unset = the rule's ranking or 3/1/0. */
+  rankingFor?: (stage: number) => GroupRanking;
+  resolutions?: TieResolution[];
+  /** Knockout size from its first round (Final 2, SF 4...) and the teams already in it. */
+  knockout?: { size: number; teams: Set<string>; hasThirdPlace: boolean };
+  /** No league / group match is still to be played. */
+  tablesComplete?: boolean;
+}
+
+const POSITION_PLACEMENT: StandingsPlacement[] = ['winner', 'runner_up', 'third_place', 'fourth_place'];
+
+/** A placing tie the tie-breakers couldn't split and that changes points. */
+export interface PendingPlacingTie { stage: number; entities: string[]; from: number; to: number }
+
+export interface TableResult {
+  placings: Map<string, StandingsPlacement[]>;
+  pending: PendingPlacingTie[];
+  /** Each contingent's record in the last table stage (for ranking semi-final losers). */
+  records: Map<string, EntityTally>;
+  stage: number;
+}
+
+const rankingOf = (rule: StandingsRule, ctx: SchemeContext, stage: number): GroupRanking =>
+  ctx.rankingFor?.(stage) ?? groupRankingFor(rule);
+
+// Placings from the final league / group table, for positions no knockout match decides.
+// Positions start after the teams that went through to the knockout, so with only a final
+// the best group runners-up are 3rd and 4th; with no knockout the table is the result.
+export function tablePlacings(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'placement' }>, ctx: SchemeContext): TableResult {
+  const out: TableResult = { placings: new Map(), pending: [], records: new Map(), stage: 1 };
+  const tableFx = fixtures.filter((f) => !isKnockoutRound(f.round) && f.status !== 'bye');
+  if (tableFx.length === 0 || !ctx.tablesComplete) return out;
+  const stage = Math.max(...tableFx.map((f) => f.stage_sequence ?? 1));
+  out.stage = stage;
+  const stageFx = tableFx.filter((f) => (f.stage_sequence ?? 1) === stage);
+  const ranking = rankingOf(rule, ctx, stage);
+  const pools = [...new Set(stageFx.map((f) => f.pool_number ?? null))];
+
+  const poolRank = new Map<string, number>();
+  const poolTies: string[][] = [];
+  const ranked = pools.map((pool) => {
+    const g = rankGroup(stageFx.filter((f) => (f.pool_number ?? null) === pool), ranking, resolverFor(ctx.resolutions, 'pool', stage, pool));
+    g.rows.forEach((r) => { poolRank.set(r.entity_id, r.rank!); out.records.set(r.entity_id, r); });
+    poolTies.push(...g.ties);
+    return g;
+  });
+  if (!rule.table_placings) return out;
+
+  const teamEntity = teamEntityMap(fixtures);
+  const ko = ctx.knockout ?? { size: 0, teams: new Set<string>(), hasThirdPlace: false };
+  const koEntities = new Set([...ko.teams].map((t) => teamEntity.get(t)).filter((e): e is string => !!e));
+  if (ko.size > 0 && koEntities.size < ko.size) return out; // knockout not filled yet
+  let pos = koEntities.size + 1;
+  if (pos > POSITION_PLACEMENT.length) return out;
+
+  const inPoolTie = (id: string) => poolTies.some((t) => t.includes(id));
+  const remaining = (ids: string[]) => ids.filter((id) => !koEntities.has(id));
+  // Ordered blocks of contingents still to place; `tied` = level with no saved order.
+  const blocks: Array<{ ids: string[]; tied: boolean }> = [];
+  if (ranked.length === 1) {
+    const rows = ranked[0].rows;
+    for (let i = 0; i < rows.length;) {
+      const tie = ranked[0].ties.find((t) => t.includes(rows[i].entity_id));
+      const ids = remaining(tie ?? [rows[i].entity_id]);
+      if (ids.length) blocks.push({ ids, tied: !!tie && ids.length > 1 });
+      i += tie ? tie.length : 1;
+    }
+  } else {
+    const cross = ranking.tiebreakers.filter((t) => t !== 'head_to_head');
+    const resolve = resolverFor(ctx.resolutions, 'placing', stage, null);
+    const maxRank = Math.max(...poolRank.values());
+    for (let rank = 1; rank <= maxRank; rank++) {
+      const tier = remaining([...poolRank].filter(([, r]) => r === rank).map(([id]) => id));
+      if (tier.length === 0) continue;
+      if (tier.some(inPoolTie)) { blocks.push({ ids: tier, tied: tier.length > 1 }); continue; }
+      for (const b of tieBlocks(tier.map((id) => out.records.get(id)!), cross.length ? cross : ['points'])) {
+        const ids = b.map((r) => r.entity_id);
+        const order = ids.length > 1 ? resolve(ids) : undefined;
+        if (order) order.forEach((id) => blocks.push({ ids: [id], tied: false }));
+        else blocks.push({ ids, tied: ids.length > 1 });
+      }
+    }
+  }
+
+  const value = (p: number) => {
+    const v = rule.points[POSITION_PLACEMENT[p - 1]] ?? 0;
+    return v > 0 || p < 3 ? v : rule.points.semi_finalist ?? 0;
+  };
+  const award = (id: string, p: number) => {
+    const list: StandingsPlacement[] = [POSITION_PLACEMENT[p - 1]];
+    if (p >= 3) list.push('semi_finalist'); // finished in the last four
+    out.placings.set(id, list);
+  };
+  for (const b of blocks) {
+    if (pos > POSITION_PLACEMENT.length) break;
+    const to = pos + b.ids.length - 1;
+    const last = Math.min(to, POSITION_PLACEMENT.length);
+    if (!b.tied) b.ids.forEach((id, i) => { if (pos + i <= last) award(id, pos + i); });
+    else {
+      const span = Array.from({ length: last - pos + 1 }, (_, i) => value(pos + i));
+      // Level teams share the better place when it makes no difference to the points.
+      const shareable = span.every((v) => v === span[0]) && (to <= POSITION_PLACEMENT.length || span[0] === 0);
+      if (shareable) b.ids.forEach((id) => award(id, pos));
+      else out.pending.push({ stage, entities: b.ids, from: pos, to: last });
+    }
+    pos = to + 1;
+  }
+  return out;
+}
+
+// No 3rd-place match: the two semi-final losers take 3rd and 4th by their group record.
+function semiLoserPlacings(
+  fixtures: SchemeFixture[], tables: TableResult, ranking: GroupRanking, ctx: SchemeContext,
+): Map<string, StandingsPlacement> {
+  const out = new Map<string, StandingsPlacement>();
+  const sfs = fixtures.filter((f) => f.round === KNOCKOUT_ROUND.semiFinal && isResult(f) && f.winner_team_id);
+  if (sfs.length !== 2) return out;
+  const teamEntity = teamEntityMap(fixtures);
+  const losers = sfs.map((f) => teamEntity.get((f.home_team_id === f.winner_team_id ? f.away_team_id : f.home_team_id) ?? ''));
+  if (losers.some((e) => !e || !tables.records.has(e))) return out;
+  const ids = losers as string[];
+  const cross = ranking.tiebreakers.filter((t) => t !== 'head_to_head');
+  const blocks = tieBlocks(ids.map((e) => tables.records.get(e)!), cross.length ? cross : ['points']);
+  const order = blocks.length === 2 ? blocks.map((b) => b[0].entity_id) : resolverFor(ctx.resolutions, 'placing', tables.stage, null)(ids);
+  if (!order) { tables.pending.push({ stage: tables.stage, entities: ids, from: 3, to: 4 }); return out; }
+  out.set(order[0], 'third_place');
+  out.set(order[1], 'fourth_place');
+  return out;
+}
+
+/** Placing ties waiting on a hand-picked order (shown on the group tables). */
+export function pendingPlacingTies(fixtures: SchemeFixture[], rule: StandingsRule, ctx: SchemeContext): PendingPlacingTie[] {
+  if (rule.scheme !== 'placement') return [];
+  const tables = tablePlacings(fixtures, rule, ctx);
+  if (rule.rank_semi_losers && !ctx.knockout?.hasThirdPlace) {
+    semiLoserPlacings(fixtures, tables, rankingOf(rule, ctx, tables.stage), ctx);
+  }
+  return tables.pending;
+}
+
+function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'placement' }>, ctx: SchemeContext = {}): EntityTally[] {
+  // Base P/W/L from the results (no league points), then layer placement points. Knockout
+  // placings accrue progressively round by round - each team holds the floor of the
+  // highest stage it has reached (see placementCandidates), so the table is live
+  // throughout the bracket rather than blank until the final.
   const table = leagueTally(fixtures, 0, 0, 0);
   const teamEntity = teamEntityMap(fixtures);
+  const ensure = (entityId: string) => {
+    let row = table.get(entityId);
+    if (!row) { row = emptyTally(entityId); table.set(entityId, row); }
+    return row;
+  };
 
-  // All placements each team earned across the bracket. Byes count here (they grant
-  // a reached-the-next-stage floor) even though leagueTally ignores them as unplayed.
+  // "Both": league / group matches also earn their W/D/L points.
+  if (rule.include_match_points) {
+    const tableFx = fixtures.filter((f) => !isKnockoutRound(f.round));
+    for (const stage of new Set(tableFx.map((f) => f.stage_sequence ?? 1))) {
+      const r = rankingOf(rule, ctx, stage);
+      for (const t of leagueTally(tableFx.filter((f) => (f.stage_sequence ?? 1) === stage), r.win, r.draw, r.loss).values()) {
+        if (!t.points) continue;
+        const row = ensure(t.entity_id);
+        row.points += t.points;
+        row.detail.match_points = (row.detail.match_points ?? 0) + t.points;
+      }
+    }
+  }
+
+  // All placements each contingent earned across the bracket and the tables. Byes count
+  // here (they grant a reached-the-next-stage floor) even though leagueTally ignores them.
   const candidates = new Map<string, Set<StandingsPlacement>>();
+  const add = (entityId: string, p: StandingsPlacement) => {
+    let set = candidates.get(entityId);
+    if (!set) { set = new Set(); candidates.set(entityId, set); }
+    set.add(p);
+  };
   for (const f of fixtures) {
     if (!isResult(f) && f.status !== 'bye') continue;
     for (const [teamId, placement] of placementCandidates(f)) {
-      let set = candidates.get(teamId);
-      if (!set) { set = new Set(); candidates.set(teamId, set); }
-      set.add(placement);
+      const entityId = teamEntity.get(teamId);
+      if (entityId) add(entityId, placement);
     }
+  }
+  const tables = tablePlacings(fixtures, rule, ctx);
+  for (const [entityId, list] of tables.placings) list.forEach((p) => add(entityId, p));
+  if (rule.rank_semi_losers && !ctx.knockout?.hasThirdPlace) {
+    for (const [entityId, p] of semiLoserPlacings(fixtures, tables, rankingOf(rule, ctx, tables.stage), ctx)) add(entityId, p);
   }
 
   // Only losing a played final makes a team runner-up; reaching it is still a floor.
   const finalLosers = new Set<string>();
   for (const f of fixtures) {
-    if (!isResult(f) || f.round !== 'Final' || !f.winner_team_id) continue;
+    if (!isResult(f) || f.round !== KNOCKOUT_ROUND.final || !f.winner_team_id) continue;
     const loser = f.home_team_id === f.winner_team_id ? f.away_team_id : f.home_team_id;
-    if (loser) finalLosers.add(loser);
+    const entityId = loser ? teamEntity.get(loser) : undefined;
+    if (entityId) finalLosers.add(entityId);
   }
 
   // Contingents that banked a scored placement - they do NOT also get participation.
+  // A placement worth 0 counts as no placement, so participation still applies.
   const placed = new Set<string>();
-  for (const [teamId, earned] of candidates) {
-    const chosen = PLACEMENT_SPECIFICITY.find((p) => earned.has(p) && rule.points[p] !== undefined);
+  for (const [entityId, earned] of candidates) {
+    const chosen = PLACEMENT_SPECIFICITY.find((p) => earned.has(p) && (rule.points[p] ?? 0) > 0);
     if (!chosen) continue;
-    const entityId = teamEntity.get(teamId);
-    if (!entityId) continue;
-    let row = table.get(entityId);
-    if (!row) { row = emptyTally(entityId); table.set(entityId, row); }
+    const row = ensure(entityId);
     row.points += rule.points[chosen]!;
     // Same points either way; the label decides whether the medal tally counts a silver.
-    const key = chosen === 'runner_up' && !finalLosers.has(teamId) ? FINALIST_DETAIL_KEY : chosen;
+    const tableRunnerUp = tables.placings.get(entityId)?.includes('runner_up');
+    const key = chosen === 'runner_up' && !finalLosers.has(entityId) && !tableRunnerUp ? FINALIST_DETAIL_KEY : chosen;
     row.detail[key] = (row.detail[key] ?? 0) + 1;
     placed.add(entityId);
   }
 
   // Participation is a consolation floor, not a universal top-up: it goes only to
-  // contingents knocked out below the semis with no placement point to show for it (so if
-  // quarter-finalist points are configured, QF losers take those instead). Anyone
-  // who reached the semis already carries a higher placement floor.
+  // contingents with no placement point to show for it (so if quarter-finalist points
+  // are configured, QF losers take those instead). A no-show earns nothing.
   if (rule.participation > 0) {
     for (const row of table.values()) {
-      if (placed.has(row.entity_id)) continue;
+      if (placed.has(row.entity_id) || isNoShow(row)) continue;
       row.points += rule.participation;
       row.detail.participation = (row.detail.participation ?? 0) + 1;
     }
@@ -266,13 +519,13 @@ function medalScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { s
 // itself (a sub-semis consolation floor). `decided` gates only the medal scheme's
 // position points until the discipline is concluded - placement now accrues live,
 // round by round, and league points always have.
-export function runScheme(fixtures: SchemeFixture[], rule: StandingsRule, decided = true): EntityTally[] {
+export function runScheme(fixtures: SchemeFixture[], rule: StandingsRule, decided = true, ctx: SchemeContext = {}): EntityTally[] {
   let tallies: EntityTally[];
   switch (rule.scheme) {
     case 'league_points': tallies = leaguePointsScheme(fixtures, rule); break;
     // Placement folds participation in itself (consolation floor for sub-semis exits),
     // so it returns directly rather than taking the universal top-up below.
-    case 'placement': return placementScheme(fixtures, rule);
+    case 'placement': return placementScheme(fixtures, rule, ctx);
     case 'medal': tallies = medalScheme(fixtures, rule, decided); break;
     case 'custom': tallies = customScheme(fixtures); break;
     // Ranking events have no head-to-head fixtures - their points come from the event
@@ -282,6 +535,8 @@ export function runScheme(fixtures: SchemeFixture[], rule: StandingsRule, decide
   }
   if (rule.participation > 0) {
     for (const t of tallies) {
+      // A no-show earns nothing; a medallist already has its medal points.
+      if (isNoShow(t) || t.detail.gold || t.detail.silver || t.detail.bronze) continue;
       t.points += rule.participation;
       t.detail.participation = (t.detail.participation ?? 0) + 1;
     }
@@ -301,22 +556,14 @@ export function accumulate(acc: Map<string, EntityTally>, tallies: EntityTally[]
     row.points += t.points;
     row.gf += t.gf;
     row.ga += t.ga;
+    row.wo += t.wo;
     for (const [k, v] of Object.entries(t.detail)) row.detail[k] = (row.detail[k] ?? 0) + v;
   }
 }
 
 // Sort rows in place by the ordered tiebreakers (descending "better first") and
-// assign sequential ranks. `head_to_head` is not yet implemented and is skipped.
+// assign sequential ranks. Head-to-head needs fixtures, so across draws it is skipped.
 export function rankBy(rows: EntityTally[], tiebreakers: StandingsTiebreaker[]): EntityTally[] {
-  const metric = (r: EntityTally, t: StandingsTiebreaker): number => {
-    switch (t) {
-      case 'points': return r.points;
-      case 'wins': return r.won;
-      case 'lost': return -r.lost; // fewer losses ranks higher
-      case 'score_diff': return r.gf - r.ga;
-      case 'head_to_head': return 0; // not implemented - neutral
-    }
-  };
   rows.sort((a, b) => {
     for (const t of tiebreakers) {
       const d = metric(b, t) - metric(a, t);
@@ -326,4 +573,26 @@ export function rankBy(rows: EntityTally[], tiebreakers: StandingsTiebreaker[]):
   });
   rows.forEach((r, i) => { r.rank = i + 1; });
   return rows;
+}
+
+const SETTLED = new Set(['completed', 'walkover', 'bye', 'cancelled']);
+
+/** Statuses a scheme scores. Everything else only feeds the draw context. */
+export const SCORED_STATUSES = ['completed', 'walkover', 'bye'];
+
+/** What a scheme needs to know about the whole draw, read from ALL its fixtures. */
+export function drawContext(
+  all: SchemeFixture[], rankingFor: (stage: number) => GroupRanking, resolutions: TieResolution[],
+): SchemeContext {
+  const ko = all.filter((f) => isKnockoutRound(f.round) && f.round !== THIRD_PLACE_ROUND);
+  return {
+    rankingFor,
+    resolutions,
+    knockout: {
+      size: Math.max(0, ...ko.map((f) => knockoutRoundSize(f.round))),
+      teams: new Set(ko.flatMap((f) => [f.home_team_id, f.away_team_id]).filter((t): t is string => !!t)),
+      hasThirdPlace: all.some((f) => f.round === THIRD_PLACE_ROUND),
+    },
+    tablesComplete: all.filter((f) => !isKnockoutRound(f.round)).every((f) => SETTLED.has(f.status)),
+  };
 }

@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import { DEFAULT_STANDINGS_RULE, STANDINGS_AGG_SCOPE, upsertStandingsRuleSchema, type StandingsAggScope } from '@semp/shared';
+import { DEFAULT_STANDINGS_RULE, STANDINGS_AGG_SCOPE, contingentKey, defaultGroupRanking, standingsAdjustmentInputSchema, upsertStandingsRuleSchema, type StandingsAggScope } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
-import { NotFoundError } from '../../shared/errors.js';
+import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
+import { AUDIT_ACTIONS, audit } from '../iam/audit.service.js';
 import { readStandings, readStandingsBreakdown, recomputeStandingsAtomic, countCompletedMatches } from './standings.service.js';
 
 // Standings = materialized org-level tables (read) + editable scoring rules (write).
@@ -69,6 +70,7 @@ export function makeStandingsRouter(prisma: Prisma): Router {
     // sports each have a "Men"/"Mixed" discipline that would otherwise look identical).
     const formats = new Map<string, string>();
     const disciplines = new Map<string, { name: string; sport: string | null; entry_type: string | null; format: string | null }>();
+    const disciplineDefaults = new Map<string, ReturnType<typeof defaultGroupRanking>>();
     for (const d of draws) {
       const fmt = d.tournament_formats ?? d.tournament_sports.tournament_formats;
       if (fmt) formats.set(fmt.id, fmt.name);
@@ -79,6 +81,7 @@ export function makeStandingsRouter(prisma: Prisma): Router {
           entry_type: d.entry_type ?? d.disciplines.entry_type ?? null,
           format: fmt?.name ?? null,
         });
+        disciplineDefaults.set(d.disciplines.id, defaultGroupRanking(d.disciplines.sports?.name));
       }
     }
 
@@ -86,7 +89,7 @@ export function makeStandingsRouter(prisma: Prisma): Router {
       default: DEFAULT_STANDINGS_RULE,
       rules: rules.map((r) => ({ id: r.id, scope_type: r.scope_type, scope_id: r.scope_id, config: r.config })),
       formats: [...formats].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
-      disciplines: [...disciplines].map(([id, v]) => ({ id, ...v }))
+      disciplines: [...disciplines].map(([id, v]) => ({ id, ...v, default_ranking: disciplineDefaults.get(id) }))
         .sort((a, b) => (a.sport ?? '').localeCompare(b.sport ?? '') || a.name.localeCompare(b.name)),
     });
   }));
@@ -105,6 +108,12 @@ export function makeStandingsRouter(prisma: Prisma): Router {
       ? await prisma.standings_rules.update({ where: { id: existing.id }, data: { config, updated_at: new Date() } })
       : await prisma.standings_rules.create({ data: { championship_id: championshipId, scope_type, scope_id, config } });
 
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.standingsRuleChanged,
+      championshipId,
+      target: { type: 'standings_rules', id: row.id, label: scope_type },
+      summary: `Point system saved (${scope_type})`,
+    });
     await recomputeStandingsAtomic(prisma, championshipId);
     res.json({ id: row.id, scope_type: row.scope_type, scope_id: row.scope_id, config: row.config });
   }));
@@ -114,6 +123,90 @@ export function makeStandingsRouter(prisma: Prisma): Router {
     const rule = await prisma.standings_rules.findUnique({ where: { id: req.params.ruleId }, select: { championship_id: true } });
     if (!rule || rule.championship_id !== req.params.id) throw new NotFoundError('Standings rule');
     await prisma.standings_rules.delete({ where: { id: req.params.ruleId } });
+    await recomputeStandingsAtomic(prisma, req.params.id);
+    res.json({ ok: true });
+  }));
+
+  // ---- Manual adjustments: +/- points per contingent with a reason ----
+
+  router.get('/:id/standings-adjustments', ownChampionship, asyncHandler(async (req, res) => {
+    const rows = await prisma.standings_adjustments.findMany({
+      where: { championship_id: req.params.id },
+      orderBy: { created_at: 'desc' },
+      include: {
+        organizations: { select: { name: true } },
+        org_units: { select: { name: true } },
+        users: { select: { name: true } },
+        tournament_disciplines: { select: { disciplines: { select: { name: true } }, tournament_sports: { select: { sports: { select: { name: true } } } } } },
+      },
+    });
+    res.json(rows.map((a) => ({
+      id: a.id,
+      entity_id: contingentKey({ orgId: a.organization_id, unitId: a.org_unit_id }),
+      name: a.org_units?.name ?? a.organizations.name,
+      points: a.points,
+      reason: a.reason,
+      discipline: a.tournament_disciplines
+        ? [a.tournament_disciplines.tournament_sports.sports?.name, a.tournament_disciplines.disciplines?.name].filter(Boolean).join(' · ')
+        : null,
+      created_by: a.users?.name ?? null,
+      created_at: a.created_at,
+    })));
+  }));
+
+  router.post('/:id/standings-adjustments', ownChampionship, validateBody(standingsAdjustmentInputSchema), asyncHandler(async (req, res) => {
+    const championshipId = req.params.id;
+    const { organization_id, org_unit_id, tournament_discipline_id, points, reason } = req.body;
+    // Only a contingent with a team in this championship, and a draw that belongs to it.
+    const team = await prisma.teams.findFirst({
+      where: {
+        organization_id, org_unit_id: org_unit_id ?? null,
+        OR: [
+          { fixtures_fixtures_home_team_idToteams: { some: { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: championshipId } } } } } },
+          { fixtures_fixtures_away_team_idToteams: { some: { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: championshipId } } } } } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (!team) throw new BusinessRuleError('That institute has no team in this championship.');
+    if (tournament_discipline_id) {
+      const td = await prisma.tournament_disciplines.findFirst({ where: { id: tournament_discipline_id, tournament_sports: { tournaments: { championship_id: championshipId } } }, select: { id: true } });
+      if (!td) throw new NotFoundError('Discipline');
+    }
+    const row = await prisma.standings_adjustments.create({
+      data: {
+        championship_id: championshipId, organization_id, org_unit_id: org_unit_id ?? null,
+        tournament_discipline_id: tournament_discipline_id ?? null, points, reason, created_by: req.user!.id,
+      },
+      include: { organizations: { select: { name: true } }, org_units: { select: { name: true } } },
+    });
+    const name = row.org_units?.name ?? row.organizations.name;
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.standingsAdjusted,
+      championshipId,
+      organizationId: organization_id,
+      target: { type: 'standings_adjustments', id: row.id, label: name },
+      summary: `${points > 0 ? '+' : ''}${points} points to ${name}. Reason: ${reason}`,
+    });
+    await recomputeStandingsAtomic(prisma, championshipId);
+    res.status(201).json({ id: row.id });
+  }));
+
+  router.delete('/:id/standings-adjustments/:adjustmentId', ownChampionship, asyncHandler(async (req, res) => {
+    const row = await prisma.standings_adjustments.findUnique({
+      where: { id: req.params.adjustmentId },
+      include: { organizations: { select: { name: true } }, org_units: { select: { name: true } } },
+    });
+    if (!row || row.championship_id !== req.params.id) throw new NotFoundError('Adjustment');
+    await prisma.standings_adjustments.delete({ where: { id: row.id } });
+    const name = row.org_units?.name ?? row.organizations.name;
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.standingsAdjustmentRemoved,
+      championshipId: req.params.id,
+      organizationId: row.organization_id,
+      target: { type: 'standings_adjustments', id: row.id, label: name },
+      summary: `Removed ${row.points > 0 ? '+' : ''}${row.points} points from ${name} (${row.reason})`,
+    });
     await recomputeStandingsAtomic(prisma, req.params.id);
     res.json({ ok: true });
   }));

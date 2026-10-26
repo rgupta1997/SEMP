@@ -217,7 +217,7 @@ export function KpiTile({ label, kpi, tone, note }: {
         ? 'border-amber-300 dark:border-amber-800'
         : 'border-slate-200 dark:border-slate-800')}>
       <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-100">{kpi?.value ?? '—'}</div>
+      <div className="mt-1 text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-100">{kpi?.value ?? '-'}</div>
       {tone === 'warning' && (kpi?.value ?? 0) > 0 ? (
         <div className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-400">⚠ Needs action</div>
       ) : d === null || d === undefined ? (

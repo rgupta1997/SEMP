@@ -1,7 +1,13 @@
-import { DEFAULT_STANDINGS_RULE, chessStandingsRule, formatPoints, isChessSport, isNoResult, standingsRuleSchema, type StandingsRule, type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker } from '@semp/shared';
+import {
+  KNOCKOUT_ROUND, DEFAULT_STANDINGS_RULE, chessStandingsRule, formatPoints, groupRankingFor, inheritRanking,
+  isChessSport, isNoResult, readTieResolutions, stageConfigSchema, standingsRuleSchema, type StandingsRule,
+  type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker,
+} from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
 import { contingentKey, type ContingentRef } from '@semp/shared';
-import { accumulate, rankBy, runScheme, type EntityTally, type SchemeFixture } from './domain/schemes.js';
+import { assignStageSequence } from '../fixtures/domain/stage-tree.js';
+import { SCORED_STATUSES, accumulate, drawContext, rankBy, runScheme, type EntityTally, type SchemeContext, type SchemeFixture } from './domain/schemes.js';
+import { convertEventTotals, type EventTotal } from './domain/event-conversion.js';
 
 // One accumulator bucket = one standings table (a scope + scope_id pair).
 interface Bucket {
@@ -19,18 +25,15 @@ function parseRule(config: unknown): StandingsRule {
   return parsed.success ? parsed.data : DEFAULT_STANDINGS_RULE;
 }
 
-// Resolve the effective scoring scheme for a single draw (most-specific wins:
-// discipline → format → championship default → built-in default). Shared with the
-// result-entry paths so they can tell whether a draw expects hand-entered custom
-// points (and remind the organiser when one is missing).
-// Resolve the full editable rule for a draw (most-specific-wins: discipline → format →
-// championship default → built-in default). Shared by the scheme helper below and the
-// scoring endpoint (which needs a ranking rule's place points).
-export async function resolveRuleForDraw(
-  prisma: Db, championshipId: string, disciplineId: string | null, formatId: string | null,
-  /** A chess draw ranks by chess points unless the organiser set a rule for it. */
-  chess?: { team: boolean },
-): Promise<StandingsRule> {
+// A championship's saved rules, indexed for most-specific-wins resolution.
+interface RuleIndex {
+  byDiscipline: Map<string, StandingsRule>;
+  byFormat: Map<string, StandingsRule>;
+  championshipRule: StandingsRule | undefined;
+  defaultRule: StandingsRule;
+}
+
+export async function loadRuleIndex(prisma: Db, championshipId: string): Promise<RuleIndex> {
   const ruleRows = await prisma.standings_rules.findMany({ where: { championship_id: championshipId } });
   const byDiscipline = new Map<string, StandingsRule>();
   const byFormat = new Map<string, StandingsRule>();
@@ -41,13 +44,38 @@ export async function resolveRuleForDraw(
     else if (r.scope_type === 'format' && r.scope_id) byFormat.set(r.scope_id, rule);
     else if (r.scope_type === 'championship') championshipRule = rule;
   }
-  return (
+  return { byDiscipline, byFormat, championshipRule, defaultRule: championshipRule ?? DEFAULT_STANDINGS_RULE };
+}
+
+/** The tables' rule for one draw: discipline, then format, then the fallback below. */
+export function ruleFromIndex(
+  index: RuleIndex, disciplineId: string | null, formatId: string | null, sportName?: string | null, entryType?: string | null,
+): StandingsRule {
+  const byFormat = formatId ? index.byFormat.get(formatId) : undefined;
+  const rule = (disciplineId ? index.byDiscipline.get(disciplineId) : undefined)
+    ?? byFormat
+    ?? fallbackRuleFor(index.defaultRule, sportName, entryType);
+  return inheritRanking(rule, byFormat, index.championshipRule);
+}
+
+// Resolve the full editable rule for a draw (most-specific-wins: discipline → format →
+// championship default → built-in default). Shared by the scheme helper below, the
+// stage resolver and the scoring endpoint (which needs a ranking rule's place points).
+export async function resolveRuleForDraw(
+  prisma: Db, championshipId: string, disciplineId: string | null, formatId: string | null,
+  /** A chess draw ranks by chess points unless the organiser set a rule for it. */
+  chess?: { team: boolean },
+): Promise<StandingsRule> {
+  const { byDiscipline, byFormat, championshipRule } = await loadRuleIndex(prisma, championshipId);
+  const formatRule = formatId ? byFormat.get(formatId) : undefined;
+  return inheritRanking(
     (disciplineId ? byDiscipline.get(disciplineId) : undefined) ??
-    (formatId ? byFormat.get(formatId) : undefined) ??
+    formatRule ??
     // Ahead of the championship default: that one is set for the points table across
     // sports, and 3/1/0 makes a chess draw a third of a win instead of half.
     (chess ? chessStandingsRule(chess.team) : undefined) ??
-    championshipRule ?? DEFAULT_STANDINGS_RULE
+    championshipRule ?? DEFAULT_STANDINGS_RULE,
+    formatRule, championshipRule,
   );
 }
 
@@ -65,6 +93,51 @@ export async function resolveSchemeForDraw(
   prisma: Db, championshipId: string, disciplineId: string | null, formatId: string | null,
 ): Promise<StandingsScheme> {
   return (await resolveRuleForDraw(prisma, championshipId, disciplineId, formatId)).scheme;
+}
+
+// ---------- One draw's input to a scheme ----------
+
+/** Fixture columns every scheme read needs (all statuses: the context reads the unplayed ones). */
+export const DRAW_FIXTURE_FIELDS = {
+  status: true, round: true, pool_number: true, stage_sequence: true,
+  home_team_id: true, away_team_id: true, home_score: true, away_score: true, winner_team_id: true, live_state: true,
+} as const;
+
+interface DrawFixtureRow {
+  status: string; round: string | null; pool_number: number | null; stage_sequence: number | null;
+  home_team_id: string | null; away_team_id: string | null; home_score: number | null; away_score: number | null;
+  winner_team_id: string | null; live_state: unknown;
+}
+
+export function toSchemeFixture(f: DrawFixtureRow, homeKey: string | null, awayKey: string | null): SchemeFixture {
+  const cp = (f.live_state as any)?.custom_points ?? null;
+  return {
+    status: f.status, round: f.round,
+    home_team_id: f.home_team_id, away_team_id: f.away_team_id,
+    home_entity_id: homeKey, away_entity_id: awayKey,
+    home_score: f.home_score, away_score: f.away_score,
+    winner_team_id: f.winner_team_id,
+    home_points: typeof cp?.home === 'number' ? cp.home : null,
+    away_points: typeof cp?.away === 'number' ? cp.away : null,
+    no_result: isNoResult(f.live_state),
+    pool_number: f.pool_number, stage_sequence: f.stage_sequence,
+  };
+}
+
+/** The fixtures a scheme scores plus what it needs to know about the rest of the draw. */
+export function schemeInput(
+  formatConfig: unknown, sportName: string | null | undefined, rule: StandingsRule, all: SchemeFixture[],
+): { fixtures: SchemeFixture[]; ctx: SchemeContext } {
+  const parsed = stageConfigSchema.safeParse(formatConfig);
+  const tree = parsed.success ? assignStageSequence(parsed.data.root) : null;
+  const rankingFor = (stage: number) => {
+    const node = tree?.bySequence.get(stage)?.node;
+    return groupRankingFor(rule, sportName, node?.type === 'group' ? node : undefined);
+  };
+  return {
+    fixtures: all.filter((f) => SCORED_STATUSES.includes(f.status)),
+    ctx: drawContext(all, rankingFor, readTieResolutions(formatConfig)),
+  };
 }
 
 // Count completed matches in a scope (championship / tournament / sport). Each fixture is
@@ -89,6 +162,96 @@ export async function countCompletedMatches(
   });
 }
 
+// ---------- Event sports ----------
+
+interface EventFixtureRow {
+  live_state: unknown;
+  tournament_discipline_id: string;
+  tournament_disciplines: {
+    discipline_id: string | null; format_id: string | null;
+    disciplines: { name: string; entry_type: string | null } | null;
+    tournament_sports: { sport_id: string; tournament_id: string; format_id: string | null; sports: { name: string } | null };
+  } | null;
+}
+
+const EVENT_FIXTURE_SELECT = {
+  live_state: true,
+  tournament_discipline_id: true,
+  tournament_disciplines: {
+    select: {
+      discipline_id: true, format_id: true,
+      disciplines: { select: { name: true, entry_type: true } },
+      tournament_sports: { select: { sport_id: true, tournament_id: true, format_id: true, sports: { select: { name: true } } } },
+    },
+  },
+} as const;
+
+interface EventContribution {
+  fixture: EventFixtureRow;
+  /** Raw per-contingent event points and medals from this fixture. */
+  tallies: EntityTally[];
+  /** Set when the rule converts this sport's totals into a sport placing. */
+  converted: boolean;
+}
+
+interface ConvertedGroup { sport_id: string; tournament_id: string; sport: string; group: string; tallies: EntityTally[] }
+
+// Every ranking-event fixture's contribution, and each converted group's sport placings.
+// The raw points stay in the sport table; a converted sport adds only its placing to the
+// championship and tournament tables.
+function eventContributions(
+  rows: EventFixtureRow[], index: RuleIndex, keyOf: (side: { organization_id: string; org_unit_id: string | null }) => string | null,
+): { contributions: EventContribution[]; groups: ConvertedGroup[] } {
+  const contributions: EventContribution[] = [];
+  const groupTotals = new Map<string, { meta: Omit<ConvertedGroup, 'tallies'>; places: number[]; participation: number; totals: Map<string, EventTotal> }>();
+  for (const f of rows) {
+    const list = (f.live_state as any)?.eventStandings;
+    const td = f.tournament_disciplines;
+    if (!Array.isArray(list) || list.length === 0 || !td) continue;
+    const ts = td.tournament_sports;
+    const tallies: EntityTally[] = [];
+    for (const c of list) {
+      if (!c?.orgId) continue;
+      const detail: Record<string, number> = {};
+      if (c.gold) detail.gold = c.gold;
+      if (c.silver) detail.silver = c.silver;
+      if (c.bronze) detail.bronze = c.bronze;
+      // A ranking event's console writes one contribution per competing side. In an
+      // intra championship that side is a campus or a department, so the row carries
+      // `unitId` beside `orgId`; an inter-organisation console omits it and the key
+      // falls back to the organisation exactly as before.
+      const key = keyOf({ organization_id: c.orgId, org_unit_id: c.unitId ?? null });
+      if (!key) continue;
+      tallies.push({
+        entity_id: key, played: 0, won: 0, drawn: 0, lost: 0,
+        points: typeof c.points === 'number' ? c.points : 0, gf: 0, ga: 0, wo: 0, detail,
+      });
+    }
+    if (tallies.length === 0) continue;
+    const rule = ruleFromIndex(index, td.discipline_id, td.format_id ?? ts.format_id, ts.sports?.name, td.disciplines?.entry_type);
+    const convert = rule.scheme === 'ranking' ? rule.convert : undefined;
+    contributions.push({ fixture: f, tallies, converted: !!convert });
+    if (!convert) continue;
+    for (const g of convert.groups) {
+      const key = `${ts.tournament_id}|${ts.sport_id}|${g.name.toLowerCase()}`;
+      let acc = groupTotals.get(key);
+      if (!acc) {
+        acc = { meta: { sport_id: ts.sport_id, tournament_id: ts.tournament_id, sport: ts.sports?.name ?? 'Event', group: g.name }, places: convert.places, participation: convert.participation, totals: new Map() };
+        groupTotals.set(key, acc);
+      }
+      for (const t of tallies) {
+        const row = acc.totals.get(t.entity_id) ?? { entity_id: t.entity_id, points: 0, gold: 0, silver: 0 };
+        row.points += t.points * g.share;
+        row.gold += t.detail.gold ?? 0;
+        row.silver += t.detail.silver ?? 0;
+        acc.totals.set(t.entity_id, row);
+      }
+    }
+  }
+  const groups = [...groupTotals.values()].map((g) => ({ ...g.meta, tallies: convertEventTotals([...g.totals.values()], g.places, g.participation) }));
+  return { contributions, groups };
+}
+
 // Rebuild every standings table for a championship from its completed fixtures.
 // Aggregates by CONTINGENT at three scopes (championship / tournament / sport), each
 // draw scored by its resolved rule. Idempotent: wipes and re-inserts in one
@@ -99,18 +262,8 @@ export async function countCompletedMatches(
 // organisation id and this behaves exactly as it did before intra events existed -
 // which is why the whole feature needed no change to the ranking maths.
 export async function recomputeStandings(prisma: Db, championshipId: string): Promise<void> {
-  // Editable rules for this championship, indexed for most-specific-wins resolution.
-  const ruleRows = await prisma.standings_rules.findMany({ where: { championship_id: championshipId } });
-  const byDiscipline = new Map<string, StandingsRule>();
-  const byFormat = new Map<string, StandingsRule>();
-  let championshipRule: StandingsRule | undefined;
-  for (const r of ruleRows) {
-    const rule = parseRule(r.config);
-    if (r.scope_type === 'discipline' && r.scope_id) byDiscipline.set(r.scope_id, rule);
-    else if (r.scope_type === 'format' && r.scope_id) byFormat.set(r.scope_id, rule);
-    else if (r.scope_type === 'championship') championshipRule = rule;
-  }
-  const defaultRule = championshipRule ?? DEFAULT_STANDINGS_RULE;
+  const index = await loadRuleIndex(prisma, championshipId);
+  const { defaultRule } = index;
 
   // Draws that still have an unplayed fixture - used to decide whether a discipline
   // is concluded (the medal scheme's position points are withheld until it is).
@@ -123,23 +276,20 @@ export async function recomputeStandings(prisma: Db, championshipId: string): Pr
   });
   const drawsWithPending = new Set(pending.map((p) => p.tournament_discipline_id));
 
-  // Every draw in the championship with its completed fixtures + each side's org.
+  // Every draw in the championship with all its fixtures + each side's org. Unplayed
+  // fixtures only feed the draw context (who is in the knockout, are the groups done).
   const draws = await prisma.tournament_disciplines.findMany({
     where: { tournament_sports: { tournaments: { championship_id: championshipId } } },
     select: {
       id: true,
       discipline_id: true,
       format_id: true,
+      format_config: true,
       disciplines: { select: { entry_type: true } },
       tournament_sports: { select: { sport_id: true, tournament_id: true, format_id: true, sports: { select: { name: true } } } },
       fixtures: {
-        // Byes are unplayed but advance a team, so the placement scheme credits the
-        // floor of the stage they reached - include them alongside completed results.
-        where: { status: { in: ['completed', 'walkover', 'bye'] } },
         select: {
-          status: true,
-          round: true, home_team_id: true, away_team_id: true,
-          home_score: true, away_score: true, winner_team_id: true, live_state: true,
+          ...DRAW_FIXTURE_FIELDS,
           teams_fixtures_home_team_idToteams: { select: { organization_id: true, org_unit_id: true } },
           teams_fixtures_away_team_idToteams: { select: { organization_id: true, org_unit_id: true } },
         },
@@ -169,41 +319,24 @@ export async function recomputeStandings(prisma: Db, championshipId: string): Pr
     if (!b) { b = { scope_type: scope, scope_id: id, rows: new Map() }; buckets.set(key, b); }
     return b;
   };
+  const drawScopes = new Map<string, { tournament_id: string; sport_id: string }>();
 
   for (const d of draws) {
-    if (d.fixtures.length === 0) continue;
     const ts = d.tournament_sports;
-    const effectiveFormatId = d.format_id ?? ts.format_id;
-    const rule =
-      (d.discipline_id ? byDiscipline.get(d.discipline_id) : undefined) ??
-      (effectiveFormatId ? byFormat.get(effectiveFormatId) : undefined) ??
-      fallbackRuleFor(defaultRule, ts.sports?.name, d.disciplines?.entry_type);
-
-    const fixtures: SchemeFixture[] = d.fixtures.map((f) => {
-      const cp = (f.live_state as any)?.custom_points ?? null;
-      return {
-        status: f.status,
-        round: f.round,
-        home_team_id: f.home_team_id,
-        away_team_id: f.away_team_id,
-        home_entity_id: keyOf(f.teams_fixtures_home_team_idToteams),
-        away_entity_id: keyOf(f.teams_fixtures_away_team_idToteams),
-        home_score: f.home_score,
-        away_score: f.away_score,
-        winner_team_id: f.winner_team_id,
-        home_points: typeof cp?.home === 'number' ? cp.home : null,
-        away_points: typeof cp?.away === 'number' ? cp.away : null,
-        no_result: isNoResult(f.live_state),
-      };
-    });
+    drawScopes.set(d.id, { tournament_id: ts.tournament_id, sport_id: ts.sport_id });
+    if (d.fixtures.length === 0) continue;
+    const rule = ruleFromIndex(index, d.discipline_id, d.format_id ?? ts.format_id, ts.sports?.name, d.disciplines?.entry_type);
+    const all = d.fixtures.map((f) => toSchemeFixture(f, keyOf(f.teams_fixtures_home_team_idToteams), keyOf(f.teams_fixtures_away_team_idToteams)));
+    const { fixtures, ctx } = schemeInput(d.format_config, ts.sports?.name, rule, all);
+    if (fixtures.length === 0) continue;
 
     // A discipline is "decided" once its final has been played, or once no fixtures
     // remain to be played. This now gates only the (legacy) medal scheme's positions;
     // the placement scheme accrues its floors live, round by round.
-    const hasCompletedFinal = fixtures.some((f) => f.round === 'Final' && f.winner_team_id);
+    const hasCompletedFinal = fixtures.some((f) => f.round === KNOCKOUT_ROUND.final && f.winner_team_id);
     const decided = hasCompletedFinal || !drawsWithPending.has(d.id);
 
-    const tallies = runScheme(fixtures, rule, decided);
+    const tallies = runScheme(fixtures, rule, decided, ctx);
     if (tallies.length === 0) continue;
 
     accumulate(ensureBucket('championship', null).rows, tallies);
@@ -221,38 +354,33 @@ export async function recomputeStandings(prisma: Db, championshipId: string): Pr
       status: { in: ['live', 'completed'] },
       tournament_disciplines: { tournament_sports: { tournaments: { championship_id: championshipId } } },
     },
-    select: {
-      live_state: true,
-      tournament_disciplines: { select: { tournament_sports: { select: { sport_id: true, tournament_id: true } } } },
-    },
+    select: EVENT_FIXTURE_SELECT,
   });
-  for (const f of eventFixtures) {
-    const contributions = (f.live_state as any)?.eventStandings;
-    if (!Array.isArray(contributions) || contributions.length === 0) continue;
-    const ts = f.tournament_disciplines?.tournament_sports;
-    if (!ts) continue;
-    const tallies: EntityTally[] = [];
-    for (const c of contributions) {
-      if (!c?.orgId) continue;
-      const detail: Record<string, number> = {};
-      if (c.gold) detail.gold = c.gold;
-      if (c.silver) detail.silver = c.silver;
-      if (c.bronze) detail.bronze = c.bronze;
-      // A ranking event's console writes one contribution per competing side. In an
-      // intra championship that side is a campus or a department, so the row carries
-      // `unitId` beside `orgId`; an inter-organisation console omits it and the key
-      // falls back to the organisation exactly as before.
-      const key = keyOf({ organization_id: c.orgId, org_unit_id: c.unitId ?? null });
-      if (!key) continue;
-      tallies.push({
-        entity_id: key, played: 0, won: 0, drawn: 0, lost: 0,
-        points: typeof c.points === 'number' ? c.points : 0, gf: 0, ga: 0, detail,
-      });
+  const events = eventContributions(eventFixtures as EventFixtureRow[], index, keyOf);
+  for (const c of events.contributions) {
+    const ts = c.fixture.tournament_disciplines!.tournament_sports;
+    accumulate(ensureBucket('sport', ts.sport_id).rows, c.tallies);
+    // A converted sport keeps its medals in the overall tables but scores its placing instead.
+    const overall = c.converted ? c.tallies.map((t) => ({ ...t, points: 0, detail: { ...t.detail } })) : c.tallies;
+    accumulate(ensureBucket('championship', null).rows, overall);
+    accumulate(ensureBucket('tournament', ts.tournament_id).rows, overall);
+  }
+  for (const g of events.groups) {
+    accumulate(ensureBucket('championship', null).rows, g.tallies);
+    accumulate(ensureBucket('tournament', g.tournament_id).rows, g.tallies);
+  }
+
+  // ---- Organiser adjustments (deductions, forfeits, OC decisions) ----
+  for (const a of await prisma.standings_adjustments.findMany({ where: { championship_id: championshipId } })) {
+    const key = keyOf({ organization_id: a.organization_id, org_unit_id: a.org_unit_id });
+    if (!key) continue;
+    const tally: EntityTally = { entity_id: key, played: 0, won: 0, drawn: 0, lost: 0, points: a.points, gf: 0, ga: 0, wo: 0, detail: { adjustment: a.points } };
+    accumulate(ensureBucket('championship', null).rows, [tally]);
+    const scope = a.tournament_discipline_id ? drawScopes.get(a.tournament_discipline_id) : undefined;
+    if (scope) {
+      accumulate(ensureBucket('tournament', scope.tournament_id).rows, [tally]);
+      accumulate(ensureBucket('sport', scope.sport_id).rows, [tally]);
     }
-    if (tallies.length === 0) continue;
-    accumulate(ensureBucket('championship', null).rows, tallies);
-    accumulate(ensureBucket('tournament', ts.tournament_id).rows, tallies);
-    accumulate(ensureBucket('sport', ts.sport_id).rows, tallies);
   }
 
   // Rank each scope by the championship default's tiebreakers (a single, predictable
@@ -338,7 +466,7 @@ export interface BreakdownEvent {
   draw_id: string;
   sport: string;
   discipline: string | null;
-  scheme: StandingsScheme;
+  scheme: StandingsScheme | 'adjustment';
   points: number;
   won: number;
   drawn: number;
@@ -366,18 +494,7 @@ export async function readStandingsBreakdown(
    */
   entityId: string,
 ): Promise<BreakdownEvent[]> {
-  // Rule resolution (most-specific wins) - mirrors recomputeStandings.
-  const ruleRows = await prisma.standings_rules.findMany({ where: { championship_id: championshipId } });
-  const byDiscipline = new Map<string, StandingsRule>();
-  const byFormat = new Map<string, StandingsRule>();
-  let championshipRule: StandingsRule | undefined;
-  for (const r of ruleRows) {
-    const rule = parseRule(r.config);
-    if (r.scope_type === 'discipline' && r.scope_id) byDiscipline.set(r.scope_id, rule);
-    else if (r.scope_type === 'format' && r.scope_id) byFormat.set(r.scope_id, rule);
-    else if (r.scope_type === 'championship') championshipRule = rule;
-  }
-  const defaultRule = championshipRule ?? DEFAULT_STANDINGS_RULE;
+  const index = await loadRuleIndex(prisma, championshipId);
 
   // Pending fixtures gate the medal scheme's positions (same as recompute), so the
   // breakdown points match the table even before a discipline is decided.
@@ -390,40 +507,28 @@ export async function readStandingsBreakdown(
   });
   const drawsWithPending = new Set(pending.map((p) => p.tournament_discipline_id));
 
-  const draws = await prisma.tournament_disciplines.findMany({
-    where: {
-      tournament_sports: {
-        tournaments: { championship_id: championshipId, ...(scope === 'tournament' && scopeId ? { id: scopeId } : {}) },
-        ...(scope === 'sport' && scopeId ? { sport_id: scopeId } : {}),
-      },
+  const scopeFilter = {
+    tournaments: { championship_id: championshipId, ...(scope === 'tournament' && scopeId ? { id: scopeId } : {}) },
+    ...(scope === 'sport' && scopeId ? { sport_id: scopeId } : {}),
+  };
+  const sideSelect = {
+    select: {
+      organization_id: true, org_unit_id: true,
+      organizations: { select: { name: true, short_name: true } },
+      org_units: { select: { name: true, code: true } },
     },
+  } as const;
+  const draws = await prisma.tournament_disciplines.findMany({
+    where: { tournament_sports: scopeFilter },
     select: {
       id: true,
       discipline_id: true,
       format_id: true,
+      format_config: true,
       disciplines: { select: { name: true, entry_type: true } },
       tournament_sports: { select: { sport_id: true, tournament_id: true, format_id: true, sports: { select: { name: true } } } },
       fixtures: {
-        where: { status: { in: ['completed', 'walkover', 'bye'] } },
-        select: {
-          status: true, round: true,
-          home_team_id: true, away_team_id: true,
-          home_score: true, away_score: true, winner_team_id: true, live_state: true,
-          teams_fixtures_home_team_idToteams: {
-            select: {
-              organization_id: true, org_unit_id: true,
-              organizations: { select: { name: true, short_name: true } },
-              org_units: { select: { name: true, code: true } },
-            },
-          },
-          teams_fixtures_away_team_idToteams: {
-            select: {
-              organization_id: true, org_unit_id: true,
-              organizations: { select: { name: true, short_name: true } },
-              org_units: { select: { name: true, code: true } },
-            },
-          },
-        },
+        select: { ...DRAW_FIXTURE_FIELDS, teams_fixtures_home_team_idToteams: sideSelect, teams_fixtures_away_team_idToteams: sideSelect },
       },
     },
   });
@@ -438,35 +543,19 @@ export async function readStandingsBreakdown(
   for (const d of draws) {
     if (d.fixtures.length === 0) continue;
     const ts = d.tournament_sports;
-    const effectiveFormatId = d.format_id ?? ts.format_id;
-    const rule =
-      (d.discipline_id ? byDiscipline.get(d.discipline_id) : undefined) ??
-      (effectiveFormatId ? byFormat.get(effectiveFormatId) : undefined) ??
-      fallbackRuleFor(defaultRule, ts.sports?.name, d.disciplines?.entry_type);
+    const rule = ruleFromIndex(index, d.discipline_id, d.format_id ?? ts.format_id, ts.sports?.name, d.disciplines?.entry_type);
+    const all = d.fixtures.map((f) => toSchemeFixture(f, sideKey(f.teams_fixtures_home_team_idToteams), sideKey(f.teams_fixtures_away_team_idToteams)));
+    const { fixtures: schemeFixtures, ctx } = schemeInput(d.format_config, ts.sports?.name, rule, all);
 
-    const schemeFixtures: SchemeFixture[] = d.fixtures.map((f) => {
-      const cp = (f.live_state as any)?.custom_points ?? null;
-      return {
-        status: f.status, round: f.round,
-        home_team_id: f.home_team_id, away_team_id: f.away_team_id,
-        home_entity_id: sideKey(f.teams_fixtures_home_team_idToteams),
-        away_entity_id: sideKey(f.teams_fixtures_away_team_idToteams),
-        home_score: f.home_score, away_score: f.away_score,
-        winner_team_id: f.winner_team_id,
-        home_points: typeof cp?.home === 'number' ? cp.home : null,
-        away_points: typeof cp?.away === 'number' ? cp.away : null,
-        no_result: isNoResult(f.live_state),
-      };
-    });
-
-    const hasCompletedFinal = schemeFixtures.some((f) => f.round === 'Final' && f.winner_team_id);
+    const hasCompletedFinal = schemeFixtures.some((f) => f.round === KNOCKOUT_ROUND.final && f.winner_team_id);
     const decided = hasCompletedFinal || !drawsWithPending.has(d.id);
-    const tally = runScheme(schemeFixtures, rule, decided).find((t) => t.entity_id === entityId);
+    const tally = runScheme(schemeFixtures, rule, decided, ctx).find((t) => t.entity_id === entityId);
     if (!tally) continue; // this contingent didn't take part in / score from this draw
 
     // This contingent's own matches in the draw, oriented to it (its score first).
     const matches: BreakdownMatch[] = [];
     for (const f of d.fixtures) {
+      if (!SCORED_STATUSES.includes(f.status)) continue;
       const isHome = sideKey(f.teams_fixtures_home_team_idToteams) === entityId;
       const isAway = sideKey(f.teams_fixtures_away_team_idToteams) === entityId;
       if (!isHome && !isAway) continue;
@@ -486,7 +575,7 @@ export async function readStandingsBreakdown(
         result = 'bye';
       } else {
         const myTeam = isHome ? f.home_team_id : f.away_team_id;
-        if (f.winner_team_id == null && myScore != null && oppScore != null && myScore === oppScore) result = 'drawn';
+        if (f.winner_team_id == null && (isNoResult(f.live_state) || (myScore != null && oppScore != null && myScore === oppScore))) result = 'drawn';
         else if (f.winner_team_id === myTeam) result = 'won';
         else result = 'lost';
         // Per-match points only exist for the per-match schemes; placement/medal points
@@ -513,40 +602,47 @@ export async function readStandingsBreakdown(
   // per-draw scheme - append this contingent's per-sport contribution so the breakdown shows what
   // a powerlifting/swimming/athletics draw earned too (medals + points, no match list).
   const eventFx = await prisma.fixtures.findMany({
-    where: {
-      status: { in: ['live', 'completed'] },
-      tournament_disciplines: {
-        tournament_sports: {
-          tournaments: { championship_id: championshipId, ...(scope === 'tournament' && scopeId ? { id: scopeId } : {}) },
-          ...(scope === 'sport' && scopeId ? { sport_id: scopeId } : {}),
-        },
-      },
-    },
-    select: {
-      live_state: true,
-      tournament_discipline_id: true,
-      tournament_disciplines: { select: { disciplines: { select: { name: true } }, tournament_sports: { select: { sports: { select: { name: true } } } } } },
-    },
+    where: { status: { in: ['live', 'completed'] }, tournament_disciplines: { tournament_sports: scopeFilter } },
+    select: EVENT_FIXTURE_SELECT,
   });
-  for (const f of eventFx) {
-    const contribs = (f.live_state as any)?.eventStandings;
-    if (!Array.isArray(contribs)) continue;
-    const mine = contribs.find((c: any) => (c?.unitId ?? c?.orgId) === entityId);
+  const converted = eventContributions(eventFx as EventFixtureRow[], index, (s) => sideKey(s));
+  for (const c of converted.contributions) {
+    const mine = c.tallies.find((t) => t.entity_id === entityId);
     if (!mine) continue;
-    const detail: Record<string, number> = {};
-    if (mine.gold) detail.gold = mine.gold;
-    if (mine.silver) detail.silver = mine.silver;
-    if (mine.bronze) detail.bronze = mine.bronze;
-    if (mine.participation) detail.participation = mine.participation;
+    const td = c.fixture.tournament_disciplines!;
     events.push({
-      draw_id: f.tournament_discipline_id,
-      sport: f.tournament_disciplines?.tournament_sports?.sports?.name ?? 'Event',
-      discipline: f.tournament_disciplines?.disciplines?.name ?? null,
+      draw_id: c.fixture.tournament_discipline_id,
+      sport: td.tournament_sports.sports?.name ?? 'Event',
+      discipline: td.disciplines?.name ?? null,
       scheme: 'medal',
-      points: typeof mine.points === 'number' ? mine.points : 0,
+      // Outside the sport table a converted sport scores its placing (below), not raw points.
+      points: c.converted && scope !== 'sport' ? 0 : mine.points,
       won: 0, drawn: 0, lost: 0,
-      detail,
+      detail: mine.detail,
       matches: [],
+    });
+  }
+  if (scope !== 'sport') {
+    for (const g of converted.groups) {
+      const mine = g.tallies.find((t) => t.entity_id === entityId);
+      if (!mine) continue;
+      events.push({ draw_id: `${g.sport_id}:${g.group}`, sport: g.sport, discipline: `${g.group} placing`, scheme: 'ranking', points: mine.points, won: 0, drawn: 0, lost: 0, detail: mine.detail, matches: [] });
+    }
+  }
+
+  // Organiser adjustments that land in this scope.
+  const adjustments = await prisma.standings_adjustments.findMany({
+    where: { championship_id: championshipId },
+    include: { tournament_disciplines: { select: { disciplines: { select: { name: true } }, tournament_sports: { select: { sport_id: true, tournament_id: true, sports: { select: { name: true } } } } } } },
+  });
+  for (const a of adjustments) {
+    if (contingentKey({ orgId: a.organization_id, unitId: a.org_unit_id }) !== entityId) continue;
+    const ts = a.tournament_disciplines?.tournament_sports;
+    if (scope === 'tournament' && ts?.tournament_id !== scopeId) continue;
+    if (scope === 'sport' && ts?.sport_id !== scopeId) continue;
+    events.push({
+      draw_id: a.id, sport: 'Adjustment', discipline: [ts?.sports?.name, a.tournament_disciplines?.disciplines?.name, a.reason].filter(Boolean).join(' · '),
+      scheme: 'adjustment', points: a.points, won: 0, drawn: 0, lost: 0, detail: { adjustment: a.points }, matches: [],
     });
   }
 

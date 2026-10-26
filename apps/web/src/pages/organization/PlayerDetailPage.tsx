@@ -171,7 +171,7 @@ export function PlayerDetailPage() {
           <Row k="Public handle" v={p.handle
             ? <span style={{ fontFamily: MONO, fontSize: 12.5 }}>/p/{p.handle}</span>
             : <span style={{ color: 'var(--faint)' }}>Not published</span>} />
-          <Row k="Contact" v={[p.email, p.phone].filter(Boolean).join(' · ') || '—'} />
+          <Row k="Contact" v={[p.email, p.phone].filter(Boolean).join(' · ') || '-'} />
         </Section>
 
         <Section

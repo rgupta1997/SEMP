@@ -99,6 +99,11 @@ export const AUDIT_ACTIONS = {
   rolePermissionsChanged: 'permission.role_changed',
   registrationApproved: 'registration.approved',
   registrationRejected: 'registration.rejected',
+  standingsTieResolved: 'standings.tie_resolved',
+  standingsTieCleared: 'standings.tie_cleared',
+  standingsAdjusted: 'standings.adjusted',
+  standingsAdjustmentRemoved: 'standings.adjustment_removed',
+  standingsRuleChanged: 'standings.rule_changed',
 } as const;
 
 // "Akash Menon (akash@iimb.ac.in)". One indexed lookup per privileged action, which

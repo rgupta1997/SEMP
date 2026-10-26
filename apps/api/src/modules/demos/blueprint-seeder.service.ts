@@ -16,7 +16,7 @@
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type { SeedBlueprint } from '@semp/shared';
-import { tieTemplateFor, eventTemplateFor, initTie, decideRubber, tieWinner, rubbersWon } from '@semp/shared';
+import { KNOCKOUT_ROUND, tieTemplateFor, eventTemplateFor, initTie, decideRubber, tieWinner, rubbersWon } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { recomputeStandings } from '../standings/standings.service.js';
 import { resolveFixtureParticipants } from '../fixtures/participants.js';
@@ -481,7 +481,7 @@ export async function buildFromBlueprint(
     const finalId = randomUUID();
 
     if (finishesOn <= PLAYED) {
-      fixtures.push({ ...base(finishesOn, { round: 'Final', bracket_position: 1, ...won(fw, fl) }), id: finalId });
+      fixtures.push({ ...base(finishesOn, { round: KNOCKOUT_ROUND.final, bracket_position: 1, ...won(fw, fl) }), id: finalId });
       fixtures.push(base(finishesOn, { round: 'Third-place', bracket_position: 1, ...won(tw, tl) }));
     } else {
       const goLive = liveBudget > 0;
@@ -490,7 +490,7 @@ export async function buildFromBlueprint(
         ? { home_team_id: s1w, away_team_id: s2w, status: 'live', ...tieLive(d.sport) }
         : { home_team_id: s1w, away_team_id: s2w, status: 'live', home_score: Math.ceil(ws / 2), away_score: Math.floor(ls / 2) };
       fixtures.push({
-        ...base(bp.championship.days, { round: 'Final', bracket_position: 1, ...(goLive ? live : { home_team_id: s1w, away_team_id: s2w, status: 'scheduled' }) }),
+        ...base(bp.championship.days, { round: KNOCKOUT_ROUND.final, bracket_position: 1, ...(goLive ? live : { home_team_id: s1w, away_team_id: s2w, status: 'scheduled' }) }),
         id: finalId,
       });
       fixtures.push(base(bp.championship.days, { round: 'Third-place', bracket_position: 1, home_team_id: s1l, away_team_id: s2l, status: 'scheduled' }));

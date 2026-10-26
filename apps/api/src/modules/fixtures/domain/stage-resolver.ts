@@ -1,9 +1,10 @@
-import { THIRD_PLACE_ROUND, contingentKey, isChessSport, isNoResult, stageConfigSchema, type StandingsTiebreaker } from '@semp/shared';
+import { KNOCKOUT_ROUND, THIRD_PLACE_ROUND, contingentKey, groupRankingFor, isChessSport, isNoResult, readTieResolutions, stageConfigSchema } from '@semp/shared';
 import type { Prisma } from '../../../infra/prisma.js';
 import { resolveRuleForDraw } from '../../standings/standings.service.js';
 import { advanceInBracket } from '../bracket.js';
 import { matchAudience, notifyMatch } from '../match-audience.js';
-import { computePoolStandings, isPoolComplete, tiedRanks, type PoolFixture, type PoolStanding } from './generators/pool-standings.js';
+import { resolverFor } from '../../standings/domain/schemes.js';
+import { computePoolStandings, isPoolComplete, type PoolFixture, type PoolStanding } from './generators/pool-standings.js';
 import { assignStageSequence, type AssignedStageTree } from './stage-tree.js';
 
 async function notifyTeamQualifies(prisma: Prisma, teamId: string): Promise<void> {
@@ -54,6 +55,7 @@ function toSchemeFixture(f: FixtureRow): PoolFixture {
     home_score: f.home_score, away_score: f.away_score,
     winner_team_id: f.winner_team_id,
     no_result: isNoResult(f.live_state),
+    pool_number: f.pool_number, stage_sequence: f.stage_sequence,
   };
 }
 
@@ -88,16 +90,19 @@ export async function resolveStageAdvancement(prisma: Prisma, tournamentDiscipli
     if (tree.stages.length <= 1) return;
 
     const all = await loadFixtures(prisma, tournamentDisciplineId);
+    const resolutions = readTieResolutions(td.format_config);
+    const sport = td.tournament_sports?.sports?.name;
 
     for (const stage of tree.stages) {
       if (stage.node.type !== 'group') continue;
+      const ranking = groupRankingFor(rule, sport, stage.node);
       const stageFixtures = all.filter((f) => (f.stage_sequence ?? 1) === stage.sequence);
       const poolNumbers = new Set(stageFixtures.map((f) => f.pool_number).filter((n): n is number => n != null));
       for (const poolNumber of poolNumbers) {
         const poolFixtures = stageFixtures.filter((f) => f.pool_number === poolNumber).map(toSchemeFixture);
         if (!isPoolComplete(poolFixtures)) continue;
-        const standings = computePoolStandings(poolFixtures, rule, stage.node.tiebreakers);
-        await resolveGroupQualifierLabels(prisma, tournamentDisciplineId, stage.sequence, poolNumber, standings, tree);
+        const { standings, tied } = computePoolStandings(poolFixtures, ranking, resolverFor(resolutions, 'pool', stage.sequence, poolNumber));
+        await resolveGroupQualifierLabels(prisma, tournamentDisciplineId, stage.sequence, poolNumber, standings, tied, tree);
       }
     }
     // Group winners may have just filled an SF; re-read before the play-off is filled.
@@ -117,14 +122,11 @@ async function resolveGroupQualifierLabels(
   producingSequence: number,
   poolNumber: number,
   standings: PoolStanding[],
+  ambiguous: Set<number>,
   tree: AssignedStageTree,
 ): Promise<void> {
   const childSequences = tree.stages.filter((s) => s.parentSequence === producingSequence).map((s) => s.sequence);
   if (childSequences.length === 0) return;
-
-  const stage = tree.bySequence.get(producingSequence);
-  const tiebreakers = stage?.node.type === 'group' ? stage.node.tiebreakers : ['points', 'wins', 'lost'];
-  const ambiguous = tiedRanks(standings, tiebreakers as any);
 
   for (const standing of standings) {
     const label = `${poolLetter(poolNumber)}${standing.rank}`;
@@ -184,7 +186,7 @@ async function resolveGroupQualifierLabels(
 }
 
 // Marks a still-unresolved fixture as blocked by a tie the standings can't break, so
-// the frontend can show "tied - needs manual resolution" instead of a bare
+// the frontend can show "tied - resolve it on the pool table" instead of a bare
 // placeholder. Stored on live_state (no migration needed), merged so it doesn't
 // disturb any other live-scoring keys already there.
 async function flagTieBlocked(prisma: Prisma, fixtureId: string, pool: number, rank: number): Promise<void> {
@@ -215,7 +217,7 @@ const loadFixtures = (prisma: Prisma, drawId: string): Promise<FixtureRow[]> => 
 // labels: its sides are the losers of that stage's two SFs, in bracket order.
 async function resolveThirdPlaceLabels(prisma: Prisma, drawId: string, all: FixtureRow[]): Promise<void> {
   const sfsOf = (stage: number) => all
-    .filter((f) => (f.stage_sequence ?? 1) === stage && f.round === 'SF' && f.bracket_position != null)
+    .filter((f) => (f.stage_sequence ?? 1) === stage && f.round === KNOCKOUT_ROUND.semiFinal && f.bracket_position != null)
     .sort((a, b) => a.bracket_position! - b.bracket_position!);
   const labelOf = (row: FixtureRow, side: 'home' | 'away'): string | null => {
     const label = side === 'home' ? row.home_slot_label : row.away_slot_label;

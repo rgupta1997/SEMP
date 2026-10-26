@@ -1,5 +1,6 @@
+import { KNOCKOUT_ROUND } from '../enums.js';
 /*
- * THE WORKBOOK AS GRIDS — the blank template a super admin downloads and a filled
+ * THE WORKBOOK AS GRIDS - the blank template a super admin downloads and a filled
  * sample, both written from SETUP_TEMPLATE_SHEETS so they can never disagree with
  * the validator about a column. Each grid is ready for SheetJS `aoa_to_sheet`.
  */
@@ -23,7 +24,7 @@ export const SETUP_INSTRUCTIONS_SHEET = 'Instructions';
  * The blank template for an event type and a setup's step switches: an
  * "Instructions" sheet first (what each sheet and column is for, which are required,
  * an example value, and what this setup's switches mean), then every data sheet the
- * setup reads, with its header row only — the Event sheet with its Field column
+ * setup reads, with its header row only - the Event sheet with its Field column
  * filled in and Value empty. No example rows on data sheets, so nothing left behind by
  * mistake is read as data. Sheets and columns follow setupWorkbookLayout, the same
  * rule the validator reads by: Fixtures on Skip means no Schedule sheet, People on
@@ -151,7 +152,7 @@ const emailOf = (name: string) => `${name.toLowerCase().replace(/[^a-z]+/g, '.')
 const mobile = (n: number) => `98${String(76000000 + n).padStart(8, '0')}`;
 
 /**
- * A small, complete, valid workbook for an event type and a setup's step switches —
+ * A small, complete, valid workbook for an event type and a setup's step switches -
  * validates with no errors under those same switches. Sheets and columns the switches
  * leave out are left out here too.
  */
@@ -214,7 +215,7 @@ export function setupSampleGrids(type: SetupEventType, steps: SetupSteps = SETUP
     { match_id: 'M2', date: '2026-10-17', kickoff: '09:00', end: '09:25', ground: 'Turf 2', side_1: c, side_2: d, round: 'Round 1' },
     { match_id: 'M3', date: 'Day 1', kickoff: '10:00 AM', end: '', ground: 'Turf 1', side_1: 'Winner of M1', side_2: e, round: 'Semi-final' },
     { match_id: 'M4', date: 'Day 1', kickoff: '10:00 AM', end: '', ground: 'Turf 2', side_1: f, side_2: 'Winner of M2', round: 'Semi-final' },
-    { match_id: 'M5', date: 'Day 2', kickoff: '4:00 PM', end: '', ground: 'Turf 1', side_1: 'Winner of M3', side_2: 'Winner of M4', round: 'Final' },
+    { match_id: 'M5', date: 'Day 2', kickoff: '4:00 PM', end: '', ground: 'Turf 1', side_1: 'Winner of M3', side_2: 'Winner of M4', round: KNOCKOUT_ROUND.final },
   ].map((r) => ({ ...r, sport: 'Football', discipline: 'Mixed', section: '' }));
 
   const grids = setupTemplateGrids(type, steps);

@@ -583,8 +583,8 @@ function LoginsPanel({ buildId, keyOnly = false }: { buildId: string; keyOnly?: 
                 </td>
                 <td style={{ padding: '6px 10px' }}>{r.name}</td>
                 <td style={{ padding: '6px 10px', fontFamily: 'ui-monospace, monospace' }}>{r.email}</td>
-                <td style={{ padding: '6px 10px', color: 'var(--muted)' }}>{r.short ?? r.organization ?? '—'}</td>
-                <td style={{ padding: '6px 10px', color: 'var(--muted)' }}>{r.team ?? r.member_code ?? '—'}</td>
+                <td style={{ padding: '6px 10px', color: 'var(--muted)' }}>{r.short ?? r.organization ?? '-'}</td>
+                <td style={{ padding: '6px 10px', color: 'var(--muted)' }}>{r.team ?? r.member_code ?? '-'}</td>
                 <td style={{ padding: '6px 10px' }}>
                   <Button variant="ghost" onClick={() => copy(r.email, 'Email')} aria-label="Copy email"><Copy size={12} /></Button>
                 </td>

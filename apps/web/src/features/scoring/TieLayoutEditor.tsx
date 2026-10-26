@@ -89,7 +89,7 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
       </div>
 
       <Select value={preset} onChange={(e) => pickPreset(e.target.value)}>
-        <option value="standard">Sport standard{layouts[0] ? ` — ${layouts[0].rubbers.length} rubbers` : ''}</option>
+        <option value="standard">Sport standard{layouts[0] ? ` - ${layouts[0].rubbers.length} rubbers` : ''}</option>
         {layouts.filter((l) => l.key !== 'default').map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
         <option value="custom">Custom</option>
       </Select>

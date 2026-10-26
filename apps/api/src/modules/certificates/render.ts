@@ -313,8 +313,8 @@ const LAYOUT_BODY: Record<LayoutId, (p: Parts) => string> = {
     <p class="body">${p.body}</p>
     <dl class="grid">
       <div><dt>Achievement</dt><dd>${p.title}${p.facts.scope ? `<br><small>${esc(p.facts.scope)}${p.facts.team ? ` &middot; ${esc(p.facts.team)}` : ''}</small>` : ''}</dd></div>
-      <div><dt>Event</dt><dd>${esc(p.facts.championship_name ?? '—')}</dd></div>
-      <div><dt>Sport</dt><dd>${esc(p.facts.sport ?? '—')}</dd></div>
+      <div><dt>Event</dt><dd>${esc(p.facts.championship_name ?? '-')}</dd></div>
+      <div><dt>Sport</dt><dd>${esc(p.facts.sport ?? '-')}</dd></div>
     </dl>
     <div class="foot">${sigBlock(p)}${verifyBlock(p)}</div>`,
 
@@ -369,7 +369,7 @@ export async function renderCertificateHtml(input: RenderInput): Promise<string>
 
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>${esc(facts.serial)} — ${esc(facts.recipient_name)}</title>
+<title>${esc(facts.serial)} - ${esc(facts.recipient_name)}</title>
 <style>${BASE(accent, ink, !!bare)}${LAYOUT_CSS[layout](accent, ink)}</style></head>
 <body>
   <div class="sheet" data-layout="${layout}">
@@ -386,6 +386,6 @@ export const sampleFacts = (organizationName: string): CertificateFacts => ({
   organization_name: organizationName,
   championship_name: 'Inter-Collegiate Championship 2026',
   sport: 'Athletics',
-  title: 'First Place — 400m Final',
+  title: 'First Place - 400m Final',
   issued_on: new Date().toISOString(),
 });

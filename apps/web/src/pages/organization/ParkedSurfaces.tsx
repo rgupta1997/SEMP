@@ -27,7 +27,7 @@ export const EventStatusReportPage = () => (
     epic="J2-E8 · Operational status report"
     whatWorks={
       <>
-        The figures are built and tested — fixtures played against scheduled, results
+        The figures are built and tested - fixtures played against scheduled, results
         locked against pending, and what is blocking the rest. What is not built yet is
         this screen.
       </>

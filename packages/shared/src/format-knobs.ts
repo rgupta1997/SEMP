@@ -169,7 +169,7 @@ export const KNOB_SPECS: KnobSpec[] = [
   // ends on the clock, not at a score, so these are hidden rather than left to
   // configure a "game" the format doesn't have.
   { key: 'target', label: 'Points to win a game', group: 'shape', type: 'int', min: 1, max: 99,
-    hint: 'The score a side plays to. 11, 21, 15 — or anything you like.',
+    hint: 'The score a side plays to. 11, 21, 15 - or anything you like.',
     applies: (k) => !k.periodShaped },
   { key: 'winBy', label: 'Winning margin', group: 'shape', type: 'int', min: 1, max: 5,
     hint: '2 means deuce continues until somebody leads by two. 1 means the target wins outright.',
@@ -186,7 +186,7 @@ export const KNOB_SPECS: KnobSpec[] = [
   // match plays), a different question: kho-kho's four turns are all played,
   // never "best of" - the match is decided on total score, not on turns won.
   { key: 'unitsToWin', label: 'Number of periods', group: 'shape', type: 'int', min: 1, max: 12,
-    hint: 'How many periods make up the whole match — two innings, four turns, two halves.',
+    hint: 'How many periods make up the whole match - two innings, four turns, two halves.',
     applies: (k) => k.periodShaped },
   { key: 'deciderEnabled', label: 'Deciding game plays to a different score', group: 'shape', type: 'bool',
     hint: 'Badminton to 11 in the decider, volleyball to 15.',
@@ -258,7 +258,7 @@ export const KNOB_SPECS: KnobSpec[] = [
     hint: 'A replayed rally: no point, no change of serve.',
     applies: (k) => !k.periodShaped },
   { key: 'penaltiesEnabled', label: 'Allow conduct points', group: 'ends', type: 'bool',
-    hint: 'An official can award a point for misconduct. Off for self-scored play — a player cannot card their opponent.',
+    hint: 'An official can award a point for misconduct. Off for self-scored play - a player cannot card their opponent.',
     applies: (k) => !k.periodShaped },
   // Needs an umpire to count returns, so it is not offered for self-scored play.
   { key: 'expediteEnabled', label: 'Expedite system', group: 'ends', type: 'bool',
@@ -312,13 +312,13 @@ export const KNOB_SPECS: KnobSpec[] = [
     hint: 'Extra periods when the scores are level at full time.',
     applies: (k) => k.periodShaped && !k.drawsAllowed },
   { key: 'extraTimePeriods', label: 'Periods of extra time', group: 'tieBreak', type: 'int', min: 1, max: 4,
-    hint: 'Both are always played out — a side that goes ahead in the first still has to survive the second.',
+    hint: 'Both are always played out - a side that goes ahead in the first still has to survive the second.',
     applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled },
   { key: 'extraTimeMinutes', label: 'Minutes per extra period', group: 'tieBreak', type: 'int', min: 1, max: 60,
     hint: 'Each period, not the total. Two periods of 5 adds ten minutes.',
     applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled },
   { key: 'shootoutEnabled', label: 'Penalty shoot-out', group: 'tieBreak', type: 'bool',
-    hint: 'Settles it when the scores are still level after extra time. The scoreline is not changed — a 1-1 won on kicks is recorded 1-1.',
+    hint: 'Settles it when the scores are still level after extra time. The scoreline is not changed - a 1-1 won on kicks is recorded 1-1.',
     applies: (k) => k.periodShaped && !k.drawsAllowed && !k.khoKho },
   { key: 'shootoutKicks', label: 'Kicks each', group: 'tieBreak', type: 'int', min: 1, max: 20,
     hint: 'The opening round. Still level after that goes to sudden death, a pair at a time.',

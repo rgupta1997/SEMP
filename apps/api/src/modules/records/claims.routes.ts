@@ -241,7 +241,7 @@ export function makeClaimsRouter(prisma: Prisma): Router {
       target_user_id: claim.user_id, sender_id: req.user!.id, organization_id: claim.organization_id,
       type: decision === 'approved' ? 'claim_approved' : 'claim_rejected', audience: 'all',
       title: decision === 'approved' ? 'Your claim was validated' : 'Your claim was not accepted',
-      body: decision === 'approved' ? `"${claim.title}" is now on your record.` : `"${claim.title}" — ${note}`,
+      body: decision === 'approved' ? `"${claim.title}" is now on your record.` : `"${claim.title}" - ${note}`,
     }).catch((e) => console.error('[claims] notify failed', e));
 
     res.json(updated);

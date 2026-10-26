@@ -1,9 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  boardsOnly, carromRulesOf, describeCricketFormat, describeTimeControl, formatLength, isCarromSport, isChessSport, isCricketFormat, isPeriodShaped, knobModelFor, parseRoundFormats,
-  pluralizePeriodLabel, resolveRounds, whyNotEditable,
-  type AnyKnobSpec, type AnyKnobs, type MatchFormat, type RoundFormatRule,
-} from '@semp/shared';
+import { KNOCKOUT_ROUND, boardsOnly, carromRulesOf, describeCricketFormat, describeTimeControl, formatLength, isCarromSport, isChessSport, isCricketFormat, isPeriodShaped, knobModelFor, parseRoundFormats, pluralizePeriodLabel, resolveRounds, whyNotEditable, type AnyKnobSpec, type AnyKnobs, type MatchFormat, type RoundFormatRule } from '@semp/shared';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
 import { Button, Field, Input, Modal, Select, Spinner, cn, confirmDialog, toast } from '../../components/ui';
@@ -727,7 +723,7 @@ function RoundFormatTable({ rounds, entrants, options, drawFormatId, drawFormat,
         <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
           Quick set
         </span>
-        {rounds.some((r) => r.round === 'Final') && (
+        {rounds.some((r) => r.round === KNOCKOUT_ROUND.final) && (
           <Button size="sm" variant="subtle"
             onClick={() => {
               // The longest format on the shelf is what "the final plays longer"
@@ -736,7 +732,7 @@ function RoundFormatTable({ rounds, entrants, options, drawFormatId, drawFormat,
               // has no levels, and this is where that crashed.
               const longest = [...options].sort((a, b) => formatLength(b.format) - formatLength(a.format))[0];
               if (!longest) return;
-              const fin = rounds.find((r) => r.round === 'Final')!;
+              const fin = rounds.find((r) => r.round === KNOCKOUT_ROUND.final)!;
               set(fin, valueOf(longest));
             }}>
             Final plays the longest format

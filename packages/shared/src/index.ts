@@ -34,6 +34,7 @@ export * from './championship-templates.js';
 export * from './regions.js';
 export * from './permissions.js';
 export * from './seasons.js';
+export * from './standings-ranking.js';
 export * from './schemas.js';
 export * from './role-codes.js';
 export * from './role-model.js';
