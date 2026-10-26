@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultGroupRanking, findTieResolution, groupRankingFor, inheritRanking, rankingFamily, tiebreakerLabel, tiebreakerOptions, type TieResolution } from './standings-ranking.js';
-import { placementRuleSchema, rankingRuleSchema } from './schemas.js';
+import { EVENT_TITLES, groupsForTitle, placementRuleSchema, rankingRuleSchema, titleFromName, titleOfGroups } from './schemas.js';
 import { isKnockoutRound, knockoutRoundLabel, knockoutRoundSize } from './enums.js';
 
 describe('per-sport group ranking defaults', () => {
@@ -100,5 +100,22 @@ describe('championship / format level match points', () => {
     expect(groupRankingFor(inheritRanking(base, undefined, champ), 'Football')).toMatchObject({ win: 4 });
     const own = { ...base, ranking: { win: 5, draw: 0, loss: 0 } };
     expect(inheritRanking(own, format, champ)).toBe(own);
+  });
+});
+
+describe('event titles (what a race counts toward)', () => {
+  it('each choice maps to piles and back', () => {
+    for (const t of EVENT_TITLES) expect(titleOfGroups(groupsForTitle(t))).toBe(t);
+    expect(groupsForTitle('both')).toEqual([{ name: 'Men', share: 0.5 }, { name: 'Women', share: 0.5 }]);
+  });
+  it('rules saved with typed names still map, odd ones stay as they were', () => {
+    expect(titleOfGroups([{ name: 'overall ', share: 1 }])).toBe('sport');
+    expect(titleOfGroups([{ name: 'Mixed', share: 0.5 }])).toBeNull();
+  });
+  it('the discipline name suggests the title', () => {
+    expect(titleFromName('50m Freestyle Women')).toBe('women');
+    expect(titleFromName("Men's 100m Butterfly")).toBe('men');
+    expect(titleFromName('4x50 Mixed Relay')).toBe('both');
+    expect(titleFromName('100m Freestyle')).toBe('sport');
   });
 });

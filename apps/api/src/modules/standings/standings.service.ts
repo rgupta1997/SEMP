@@ -1,5 +1,5 @@
 import {
-  KNOCKOUT_ROUND, DEFAULT_STANDINGS_RULE, chessStandingsRule, formatPoints, groupRankingFor, inheritRanking,
+  KNOCKOUT_ROUND, DEFAULT_STANDINGS_RULE, EVENT_TITLE_GROUP, chessStandingsRule, formatPoints, groupRankingFor, inheritRanking,
   isChessSport, isNoResult, readTieResolutions, stageConfigSchema, standingsRuleSchema, type StandingsRule,
   type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker,
 } from '@semp/shared';
@@ -626,7 +626,7 @@ export async function readStandingsBreakdown(
     for (const g of converted.groups) {
       const mine = g.tallies.find((t) => t.entity_id === entityId);
       if (!mine) continue;
-      events.push({ draw_id: `${g.sport_id}:${g.group}`, sport: g.sport, discipline: `${g.group} placing`, scheme: 'ranking', points: mine.points, won: 0, drawn: 0, lost: 0, detail: mine.detail, matches: [] });
+      events.push({ draw_id: `${g.sport_id}:${g.group}`, sport: g.sport, discipline: g.group === EVENT_TITLE_GROUP.sport ? 'Sport placing' : `${g.group}'s title placing`, scheme: 'ranking', points: mine.points, won: 0, drawn: 0, lost: 0, detail: mine.detail, matches: [] });
     }
   }
 

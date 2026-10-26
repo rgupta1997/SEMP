@@ -962,6 +962,42 @@ export const eventConversionSchema = z.object({
 });
 export type EventConversion = z.infer<typeof eventConversionSchema>;
 
+// The titles an event discipline can count toward, offered as a fixed choice so pile
+// names can't be mistyped. Each maps to the groups the engine sums.
+export const EVENT_TITLE_GROUP = { sport: 'Overall', men: 'Men', women: 'Women' } as const;
+export const EVENT_TITLES = ['sport', 'men', 'women', 'both'] as const;
+export type EventTitle = (typeof EVENT_TITLES)[number];
+export const EVENT_TITLE_LABEL: Record<EventTitle, string> = {
+  sport: 'Whole sport (one title)',
+  men: "Men's title",
+  women: "Women's title",
+  both: "Men's and Women's titles (half each)",
+};
+
+export function groupsForTitle(title: EventTitle): EventConversion['groups'] {
+  switch (title) {
+    case 'sport': return [{ name: EVENT_TITLE_GROUP.sport, share: 1 }];
+    case 'men': return [{ name: EVENT_TITLE_GROUP.men, share: 1 }];
+    case 'women': return [{ name: EVENT_TITLE_GROUP.women, share: 1 }];
+    case 'both': return [{ name: EVENT_TITLE_GROUP.men, share: 0.5 }, { name: EVENT_TITLE_GROUP.women, share: 0.5 }];
+  }
+}
+
+/** The choice a saved set of groups corresponds to; null for anything else saved earlier. */
+export function titleOfGroups(groups: EventConversion['groups']): EventTitle | null {
+  const key = (gs: EventConversion['groups']) => gs.map((g) => `${g.name.trim().toLowerCase()}:${g.share}`).sort().join('|');
+  return EVENT_TITLES.find((t) => key(groupsForTitle(t)) === key(groups)) ?? null;
+}
+
+/** A sensible default from the discipline's name ("50m Freestyle Women" -> women). */
+export function titleFromName(name?: string | null): EventTitle {
+  const n = name ?? '';
+  if (/\bmixed\b/i.test(n)) return 'both';
+  if (/\b(women|women's|womens|ladies|girls)\b/i.test(n)) return 'women';
+  if (/\b(men|men's|mens|boys)\b/i.test(n)) return 'men';
+  return 'sport';
+}
+
 export const rankingRuleSchema = z.object({
   scheme: z.literal('ranking'),
   places: z.array(z.number().int().min(0)).min(1).default([5, 3, 1]),
