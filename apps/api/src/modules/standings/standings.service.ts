@@ -5,7 +5,7 @@ import {
 } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
 import { contingentKey, type ContingentRef } from '@semp/shared';
-import { assignStageSequence } from '../fixtures/domain/stage-tree.js';
+import { assignStageSequence, inPlacingStage, placingStageSequences } from '../fixtures/domain/stage-tree.js';
 import { SCORED_STATUSES, accumulate, drawContext, rankBy, runScheme, type EntityTally, type SchemeContext, type SchemeFixture } from './domain/schemes.js';
 import { convertEventTotals, type EventTotal } from './domain/event-conversion.js';
 
@@ -136,7 +136,7 @@ export function schemeInput(
   };
   return {
     fixtures: all.filter((f) => SCORED_STATUSES.includes(f.status)),
-    ctx: drawContext(all, rankingFor, readTieResolutions(formatConfig)),
+    ctx: drawContext(all, rankingFor, readTieResolutions(formatConfig), placingStageSequences(tree)),
   };
 }
 
@@ -333,7 +333,7 @@ export async function recomputeStandings(prisma: Db, championshipId: string): Pr
     // A discipline is "decided" once its final has been played, or once no fixtures
     // remain to be played. This now gates only the (legacy) medal scheme's positions;
     // the placement scheme accrues its floors live, round by round.
-    const hasCompletedFinal = fixtures.some((f) => f.round === KNOCKOUT_ROUND.final && f.winner_team_id);
+    const hasCompletedFinal = fixtures.some((f) => f.round === KNOCKOUT_ROUND.final && f.winner_team_id && inPlacingStage(ctx.placingStages, f.stage_sequence));
     const decided = hasCompletedFinal || !drawsWithPending.has(d.id);
 
     const tallies = runScheme(fixtures, rule, decided, ctx);
@@ -547,7 +547,7 @@ export async function readStandingsBreakdown(
     const all = d.fixtures.map((f) => toSchemeFixture(f, sideKey(f.teams_fixtures_home_team_idToteams), sideKey(f.teams_fixtures_away_team_idToteams)));
     const { fixtures: schemeFixtures, ctx } = schemeInput(d.format_config, ts.sports?.name, rule, all);
 
-    const hasCompletedFinal = schemeFixtures.some((f) => f.round === KNOCKOUT_ROUND.final && f.winner_team_id);
+    const hasCompletedFinal = schemeFixtures.some((f) => f.round === KNOCKOUT_ROUND.final && f.winner_team_id && inPlacingStage(ctx.placingStages, f.stage_sequence));
     const decided = hasCompletedFinal || !drawsWithPending.has(d.id);
     const tally = runScheme(schemeFixtures, rule, decided, ctx).find((t) => t.entity_id === entityId);
     if (!tally) continue; // this contingent didn't take part in / score from this draw

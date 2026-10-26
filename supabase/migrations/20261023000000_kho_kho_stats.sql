@@ -1,6 +1,6 @@
 -- Kho kho per-match stats, on the raid table it already shares with kabaddi.
 --
--- STATUS: NOT APPLIED. Written 2026-10-23. RDS twin: infra/rds-migrations/027_kho_kho_stats.sql.
+-- STATUS: NOT APPLIED. Written 2026-10-23. RDS twin: infra/rds-migrations/028_kho_kho_stats.sql.
 --
 -- How each defender went out, as the KKFI score sheet records it (touch_points, the
 -- chaser's outs, already exists), plus chasing fouls and cards. Kabaddi uses

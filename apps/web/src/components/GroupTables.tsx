@@ -18,11 +18,22 @@ export interface DrawTables {
   sport: string | null;
   stages: Array<{ stage: number; ranking: GroupRanking & { labels: string[] }; pools: PoolTable[] }>;
   placing_ties: Array<{ stage: number; entities: string[]; from: number; to: number }>;
+  cross_group: CrossGroup[];
   resolutions: TieResolution[];
   names: Record<string, string>;
 }
 
+interface CrossGroup {
+  stage: number;
+  kind: 'placings' | 'semi_losers';
+  rows: Array<Omit<TableRow, 'rank'> & { pool: string; place: number | null }>;
+  /** Between rows[i] and rows[i + 1]: what separated them, or null = still level. */
+  decided_by: Array<string | null>;
+}
+
 export const tablesPath = (drawId: string) => `/tournament-disciplines/${drawId}/standings-tables`;
+/** Results land from other devices (officials scoring), so tables refresh on their own. */
+export const TABLES_REFRESH_MS = 15_000;
 
 /** How many ties on this draw are waiting for a hand-picked order. */
 export const openTieCount = (t?: DrawTables) =>
@@ -79,6 +90,63 @@ function ResolveModal({ drawId, target, names, onClose }: { drawId: string; targ
   );
 }
 
+// Teams from different groups compared for a placing: who was compared, their records,
+// the place each got, and which tie-breaker (or hand-picked order) settled each pair.
+function CrossGroupView({ c, multiStage }: { c: CrossGroup; multiStage: boolean }) {
+  const placed = c.rows.map((r) => r.place).filter((p): p is number => p != null);
+  const title = c.kind === 'semi_losers'
+    ? 'Semi-final losers, ranked by group record'
+    : placed.length
+      ? `Ranking across groups: ${placed.length > 1 ? `places ${ordinal(Math.min(...placed))}-${ordinal(Math.max(...placed))}` : `${ordinal(placed[0])} place`}`
+      : 'Ranking across groups';
+  return (
+    <div className="min-w-0 rounded-xl border border-slate-200 dark:border-slate-800">
+      <div className="border-b border-slate-100 px-3 py-2 text-sm font-semibold text-slate-800 dark:border-slate-800 dark:text-slate-100">
+        {title}{multiStage ? <span className="ml-2 text-xs font-normal text-slate-400">Stage {c.stage}</span> : null}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              <th className="px-3 py-1.5 text-left">Team</th>
+              <th className="px-2 py-1.5 text-left">Group</th>
+              {['P', 'W', 'D', 'L', 'Diff', 'For', 'Pts'].map((h) => <th key={h} className="px-2 py-1.5 text-right">{h}</th>)}
+              <th className="px-3 py-1.5 text-right">Place</th>
+            </tr>
+          </thead>
+          <tbody>
+            {c.rows.map((r) => (
+              <tr key={r.entity_id}>
+                <td className="max-w-[12rem] truncate px-3 py-1.5 font-medium text-slate-800 dark:text-slate-100" title={r.name}>{r.short_name || r.name}</td>
+                <td className="px-2 py-1.5 text-slate-500 dark:text-slate-400">{r.pool}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{r.played}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{r.won}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{r.drawn}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{r.lost}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_for - r.score_against)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_for)}</td>
+                <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{formatPoints(r.points)}</td>
+                <td className="px-3 py-1.5 text-right">{r.place != null ? <Badge tone="brand">{ordinal(r.place)}</Badge> : <span className="text-slate-400">-</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <ul className="space-y-0.5 border-t border-slate-100 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+        {c.decided_by.map((d, i) => (
+          <li key={i}>
+            <span className="font-medium text-slate-700 dark:text-slate-200">{c.rows[i].short_name || c.rows[i].name}</span>
+            {' above '}
+            <span className="font-medium text-slate-700 dark:text-slate-200">{c.rows[i + 1].short_name || c.rows[i + 1].name}</span>
+            {': '}
+            {d ? <>decided by <span className="font-semibold">{d.toLowerCase()}</span></> : <span className="text-amber-700 dark:text-amber-300">still level, waiting for a hand-picked order</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
   pool: PoolTable; ranking: DrawTables['stages'][number]['ranking']; canManage: boolean; names: Record<string, string>;
   onResolve: (entities: string[]) => void;
@@ -128,7 +196,7 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
 }
 
 export function GroupTables({ drawId, canManage }: { drawId: string; canManage: boolean }) {
-  const { data, isLoading } = useApi<DrawTables>(tablesPath(drawId));
+  const { data, isLoading } = useApi<DrawTables>(tablesPath(drawId), true, { refetchInterval: TABLES_REFRESH_MS });
   const [target, setTarget] = useState<TieTarget | null>(null);
   const clear = useApiMutation((id: string) => api('DELETE', `/tournament-disciplines/${drawId}/tie-resolutions/${id}`), []);
   if (isLoading || !data) return <Spinner label="Loading tables…" />;
@@ -152,6 +220,12 @@ export function GroupTables({ drawId, canManage }: { drawId: string; canManage: 
           </div>
         </div>
       ))}
+
+      {data.cross_group.length > 0 && (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {data.cross_group.map((c, i) => <CrossGroupView key={`${c.stage}-${c.kind}-${i}`} c={c} multiStage={multi} />)}
+        </div>
+      )}
 
       {data.placing_ties.map((t) => (
         <div key={t.entities.join()} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">

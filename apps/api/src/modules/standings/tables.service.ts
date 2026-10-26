@@ -4,7 +4,7 @@ import {
 } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
 import { NotFoundError } from '../../shared/errors.js';
-import { pendingPlacingTies, rankGroup, resolverFor } from './domain/schemes.js';
+import { rankGroup, resolverFor, tableAnalysis } from './domain/schemes.js';
 import { DRAW_FIXTURE_FIELDS, loadRuleIndex, ruleFromIndex, schemeInput, toSchemeFixture } from './standings.service.js';
 
 // The group / league tables of one draw, ranked exactly as advancement and the tally
@@ -24,11 +24,21 @@ export interface DrawTables {
   scheme: StandingsScheme;
   stages: Array<{ stage: number; ranking: GroupRanking & { labels: string[] }; pools: PoolTable[] }>;
   placing_ties: Array<{ stage: number; entities: string[]; from: number; to: number }>;
+  /** Teams from different groups compared for a placing, with what separated each pair. */
+  cross_group: CrossGroupView[];
   resolutions: TieResolution[];
   names: Record<string, string>;
 }
 
 const SETTLED = new Set(['completed', 'walkover', 'bye', 'cancelled']);
+export interface CrossGroupView {
+  stage: number;
+  kind: 'placings' | 'semi_losers';
+  rows: Array<Omit<TableRow, 'rank'> & { pool: string; place: number | null }>;
+  /** Between rows[i] and rows[i + 1]: the tie-breaker's name, "Hand-picked order", or null = still level. */
+  decided_by: Array<string | null>;
+}
+
 const poolLabel = (pool: number | null) => (pool == null ? 'Table' : `Pool ${String.fromCharCode(64 + pool)}`);
 
 export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTables> {
@@ -93,6 +103,7 @@ export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTa
     return { stage, ranking: { ...ranking, labels: ranking.tiebreakers.map((t) => tiebreakerLabel(t, sport, entryType)) }, pools };
   });
 
+  const analysis = tableAnalysis(fixtures, rule, ctx);
   return {
     draw_id: td.id,
     championship_id: championshipId,
@@ -101,7 +112,21 @@ export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTa
     entry_type: entryType,
     scheme: rule.scheme,
     stages,
-    placing_ties: pendingPlacingTies(fixtures, rule, ctx),
+    placing_ties: analysis?.pending ?? [],
+    cross_group: (analysis?.comparisons ?? []).map((c) => ({
+      stage: c.stage,
+      kind: c.kind,
+      rows: c.order.map((id, i) => {
+        const r = analysis!.records.get(id);
+        return {
+          entity_id: id, name: names[id]?.name ?? 'Unknown', short_name: names[id]?.short ?? null,
+          pool: poolLabel(analysis!.poolOf.get(id) ?? null), place: c.places[i],
+          played: r?.played ?? 0, won: r?.won ?? 0, drawn: r?.drawn ?? 0, lost: r?.lost ?? 0,
+          points: r?.points ?? 0, score_for: r?.gf ?? 0, score_against: r?.ga ?? 0,
+        };
+      }),
+      decided_by: c.decidedBy.map((d) => (d === 'resolution' ? 'Hand-picked order' : d ? tiebreakerLabel(d, sport, entryType) : null)),
+    })),
     resolutions,
     names: Object.fromEntries(Object.entries(names).map(([k, v]) => [k, v.name])),
   };

@@ -1,4 +1,11 @@
-import { KNOCKOUT_ROUND, PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor, playedContests, seatIn, earlyEndOf, formatPoints, KHO_END_SHORT, KHO_RESULT_WORDS, khoSettlementOf, shootoutOf, THIRD_PLACE_ROUND, type EarlyEnd, type PlayedContest, type AchievementKind, type EventSpec, type EventState, type FormatTemplate, type LifetimeEntryKind, type MatchOutcome, type Medal, type StandingsPlacement } from '@semp/shared';
+import {
+  KNOCKOUT_ROUND, PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor,
+  playedContests, seatIn, earlyEndOf, formatPoints, KHO_END_SHORT, KHO_RESULT_WORDS, khoSettlementOf,
+  shootoutOf, THIRD_PLACE_ROUND, type EarlyEnd, type PlayedContest, type AchievementKind, type EventSpec,
+  type EventState, type FormatTemplate, type LifetimeEntryKind, type MatchOutcome, type Medal,
+  type StandingsPlacement,
+} from '@semp/shared';
+import { inPlacingStage, placingStagesOf } from '../fixtures/domain/stage-tree.js';
 
 // What a locked result MEANS - as pure functions, with no database anywhere in
 // sight (J4-E2, J4-E4).
@@ -57,6 +64,8 @@ export interface DerivableAward {
 export interface DerivableFixture {
   id: string;
   round: string | null;
+  /** Which stage of a multi-stage draw; a Plate stage awards no medals. */
+  stage_sequence?: number | null;
   status: string;
   home_team_id: string | null;
   away_team_id: string | null;
@@ -345,7 +354,9 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
     teamId === fx.home_team_id ? fx.home_team_name : teamId === fx.away_team_id ? fx.away_team_name : null;
 
   // ---- 1 · knockout medals and placements (J4-E4-S1) -----------------------
-  for (const v of verdictsOf(fx)) {
+  // A consolation (Plate) bracket has its own "Final" but decides no medal.
+  const decidesPlacings = inPlacingStage(placingStagesOf(fx.format_config), fx.stage_sequence);
+  for (const v of decidesPlacings ? verdictsOf(fx) : []) {
     const medal = v.kind === 'medal' ? v.medal : null;
     const title = medal
       ? `${MEDAL_LABEL[medal]} - ${eventLabel}`

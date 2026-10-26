@@ -1,4 +1,4 @@
-import type { Branch, StageNode } from '@semp/shared';
+import { stageConfigSchema, type Branch, type StageNode } from '@semp/shared';
 
 // A StageNode with its assigned position in the tree. sequence 1 is always the tree
 // root (real entrants); every other sequence is a placeholder stage fed by a branch
@@ -45,6 +45,32 @@ export function assignStageSequence(root: StageNode): AssignedStageTree {
 
   return { stages, bySequence: new Map(stages.map((s) => [s.sequence, s])) };
 }
+
+/**
+ * Stages whose results decide the event's placings: the root, and every stage reached
+ * only through branches that start at rank 1 (the Cup). A Plate or other consolation
+ * branch plays its own "Final" but must not crown a winner. Null = no stage tree, so
+ * every fixture counts, as for a plain draw.
+ */
+export function placingStageSequences(tree: AssignedStageTree | null): Set<number> | null {
+  if (!tree) return null;
+  const out = new Set<number>();
+  for (const stage of tree.stages) {
+    const parentCounts = stage.parentSequence == null || out.has(stage.parentSequence);
+    if (parentCounts && (stage.producingBranch == null || stage.producingBranch.rankFrom === 1)) out.add(stage.sequence);
+  }
+  return out;
+}
+
+/** placingStageSequences straight from a draw's stored format_config. */
+export function placingStagesOf(formatConfig: unknown): Set<number> | null {
+  const parsed = stageConfigSchema.safeParse(formatConfig);
+  return parsed.success ? placingStageSequences(assignStageSequence(parsed.data.root)) : null;
+}
+
+/** Whether a fixture's stage decides placings (always, for a draw with no stage tree). */
+export const inPlacingStage = (stages: Set<number> | null | undefined, stageSequence: number | null | undefined): boolean =>
+  !stages || stages.has(stageSequence ?? 1);
 
 export function findStageBySequence(tree: AssignedStageTree, sequence: number): AssignedStage | undefined {
   return tree.bySequence.get(sequence);

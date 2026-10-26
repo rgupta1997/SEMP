@@ -263,6 +263,8 @@ export interface SchemeContext {
   knockout?: { size: number; teams: Set<string>; hasThirdPlace: boolean };
   /** No league / group match is still to be played. */
   tablesComplete?: boolean;
+  /** Stages that decide placings (the Cup, not a Plate). Unset = every stage. */
+  placingStages?: Set<number> | null;
 }
 
 const POSITION_PLACEMENT: StandingsPlacement[] = ['winner', 'runner_up', 'third_place', 'fourth_place'];
@@ -270,13 +272,32 @@ const POSITION_PLACEMENT: StandingsPlacement[] = ['winner', 'runner_up', 'third_
 /** A placing tie the tie-breakers couldn't split and that changes points. */
 export interface PendingPlacingTie { stage: number; entities: string[]; from: number; to: number }
 
+/** Teams from different groups compared for placings, and what separated each pair. */
+export interface CrossComparison {
+  stage: number;
+  kind: 'placings' | 'semi_losers';
+  /** Compared contingents, best first. */
+  order: string[];
+  /** Place each one was given (null = none, or still waiting for an order). */
+  places: Array<number | null>;
+  /** Why order[i] is above order[i + 1]: a tie-breaker, a hand-picked order, or null = still level. */
+  decidedBy: Array<StandingsTiebreaker | 'resolution' | null>;
+}
+
 export interface TableResult {
   placings: Map<string, StandingsPlacement[]>;
   pending: PendingPlacingTie[];
   /** Each contingent's record in the last table stage (for ranking semi-final losers). */
   records: Map<string, EntityTally>;
+  /** Each contingent's pool in that stage. */
+  poolOf: Map<string, number | null>;
+  comparisons: CrossComparison[];
   stage: number;
 }
+
+/** The first tie-breaker on which two records differ. */
+const separatedBy = (a: EntityTally, b: EntityTally, tbs: StandingsTiebreaker[]) =>
+  tbs.find((t) => metric(a, t) !== metric(b, t)) ?? null;
 
 const rankingOf = (rule: StandingsRule, ctx: SchemeContext, stage: number): GroupRanking =>
   ctx.rankingFor?.(stage) ?? groupRankingFor(rule);
@@ -285,7 +306,7 @@ const rankingOf = (rule: StandingsRule, ctx: SchemeContext, stage: number): Grou
 // Positions start after the teams that went through to the knockout, so with only a final
 // the best group runners-up are 3rd and 4th; with no knockout the table is the result.
 export function tablePlacings(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'placement' }>, ctx: SchemeContext): TableResult {
-  const out: TableResult = { placings: new Map(), pending: [], records: new Map(), stage: 1 };
+  const out: TableResult = { placings: new Map(), pending: [], records: new Map(), poolOf: new Map(), comparisons: [], stage: 1 };
   const tableFx = fixtures.filter((f) => !isKnockoutRound(f.round) && f.status !== 'bye');
   if (tableFx.length === 0 || !ctx.tablesComplete) return out;
   const stage = Math.max(...tableFx.map((f) => f.stage_sequence ?? 1));
@@ -298,7 +319,7 @@ export function tablePlacings(fixtures: SchemeFixture[], rule: Extract<Standings
   const poolTies: string[][] = [];
   const ranked = pools.map((pool) => {
     const g = rankGroup(stageFx.filter((f) => (f.pool_number ?? null) === pool), ranking, resolverFor(ctx.resolutions, 'pool', stage, pool));
-    g.rows.forEach((r) => { poolRank.set(r.entity_id, r.rank!); out.records.set(r.entity_id, r); });
+    g.rows.forEach((r) => { poolRank.set(r.entity_id, r.rank!); out.records.set(r.entity_id, r); out.poolOf.set(r.entity_id, pool); });
     poolTies.push(...g.ties);
     return g;
   });
@@ -315,6 +336,7 @@ export function tablePlacings(fixtures: SchemeFixture[], rule: Extract<Standings
   const remaining = (ids: string[]) => ids.filter((id) => !koEntities.has(id));
   // Ordered blocks of contingents still to place; `tied` = level with no saved order.
   const blocks: Array<{ ids: string[]; tied: boolean }> = [];
+  const tiers: Array<Pick<CrossComparison, 'order' | 'decidedBy'>> = [];
   if (ranked.length === 1) {
     const rows = ranked[0].rows;
     for (let i = 0; i < rows.length;) {
@@ -325,18 +347,35 @@ export function tablePlacings(fixtures: SchemeFixture[], rule: Extract<Standings
     }
   } else {
     const cross = ranking.tiebreakers.filter((t) => t !== 'head_to_head');
+    const crossOrder: StandingsTiebreaker[] = cross.length ? cross : ['points'];
     const resolve = resolverFor(ctx.resolutions, 'placing', stage, null);
     const maxRank = Math.max(...poolRank.values());
     for (let rank = 1; rank <= maxRank; rank++) {
       const tier = remaining([...poolRank].filter(([, r]) => r === rank).map(([id]) => id));
       if (tier.length === 0) continue;
-      if (tier.some(inPoolTie)) { blocks.push({ ids: tier, tied: tier.length > 1 }); continue; }
-      for (const b of tieBlocks(tier.map((id) => out.records.get(id)!), cross.length ? cross : ['points'])) {
-        const ids = b.map((r) => r.entity_id);
-        const order = ids.length > 1 ? resolve(ids) : undefined;
-        if (order) order.forEach((id) => blocks.push({ ids: [id], tied: false }));
-        else blocks.push({ ids, tied: ids.length > 1 });
+      if (tier.some(inPoolTie)) {
+        blocks.push({ ids: tier, tied: tier.length > 1 });
+        if (tier.length > 1) tiers.push({ order: tier, decidedBy: tier.slice(1).map(() => null) });
+        continue;
       }
+      // Kept for the "ranking across groups" view: the order and what split each pair.
+      const order: string[] = [];
+      const decidedBy: CrossComparison['decidedBy'] = [];
+      let prev: { id: string; block: number; resolved: boolean } | null = null;
+      tieBlocks(tier.map((id) => out.records.get(id)!), crossOrder).forEach((b, bi) => {
+        const ids = b.map((r) => r.entity_id);
+        const picked = ids.length > 1 ? resolve(ids) : undefined;
+        if (picked) picked.forEach((id) => blocks.push({ ids: [id], tied: false }));
+        else blocks.push({ ids, tied: ids.length > 1 });
+        for (const id of picked ?? ids) {
+          if (prev) {
+            decidedBy.push(prev.block !== bi ? separatedBy(out.records.get(prev.id)!, out.records.get(id)!, crossOrder) : prev.resolved ? 'resolution' : null);
+          }
+          order.push(id);
+          prev = { id, block: bi, resolved: !!picked };
+        }
+      });
+      if (tier.length > 1) tiers.push({ order, decidedBy });
     }
   }
 
@@ -344,10 +383,12 @@ export function tablePlacings(fixtures: SchemeFixture[], rule: Extract<Standings
     const v = rule.points[POSITION_PLACEMENT[p - 1]] ?? 0;
     return v > 0 || p < 3 ? v : rule.points.semi_finalist ?? 0;
   };
+  const placeOf = new Map<string, number>();
   const award = (id: string, p: number) => {
     const list: StandingsPlacement[] = [POSITION_PLACEMENT[p - 1]];
     if (p >= 3) list.push('semi_finalist'); // finished in the last four
     out.placings.set(id, list);
+    placeOf.set(id, p);
   };
   for (const b of blocks) {
     if (pos > POSITION_PLACEMENT.length) break;
@@ -362,6 +403,12 @@ export function tablePlacings(fixtures: SchemeFixture[], rule: Extract<Standings
       else out.pending.push({ stage, entities: b.ids, from: pos, to: last });
     }
     pos = to + 1;
+  }
+  // Only comparisons that decided (or are holding up) a placing are worth showing.
+  for (const t of tiers) {
+    const places = t.order.map((id) => placeOf.get(id) ?? null);
+    const waiting = out.pending.some((pt) => pt.entities.some((id) => t.order.includes(id)));
+    if (places.some((pl) => pl != null) || waiting) out.comparisons.push({ stage, kind: 'placings', order: t.order, places, decidedBy: t.decidedBy });
   }
   return out;
 }
@@ -379,21 +426,33 @@ function semiLoserPlacings(
   const ids = losers as string[];
   const cross = ranking.tiebreakers.filter((t) => t !== 'head_to_head');
   const blocks = tieBlocks(ids.map((e) => tables.records.get(e)!), cross.length ? cross : ['points']);
-  const order = blocks.length === 2 ? blocks.map((b) => b[0].entity_id) : resolverFor(ctx.resolutions, 'placing', tables.stage, null)(ids);
+  const split = blocks.length === 2;
+  const order = split ? blocks.map((b) => b[0].entity_id) : resolverFor(ctx.resolutions, 'placing', tables.stage, null)(ids);
+  const crossOrder: StandingsTiebreaker[] = cross.length ? cross : ['points'];
+  tables.comparisons.push({
+    stage: tables.stage, kind: 'semi_losers', order: order ?? ids, places: order ? [3, 4] : [null, null],
+    decidedBy: [split ? separatedBy(tables.records.get(order![0])!, tables.records.get(order![1])!, crossOrder) : order ? 'resolution' : null],
+  });
   if (!order) { tables.pending.push({ stage: tables.stage, entities: ids, from: 3, to: 4 }); return out; }
   out.set(order[0], 'third_place');
   out.set(order[1], 'fourth_place');
   return out;
 }
 
-/** Placing ties waiting on a hand-picked order (shown on the group tables). */
-export function pendingPlacingTies(fixtures: SchemeFixture[], rule: StandingsRule, ctx: SchemeContext): PendingPlacingTie[] {
-  if (rule.scheme !== 'placement') return [];
+/** How table placings were worked out: ties waiting on an order, and cross-group comparisons. */
+export function tableAnalysis(all: SchemeFixture[], rule: StandingsRule, ctx: SchemeContext): TableResult | null {
+  if (rule.scheme !== 'placement') return null;
+  const fixtures = all.filter((f) => !ctx.placingStages || ctx.placingStages.has(f.stage_sequence ?? 1));
   const tables = tablePlacings(fixtures, rule, ctx);
   if (rule.rank_semi_losers && !ctx.knockout?.hasThirdPlace) {
     semiLoserPlacings(fixtures, tables, rankingOf(rule, ctx, tables.stage), ctx);
   }
-  return tables.pending;
+  return tables;
+}
+
+/** Placing ties waiting on a hand-picked order (shown on the group tables). */
+export function pendingPlacingTies(all: SchemeFixture[], rule: StandingsRule, ctx: SchemeContext): PendingPlacingTie[] {
+  return tableAnalysis(all, rule, ctx)?.pending ?? [];
 }
 
 function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule, { scheme: 'placement' }>, ctx: SchemeContext = {}): EntityTally[] {
@@ -408,6 +467,8 @@ function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule,
     if (!row) { row = emptyTally(entityId); table.set(entityId, row); }
     return row;
   };
+  // A Plate (consolation) bracket plays its own Final, but only the Cup decides placings.
+  const placingFx = fixtures.filter((f) => !ctx.placingStages || ctx.placingStages.has(f.stage_sequence ?? 1));
 
   // "Both": league / group matches also earn their W/D/L points.
   if (rule.include_match_points) {
@@ -431,22 +492,22 @@ function placementScheme(fixtures: SchemeFixture[], rule: Extract<StandingsRule,
     if (!set) { set = new Set(); candidates.set(entityId, set); }
     set.add(p);
   };
-  for (const f of fixtures) {
+  for (const f of placingFx) {
     if (!isResult(f) && f.status !== 'bye') continue;
     for (const [teamId, placement] of placementCandidates(f)) {
       const entityId = teamEntity.get(teamId);
       if (entityId) add(entityId, placement);
     }
   }
-  const tables = tablePlacings(fixtures, rule, ctx);
+  const tables = tablePlacings(placingFx, rule, ctx);
   for (const [entityId, list] of tables.placings) list.forEach((p) => add(entityId, p));
   if (rule.rank_semi_losers && !ctx.knockout?.hasThirdPlace) {
-    for (const [entityId, p] of semiLoserPlacings(fixtures, tables, rankingOf(rule, ctx, tables.stage), ctx)) add(entityId, p);
+    for (const [entityId, p] of semiLoserPlacings(placingFx, tables, rankingOf(rule, ctx, tables.stage), ctx)) add(entityId, p);
   }
 
   // Only losing a played final makes a team runner-up; reaching it is still a floor.
   const finalLosers = new Set<string>();
-  for (const f of fixtures) {
+  for (const f of placingFx) {
     if (!isResult(f) || f.round !== KNOCKOUT_ROUND.final || !f.winner_team_id) continue;
     const loser = f.home_team_id === f.winner_team_id ? f.away_team_id : f.home_team_id;
     const entityId = loser ? teamEntity.get(loser) : undefined;
@@ -582,12 +643,16 @@ export const SCORED_STATUSES = ['completed', 'walkover', 'bye'];
 
 /** What a scheme needs to know about the whole draw, read from ALL its fixtures. */
 export function drawContext(
-  all: SchemeFixture[], rankingFor: (stage: number) => GroupRanking, resolutions: TieResolution[],
+  everything: SchemeFixture[], rankingFor: (stage: number) => GroupRanking, resolutions: TieResolution[],
+  placingStages: Set<number> | null = null,
 ): SchemeContext {
+  // Only the Cup side of the tree decides placings, so a Plate is left out here too.
+  const all = everything.filter((f) => !placingStages || placingStages.has(f.stage_sequence ?? 1));
   const ko = all.filter((f) => isKnockoutRound(f.round) && f.round !== THIRD_PLACE_ROUND);
   return {
     rankingFor,
     resolutions,
+    placingStages,
     knockout: {
       size: Math.max(0, ...ko.map((f) => knockoutRoundSize(f.round))),
       teams: new Set(ko.flatMap((f) => [f.home_team_id, f.away_team_id]).filter((t): t is string => !!t)),

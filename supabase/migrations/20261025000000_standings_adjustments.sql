@@ -1,6 +1,6 @@
 -- Point system: manual tally adjustments, and half points in the standings table.
 --
--- STATUS: NOT APPLIED. Written 2026-10-25. RDS twin: infra/rds-migrations/028_standings_adjustments.sql.
+-- STATUS: NOT APPLIED. Written 2026-10-25. RDS twin: infra/rds-migrations/029_standings_adjustments.sql.
 --
 -- What changes:
 --   standings.points      integer -> double precision, so a mixed event that counts half

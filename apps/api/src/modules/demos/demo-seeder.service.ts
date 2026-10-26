@@ -7,7 +7,11 @@
 
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import { KNOCKOUT_ROUND, DEMO_DEFAULT_SPORTS, demoOrgNamesFor, detailedContributions, tieTemplateFor, eventTemplateFor, initTie, decideRubber, tieWinner, rubbersWon, type CreateDemoSandboxInput, type DemoChampKind } from '@semp/shared';
+import {
+  KNOCKOUT_ROUND, DEMO_DEFAULT_SPORTS, demoOrgNamesFor, detailedContributions, tieTemplateFor,
+  eventTemplateFor, initTie, decideRubber, tieWinner, rubbersWon, type CreateDemoSandboxInput,
+  type DemoChampKind,
+} from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { recomputeStandingsAtomic } from '../standings/standings.service.js';
 import { catalogAwardTypeIds } from '../awards/award-types.service.js';

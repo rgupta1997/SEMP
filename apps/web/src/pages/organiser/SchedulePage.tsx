@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ClipboardList, ClipboardPen, Eye, Pencil, Trash2, Users } from 'lucide-react';
-import { FIXTURE_STATUS, inheritedOverrides, isKnockoutRound, resolveFormat, TBD_LABEL } from '@semp/shared';
+import { FIXTURE_STATUS, inheritedOverrides, isKnockoutRound, KNOCKOUT_ROUND, knockoutRoundLabel, knockoutRoundSize, resolveFormat, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { ARCHIVED_READ_ONLY_MESSAGE, isRankingSport, isScoredSport } from '@semp/shared';
@@ -12,7 +12,7 @@ import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
 import { Badge, Button, Card, cn, confirmDialog, EmptyState, Field, Input, Modal, SearchableSelect, Segmented, Select, Spinner, StatusBadge, StatusLegend, toast } from '../../components/ui';
 import { Bracket, fixtureStatusLabel } from '../../components/Bracket';
 import { FitName } from '../../components/FitName';
-import { GroupTables, openTieCount, tablesPath, type DrawTables } from '../../components/GroupTables';
+import { GroupTables, openTieCount, tablesPath, TABLES_REFRESH_MS, type DrawTables } from '../../components/GroupTables';
 import { useUrlState } from '../../components/primitives';
 import { RoundRobinGrid } from '../../components/RoundRobinGrid';
 import { ScheduleTimeline } from '../../components/ScheduleTimeline';
@@ -315,6 +315,23 @@ function SectionLabel({ children }: { children: ReactNode }) {
 
 // Create or edit a single fixture by hand. `fixture === null` ⇒ create mode for the
 // given draw; otherwise edit (teams / round / schedule / status) with a delete option.
+// Knockout rounds the editor offers, by the exact names the engine reads. Anything else
+// is a league / pool match with a free label.
+const KNOCKOUT_CHOICES = [
+  KNOCKOUT_ROUND.final, KNOCKOUT_ROUND.thirdPlace, KNOCKOUT_ROUND.semiFinal, KNOCKOUT_ROUND.quarterFinal,
+  knockoutRoundLabel(16), knockoutRoundLabel(32),
+];
+const TABLE_ROUND = 'table';
+function knockoutChoiceLabel(round: string): string {
+  if (round === KNOCKOUT_ROUND.final) return 'Final';
+  if (round === KNOCKOUT_ROUND.thirdPlace) return '3rd-place play-off';
+  if (round === KNOCKOUT_ROUND.semiFinal) return 'Semi-final';
+  if (round === KNOCKOUT_ROUND.quarterFinal) return 'Quarter-final';
+  return `Round of ${knockoutRoundSize(round)}`;
+}
+// A typed label that reads like a knockout round would be scored as a league match.
+const looksKnockout = (label: string) => /\b(final|semi|quarter|sf|qf|3rd|third)\b/i.test(label);
+
 function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, officials, teamName, onClose }:
   { fixture: any | null; tdId: string; drawPath: string; sportName?: string; grounds: Ground[]; venues: Venue[]; officials: Official[]; teamName: (id: string | null) => string; onClose: () => void }) {
   const isEdit = !!fixture;
@@ -544,9 +561,21 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
         <div className="mt-4">
           <SectionLabel>Stage & officiating</SectionLabel>
           <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
-            <Field compact label="Round" hint="e.g. Final, SF, Group A, Match 1">
-              <Input value={round} onChange={(e) => setRound(e.target.value)} placeholder="Match" />
+            <Field compact label="Round" hint="Knockout rounds decide placings and medals.">
+              <Select className="w-full" value={isKnockoutRound(round) ? round : TABLE_ROUND}
+                onChange={(e) => setRound(e.target.value === TABLE_ROUND ? '' : e.target.value)}>
+                <option value={TABLE_ROUND}>League / pool match</option>
+                {[...KNOCKOUT_CHOICES, ...(isKnockoutRound(round) && !KNOCKOUT_CHOICES.includes(round) ? [round] : [])].map((r) => (
+                  <option key={r} value={r}>{knockoutChoiceLabel(r)}</option>
+                ))}
+              </Select>
             </Field>
+            {!isKnockoutRound(round) && (
+              <Field compact label="Match label"
+                hint={looksKnockout(round) ? 'This reads like a knockout round. Pick it from Round instead, or it counts as a league match.' : 'e.g. Group A, Round 2. Counts as a league / pool match.'}>
+                <Input value={round} onChange={(e) => setRound(e.target.value)} placeholder="Match" />
+              </Field>
+            )}
             <Field compact label="Status">
               <Select className="w-full" value={status} onChange={(e) => setStatus(e.target.value)}>
                 {FIXTURE_STATUS.map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
@@ -716,7 +745,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
   const showVisual = !isRanking && fixtures.length > 0 && view === 'visual' && !teamFilter;
   // League / group tables, with ties the tie-breakers left for a hand-picked order.
   const hasTables = !isRanking && fixtures.some((f) => !isKnockoutRound(f.round));
-  const { data: drawTables } = useApi<DrawTables>(hasTables ? tablesPath(td.id) : null);
+  const { data: drawTables } = useApi<DrawTables>(hasTables ? tablesPath(td.id) : null, true, { refetchInterval: TABLES_REFRESH_MS });
   const openTies = openTieCount(drawTables);
 
   // A discipline built with the stage-config wizard has more than one

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GroupRanking, StandingsRule, TieResolution } from '@semp/shared';
-import { drawContext, pendingPlacingTies, runScheme, type EntityTally, type SchemeFixture } from './schemes.js';
+import { drawContext, pendingPlacingTies, runScheme, tableAnalysis, type EntityTally, type SchemeFixture } from './schemes.js';
+import { placingStagesOf } from '../../fixtures/domain/stage-tree.js';
 import { convertEventTotals } from './event-conversion.js';
 
 // team id === contingent id for brevity.
@@ -125,5 +126,50 @@ describe('event conversion (G11)', () => {
       { entity_id: 'E', points: 0, gold: 0, silver: 0 },
     ], [10, 7, 4, 1], 1));
     expect([out.B.points, out.A.points, out.C.points, out.D.points, out.E.points]).toEqual([10, 7, 4, 4, 1]);
+  });
+});
+
+describe('Cup and Plate', () => {
+  const config = {
+    root: {
+      type: 'group', numGroups: 2, tiebreakers: ['points'],
+      branches: [
+        { id: 'cup', label: 'Cup', rankFrom: 1, rankTo: 2, childStage: { type: 'knockout', eliminationType: 'single', seeding: 'auto' } },
+        { id: 'plate', label: 'Plate', rankFrom: 3, rankTo: 4, childStage: { type: 'knockout', eliminationType: 'single', seeding: 'auto' } },
+      ],
+    },
+  };
+
+  it('only the stage fed by rank 1 decides placings', () => {
+    expect([...(placingStagesOf(config) ?? [])]).toEqual([1, 2]);
+    expect(placingStagesOf({ scoring: {} })).toBeNull();
+  });
+
+  it('the Plate final crowns nobody', () => {
+    const all = [
+      fx('A', 'B', 2, 1, 'Final', { stage_sequence: 2, bracket_position: 1 } as Partial<SchemeFixture>),
+      fx('C', 'D', 2, 1, 'Final', { stage_sequence: 3, bracket_position: 1 } as Partial<SchemeFixture>),
+    ];
+    const ctx = drawContext(all, () => ranking, [], placingStagesOf(config));
+    const rows = byId(runScheme(scored(all), iimk({ participation: 1 }), true, ctx));
+    expect([rows.A.points, rows.B.points]).toEqual([10, 7]);
+    expect([rows.C.points, rows.D.points]).toEqual([1, 1]);
+    expect(rows.C.detail.winner).toBeUndefined();
+  });
+});
+
+describe('ranking across groups', () => {
+  it('records who was compared, their places and what separated them', () => {
+    const all = [fx('A', 'B', 3, 0, null, pool(1)), fx('C', 'D', 1, 0, null, pool(2)), fx('A', 'C', 2, 1, 'Final')];
+    const t = tableAnalysis(scored(all), iimk({ table_placings: true }), ctxFor(all))!;
+    expect(t.comparisons).toEqual([{ stage: 1, kind: 'placings', order: ['D', 'B'], places: [3, 4], decidedBy: ['score_diff'] }]);
+  });
+
+  it('a level pair shows as waiting, then as hand-picked', () => {
+    const all = [fx('A', 'B', 1, 0, null, pool(1)), fx('C', 'D', 1, 0, null, pool(2)), fx('A', 'C', 2, 1, 'Final')];
+    const rule = iimk({ table_placings: true });
+    expect(tableAnalysis(scored(all), rule, ctxFor(all))!.comparisons[0]).toMatchObject({ places: [null, null], decidedBy: [null] });
+    const picked: TieResolution = { scope: 'placing', stage: 1, pool: null, order: ['D', 'B'], reason: 'Coin toss', by: null, at: '' };
+    expect(tableAnalysis(scored(all), rule, ctxFor(all, [picked]))!.comparisons[0]).toMatchObject({ order: ['D', 'B'], places: [3, 4], decidedBy: ['resolution'] });
   });
 });
