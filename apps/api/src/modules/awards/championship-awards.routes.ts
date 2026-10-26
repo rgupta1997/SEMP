@@ -22,6 +22,8 @@ export function makeChampionshipAwardsRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
   const manager = guards.championshipManager(async (req) => req.params.id);
+  // Reads are the whole organising team's, sport organisers included.
+  const viewer = guards.championshipViewer(async (req) => req.params.id);
 
   const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
   const scopeFromQuery = (q: Record<string, unknown>): ScopeInput => {
@@ -90,7 +92,7 @@ export function makeChampionshipAwardsRouter(prisma: Prisma): Router {
   }));
 
   // Everything this event has given, every scope.
-  router.get('/:id/awards', manager, asyncHandler(async (req, res) => {
+  router.get('/:id/awards', viewer, asyncHandler(async (req, res) => {
     const rows = await prisma.championship_awards.findMany({
       where: { championship_id: req.params.id },
       include: awardInclude,
@@ -100,7 +102,7 @@ export function makeChampionshipAwardsRouter(prisma: Prisma): Router {
   }));
 
   // The event's tournaments and their sports - the scopes an award can be given in.
-  router.get('/:id/awards/scopes', manager, asyncHandler(async (req, res) => {
+  router.get('/:id/awards/scopes', viewer, asyncHandler(async (req, res) => {
     const tournaments = await prisma.tournaments.findMany({
       where: { championship_id: req.params.id },
       select: {
@@ -120,7 +122,7 @@ export function makeChampionshipAwardsRouter(prisma: Prisma): Router {
   }));
 
   // What can be given in one scope, and to whom.
-  router.get('/:id/awards/options', manager, asyncHandler(async (req, res) => {
+  router.get('/:id/awards/options', viewer, asyncHandler(async (req, res) => {
     const scope = await resolveAwardScope(prisma, req.params.id, scopeFromQuery(req.query));
     const [types, participants] = await Promise.all([scopeAwardTypes(prisma, scope), scopeParticipants(prisma, scope)]);
     res.json({ types, ...participants });
@@ -166,7 +168,7 @@ export function makeChampionshipAwardsRouter(prisma: Prisma): Router {
     if (foreign.length) throw new ValidationError('Map it only to sports in this event');
   };
 
-  router.get('/:id/award-types', manager, asyncHandler(async (req, res) => {
+  router.get('/:id/award-types', viewer, asyncHandler(async (req, res) => {
     const rows = await prisma.award_types.findMany({
       where: { championship_id: req.params.id },
       include: awardTypeInclude,

@@ -224,15 +224,22 @@ function roundSortKey(round: string | null | undefined): number {
 // 15-minute slots. Tap an empty slot (managers only) to place one of that discipline's
 // unscheduled matches there; drag a placed match to another slot to move it, or click
 // it to change its time/duration or unschedule it.
-export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, onUnschedule, placing }: {
+export function ScheduleTimeline({ rows, fixtures, days, canManage, canManageRow, onPlace, onUnschedule, placing }: {
   rows: DisciplineRow[];
   fixtures: GridFixture[];
   days: string[];
+  /** May schedule anything here at all - shows the how-to. */
   canManage: boolean;
+  /**
+   * May schedule this row's (discipline's) matches. A sport organiser sees every
+   * sport on the shared timeline but places only their own. Defaults to canManage.
+   */
+  canManageRow?: (rowId: string) => boolean;
   onPlace: (fixtureId: string, startISO: string, durationMinutes: number) => void;
   onUnschedule?: (fixtureId: string) => void;
   placing?: boolean;
 }) {
+  const mayRow = (rowId: string) => (canManageRow ? canManageRow(rowId) : canManage);
   const [day, setDay] = useState('');
   const activeDay = day && days.includes(day) ? day : days[0] ?? '';
   const [slot, setSlot] = useState<{ row: DisciplineRow; hour: number; minute: number } | null>(null);
@@ -348,7 +355,7 @@ export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, onU
                 <div className="relative" style={{ width: trackW, height: rowH }}>
                   {/* 15-minute slots: click to schedule, or drop a match here. */}
                   {hours.map((h, hi) => QUARTERS.map((q) => (
-                    canManage ? (
+                    mayRow(row.id) ? (
                       <button
                         key={`${h}-${q}`}
                         type="button"
@@ -380,14 +387,14 @@ export function ScheduleTimeline({ rows, fixtures, days, canManage, onPlace, onU
                     return (
                       <div
                         key={f.id}
-                        draggable={canManage}
-                        onDragStart={canManage ? (ev) => onCardDragStart(ev, f) : undefined}
-                        onClick={canManage ? () => setEditing(f) : undefined}
+                        draggable={mayRow(f.tournament_discipline_id)}
+                        onDragStart={mayRow(f.tournament_discipline_id) ? (ev) => onCardDragStart(ev, f) : undefined}
+                        onClick={mayRow(f.tournament_discipline_id) ? () => setEditing(f) : undefined}
                         title={`${matchLabelWithOrg(f)} · ${timeRange(f)} · ${live ? 'live' : f.status}`}
                         className={cn(
                           'absolute z-10 flex flex-col justify-center overflow-hidden rounded-lg border px-1.5',
                           cardTint(f.status, live),
-                          canManage && 'cursor-pointer hover:shadow-sm hover:brightness-95',
+                          mayRow(f.tournament_discipline_id) && 'cursor-pointer hover:shadow-sm hover:brightness-95',
                         )}
                         style={{ left, width, top: ROW_PAD + lane * LANE_PX, height: LANE_PX - CARD_GAP }}
                       >

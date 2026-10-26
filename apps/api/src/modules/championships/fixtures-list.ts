@@ -32,6 +32,7 @@ export async function listChampionshipFixtures(prisma: Prisma, championshipId: s
           disciplines: { select: { name: true } },
           tournament_sports: {
             select: {
+              sport_id: true,
               sports: { select: { name: true, icon: true } },
               tournaments: { select: { id: true, name: true } },
             },
@@ -81,6 +82,9 @@ export async function listChampionshipFixtures(prisma: Prisma, championshipId: s
     live_state: f.live_state,
     ground: f.venue_grounds ? { id: f.venue_grounds.id, name: f.venue_grounds.name, venue: f.venue_grounds.venues?.name ?? null } : null,
     sport: f.tournament_disciplines?.tournament_sports?.sports?.name ?? null,
+    // The catalogue sport, so the organiser screens can tell which matches a
+    // sport organiser may act on.
+    sport_id: f.tournament_disciplines?.tournament_sports?.sport_id ?? null,
     sport_icon: f.tournament_disciplines?.tournament_sports?.sports?.icon ?? null,
     tournament: f.tournament_disciplines?.tournament_sports?.tournaments ?? null,
     discipline: f.tournament_disciplines?.disciplines?.name ?? null,

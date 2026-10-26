@@ -18,6 +18,8 @@ import { useUrlState, usePreserveScroll } from '../../components/primitives';
 
 // A flattened fixture row from GET /championships/:id/fixtures.
 interface ResultRow {
+  /** Catalogue sport - which organisers may act on this match. */
+  sport_id?: string | null;
   /** Sequential within the championship - how a person refers to this match. */
   match_no?: number | null;
   /** When it is played. Rendered as Today / Tomorrow / 28th Aug, 2026 · 7:30 PM. */
@@ -285,7 +287,7 @@ function UnlockModal({ label, busy, onClose, onConfirm }: {
 }
 
 export function ResultsPage() {
-  const { eventId, canManage, championship } = useEvent();
+  const { eventId, organises, canManageSport, championship } = useEvent();
   const { ctx } = useAuth();
   const navigate = useNavigate();
   // Archived: results stay visible, but none can be rescored, locked or reopened -
@@ -301,7 +303,7 @@ export function ResultsPage() {
   // Is this championship awarding custom (hand-entered) points anywhere? If so, the
   // organiser is reminded to add points per result. Rules are organiser-only.
   const { data: rulesData } = useApi<{ default: { scheme: string }; rules: { scope_type: string; config: { scheme: string } }[] }>(
-    canManage ? `/championships/${eventId}/standings-rules` : null,
+    organises ? `/championships/${eventId}/standings-rules` : null,
   );
   const customActive = useMemo(() => {
     if (!rulesData) return false;
@@ -356,9 +358,12 @@ export function ResultsPage() {
   // one person actually there to record the score had to leave the event and find
   // the match again in their own Officiating queue.
   const myId = ctx?.user?.id;
+  // Organising this match's sport - every sport for an overall organiser, their own
+  // for a sport organiser. Mirrors fixtureScorer / sportManager on the server.
+  const manages = (f: ResultRow) => canManageSport(f.sport_id);
   // Still opens while archived - the scoring page is read-only then, so the host can view the result.
-  const canScore = (f: ResultRow) => canManage || (!!myId && f.official_id === myId);
-  const scoresAny = canManage || rows.some(canScore);
+  const canScore = (f: ResultRow) => manages(f) || (!!myId && f.official_id === myId);
+  const scoresAny = organises || rows.some(canScore);
 
   const open = (f: ResultRow) => {
     if (!canScore(f)) return;
@@ -431,7 +436,8 @@ export function ResultsPage() {
   // Byes are not counted: they are not waiting to be started, they will never be.
   const hiddenCount = useMemo(() => rows.filter((f) => !started(f) && f.status !== 'bye').length, [rows]);
 
-  const readyRows = useMemo(() => rows.filter(started).filter(lockable), [rows]);
+  // Only what this organiser may lock: a sport organiser's queue is their sports'.
+  const readyRows = useMemo(() => rows.filter(started).filter(lockable).filter(manages), [rows, canManageSport]);
   const lockedCount = useMemo(() => rows.filter(started).filter(locked).length, [rows]);
 
   /**
@@ -579,7 +585,7 @@ export function ResultsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <p className="hidden text-sm text-slate-500 sm:block dark:text-slate-400">
-          {canManage
+          {organises
             ? 'Tap a match to enter its result. Standings recalculate instantly.'
             : scoresAny
               ? 'Tap a match you are officiating to record its result.'
@@ -594,7 +600,7 @@ export function ResultsPage() {
         </div>
       </div>
 
-      {customActive && canManage && (
+      {customActive && organises && (
         <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
           <span className="font-semibold">Custom points are on.</span> Open a completed match to award each side its championship points - standings won’t update until you do.
         </div>
@@ -602,7 +608,7 @@ export function ResultsPage() {
 
       {/* The lock queue. Shown only while there is something to do with it - an
           organiser with nothing finished does not need to be told a number. */}
-      {canManage && readyRows.length > 0 && (
+      {organises && readyRows.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50/70 px-3 py-2.5 text-sm text-brand-800 sm:px-4 sm:py-3 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-200">
           <div className="min-w-0 flex-1">
             <span className="font-semibold">
@@ -704,7 +710,7 @@ export function ResultsPage() {
             : queue === 'pending' ? 'Everything here has been played'
             : 'No matches for this sport'}
           description={fixtures.length === 0
-            ? (canManage ? 'Generate draws on the Schedule tab - matches appear here for scoring.' : 'Results will appear here once matches are scheduled and played.')
+            ? (organises ? 'Generate draws on the Schedule tab - matches appear here for scoring.' : 'Results will appear here once matches are scheduled and played.')
             : queue !== 'all' ? 'Nothing in this view. Choose "All matches" to see the rest.'
             : 'Clear the sport filter or pick another sport.'}
         />
@@ -790,7 +796,7 @@ export function ResultsPage() {
                           {[f.round || (rankingEvent ? 'Event' : ''), whenLabel(f.scheduled_at)].filter(Boolean).join(' · ')}
                         </span>
                         <StatusGlyph locked={isLocked} rankingEvent={rankingEvent} status={f.status} />
-                        {canManage && (
+                        {manages(f) && (
                           <span className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
                             {/* `expressive` reveals the word from sm up. This card
                                 layout now serves phones AND tablets, and a tablet
@@ -985,21 +991,21 @@ export function ResultsPage() {
                       {/* Every one of these stops the click reaching the card -
                           otherwise locking a result also navigates away from the
                           list. */}
-                      {canManage && isLocked && (
+                      {manages(f) && isLocked && (
                         <IconAction expressive short="Reopen" tone="warn"
                           label="Reopen this result" disabled={busyId !== null || archived}
                           onClick={() => setUnlocking(f)}>
                           <LockOpen size={15} />
                         </IconAction>
                       )}
-                      {canManage && lockable(f) && (
+                      {manages(f) && lockable(f) && (
                         <IconAction expressive short={busyId === f.id ? 'Locking…' : 'Lock'} tone="primary"
                           label="Make this result official" disabled={busyId !== null || archived} busy={busyId === f.id}
                           onClick={() => void lockOne(f)}>
                           <Lock size={15} />
                         </IconAction>
                       )}
-                      {canManage && (
+                      {manages(f) && (
                         <IconAction
                           expressive
                           short={isLocked ? 'View' : completed ? 'Edit' : 'Record'}

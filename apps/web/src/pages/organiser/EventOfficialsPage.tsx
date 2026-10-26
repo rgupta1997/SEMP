@@ -45,7 +45,9 @@ function AssignOfficialModal({ eventId, existingIds, onClose }: { eventId: strin
 }
 
 export function EventOfficialsPage() {
-  const { championship, eventId } = useEvent();
+  const { championship, eventId, canManage } = useEvent();
+  // Any organiser may add officials - a sport organiser assigns them to their own
+  // sport's matches - but the list is shared, so only an overall one removes.
   // Refused by the server too; disabled here so nobody picks people first.
   const archived = !!championship.archived_at;
   const archivedTitle = archived ? ARCHIVED_READ_ONLY_MESSAGE : undefined;
@@ -150,9 +152,9 @@ export function EventOfficialsPage() {
                       removeMut.mutate(o.id);
                     }
                   }}
-                  disabled={removeMut.isPending || archived}
+                  disabled={removeMut.isPending || archived || !canManage}
                   aria-label={`Remove ${o.user.name}`}
-                  title={archivedTitle ?? 'Remove'}
+                  title={archivedTitle ?? (canManage ? 'Remove' : 'Only an organiser for all sports can remove an official')}
                 >
                   <Trash2 size={14} />
                 </Button>

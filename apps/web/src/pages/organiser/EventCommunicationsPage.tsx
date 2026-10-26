@@ -20,7 +20,7 @@ import { useEvent } from './EventLayout';
 // afterwards is a product where nobody can quote what they were told.
 
 export function EventCommunicationsPage() {
-  const { championship, eventId, canManage } = useEvent();
+  const { championship, eventId, organises } = useEvent();
   const [composing, setComposing] = useState(false);
   // Refused by the server too; disabled here so nobody writes an announcement first.
   const archived = !!championship.archived_at;
@@ -43,17 +43,17 @@ export function EventCommunicationsPage() {
         title="Communications"
         subtitle="Every announcement made about this event, newest first."
       >
-        {canManage && announce}
+        {organises && announce}
       </PageHeader>
 
       {isLoading ? <Spinner /> : rows.length === 0 ? (
         <EmptyState
           icon={<Megaphone size={24} />}
           title="Nothing announced yet"
-          description={canManage
+          description={organises
             ? 'Announcements you make here reach the audience you choose — everyone, or just captains, officials or points of contact.'
             : 'Announcements from the organising team will appear here.'}
-          action={canManage ? announce : undefined}
+          action={organises ? announce : undefined}
         />
       ) : (
         <div className="space-y-2">

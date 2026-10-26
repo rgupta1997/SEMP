@@ -16,6 +16,7 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
   const eventOrganiser = guards.championshipManager(async (req) => req.params.eventId);
+  const organisingTeam = guards.championshipViewer(async (req) => req.params.eventId);
 
   // The organizations the signed-in user owns/administers - the set an invitation
   // can be addressed to (and accepted/declined on behalf of).
@@ -240,7 +241,7 @@ export function makeInvitationsRouter(prisma: Prisma): Router {
   }));
 
   // The host's invitation list for a championship.
-  router.get('/championships/:eventId/invitations', eventOrganiser, asyncHandler(async (req, res) => {
+  router.get('/championships/:eventId/invitations', organisingTeam, asyncHandler(async (req, res) => {
     const rows = await prisma.championship_invitations.findMany({
       where: { championship_id: req.params.eventId },
       include: {

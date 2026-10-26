@@ -131,8 +131,8 @@ async function remindCustomPointsIfNeeded(prisma: Prisma, fixtureId: string, sen
 export function makeFixturesRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
-  // organiser of the championship that owns this draw (from the :id tournament_discipline).
-  const drawOrganiser = guards.championshipManager(async (req) => guards.resolvers.championshipOfTournamentDiscipline(req.params.id));
+  // organiser of this draw's sport (from the :id tournament_discipline) - overall or sport-limited.
+  const drawOrganiser = guards.sportManager(async (req) => guards.resolvers.sportOfTournamentDiscipline(req.params.id));
 
   // List fixtures for a discipline draw.
   router.get('/tournament-disciplines/:id/fixtures', asyncHandler(async (req, res) => {
@@ -865,7 +865,8 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   // is expressed with the existing championshipManager guard.
   // ---------------------------------------------------------------------------
 
-  const fixtureOrganiser = guards.championshipManager((req) => guards.resolvers.championshipOfFixture(req.params.id));
+  // Whoever runs this fixture's sport - overall or sport-limited organiser.
+  const fixtureOrganiser = guards.sportManager((req) => guards.resolvers.sportOfFixture(req.params.id));
 
   // ---------------------------------------------------------------------------
   // Assigning the official responsible for a match (J2-E4-S3)
@@ -942,7 +943,8 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   // the write that created one.
   // ---------------------------------------------------------------------------
   router.get('/championships/:eventId/fixtures/clashes',
-    guards.championshipManager(async (req) => req.params.eventId),
+    // Every sport's matches share the venues, so a sport organiser needs the whole picture.
+    guards.championshipViewer(async (req) => req.params.eventId),
     asyncHandler(async (req, res) => {
       const rows = await prisma.fixtures.findMany({
         where: { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: req.params.eventId } } } },
@@ -989,7 +991,14 @@ export function makeFixturesRouter(prisma: Prisma): Router {
   // Finishing a 90-match meet is not 90 separate actions. Per-fixture transactions,
   // looped outside; partial success is the correct outcome.
   router.post('/championships/:eventId/fixtures/lock-bulk',
-    guards.championshipManager(async (req) => req.params.eventId),
+    // Judged per scorecard: a sport organiser may lock only their sports' fixtures,
+    // and every fixture named must belong to this event.
+    guards.sportManager(async (req) => {
+      const ids = Array.isArray(req.body?.fixture_ids) ? (req.body.fixture_ids as string[]).slice(0, 50) : [];
+      const contexts = await Promise.all(ids.map((id) => guards.resolvers.sportOfFixture(id)));
+      if (contexts.some((c) => !c || c.championshipId !== req.params.eventId)) throw new NotFoundError('Fixture');
+      return contexts.length ? contexts : [{ championshipId: req.params.eventId, sportId: '' }];
+    }),
     asyncHandler(async (req, res) => {
       const ids = Array.isArray(req.body?.fixture_ids) ? req.body.fixture_ids as string[] : [];
       if (ids.length === 0) throw new BusinessRuleError('Select at least one scorecard to lock.');
@@ -1000,14 +1009,16 @@ export function makeFixturesRouter(prisma: Prisma): Router {
 
   // Counts by state - the organiser's "N ready to lock" queue.
   router.get('/championships/:eventId/lock-status',
-    guards.championshipManager(async (req) => req.params.eventId),
+    guards.championshipViewer(async (req) => req.params.eventId),
     asyncHandler(async (req, res) => {
       res.json(await lockStatusForChampionship(prisma, req.params.eventId));
     }));
 
-  const crudGuard = guards.championshipCrudGuard({
-    body: async (req) => guards.resolvers.championshipOfTournamentDiscipline(req.body?.tournament_discipline_id),
-    byId: guards.resolvers.championshipOfFixture,
+  // Sport-aware: scheduling, venue and opponent edits are the fixture's sport's
+  // business. A move to another draw must land in a sport the caller also runs.
+  const crudGuard = guards.sportCrudGuard({
+    body: async (req) => guards.resolvers.sportOfTournamentDiscipline(req.body?.tournament_discipline_id),
+    byId: guards.resolvers.sportOfFixture,
   });
 
   // The generic update/delete path can set scores, status and schedule just as

@@ -447,3 +447,32 @@ and a redundant index is dropped only if its covering index exists in that datab
 Applied with `apply-migration.ts` (3 statements). Read back: 0 unindexed foreign keys,
 349 public indexes, and EXPLAIN shows the four target queries on their new indexes.
 RDS twin: `infra/rds-migrations/015_query_path_indexes.sql` (not applied). **Not applied to prod.**
+
+---
+
+## Applied 2026-10-23 — the 2026-10-12 → 2026-10-21 batch (10 files), Supabase `iwxgd…`
+
+Checked `information_schema` first: `20261014000000_query_path_indexes` and
+`20261015120000_event_setups` were already present; everything else was missing
+(including `20261012000000_carrom_line_stats`, which the entry above records as applied
+to "dev" - it was not on this database). Applied in filename order with
+`apply-migration.ts --direct`, each file on its own:
+
+`20261012000000_carrom_line_stats`, `20261013000000_basketball_shot_attempts`,
+`20261013010000_net_points_lost`, `20261016000000_shootout_kicks`,
+`20261018000000_championship_host_cities`, `20261020000000_award_system`,
+`20261020000010_award_certificates`, `20261020000020_award_achievement_source`,
+`20261021000000_team_members_left_at`, `20261021010000_members_start_verified`.
+
+Read back: every new column present, `award_type_sports` and `championship_awards` exist,
+`achievements_source_check` admits `organiser_award`, and 0 active members remain
+unverified (371 were flipped to verified by the last file).
+
+---
+
+## Applied 2026-10-26 — `20261026000000_sport_scoped_organisers`, Supabase `iwxgd…`
+
+Applied with `apply-migration.ts` (2 statements). Read back from `information_schema`:
+`sport_ids uuid[] default '{}'` on both `user_championship_roles` and `user_invitations`;
+0 organiser rows limited to sports, so every existing organiser stays overall.
+RDS twin: `infra/rds-migrations/027_sport_scoped_organisers.sql` (not applied).

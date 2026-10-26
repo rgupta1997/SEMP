@@ -89,7 +89,8 @@ export function makeAuditRouter(prisma: Prisma): Router {
 
   // Championship timeline - the championship's organiser, or a super admin. Reuses
   // the same guard the rest of the championship management surface is behind.
-  const championshipOrganiser = guards.championshipManager(async (req) => req.params.eventId);
+  // Reading the trail is the whole organising team's, sport organisers included.
+  const championshipOrganiser = guards.championshipViewer(async (req) => req.params.eventId);
 
   router.get('/championships/:eventId/audit', championshipOrganiser, asyncHandler(async (req, res) => {
     const where = { championship_id: req.params.eventId, ...filters(req) };

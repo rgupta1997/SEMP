@@ -13,6 +13,7 @@ export function makeStandingsRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
   const ownChampionship = guards.championshipManager(async (req) => req.params.id);
+  const organisingTeam = guards.championshipViewer(async (req) => req.params.id);
 
   // Read a standings table for a scope. Default scope = championship; tournament and
   // sport require a scopeId (the tournament_id / sport_id). Rows are pre-ranked.
@@ -47,7 +48,7 @@ export function makeStandingsRouter(prisma: Prisma): Router {
 
   // The championship's scoring rules + the format/discipline options the organiser
   // can override, so the editor can render the full matrix in one round-trip.
-  router.get('/:id/standings-rules', ownChampionship, asyncHandler(async (req, res) => {
+  router.get('/:id/standings-rules', organisingTeam, asyncHandler(async (req, res) => {
     const championshipId = req.params.id;
     const [rules, draws] = await Promise.all([
       prisma.standings_rules.findMany({ where: { championship_id: championshipId } }),

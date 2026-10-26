@@ -11,6 +11,7 @@ import { env } from '../../config/env.js';
 import { sendInvitationEmail } from '../comms/email.js';
 import { notify } from '@semp/notifications/server/notify.js';
 import { equalsIgnoreCase } from '../../shared/exact-ci.js';
+import { assertMayGrantSports } from '../championships/organiser-scope.js';
 
 // Invite a person by mobile to a role (org member / co-organiser / official). When
 // they sign in with that number the invite is auto-applied (see the service).
@@ -19,11 +20,17 @@ export function makeUserInvitationsRouter(prisma: Prisma): Router {
   const guards = makeGuards(prisma);
 
   // The actor must manage the invitation's target: owner/admin of the org, or
-  // organiser of the championship.
-  async function assertManagesTarget(userId: string, isSuper: boolean, targetType: string, targetId: string) {
+  // organiser of the championship. A sport organiser counts for officials (they
+  // assign officials to their sport's matches) and for organisers within their own
+  // sports - the second is judged on the invite's sport list by assertMayGrantSports.
+  async function assertManagesTarget(userId: string, isSuper: boolean, targetType: string, targetId: string, sportIds: string[] = []) {
     if (isSuper) return;
     if (targetType === 'org_member') {
       if (await guards.orgRole(userId, targetId, ['owner', 'admin'])) return;
+    } else if (targetType === 'championship_organiser') {
+      return assertMayGrantSports(prisma, guards, { id: userId }, targetId, sportIds, { newScope: false });
+    } else if (targetType === 'championship_official') {
+      if (await guards.eventScope(userId, targetId)) return;
     } else if (await guards.managesChampionship(userId, targetId)) {
       return;
     }
@@ -35,7 +42,12 @@ export function makeUserInvitationsRouter(prisma: Prisma): Router {
     const { mobile, email, target_type, target_id, role } = req.body as {
       mobile?: string; email?: string; target_type: string; target_id: string; role?: string;
     };
-    await assertManagesTarget(actor.id, actor.isSuperAdmin, target_type, target_id);
+    const sportIds = target_type === 'championship_organiser' ? [...new Set((req.body.sport_ids as string[] | undefined) ?? [])] : [];
+    if (target_type === 'championship_organiser') {
+      await assertMayGrantSports(prisma, guards, actor, target_id, sportIds);
+    } else {
+      await assertManagesTarget(actor.id, actor.isSuperAdmin, target_type, target_id);
+    }
 
     const normalized = mobile ? last10(mobile) : null;
     if (mobile && (normalized?.length ?? 0) < 10) throw new BusinessRuleError('Enter a valid 10-digit mobile number');
@@ -61,6 +73,7 @@ export function makeUserInvitationsRouter(prisma: Prisma): Router {
         target_type,
         target_id,
         role: role ?? null,
+        sport_ids: sportIds,
         invited_by: actor.id,
         status: 'pending',
         token_hash: issued?.token_hash ?? null,
@@ -90,7 +103,13 @@ export function makeUserInvitationsRouter(prisma: Prisma): Router {
     const target_type = req.query.target_type as string | undefined;
     const target_id = req.query.target_id as string | undefined;
     if (!target_type || !target_id) { res.json([]); return; }
-    await assertManagesTarget(actor.id, actor.isSuperAdmin, target_type, target_id);
+    // Reading the pending list is open to the whole organising team; acting on an
+    // invite (create, revoke) is judged on its sports.
+    if (target_type === 'championship_organiser' && !actor.isSuperAdmin) {
+      if (!(await guards.eventScope(actor.id, target_id))) throw new ForbiddenError('You do not manage this target');
+    } else {
+      await assertManagesTarget(actor.id, actor.isSuperAdmin, target_type, target_id);
+    }
     const rows = await prisma.user_invitations.findMany({
       where: { target_type, target_id, status: 'pending' },
       orderBy: { created_at: 'desc' },
@@ -102,7 +121,7 @@ export function makeUserInvitationsRouter(prisma: Prisma): Router {
     const actor = req.user!;
     const inv = await prisma.user_invitations.findUnique({ where: { id: req.params.id } });
     if (!inv) throw new NotFoundError('Invitation');
-    await assertManagesTarget(actor.id, actor.isSuperAdmin, inv.target_type, inv.target_id);
+    await assertManagesTarget(actor.id, actor.isSuperAdmin, inv.target_type, inv.target_id, inv.sport_ids);
     await prisma.user_invitations.update({ where: { id: inv.id }, data: { status: 'revoked', revoked_at: new Date(), responded_at: new Date() } });
     res.json({ ok: true });
   }));
@@ -187,7 +206,7 @@ export function makePublicInviteRouter(prisma: Prisma): Router {
   router.get('/invites/:token', asyncHandler(async (req, res) => {
     const inv = await prisma.user_invitations.findFirst({
       where: { token_hash: hashInviteToken(req.params.token) },
-      select: { id: true, target_type: true, target_id: true, role: true, status: true, expires_at: true, invited_by: true },
+      select: { id: true, target_type: true, target_id: true, role: true, status: true, expires_at: true, invited_by: true, sport_ids: true },
     });
     // One answer for missing, spent and expired alike - a distinct "already accepted"
     // would confirm to a guesser that the token was real.

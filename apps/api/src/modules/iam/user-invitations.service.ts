@@ -1,5 +1,6 @@
 import type { Prisma } from '../../infra/prisma.js';
 import { vouchedBy } from './member-removal.service.js';
+import { mergeSportScope } from '../championships/organiser-scope.js';
 
 // Normalize a free-form mobile to its last 10 digits (consistent with the
 // championship_invitations matching) so lookups are an indexed exact match.
@@ -90,6 +91,8 @@ export interface ApplicableInvitation {
   target_id: string;
   role: string | null;
   invited_by: string;
+  /** championship_organiser: the sports the invite limits them to; empty = all. */
+  sport_ids?: string[];
 }
 
 /**
@@ -126,10 +129,16 @@ export async function applyInvitation(
     // Leave it pending rather than half-applying: the role is seed data, and an
     // invitation marked accepted that granted nothing is worse than one still waiting.
     if (!organiserRole) throw new Error('Organiser role is not configured');
+    // The invite's sport list becomes the row's; joining an existing row widens it
+    // and never narrows it (mergeSportScope).
+    const existing = await prisma.user_championship_roles.findUnique({
+      where: { user_id_championship_id_role_id: { user_id: userId, championship_id: inv.target_id, role_id: organiserRole.id } },
+      select: { sport_ids: true },
+    });
     await prisma.user_championship_roles.upsert({
       where: { user_id_championship_id_role_id: { user_id: userId, championship_id: inv.target_id, role_id: organiserRole.id } },
-      update: {},
-      create: { user_id: userId, championship_id: inv.target_id, role_id: organiserRole.id, assigned_by: inv.invited_by },
+      update: { sport_ids: mergeSportScope(existing?.sport_ids, inv.sport_ids ?? []) },
+      create: { user_id: userId, championship_id: inv.target_id, role_id: organiserRole.id, assigned_by: inv.invited_by, sport_ids: inv.sport_ids ?? [] },
     });
     return;
   }

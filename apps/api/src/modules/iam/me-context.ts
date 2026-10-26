@@ -1,6 +1,6 @@
 import type { Prisma } from '../../infra/prisma.js';
 import { applyUserInvitations } from './user-invitations.service.js';
-import { managedChampionshipIds } from '../championships/manage-access.js';
+import { managedChampionshipIds, sportScopedChampionships } from '../championships/manage-access.js';
 
 // Assembles the full authentication context the web app needs to render the
 // unified shell and decide what the user can act on:
@@ -74,6 +74,7 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
   // team entries for it drop out, so it leaves their workspace switcher and My Game.
   const managedIds = await managedChampionshipIds(prisma, user.id);
   const managed = new Set(managedIds);
+  const sportScoped = await sportScopedChampionships(prisma, user.id, managedIds);
   const referenced = [...new Set([
     ...championshipRoleRows.map((r) => r.championship_id),
     ...officialRows.map((o) => o.championship_id),
@@ -110,6 +111,9 @@ export async function buildAuthContext(prisma: Prisma, user: any) {
     // - an institution's owner manages the events it hosts without holding an
     // Organiser row on any of them.
     managed_championship_ids: managedIds,
+    // Events this person organises for SOME sports only: they get the organiser's
+    // workspace to view, and may act only where a sport id here matches.
+    sport_organiser_scopes: sportScoped.filter((s) => visible(s.championship_id)),
     // What this person was explicitly GRANTED per organisation, as opposed to what
     // their membership implies. The shell unions the two: a Sports Admin grant has
     // to widen the nav, and losing it must not silently remove the member's own

@@ -38,7 +38,16 @@ export interface EventDetail {
     scope_unit: { id: string; name: string } | null;
   };
 }
-interface EventCtx { championship: EventDetail; eventId: string; canManage: boolean }
+interface EventCtx {
+  championship: EventDetail;
+  eventId: string;
+  /** Runs the WHOLE event - settings, approvals, venues. A sport organiser never does. */
+  canManage: boolean;
+  /** On the organising team at all, whether for every sport or some. */
+  organises: boolean;
+  /** May act on this catalogue sport: an overall organiser, or its sport organiser. */
+  canManageSport: (sportId: string | null | undefined) => boolean;
+}
 export const useEvent = () => useOutletContext<EventCtx>();
 
 // The legal "next" status + button label for the go-live flow.
@@ -52,8 +61,10 @@ const NEXT_STATUS: Record<string, { to: string; label: string } | null> = {
 export function EventLayout() {
   const { eventId } = useParams();
   const { pathname, state } = useLocation();
-  const { canManageChampionship } = usePermissions();
+  const { canManageChampionship, organiserScope, canManageSport } = usePermissions();
   const canManage = canManageChampionship(eventId);
+  const organises = !!organiserScope(eventId);
+  const manageSport = (sportId: string | null | undefined) => canManageSport(eventId, sportId);
   const ws = useWorkspace();
   const roleCodes = ws.contexts.find((c) => c.id === eventId)?.roleCodes ?? [];
   const { data: championship, isLoading, error } = useApi<EventDetail>(`/championships/${eventId}`);
@@ -208,7 +219,7 @@ export function EventLayout() {
         </div>
       )}
 
-      <Outlet context={{ championship, eventId: eventId!, canManage } satisfies EventCtx} />
+      <Outlet context={{ championship, eventId: eventId!, canManage, organises, canManageSport: manageSport } satisfies EventCtx} />
     </div>
   );
 }

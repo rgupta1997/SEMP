@@ -45,6 +45,16 @@ export interface PermissionScope {
    * call site narrows by naming the unit; until it does, behaviour is what it was.
    */
   orgUnitId?: string | null;
+  /**
+   * The sport the question is ABOUT, inside a championship.
+   *
+   * An event role may be limited to some sports (`user_championship_roles.sport_ids`,
+   * empty = all). The default is the OPPOSITE of orgUnitId's, deliberately: a
+   * sport-limited row counts only when the caller names one of its sports. Leaving
+   * it out asks the event-wide question - settings, approvals, venues - and a
+   * Football organiser must not answer yes to that.
+   */
+  sportId?: string | null;
 }
 
 export interface CanContext {
@@ -122,9 +132,12 @@ async function grantedPermissions(db: Db, ctx: CanContext): Promise<Set<string>>
   if (scope?.championshipId) {
     const rows = await db.user_championship_roles.findMany({
       where: { user_id: user.id, championship_id: scope.championshipId },
-      select: { role_id: true },
+      select: { role_id: true, sport_ids: true },
     });
-    roleIds.push(...rows.map((r) => r.role_id));
+    const wantedSport = scope.sportId ?? null;
+    roleIds.push(...rows
+      .filter((r) => !r.sport_ids?.length || (!!wantedSport && r.sport_ids.includes(wantedSport)))
+      .map((r) => r.role_id));
   }
 
   if (roleIds.length === 0 && roleCodes.length === 0) return new Set();

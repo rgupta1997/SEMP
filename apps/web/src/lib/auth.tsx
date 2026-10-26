@@ -37,6 +37,8 @@ export interface AuthContext {
    * second route is not visible from `championship_roles`.
    */
   managed_championship_ids: string[];
+  /** Events this person organises for some sports only (catalogue sport ids). */
+  sport_organiser_scopes?: Array<{ championship_id: string; sport_ids: string[] }>;
   championship_roles: ChampionshipRole[];
   memberships: Membership[];
 }

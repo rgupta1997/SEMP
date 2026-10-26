@@ -103,6 +103,9 @@ export function makeEventsRouter(prisma: Prisma): Router {
   const guards = makeGuards(prisma);
   // organiser of THIS championship (or super) - for mutations on /:id and its children.
   const ownChampionship = guards.championshipManager(async (req) => req.params.id);
+  // The whole organising team, sport organisers included - reads, and the officials
+  // pool (a sport organiser assigns officials to their sport's matches).
+  const organisingTeam = guards.championshipViewer(async (req) => req.params.id);
 
   // Private championships are visible only to people already involved: any
   // championship role (organiser/official), active officiating, playing on an
@@ -512,7 +515,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
 
   // What saving would capture, so the "save as template" prompt can show the organiser
   // what they are about to keep before they name it.
-  router.get('/:id/template-shape', ownChampionship, asyncHandler(async (req, res) => {
+  router.get('/:id/template-shape', organisingTeam, asyncHandler(async (req, res) => {
     res.json(await captureShape(prisma, req.params.id));
   }));
 
@@ -820,7 +823,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
   }));
 
   // Assign official to championship
-  router.post('/:id/officials', ownChampionship, asyncHandler(async (req, res) => {
+  router.post('/:id/officials', organisingTeam, asyncHandler(async (req, res) => {
     const { user_id, notes } = req.body;
     if (!user_id) throw new NotFoundError('user_id required');
     
@@ -847,7 +850,7 @@ export function makeEventsRouter(prisma: Prisma): Router {
 
   // Bulk-assign several officials in one request (multi-select picker). Upserts each
   // (championship, user): a previously-removed official is reactivated. One round-trip.
-  router.post('/:id/officials/bulk', ownChampionship, validateBody(bulkAssignOfficialsSchema), asyncHandler(async (req, res) => {
+  router.post('/:id/officials/bulk', organisingTeam, validateBody(bulkAssignOfficialsSchema), asyncHandler(async (req, res) => {
     const { user_ids, notes } = req.body as { user_ids: string[]; notes?: string };
     const championshipId = req.params.id;
     const rows = await prisma.$transaction(

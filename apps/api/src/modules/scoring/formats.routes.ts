@@ -59,8 +59,8 @@ const drawFormatSchema = z.object({
 export function makeScoringFormatsRouter(prisma: Prisma): Router {
   const router = Router();
   const guards = makeGuards(prisma);
-  const drawOrganiser = guards.championshipManager(async (req: Request) =>
-    guards.resolvers.championshipOfTournamentDiscipline(req.params.id));
+  const drawOrganiser = guards.sportManager(async (req: Request) =>
+    guards.resolvers.sportOfTournamentDiscipline(req.params.id));
 
   /** The host org of the championship that owns this draw, for shelf scoping. */
   const hostOrgOfDraw = async (tournamentDisciplineId: string): Promise<string | null> => {

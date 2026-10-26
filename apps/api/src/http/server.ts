@@ -176,9 +176,20 @@ export function buildApp(prisma: Prisma) {
   // an organiser's custom discipline is offered only in its own event.
   const eventOfDiscipline = async (id: string) =>
     (await prisma.disciplines.findUnique({ where: { id }, select: { championship_id: true } }))?.championship_id ?? null;
-  const eventManager = guards.championshipCrudGuard({
-    body: async (req) => req.body?.championship_id,
-    byId: eventOfDiscipline,
+  // An event's own discipline belongs to one sport, so that sport's organiser may
+  // add and edit it.
+  const disciplineOfEvent = async (id: string) => {
+    const d = await prisma.disciplines.findUnique({ where: { id }, select: { championship_id: true, sport_id: true } });
+    return d?.championship_id ? { championshipId: d.championship_id, sportId: d.sport_id } : null;
+  };
+  const eventManager = guards.sportCrudGuard({
+    body: async (req) => {
+      const current = req.params.id ? await disciplineOfEvent(req.params.id) : null;
+      const championshipId = req.body?.championship_id ?? current?.championshipId;
+      const sportId = req.body?.sport_id ?? current?.sportId;
+      return championshipId && sportId ? { championshipId, sportId } : null;
+    },
+    byId: disciplineOfEvent,
   });
   // The catalogue stays super-admin only; an event's own discipline is its organisers'.
   const disciplineCreateGuard: RequestHandler = (req, res, next) =>
@@ -267,7 +278,19 @@ export function buildApp(prisma: Prisma) {
   api.use('/tournament-sports', makeCrudRouter(prisma.tournament_sports, {
     name: 'Tournament sport', createSchema: createTournamentSportSchema, updateSchema: updateTournamentSportSchema,
     listFilters: ['tournament_id', 'sport_id'], orderBy: { display_order: 'asc' },
-    writeGuards: [guards.championshipCrudGuard({ body: async (req) => guards.resolvers.championshipOfTournament(req.body?.tournament_id), byId: guards.resolvers.championshipOfTournamentSport })],
+    // Sport-aware: a sport organiser adds and edits their own sports here. The body
+    // names where the row is (or is going): its tournament and its sport, each
+    // defaulting to the row's current one on an edit.
+    writeGuards: [guards.sportCrudGuard({
+      body: async (req) => {
+        const current = req.params.id ? await prisma.tournament_sports.findUnique({ where: { id: req.params.id }, select: { tournament_id: true, sport_id: true } }) : null;
+        const tournamentId = req.body?.tournament_id ?? current?.tournament_id;
+        const sportId = req.body?.sport_id ?? current?.sport_id;
+        const championshipId = await guards.resolvers.championshipOfTournament(tournamentId);
+        return championshipId && sportId ? { championshipId, sportId } : null;
+      },
+      byId: guards.resolvers.sportOfTournamentSport,
+    })],
     beforeDelete: async (id) => {
       const disciplines = await prisma.tournament_disciplines.findMany({ where: { tournament_sport_id: id }, select: { id: true } });
       await clearDisciplineRefs(disciplines.map((d) => d.id));
@@ -279,7 +302,7 @@ export function buildApp(prisma: Prisma) {
     listFilters: ['tournament_sport_id', 'discipline_id'], orderBy: { display_order: 'asc' },
     include: { disciplines: true }, // so the UI can show each discipline's own name
 
-    writeGuards: [guards.championshipCrudGuard({ body: async (req) => guards.resolvers.championshipOfTournamentSport(req.body?.tournament_sport_id), byId: guards.resolvers.championshipOfTournamentDiscipline })],
+    writeGuards: [guards.sportCrudGuard({ body: async (req) => guards.resolvers.sportOfTournamentSport(req.body?.tournament_sport_id), byId: guards.resolvers.sportOfTournamentDiscipline })],
     beforeDelete: async (id) => { await clearDisciplineRefs([id]); },
   }));
 

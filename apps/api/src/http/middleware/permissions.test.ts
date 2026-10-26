@@ -19,6 +19,8 @@ const OWNER: User = { id: 's1', isSuperAdmin: false, organizationId: 'org-a' };
 // permission list.
 function fakePrisma(over: {
   organiserChampionshipIds?: string[]; organiserUserId?: string;
+  /** The Organiser row's sport list - empty (the default) is the overall organiser. */
+  organiserSportIds?: string[];
   orgAdmins?: string[];
   /** The institution hosting every championship this fake is asked about. */
   hostOrg?: string | null;
@@ -41,6 +43,10 @@ function fakePrisma(over: {
       // moves it on its own Roles & Permissions screen.
       findMany: async (args: any) => {
         const where = JSON.stringify(args?.where ?? {});
+        // The platform Organiser row, which grants event.manage in production.
+        if (where.includes('role-organiser')) {
+          return [{ code: 'organiser', organization_id: null, permission_ids: ['event.manage', 'fixture.score'] }];
+        }
         // A role an institution defined itself, granted on the event. It has no code,
         // so it is resolved by id and its stored permissions are what it grants.
         if (where.includes('role-custom-event')) {
@@ -55,15 +61,22 @@ function fakePrisma(over: {
     user_championship_roles: {
       findFirst: async (args: any) =>
         (over.organiserChampionshipIds ?? []).includes(args.where.championship_id) && args.where.user_id === over.organiserUserId
-          ? { id: 'uer' } : null,
+          ? { id: 'uer', sport_ids: over.organiserSportIds ?? [] } : null,
       // `managesChampionship` now also asks the ENGINE whether any event role this
       // person holds on the event grants `event.manage` - which is what lets an
       // institution's own event role run an event. The engine reads the grants
       // through findMany, so the fake has to answer it.
-      findMany: async (args: any) =>
-        (over.eventRoleChampionshipIds ?? []).includes(args.where.championship_id)
+      // The Organiser row itself is returned too, sport list included, so the engine
+      // sees what it would in production: a sport-limited row it must not count.
+      findMany: async (args: any) => [
+        // organiserRow() asks for Organiser rows only (where.roles); the engine asks for all.
+        ...(!args.where.roles && (over.eventRoleChampionshipIds ?? []).includes(args.where.championship_id)
           && args.where.user_id === over.eventRoleUserId
-          ? [{ role_id: 'role-custom-event' }] : [],
+          ? [{ role_id: 'role-custom-event', sport_ids: [] }] : []),
+        ...((over.organiserChampionshipIds ?? []).includes(args.where.championship_id)
+          && args.where.user_id === over.organiserUserId
+          ? [{ role_id: 'role-organiser', sport_ids: over.organiserSportIds ?? [] }] : []),
+      ],
     },
     organization_members: {
       findFirst: async (args: any) =>
@@ -207,7 +220,7 @@ describe('championshipManager - a role the institution defined itself', () => {
 });
 
 describe('fixtureScorer', () => {
-  const fixture = { official_id: 'off1', tournament_disciplines: { tournament_sports: { tournaments: { championship_id: 'c1' } } } };
+  const fixture = { official_id: 'off1', tournament_disciplines: { tournament_sports: { sport_id: 'football', tournaments: { championship_id: 'c1' } } } };
   it('allows the assigned official', async () => {
     const g = makeGuards(fakePrisma({ fixture }));
     const official: User = { id: 'off1', isSuperAdmin: false, organizationId: null };
@@ -227,5 +240,56 @@ describe('fixtureScorer', () => {
     const r = await run(g.fixtureScorer, other, { params: { id: 'f1' } });
     expect(r.ok).toBe(false);
     expect(r.status).toBe(403);
+  });
+});
+
+// ---- sport-limited organisers ------------------------------------------
+//
+// An Organiser row with sport_ids runs those sports and nothing event-wide. The
+// event-wide guards must refuse them however the engine is asked; the sport-aware
+// ones must let them in for their sports only.
+describe('sport-limited organiser', () => {
+  const fixture = { official_id: null, tournament_disciplines: { tournament_sports: { sport_id: 'football', tournaments: { championship_id: 'c1' } } } };
+  const footballOrganiser = (extra: any = {}) => fakePrisma({
+    organiserChampionshipIds: ['c1'], organiserUserId: 'org1', organiserSportIds: ['football'], ...extra,
+  });
+
+  it('is refused by the event-wide guard', async () => {
+    const g = makeGuards(footballOrganiser());
+    expect((await run(g.championshipManager(async () => 'c1'), ORGANISER)).ok).toBe(false);
+    expect(await g.managesChampionship('org1', 'c1')).toBe(false);
+  });
+  it('is let into the organiser read screens', async () => {
+    const g = makeGuards(footballOrganiser());
+    expect((await run(g.championshipViewer(async () => 'c1'), ORGANISER)).ok).toBe(true);
+  });
+  it('acts on its own sport', async () => {
+    const g = makeGuards(footballOrganiser());
+    expect((await run(g.sportManager(async () => ({ championshipId: 'c1', sportId: 'football' })), ORGANISER)).ok).toBe(true);
+  });
+  it('is refused on another sport', async () => {
+    const g = makeGuards(footballOrganiser());
+    expect((await run(g.sportManager(async () => ({ championshipId: 'c1', sportId: 'cricket' })), ORGANISER)).ok).toBe(false);
+  });
+  it('must hold both ends of a move', async () => {
+    const g = makeGuards(footballOrganiser());
+    const move = g.sportManager(async () => [
+      { championshipId: 'c1', sportId: 'football' },
+      { championshipId: 'c1', sportId: 'cricket' },
+    ]);
+    expect((await run(move, ORGANISER)).ok).toBe(false);
+  });
+  it('scores its own sport and not another', async () => {
+    expect((await run(makeGuards(footballOrganiser({ fixture })).fixtureScorer, ORGANISER, { params: { id: 'f1' } })).ok).toBe(true);
+    const cricket = { ...fixture, tournament_disciplines: { tournament_sports: { sport_id: 'cricket', tournaments: { championship_id: 'c1' } } } };
+    expect((await run(makeGuards(footballOrganiser({ fixture: cricket })).fixtureScorer, ORGANISER, { params: { id: 'f1' } })).ok).toBe(false);
+  });
+  it('an overall organiser acts on every sport', async () => {
+    const g = makeGuards(fakePrisma({ organiserChampionshipIds: ['c1'], organiserUserId: 'org1' }));
+    expect((await run(g.sportManager(async () => ({ championshipId: 'c1', sportId: 'cricket' })), ORGANISER)).ok).toBe(true);
+    expect(await g.eventScope('org1', 'c1')).toBe('all');
+  });
+  it('reports its sports as its scope', async () => {
+    expect(await makeGuards(footballOrganiser()).eventScope('org1', 'c1')).toEqual(['football']);
   });
 });

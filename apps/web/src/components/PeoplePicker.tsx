@@ -22,7 +22,7 @@ export function PeoplePicker({ title, subtitle, excludeUserIds, assignedUserIds,
   excludeUserIds?: Set<string>;
   assignedUserIds?: Set<string>;
   assignedLabel?: string;
-  invite: { target_type: 'org_member' | 'championship_organiser' | 'championship_official'; target_id: string; role?: string };
+  invite: { target_type: 'org_member' | 'championship_organiser' | 'championship_official'; target_id: string; role?: string; sport_ids?: string[] };
   roleControl?: ReactNode;
   invalidateKeys?: (string | null)[];
   onAssignUsers: (userIds: string[]) => Promise<void>;
@@ -88,7 +88,7 @@ export function PeoplePicker({ title, subtitle, excludeUserIds, assignedUserIds,
   const sendInvite = async () => {
     setBusy(true);
     try {
-      await api('POST', '/user-invitations', { mobile: search.trim(), target_type: invite.target_type, target_id: invite.target_id, role: invite.role });
+      await api('POST', '/user-invitations', { mobile: search.trim(), target_type: invite.target_type, target_id: invite.target_id, role: invite.role, sport_ids: invite.sport_ids });
       setInvited((l) => [...l, qDigits.slice(-10)]);
       setSearch('');
       refresh();

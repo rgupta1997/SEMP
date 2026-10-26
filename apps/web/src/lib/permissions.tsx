@@ -79,6 +79,20 @@ export function usePermissions() {
   // Per-entity checks (preferred for new code).
   const organisesChampionship = (id?: string | null) => isSuper || (!!id && managedIds.includes(id));
   const canManageChampionship = (id?: string | null) => (id ? organisesChampionship(id) : isSuper || organisesAny);
+  // Sport organisers. The two above stay the EVENT-WIDE answer, which a sport
+  // organiser never gets; these say which sports they act on. Mirrors eventScope()
+  // in the API's permissions.ts.
+  const sportScopes = ctx?.sport_organiser_scopes ?? [];
+  /** 'all' for an overall organiser, the sport ids for a sport organiser, else null. */
+  const organiserScope = (id?: string | null): 'all' | string[] | null => {
+    if (organisesChampionship(id)) return 'all';
+    return sportScopes.find((s) => s.championship_id === id)?.sport_ids ?? null;
+  };
+  /** May this person act on this sport in this event? */
+  const canManageSport = (id?: string | null, sportId?: string | null): boolean => {
+    const scope = organiserScope(id);
+    return scope === 'all' || (!!scope && !!sportId && scope.includes(sportId));
+  };
   // "Manage this organisation" is `org.manage` - the permission, not the membership
   // string - so a granted Org Admin reaches the same controls a member one does.
   const canManageOrg = (id?: string | null) => hasOrgPermission('org.manage', id);
@@ -134,6 +148,7 @@ export function usePermissions() {
   return {
     can, isSuper, isCaptain, organisesAny, orgAdminAny, isOfficialAny,
     canManageChampionship, canManageOrg, isOrgOwner, organisesChampionship,
+    organiserScope, canManageSport,
     // The engine's own vocabulary, for screens that need a specific permission
     // rather than the coarse shim above.
     hasOrgPermission, orgPermissions,

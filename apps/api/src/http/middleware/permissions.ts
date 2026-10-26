@@ -5,6 +5,7 @@ import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { isCampusAdmin } from '../../modules/iam/campus-admin.js';
 import { ROLE_CODES, roleWhereByCode, type PermissionCode } from '@semp/shared';
 import { hostOrgManages } from '../../modules/championships/manage-access.js';
+import { ANY_ORGANISER_ROLE } from '../../modules/championships/organiser-scope.js';
 import { can } from './can.js';
 
 // Server-side authorization. The client mirrors these rules for UX, but this is
@@ -12,23 +13,24 @@ import { can } from './can.js';
 // championship-scoped (organiser of THIS championship), organization-scoped
 // (an owner/admin member of the org), or platform-wide (super admin).
 export function makeGuards(prisma: Prisma) {
-  let organiserRoleId: string | null | undefined;
-  async function getOrganiserRoleId(): Promise<string | null> {
-    if (organiserRoleId === undefined) {
-      const r = await prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser), select: { id: true } });
-      organiserRoleId = r?.id ?? null;
-    }
-    return organiserRoleId;
+  // The Organiser row itself, sport list included. Empty `sport_ids` is the overall
+  // organiser; a non-empty one limits the row to those catalogue sports.
+  // Any Organiser role counts - the platform row or an institution's own copy - and
+  // an overall row wins over a sport-limited one should somebody hold both.
+  async function organiserRow(userId: string, championshipId: string) {
+    const rows = await prisma.user_championship_roles.findMany({
+      where: { user_id: userId, championship_id: championshipId, roles: ANY_ORGANISER_ROLE },
+      select: { id: true, sport_ids: true },
+    });
+    if (rows.length === 0) return null;
+    return rows.find((r) => r.sport_ids.length === 0)
+      ?? { id: rows[0].id, sport_ids: [...new Set(rows.flatMap((r) => r.sport_ids))] };
   }
 
+  /** An OVERALL Organiser row on this event - a sport-limited one does not count. */
   async function organisesChampionship(userId: string, championshipId: string): Promise<boolean> {
-    const rid = await getOrganiserRoleId();
-    if (!rid) return false;
-    const row = await prisma.user_championship_roles.findFirst({
-      where: { user_id: userId, championship_id: championshipId, role_id: rid },
-      select: { id: true },
-    });
-    return !!row;
+    const row = await organiserRow(userId, championshipId);
+    return !!row && row.sport_ids.length === 0;
   }
 
   // The real question every management guard is asking. Three answers, in the order
@@ -44,10 +46,35 @@ export function makeGuards(prisma: Prisma) {
   // role an institution defined itself could not run an event however it was
   // configured. See manage-access.ts for why (3) is not a shortcut but the normal
   // case for an institution's own event.
+  //
+  // All three answer for the WHOLE event. A sport-limited Organiser row answers none
+  // of them - can() drops it unless a sport is named - so every guard built on this
+  // stays event-wide, and a sport organiser reaches only the routes that were
+  // deliberately made sport-aware (sportManager below). Missing one fails closed.
   async function managesChampionship(userId: string, championshipId: string): Promise<boolean> {
-    if (await organisesChampionship(userId, championshipId)) return true;
-    if (await can(prisma, 'event.manage', { user: { id: userId }, scope: { championshipId } })) return true;
-    return hostOrgManages(prisma, userId, championshipId);
+    return (await eventScope(userId, championshipId)) === 'all';
+  }
+
+  /**
+   * How much of this event the person runs: 'all', only these sports, or nothing.
+   *
+   * The sport list comes from the Organiser row alone; every other route to
+   * authority (an event role granting `event.manage`, the host organisation) is
+   * event-wide by nature.
+   */
+  async function eventScope(userId: string, championshipId: string): Promise<'all' | string[] | null> {
+    const row = await organiserRow(userId, championshipId);
+    if (row && row.sport_ids.length === 0) return 'all';
+    if (await can(prisma, 'event.manage', { user: { id: userId }, scope: { championshipId } })) return 'all';
+    if (await hostOrgManages(prisma, userId, championshipId)) return 'all';
+    return row ? row.sport_ids : null;
+  }
+
+  /** Does this person run this sport in this event - overall, or as its sport organiser? */
+  async function managesSport(userId: string, championshipId: string, sportId: string | null | undefined): Promise<boolean> {
+    const scope = await eventScope(userId, championshipId);
+    if (scope === 'all') return true;
+    return !!scope && !!sportId && scope.includes(sportId);
   }
 
   // Does the user hold one of `roles` in this organization? Replaces the old
@@ -130,10 +157,29 @@ export function makeGuards(prisma: Prisma) {
   const fixtureContext = async (id?: string | null) =>
     id ? prisma.fixtures.findUnique({
       where: { id },
-      select: { official_id: true, tournament_disciplines: { select: { tournament_sports: { select: { tournaments: { select: { championship_id: true } } } } } } },
+      select: { official_id: true, tournament_disciplines: { select: { tournament_sports: { select: { sport_id: true, tournaments: { select: { championship_id: true } } } } } } },
     }) : null;
   const championshipOfFixture = async (id?: string | null) =>
     (await fixtureContext(id))?.tournament_disciplines?.tournament_sports?.tournaments?.championship_id ?? null;
+
+  // ---- sport resolvers: the same walk, keeping the sport it passes through ----
+  type SportContext = { championshipId: string; sportId: string };
+  const sportOfTournamentSport = async (id?: string | null): Promise<SportContext | null> => {
+    const ts = id ? await prisma.tournament_sports.findUnique({
+      where: { id }, select: { sport_id: true, tournaments: { select: { championship_id: true } } },
+    }) : null;
+    return ts ? { championshipId: ts.tournaments.championship_id, sportId: ts.sport_id } : null;
+  };
+  const sportOfTournamentDiscipline = async (id?: string | null): Promise<SportContext | null> => {
+    const td = id ? await prisma.tournament_disciplines.findUnique({
+      where: { id }, select: { tournament_sport_id: true },
+    }) : null;
+    return td ? sportOfTournamentSport(td.tournament_sport_id) : null;
+  };
+  const sportOfFixture = async (id?: string | null): Promise<SportContext | null> => {
+    const ts = (await fixtureContext(id))?.tournament_disciplines?.tournament_sports;
+    return ts ? { championshipId: ts.tournaments.championship_id, sportId: ts.sport_id } : null;
+  };
 
   // ---- guard: super admin OR organiser of the resolved championship ----
   function championshipManager(resolveChampionshipId: (req: Request) => Promise<string | null | undefined>): RequestHandler {
@@ -153,6 +199,54 @@ export function makeGuards(prisma: Prisma) {
     byId: (id: string) => Promise<string | null | undefined>;
   }): RequestHandler {
     return championshipManager((req) => (req.method === 'POST' ? resolvers.body(req) : resolvers.byId(req.params.id)));
+  }
+
+  // ---- guard: super admin OR whoever runs EVERY sport the request touches ----
+  //
+  // The sport-aware counterpart of championshipManager. Returning several contexts
+  // covers an edit that MOVES something (a fixture to another draw, a draw to
+  // another sport): the organiser must hold both ends. Contexts from different
+  // championships are each judged on their own.
+  function sportManager(resolve: (req: Request) => Promise<Array<SportContext | null | undefined> | SportContext | null | undefined>): RequestHandler {
+    return asyncHandler(async (req, _res, next) => {
+      const user = req.user!;
+      if (user.isSuperAdmin) return next();
+      const resolved = await resolve(req);
+      const contexts = (Array.isArray(resolved) ? resolved : [resolved]).filter(Boolean) as SportContext[];
+      if (contexts.length === 0) throw new NotFoundError('Championship');
+      for (const c of contexts) {
+        if (!(await managesSport(user.id, c.championshipId, c.sportId))) {
+          throw new ForbiddenError('You do not manage this sport in this championship');
+        }
+      }
+      next();
+    });
+  }
+
+  // Generic CRUD, sport-aware. An update or delete is judged on the row as it is,
+  // plus - when the body would move it - on where it is going.
+  function sportCrudGuard(resolvers: {
+    body: (req: Request) => Promise<SportContext | null | undefined>;
+    byId: (id: string) => Promise<SportContext | null | undefined>;
+  }): RequestHandler {
+    return sportManager(async (req) => (req.method === 'POST'
+      ? resolvers.body(req)
+      : [await resolvers.byId(req.params.id), req.method === 'DELETE' ? null : await resolvers.body(req)]));
+  }
+
+  // ---- guard: super admin OR anyone on the organising team, whatever their sports ----
+  //
+  // For the organiser's READ screens. A sport organiser views the whole event; only
+  // acting on it is limited to their sports.
+  function championshipViewer(resolveChampionshipId: (req: Request) => Promise<string | null | undefined>): RequestHandler {
+    return asyncHandler(async (req, _res, next) => {
+      const user = req.user!;
+      if (user.isSuperAdmin) return next();
+      const championshipId = await resolveChampionshipId(req);
+      if (!championshipId) throw new NotFoundError('Championship');
+      if (!(await eventScope(user.id, championshipId))) throw new ForbiddenError('You do not manage this championship');
+      next();
+    });
   }
 
   // ---- guard: managing a specific team - an owner/admin of the owning
@@ -267,8 +361,8 @@ export function makeGuards(prisma: Prisma) {
     const fx = await fixtureContext(req.params.id);
     if (!fx) throw new NotFoundError('Fixture');
     if (fx.official_id === u.id) return next();
-    const championshipId = fx.tournament_disciplines?.tournament_sports?.tournaments?.championship_id;
-    if (championshipId && (await managesChampionship(u.id, championshipId))) return next();
+    const ts = fx.tournament_disciplines?.tournament_sports;
+    if (ts && (await managesSport(u.id, ts.tournaments.championship_id, ts.sport_id))) return next();
     throw new ForbiddenError('Not authorized to score this fixture');
   });
 
@@ -276,6 +370,9 @@ export function makeGuards(prisma: Prisma) {
     orgPermission,
     championshipManager,
     championshipCrudGuard,
+    championshipViewer,
+    sportManager,
+    sportCrudGuard,
     teamManager,
     teamCreate,
     manageUser,
@@ -283,10 +380,13 @@ export function makeGuards(prisma: Prisma) {
     fixtureScorer,
     organisesChampionship,
     managesChampionship,
+    managesSport,
+    eventScope,
     orgRole,
     resolvers: {
       championshipOfTournament, championshipOfVenue, championshipOfVenueGround,
       championshipOfTournamentSport, championshipOfTournamentDiscipline, championshipOfFixture,
+      sportOfTournamentSport, sportOfTournamentDiscipline, sportOfFixture,
     },
   };
 }

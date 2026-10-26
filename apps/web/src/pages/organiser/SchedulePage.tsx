@@ -1029,7 +1029,7 @@ function buildDays(startISO?: string, endISO?: string): string[] {
 }
 
 export function SchedulePage() {
-  const { eventId, canManage, championship } = useEvent();
+  const { eventId, organises, canManageSport, championship } = useEvent();
   const [topView, setTopView] = useState<'manage' | 'timeline'>('manage');
   // Timeline status filter, driven by clicking the colour legend (empty = show all).
   const [timelineStatus, setTimelineStatus] = useState('');
@@ -1040,6 +1040,10 @@ export function SchedulePage() {
   // All draws for the championship in one request - feeds the timeline rows and each
   // manage-view SportBlock (replaces one disciplines query per sport).
   const { data: allDraws = [] } = useApi<any[]>(`/championships/${eventId}/draws`);
+  // A sport organiser sees every sport here but schedules only their own: each draw
+  // (a timeline row) is judged on its sport.
+  const sportOfDraw = useMemo(() => new Map(allDraws.map((d) => [d.id, d.tournament_sports?.sport_id as string | undefined])), [allDraws]);
+  const canManageDraw = (drawId: string) => canManageSport(sportOfDraw.get(drawId));
   const place = useApiMutation(
     ({ fixtureId, whenIso, durationMinutes }: { fixtureId: string; whenIso: string; durationMinutes: number }) =>
       api('PATCH', `/fixtures/${fixtureId}`, { scheduled_at: whenIso, duration_minutes: durationMinutes }),
@@ -1176,7 +1180,8 @@ export function SchedulePage() {
               rows={timelineRows}
               fixtures={timelineStatus ? allFixtures.filter((f: any) => f.status === timelineStatus) : allFixtures}
               days={days}
-              canManage={canManage}
+              canManage={organises}
+              canManageRow={canManageDraw}
               placing={place.isPending || unschedule.isPending}
               onPlace={placeMatch}
               onUnschedule={unscheduleMatch}
@@ -1192,7 +1197,7 @@ export function SchedulePage() {
           action={<Button variant="outline" onClick={() => setTeamFilter('')}>Show all teams</Button>} />
       ) : (
         <div className="space-y-6">
-          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} teamsLoading={teamsLoading} fixturesPath={fixturesPath} teamsPath={teamsPath} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} teamShort={teamShort} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManage} teamFilter={teamFilter} />)}
+          {visibleTsports.map((ts) => <SportBlock key={ts.id} ts={ts} draws={allDraws.filter((d) => d.tournament_sport_id === ts.id)} allFixtures={allFixtures} fixturesLoading={fixturesLoading} teamsLoading={teamsLoading} fixturesPath={fixturesPath} teamsPath={teamsPath} sportName={sportName(ts.sport_id)} formatName={formatName} teamName={teamName} teamShort={teamShort} teamOrg={teamOrg} grounds={grounds} venues={venues} officials={officials} canManage={canManageSport(ts.sport_id)} teamFilter={teamFilter} />)}
         </div>
       )}
     </div>

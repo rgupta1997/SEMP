@@ -1,6 +1,7 @@
 import { ROLE_CODES, roleWhereByCode } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { can } from '../../http/middleware/can.js';
+import { ANY_ORGANISER_ROLE } from './organiser-scope.js';
 
 // Who manages a championship.
 //
@@ -48,7 +49,9 @@ export async function managedChampionshipIds(prisma: Prisma, userId: string): Pr
     prisma.user_championship_roles.findMany({
       // By code, with the same null-code name fallback every other organiser
       // lookup uses - matching the display name is how renaming a role revokes it.
-      where: { user_id: userId, roles: roleWhereByCode(ROLE_CODES.organiser) },
+      // Overall organisers only: a row limited to some sports manages THOSE, which
+      // sportScopedChampionships() reports separately.
+      where: { user_id: userId, roles: ANY_ORGANISER_ROLE, sport_ids: { isEmpty: true } },
       select: { championship_id: true },
     }),
     prisma.organization_members.findMany({
@@ -78,4 +81,21 @@ export async function managedChampionshipIds(prisma: Prisma, userId: string): Pr
     for (const c of hosted) ids.add(c.id);
   }
   return [...ids];
+}
+
+/**
+ * Championships where this person organises only some sports, with those sports.
+ *
+ * Leaves out any event they already manage outright - by an overall Organiser row
+ * or through the host organisation - since the wider answer wins.
+ */
+export async function sportScopedChampionships(
+  prisma: Prisma, userId: string, managedIds: string[],
+): Promise<Array<{ championship_id: string; sport_ids: string[] }>> {
+  const rows = await prisma.user_championship_roles.findMany({
+    where: { user_id: userId, roles: ANY_ORGANISER_ROLE, NOT: { sport_ids: { isEmpty: true } } },
+    select: { championship_id: true, sport_ids: true },
+  });
+  const managed = new Set(managedIds);
+  return rows.filter((r) => !managed.has(r.championship_id));
 }

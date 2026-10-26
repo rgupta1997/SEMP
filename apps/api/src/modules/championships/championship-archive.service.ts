@@ -3,6 +3,7 @@ import { ARCHIVE_RETENTION_DAYS, ARCHIVED_READ_ONLY_MESSAGE, ROLE_CODES, roleWhe
 import type { Db, Prisma } from '../../infra/prisma.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { hostOrgManages } from './manage-access.js';
+import { ANY_ORGANISER_ROLE } from './organiser-scope.js';
 
 // Removing a championship: archive once it has results, delete only while it has none.
 //
@@ -152,7 +153,8 @@ export function blockArchivedWritesVia(
 /** Organiser on this event, or holds event authority in the organisation hosting it. */
 async function managesChampionship(prisma: Prisma, userId: string, championshipId: string): Promise<boolean> {
   const organiser = await prisma.user_championship_roles.findFirst({
-    where: { user_id: userId, championship_id: championshipId, roles: roleWhereByCode(ROLE_CODES.organiser) },
+    // Overall organisers only - archiving is not one sport's decision.
+    where: { user_id: userId, championship_id: championshipId, roles: ANY_ORGANISER_ROLE, sport_ids: { isEmpty: true } },
     select: { id: true },
   });
   return !!organiser || hostOrgManages(prisma, userId, championshipId);

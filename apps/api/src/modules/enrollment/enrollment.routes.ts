@@ -1,12 +1,13 @@
 import { Router } from 'express';
-import { assignRoleSchema, bulkAssignRoleSchema, enrollOrganizationSchema, reviewEnrollmentSchema } from '@semp/shared';
+import { assignRoleSchema, bulkAssignRoleSchema, enrollOrganizationSchema, reviewEnrollmentSchema, updateRoleSportsSchema } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { makeGuards } from '../../http/middleware/permissions.js';
-import { NotFoundError, BusinessRuleError } from '../../shared/errors.js';
+import { NotFoundError, BusinessRuleError, ForbiddenError } from '../../shared/errors.js';
 import { findEntrant } from '../championships/contingent.js';
 import { assertNotArchived } from '../championships/championship-archive.service.js';
+import { ANY_ORGANISER_ROLE, assertMayGrantSports, mergeSportScope } from '../championships/organiser-scope.js';
 import { notifyApplicationReceived, notifyEnrollmentApproved, notifyRegistrationRejected } from './enrollment.notifications.js';
 
 export function makeEnrollmentRouter(prisma: Prisma): Router {
@@ -14,6 +15,11 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
   const guards = makeGuards(prisma);
   // organiser of the championship named in the route param (for the approve queue).
   const eventOrganiser = guards.championshipManager(async (req) => req.params.eventId);
+  // anyone on the organising team, sport-limited included - for the routes that then
+  // judge the request on the sports it names (see organiser-scope.ts).
+  const eventTeamMember = guards.championshipViewer(async (req) => req.params.eventId);
+  const isOrganiserRole = async (roleId: string) =>
+    !!(await prisma.roles.findFirst({ where: { id: roleId, ...ANY_ORGANISER_ROLE }, select: { id: true } }));
   // organiser of the championship that owns this enrollment row (for approve/reject).
   const enrollmentOrganiser = guards.championshipManager(async (req) => {
     const ei = await prisma.championship_organizations.findUnique({ where: { id: req.params.id }, select: { championship_id: true } });
@@ -230,17 +236,52 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
 
   // Bulk-assign one role to several users at once (multi-select picker). Idempotent
   // per (user, championship, role) like the single endpoint - one round-trip.
-  router.post('/championships/:eventId/roles/bulk', eventOrganiser, validateBody(bulkAssignRoleSchema), asyncHandler(async (req, res) => {
-    const { user_ids, role_id } = req.body as { user_ids: string[]; role_id: string };
+  router.post('/championships/:eventId/roles/bulk', eventTeamMember, validateBody(bulkAssignRoleSchema), asyncHandler(async (req, res) => {
+    const { user_ids, role_id } = req.body as { user_ids: string[]; role_id: string; sport_ids?: string[] };
     const eventId = req.params.eventId;
+    const organiser = await isOrganiserRole(role_id);
+    // A sport list only means something on an Organiser row.
+    const sportIds = organiser ? [...new Set((req.body.sport_ids as string[] | undefined) ?? [])] : [];
+    if (organiser) {
+      await assertMayGrantSports(prisma, guards, req.user!, eventId, sportIds);
+    } else if (!req.user!.isSuperAdmin && !(await guards.managesChampionship(req.user!.id, eventId))) {
+      throw new ForbiddenError('You do not manage this championship');
+    }
+    const ids = [...new Set(user_ids)];
+    // Re-adding somebody widens their scope and never narrows it (mergeSportScope).
+    const existing = new Map((await prisma.user_championship_roles.findMany({
+      where: { championship_id: eventId, role_id, user_id: { in: ids } },
+      select: { user_id: true, sport_ids: true },
+    })).map((r) => [r.user_id, r.sport_ids]));
     const rows = await prisma.$transaction(
-      [...new Set(user_ids)].map((user_id) => prisma.user_championship_roles.upsert({
+      ids.map((user_id) => prisma.user_championship_roles.upsert({
         where: { user_id_championship_id_role_id: { user_id, championship_id: eventId, role_id } },
-        update: {},
-        create: { championship_id: eventId, user_id, role_id, assigned_by: req.user!.id },
+        update: organiser ? { sport_ids: mergeSportScope(existing.get(user_id), sportIds) } : {},
+        create: { championship_id: eventId, user_id, role_id, assigned_by: req.user!.id, sport_ids: sportIds },
       })),
     );
     res.status(201).json(rows);
+  }));
+
+  // Change which sports an organiser runs. Empty = all sports. A sport organiser may
+  // move somebody only between their own sports, and only somebody who is already
+  // inside them; the championship's default organiser is never narrowed.
+  router.patch('/championships/:eventId/roles/:assignmentId', eventTeamMember, validateBody(updateRoleSportsSchema), asyncHandler(async (req, res) => {
+    const row = await prisma.user_championship_roles.findFirst({
+      where: { id: req.params.assignmentId, championship_id: req.params.eventId },
+    });
+    if (!row) throw new NotFoundError('Assignment');
+    if (!(await isOrganiserRole(row.role_id))) throw new BusinessRuleError('Only an organiser can be limited to sports.');
+    const sportIds = [...new Set(req.body.sport_ids as string[])];
+    await assertMayGrantSports(prisma, guards, req.user!, req.params.eventId, row.sport_ids, { newScope: false });
+    await assertMayGrantSports(prisma, guards, req.user!, req.params.eventId, sportIds);
+    if (sportIds.length > 0 && await isProtectedOrganiser(req.params.eventId, row)) {
+      throw new BusinessRuleError("This person is the championship's default organiser and always runs every sport.");
+    }
+    if (row.user_id === req.user!.id && !req.user!.isSuperAdmin) {
+      throw new BusinessRuleError('Ask another organiser to change your own sports.');
+    }
+    res.json(await prisma.user_championship_roles.update({ where: { id: row.id }, data: { sport_ids: sportIds } }));
   }));
 
   // Can this organiser row be removed from the team? Two people are protected:
@@ -273,11 +314,18 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
   // championship's host organisation (when it has one) keeps access regardless -
   // `managesChampionship` also grants owner/admin members of the host org - so
   // removing every OTHER row here can never lock everyone out.
-  router.delete('/championships/:eventId/roles/:assignmentId', eventOrganiser, asyncHandler(async (req, res) => {
+  router.delete('/championships/:eventId/roles/:assignmentId', eventTeamMember, asyncHandler(async (req, res) => {
     const row = await prisma.user_championship_roles.findFirst({
       where: { id: req.params.assignmentId, championship_id: req.params.eventId },
     });
     if (!row) throw new NotFoundError('Assignment');
+    // A sport organiser removes only organisers inside their own sports; every other
+    // role on the event stays the overall organisers' to take away.
+    if (await isOrganiserRole(row.role_id)) {
+      await assertMayGrantSports(prisma, guards, req.user!, req.params.eventId, row.sport_ids, { newScope: false });
+    } else if (!req.user!.isSuperAdmin && !(await guards.managesChampionship(req.user!.id, req.params.eventId))) {
+      throw new ForbiddenError('You do not manage this championship');
+    }
     if (await isProtectedOrganiser(req.params.eventId, row)) {
       throw new BusinessRuleError("This person is the championship's default organiser and can't be removed from the organising team.");
     }

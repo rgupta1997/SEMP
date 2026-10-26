@@ -581,7 +581,14 @@ export const updateRoleGrantSchema = z.object({
   status: z.enum(ROLE_GRANT_STATUS),
 });
 // Bulk-assign one championship role to several users at once (multi-select picker).
-export const bulkAssignRoleSchema = z.object({ user_ids: z.array(uuid).min(1).max(200), role_id: uuid });
+export const bulkAssignRoleSchema = z.object({
+  user_ids: z.array(uuid).min(1).max(200),
+  role_id: uuid,
+  /** Organiser only: the sports this organiser runs. Empty or absent = all sports. */
+  sport_ids: z.array(uuid).max(100).optional(),
+});
+/** Change which sports an organiser runs. Empty = all sports (the overall organiser). */
+export const updateRoleSportsSchema = z.object({ sport_ids: z.array(uuid).max(100) });
 // Bulk-assign several users as championship officials at once (multi-select picker).
 export const bulkAssignOfficialsSchema = z.object({ user_ids: z.array(uuid).min(1).max(200), notes: z.string().optional() });
 
@@ -619,6 +626,8 @@ export const createUserInvitationSchema = z.object({
   target_type: z.enum(USER_INVITATION_TARGET),
   target_id: uuid,
   role: z.enum(ORGANIZATION_MEMBER_ROLE).optional(),
+  /** championship_organiser only: the sports they will run. Empty or absent = all sports. */
+  sport_ids: z.array(uuid).max(100).optional(),
 }).refine((v) => !!v.mobile || !!v.email, {
   path: ['email'],
   message: 'Give a mobile number or an email address to invite',
