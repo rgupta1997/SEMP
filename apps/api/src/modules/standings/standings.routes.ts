@@ -1,5 +1,8 @@
 import { Router } from 'express';
-import { DEFAULT_STANDINGS_RULE, STANDINGS_AGG_SCOPE, contingentKey, defaultGroupRanking, standingsAdjustmentInputSchema, upsertStandingsRuleSchema, type StandingsAggScope } from '@semp/shared';
+import {
+  DEFAULT_STANDINGS_RULE, DEFAULT_TITLE_PLACING, SPORT_TITLES_SCOPE, STANDINGS_AGG_SCOPE, contingentKey, defaultGroupRanking, sportTitlesSchema,
+  standingsAdjustmentInputSchema, upsertStandingsRuleSchema, type StandingsAggScope,
+} from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
@@ -58,7 +61,7 @@ export function makeStandingsRouter(prisma: Prisma): Router {
         select: {
           format_id: true,
           entry_type: true,
-          disciplines: { select: { id: true, name: true, entry_type: true, sports: { select: { name: true } } } },
+          disciplines: { select: { id: true, name: true, entry_type: true, sports: { select: { id: true, name: true } } } },
           tournament_formats: { select: { id: true, name: true } },
           tournament_sports: { select: { format_id: true, tournament_formats: { select: { id: true, name: true } } } },
         },
@@ -69,7 +72,8 @@ export function makeStandingsRouter(prisma: Prisma): Router {
     // their sport + entry type + format so the editor rows are distinguishable (several
     // sports each have a "Men"/"Mixed" discipline that would otherwise look identical).
     const formats = new Map<string, string>();
-    const disciplines = new Map<string, { name: string; sport: string | null; entry_type: string | null; format: string | null }>();
+    const disciplines = new Map<string, { name: string; sport: string | null; sport_id: string | null; entry_type: string | null; format: string | null }>();
+    const sports = new Map<string, string>();
     const disciplineDefaults = new Map<string, ReturnType<typeof defaultGroupRanking>>();
     for (const d of draws) {
       const fmt = d.tournament_formats ?? d.tournament_sports.tournament_formats;
@@ -78,16 +82,26 @@ export function makeStandingsRouter(prisma: Prisma): Router {
         disciplines.set(d.disciplines.id, {
           name: d.disciplines.name,
           sport: d.disciplines.sports?.name ?? null,
+          sport_id: d.disciplines.sports?.id ?? null,
           entry_type: d.entry_type ?? d.disciplines.entry_type ?? null,
           format: fmt?.name ?? null,
         });
         disciplineDefaults.set(d.disciplines.id, defaultGroupRanking(d.disciplines.sports?.name));
       }
+      if (d.disciplines?.sports) sports.set(d.disciplines.sports.id, d.disciplines.sports.name);
     }
 
     res.json({
       default: DEFAULT_STANDINGS_RULE,
-      rules: rules.map((r) => ({ id: r.id, scope_type: r.scope_type, scope_id: r.scope_id, config: r.config })),
+      rules: rules.filter((r) => r.scope_type !== SPORT_TITLES_SCOPE)
+        .map((r) => ({ id: r.id, scope_type: r.scope_type, scope_id: r.scope_id, config: r.config })),
+      // Each sport's title setup (event sports), saved once per sport; null = never saved.
+      sports: [...sports].map(([id, name]) => {
+        const row = rules.find((r) => r.scope_type === SPORT_TITLES_SCOPE && r.scope_id === id);
+        const parsed = row ? sportTitlesSchema.safeParse(row.config) : null;
+        return { id, name, titles: parsed?.success ? parsed.data : null };
+      }).sort((a, b) => a.name.localeCompare(b.name)),
+      default_title: DEFAULT_TITLE_PLACING,
       formats: [...formats].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
       disciplines: [...disciplines].map(([id, v]) => ({ id, ...v, default_ranking: disciplineDefaults.get(id) }))
         .sort((a, b) => (a.sport ?? '').localeCompare(b.sport ?? '') || a.name.localeCompare(b.name)),
@@ -116,6 +130,35 @@ export function makeStandingsRouter(prisma: Prisma): Router {
     });
     await recomputeStandingsAtomic(prisma, championshipId);
     res.json({ id: row.id, scope_type: row.scope_type, scope_id: row.scope_id, config: row.config });
+  }));
+
+  // Save one sport's title setup (on/off, each event's title, what each title pays), then recompute.
+  router.put('/:id/sport-titles/:sportId', ownChampionship, validateBody(sportTitlesSchema), asyncHandler(async (req, res) => {
+    const championshipId = req.params.id;
+    const sportId = req.params.sportId;
+    const sport = await prisma.tournament_sports.findFirst({
+      where: { sport_id: sportId, tournaments: { championship_id: championshipId } },
+      select: { sports: { select: { name: true } } },
+    });
+    if (!sport) throw new NotFoundError('Sport in this championship');
+    const existing = await prisma.standings_rules.findFirst({
+      where: { championship_id: championshipId, scope_type: SPORT_TITLES_SCOPE, scope_id: sportId },
+      select: { id: true },
+    });
+    const config = req.body;
+    const row = existing
+      ? await prisma.standings_rules.update({ where: { id: existing.id }, data: { config, updated_at: new Date() } })
+      : await prisma.standings_rules.create({ data: { championship_id: championshipId, scope_type: SPORT_TITLES_SCOPE, scope_id: sportId, config } });
+    const summary = !req.body.enabled ? 'off (raw event points)' : Object.entries(req.body.titles as Record<string, { places: number[]; participation: number }>)
+      .map(([name, t]) => `${name} ${t.places.join('/')}, others ${t.participation}`).join('; ') || 'on, default points';
+    await audit(prisma, req, {
+      action: AUDIT_ACTIONS.standingsRuleChanged,
+      championshipId,
+      target: { type: 'standings_rules', id: row.id, label: `${sport.sports?.name ?? 'Sport'} titles` },
+      summary: `Sport titles saved for ${sport.sports?.name ?? 'sport'}: ${summary}`,
+    });
+    await recomputeStandingsAtomic(prisma, championshipId);
+    res.json({ sport_id: sportId, titles: config });
   }));
 
   // Remove an override (reverts that scope to its inherited rule), then recompute.

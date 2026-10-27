@@ -1,8 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Pencil } from 'lucide-react';
 import {
-  DEFAULT_STANDINGS_RULE, EVENT_TITLE_LABEL, EVENT_TITLES, defaultGroupRanking, isRankingSport, groupsForTitle, tiebreakerLabel, titleFromName, titleOfGroups,
-  type EventTitle, type GroupRanking, type StandingsRule, type StandingsScheme,
+  DEFAULT_RANKING_RULE, DEFAULT_STANDINGS_RULE, EVENT_TITLE_LABEL, EVENT_TITLES, defaultGroupRanking, eventTitleIn, isRankingEvent, isRankingFormatName,
+  sportTitles, tiebreakerLabel,
+  titlePlacingFor, type EventTitle, type GroupRanking, type SportTitles, type SportTitlesConfig, type StandingsRule, type StandingsScheme,
+  type TitlePlacing,
 } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
@@ -14,11 +16,11 @@ import { Badge, Button, Card, CardBody, CardHeader, Select, Spinner, toast } fro
 // standings server-side; we refresh all queries so the Standings tab reflects it.
 
 interface RuleRow { id: string; scope_type: 'championship' | 'format' | 'discipline'; scope_id: string | null; config: StandingsRule }
-interface ScopeOption { id: string; name: string; sport?: string | null; entry_type?: string | null; format?: string | null; default_ranking?: GroupRanking }
-interface RulesResponse { default: StandingsRule; rules: RuleRow[]; formats: ScopeOption[]; disciplines: ScopeOption[] }
+interface ScopeOption { id: string; name: string; sport?: string | null; sport_id?: string | null; entry_type?: string | null; format?: string | null; default_ranking?: GroupRanking }
+interface SportOption { id: string; name: string; titles: SportTitlesConfig | null }
+interface RulesResponse { default: StandingsRule; rules: RuleRow[]; formats: ScopeOption[]; disciplines: ScopeOption[]; sports: SportOption[] }
 
 type PlacementRule = Extract<StandingsRule, { scheme: 'placement' }>;
-type RankingRule = Extract<StandingsRule, { scheme: 'ranking' }>;
 
 // What the organiser picks. "both" is a placement rule that also counts match points.
 type Choice = 'placement' | 'both' | 'league_points' | 'custom' | 'ranking' | 'medal';
@@ -73,13 +75,17 @@ const PLACEMENT_LABEL: Record<(typeof PLACEMENT_KEYS)[number], string> = {
 // A format row has no sport, so a format named like "Rankings" counts too.
 const RANKING_ONLY: Choice[] = ['ranking', 'custom'];
 const isRankingRow = (option?: ScopeOption) =>
-  option?.sport ? isRankingSport(option.sport) : /\brank/i.test(option?.name ?? '');
+  option?.sport ? isRankingEvent(option.sport, option.format) : isRankingFormatName(option?.name);
 /** The rule a ranking row starts from: what it inherits, unless that can't apply to it. */
 const startingRule = (rule: StandingsRule, option?: ScopeOption): StandingsRule =>
   isRankingRow(option) && !RANKING_ONLY.includes(choiceOf(rule)) ? ruleForChoice('ranking', rule) : rule;
 
 // A league / round-robin style format, where placings can only come from the table.
 const isTableFormat = (format?: string | null) => !!format && /league|round[\s-]?robin|group|pool|swiss/i.test(format);
+// A pure league / round robin: no knockout, so no semi-finals or quarter-finals to pay.
+const isPureLeagueFormat = (format?: string | null) =>
+  !!format && /league|round[\s-]?robin|swiss/i.test(format) && !/knockout|group|pool|final/i.test(format);
+const KNOCKOUT_ONLY: Array<(typeof PLACEMENT_KEYS)[number]> = ['semi_finalist', 'quarter_finalist'];
 
 // A compact, read-only summary of a saved rule - shown when the editor is frozen.
 export function ruleSummary(rule: StandingsRule, sport?: string | null, entryType?: string | null): string {
@@ -96,10 +102,6 @@ export function ruleSummary(rule: StandingsRule, sport?: string | null, entryTyp
   } else if (rule.scheme === 'medal') parts.push(`Gold ${rule.gold} · Silver ${rule.silver} · Bronze ${rule.bronze}`);
   else if (rule.scheme === 'ranking') {
     parts.push(rule.places.map((p, i) => `${ordinal(i + 1)} ${p}`).join(' · '));
-    if (rule.convert) {
-      const title = titleOfGroups(rule.convert.groups);
-      parts.push(`sport placing ${rule.convert.places.join('/')} (${title ? EVENT_TITLE_LABEL[title] : rule.convert.groups.map((g) => g.name).join(', ')})`);
-    }
   }
   if (rule.participation) parts.push(`Participation ${rule.participation}`);
   return parts.join('  ·  ');
@@ -196,48 +198,6 @@ function RankingSection({ rule, onChange, option, inherited }: {
   );
 }
 
-// Event sports: sum the event points per group and award a sport placing instead.
-function ConversionSection({ rule, onChange, option }: { rule: RankingRule; onChange: (r: StandingsRule) => void; option?: ScopeOption }) {
-  const conv = rule.convert;
-  if (!conv) {
-    return (
-      <Check checked={false} label="Convert to a sport placing"
-        hint="Add up each institute's event points, rank them, and award placing points (e.g. 10/7/4/1) to the overall table."
-        // Start from the title the discipline's name suggests ("... Women" -> Women's title).
-        onChange={() => onChange({ ...rule, convert: { groups: groupsForTitle(titleFromName(option?.name)), places: [10, 7, 4, 1], participation: 0 } })} />
-    );
-  }
-  const set = (c: Partial<NonNullable<RankingRule['convert']>>) => onChange({ ...rule, convert: { ...conv, ...c } });
-  const title = titleOfGroups(conv.groups);
-  return (
-    <Section title="Sport placing">
-      <Check checked label="Convert to a sport placing" onChange={() => onChange({ ...rule, convert: undefined })} />
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        The sport table keeps the event points. Every discipline counting toward the same title is added up, ranked, and the overall table gets the placing below.
-      </p>
-      <label className="flex flex-col gap-1">
-        <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Counts toward</span>
-        <Select className="w-full max-w-sm" value={title ?? 'custom'}
-          onChange={(e) => e.target.value !== 'custom' && set({ groups: groupsForTitle(e.target.value as EventTitle) })}>
-          {EVENT_TITLES.map((t) => <option key={t} value={t}>{EVENT_TITLE_LABEL[t]}</option>)}
-          {!title && <option value="custom">Saved earlier: {conv.groups.map((g) => (g.share < 1 ? `${g.name} (half)` : g.name)).join(', ')}</option>}
-        </Select>
-      </label>
-      <div className="flex flex-wrap items-end gap-3">
-        {conv.places.map((p, i) => (
-          <NumberField key={i} label={ordinal(i + 1)} value={p} onChange={(n) => set({ places: conv.places.map((x, j) => (j === i ? n : x)) })} />
-        ))}
-        <NumberField label="Others" value={conv.participation} onChange={(n) => set({ participation: n })} />
-      </div>
-      <div className="flex gap-2">
-        <Button size="sm" variant="ghost" onClick={() => set({ places: [...conv.places, 0] })}>+ Add place</Button>
-        {conv.places.length > 1 && <Button size="sm" variant="ghost" onClick={() => set({ places: conv.places.slice(0, -1) })}>- Remove last</Button>}
-      </div>
-      <p className="text-xs text-slate-400 dark:text-slate-500">Level totals are split by more golds, then more silvers; still level, they share the better place.</p>
-    </Section>
-  );
-}
-
 // One editable rule: the point-system choice and its fields. `option` is set for a
 // format / discipline row, so the form can speak to that sport and format.
 function RuleForm({ value, onChange, option, inherited }: {
@@ -250,7 +210,10 @@ function RuleForm({ value, onChange, option, inherited }: {
     ? [...CHOICES.filter((c) => RANKING_ONLY.includes(c.value)),
       ...(RANKING_ONLY.includes(choice) ? [] : [{ value: choice, label: `${CHOICES.find((c) => c.value === choice)?.label ?? 'Medals (legacy)'} - doesn't apply to this sport` }])]
     : choice === 'medal' ? [...CHOICES, { value: 'medal' as const, label: 'Medals (legacy)' }] : CHOICES;
-  const tableFormat = isTableFormat(option?.format ?? (option?.sport ? null : option?.name));
+  const rowFormat = option?.format ?? (option?.sport ? null : option?.name);
+  const tableFormat = isTableFormat(rowFormat);
+  // League / round-robin rows hide what only a knockout can pay; the default shows everything.
+  const pureLeague = isPureLeagueFormat(rowFormat);
   const discipline = !!option?.sport;
   return (
     <div className="space-y-3">
@@ -264,7 +227,7 @@ function RuleForm({ value, onChange, option, inherited }: {
       {value.scheme === 'placement' && (
         <>
           <div className="flex flex-wrap items-end gap-4">
-            {PLACEMENT_KEYS.map((k) => (
+            {PLACEMENT_KEYS.filter((k) => !pureLeague || !KNOCKOUT_ONLY.includes(k)).map((k) => (
               <NumberField key={k} label={PLACEMENT_LABEL[k]} value={value.points[k] ?? 0}
                 onChange={(n) => onChange({ ...value, points: { ...value.points, [k]: n } })} />
             ))}
@@ -274,9 +237,11 @@ function RuleForm({ value, onChange, option, inherited }: {
             <Check checked={!!value.table_placings} onChange={(v) => onChange({ ...value, table_placings: v })}
               label="Placings from league / group tables"
               hint="When the league or groups finish, places no knockout match decides come from the table (e.g. 3rd and 4th when only a final is played)." />
-            <Check checked={!!value.rank_semi_losers} onChange={(v) => onChange({ ...value, rank_semi_losers: v })}
-              label="No 3rd-place match: rank the semi-final losers by group record"
-              hint="The better group record takes 3rd. Level records are ordered by hand on the group table." />
+            {!pureLeague && (
+              <Check checked={!!value.rank_semi_losers} onChange={(v) => onChange({ ...value, rank_semi_losers: v })}
+                label="No 3rd-place match: rank the semi-final losers by group record"
+                hint="The better group record takes 3rd. Level records are ordered by hand on the group table." />
+            )}
           </div>
           {tableFormat && !value.table_placings && (
             <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
@@ -329,7 +294,6 @@ function RuleForm({ value, onChange, option, inherited }: {
               <Button size="sm" variant="ghost" onClick={() => onChange({ ...value, places: value.places.slice(0, -1) })}>- Remove last</Button>
             )}
           </div>
-          <ConversionSection rule={value} onChange={onChange} option={option} />
         </>
       )}
 
@@ -337,10 +301,12 @@ function RuleForm({ value, onChange, option, inherited }: {
         {value.scheme === 'custom'
           ? 'Custom points: award championship points to each side after every result, from the Results page. A reminder is sent while a completed match still has no points.'
           : value.scheme === 'ranking'
-            ? 'Event points are awarded by finishing place once the official saves and signs off the event ranking. Places beyond the list score only the participation point.'
+            ? "Event points are awarded by finishing place once the official saves and signs off the event ranking. Places beyond the list score only the participation point. To turn a sport's event points into titles (e.g. Men's and Women's), use Sport titles at the bottom of this card."
             : value.scheme === 'league_points'
               ? 'Every match adds its win / draw / loss points to the overall table as soon as it is played.'
-              : 'Placing points build up as teams advance (reaching the semis banks the semi-finalist points) and settle when the final is played. A placing worth 0 counts as no placing. Participation goes to teams with no placing; a team that only lost walkovers gets nothing.'}
+              : pureLeague
+                ? 'Placings come from the final league table once every match is played. A placing worth 0 counts as no placing. Participation goes to teams with no placing; a team that only lost walkovers gets nothing.'
+                : 'Placing points build up as teams advance (reaching the semis banks the semi-finalist points) and settle when the final is played. A placing worth 0 counts as no placing. Participation goes to teams with no placing; a team that only lost walkovers gets nothing.'}
       </p>
     </div>
   );
@@ -393,9 +359,12 @@ function ScopeRuleEditor({ eventId, scopeType, option, override, fallback, inher
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [rule, setRule] = useState<StandingsRule>(override?.config ?? startingRule(fallback, option));
+  // What the form starts from, read fresh: a reset override or a changed default must show.
+  const current = () => override?.config ?? startingRule(fallback, option);
+  const [rule, setRule] = useState<StandingsRule>(current);
+  const openForm = (edit: boolean) => { setRule(current()); if (edit) setEditing(true); else setOpen(true); };
   // Close the form and drop unsaved edits.
-  const cancel = () => { setRule(override?.config ?? startingRule(fallback, option)); setEditing(false); setOpen(false); };
+  const cancel = () => { setRule(current()); setEditing(false); setOpen(false); };
   const save = useApiMutation(
     (config: StandingsRule) => api('PUT', `/championships/${eventId}/standings-rules`, { scope_type: scopeType, scope_id: option.id, config }),
     [],
@@ -427,11 +396,11 @@ function ScopeRuleEditor({ eventId, scopeType, option, override, fallback, inher
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {frozen && (
-            <Button variant="outline" onClick={() => setEditing(true)} aria-label={`Edit ${option.name} rules`} title="Edit">
+            <Button variant="outline" onClick={() => openForm(true)} aria-label={`Edit ${option.name} rules`} title="Edit">
               <Pencil size={14} />
             </Button>
           )}
-          {!override && !open && <Button variant="ghost" onClick={() => setOpen(true)}>Customize</Button>}
+          {!override && !open && <Button variant="ghost" onClick={() => openForm(false)}>Customize</Button>}
           {showForm && <Button variant="ghost" onClick={cancel}>Cancel</Button>}
         </div>
       </div>
@@ -460,6 +429,140 @@ function ScopeRuleEditor({ eventId, scopeType, option, override, fallback, inher
   );
 }
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+type RulesShape = { default: StandingsRule; rules: Array<{ scope_type: string; scope_id: string | null; config: StandingsRule }>; formats: Array<{ id: string; name: string }> };
+
+/** A discipline's rule as the engine resolves it: its own, then its format's, then the championship default. */
+export function resolvedDisciplineRule(data: RulesShape, d: { id: string; sport?: string | null; format?: string | null }): StandingsRule {
+  const own = data.rules.find((r) => r.scope_type === 'discipline' && r.scope_id === d.id)?.config;
+  // A ranking event takes only its own rule (as the engine does), else the 5/3/1 default.
+  if (isRankingEvent(d.sport, d.format)) return own ?? DEFAULT_RANKING_RULE;
+  const fmt = data.formats.find((f) => f.name === d.format);
+  const byFormat = fmt ? data.rules.find((r) => r.scope_type === 'format' && r.scope_id === fmt.id)?.config : undefined;
+  return own ?? byFormat ?? data.rules.find((r) => r.scope_type === 'championship')?.config ?? data.default;
+}
+
+type DisciplineShape = { id: string; name: string; sport?: string | null; sport_id?: string | null; format?: string | null };
+
+/** Each event sport's ranking events, grouped by sport (only events scored by event ranking). */
+export function rankingEventsBySport(data: RulesShape & { disciplines: DisciplineShape[] }) {
+  const out = new Map<string, { sport: string; events: Array<{ id: string; name: string }> }>();
+  for (const d of data.disciplines) {
+    if (!d.sport_id || resolvedDisciplineRule(data, d).scheme !== 'ranking') continue;
+    const entry = out.get(d.sport_id) ?? { sport: d.sport ?? '', events: [] };
+    out.set(d.sport_id, entry);
+    entry.events.push({ id: d.id, name: d.name });
+  }
+  return out;
+}
+
+/** The titles of every sport that has them switched on. */
+export function sportTitlesFor(data: RulesShape & { disciplines: DisciplineShape[]; sports: Array<{ id: string; titles: SportTitlesConfig | null }> }): SportTitles[] {
+  const events = [...rankingEventsBySport(data)].flatMap(([sportId, s]) => s.events.map((e) => ({ ...e, sport: s.sport, sportId })));
+  return sportTitles(events, (id) => data.sports.find((s) => s.id === id)?.titles);
+}
+
+const placingText = (p: TitlePlacing) => `${p.places.join('/')}${p.participation ? `, others ${p.participation}` : ''}`;
+
+/** "Men's (5 events, pays 10/7/4) + Women's (...)"; a whole-sport title beside gender titles names its events. */
+export function titlesLine(s: SportTitles, config: SportTitlesConfig | null | undefined): string {
+  return s.titles.map((t) => {
+    const events = s.mixed && t.group === 'overall' ? t.events.join(', ') : plural(t.events.length, 'event');
+    return `${t.label} (${events}, pays ${placingText(titlePlacingFor(config, t.name))})`;
+  }).join(' + ');
+}
+
+// Not blocked: a separate whole-sport title can be intended, but is usually an event left behind.
+function MixedTitlesWarning({ titles }: { titles: SportTitles }) {
+  const whole = titles.titles.find((t) => t.group === 'overall')!;
+  const one = whole.events.length === 1;
+  return (
+    <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+      <span className="font-semibold">{titles.sport} will have {plural(titles.titles.length, 'title')}.</span>
+      {' '}The Whole sport title is decided by {whole.events.join(', ')} alone.
+      {' '}If {one ? 'it belongs' : 'they belong'} to the Men's or Women's competition, change {one ? 'its' : 'their'} title above.
+    </p>
+  );
+}
+
+const EMPTY_TITLES: SportTitlesConfig = { enabled: false, events: {}, titles: {} };
+
+// One event sport's titles, all in one place: on/off, which title each event counts
+// toward (Whole sport unless changed), and what each title pays the overall table.
+function SportTitlesEditor({ eventId, sport, sportId, events, saved }: {
+  eventId: string; sport: string; sportId: string; events: Array<{ id: string; name: string }>; saved: SportTitlesConfig | null;
+}) {
+  const [draft, setDraft] = useState<SportTitlesConfig>(saved ?? EMPTY_TITLES);
+  useEffect(() => setDraft(saved ?? EMPTY_TITLES), [JSON.stringify(saved)]); // eslint-disable-line react-hooks/exhaustive-deps
+  const save = useApiMutation((body: SportTitlesConfig) => api('PUT', `/championships/${eventId}/sport-titles/${sportId}`, body), []);
+  const [summary] = sportTitles(events.map((e) => ({ ...e, sport, sportId })), () => ({ ...draft, enabled: true }));
+  const placing = (name: string) => titlePlacingFor(draft, name);
+  const setTitle = (name: string, p: Partial<TitlePlacing>) =>
+    setDraft((d) => ({ ...d, titles: { ...d.titles, [name]: { ...titlePlacingFor(d, name), ...p } } }));
+  const setEvent = (id: string, title: EventTitle) => setDraft((d) => ({ ...d, events: { ...d.events, [id]: title } }));
+  // Only what matters is saved: each event's choice and the titles in use.
+  const body = (): SportTitlesConfig => ({
+    enabled: draft.enabled,
+    events: Object.fromEntries(events.map((e) => [e.id, eventTitleIn(draft, e.id)])),
+    titles: Object.fromEntries((summary?.titles ?? []).map((t) => [t.name, placing(t.name)])),
+  });
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved ?? EMPTY_TITLES);
+  return (
+    <div className="space-y-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{sport}</span>
+        <Badge tone={draft.enabled ? 'brand' : 'slate'}>{draft.enabled ? 'titles on' : 'event points only'}</Badge>
+        {dirty && <Badge tone="amber">not saved</Badge>}
+      </div>
+      <Check checked={draft.enabled} onChange={(v) => setDraft((d) => ({ ...d, enabled: v }))}
+        label="Convert event points into sport titles"
+        hint="Off: each event's points go straight to the overall table. On: events are added up per title, ranked, and each title pays its placing points instead." />
+      {draft.enabled && summary && (
+        <>
+          <div className="space-y-1.5">
+            <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">Which title each event counts toward</div>
+            {events.map((e) => (
+              <div key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-sm dark:bg-slate-800/40">
+                <span className="text-slate-700 dark:text-slate-200">{e.name}</span>
+                <Select className="w-full max-w-xs" value={eventTitleIn(draft, e.id)} onChange={(ev) => setEvent(e.id, ev.target.value as EventTitle)}>
+                  {EVENT_TITLES.map((t) => <option key={t} value={t}>{EVENT_TITLE_LABEL[t]}</option>)}
+                </Select>
+              </div>
+            ))}
+          </div>
+          {summary.mixed && <MixedTitlesWarning titles={summary} />}
+          {summary.titles.map((t) => {
+            const p = placing(t.name);
+            return (
+              <div key={t.group} className="space-y-2">
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">{t.label} title pays</span> · {plural(t.events.length, 'event')}
+                </div>
+                <div className="flex flex-wrap items-end gap-3">
+                  {p.places.map((v, i) => (
+                    <NumberField key={i} label={ordinal(i + 1)} value={v} onChange={(n) => setTitle(t.name, { places: p.places.map((x, j) => (j === i ? n : x)) })} />
+                  ))}
+                  <NumberField label="Others" value={p.participation} onChange={(n) => setTitle(t.name, { participation: n })} />
+                  <Button size="sm" variant="ghost" onClick={() => setTitle(t.name, { places: [...p.places, 0] })}>+ Add place</Button>
+                  {p.places.length > 1 && <Button size="sm" variant="ghost" onClick={() => setTitle(t.name, { places: p.places.slice(0, -1) })}>- Remove last</Button>}
+                </div>
+              </div>
+            );
+          })}
+          <p className="text-xs text-slate-400 dark:text-slate-500">Level totals are split by more golds, then more silvers; still level, they share the better place.</p>
+        </>
+      )}
+      <div className="flex justify-end">
+        <Button size="sm" disabled={save.isPending || !dirty}
+          onClick={() => save.mutate(body(), { onSuccess: () => toast.success(`${sport} titles saved`), onError: (e: any) => toast.error(e.message) })}>
+          {save.isPending ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function StandingsRulesCard({ eventId }: { eventId: string }) {
   const { data, isLoading } = useApi<RulesResponse>(`/championships/${eventId}/standings-rules`);
 
@@ -476,6 +579,7 @@ export function StandingsRulesCard({ eventId }: { eventId: string }) {
   const defaultInherited: InheritedRanking = { ranking: rankingOf(defaultRule), from: 'the championship default' };
   // A discipline sits under its format's override when there is one, as the engine resolves it.
   const parentOf = (d: ScopeOption) => {
+    if (isRankingEvent(d.sport, d.format)) return { rule: DEFAULT_RANKING_RULE, inherited: defaultInherited };
     const fmt = data.formats.find((f) => f.name === d.format);
     const fmtRule = fmt ? findOverride('format', fmt.id)?.config : undefined;
     const fmtRanking = rankingOf(fmtRule);
@@ -484,6 +588,10 @@ export function StandingsRulesCard({ eventId }: { eventId: string }) {
       inherited: fmtRanking ? { ranking: fmtRanking, from: `the ${fmt!.name} format` } : defaultInherited,
     };
   };
+
+  const eventSports = [...rankingEventsBySport(data)];
+  // A Rankings format has nothing to set: its events take their own rule, titles are per sport.
+  const matchFormats = data.formats.filter((f) => !isRankingFormatName(f.name));
 
   return (
     <Card>
@@ -494,10 +602,10 @@ export function StandingsRulesCard({ eventId }: { eventId: string }) {
       <CardBody className="space-y-5">
         <DefaultRuleEditor key={JSON.stringify(defaultRule)} eventId={eventId} initial={defaultRule} saved={!!championshipRule} />
 
-        {data.formats.length > 0 && (
+        {matchFormats.length > 0 && (
           <div className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">By format</h4>
-            {data.formats.map((f) => (
+            {matchFormats.map((f) => (
               <ScopeRuleEditor key={f.id} eventId={eventId} scopeType="format" option={f} override={findOverride('format', f.id)} fallback={defaultRule} inherited={defaultInherited} />
             ))}
           </div>
@@ -508,6 +616,18 @@ export function StandingsRulesCard({ eventId }: { eventId: string }) {
             <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">By discipline</h4>
             {data.disciplines.map((d) => (
               <ScopeRuleEditor key={d.id} eventId={eventId} scopeType="discipline" option={d} override={findOverride('discipline', d.id)} fallback={parentOf(d).rule} inherited={parentOf(d).inherited} />
+            ))}
+          </div>
+        )}
+
+        {eventSports.length > 0 && (
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Sport titles (event sports)</h4>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              For sports scored by event ranking. Choose whether the sport pays titles, which title each event counts toward, and what each title pays.
+            </p>
+            {eventSports.map(([sportId, s]) => (
+              <SportTitlesEditor key={sportId} eventId={eventId} sport={s.sport} sportId={sportId} events={s.events} saved={data.sports.find((x) => x.id === sportId)?.titles ?? null} />
             ))}
           </div>
         )}

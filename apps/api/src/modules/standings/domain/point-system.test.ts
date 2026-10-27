@@ -69,10 +69,11 @@ describe('table placings (G03)', () => {
     expect(rows.B.points).toBe(1);
   });
 
-  it('level runners-up wait for a hand-picked order, then use it', () => {
+  it('level runners-up share 3rd until the organiser sets an order, then use it', () => {
     const all = [fx('A', 'B', 1, 0, null, pool(1)), fx('C', 'D', 1, 0, null, pool(2)), fx('A', 'C', 2, 1, 'Final')];
     const rule = iimk({ table_placings: true });
-    expect(run(all, rule).B.points).toBe(0);
+    const shared = run(all, rule);
+    expect([shared.B.points, shared.D.points]).toEqual([4, 4]);
     expect(pendingPlacingTies(scored(all), rule, ctxFor(all))).toEqual([{ stage: 1, entities: ['B', 'D'], from: 3, to: 4 }]);
     const resolution: TieResolution = { scope: 'placing', stage: 1, pool: null, order: ['D', 'B'], reason: 'Coin toss', by: null, at: '' };
     const rows = run(all, rule, [resolution]);
@@ -165,11 +166,40 @@ describe('ranking across groups', () => {
     expect(t.comparisons).toEqual([{ stage: 1, kind: 'placings', order: ['D', 'B'], places: [3, 4], decidedBy: ['score_diff'] }]);
   });
 
-  it('a level pair shows as waiting, then as hand-picked', () => {
+  it('a level pair shows as sharing the place, then as hand-picked', () => {
     const all = [fx('A', 'B', 1, 0, null, pool(1)), fx('C', 'D', 1, 0, null, pool(2)), fx('A', 'C', 2, 1, 'Final')];
     const rule = iimk({ table_placings: true });
-    expect(tableAnalysis(scored(all), rule, ctxFor(all))!.comparisons[0]).toMatchObject({ places: [null, null], decidedBy: [null] });
+    expect(tableAnalysis(scored(all), rule, ctxFor(all))!.comparisons[0]).toMatchObject({ places: [3, 3], decidedBy: [null] });
     const picked: TieResolution = { scope: 'placing', stage: 1, pool: null, order: ['D', 'B'], reason: 'Coin toss', by: null, at: '' };
     expect(tableAnalysis(scored(all), rule, ctxFor(all, [picked]))!.comparisons[0]).toMatchObject({ order: ['D', 'B'], places: [3, 4], decidedBy: ['resolution'] });
+  });
+});
+
+describe('a pure league has no semi-finals', () => {
+  // A beats everyone, B beats C and D, C beats D: final order A, B, C, D.
+  const league = [fx('A', 'B', 3, 0), fx('A', 'C', 3, 0), fx('A', 'D', 3, 0), fx('B', 'C', 3, 0), fx('B', 'D', 3, 0), fx('C', 'D', 3, 0)];
+  it('a 4th place worth 0 falls to participation, not semi-finalist points', () => {
+    const rows = run(league, iimk({ points: { winner: 10, runner_up: 7, third_place: 5, fourth_place: 0, semi_finalist: 3 }, participation: 1, table_placings: true }));
+    expect([rows.A.points, rows.B.points, rows.C.points, rows.D.points]).toEqual([10, 7, 5, 1]);
+    expect(rows.D.detail.semi_finalist).toBeUndefined();
+  });
+});
+
+describe('level teams share a position (IIMK), unless the organiser orders them', () => {
+  // Semi losers B and D have identical group records; no 3rd-place match.
+  const all = [
+    fx('A', 'B', 1, 0, null, pool(1)), fx('C', 'D', 1, 0, null, pool(2)),
+    fx('A', 'D', 2, 1, 'SF'), fx('C', 'B', 2, 1, 'SF'), fx('A', 'C', 2, 1, 'Final'),
+  ];
+  const rule = iimk({ rank_semi_losers: true });
+  it('level semi-final losers both take 3rd', () => {
+    const rows = run(all, rule);
+    expect([rows.B.points, rows.D.points]).toEqual([4, 4]);
+    expect(rows.B.detail.third_place).toBe(1);
+  });
+  it('an order set by the organiser splits them', () => {
+    const picked: TieResolution = { scope: 'placing', stage: 1, pool: null, order: ['B', 'D'], reason: 'Lots', by: null, at: '' };
+    const rows = run(all, rule, [picked]);
+    expect([rows.B.points, rows.D.points]).toEqual([4, 1]);
   });
 });

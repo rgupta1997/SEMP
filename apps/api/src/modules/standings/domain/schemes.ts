@@ -269,7 +269,10 @@ export interface SchemeContext {
 
 const POSITION_PLACEMENT: StandingsPlacement[] = ['winner', 'runner_up', 'third_place', 'fourth_place'];
 
-/** A placing tie the tie-breakers couldn't split and that changes points. */
+/**
+ * A placing tie the tie-breakers couldn't split. The teams share the better place (IIMK:
+ * level teams get the same position) until the organiser sets an order, which then applies.
+ */
 export interface PendingPlacingTie { stage: number; entities: string[]; from: number; to: number }
 
 /** Teams from different groups compared for placings, and what separated each pair. */
@@ -379,14 +382,17 @@ export function tablePlacings(fixtures: SchemeFixture[], rule: Extract<Standings
     }
   }
 
+  // With a knockout, a top-four table finish counts as reaching the semis. A pure league
+  // has no semis, so a 4th place worth 0 falls to participation instead.
+  const semis = ko.size > 0;
   const value = (p: number) => {
     const v = rule.points[POSITION_PLACEMENT[p - 1]] ?? 0;
-    return v > 0 || p < 3 ? v : rule.points.semi_finalist ?? 0;
+    return v > 0 || p < 3 || !semis ? v : rule.points.semi_finalist ?? 0;
   };
   const placeOf = new Map<string, number>();
   const award = (id: string, p: number) => {
     const list: StandingsPlacement[] = [POSITION_PLACEMENT[p - 1]];
-    if (p >= 3) list.push('semi_finalist'); // finished in the last four
+    if (p >= 3 && semis) list.push('semi_finalist'); // finished in the last four
     out.placings.set(id, list);
     placeOf.set(id, p);
   };
@@ -396,11 +402,10 @@ export function tablePlacings(fixtures: SchemeFixture[], rule: Extract<Standings
     const last = Math.min(to, POSITION_PLACEMENT.length);
     if (!b.tied) b.ids.forEach((id, i) => { if (pos + i <= last) award(id, pos + i); });
     else {
+      // Level teams share the better place; listed so the organiser can still set an order.
+      b.ids.forEach((id) => award(id, pos));
       const span = Array.from({ length: last - pos + 1 }, (_, i) => value(pos + i));
-      // Level teams share the better place when it makes no difference to the points.
-      const shareable = span.every((v) => v === span[0]) && (to <= POSITION_PLACEMENT.length || span[0] === 0);
-      if (shareable) b.ids.forEach((id) => award(id, pos));
-      else out.pending.push({ stage, entities: b.ids, from: pos, to: last });
+      if (span.some((v) => v !== span[0])) out.pending.push({ stage, entities: b.ids, from: pos, to: last });
     }
     pos = to + 1;
   }
@@ -430,10 +435,15 @@ function semiLoserPlacings(
   const order = split ? blocks.map((b) => b[0].entity_id) : resolverFor(ctx.resolutions, 'placing', tables.stage, null)(ids);
   const crossOrder: StandingsTiebreaker[] = cross.length ? cross : ['points'];
   tables.comparisons.push({
-    stage: tables.stage, kind: 'semi_losers', order: order ?? ids, places: order ? [3, 4] : [null, null],
+    stage: tables.stage, kind: 'semi_losers', order: order ?? ids, places: order ? [3, 4] : [3, 3],
     decidedBy: [split ? separatedBy(tables.records.get(order![0])!, tables.records.get(order![1])!, crossOrder) : order ? 'resolution' : null],
   });
-  if (!order) { tables.pending.push({ stage: tables.stage, entities: ids, from: 3, to: 4 }); return out; }
+  // Still level with no order set: both share 3rd until the organiser orders them.
+  if (!order) {
+    tables.pending.push({ stage: tables.stage, entities: ids, from: 3, to: 4 });
+    ids.forEach((id) => out.set(id, 'third_place'));
+    return out;
+  }
   out.set(order[0], 'third_place');
   out.set(order[1], 'fourth_place');
   return out;
@@ -624,6 +634,16 @@ export function accumulate(acc: Map<string, EntityTally>, tallies: EntityTally[]
 
 // Sort rows in place by the ordered tiebreakers (descending "better first") and
 // assign sequential ranks. Head-to-head needs fixtures, so across draws it is skipped.
+/** Two rows level on every tie-breaker in the list. */
+export const levelOn = (tiebreakers: StandingsTiebreaker[]) => (a: EntityTally, b: EntityTally) =>
+  tiebreakers.every((t) => metric(a, t) === metric(b, t));
+
+/** Rows already in order: level neighbours share the better rank (1, 2, 2, 4), as IIMK ranks ties. */
+export function shareRanks(rows: EntityTally[], level: (a: EntityTally, b: EntityTally) => boolean): EntityTally[] {
+  rows.forEach((r, i) => { r.rank = i > 0 && level(rows[i - 1], r) ? rows[i - 1].rank : i + 1; });
+  return rows;
+}
+
 export function rankBy(rows: EntityTally[], tiebreakers: StandingsTiebreaker[]): EntityTally[] {
   rows.sort((a, b) => {
     for (const t of tiebreakers) {

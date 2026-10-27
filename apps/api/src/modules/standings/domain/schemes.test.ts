@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_STANDINGS_RULE, type StandingsRule } from '@semp/shared';
-import { runScheme, rankBy, accumulate, type SchemeFixture, type EntityTally } from './schemes.js';
+import { runScheme, rankBy, accumulate, levelOn, shareRanks, type SchemeFixture, type EntityTally } from './schemes.js';
 
 // One team per org for brevity: team_id === org_id.
 function fx(home: string, away: string, hs: number, as: number, round: string | null = null): SchemeFixture {
@@ -15,8 +15,17 @@ function fx(home: string, away: string, hs: number, as: number, round: string | 
 
 const byId = (rows: EntityTally[]) => Object.fromEntries(rows.map((r) => [r.entity_id, r]));
 
+// A classic 3 / 1 / 0 league, independent of whatever the built-in default is.
+const league310: StandingsRule = { scheme: 'league_points', win: 3, draw: 1, loss: 0, participation: 0, tiebreakers: ['points', 'wins', 'lost'] };
+
+describe('the built-in default', () => {
+  it('is 2 / 1 / 0 per match', () => {
+    expect(DEFAULT_STANDINGS_RULE).toMatchObject({ scheme: 'league_points', win: 2, draw: 1, loss: 0, participation: 0 });
+  });
+});
+
 describe('league_points scheme', () => {
-  const rule = DEFAULT_STANDINGS_RULE; // 3 / 1 / 0
+  const rule = league310;
 
   it('awards win/draw/loss points and counts P/W/D/L', () => {
     const rows = byId(runScheme([fx('A', 'B', 2, 0), fx('A', 'C', 1, 1), fx('B', 'C', 3, 1)], rule));
@@ -246,11 +255,19 @@ describe('medal position points are withheld until the discipline is decided', (
 describe('accumulate across draws', () => {
   it('sums points and merges medal/placement detail by org', () => {
     const acc = new Map<string, EntityTally>();
-    accumulate(acc, runScheme([fx('A', 'B', 2, 0)], DEFAULT_STANDINGS_RULE)); // A +3
+    accumulate(acc, runScheme([fx('A', 'B', 2, 0)], league310)); // A +3
     accumulate(acc, runScheme([fx('A', 'B', 1, 0)], { scheme: 'medal', gold: 5, silver: 3, bronze: 1, participation: 0 })); // A gold +5
     const a = acc.get('A')!;
     expect(a.points).toBe(8);
     expect(a.detail.gold).toBe(1);
     expect(a.played).toBe(2);
+  });
+});
+
+describe('shared positions in a table', () => {
+  it('rows level on every tie-breaker share the better rank: 1, 2, 2, 4', () => {
+    const t = (id: string, points: number, won: number) => ({ entity_id: id, played: 3, won, drawn: 0, lost: 3 - won, points, gf: 0, ga: 0, wo: 0, detail: {} });
+    const rows = shareRanks(rankBy([t('A', 9, 3), t('B', 6, 2), t('C', 6, 2), t('D', 0, 0)], ['points', 'wins', 'lost']), levelOn(['points', 'wins', 'lost']));
+    expect(rows.map((r) => [r.entity_id, r.rank])).toEqual([['A', 1], ['B', 2], ['C', 2], ['D', 4]]);
   });
 });

@@ -41,6 +41,7 @@ function fakeDb(fixtures: Array<{ home: Team; away: Team; homeScore: number; awa
 
   const db = {
     standings_rules: { findMany: async () => [] },
+    tournament_formats: { findMany: async () => [] },
     standings_adjustments: { findMany: async () => [] },
     tournament_disciplines: {
       findMany: async () => [{

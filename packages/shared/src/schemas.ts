@@ -4,7 +4,7 @@ import {
   DEMO_REQUEST_STATUS, FEEDBACK_STATUS, ENTRY_TYPE, ENROLLMENT_STATUS, CHAMPIONSHIP_STATUS, CHAMPIONSHIP_VISIBILITY, FIXTURE_STATUS, GROUND_TYPE,
   AWARD_LEVEL, AWARD_RECIPIENT_KIND,
   CHAMPIONSHIP_TYPE, NOTIFICATION_AUDIENCE, NOTIFICATION_REACTIONS, ORGANIZATION_MEMBER_ROLE,
-  STANDINGS_RULE_SCOPE, STANDINGS_TIEBREAKER, TEAM_MEMBER_ROLE,
+  STAGE_DEFAULT_TIEBREAKERS, STANDINGS_RULE_SCOPE, STANDINGS_TIEBREAKER, TEAM_MEMBER_ROLE,
   TEAM_STATUS, TOURNAMENT_DISCIPLINE_STATUS, TOURNAMENT_STATUS,
 } from './enums.js';
 import { disciplineFormatConfigSchema } from './scoring.js';
@@ -13,6 +13,7 @@ import { formatOverridesSchema } from './format-overrides.js';
 import { ENTRY_LEVELS } from './org-structure.js';
 import { HOST_CITIES_MAX } from './host-cities.js';
 import { groupRankingSchema } from './standings-ranking.js';
+import { isRankingSport } from './event-templates.js';
 
 const uuid = z.string().uuid();
 
@@ -914,7 +915,7 @@ export const leaguePointsRuleSchema = z.object({
   draw: z.number().int().min(0).default(1),
   loss: z.number().int().min(0).default(0),
   participation,
-  tiebreakers: z.array(z.enum(STANDINGS_TIEBREAKER)).min(1).default(['points', 'wins', 'lost']),
+  tiebreakers: z.array(z.enum(STANDINGS_TIEBREAKER)).min(1).default(STAGE_DEFAULT_TIEBREAKERS),
 });
 
 // points keyed by canonical placement (winner / runner_up / semi_finalist / …).
@@ -952,57 +953,10 @@ export const customRuleSchema = z.object({
 // Ranking events (swimming/powerlifting/athletics): `places[i]` is the championship
 // points for finishing place i+1 (places[0] = 1st, places[1] = 2nd, …). Places beyond
 // the array score 0 (or `participation`). The event console's final ranking awards these.
-// Event sports (swimming, powerlifting) can convert their summed event points into a
-// sport placing: totals per group (e.g. Men / Women) are ranked and `places` awarded.
-// `share` lets a mixed event count half toward each group. Unset = raw points, as before.
-export const eventConversionSchema = z.object({
-  groups: z.array(z.object({ name: z.string().trim().min(1).max(60), share: z.number().min(0).max(1).default(1) })).min(1).max(4),
-  places: z.array(z.number().int().min(0)).min(1).max(16),
-  participation: z.number().int().min(0).default(0),
-});
-export type EventConversion = z.infer<typeof eventConversionSchema>;
-
-// The titles an event discipline can count toward, offered as a fixed choice so pile
-// names can't be mistyped. Each maps to the groups the engine sums.
-export const EVENT_TITLE_GROUP = { sport: 'Overall', men: 'Men', women: 'Women' } as const;
-export const EVENT_TITLES = ['sport', 'men', 'women', 'both'] as const;
-export type EventTitle = (typeof EVENT_TITLES)[number];
-export const EVENT_TITLE_LABEL: Record<EventTitle, string> = {
-  sport: 'Whole sport (one title)',
-  men: "Men's title",
-  women: "Women's title",
-  both: "Men's and Women's titles (half each)",
-};
-
-export function groupsForTitle(title: EventTitle): EventConversion['groups'] {
-  switch (title) {
-    case 'sport': return [{ name: EVENT_TITLE_GROUP.sport, share: 1 }];
-    case 'men': return [{ name: EVENT_TITLE_GROUP.men, share: 1 }];
-    case 'women': return [{ name: EVENT_TITLE_GROUP.women, share: 1 }];
-    case 'both': return [{ name: EVENT_TITLE_GROUP.men, share: 0.5 }, { name: EVENT_TITLE_GROUP.women, share: 0.5 }];
-  }
-}
-
-/** The choice a saved set of groups corresponds to; null for anything else saved earlier. */
-export function titleOfGroups(groups: EventConversion['groups']): EventTitle | null {
-  const key = (gs: EventConversion['groups']) => gs.map((g) => `${g.name.trim().toLowerCase()}:${g.share}`).sort().join('|');
-  return EVENT_TITLES.find((t) => key(groupsForTitle(t)) === key(groups)) ?? null;
-}
-
-/** A sensible default from the discipline's name ("50m Freestyle Women" -> women). */
-export function titleFromName(name?: string | null): EventTitle {
-  const n = name ?? '';
-  if (/\bmixed\b/i.test(n)) return 'both';
-  if (/\b(women|women's|womens|ladies|girls)\b/i.test(n)) return 'women';
-  if (/\b(men|men's|mens|boys)\b/i.test(n)) return 'men';
-  return 'sport';
-}
-
 export const rankingRuleSchema = z.object({
   scheme: z.literal('ranking'),
   places: z.array(z.number().int().min(0)).min(1).default([5, 3, 1]),
   participation,
-  convert: eventConversionSchema.optional(),
 });
 
 export const standingsRuleSchema = z.discriminatedUnion('scheme', [
@@ -1014,17 +968,118 @@ export const standingsRuleSchema = z.discriminatedUnion('scheme', [
 ]);
 export type StandingsRule = z.infer<typeof standingsRuleSchema>;
 
-// The implicit default applied when no standings_rules row matches - preserves the
-// historical behaviour (win = 3, draw = 1, loss = 0). Single source of truth shared
-// by the engine and the rules editor UI.
+// ---------- Sport titles (event sports) ----------
+//
+// An event sport (swimming, powerlifting) can turn its summed event points into sport
+// placings. Everything about it is set once per sport: whether it converts, which title
+// each event counts toward, and what each title pays. A mixed event counts half to each.
+
+export const EVENT_TITLE_GROUP = { sport: 'Overall', men: 'Men', women: 'Women' } as const;
+export const EVENT_TITLES = ['sport', 'men', 'women', 'both'] as const;
+export type EventTitle = (typeof EVENT_TITLES)[number];
+export const EVENT_TITLE_LABEL: Record<EventTitle, string> = {
+  sport: 'Whole sport',
+  men: "Men's title",
+  women: "Women's title",
+  both: "Men's and Women's (half each)",
+};
+
+export interface TitleGroup { name: string; share: number }
+
+/** The title pots an event's choice feeds, with the share of its points each gets. */
+export function groupsForTitle(title: EventTitle): TitleGroup[] {
+  switch (title) {
+    case 'sport': return [{ name: EVENT_TITLE_GROUP.sport, share: 1 }];
+    case 'men': return [{ name: EVENT_TITLE_GROUP.men, share: 1 }];
+    case 'women': return [{ name: EVENT_TITLE_GROUP.women, share: 1 }];
+    case 'both': return [{ name: EVENT_TITLE_GROUP.men, share: 0.5 }, { name: EVENT_TITLE_GROUP.women, share: 0.5 }];
+  }
+}
+
+/** What one title pays the overall table: points by place, `participation` to the rest. */
+export const titlePlacingSchema = z.object({
+  places: z.array(z.number().int().min(0)).min(1).max(16),
+  participation: z.number().int().min(0).default(0),
+});
+export type TitlePlacing = z.infer<typeof titlePlacingSchema>;
+export const DEFAULT_TITLE_PLACING: TitlePlacing = { places: [10, 7, 4, 1], participation: 0 };
+
+/** One sport's title setup. Off = raw event points; an event not listed counts to Whole sport. */
+export const sportTitlesSchema = z.object({
+  enabled: z.boolean().default(false),
+  events: z.record(uuid, z.enum(EVENT_TITLES)).default({}),
+  titles: z.record(z.string().trim().min(1).max(60), titlePlacingSchema).default({}),
+});
+export type SportTitlesConfig = z.infer<typeof sportTitlesSchema>;
+
+/** The title an event (discipline id) counts toward. */
+export const eventTitleIn = (config: SportTitlesConfig | null | undefined, disciplineId: string): EventTitle =>
+  config?.events[disciplineId] ?? 'sport';
+
+/** The placing a title pays; group names match case-insensitively, unset = the default. */
+export function titlePlacingFor(config: SportTitlesConfig | null | undefined, group: string): TitlePlacing {
+  const key = group.trim().toLowerCase();
+  const hit = Object.entries(config?.titles ?? {}).find(([name]) => name.trim().toLowerCase() === key);
+  return hit?.[1] ?? DEFAULT_TITLE_PLACING;
+}
+
+/** A converting sport's titles and their events; `mixed` = whole sport alongside gender titles. */
+export interface SportTitles { sport: string; sportId: string; titles: Array<{ group: string; name: string; label: string; events: string[] }>; mixed: boolean }
+
+const TITLE_GROUP_LABEL: Record<string, string> = {
+  [EVENT_TITLE_GROUP.sport.toLowerCase()]: 'Whole sport',
+  [EVENT_TITLE_GROUP.men.toLowerCase()]: "Men's",
+  [EVENT_TITLE_GROUP.women.toLowerCase()]: "Women's",
+};
+
+// Groups each sport's events by title. Only sports with titles switched on appear.
+// Mixing a whole-sport title with gender titles is allowed, but usually an event left behind.
+export function sportTitles(
+  events: Array<{ id: string; name: string; sport: string; sportId: string }>,
+  configFor: (sportId: string) => SportTitlesConfig | null | undefined,
+): SportTitles[] {
+  const bySport = new Map<string, { sport: string; titles: Map<string, { name: string; label: string; events: string[] }> }>();
+  for (const e of events) {
+    const config = configFor(e.sportId);
+    if (!config?.enabled) continue;
+    const entry = bySport.get(e.sportId) ?? { sport: e.sport, titles: new Map() };
+    bySport.set(e.sportId, entry);
+    for (const g of groupsForTitle(eventTitleIn(config, e.id))) {
+      const key = g.name.toLowerCase();
+      const t = entry.titles.get(key) ?? { name: g.name, label: TITLE_GROUP_LABEL[key] ?? g.name, events: [] };
+      entry.titles.set(key, t);
+      t.events.push(e.name);
+    }
+  }
+  const sportKey = EVENT_TITLE_GROUP.sport.toLowerCase();
+  return [...bySport].map(([sportId, { sport, titles }]) => ({
+    sport, sportId,
+    titles: [...titles].map(([group, t]) => ({ group, ...t })),
+    mixed: titles.has(sportKey) && titles.size > 1,
+  }));
+}
+
+// The implicit default applied when no standings_rules row matches: 2 / 1 / 0 per match.
+// Single source of truth shared by the engine and the rules editor UI.
 export const DEFAULT_STANDINGS_RULE: StandingsRule = {
   scheme: 'league_points',
-  win: 3,
+  win: 2,
   draw: 1,
   loss: 0,
   participation: 0,
   tiebreakers: ['points', 'wins', 'lost'],
 };
+
+/** A "Rankings" fixture format (time trials, lifts): no head-to-head matches. */
+export const isRankingFormatName = (name?: string | null): boolean => !!name && /\brank/i.test(name);
+
+/** A ranking event: a ranking sport (swimming, powerlifting...) or a draw on a Rankings format. */
+export const isRankingEvent = (sport?: string | null, formatName?: string | null): boolean =>
+  isRankingSport(sport) || isRankingFormatName(formatName);
+
+// A ranking event takes only its own discipline rule, else this. Format and championship
+// rules don't reach it, so its event points are set in exactly one place.
+export const DEFAULT_RANKING_RULE: StandingsRule = { scheme: 'ranking', places: [5, 3, 1], participation: 0 };
 
 /**
  * A chess draw's own table when the organiser set no rule for it. 2/1/0 orders players

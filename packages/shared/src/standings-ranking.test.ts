@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { defaultGroupRanking, findTieResolution, groupRankingFor, inheritRanking, rankingFamily, tiebreakerLabel, tiebreakerOptions, type TieResolution } from './standings-ranking.js';
-import { EVENT_TITLES, groupsForTitle, placementRuleSchema, rankingRuleSchema, titleFromName, titleOfGroups } from './schemas.js';
+import {
+  DEFAULT_RANKING_RULE, DEFAULT_TITLE_PLACING, eventTitleIn, groupsForTitle, isRankingEvent, isRankingFormatName, placementRuleSchema, rankingRuleSchema, sportTitles, sportTitlesSchema, titlePlacingFor,
+} from './schemas.js';
 import { isKnockoutRound, knockoutRoundLabel, knockoutRoundSize } from './enums.js';
 
 describe('per-sport group ranking defaults', () => {
@@ -62,7 +64,7 @@ describe('saved rules stay valid', () => {
   it('old placement and ranking rules parse unchanged', () => {
     const old = { scheme: 'placement', points: { winner: 10, runner_up: 7 }, participation: 1 };
     expect(placementRuleSchema.parse(old)).toEqual(old);
-    expect(rankingRuleSchema.parse({ scheme: 'ranking', places: [5, 3, 1], participation: 0 }).convert).toBeUndefined();
+    expect(rankingRuleSchema.parse({ scheme: 'ranking', places: [5, 3, 1], participation: 0 })).toEqual({ scheme: 'ranking', places: [5, 3, 1], participation: 0 });
   });
 });
 
@@ -103,19 +105,84 @@ describe('championship / format level match points', () => {
   });
 });
 
-describe('event titles (what a race counts toward)', () => {
-  it('each choice maps to piles and back', () => {
-    for (const t of EVENT_TITLES) expect(titleOfGroups(groupsForTitle(t))).toBe(t);
+describe('sport titles, set once per sport', () => {
+  const SW = 'aaaaaaaa-0000-4000-8000-000000000001', PL = 'aaaaaaaa-0000-4000-8000-000000000002';
+  const id = (n: number) => `bbbbbbbb-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const swim = [
+    { id: id(1), name: '50m Free (Men)', sport: 'Swimming', sportId: SW },
+    { id: id(2), name: '50m Free (Women)', sport: 'Swimming', sportId: SW },
+    { id: id(3), name: 'Mixed Relay', sport: 'Swimming', sportId: SW },
+  ];
+  const lift = [{ id: id(4), name: '74kg', sport: 'Powerlifting', sportId: PL }, { id: id(5), name: '83kg', sport: 'Powerlifting', sportId: PL }];
+  const cfg = (c: object) => sportTitlesSchema.parse(c);
+
+  it('a half-each choice feeds both gender titles at half', () => {
     expect(groupsForTitle('both')).toEqual([{ name: 'Men', share: 0.5 }, { name: 'Women', share: 0.5 }]);
   });
-  it('rules saved with typed names still map, odd ones stay as they were', () => {
-    expect(titleOfGroups([{ name: 'overall ', share: 1 }])).toBe('sport');
-    expect(titleOfGroups([{ name: 'Mixed', share: 0.5 }])).toBeNull();
+
+  it('switched off or never saved: no titles at all', () => {
+    expect(sportTitles([...swim, ...lift], () => null)).toEqual([]);
+    expect(sportTitles(swim, () => cfg({ enabled: false, events: { [id(1)]: 'men' } }))).toEqual([]);
   });
-  it('the discipline name suggests the title', () => {
-    expect(titleFromName('50m Freestyle Women')).toBe('women');
-    expect(titleFromName("Men's 100m Butterfly")).toBe('men');
-    expect(titleFromName('4x50 Mixed Relay')).toBe('both');
-    expect(titleFromName('100m Freestyle')).toBe('sport');
+
+  it('switched on with nothing chosen: every event counts to one whole-sport title', () => {
+    const [pl] = sportTitles(lift, () => cfg({ enabled: true }));
+    expect(pl.titles.map((t) => [t.label, t.events])).toEqual([['Whole sport', ['74kg', '83kg']]]);
+    expect(pl.mixed).toBe(false);
+  });
+
+  it('gender titles list their events; a half-each event sits in both', () => {
+    const [sw] = sportTitles(swim, () => cfg({ enabled: true, events: { [id(1)]: 'men', [id(2)]: 'women', [id(3)]: 'both' } }));
+    expect(sw.mixed).toBe(false);
+    expect(sw.titles.map((t) => [t.label, t.events])).toEqual([["Men's", ['50m Free (Men)', 'Mixed Relay']], ["Women's", ['50m Free (Women)', 'Mixed Relay']]]);
+  });
+
+  it('an event left on whole sport beside gender titles is flagged', () => {
+    const [sw] = sportTitles(swim, () => cfg({ enabled: true, events: { [id(1)]: 'men', [id(2)]: 'women' } }));
+    expect(sw.mixed).toBe(true);
+    expect(sw.titles.find((t) => t.group === 'overall')?.events).toEqual(['Mixed Relay']);
+    expect(eventTitleIn(null, id(3))).toBe('sport');
+  });
+
+  it('title points read by name, case-insensitively, else the default', () => {
+    const c = cfg({ enabled: true, titles: { Men: { places: [10, 7, 4], participation: 1 } } });
+    expect(titlePlacingFor(c, 'men')).toEqual({ places: [10, 7, 4], participation: 1 });
+    expect(titlePlacingFor(c, 'Women')).toEqual(DEFAULT_TITLE_PLACING);
+    expect(titlePlacingFor(null, 'Overall')).toEqual(DEFAULT_TITLE_PLACING);
+  });
+
+  it('an older event rule that carried its own title setup still parses, without it', () => {
+    const rule = rankingRuleSchema.parse({ scheme: 'ranking', places: [5, 3, 1], convert: { groups: [{ name: 'Men', share: 1 }], places: [12, 9], participation: 2 } });
+    expect(rule).toEqual({ scheme: 'ranking', places: [5, 3, 1], participation: 0 });
+  });
+});
+
+describe('ranking events take only their own rule', () => {
+  it('a ranking sport or a Rankings format is a ranking event', () => {
+    expect(isRankingEvent('Swimming', null)).toBe(true);
+    expect(isRankingEvent('Squash', 'Rankings')).toBe(true);
+    expect(isRankingEvent('Kabaddi', 'Groups + Knockout')).toBe(false);
+    expect(isRankingFormatName('Rankings')).toBe(true);
+    expect(isRankingFormatName('Knockout')).toBe(false);
+  });
+  it('with no rule of its own it scores 5/3/1', () => {
+    expect(DEFAULT_RANKING_RULE).toEqual({ scheme: 'ranking', places: [5, 3, 1], participation: 0 });
+  });
+});
+
+describe('group tie-breakers: a stage only overrides the Point System when someone chose its order', () => {
+  const rule = { scheme: 'placement', points: { winner: 10 }, participation: 0, ranking: { win: 2, draw: 0, loss: 0, tiebreakers: ['points', 'score_diff', 'head_to_head'] } } as any;
+  it('a stage left on the built-in order uses the Point System order', () => {
+    expect(groupRankingFor(rule, 'Table Tennis', { tiebreakers: ['points', 'wins', 'lost'] }).tiebreakers).toEqual(['points', 'score_diff', 'head_to_head']);
+  });
+  it("a stage left on the sport's default order uses the Point System order", () => {
+    const sportOrder = defaultGroupRanking('Table Tennis').tiebreakers;
+    expect(groupRankingFor(rule, 'Table Tennis', { tiebreakers: sportOrder }).tiebreakers).toEqual(['points', 'score_diff', 'head_to_head']);
+  });
+  it('an order picked in Configure stages still wins', () => {
+    expect(groupRankingFor(rule, 'Table Tennis', { tiebreakers: ['points', 'head_to_head', 'wins'] }).tiebreakers).toEqual(['points', 'head_to_head', 'wins']);
+  });
+  it('with no Point System order, the sport default applies', () => {
+    expect(groupRankingFor(null, 'Table Tennis', { tiebreakers: ['points', 'wins', 'lost'] }).tiebreakers).toEqual(defaultGroupRanking('Table Tennis').tiebreakers);
   });
 });

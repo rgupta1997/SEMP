@@ -2901,11 +2901,12 @@ const ordinal = (n: number): string => {
 // detailed per-athlete state in live_state.eventRanking, so the two modes don't clobber.
 function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   { fixture: any; fixtureId: string; spec: EventSpec; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[] }) {
-  const champId = eventInfo(fixture)?.id;
-  const { data: parts } = useApi<{ organizations: { orgId: string; org: { id: string; name: string } | null }[] }>(
-    champId ? `/championships/${champId}/participants` : null);
-  const orgs = (parts?.organizations ?? [])
-    .map((o) => ({ id: o.org?.id ?? o.orgId, name: o.org?.name ?? 'Unaffiliated' }))
+  // Only the clubs entered in THIS event can be ranked (not every club in the championship).
+  const drawId = (fixture as any)?.tournament_discipline_id as string | undefined;
+  const { data: entrants, isLoading: entrantsLoading } = useApi<Array<{ organizations?: { id: string; name: string } | null; organization_id: string }>>(
+    drawId ? `/teams?tournament_discipline_id=${drawId}` : null);
+  const orgs = [...new Map((entrants ?? []).map((t) => [t.organizations?.id ?? t.organization_id, t.organizations?.name ?? 'Unaffiliated'])).entries()]
+    .map(([id, name]) => ({ id, name }))
     .sort((a, b) => a.name.localeCompare(b.name));
   // Organiser-configured ranking points (from the "Ranking" point system on the Standings
   // settings, resolved server-side per draw) win; otherwise the template default.
@@ -2928,10 +2929,13 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   // too, and autosaving that would write the fixture's own ranking back to it the
   // moment anybody so much as opened the console.
   const [touched, setTouched] = useState(false);
+  // Set by "Save & sign off": a draft still waiting must not land after it and undo it.
+  const signedOff = useRef(false);
 
   const persist = useLiveSave(fixtureId, invalidate);
   const setPlace = (orgId: string, place: number | null) => {
     setTouched(true);
+    signedOff.current = false;
     setPlaces((p) => { const n = { ...p }; if (place) n[orgId] = place; else delete n[orgId]; return n; });
   };
   // Championship points for an org. Participation is a consolation floor, NOT a top-up:
@@ -2948,6 +2952,8 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   // (points + medals) the standings service reads - so events feed the championship table
   // without the server needing the event spec. `complete` signs the event off.
   const persistRanking = (complete: boolean, quiet = false) => {
+    if (quiet && signedOff.current) return; // a late draft: the sign-off stands
+    if (complete) signedOff.current = true;
     const rows = orgs.map((o) => ({ orgId: o.id, org: o.name, place: places[o.id] ?? null, points: pointsFor(o.id) }));
     // Drops any detailed per-athlete data this fixture was PREVIOUSLY scored
     // with - a stale `event` key here is what let derive.ts's two medal paths
@@ -2992,8 +2998,10 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
       <Card>
         <CardHeader title="Team ranking" subtitle={`Set each team's finishing place - points are awarded by placement (${medalPoints.join(' / ')}).`} />
         <CardBody className="space-y-2">
-          {orgs.length === 0 ? (
-            <p className="text-sm text-slate-400 dark:text-slate-500">No teams have joined this championship yet.</p>
+          {entrantsLoading || !entrants ? (
+            <p className="text-sm text-slate-400 dark:text-slate-500">Loading the event's entrants…</p>
+          ) : orgs.length === 0 ? (
+            <p className="text-sm text-slate-400 dark:text-slate-500">No teams are entered in this event yet.</p>
           ) : orgs.map((o) => (
             <div key={o.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-800">
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{o.name}</span>
@@ -3091,6 +3099,8 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   // Armed by the first mark an official types, never by the seeding above - see the
   // matching comment in EventRankingConsole.
   const [touched, setTouched] = useState(false);
+  // Set by "Save & sign off": a draft still waiting must not land after it and undo it.
+  const signedOff = useRef(false);
 
   // A late registration folds in automatically, matched by phone (the same
   // handle resolveFixtureParticipants uses at lock time) - never by hand.
@@ -3132,6 +3142,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     .sort((a, b) => a.name.localeCompare(b.name));
   const patchP = (id: string, patch: Partial<ParticipantResult>) => {
     setTouched(true);
+    signedOff.current = false;
     setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
   };
   const setOrg = (id: string, orgId: string) => patchP(id, { orgId: orgId || null, org: orgs.find((o) => o.id === orgId)?.name ?? null });
@@ -3140,6 +3151,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const persist = useLiveSave(fixtureId, invalidate);
   const setMark = (id: string, key: string, n: number | null) => {
     setTouched(true);
+    signedOff.current = false;
     setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, marks: { ...p.marks, [key]: n } } : p)) }));
   };
 
@@ -3147,6 +3159,8 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   // top three) the standings service reads, so detailed event results feed the
   // championship table + medal tally too. `complete` signs the event off.
   const persistEvent = (complete: boolean, quiet = false) => {
+    if (quiet && signedOff.current) return; // a late draft: the sign-off stands
+    if (complete) signedOff.current = true;
     // Drops any "Team ranking" org-placement data - see persistRanking's matching
     // comment on why a stale key here would double up on medals.
     const { eventRanking: _staleSimple, ...restLiveState } = (live?.live_state ?? {}) as Record<string, unknown>;

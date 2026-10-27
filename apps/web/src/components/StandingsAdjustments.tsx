@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { formatPoints, type StandingsRule } from '@semp/shared';
+import { formatPoints, isRankingFormatName, type SportTitlesConfig, type StandingsRule } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
-import { ruleSummary } from './StandingsRulesCard';
+import { ruleSummary, sportTitlesFor, titlesLine } from './StandingsRulesCard';
 import { Badge, Button, Card, CardBody, CardHeader, Input, Select, toast } from './ui';
 
 // Organiser-only cards under the championship table: manual adjustments (deductions,
@@ -81,8 +81,9 @@ export function StandingsAdjustments({ eventId, rows, draws }: { eventId: string
 interface RulesResponse {
   default: StandingsRule;
   rules: Array<{ scope_type: string; scope_id: string | null; config: StandingsRule }>;
-  disciplines: Array<{ id: string; name: string; sport: string | null; entry_type: string | null }>;
+  disciplines: Array<{ id: string; name: string; sport: string | null; sport_id: string | null; entry_type: string | null; format: string | null }>;
   formats: Array<{ id: string; name: string }>;
+  sports: Array<{ id: string; name: string; titles: SportTitlesConfig | null }>;
 }
 
 /** "How this table is calculated", in plain words, from the saved point systems. */
@@ -97,7 +98,9 @@ export function StandingsCalculation({ eventId }: { eventId: string }) {
     const d = data.disciplines.find((x) => x.id === r.scope_id);
     return d ? [d.sport, d.name].filter(Boolean).join(' · ') : 'Discipline';
   };
-  const overrides = data.rules.filter((r) => r.scope_type !== 'championship');
+  // A Rankings format rule no longer applies (ranking events take their own rule), so it isn't listed.
+  const overrides = data.rules.filter((r) => r.scope_type !== 'championship'
+    && !(r.scope_type === 'format' && isRankingFormatName(data.formats.find((f) => f.id === r.scope_id)?.name)));
   return (
     <Card>
       <button type="button" className="flex w-full items-center justify-between px-5 py-4 text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
@@ -108,6 +111,11 @@ export function StandingsCalculation({ eventId }: { eventId: string }) {
         <CardBody className="space-y-2 pt-0 text-sm text-slate-600 dark:text-slate-300">
           <p><span className="font-semibold">Every discipline</span>{saved ? '' : ' (built-in, not saved)'}: {ruleSummary(def)}</p>
           {overrides.map((r, i) => <p key={i}><span className="font-semibold">{name(r)}</span>: {ruleSummary(r.config, data.disciplines.find((d) => d.id === r.scope_id)?.sport, data.disciplines.find((d) => d.id === r.scope_id)?.entry_type)}</p>)}
+          {sportTitlesFor(data).map((s) => (
+            <p key={s.sport} className={s.mixed ? 'text-amber-700 dark:text-amber-300' : undefined}>
+              <span className="font-semibold">{s.sport} titles</span>: {titlesLine(s, data.sports.find((x) => x.id === s.sportId)?.titles ?? null)}{s.mixed ? '. A whole-sport title sits beside the gender titles; check this is intended.' : ''}
+            </p>
+          ))}
           <p className="text-xs text-slate-400 dark:text-slate-500">
             Each discipline's points are added up per entrant, plus any adjustments below. Level totals are ordered by {def.scheme === 'league_points' ? def.tiebreakers.join(', ').replace(/_/g, ' ') : 'points, wins, fewest losses, then score difference'}.
             Group and league tables (with their tie-breakers) are on the Schedule page, in each draw's Grid view.

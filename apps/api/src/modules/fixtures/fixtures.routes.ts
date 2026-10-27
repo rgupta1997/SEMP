@@ -17,6 +17,7 @@ import { resolveMatchAwards, type MatchAwardInput } from '../awards/match-awards
 import { generateFixtures, type TeamRef } from './domain/generators/index.js';
 import { generateAllStages } from './domain/stage-orchestrator.js';
 import { resolveStageAdvancement } from './domain/stage-resolver.js';
+import { guardEventSignOff, isEventWrite } from './domain/event-signoff.js';
 import { clashesByFixture, findClashes } from './domain/clashes.js';
 import { recomputeStandingsForFixtureAtomic, resolveRuleForDraw, resolveSchemeForDraw } from '../standings/standings.service.js';
 import { notify } from '@semp/notifications/server/notify.js';
@@ -100,7 +101,7 @@ async function remindCustomPointsIfNeeded(prisma: Prisma, fixtureId: string, sen
     const cp = (fx.live_state as any)?.custom_points;
     if (cp && (typeof cp.home === 'number' || typeof cp.away === 'number')) return; // points already entered
     const formatId = td?.format_id ?? td?.tournament_sports?.format_id ?? null;
-    const scheme = await resolveSchemeForDraw(prisma, championshipId, td?.discipline_id ?? null, formatId);
+    const scheme = await resolveSchemeForDraw(prisma, championshipId, td?.discipline_id ?? null, formatId, td?.tournament_sports?.sports?.name);
     if (scheme !== 'custom') return;
     const organiserRole = await prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser), select: { id: true } });
     if (!organiserRole) return;
@@ -451,7 +452,12 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     // admin alike. Changing it means unlocking it first, with a reason, on the record.
     await assertNotLocked(prisma, req.params.id);
     await assertChampionshipStarted(prisma, req.params.id);
-    const b = req.body ?? {};
+    let b = req.body ?? {};
+    // A late draft from an event console can't undo a ranking sign-off (event-signoff.ts).
+    if (isEventWrite(b)) {
+      const current = await prisma.fixtures.findUnique({ where: { id: req.params.id }, select: { status: true, live_state: true } });
+      b = guardEventSignOff(current ? { status: String(current.status), live_state: current.live_state } : null, b);
+    }
     await assertScoreShape(prisma, b, { fixtureId: req.params.id });
     // Only touch fields that were actually sent, so a status-only change (e.g.
     // walkover/postpone/cancel) doesn't clobber the score or live snapshot.
@@ -590,7 +596,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     const tdx = fixture.tournament_disciplines;
     const champId = tdx?.tournament_sports?.tournaments?.championships?.id;
     const formatId = tdx?.format_id ?? tdx?.tournament_sports?.format_id ?? null;
-    const rule = champId ? await resolveRuleForDraw(prisma, champId, tdx?.discipline_id ?? null, formatId) : null;
+    const rule = champId ? await resolveRuleForDraw(prisma, champId, tdx?.discipline_id ?? null, formatId, undefined, tdx?.tournament_sports?.sports?.name) : null;
     // `ranking_points` / `ranking_participation` let the ranking console award the
     // organiser-configured placement points (1st/2nd/3rd/…) + a participation floor for
     // every ranked org, instead of the template default.

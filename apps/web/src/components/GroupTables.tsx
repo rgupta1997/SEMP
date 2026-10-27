@@ -35,9 +35,10 @@ export const tablesPath = (drawId: string) => `/tournament-disciplines/${drawId}
 /** Results land from other devices (officials scoring), so tables refresh on their own. */
 export const TABLES_REFRESH_MS = 15_000;
 
-/** How many ties on this draw are waiting for a hand-picked order. */
+/** How many group ties on this draw are waiting for a hand-picked order. */
+// Only group ties can hold something up (who advances); a shared placing never waits.
 export const openTieCount = (t?: DrawTables) =>
-  (t?.stages.reduce((n, s) => n + s.pools.reduce((m, p) => m + p.ties.length, 0), 0) ?? 0) + (t?.placing_ties.length ?? 0);
+  t?.stages.reduce((n, s) => n + s.pools.reduce((m, p) => m + p.ties.length, 0), 0) ?? 0;
 
 const ordinal = (n: number) => (n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`);
 
@@ -118,7 +119,7 @@ function CrossGroupView({ c, multiStage }: { c: CrossGroup; multiStage: boolean 
             {c.rows.map((r) => (
               <tr key={r.entity_id}>
                 <td className="max-w-[12rem] truncate px-3 py-1.5 font-medium text-slate-800 dark:text-slate-100" title={r.name}>{r.short_name || r.name}</td>
-                <td className="px-2 py-1.5 text-slate-500 dark:text-slate-400">{r.pool}</td>
+                <td className="whitespace-nowrap px-2 py-1.5 text-slate-500 dark:text-slate-400">{r.pool}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{r.played}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{r.won}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{r.drawn}</td>
@@ -139,7 +140,7 @@ function CrossGroupView({ c, multiStage }: { c: CrossGroup; multiStage: boolean 
             {' above '}
             <span className="font-medium text-slate-700 dark:text-slate-200">{c.rows[i + 1].short_name || c.rows[i + 1].name}</span>
             {': '}
-            {d ? <>decided by <span className="font-semibold">{d.toLowerCase()}</span></> : <span className="text-amber-700 dark:text-amber-300">still level, waiting for a hand-picked order</span>}
+            {d ? <>decided by <span className="font-semibold">{d.toLowerCase()}</span></> : <span className="text-slate-600 dark:text-slate-300">level, so they share the place</span>}
           </li>
         ))}
       </ul>
@@ -152,6 +153,11 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
   onResolve: (entities: string[]) => void;
 }) {
   const tiedIds = new Set(pool.ties.flat());
+  // Teams level on every tie-breaker share a position (2, 2, 4) until an order is set.
+  const shownRank = (r: PoolTable['rows'][number]) => {
+    const tie = pool.ties.find((t) => t.includes(r.entity_id));
+    return tie ? Math.min(...pool.rows.filter((x) => tie.includes(x.entity_id)).map((x) => x.rank ?? Infinity)) : r.rank;
+  };
   return (
     <div className="min-w-0 rounded-xl border border-slate-200 dark:border-slate-800">
       <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 dark:border-slate-800">
@@ -170,7 +176,7 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
           <tbody>
             {pool.rows.map((r) => (
               <tr key={r.entity_id} className={tiedIds.has(r.entity_id) ? 'bg-amber-50 dark:bg-amber-500/10' : ''}>
-                <td className="px-3 py-1.5 text-slate-400">{r.rank}</td>
+                <td className="px-3 py-1.5 text-slate-400">{shownRank(r)}</td>
                 <td className="max-w-[12rem] truncate px-2 py-1.5 font-medium text-slate-800 dark:text-slate-100" title={r.name}>{r.short_name || r.name}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{r.played}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{r.won}</td>
@@ -222,17 +228,18 @@ export function GroupTables({ drawId, canManage }: { drawId: string; canManage: 
       ))}
 
       {data.cross_group.length > 0 && (
-        <div className="grid gap-3 lg:grid-cols-2">
+        // Full width: these few-row tables need every column, Place most of all.
+        <div className="space-y-3">
           {data.cross_group.map((c, i) => <CrossGroupView key={`${c.stage}-${c.kind}-${i}`} c={c} multiStage={multi} />)}
         </div>
       )}
 
       {data.placing_ties.map((t) => (
-        <div key={t.entities.join()} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+        <div key={t.entities.join()} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
           <span>
-            {t.entities.map((id) => data.names[id] ?? id).join(' and ')} are level for {ordinal(t.from)}{t.to > t.from ? `-${ordinal(t.to)}` : ''} place. Their placing points wait for an order.
+            {t.entities.map((id) => data.names[id] ?? id).join(' and ')} are level and share {ordinal(t.from)} place, with its points each. To split them instead, set an order.
           </span>
-          {canManage && <Button size="sm" variant="outline" onClick={() => setTarget({ scope: 'placing', stage: t.stage, pool: null, entities: t.entities, title: `Resolve ${ordinal(t.from)} place` })}>Resolve</Button>}
+          {canManage && <Button size="sm" variant="outline" onClick={() => setTarget({ scope: 'placing', stage: t.stage, pool: null, entities: t.entities, title: `Order ${ordinal(t.from)} place` })}>Set order</Button>}
         </div>
       ))}
 

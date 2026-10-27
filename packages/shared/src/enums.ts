@@ -158,11 +158,16 @@ export type StandingsScheme = (typeof STANDINGS_SCHEME)[number];
 // Ordered tiebreakers for a group / league table (applied left-to-right). score_diff and
 // score_for read each match's headline score, so they mean goals, sets or rubbers by sport.
 export const STANDINGS_TIEBREAKER = ['points', 'wins', 'lost', 'head_to_head', 'score_diff', 'score_for'] as const;
+// The order a stage gets when nobody set one (older saved stages carry it explicitly).
+export const STAGE_DEFAULT_TIEBREAKERS: StandingsTiebreaker[] = ['points', 'wins', 'lost'];
 export type StandingsTiebreaker = (typeof STANDINGS_TIEBREAKER)[number];
 
 // Where an editable scoring rule applies. Resolution is most-specific-wins:
 // discipline → format → championship default → DEFAULT_STANDINGS_RULE.
 export const STANDINGS_RULE_SCOPE = ['championship', 'format', 'discipline'] as const;
+// A standings_rules row holding one sport's title placings (scope_id = sport id). Its
+// config is sportTitlesSchema, not a point-system rule, so rule readers skip it.
+export const SPORT_TITLES_SCOPE = 'sport_titles';
 export type StandingsRuleScope = (typeof STANDINGS_RULE_SCOPE)[number];
 
 // Where a materialized standings table is aggregated / shown. championship is the

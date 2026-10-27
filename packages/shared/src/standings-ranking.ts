@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { STANDINGS_TIEBREAKER, type StandingsTiebreaker } from './enums.js';
+import { STAGE_DEFAULT_TIEBREAKERS, STANDINGS_TIEBREAKER, type StandingsTiebreaker } from './enums.js';
 import { canonicalTeamSport } from './team-presets.js';
 import { canonicalRacquetSport } from './racquet-presets.js';
 import { canonicalCricketSport } from './cricket-rules.js';
@@ -71,9 +71,13 @@ export function defaultGroupRanking(sport?: string | null): GroupRanking {
   return { win, draw, loss, tiebreakers: withoutScoreFor(STANDARD_ORDER, family) };
 }
 
+const sameOrder = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((t, i) => t === b[i]);
+
 /**
  * The ranking a group / league table actually uses. A stage set in Configure stages wins,
  * then the discipline's own ranking, then a match-points rule's W/D/L, then the sport default.
+ * A stage tie-breaker order equal to a default (schema or sport) was never chosen by anyone,
+ * so it doesn't override the Point System.
  */
 export function groupRankingFor(
   rule: StandingsRule | null | undefined, sport?: string | null,
@@ -86,7 +90,8 @@ export function groupRankingFor(
     : sportDefault;
   if (!stage) return base;
   const points = stage.points ?? { win: base.win, draw: base.draw, loss: base.loss };
-  return { ...points, tiebreakers: stage.tiebreakers };
+  const chosen = !sameOrder(stage.tiebreakers, STAGE_DEFAULT_TIEBREAKERS) && !sameOrder(stage.tiebreakers, sportDefault.tiebreakers);
+  return { ...points, tiebreakers: chosen ? stage.tiebreakers : base.tiebreakers };
 }
 
 /** A placings rule with no table ranking of its own takes its parent's (format, then default). */

@@ -1,12 +1,13 @@
 import {
-  KNOCKOUT_ROUND, DEFAULT_STANDINGS_RULE, EVENT_TITLE_GROUP, chessStandingsRule, formatPoints, groupRankingFor, inheritRanking,
-  isChessSport, isNoResult, readTieResolutions, stageConfigSchema, standingsRuleSchema, type StandingsRule,
+  KNOCKOUT_ROUND, DEFAULT_RANKING_RULE, DEFAULT_STANDINGS_RULE, EVENT_TITLE_GROUP, chessStandingsRule, formatPoints, groupRankingFor, inheritRanking,
+  isChessSport, isNoResult, isRankingFormatName, isRankingSport, readTieResolutions, SPORT_TITLES_SCOPE, eventTitleIn, groupsForTitle, sportTitlesSchema, stageConfigSchema, standingsRuleSchema, titlePlacingFor,
+  type SportTitlesConfig, type StandingsRule,
   type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker,
 } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
 import { contingentKey, type ContingentRef } from '@semp/shared';
 import { assignStageSequence, inPlacingStage, placingStageSequences } from '../fixtures/domain/stage-tree.js';
-import { SCORED_STATUSES, accumulate, drawContext, rankBy, runScheme, type EntityTally, type SchemeContext, type SchemeFixture } from './domain/schemes.js';
+import { SCORED_STATUSES, accumulate, drawContext, levelOn, rankBy, runScheme, shareRanks, type EntityTally, type SchemeContext, type SchemeFixture } from './domain/schemes.js';
 import { convertEventTotals, type EventTotal } from './domain/event-conversion.js';
 
 // One accumulator bucket = one standings table (a scope + scope_id pair).
@@ -31,26 +32,47 @@ interface RuleIndex {
   byFormat: Map<string, StandingsRule>;
   championshipRule: StandingsRule | undefined;
   defaultRule: StandingsRule;
+  /** Each sport's title placings (sport id -> titles), for converted event sports. */
+  sportTitles: Map<string, SportTitlesConfig>;
+  /** Fixture formats that are ranking events ("Rankings"). */
+  rankingFormats: Set<string>;
 }
 
 export async function loadRuleIndex(prisma: Db, championshipId: string): Promise<RuleIndex> {
-  const ruleRows = await prisma.standings_rules.findMany({ where: { championship_id: championshipId } });
+  const [ruleRows, formats] = await Promise.all([
+    prisma.standings_rules.findMany({ where: { championship_id: championshipId } }),
+    prisma.tournament_formats.findMany({ select: { id: true, name: true } }),
+  ]);
+  const rankingFormats = new Set(formats.filter((f) => isRankingFormatName(f.name)).map((f) => f.id));
   const byDiscipline = new Map<string, StandingsRule>();
   const byFormat = new Map<string, StandingsRule>();
   let championshipRule: StandingsRule | undefined;
+  const sportTitles = new Map<string, SportTitlesConfig>();
   for (const r of ruleRows) {
+    if (r.scope_type === SPORT_TITLES_SCOPE) {
+      const parsed = sportTitlesSchema.safeParse(r.config);
+      if (parsed.success && r.scope_id) sportTitles.set(r.scope_id, parsed.data);
+      continue;
+    }
     const rule = parseRule(r.config);
     if (r.scope_type === 'discipline' && r.scope_id) byDiscipline.set(r.scope_id, rule);
     else if (r.scope_type === 'format' && r.scope_id) byFormat.set(r.scope_id, rule);
     else if (r.scope_type === 'championship') championshipRule = rule;
   }
-  return { byDiscipline, byFormat, championshipRule, defaultRule: championshipRule ?? DEFAULT_STANDINGS_RULE };
+  return { byDiscipline, byFormat, championshipRule, defaultRule: championshipRule ?? DEFAULT_STANDINGS_RULE, sportTitles, rankingFormats };
 }
+
+// A ranking event (ranking sport or Rankings format) takes only its own discipline rule.
+const isRankingDraw = (index: RuleIndex, formatId: string | null, sportName?: string | null) =>
+  isRankingSport(sportName) || (!!formatId && index.rankingFormats.has(formatId));
+const rankingDrawRule = (index: RuleIndex, disciplineId: string | null) =>
+  (disciplineId ? index.byDiscipline.get(disciplineId) : undefined) ?? DEFAULT_RANKING_RULE;
 
 /** The tables' rule for one draw: discipline, then format, then the fallback below. */
 export function ruleFromIndex(
   index: RuleIndex, disciplineId: string | null, formatId: string | null, sportName?: string | null, entryType?: string | null,
 ): StandingsRule {
+  if (isRankingDraw(index, formatId, sportName)) return rankingDrawRule(index, disciplineId);
   const byFormat = formatId ? index.byFormat.get(formatId) : undefined;
   const rule = (disciplineId ? index.byDiscipline.get(disciplineId) : undefined)
     ?? byFormat
@@ -65,8 +87,11 @@ export async function resolveRuleForDraw(
   prisma: Db, championshipId: string, disciplineId: string | null, formatId: string | null,
   /** A chess draw ranks by chess points unless the organiser set a rule for it. */
   chess?: { team: boolean },
+  sportName?: string | null,
 ): Promise<StandingsRule> {
-  const { byDiscipline, byFormat, championshipRule } = await loadRuleIndex(prisma, championshipId);
+  const index = await loadRuleIndex(prisma, championshipId);
+  if (isRankingDraw(index, formatId, sportName)) return rankingDrawRule(index, disciplineId);
+  const { byDiscipline, byFormat, championshipRule } = index;
   const formatRule = formatId ? byFormat.get(formatId) : undefined;
   return inheritRanking(
     (disciplineId ? byDiscipline.get(disciplineId) : undefined) ??
@@ -90,9 +115,9 @@ function fallbackRuleFor(defaultRule: StandingsRule, sportName?: string | null, 
 }
 
 export async function resolveSchemeForDraw(
-  prisma: Db, championshipId: string, disciplineId: string | null, formatId: string | null,
+  prisma: Db, championshipId: string, disciplineId: string | null, formatId: string | null, sportName?: string | null,
 ): Promise<StandingsScheme> {
-  return (await resolveRuleForDraw(prisma, championshipId, disciplineId, formatId)).scheme;
+  return (await resolveRuleForDraw(prisma, championshipId, disciplineId, formatId, undefined, sportName)).scheme;
 }
 
 // ---------- One draw's input to a scheme ----------
@@ -190,7 +215,7 @@ interface EventContribution {
   fixture: EventFixtureRow;
   /** Raw per-contingent event points and medals from this fixture. */
   tallies: EntityTally[];
-  /** Set when the rule converts this sport's totals into a sport placing. */
+  /** Set when this event's sport turns its event points into title placings. */
   converted: boolean;
 }
 
@@ -229,14 +254,17 @@ function eventContributions(
     }
     if (tallies.length === 0) continue;
     const rule = ruleFromIndex(index, td.discipline_id, td.format_id ?? ts.format_id, ts.sports?.name, td.disciplines?.entry_type);
-    const convert = rule.scheme === 'ranking' ? rule.convert : undefined;
-    contributions.push({ fixture: f, tallies, converted: !!convert });
-    if (!convert) continue;
-    for (const g of convert.groups) {
+    // Titles are set per sport: switched on, each event feeds the title chosen for it.
+    const titles = index.sportTitles.get(ts.sport_id);
+    const title = rule.scheme === 'ranking' && titles?.enabled ? eventTitleIn(titles, td.discipline_id ?? '') : null;
+    contributions.push({ fixture: f, tallies, converted: !!title });
+    if (!title) continue;
+    for (const g of groupsForTitle(title)) {
       const key = `${ts.tournament_id}|${ts.sport_id}|${g.name.toLowerCase()}`;
       let acc = groupTotals.get(key);
       if (!acc) {
-        acc = { meta: { sport_id: ts.sport_id, tournament_id: ts.tournament_id, sport: ts.sports?.name ?? 'Event', group: g.name }, places: convert.places, participation: convert.participation, totals: new Map() };
+        const placing = titlePlacingFor(index.sportTitles.get(ts.sport_id), g.name);
+        acc = { meta: { sport_id: ts.sport_id, tournament_id: ts.tournament_id, sport: ts.sports?.name ?? 'Event', group: g.name }, places: placing.places, participation: placing.participation, totals: new Map() };
         groupTotals.set(key, acc);
       }
       for (const t of tallies) {
@@ -393,8 +421,23 @@ export async function recomputeStandings(prisma: Db, championshipId: string): Pr
     organization_id: string; org_unit_id: string | null;
     played: number; won: number; drawn: number; lost: number; points: number; detail: object; rank: number;
   }>;
+  // A ranking sport's own table (swimming, powerlifting) has no wins or losses: level
+  // totals go by more golds, then more silvers, as its sport placing does.
+  const eventSports = new Set(events.contributions
+    .filter((c) => isRankingSport(c.fixture.tournament_disciplines?.tournament_sports.sports?.name))
+    .map((c) => c.fixture.tournament_disciplines!.tournament_sports.sport_id));
+  const medals = (r: EntityTally, k: 'gold' | 'silver') => r.detail[k] ?? 0;
+  const levelOnTiebreakers = levelOn(tiebreakers);
   for (const b of buckets.values()) {
-    const rows = rankBy([...b.rows.values()], tiebreakers);
+    const eventTable = b.scope_type === 'sport' && !!b.scope_id && eventSports.has(b.scope_id);
+    const ordered = eventTable
+      ? rankBy([...b.rows.values()], tiebreakers)
+        .sort((x, y) => y.points - x.points || medals(y, 'gold') - medals(x, 'gold') || medals(y, 'silver') - medals(x, 'silver'))
+      : rankBy([...b.rows.values()], tiebreakers);
+    // Level on everything that orders the table: same position.
+    const rows = shareRanks(ordered, eventTable
+      ? (x, y) => x.points === y.points && medals(x, 'gold') === medals(y, 'gold') && medals(x, 'silver') === medals(y, 'silver')
+      : levelOnTiebreakers);
     for (const r of rows) {
       const ref = refs.get(r.entity_id);
       // A tally whose key was never registered cannot be written: organization_id is
