@@ -1,4 +1,5 @@
 // Shapes returned by the /me/* participant dashboard endpoints.
+import type { Settlement } from '@semp/shared';
 
 export interface CareerStatsData {
   total_events: number;
@@ -39,7 +40,7 @@ export interface MatchSummary {
   /** Shoot-out kicks [mine, theirs] when a level match was settled on penalties. */
   pens?: [number, number] | null;
   /** Kho kho: settled on minimum chase or won by an innings. */
-  settled?: 'minimum_chase' | 'innings' | null;
+  settled?: Settlement | null;
   result: MatchResult;
 }
 

@@ -92,3 +92,36 @@ describe('format editor', () => {
     expect(describeKnobs(k)).toBe('2 halves · first to 13 · 40 min cap (20/period) · universal point');
   });
 });
+
+// Sheet FR03: 12-12 at the cap in the final. Either reading of the rulebook can be set.
+describe('the win score in extra time', () => {
+  const fin = presetByKey('ultimate_final_2x20')!;
+  const twelveAll = [...goals('A', 6), ...goals('B', 6), half, ...goals('A', 6), ...goals('B', 6), half];
+
+  it('by default the first goal to 13 in extra time wins at once', () => {
+    expect(foldRally(fin, twelveAll).state.ended).toBe(false);
+    expect(foldRally(fin, [...twelveAll, ...goals('A', 1)]).state).toMatchObject({ ended: true, winner: 'A' });
+  });
+
+  it('switched off in the editor, extra time is played in full and the leader wins', () => {
+    const k = readKnobs(fin);
+    expect(k.extraTimeFirstTo).toBe(true);
+    expect(knobsFor(k).map((x) => x.key)).toContain('extraTimeFirstTo');
+    const full = applyKnobs(fin, { ...k, extraTimeFirstTo: false });
+    expect(full.tieBreak?.extraTime).toMatchObject({ periods: 2, minutes: 8, fullTime: true });
+    // 13-12 in extra time does not end it; 15-14 after both extra halves does.
+    expect(foldRally(full, [...twelveAll, ...goals('A', 1)]).state.ended).toBe(false);
+    const st = foldRally(full, [...twelveAll, ...goals('A', 2), half, ...goals('B', 2), ...goals('A', 1), half]).state;
+    expect(st).toMatchObject({ ended: true, winner: 'A' });
+    expect(describeKnobs(readKnobs(full))).toContain('ET 2x8 min played in full');
+  });
+
+  it('a regulation goal to 13 still wins straight away either way', () => {
+    const full = applyKnobs(fin, { ...readKnobs(fin), extraTimeFirstTo: false });
+    expect(foldRally(full, [...goals('A', 12), ...goals('B', 3), ...goals('A', 1)]).state).toMatchObject({ ended: true, winner: 'A' });
+  });
+
+  it('is not offered without extra time', () => {
+    expect(knobsFor(readKnobs(f)).map((x) => x.key)).not.toContain('extraTimeFirstTo');
+  });
+});

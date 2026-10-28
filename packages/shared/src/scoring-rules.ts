@@ -285,6 +285,8 @@ export interface TieBreakSpec {
     repeat?: boolean;
     /** What the period is called on the board - "Overtime" rather than "Extra time". */
     label?: string;
+    /** Ultimate: extra time runs its full length; reaching `firstTo` no longer ends the match in it. */
+    fullTime?: boolean;
   } | null;
   /**
    * The shoot-out. `kicks` each in the first round; level after that goes to
@@ -304,6 +306,11 @@ export interface TieBreakSpec {
    * wins - the "universal point". Decided by the kernel on that point.
    */
   universalPoint?: boolean | null;
+  /**
+   * Kabaddi: still level after extra time, a fresh toss and a golden raid each, the
+   * first point winning; level after both, a toss decides (kabaddi.ts).
+   */
+  goldenRaid?: boolean | null;
 }
 
 export interface ScoringFormat {
@@ -350,6 +357,10 @@ export const END_REASONS = [
   'extra_time', 'penalties',
   // Kho kho: the faster first out after a level match, and a follow-on side still behind.
   'minimum_chase', 'innings',
+  // Called off for rain or bad light: awarded on the rulebook's weather rule, or drawn.
+  'weather',
+  // Kabaddi: the first point of a golden raid, or the toss when both were empty.
+  'golden_raid', 'toss',
 ] as const;
 export type EndReason = (typeof END_REASONS)[number];
 
@@ -425,12 +436,14 @@ export const tieBreakSpecSchema: z.ZodType<TieBreakSpec> = z.object({
     minutes: z.number().int().min(1).max(60),
     repeat: z.boolean().optional(),
     label: z.string().min(1).max(30).optional(),
+    fullTime: z.boolean().optional(),
   }).nullable().optional(),
   penalties: z.object({
     kicks: z.number().int().min(1).max(20),
   }).nullable().optional(),
   minimumChase: z.boolean().nullable().optional(),
   universalPoint: z.boolean().nullable().optional(),
+  goldenRaid: z.boolean().nullable().optional(),
 });
 
 export const scoringFormatSchema = z.object({

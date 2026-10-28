@@ -347,6 +347,14 @@ const RAID: ScoringFormat[] = [
     levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(40, 'leaderWins'), endStates: LEAGUE,
     rulesSheet: { doOrDieRaid: 'every third empty raid', superTackle: 'defenders 3 or fewer', matSize: '13x10m' },
   }),
+  // Inter-IIM semi-finals and finals: no draws, a level match plays extra time of
+  // 3 + 3 (the 1-minute break is just a pause). Still level: a golden raid each, then a toss.
+  fmt({
+    sport: 'kabaddi', key: 'kabaddi_ko_2x20_et', name: 'Knockout - two halves of 20, extra time 3 + 3',
+    levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(40, 'leaderWins'), endStates: STRICT,
+    tieBreak: { extraTime: { periods: 2, minutes: 3 }, goldenRaid: true },
+    rulesSheet: { doOrDieRaid: 'every third empty raid', superTackle: 'defenders 3 or fewer', extraTime: '3 + 3 minutes, 1-minute break, then golden raid' },
+  }),
   // AKFI: women, junior girls and sub-juniors play two halves of 15.
   fmt({
     sport: 'kabaddi', key: 'kabaddi_2x15', name: 'Two halves of 15 minutes (women and juniors)',

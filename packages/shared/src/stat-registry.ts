@@ -502,7 +502,10 @@ const RAID_EVENTS: StatEventSpec[] = [
     points: 2, tone: 'score', role: 'defend', secondPlayer: KAB_RAIDER, secondPlayerMetrics: { raids: 1, times_out: 1 },
   }),
   // Out of bounds, or into the raiders' court before the raid ended: the raiders score.
+  // Alongside a scoring raid it does not end the raid; tap it before the raid's own ending.
   ev('defender_out', 'Defender out', { times_out: 1 }, { points: 1, forOpponent: true, tone: 'ownGoal', role: 'defend' }),
+  // The raid's only point came from a defender going out: ends the raid, not an empty one.
+  ev('defender_out_raid', 'Defender out, raid ends', { times_out: 1 }, { points: 1, forOpponent: true, tone: 'ownGoal', role: 'defend' }),
   // The team's, not one player's.
   ev('allout', 'All out +2', { all_outs: 1 }, { points: 2, perPlayer: false, tone: 'score' }),
   ev('technical', 'Technical point', {}, { points: 1, perPlayer: false, tone: 'score' }),
@@ -524,7 +527,7 @@ const RAID_METRICS: StatMetric[] = [
   count('super_tackles', 'Super tackles', 'ST', { fromEvents: ['super_tackle'] }),
   count('bonus_points', 'Bonus points', 'BP', { fromEvents: ['bonus', 'bonus_raid'] }),
   count('times_out', 'Times out', 'Out', {
-    fromEvents: ['raider_out', 'dod_failed', 'tackle', 'super_tackle', 'defender_out'], higherIsBetter: false,
+    fromEvents: ['raider_out', 'dod_failed', 'tackle', 'super_tackle', 'defender_out', 'defender_out_raid'], higherIsBetter: false,
   }),
   count('all_outs', 'All outs', 'AO', { fromEvents: ['allout'] }),
   count('yellows', 'Yellow cards', 'YC', { fromEvents: ['kab_yellow'], higherIsBetter: false }),

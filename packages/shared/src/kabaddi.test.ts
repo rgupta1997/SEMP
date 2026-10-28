@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { kabaddiStatus } from './kabaddi.js';
+import { goldenTossEnd, khoSettlementOf } from './kho-kho.js';
+import { tieProgress } from './tie-break.js';
 import { foldRally, type RallyEvent } from './rally-kernel.js';
 import { presetByKey } from './racquet-presets.js';
 import { statSpecFor } from './stat-registry.js';
@@ -100,5 +102,122 @@ describe('raider and defender stats', () => {
     });
     expect(row?.table).toBe('raid_match_lines');
     expect(row?.unmapped).toEqual([]);
+  });
+});
+
+// Sheet KB02: a raid whose only point came from a defender stepping out.
+describe('defender out, raid ends', () => {
+  // Fired from the defending side (B) for a raid by A: the point goes to A.
+  const outRaid = (raiders: 'A' | 'B'): RallyEvent => ({ t: 'point', side: raiders, pts: 1, kind: 'defender_out_raid', playerId: 'd1' });
+
+  it('gives the raiders the point, ends the raid and is not an empty raid', () => {
+    const log: RallyEvent[] = [{ t: 'raidFirst', side: 'A' }, empty('A'), raid('B', 1), empty('A'), raid('B', 1)];
+    expect(status(log)).toMatchObject({ raider: 'A', doOrDie: true });
+    const after = [...log, outRaid('A')];
+    expect(foldRally(f, after).state.score[0]).toEqual([1, 2]);
+    // The do-or-die raid scored, so the count resets and B raids next.
+    expect(status(after)).toMatchObject({ raider: 'B', emptyStreak: 0 });
+    expect(status([...after, raid('B', 1)])).toMatchObject({ raider: 'A', doOrDie: false, emptyStreak: 0 });
+  });
+
+  it('a plain defender out still leaves the raid open', () => {
+    const log: RallyEvent[] = [{ t: 'raidFirst', side: 'A' }, { t: 'point', side: 'A', pts: 1, kind: 'defender_out' }];
+    expect(status(log).raider).toBe('A');
+  });
+
+  it('counts as a time out for the defender', () => {
+    const spec = statSpecFor('kabaddi')!;
+    expect(spec.events.find((e) => e.key === 'defender_out_raid')).toMatchObject({ forOpponent: true, role: 'defend', points: 1 });
+    expect(spec.metrics.find((m) => m.key === 'times_out')?.fromEvents).toContain('defender_out_raid');
+  });
+});
+
+// Sheet KB03: Inter-IIM semi-finals and finals.
+describe('the kabaddi knockout preset', () => {
+  const ko = presetByKey('kabaddi_ko_2x20_et')!;
+  const half: RallyEvent = { t: 'endPeriod' };
+
+  it('plays two halves of 20 with no draw and 3 + 3 of extra time', () => {
+    expect(ko.clock?.minutes).toBe(40);
+    expect(ko.endStates.drawsAllowed).toBe(false);
+    expect(ko.tieBreak?.extraTime).toEqual({ periods: 2, minutes: 3 });
+  });
+
+  it('level after both halves goes to extra time, and the leader after it wins', () => {
+    const level: RallyEvent[] = [raid('A', 2), half, raid('B', 2), half];
+    expect(foldRally(ko, level).state.ended).toBe(false);
+    const st = foldRally(ko, [...level, raid('A', 1), half, half]).state;
+    expect(st).toMatchObject({ ended: true, winner: 'A' });
+  });
+
+  it('the editor offers extra time with any length, and no kicks, universal point or win score', async () => {
+    const { knobsFor, readKnobs, applyKnobs } = await import('./format-knobs.js');
+    const keys = knobsFor(readKnobs(ko)).map((s) => s.key);
+    expect(keys).toEqual(expect.arrayContaining(['extraTimeEnabled', 'extraTimePeriods', 'extraTimeMinutes']));
+    expect(keys).not.toContain('shootoutEnabled');
+    expect(keys).not.toContain('universalPointEnabled');
+    expect(keys).not.toContain('firstTo');
+    const five = applyKnobs(ko, { ...readKnobs(ko), extraTimeMinutes: 5 });
+    expect(five.tieBreak?.extraTime).toMatchObject({ periods: 2, minutes: 5 });
+    // A league format turns into a knockout one in the editor too.
+    const league = presetByKey('pkl_2x20')!;
+    const turned = applyKnobs(league, { ...readKnobs(league), drawsAllowed: false, extraTimeEnabled: true, extraTimePeriods: 2, extraTimeMinutes: 4 });
+    expect(turned.tieBreak?.extraTime).toMatchObject({ periods: 2, minutes: 4 });
+  });
+});
+
+// Sheet KB04: still level after extra time - a golden raid each, then a toss.
+describe('golden raid', () => {
+  const ko = presetByKey('kabaddi_ko_2x20_et')!;
+  const half: RallyEvent = { t: 'endPeriod' };
+  // Level after both halves and both extra-time halves.
+  const levelAfterExtra: RallyEvent[] = [{ t: 'raidFirst', side: 'A' }, raid('A', 2), half, raid('B', 2), half, half, half];
+  const gs = (log: RallyEvent[]) => kabaddiStatus(log, foldRally(ko, log).state);
+
+  it('the knockout preset turns it on, after extra time', () => {
+    expect(ko.tieBreak?.goldenRaid).toBe(true);
+    const st = foldRally(ko, levelAfterExtra).state;
+    expect(st.ended).toBe(false);
+    expect(tieProgress(ko, st, [2, 2]).phase).toBe('goldenRaid');
+    expect(gs(levelAfterExtra)).toMatchObject({ goldenStarted: false, goldenTossDue: false });
+  });
+
+  it('the toss winner raids; a scoring raid wins the match on golden raid', () => {
+    const log = [...levelAfterExtra, { t: 'goldenRaid', side: 'B' } as RallyEvent];
+    expect(gs(log)).toMatchObject({ goldenStarted: true, raider: 'B', goldenRaids: 0 });
+    const won = [...log, raid('B', 1)];
+    expect(foldRally(ko, won).state).toMatchObject({ ended: true, winner: 'B', reason: 'golden_raid' });
+    expect(khoSettlementOf({ rally: won })).toEqual({ reason: 'golden_raid', winner: 'B' });
+  });
+
+  it('a tackle on the golden raid wins it for the defenders', () => {
+    const log = [...levelAfterExtra, { t: 'goldenRaid', side: 'B' } as RallyEvent, { t: 'point', side: 'A', pts: 1, kind: 'tackle' } as RallyEvent];
+    expect(foldRally(ko, log).state).toMatchObject({ ended: true, winner: 'A' });
+    expect(khoSettlementOf({ rally: log })?.reason).toBe('golden_raid');
+  });
+
+  it('an empty golden raid passes it to the other team; both empty, a toss decides', () => {
+    const one = [...levelAfterExtra, { t: 'goldenRaid', side: 'A' } as RallyEvent, empty('A')];
+    expect(gs(one)).toMatchObject({ raider: 'B', goldenRaids: 1, goldenTossDue: false, doOrDie: false });
+    const both = [...one, empty('B')];
+    expect(gs(both)).toMatchObject({ goldenRaids: 2, goldenTossDue: true });
+    const tossed = [...both, goldenTossEnd('B')];
+    expect(foldRally(ko, tossed).state).toMatchObject({ ended: true, winner: 'B', reason: 'toss' });
+    expect(khoSettlementOf({ rally: tossed })).toEqual({ reason: 'toss', winner: 'B' });
+  });
+
+  it('a plain win is not read as a golden raid', () => {
+    expect(khoSettlementOf({ rally: [raid('A', 3), half, half] })).toBeNull();
+  });
+
+  it('the editor shows it for kabaddi knockouts only', async () => {
+    const { knobsFor, readKnobs, applyKnobs, describeKnobs } = await import('./format-knobs.js');
+    const k = readKnobs(ko);
+    expect(k.goldenRaidEnabled).toBe(true);
+    expect(knobsFor(k).map((s) => s.key)).toContain('goldenRaidEnabled');
+    expect(knobsFor(readKnobs(f)).map((s) => s.key)).not.toContain('goldenRaidEnabled');
+    expect(knobsFor(readKnobs(presetByKey('ultimate_2x20')!)).map((s) => s.key)).not.toContain('goldenRaidEnabled');
+    expect(applyKnobs(ko, { ...k, goldenRaidEnabled: false }).tieBreak?.goldenRaid).toBeUndefined();
+    expect(describeKnobs(k)).toContain('ET 2x3 min then golden raid');
   });
 });

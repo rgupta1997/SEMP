@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints, isKnockoutRound, KHO_END_LABEL, KHO_END_SHORT, khoSettlementOf, resultSummary, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndNoteOf, earlyEndOf, formatPoints, isKnockoutRound, KHO_END_LABEL, KHO_END_SHORT, khoSettlementOf, resultSummary, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { AwardsBoard, MatchAwardsLine, type AwardsBoardData, type BoardMatchAward } from '../../features/awards/AwardsBoard';
 import { useAuth } from '../../lib/auth';
@@ -786,8 +786,9 @@ export function ResultsPage() {
                 const early = earlyEndOf(f.live_state);
                 // How it went, home first: carrom game scores, chess game results or ending.
                 const summary = scored ? resultSummary(f.sport, f.live_state) : null;
+                const endNote = early ? earlyEndNoteOf(f.live_state) : null;
                 const earlyNote = (won: boolean) => early && scored && !won && (homeWon || awayWon) && (
-                  <span className="ml-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400">({EARLY_END_LABEL[early]})</span>
+                  <span className="ml-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400" title={endNote ?? undefined}>({EARLY_END_LABEL[early]})</span>
                 );
                 // Level after play and settled on penalties: the kicks sit beside the score.
                 const pens = scored ? shootoutOf(f.live_state) : null;

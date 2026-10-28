@@ -16,7 +16,7 @@ import type { ScoringFormat, Side, TieBreakSpec } from './scoring-rules.js';
  *   penalties    kicks, which do NOT move the scoreline
  *   done         somebody has won, or the match is drawable and drawn
  */
-export type TiePhase = 'regulation' | 'extraTime' | 'penalties' | 'minimumChase' | 'universalPoint' | 'done';
+export type TiePhase = 'regulation' | 'extraTime' | 'penalties' | 'minimumChase' | 'universalPoint' | 'goldenRaid' | 'done';
 
 export interface TieProgress {
   phase: TiePhase;
@@ -83,6 +83,10 @@ export function tieProgress(
   // Kho kho's equivalent of the kicks: each side chases once more, fastest first out wins.
   if (tb?.minimumChase) {
     return { phase: 'minimumChase', extraPlayed, extraTotal, periodMs: extraMs, levelAfterRegulation };
+  }
+  // Kabaddi: golden raids - the first point wins, the kernel ends the match on it.
+  if (tb?.goldenRaid) {
+    return { phase: 'goldenRaid', extraPlayed, extraTotal, periodMs: extraMs, levelAfterRegulation };
   }
   // Ultimate: the next point wins - the kernel ends the match on it.
   if (tb?.universalPoint) {

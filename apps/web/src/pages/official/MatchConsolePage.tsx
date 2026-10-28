@@ -1954,6 +1954,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       // enabled Undo beneath it a straight contradiction.
       disabled={fixture.scorecard_status === 'locked'}
       recorded={status === 'completed'}
+      knockout={isKnockoutFixture(fixture ?? {})}
       afterResult={<PostMatchActions fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} />}
       onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
       // NO onDone HERE. Confirming used to navigate straight back to the results

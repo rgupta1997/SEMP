@@ -3,6 +3,7 @@ import { expediteConfig, ITTF_EXPEDITE } from './rally-kernel.js';
 import { isChessSport } from './chess.js';
 import { carromRulesOf, isCarromSport } from './carrom.js';
 import { isKhoKhoFormat } from './kho-kho.js';
+import { isKabaddiFormat } from './kabaddi.js';
 import type {
   CapAction, CapTieRule, ChangeEndsRule, LevelSpec, OfficiatingMode,
   ScoringFormat, ServeMovement, PointScoring,
@@ -82,6 +83,8 @@ export interface FormatKnobs {
   extraTimePeriods: number;
   /** Minutes in EACH period of extra time, not the total. */
   extraTimeMinutes: number;
+  /** Ultimate: reaching the win score (`firstTo`) still ends the match during extra time. */
+  extraTimeFirstTo: boolean;
   shootoutEnabled: boolean;
   /** Kicks each in the opening round. Level after that goes to sudden death. */
   shootoutKicks: number;
@@ -93,6 +96,10 @@ export interface FormatKnobs {
   firstTo: number;
   /** Read-only. Kho kho offers the minimum chase instead of a shoot-out. */
   khoKho: boolean;
+  /** Read-only. Kabaddi settles a level knockout with extra time (then golden raid), never kicks. */
+  kabaddi: boolean;
+  /** Kabaddi: still level after extra time, a golden raid each, then a toss. */
+  goldenRaidEnabled: boolean;
 
   // ---- how it is run
   officiatingMode: OfficiatingMode;
@@ -368,21 +375,27 @@ export const KNOB_SPECS: KnobSpec[] = [
   { key: 'extraTimeMinutes', label: 'Minutes per extra period', group: 'tieBreak', type: 'int', min: 1, max: 60,
     hint: 'Each period, not the total. Two periods of 5 adds ten minutes.',
     applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled },
+  { key: 'extraTimeFirstTo', label: 'Win score still ends it in extra time', group: 'tieBreak', type: 'bool',
+    hint: 'On: the first side to the win score wins at once, even in extra time (level 12-12, the next goal wins). Off: extra time is played in full and the leader at the end wins.',
+    applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled && k.firstTo > 0 && !k.khoKho },
+  { key: 'goldenRaidEnabled', label: 'Golden raid', group: 'tieBreak', type: 'bool',
+    hint: 'Still level after extra time: a fresh toss, then a golden raid each; the first point wins. Still level after both, a toss decides.',
+    applies: (k) => k.kabaddi && !k.drawsAllowed },
   { key: 'shootoutEnabled', label: 'Penalty shoot-out', group: 'tieBreak', type: 'bool',
     hint: 'Settles it when the scores are still level after extra time. The scoreline is not changed - a 1-1 won on kicks is recorded 1-1.',
-    applies: (k) => k.periodShaped && !k.drawsAllowed && !k.khoKho },
+    applies: (k) => k.periodShaped && !k.drawsAllowed && !k.khoKho && !k.kabaddi },
   { key: 'shootoutKicks', label: 'Kicks each', group: 'tieBreak', type: 'int', min: 1, max: 20,
     hint: 'The opening round. Still level after that goes to sudden death, a pair at a time.',
-    applies: (k) => k.periodShaped && !k.drawsAllowed && k.shootoutEnabled && !k.khoKho },
+    applies: (k) => k.periodShaped && !k.drawsAllowed && k.shootoutEnabled && !k.khoKho && !k.kabaddi },
   { key: 'minimumChaseEnabled', label: 'Minimum chase', group: 'tieBreak', type: 'bool',
     hint: 'Still level: each side chases once more and the faster first out wins. The score stays level.',
     applies: (k) => k.khoKho && !k.drawsAllowed },
   { key: 'universalPointEnabled', label: 'Universal point', group: 'tieBreak', type: 'bool',
     hint: 'Still level after the last period (and any extra time): the next point wins.',
-    applies: (k) => k.periodShaped && !k.drawsAllowed && !k.khoKho },
+    applies: (k) => k.periodShaped && !k.drawsAllowed && !k.khoKho && !k.kabaddi },
   { key: 'firstTo', label: 'Win at this score', group: 'shape', type: 'int', min: 0, max: 99,
     hint: 'The first side to this total wins straight away, even before time is up (ultimate: 13). 0 = off.',
-    applies: (k) => k.periodShaped && !k.khoKho },
+    applies: (k) => k.periodShaped && !k.khoKho && !k.kabaddi },
 
   // ---- run
   { key: 'officiatingMode', label: 'Who scores', group: 'run', type: 'enum',
@@ -481,12 +494,15 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
     extraTimeEnabled: !!f.tieBreak?.extraTime,
     extraTimePeriods: f.tieBreak?.extraTime?.periods ?? 2,
     extraTimeMinutes: f.tieBreak?.extraTime?.minutes ?? 5,
+    extraTimeFirstTo: !f.tieBreak?.extraTime?.fullTime,
     shootoutEnabled: !!f.tieBreak?.penalties,
     shootoutKicks: f.tieBreak?.penalties?.kicks ?? 5,
     minimumChaseEnabled: !!f.tieBreak?.minimumChase,
     universalPointEnabled: !!f.tieBreak?.universalPoint,
     firstTo: top.firstTo ?? 0,
     khoKho: isKhoKhoFormat(f),
+    kabaddi: isKabaddiFormat(f),
+    goldenRaidEnabled: !!f.tieBreak?.goldenRaid,
 
     officiatingMode: f.officiatingMode,
     drawsAllowed: f.endStates.drawsAllowed,
@@ -631,14 +647,16 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
         pauseOnStoppage: f.clock?.pauseOnStoppage ?? false,
       }
       : null,
-    tieBreak: k.extraTimeEnabled || k.shootoutEnabled || k.minimumChaseEnabled || k.universalPointEnabled
+    tieBreak: k.extraTimeEnabled || k.shootoutEnabled || k.minimumChaseEnabled || k.universalPointEnabled || (k.goldenRaidEnabled && k.kabaddi)
       ? {
+        ...(k.goldenRaidEnabled && k.kabaddi ? { goldenRaid: true } : {}),
         ...(k.universalPointEnabled && !k.khoKho ? { universalPoint: true } : {}),
         extraTime: k.extraTimeEnabled
           ? {
             // Keep basketball's repeat-while-level and its "Overtime" name; the editor has no knob for them.
             ...(f.tieBreak?.extraTime?.repeat ? { repeat: true } : {}),
             ...(f.tieBreak?.extraTime?.label ? { label: f.tieBreak.extraTime.label } : {}),
+            ...(k.firstTo > 0 && !k.extraTimeFirstTo ? { fullTime: true } : {}),
             periods: Math.max(1, k.extraTimePeriods),
             minutes: Math.max(1, k.extraTimeMinutes),
           }
@@ -714,12 +732,14 @@ export function describeKnobs(k: FormatKnobs): string {
   const minChase = k.khoKho && k.minimumChaseEnabled;
   const kicks = k.shootoutEnabled && !k.khoKho;
   const universal = k.universalPointEnabled && !k.khoKho;
-  if (!k.drawsAllowed && (k.extraTimeEnabled || kicks || minChase || universal)) {
+  const golden = k.kabaddi && k.goldenRaidEnabled;
+  if (!k.drawsAllowed && (k.extraTimeEnabled || kicks || minChase || universal || golden)) {
     const chain: string[] = [];
-    if (k.extraTimeEnabled) chain.push(`ET ${k.extraTimePeriods}x${k.extraTimeMinutes} min`);
+    if (k.extraTimeEnabled) chain.push(`ET ${k.extraTimePeriods}x${k.extraTimeMinutes} min${k.firstTo > 0 && !k.extraTimeFirstTo ? ' played in full' : ''}`);
     if (kicks) chain.push(`${k.shootoutKicks} kicks`);
     if (minChase) chain.push('minimum chase');
     if (universal) chain.push('universal point');
+    if (golden) chain.push('golden raid');
     bits.push(chain.join(' then '));
   }
   return bits.join(' · ');

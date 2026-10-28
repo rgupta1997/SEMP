@@ -4,7 +4,7 @@ import {
   aggregateScore, capLeader, changesEndsAfterUnit, effectiveLevel, foldRally, isDecider, isAggregate, periodsPlayed, resultEnvelope,
   clockReading, formatClock, minuteLabel, tieProgress, shootoutState, shootoutLine, shootoutEnd,
   isKhoKhoFormat, khoStatus, khoTurnLines, minChaseState, minChaseEnd, inningsEnd, formatChaseTime, parseChaseTime, KHO_END_LABEL, MIN_CHASE_GRACE_MS,
-  isKabaddiFormat, kabaddiStatus, canonicalTeamSport,
+  isKabaddiFormat, kabaddiStatus, canonicalTeamSport, goldenTossEnd, GOLDEN_RAIDS,
   type ClockReading, type ShootoutState, type MinChaseState,
   statSpecFor, type EventTone, type KernelState, type RallyEvent, type RallyLog, type ScoringFormat,
   type Side, type StatEventSpec,
@@ -68,6 +68,8 @@ export interface TeamDeckProps {
   busy?: boolean;
   /** Has the confirmed result actually been written to the fixture yet? */
   recorded?: boolean;
+  /** A knockout fixture needs a winner, so a rain draw is not offered. */
+  knockout?: boolean;
   /**
    * What follows a recorded result - the award and the lock. Passed in rather than
    * built here: the deck knows the match is over, and the page knows what the
@@ -465,6 +467,7 @@ export function TeamDeck(p: TeamDeckProps) {
                 ? 'Penalties'
                 : progress.phase === 'minimumChase' ? 'Minimum chase'
                 : progress.phase === 'universalPoint' ? 'Universal point'
+                : progress.phase === 'goldenRaid' ? 'Golden raid'
                 : aggregate ? (repeatingExtra ? `${periodName} ${periodNo}` : `${periodName} ${periodNo} of ${periodOf}`) : lv.label}
             </div>
 
@@ -474,7 +477,7 @@ export function TeamDeck(p: TeamDeckProps) {
             {/* No clock in a shoot-out - kicks are not timed, and a running clock
                 with a KICK OFF button under it invites an official to start one. */}
             {clockPeriods && !state.ended && progress.phase !== 'penalties' && progress.phase !== 'minimumChase'
-              && progress.phase !== 'universalPoint' && !khoNow?.wonByInnings ? (
+              && progress.phase !== 'universalPoint' && progress.phase !== 'goldenRaid' && !khoNow?.wonByInnings ? (
               <>
                 <button type="button" data-qa="clock-face"
                   onClick={() => setSurface(surface === 'clock' ? 'act' : 'clock')}
@@ -503,6 +506,7 @@ export function TeamDeck(p: TeamDeckProps) {
             ) : (
               <div className="font-mono text-[10px] uppercase tracking-wider text-on-brand">
                 {progress.phase === 'universalPoint' ? 'Next goal wins'
+                  : progress.phase === 'goldenRaid' ? 'First point wins'
                   : progress.phase === 'penalties' || progress.phase === 'minimumChase' ? 'Level' : aggregate ? 'Total' : lv.label}
               </div>
             )}
@@ -602,7 +606,9 @@ export function TeamDeck(p: TeamDeckProps) {
               ? 'bg-red-100 text-red-900 dark:bg-red-500/15 dark:text-red-300'
               : 'border border-line text-slate-700 dark:text-slate-200')}>
           <span className="mr-auto truncate">
-            {kabNow.doOrDie
+            {kabNow.goldenStarted
+              ? `Golden raid ${Math.min(kabNow.goldenRaids + 1, GOLDEN_RAIDS)} of ${GOLDEN_RAIDS}: ${nameOf(kabNow.raider)} raiding · the first point wins`
+              : kabNow.doOrDie
               ? `Do-or-die raid: ${nameOf(kabNow.raider)} must score, or the raider is out`
               : `${nameOf(kabNow.raider)} raiding${kabNow.emptyStreak ? ` · ${kabNow.emptyStreak} empty in a row` : ''}`}
           </span>
@@ -738,6 +744,17 @@ export function TeamDeck(p: TeamDeckProps) {
               </Button>
             )}
           </Card>
+        ) : progress.phase === 'goldenRaid' && kabNow && (!kabNow.goldenStarted || kabNow.goldenTossDue) ? (
+          <GoldenRaidToss
+            nameOf={nameOf} busy={!!p.disabled || !!p.busy} score={shown} final={kabNow.goldenTossDue}
+            onToss={(s) => push({ t: 'goldenRaid', side: s })}
+            onUndo={undo}
+            // Sign-off, as the shoot-out does: the toss decides the match.
+            onSettle={(winner) => {
+              const next = [...log, { ...goldenTossEnd(winner), at: new Date().toISOString() }];
+              p.onSignOff(next, foldRally(format, next, 'A').state);
+            }}
+          />
         ) : progress.phase === 'minimumChase' && minChase ? (
           <MinimumChase
             mc={minChase} nameOf={nameOf} busy={!!p.disabled || !!p.busy} score={shown}
@@ -777,7 +794,7 @@ export function TeamDeck(p: TeamDeckProps) {
           <MorePanel
             format={format} state={state} nameOf={nameOf} shown={shown} played={played}
             totalPeriods={totalPeriods} bestOf={maxUnits !== totalPeriods ? maxUnits : undefined}
-            periodLabel={lv.label} finishing={finishing}
+            periodLabel={lv.label} finishing={finishing} knockout={p.knockout}
             onFinishing={setFinishing} onEvent={push} onClose={() => setSurface('act')}
           />
         ) : (
@@ -1042,7 +1059,7 @@ export function TeamDeck(p: TeamDeckProps) {
                 // still does not blow itself - stoppage time is the official's call,
                 // and a clock that ended halves would end them mid-added-time.
                 clock.overrun && 'animate-pulse ring-2 ring-amber-400 ring-offset-1 dark:ring-offset-slate-900')}
-              disabled={p.disabled || p.busy || progress.phase === 'universalPoint'} onClick={endPeriod}>
+              disabled={p.disabled || p.busy || progress.phase === 'universalPoint' || progress.phase === 'goldenRaid'} onClick={endPeriod}>
               End {periodName.toLowerCase()} {periodNo}
             </Button>
           )}
@@ -1078,7 +1095,7 @@ const SURFACE = 'absolute inset-0 flex flex-col overflow-hidden';
 /** The "Not sure" choice for a required second person: records the action, credits nobody. */
 const UNSURE = '?';
 
-const PASSIVE: ReadonlySet<string> = new Set(['clockStart', 'clockPause', 'clockAdjust', 'timeout', 'setServe', 'chaseFirst', 'followOn', 'minChase', 'raidFirst', 'raidTurn']);
+const PASSIVE: ReadonlySet<string> = new Set(['clockStart', 'clockPause', 'clockAdjust', 'timeout', 'setServe', 'chaseFirst', 'followOn', 'minChase', 'raidFirst', 'raidTurn', 'goldenRaid']);
 
 /** A panel toggle that is currently open - readable as "on" without going solid. */
 const PANEL_OPEN = 'border-brand-300 bg-brand-50 text-brand-700 ring-1 ring-brand-200 dark:border-brand-500/50 dark:bg-brand-500/10 dark:text-brand-200 dark:ring-brand-500/30';
@@ -1336,6 +1353,54 @@ function Shootout({ shoot, nameOf, kicksEach, busy, score, roster, onKick, onUnd
  * Kho kho's minimum chase: each side chases once more, the faster first out wins.
  * The referee times it on a stopwatch; the scorer types the time. Repeats while level.
  */
+/**
+ * Kabaddi golden raid tosses: the fresh toss for who raids first, then - when both
+ * golden raids were empty - the toss that decides the match. The raids themselves are
+ * tapped on the usual buttons; the first point wins.
+ */
+function GoldenRaidToss({ nameOf, busy, score, final, onToss, onUndo, onSettle }: {
+  nameOf: (s: Side) => string;
+  busy: boolean;
+  score: readonly [number, number] | number[];
+  /** Both golden raids were empty: this toss decides the match. */
+  final: boolean;
+  onToss: (side: Side) => void;
+  onUndo: () => void;
+  onSettle: (winner: Side) => void;
+}) {
+  const settle = async (s: Side) => {
+    const ok = await confirmDialog({
+      title: `${nameOf(s)} won the toss?`,
+      confirmLabel: 'Record result',
+      message: `Still ${score[0]}-${score[1]} after both golden raids. ${nameOf(s)} win the match on the toss.`,
+    });
+    if (ok) onSettle(s);
+  };
+  return (
+    <Card data-qa="kab-golden-raid" className={cn(SURFACE, 'gap-3 p-3')}>
+      <div>
+        <h3 className="text-sm font-semibold">{final ? 'Still level after both golden raids' : `Level ${score[0]}-${score[1]} after extra time: golden raid`}</h3>
+        <p className="mt-1 text-xs text-muted">
+          {final
+            ? 'A toss decides the match. Pick the team that won it.'
+            : 'Fresh toss: the winner raids first. Baulk line counts as the bonus line. The first point wins; an empty raid passes the golden raid to the other team.'}
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {(['A', 'B'] as Side[]).map((s) => (
+          <Button key={s} variant="outline" className="h-12 truncate" disabled={busy}
+            onClick={() => (final ? void settle(s) : onToss(s))}>
+            {final ? `${nameOf(s)} won the toss` : `${nameOf(s)} raid first`}
+          </Button>
+        ))}
+      </div>
+      <Button variant="subtle" size="sm" className="self-start" disabled={busy} onClick={onUndo}>
+        <Undo2 className="mr-1 h-4 w-4" /> Undo the last action
+      </Button>
+    </Card>
+  );
+}
+
 function MinimumChase({ mc, nameOf, busy, score, onRecord, onUndo, onSettle }: {
   mc: MinChaseState;
   nameOf: (s: Side) => string;
@@ -1864,6 +1929,8 @@ function Timeline({ log, nameOf, nameFor, fullMs, onClose }: {
                   <span className="text-muted">{nameOf(ev.side)} raid first (toss)</span>
                 ) : ev.t === 'raidTurn' ? (
                   <span className="text-amber-700 dark:text-amber-300">Raid switched: {nameOf(ev.side)} to raid</span>
+                ) : ev.t === 'goldenRaid' ? (
+                  <span className="text-amber-700 dark:text-amber-300">Golden raid toss: {nameOf(ev.side)} raid first</span>
                 ) : ev.t === 'chaseFirst' ? (
                   <span className="text-muted">{nameOf(ev.side)} chase first (toss)</span>
                 ) : ev.t === 'followOn' ? (
@@ -1888,9 +1955,10 @@ function Timeline({ log, nameOf, nameFor, fullMs, onClose }: {
 
 /** Corrections and the ways a match ends that the rules did not produce. */
 function MorePanel({
-  format, state, nameOf, shown, played, totalPeriods, bestOf, periodLabel, finishing, onFinishing, onEvent, onClose,
+  format, state, nameOf, shown, played, totalPeriods, bestOf, periodLabel, finishing, onFinishing, onEvent, onClose, knockout,
 }: {
   format: ScoringFormat;
+  knockout?: boolean;
   state: KernelState;
   /** Set for a sets match ("best of 5"); absent when every period is played. */
   bestOf?: number;
@@ -1904,6 +1972,21 @@ function MorePanel({
   onEvent: (ev: RallyEvent) => void;
   onClose: () => void;
 }) {
+  // Optional detail for a rain decision: "led by 2 when called off", "pull contest 52m-47m".
+  const [rainNote, setRainNote] = useState('');
+  const rain = async (winner: Side | null) => {
+    const note = rainNote.trim();
+    const ok = await confirmDialog({
+      title: winner ? `Called off for rain - ${nameOf(winner)} win?` : 'Called off for rain - record a draw?',
+      confirmLabel: 'Record it',
+      message: (winner ? `${nameOf(winner)} take the match under the weather rule.` : 'The match is recorded as drawn.')
+        + ` Results show it as rain, not a concession.${note ? ` Note: ${note}` : ''}`,
+    });
+    if (!ok) return;
+    onFinishing(false);
+    setRainNote('');
+    onEvent({ t: 'end', outcome: winner ? 'win' : 'draw', reason: 'weather', winner, ...(note ? { note } : {}) });
+  };
   return (
     <Card className={cn(SURFACE, 'gap-2 p-3')}>
       <div className="flex shrink-0 items-center justify-between">
@@ -2005,6 +2088,18 @@ function MorePanel({
                   Record a draw
                 </Button>
               )}
+              {/* Rain: awarded under the rulebook's weather rule (lead, pull contest), or drawn. */}
+              <div className="mt-1 grid gap-1.5 rounded-lg border border-slate-200 p-2 dark:border-slate-700">
+                <div className="text-[10px] uppercase tracking-wide text-muted">Called off for rain</div>
+                <Input value={rainNote} maxLength={120} onChange={(e) => setRainNote(e.target.value)}
+                  placeholder="Note, optional - e.g. led by 2, or pull contest 52m-47m" aria-label="Rain note" />
+                <div className="flex flex-wrap gap-1.5">
+                  {(['A', 'B'] as Side[]).map((side) => (
+                    <Button key={side} size="sm" variant="outline" onClick={() => void rain(side)}>{nameOf(side)} win</Button>
+                  ))}
+                  {!knockout && <Button size="sm" variant="outline" onClick={() => void rain(null)}>Draw</Button>}
+                </div>
+              </div>
               <Button size="sm" variant="subtle"
                 onClick={async () => {
                   const ok = await confirmDialog({

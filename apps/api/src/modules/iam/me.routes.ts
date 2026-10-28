@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { canonicalTeamSport, khoSettlementOf, shootoutOf, type Shootout } from '@semp/shared';
+import { canonicalTeamSport, khoSettlementOf, shootoutOf, type Shootout, type Settlement as KhoSettlement } from '@semp/shared';
 import { myMatchStats } from '../records/my-match-stats.service.js';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -147,7 +147,7 @@ const matchSelect = {
 } as const;
 
 /** How a match was settled beyond its score: shoot-out kicks, or a kho kho minimum chase / innings win. */
-interface Settlement { pens: Shootout | null; settled: 'minimum_chase' | 'innings' | null }
+interface Settlement { pens: Shootout | null; settled: KhoSettlement | null }
 
 // MatchSummary built from a `matchSelect` row. `shootouts` comes from loadShootouts.
 function summariseLean(f: FixtureRow, myTeamIds: Set<string>, shootouts?: Map<string, Settlement>) {

@@ -5,7 +5,7 @@ import {
 } from './rally-kernel.js';
 import { defaultFormatFor, presetByKey, presetsFor, RACQUET_PRESETS } from './racquet-presets.js';
 import { formatForPairing, resolveServer, serveCall } from './serve-resolvers.js';
-import { earlyEndOf } from './rally-rows.js';
+import { earlyEndNoteOf, earlyEndOf } from './rally-rows.js';
 import { scoringFormatSchema, type ScoringFormat, type Side } from './scoring-rules.js';
 import { deriveRacquetStats, foldCareerStats, statSpecFor } from './stat-registry.js';
 
@@ -891,6 +891,17 @@ describe('a match stopped early', () => {
     expect(earlyEndOf({ rally: [{ t: 'end', outcome: 'win', reason: 'walkover', winner: 'A' }] })).toBeNull();
     expect(earlyEndOf({ rally: [{ t: 'end', outcome: 'win', reason: 'retired', winner: 'A' }, ...pts(1)] })).toBeNull();
     expect(earlyEndOf({})).toBeNull();
+  });
+  // Sheet FR02: rain is its own reason, never a concession, with the official's note.
+  it('reads a rain decision and its note, win or draw', () => {
+    const won = { rally: [...pts(5), { t: 'end', outcome: 'win', reason: 'weather', winner: 'A', note: 'pull contest 52m-47m' }] };
+    expect(earlyEndOf(won)).toBe('weather');
+    expect(earlyEndNoteOf(won)).toBe('pull contest 52m-47m');
+    const drawn = { rally: [{ t: 'end', outcome: 'draw', reason: 'weather', winner: null }] };
+    expect(earlyEndOf(drawn)).toBe('weather');
+    expect(earlyEndNoteOf(drawn)).toBeNull();
+    const folded = foldRally(presetByKey('ultimate_2x20')!, won.rally as RallyLog, 'A').state;
+    expect(folded).toMatchObject({ ended: true, winner: 'A', reason: 'weather' });
   });
 });
 

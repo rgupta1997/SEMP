@@ -115,7 +115,7 @@ export type RallyEvent =
    */
   | { t: 'endPeriod'; reason?: string; by?: string; at?: string; clockMs?: number }
   /** Terminal, out-of-band: retirement, walkover, override. */
-  | { t: 'end'; outcome: Outcome; reason: EndReason; winner?: Side | null; by?: string; at?: string }
+  | { t: 'end'; outcome: Outcome; reason: EndReason; winner?: Side | null; note?: string; by?: string; at?: string }
   /**
    * THE MATCH CLOCK, as events rather than as a field.
    *
@@ -150,6 +150,8 @@ export type RallyEvent =
    */
   | { t: 'raidFirst'; side: Side; at?: string; by?: string }
   | { t: 'raidTurn'; side: Side; at?: string; by?: string }
+  // Kabaddi: the golden raid toss - this side raids first. Marks where the golden raids begin.
+  | { t: 'goldenRaid'; side: Side; at?: string; by?: string }
   | { t: 'clockStart'; at?: string; by?: string }
   | { t: 'clockPause'; at?: string; by?: string }
   /** An official's correction. `toMs` is the elapsed time the clock now reads. */
@@ -1106,15 +1108,19 @@ function aggregateFinish(format: ScoringFormat, state: KernelState): void {
   const [a, b] = aggregateScore(state);
   if (a === b) return;
   const lead: Side = a > b ? 'A' : 'B';
-  const reachedTarget = !!top.firstTo && Math.max(a, b) >= top.firstTo;
   const played = state.finished.filter((u) => u.level === 0).length;
+  // Extra time played in full: the win score stops counting once regulation is over.
+  const inFullExtra = !!format.tieBreak?.extraTime?.fullTime && played >= top.target;
+  const reachedTarget = !!top.firstTo && !inFullExtra && Math.max(a, b) >= top.firstTo;
   const allPlayed = played >= top.target + (format.tieBreak?.extraTime?.periods ?? 0);
-  const universal = !!format.tieBreak?.universalPoint && allPlayed;
+  // A golden raid is the same rule: any point once everything is played level wins it.
+  const golden = !!format.tieBreak?.goldenRaid && allPlayed;
+  const universal = (!!format.tieBreak?.universalPoint || golden) && allPlayed;
   if (!reachedTarget && !universal) return;
   state.ended = true;
   state.outcome = 'win';
   state.winner = lead;
-  state.reason = state.reason ?? 'normal';
+  state.reason = state.reason ?? (golden && !reachedTarget ? 'golden_raid' : 'normal');
 }
 
 function endPeriod(format: ScoringFormat, state: KernelState): FinishedUnit[] {

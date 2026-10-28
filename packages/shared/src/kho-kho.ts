@@ -139,12 +139,19 @@ export function minChaseState(log: RallyLog, firstChaser: Side | null): MinChase
 
 /** The terminal events. The score stays level for a minimum chase, as for a shoot-out. */
 export const minChaseEnd = (winner: Side): RallyEvent => ({ t: 'end', outcome: 'win', winner, reason: 'minimum_chase' });
+/** Kabaddi: both golden raids empty, the toss winner takes the match. */
+export const goldenTossEnd = (winner: Side): RallyEvent => ({ t: 'end', outcome: 'win', winner, reason: 'toss' });
+
+/** A match settled other than on the score: kho kho's minimum chase or innings, kabaddi's golden raid or toss. */
+export type Settlement = 'minimum_chase' | 'innings' | 'golden_raid' | 'toss';
 export const inningsEnd = (winner: Side): RallyEvent => ({ t: 'end', outcome: 'win', winner, reason: 'innings' });
 
 /** How a result line says it. */
-export const KHO_END_LABEL: Record<'minimum_chase' | 'innings', string> = {
+export const KHO_END_LABEL: Record<Settlement, string> = {
   minimum_chase: 'won on minimum chase',
   innings: 'won by an innings',
+  golden_raid: 'won on golden raid',
+  toss: 'won on a toss after golden raids',
 };
 
 /** 83400 -> "1:23.4". */
@@ -157,25 +164,35 @@ export function formatChaseTime(ms: number | null | undefined): string {
 }
 
 /** Short marks for a results row, beside the score. */
-export const KHO_END_SHORT: Record<'minimum_chase' | 'innings', string> = {
+export const KHO_END_SHORT: Record<Settlement, string> = {
   minimum_chase: 'min. chase',
   innings: 'by an innings',
+  golden_raid: 'golden raid',
+  toss: 'toss',
 };
 
 /** After a player's own "Won"/"Lost": "Won on minimum chase", "Lost by an innings". */
-export const KHO_RESULT_WORDS: Record<'minimum_chase' | 'innings', string> = {
+export const KHO_RESULT_WORDS: Record<Settlement, string> = {
   minimum_chase: 'on minimum chase',
   innings: 'by an innings',
+  golden_raid: 'on golden raid',
+  toss: 'on a toss after golden raids',
 };
 
 /** How a finished kho kho match was settled, read from its saved log; null for a plain win. */
-export function khoSettlementOf(liveState: unknown): { reason: 'minimum_chase' | 'innings'; winner: Side } | null {
+export function khoSettlementOf(liveState: unknown): { reason: Settlement; winner: Side } | null {
   const raw = (liveState as { rally?: unknown } | null)?.rally;
   if (!Array.isArray(raw)) return null;
+  // A golden raid ends on its first point, with no end event: the point after the toss decides.
+  let scored: Side | null = null;
   for (let i = raw.length - 1; i >= 0; i--) {
     const ev = raw[i] as RallyEvent | null;
-    if (!ev || ev.t !== 'end') continue;
-    return (ev.reason === 'minimum_chase' || ev.reason === 'innings') && ev.winner ? { reason: ev.reason, winner: ev.winner } : null;
+    if (!ev) continue;
+    if (ev.t === 'point' && (ev.pts ?? 1) > 0) scored = ev.side;
+    if (ev.t === 'goldenRaid') return scored ? { reason: 'golden_raid', winner: scored } : null;
+    if (ev.t !== 'end') continue;
+    return (ev.reason === 'minimum_chase' || ev.reason === 'innings' || ev.reason === 'toss') && ev.winner
+      ? { reason: ev.reason, winner: ev.winner } : null;
   }
   return null;
 }

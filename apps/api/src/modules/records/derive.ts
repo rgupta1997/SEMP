@@ -297,7 +297,8 @@ function entryTitle(fx: DerivableFixture, teamId: string | null): string {
   const verb = outcome === 'won' ? 'Won' : outcome === 'lost' ? 'Lost' : outcome === 'drew' ? 'Drew' : null;
   // Stopped early: "Won (opponent retired)" / "Lost (retired)" - never a match played out.
   const early = earlyEndOf(fx.live_state);
-  const why = early && verb ? ` (${outcome === 'won' ? `opponent ${EARLY_END_WORD[early]}` : EARLY_END_WORD[early]})` : '';
+  // Rain is nobody's doing, so both sides read the same.
+  const why = early && verb ? ` (${outcome === 'won' && early !== 'weather' ? `opponent ${EARLY_END_WORD[early]}` : EARLY_END_WORD[early]})` : '';
   // Settled by a shoot-out: "Won 4-3 on penalties", my kicks first.
   const pens = verb ? shootoutOf(fx.live_state) : null;
   if (pens) {
@@ -310,7 +311,7 @@ function entryTitle(fx: DerivableFixture, teamId: string | null): string {
   return verb ? `${versus}${TITLE_SEP}${verb}${why}` : versus;
 }
 
-const EARLY_END_WORD: Record<EarlyEnd, string> = { retired: 'retired', disqualified: 'disqualified', conceded: 'conceded' };
+const EARLY_END_WORD: Record<EarlyEnd, string> = { retired: 'retired', disqualified: 'disqualified', conceded: 'conceded', weather: 'called off for rain' };
 
 /** "7-7", or "7-7 (4-3 pens)" when a shoot-out settled it. Home first, like the fixture. */
 function fixtureScore(fx: DerivableFixture): string | null {

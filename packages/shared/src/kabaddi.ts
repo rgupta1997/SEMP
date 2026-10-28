@@ -15,7 +15,7 @@ import { canonicalTeamSport } from './team-presets.js';
 
 /** Taps that end a raid. Bonus is an add-on to a scoring raid, not an ending. */
 export const RAID_ENDS: ReadonlySet<string> = new Set([
-  'raid', 'bonus_raid', 'empty_raid', 'raider_out', 'dod_failed', 'tackle', 'super_tackle',
+  'raid', 'bonus_raid', 'empty_raid', 'raider_out', 'dod_failed', 'tackle', 'super_tackle', 'defender_out_raid',
 ]);
 
 const other = (s: Side): Side => (s === 'A' ? 'B' : 'A');
@@ -35,7 +35,16 @@ export interface KabaddiStatus {
   emptyStreak: number;
   /** True until the first raid has ended - the toss can still be changed. */
   beforeFirstRaid: boolean;
+  /** Golden raid toss made: the raids since are golden raids. */
+  goldenStarted: boolean;
+  /** Golden raids completed (each team gets one). */
+  goldenRaids: number;
+  /** Both golden raids empty and still level: a toss decides. */
+  goldenTossDue: boolean;
 }
+
+/** Each team's golden raid; level after both, a toss decides. */
+export const GOLDEN_RAIDS = 2;
 
 export function kabaddiStatus(log: RallyLog, state: KernelState): KabaddiStatus {
   let first: Side | null = null;
@@ -43,6 +52,8 @@ export function kabaddiStatus(log: RallyLog, state: KernelState): KabaddiStatus 
   let half = 0;
   let raidsEnded = 0;
   let empty: Record<Side, number> = { A: 0, B: 0 };
+  let goldenStarted = false;
+  let goldenRaids = 0;
   for (const ev of log) {
     if (ev.t === 'raidFirst' && raidsEnded === 0 && half === 0) {
       first = ev.side;
@@ -54,13 +65,20 @@ export function kabaddiStatus(log: RallyLog, state: KernelState): KabaddiStatus 
       empty = { A: 0, B: 0 };
     } else if (ev.t === 'raidTurn') {
       raider = ev.side;
+    } else if (ev.t === 'goldenRaid') {
+      goldenStarted = true;
+      raider = ev.side;
     } else if (ev.t === 'point' && ev.kind && RAID_ENDS.has(ev.kind) && raider) {
       empty[raider] = ev.kind === 'empty_raid' ? empty[raider] + 1 : 0;
       raidsEnded += 1;
+      if (goldenStarted) goldenRaids += 1;
       raider = other(raider);
     }
   }
   const live = state.ended ? null : raider;
   const emptyStreak = live ? empty[live] : 0;
-  return { firstRaider: first, raider: live, doOrDie: emptyStreak >= 2, emptyStreak, beforeFirstRaid: raidsEnded === 0 };
+  return {
+    firstRaider: first, raider: live, doOrDie: !goldenStarted && emptyStreak >= 2, emptyStreak, beforeFirstRaid: raidsEnded === 0,
+    goldenStarted, goldenRaids, goldenTossDue: goldenStarted && !state.ended && goldenRaids >= GOLDEN_RAIDS,
+  };
 }
