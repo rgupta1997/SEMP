@@ -18,27 +18,31 @@ const scopeKey = (s: AwardScopeRef) => `${s.level}|${s.tournament_id ?? ''}|${s.
 // tournament, and for the whole event - plus award types that exist only here.
 // Match awards stay on the match console, where the scorer gives them.
 export function EventAwardsPage() {
-  const { championship, eventId, canManage } = useEvent();
+  // An overall organiser gives awards at every level; a sport organiser only within
+  // the sports they run (the server enforces the same).
+  const { championship, eventId, canManage, organises, canManageSport } = useEvent();
   const archived = !!championship.archived_at;
   const qc = useQueryClient();
 
-  const { data: tournaments = [], isLoading } = useApi<TournamentScope[]>(canManage ? `/championships/${eventId}/awards/scopes` : null);
-  const { data: awards = [] } = useApi<ChampionshipAward[]>(canManage ? `/championships/${eventId}/awards` : null);
+  const { data: tournaments = [], isLoading } = useApi<TournamentScope[]>(organises ? `/championships/${eventId}/awards/scopes` : null);
+  const { data: awards = [] } = useApi<ChampionshipAward[]>(organises ? `/championships/${eventId}/awards` : null);
   const ownTypesPath = `/championships/${eventId}/award-types`;
   const { data: ownTypes = [] } = useApi<AwardType[]>(canManage ? ownTypesPath : null);
 
   const scopes = useMemo<AwardScopeRef[]>(() => {
     const multi = tournaments.length > 1;
-    const list: AwardScopeRef[] = [{
+    const list: AwardScopeRef[] = canManage ? [{
       level: 'championship', title: 'Event awards', subtitle: `Across the whole of ${championship.name}`,
-    }];
+    }] : [];
     for (const t of tournaments) {
-      list.push({
-        level: 'tournament', tournament_id: t.id,
-        title: multi ? `${t.name} - whole tournament` : 'Whole tournament',
-        subtitle: `Across every sport in ${t.name}`,
-      });
-      for (const s of t.sports) {
+      if (canManage) {
+        list.push({
+          level: 'tournament', tournament_id: t.id,
+          title: multi ? `${t.name} - whole tournament` : 'Whole tournament',
+          subtitle: `Across every sport in ${t.name}`,
+        });
+      }
+      for (const s of t.sports.filter((x) => canManage || canManageSport(x.sport_id))) {
         list.push({
           level: 'tournament_sport', tournament_id: t.id, tournament_sport_id: s.id,
           title: multi ? `${s.name} · ${t.name}` : s.name,
@@ -47,7 +51,7 @@ export function EventAwardsPage() {
       }
     }
     return list;
-  }, [tournaments, championship.name]);
+  }, [tournaments, championship.name, canManage, canManageSport]);
 
   const eventSports = useMemo(() => {
     const m = new Map<string, string>();
@@ -88,10 +92,13 @@ export function EventAwardsPage() {
     }
   }
 
-  if (!canManage) {
+  if (!organises) {
     return <EmptyState icon={<Award size={24} />} title="Awards" description="Only the event's organisers can give awards here." />;
   }
   if (isLoading) return <div className="grid h-40 place-items-center"><Spinner /></div>;
+  if (scopes.length === 0) {
+    return <EmptyState icon={<Award size={24} />} title="Awards" description="None of the sports you organise is in this event's tournaments yet." />;
+  }
 
   const countIn = (s: AwardScopeRef) => awards.filter((a) => inScope(a, s)).length;
 
@@ -99,7 +106,9 @@ export function EventAwardsPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Awards"
-        subtitle="Give awards for a sport, a whole tournament or the whole event. Match awards like Player of the Match are given on each match's scoring screen."
+        subtitle={canManage
+          ? "Give awards for a sport, a whole tournament or the whole event. Match awards like Player of the Match are given on each match's scoring screen."
+          : "Give awards within the sports you organise. Match awards like Player of the Match are given on each match's scoring screen."}
       />
 
       <div className="grid gap-4 lg:grid-cols-[17rem_1fr]">
@@ -139,6 +148,8 @@ export function EventAwardsPage() {
         )}
       </div>
 
+      {/* The event's own award types apply across sports, so they are the overall organiser's. */}
+      {canManage && (
       <Card className="p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -179,6 +190,7 @@ export function EventAwardsPage() {
           </ul>
         )}
       </Card>
+      )}
 
       {creating && (
         <AwardTypeFormModal

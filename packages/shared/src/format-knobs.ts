@@ -1,6 +1,7 @@
 import { isPeriodShaped, pluralizePeriodLabel } from './match-format.js';
 import { expediteConfig, ITTF_EXPEDITE } from './rally-kernel.js';
 import { isChessSport } from './chess.js';
+import { carromRulesOf, isCarromSport } from './carrom.js';
 import { isKhoKhoFormat } from './kho-kho.js';
 import type {
   CapAction, CapTieRule, ChangeEndsRule, LevelSpec, OfficiatingMode,
@@ -122,17 +123,38 @@ export interface FormatKnobs {
   /** Chess: minutes each on the clock, and seconds added per move (FIDE "90+30"). */
   timeBaseMinutes: number;
   timeIncrementSeconds: number;
+
+  /** Read-only. A carrom format: games built board by board (carrom.ts), so no serve, deuce or clock. */
+  carrom: boolean;
+  /** Carrom: a game also ends after this many boards (ICF 8, IIMK 4). */
+  carromMaxBoardsEnabled: boolean;
+  carromMaxBoards: number;
+  carromQueenPoints: number;
+  /** Carrom: from this game score on the queen is worth 0 (ICF 22, IIMK 14). */
+  carromQueenCutoffEnabled: boolean;
+  carromQueenCutoff: number;
+  carromQueenMustBeCovered: boolean;
+  /** Carrom: level on points at the board limit, more boards won takes the game. */
+  carromBoardsWonDecides: boolean;
+  /** Carrom: tie-break boards totalled on their own. 1 = the next board decides (ICF). */
+  carromTieBreakBoards: number;
 }
 
 /** The only knobs a chess format has; everything else describes a game it does not play. */
 const CHESS_KNOBS = new Set<keyof FormatKnobs>(['unitsToWin', 'timeBaseMinutes', 'timeIncrementSeconds', 'officiatingMode', 'drawsAllowed']);
+/** Carrom's knobs: the game, the board limit and the queen. A carrom game cannot be drawn. */
+const CARROM_KNOBS = new Set<keyof FormatKnobs>([
+  'unitsToWin', 'target', 'carromMaxBoardsEnabled', 'carromMaxBoards', 'carromQueenPoints',
+  'carromQueenCutoffEnabled', 'carromQueenCutoff', 'carromQueenMustBeCovered', 'carromBoardsWonDecides',
+  'carromTieBreakBoards', 'officiatingMode',
+]);
 
 /** UI metadata for one knob. Rendering is generic; this is what makes it legible. */
 export interface KnobSpec {
   key: keyof FormatKnobs;
   label: string;
   hint?: string;
-  group: 'shape' | 'serve' | 'ends' | 'clock' | 'tieBreak' | 'run';
+  group: 'shape' | 'carrom' | 'serve' | 'ends' | 'clock' | 'tieBreak' | 'run';
   type: 'int' | 'bool' | 'enum';
   min?: number;
   max?: number;
@@ -170,7 +192,10 @@ export const KNOB_SPECS: KnobSpec[] = [
   // configure a "game" the format doesn't have.
   { key: 'target', label: 'Points to win a game', group: 'shape', type: 'int', min: 1, max: 99,
     hint: 'The score a side plays to. 11, 21, 15 - or anything you like.',
-    applies: (k) => !k.periodShaped },
+    applies: (k) => !k.periodShaped && !k.carrom },
+  { key: 'target', label: 'Points to win a game', group: 'shape', type: 'int', min: 1, max: 99,
+    hint: 'ICF 25, IIMK 16. Set 1 to count boards only: each board won is a point.',
+    applies: (k) => k.carrom },
   { key: 'winBy', label: 'Winning margin', group: 'shape', type: 'int', min: 1, max: 5,
     hint: '2 means deuce continues until somebody leads by two. 1 means the target wins outright.',
     applies: (k) => !k.periodShaped },
@@ -199,6 +224,32 @@ export const KNOB_SPECS: KnobSpec[] = [
   { key: 'timeIncrementSeconds', label: 'Seconds added per move', group: 'shape', type: 'int', min: 0, max: 120,
     hint: 'The increment: 30 for classical, 10 for rapid, 2 for blitz. 0 for none.',
     applies: (k) => k.chess },
+  // ---- carrom: only for a points game (target above 1); boards-only has no queen or limit
+  { key: 'carromMaxBoardsEnabled', label: 'Board limit per game', group: 'carrom', type: 'bool',
+    hint: 'The game also ends after a set number of boards, and the higher score wins it.',
+    applies: (k) => k.carrom && k.target > 1 },
+  { key: 'carromMaxBoards', label: 'Boards in a game', group: 'carrom', type: 'int', min: 1, max: 30,
+    hint: 'ICF 8, IIMK 4.',
+    applies: (k) => k.carrom && k.target > 1 && k.carromMaxBoardsEnabled },
+  { key: 'carromQueenPoints', label: 'Queen is worth', group: 'carrom', type: 'int', min: 0, max: 10,
+    hint: 'Points to the board winner when they covered the queen. Usually 3.',
+    applies: (k) => k.carrom && k.target > 1 },
+  { key: 'carromQueenCutoffEnabled', label: 'Queen stops counting near the end', group: 'carrom', type: 'bool',
+    hint: 'Past a set score the queen adds nothing, so it cannot carry a side over the line.',
+    applies: (k) => k.carrom && k.target > 1 && k.carromQueenPoints > 0 },
+  { key: 'carromQueenCutoff', label: 'Queen is worth 0 from', group: 'carrom', type: 'int', min: 1, max: 99,
+    hint: "The board winner's game score. ICF 22, IIMK 14 (3 points up to and including 13).",
+    applies: (k) => k.carrom && k.target > 1 && k.carromQueenPoints > 0 && k.carromQueenCutoffEnabled },
+  { key: 'carromQueenMustBeCovered', label: 'Queen must be covered', group: 'carrom', type: 'bool',
+    hint: 'ICF and AICF: a board cannot end with the queen left on. Off lets the official record it as uncovered.',
+    applies: (k) => k.carrom && k.target > 1 },
+  // Carrom, level on points at the board limit (only with a board limit).
+  { key: 'carromBoardsWonDecides', label: 'More boards won takes a level game', group: 'tieBreak', type: 'bool',
+    hint: 'Level on points after the last board: the side that won more boards wins the game (Inter-IIM). Off goes straight to tie-break boards (ICF).',
+    applies: (k) => k.carrom && k.target > 1 && k.carromMaxBoardsEnabled },
+  { key: 'carromTieBreakBoards', label: 'Tie-break boards', group: 'tieBreak', type: 'int', min: 1, max: 5,
+    hint: '1 = the next board decides (ICF). 2 or more = play them all and the higher total over them wins (Inter-IIM 2).',
+    applies: (k) => k.carrom && k.target > 1 && k.carromMaxBoardsEnabled },
   { key: 'handicapEnabled', label: 'Handicap start', group: 'shape', type: 'bool',
     hint: 'One side begins every game on a head start.',
     applies: (k) => !k.periodShaped },
@@ -346,6 +397,7 @@ export const KNOB_SPECS: KnobSpec[] = [
 
 export const KNOB_GROUPS: Array<{ key: KnobSpec['group']; label: string }> = [
   { key: 'shape', label: 'Match shape' },
+  { key: 'carrom', label: 'Boards & queen' },
   { key: 'serve', label: 'Serving' },
   { key: 'ends', label: 'Ends & conduct' },
   { key: 'clock', label: 'Time cap' },
@@ -355,7 +407,8 @@ export const KNOB_GROUPS: Array<{ key: KnobSpec['group']; label: string }> = [
 
 /** The knobs that apply to this particular set of values, in display order. */
 export function knobsFor(k: FormatKnobs): KnobSpec[] {
-  return KNOB_SPECS.filter((s) => (!k.chess || CHESS_KNOBS.has(s.key)) && (!s.applies || s.applies(k)));
+  return KNOB_SPECS.filter((s) => (!k.chess || CHESS_KNOBS.has(s.key)) && (!k.carrom || CARROM_KNOBS.has(s.key))
+    && (!s.applies || s.applies(k)));
 }
 
 /** "90+30" -> [90, 30]; anything else -> the classical default. */
@@ -444,6 +497,24 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
     chess: isChessSport(f.sport),
     timeBaseMinutes: readTimeControl(f.rulesSheet?.timeControl)[0],
     timeIncrementSeconds: readTimeControl(f.rulesSheet?.timeControl)[1],
+
+    ...carromKnobs(f),
+  };
+}
+
+/** Carrom's board limit and queen, read off the rules sheet; defaults are the ICF ones. */
+function carromKnobs(f: ScoringFormat) {
+  const r = carromRulesOf(f);
+  return {
+    carrom: isCarromSport(f.sport),
+    carromMaxBoardsEnabled: r.maxBoards != null,
+    carromMaxBoards: r.maxBoards ?? 8,
+    carromQueenPoints: r.queenPoints,
+    carromQueenCutoffEnabled: r.queenCutoff != null,
+    carromQueenCutoff: r.queenCutoff ?? 22,
+    carromQueenMustBeCovered: r.queenMustBeCovered,
+    carromBoardsWonDecides: r.boardsWonDecides,
+    carromTieBreakBoards: r.tieBreakBoards,
   };
 }
 
@@ -565,6 +636,9 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
         ...(k.universalPointEnabled && !k.khoKho ? { universalPoint: true } : {}),
         extraTime: k.extraTimeEnabled
           ? {
+            // Keep basketball's repeat-while-level and its "Overtime" name; the editor has no knob for them.
+            ...(f.tieBreak?.extraTime?.repeat ? { repeat: true } : {}),
+            ...(f.tieBreak?.extraTime?.label ? { label: f.tieBreak.extraTime.label } : {}),
             periods: Math.max(1, k.extraTimePeriods),
             minutes: Math.max(1, k.extraTimeMinutes),
           }
@@ -579,6 +653,20 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
     ...(k.chess
       ? { rulesSheet: { ...(f.rulesSheet ?? {}), timeControl: `${Math.max(1, k.timeBaseMinutes)}+${Math.max(0, k.timeIncrementSeconds)}` } }
       : {}),
+    // Carrom keeps its board limit and queen on the rules sheet, which carrom.ts reads.
+    ...(k.carrom && k.target > 1
+      ? {
+        rulesSheet: {
+          ...(f.rulesSheet ?? {}),
+          maxBoards: k.carromMaxBoardsEnabled ? Math.max(1, k.carromMaxBoards) : null,
+          queenPoints: Math.max(0, k.carromQueenPoints),
+          queenCutoff: k.carromQueenPoints > 0 && k.carromQueenCutoffEnabled ? Math.max(1, k.carromQueenCutoff) : null,
+          queenMustBeCovered: k.carromQueenMustBeCovered,
+          boardsWonDecides: k.carromMaxBoardsEnabled && k.carromBoardsWonDecides,
+          tieBreakBoards: Math.max(1, k.carromTieBreakBoards),
+        },
+      }
+      : {}),
   };
 }
 
@@ -589,6 +677,15 @@ export function describeKnobs(k: FormatKnobs): string {
   if (k.chess) {
     const games = k.unitsToWin * 2 - 1;
     return [games === 1 ? 'single game' : `${games}-game match`, `${k.timeBaseMinutes}+${k.timeIncrementSeconds}`].join(' · ');
+  }
+  if (k.carrom) {
+    if (k.target <= 1) return k.unitsToWin > 1 ? `best of ${k.unitsToWin * 2 - 1} boards` : 'single board';
+    bits.push(k.unitsToWin > 1 ? `best of ${k.unitsToWin * 2 - 1} games to ${k.target}` : `single game to ${k.target}`);
+    if (k.carromMaxBoardsEnabled) bits.push(`${k.carromMaxBoards} boards a game`);
+    if (k.carromMaxBoardsEnabled && k.carromBoardsWonDecides) bits.push('level: more boards won');
+    if (k.carromMaxBoardsEnabled && k.carromTieBreakBoards > 1) bits.push(`${k.carromTieBreakBoards} tie-break boards`);
+    if (k.carromQueenPoints > 0) bits.push(k.carromQueenCutoffEnabled ? `queen ${k.carromQueenPoints} below ${k.carromQueenCutoff}` : `queen ${k.carromQueenPoints}`);
+    return bits.join(' · ');
   }
   // Period-shaped (kho-kho, kabaddi...): there is no game to win and no
   // decider, just a fixed number of periods and a clock - "best of 7 to 1"

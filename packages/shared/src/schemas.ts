@@ -972,15 +972,17 @@ export type StandingsRule = z.infer<typeof standingsRuleSchema>;
 //
 // An event sport (swimming, powerlifting) can turn its summed event points into sport
 // placings. Everything about it is set once per sport: whether it converts, which title
-// each event counts toward, and what each title pays. A mixed event counts half to each.
+// each event counts toward, and what each title pays. A mixed event can be its own Mixed
+// title, or count half to Men's and half to Women's.
 
-export const EVENT_TITLE_GROUP = { sport: 'Overall', men: 'Men', women: 'Women' } as const;
-export const EVENT_TITLES = ['sport', 'men', 'women', 'both'] as const;
+export const EVENT_TITLE_GROUP = { sport: 'Overall', men: 'Men', women: 'Women', mixed: 'Mixed' } as const;
+export const EVENT_TITLES = ['sport', 'men', 'women', 'mixed', 'both'] as const;
 export type EventTitle = (typeof EVENT_TITLES)[number];
 export const EVENT_TITLE_LABEL: Record<EventTitle, string> = {
   sport: 'Whole sport',
   men: "Men's title",
   women: "Women's title",
+  mixed: 'Mixed title',
   both: "Men's and Women's (half each)",
 };
 
@@ -992,6 +994,7 @@ export function groupsForTitle(title: EventTitle): TitleGroup[] {
     case 'sport': return [{ name: EVENT_TITLE_GROUP.sport, share: 1 }];
     case 'men': return [{ name: EVENT_TITLE_GROUP.men, share: 1 }];
     case 'women': return [{ name: EVENT_TITLE_GROUP.women, share: 1 }];
+    case 'mixed': return [{ name: EVENT_TITLE_GROUP.mixed, share: 1 }];
     case 'both': return [{ name: EVENT_TITLE_GROUP.men, share: 0.5 }, { name: EVENT_TITLE_GROUP.women, share: 0.5 }];
   }
 }
@@ -1026,10 +1029,12 @@ export function titlePlacingFor(config: SportTitlesConfig | null | undefined, gr
 /** A converting sport's titles and their events; `mixed` = whole sport alongside gender titles. */
 export interface SportTitles { sport: string; sportId: string; titles: Array<{ group: string; name: string; label: string; events: string[] }>; mixed: boolean }
 
-const TITLE_GROUP_LABEL: Record<string, string> = {
+/** Display name of a title group, by its lowercase key. */
+export const TITLE_GROUP_LABEL: Record<string, string> = {
   [EVENT_TITLE_GROUP.sport.toLowerCase()]: 'Whole sport',
   [EVENT_TITLE_GROUP.men.toLowerCase()]: "Men's",
   [EVENT_TITLE_GROUP.women.toLowerCase()]: "Women's",
+  [EVENT_TITLE_GROUP.mixed.toLowerCase()]: 'Mixed',
 };
 
 // Groups each sport's events by title. Only sports with titles switched on appear.

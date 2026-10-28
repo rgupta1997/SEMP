@@ -265,6 +265,14 @@ const INVASION: ScoringFormat[] = [
     rulesSheet: { shotClockSeconds: 24, foulsToDisqualify: 5, timeoutsPerHalf: 2, overtime: '5 minutes, repeated until a side leads' },
   }),
   fmt({
+    sport: 'basketball', key: 'basketball_4x8', name: 'Four quarters of 8 minutes',
+    // Shorter quarters (IIMK women's games), same FIBA overtime.
+    levels: [period('Quarter', 'quarter'), aggregateMatch(4)], clock: cap(32, 'leaderWins', 'organiserDecides'),
+    tieBreak: BASKETBALL_OVERTIME,
+    endStates: STRICT,
+    rulesSheet: { shotClockSeconds: 24, foulsToDisqualify: 5, timeoutsPerHalf: 2, overtime: '5 minutes, repeated until a side leads' },
+  }),
+  fmt({
     sport: 'basketball', key: 'basketball_corp_2x10', name: 'Corporate - two halves of 10 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)], mode: 'selfScored',
     // No draws here either - a level game goes to overtime like any other.
@@ -383,6 +391,15 @@ const BOARD: ScoringFormat[] = [
     levels: [{ key: 'game', label: 'Game', target: 25, winBy: 1, cap: null }, unitsMatch(2)],
     serve: PER_UNIT_SERVE, changeEnds: 'betweenUnits',
     rulesSheet: { maxBoards: 8, queenPoints: 3, queenCutoff: 22, queenMustBeCovered: true },
+  }),
+  // Inter-IIM rulebook: one game is 4 boards or 16 points, queen 3 up to and including 13.
+  // Level on points: more boards won, then 2 tie-break boards totalled. The best of 3
+  // (groups) or 5 (finals) games is the team tie around it.
+  fmt({
+    sport: 'carrom', key: 'iim_4boards_16', name: 'Inter-IIM - one game, 4 boards or 16 points',
+    levels: [{ key: 'game', label: 'Game', target: 16, winBy: 1, cap: null }, unitsMatch(1)],
+    serve: PER_UNIT_SERVE, changeEnds: 'betweenUnits',
+    rulesSheet: { maxBoards: 4, queenPoints: 3, queenCutoff: 14, queenMustBeCovered: true, boardsWonDecides: true, tieBreakBoards: 2 },
   }),
   fmt({
     sport: 'carrom', key: 'corp_bo3_21', name: 'Corporate - best of 3 games to 21',

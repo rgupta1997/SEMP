@@ -1,4 +1,4 @@
-import { boardsOnly, carromMatch, carromRulesOf, isCarromSport, readCarromState } from './carrom.js';
+import { boardsOnly, carromMatchOf, carromRulesOf, isCarromSport, readCarromState } from './carrom.js';
 import { CHESS_ENDINGS, isChessSport, type ChessEnding } from './chess.js';
 
 /**
@@ -23,8 +23,8 @@ export function resultSummary(sportName: string | null | undefined, liveState: u
       : null;
     const rules = carromRulesOf(format);
     if (boardsOnly(rules) || rules.gamesToWin <= 1) return null;
-    const games = carromMatch(state.boards, rules, state.firstBreak).games.filter((g) => g.winner);
-    return games.length ? games.map((g) => `${g.score[0]}–${g.score[1]}`).join(', ') : null;
+    const games = carromMatchOf(state, rules).games.filter((g) => g.winner);
+    return games.length ? games.map((g) => `${g.score[0]}–${g.score[1]}${g.retired ? ' (ret.)' : ''}`).join(', ') : null;
   }
 
   if (isChessSport(sportName)) {

@@ -118,6 +118,7 @@ describe('sport titles, set once per sport', () => {
 
   it('a half-each choice feeds both gender titles at half', () => {
     expect(groupsForTitle('both')).toEqual([{ name: 'Men', share: 0.5 }, { name: 'Women', share: 0.5 }]);
+    expect(groupsForTitle('mixed')).toEqual([{ name: 'Mixed', share: 1 }]);
   });
 
   it('switched off or never saved: no titles at all', () => {
@@ -135,6 +136,12 @@ describe('sport titles, set once per sport', () => {
     const [sw] = sportTitles(swim, () => cfg({ enabled: true, events: { [id(1)]: 'men', [id(2)]: 'women', [id(3)]: 'both' } }));
     expect(sw.mixed).toBe(false);
     expect(sw.titles.map((t) => [t.label, t.events])).toEqual([["Men's", ['50m Free (Men)', 'Mixed Relay']], ["Women's", ['50m Free (Women)', 'Mixed Relay']]]);
+  });
+
+  it('a mixed event can be its own Mixed title, with no warning', () => {
+    const [sw] = sportTitles(swim, () => cfg({ enabled: true, events: { [id(1)]: 'men', [id(2)]: 'women', [id(3)]: 'mixed' } }));
+    expect(sw.mixed).toBe(false);
+    expect(sw.titles.map((t) => [t.label, t.events])).toEqual([["Men's", ['50m Free (Men)']], ["Women's", ['50m Free (Women)']], ['Mixed', ['Mixed Relay']]]);
   });
 
   it('an event left on whole sport beside gender titles is flagged', () => {

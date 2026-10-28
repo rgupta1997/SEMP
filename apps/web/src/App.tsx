@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useMatch } from 'react-router-dom';
 import { useAuth, type AppRole } from './lib/auth';
+import { returnAfterLogin } from './lib/browserStorage';
 import { AppShell, roleHome } from './components/AppShell';
 import { ConfirmProvider, Spinner, ToastProvider } from './components/ui';
 import { TourProvider } from './components/onboarding/Tour';
@@ -185,7 +186,7 @@ function AppRoutes() {
   const { ctx, loading, justLoggedIn, clearJustLoggedIn, activeRole } = useAuth();
 
   // Consume the one-shot login flag once we've acted on it (below).
-  useEffect(() => { if (justLoggedIn) clearJustLoggedIn(); }, [justLoggedIn, clearJustLoggedIn]);
+  useEffect(() => { if (justLoggedIn) { clearJustLoggedIn(); returnAfterLogin.clear(); } }, [justLoggedIn, clearJustLoggedIn]);
 
   // Every route match is read before the first early return below: a hook skipped by
   // a return changes the hook count between renders, which React does not forgive.
@@ -239,7 +240,8 @@ function AppRoutes() {
   }
   // After an explicit login/signup, bounce to the role's home so the previous
   // session's last-visited URL never renders. Initial token refresh skips this.
-  if (justLoggedIn) return <Navigate to={roleHome(activeRole)} replace />;
+  // Back to the page that sent the visitor to sign in (e.g. a public share link), else home.
+  if (justLoggedIn) return <Navigate to={returnAfterLogin.get() ?? roleHome(activeRole)} replace />;
   return <AuthenticatedRoutes />;
 }
 

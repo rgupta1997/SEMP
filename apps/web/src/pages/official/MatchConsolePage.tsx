@@ -16,7 +16,7 @@ import {
 } from '../../features/scoring/tie';
 import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
 import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
-import { carromHeadline, carromMatch, carromRulesOf, isCarromSport } from '@semp/shared';
+import { carromHeadline, carromMatchOf, carromRulesOf, isCarromSport } from '@semp/shared';
 import { CarromResult, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
 import { TieLayoutEditor, type TieLayoutValue } from '../../features/scoring/TieLayoutEditor';
 import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, isChessSport, isKnockoutFixture, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
@@ -1700,7 +1700,7 @@ function CarromConsole({ fixture, fixtureId, live, invalidate, onDone }:
   const [status, setStatus] = useState<string>(fixture.status);
 
   const save = (state: CarromState, done: boolean) => {
-    const m = carromMatch(state.boards, rules, state.firstBreak);
+    const m = carromMatchOf(state, rules);
     const [h, a] = carromHeadline(m, rules);
     const winner_team_id = m.winner === 'A' ? fixture.home_team_id : m.winner === 'B' ? fixture.away_team_id : null;
     const st = done ? 'completed' : (status === 'scheduled' || status === 'completed' ? 'live' : status);
@@ -2553,7 +2553,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
     if (r.drawn) return spec.boardPoints ? 'Drawn ½–½' : 'Drawn';
     if (carromTie && r.carrom?.boards.length) {
       const rules = carromRulesFor(r);
-      const h = carromHeadline(carromMatch(r.carrom.boards, rules, r.carrom.firstBreak), rules);
+      const h = carromHeadline(carromMatchOf(r.carrom, rules), rules);
       return r.winner ? `${r.winner === 'A' ? homeName : awayName} won ${h[0]}–${h[1]}` : `${h[0]}–${h[1]}`;
     }
     const games = rubberGames(r);
@@ -2744,7 +2744,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
                           busy={submitting}
                           onSave={(cs, done) => {
                             const fmt = active.format ?? carromBase ?? undefined;
-                            const m = carromMatch(cs.boards, carromRulesFor(active), cs.firstBreak);
+                            const m = carromMatchOf(cs, carromRulesFor(active));
                             const patch: Partial<RubberInstance> = {
                               carrom: cs,
                               ...(cs.boards.length && fmt ? { format: fmt } : {}),

@@ -1,8 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { Calendar, Flag, MapPin } from 'lucide-react';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints, KHO_END_LABEL, KHO_END_SHORT, khoSettlementOf, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints, isKnockoutRound, KHO_END_LABEL, KHO_END_SHORT, khoSettlementOf, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
 import { useApi, fmtDateTime } from '../../lib/hooks';
-import { Badge, Card, EmptyState, ListToolbar, Segmented, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
+import { Badge, Button, Card, EmptyState, ListToolbar, Modal, Segmented, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
+import { GroupTables } from '../GroupTables';
+import { EventTallyTable, TitleTallyCard, hasTally as sportHasTally, titleTallyPath, type TitleTallyResponse } from '../TitleTally';
+import { returnAfterLogin } from '../../lib/browserStorage';
 import { FitName } from '../FitName';
 import { Bracket } from '../Bracket';
 
@@ -20,7 +24,7 @@ interface FixtureRow {
   id: string; status: string; round: string | null; scheduled_at: string | null;
   entry_type: string | null; home_score: number | null; away_score: number | null; winner_team_id: string | null;
   ground: { id: string; name: string; venue: string | null } | null;
-  sport: string | null; sport_icon: string | null;
+  sport: string | null; sport_icon: string | null; sport_id?: string | null;
   tournament: { id: string; name: string } | null; discipline: string | null;
   scorecard_url: string | null;
   home: TeamRef | null;
@@ -67,8 +71,36 @@ function TeamName({ team, align, won }: { team: TeamRef | null; align: 'left' | 
 
 // Whole-championship fixtures (as spectators see them) so players can follow every
 // match, not just their own. `results` narrows `schedule` to concluded matches.
-export function ChampionshipFixtures({ championshipId, mode, apiBase }: { championshipId: string; mode: 'schedule' | 'results'; apiBase?: string }) {
+/** Point tallies on a results list: shown to all, opened only when signed in (public page). */
+export interface TallyAccess { championshipId: string; signedIn: boolean }
+
+export function ChampionshipFixtures({ championshipId, mode, apiBase, tally }: {
+  championshipId: string; mode: 'schedule' | 'results'; apiBase?: string; tally?: TallyAccess;
+}) {
   const base = apiBase ?? `/championships/${championshipId}`;
+  const location = useLocation();
+  // After sign-in the visitor lands back with ?tally=<draw> or ?title=<sport>: that
+  // discipline's Point tally opens (keyed by draw), or the sport's title tally, and scrolls into view.
+  const [searchParams] = useSearchParams();
+  const backTo = { tally: searchParams.get('tally'), title: searchParams.get('title') };
+  const [tallyOpen, setTallyOpen] = useState<Record<string, boolean>>(() => (backTo.tally ? { [backTo.tally]: true } : {}));
+  /** Where to come back to after signing in, or null when the prompt is closed. */
+  const [askSignIn, setAskSignIn] = useState<string | null>(null);
+  const ask = (target: { tally?: string; title?: string }) =>
+    setAskSignIn(`${location.pathname}?tab=results${target.tally ? `&tally=${target.tally}` : ''}${target.title ? `&title=${target.title}` : ''}`);
+  // Bring the tally they came back for into view once the list has rendered it.
+  useEffect(() => {
+    const anchor = backTo.tally ? `tally-${backTo.tally}` : backTo.title ? `title-${backTo.title}` : null;
+    if (!anchor || !tally?.signedIn) return;
+    let tries = 0;
+    const t = window.setInterval(() => {
+      const el = document.getElementById(anchor);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (el || ++tries > 40) window.clearInterval(t);
+    }, 250);
+    return () => window.clearInterval(t);
+  }, [backTo.tally, backTo.title, tally?.signedIn]);
+  const { data: titleTally } = useApi<TitleTallyResponse>(tally?.signedIn ? titleTallyPath(tally.championshipId) : null);
   const { data: all = [], isLoading } = useApi<FixtureRow[]>(`${base}/fixtures`);
   const [sport, setSport] = useState('');
   // Status filter is driven by clicking the colour legend (empty = show all).
@@ -148,7 +180,29 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
         <StatusLegend className="px-1" statuses={legendStatuses} value={legendStatus} onSelect={setLegendStatus} />
       )}
 
+      {askSignIn && (
+        <Modal title="Sign in to see the point tally" onClose={() => setAskSignIn(null)}
+          footer={(
+            <div className="flex justify-end gap-2">
+              <Link to="/login?mode=signup" onClick={() => returnAfterLogin.set(askSignIn)}><Button variant="outline">Sign up</Button></Link>
+              <Link to="/login" onClick={() => returnAfterLogin.set(askSignIn)}><Button>Sign in</Button></Link>
+            </div>
+          )}>
+          <p className="text-sm text-slate-600 dark:text-slate-300">Group tables, event standings and title tallies are available once you sign in. You'll come straight back to this page.</p>
+        </Modal>
+      )}
       {groups.map((g) => {
+        // Point tally: group / league tables, or a ranking event's own standing.
+        const drawId = g.rows[0]?.tournament_discipline_id ?? null;
+        const sportId = g.rows[0]?.sport_id ?? null;
+        const isEvent = g.rows.every((f) => f.round === 'Event');
+        const hasPools = !!drawId && all.some((f) => f.tournament_discipline_id === drawId && f.round !== 'Event' && !isKnockoutRound(f.round));
+        const showTallyTab = !!tally && !!drawId && (isEvent || hasPools);
+        const tallyShown = showTallyTab && !!tally?.signedIn && !!drawId && !!tallyOpen[drawId];
+        const eventTally = titleTally?.events.find((e) => e.draw_id === drawId);
+        // A ranking sport's title tally sits once, above its first event.
+        const firstOfSport = isEvent && groups.find((x) => x.rows.every((f) => f.round === 'Event') && x.rows[0]?.sport_id === sportId)?.key === g.key;
+        const sportTally = titleTally?.sports.find((x) => x.sport_id === sportId);
         // A bracket is drawn from the WHOLE knockout draw, whatever the status chip
         // says - a filtered tree would have holes. Pool matches are not part of it.
         const knockout = mode === 'schedule'
@@ -157,7 +211,15 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
         const hasBracket = knockout.some((f) => f.bracket_position != null);
         const showBracket = hasBracket && !!asBracket[g.key];
         return (
-        <section key={g.key} className="space-y-2">
+        <section key={g.key} id={drawId ? `tally-${drawId}` : undefined} className="scroll-mt-24 space-y-2">
+          {tally && firstOfSport && (tally.signedIn
+            ? (sportHasTally(sportTally) && <div id={`title-${sportId}`} className="scroll-mt-24"><TitleTallyCard tally={sportTally!} /></div>)
+            : (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-800">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">{g.sport} · Title tally</span>
+                <Button size="sm" variant="outline" onClick={() => ask({ title: sportId ?? undefined })}>View tally</Button>
+              </div>
+            ))}
           <div className="flex flex-wrap items-center gap-2 px-1">
             <span className="text-base">{g.icon ?? '◇'}</span>
             <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">
@@ -165,6 +227,11 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
               {g.discipline && <span className="font-medium text-slate-400 dark:text-slate-500"> · {g.discipline}</span>}
             </h3>
             <Badge tone="slate">{g.rows.length}</Badge>
+            {showTallyTab && (
+              <Segmented size="sm" value={tallyShown ? 'tally' : 'matches'}
+                onChange={(v) => (tally?.signedIn ? setTallyOpen((s) => ({ ...s, [drawId!]: v === 'tally' })) : v === 'tally' && ask({ tally: drawId! }))}
+                options={[{ value: 'matches', label: 'Matches' }, { value: 'tally', label: 'Point tally' }]} />
+            )}
             {hasBracket && (
               <div className="ml-auto">
                 <Segmented size="sm" value={showBracket ? 'bracket' : 'list'}
@@ -174,7 +241,9 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase }: { champi
             )}
           </div>
 
-          {showBracket ? (
+          {tallyShown ? (
+            eventTally ? <EventTallyTable event={eventTally} /> : <GroupTables drawId={drawId!} canManage={false} />
+          ) : showBracket ? (
             <Card className="p-3 sm:p-4">
               {/* Read-only: no onSelect / onScore, so nothing in it can be edited. */}
               <Bracket fixtures={knockout} teamName={bracketTeamName} teamOrg={bracketTeamOrg} />

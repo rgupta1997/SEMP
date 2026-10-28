@@ -10,6 +10,7 @@ import { makeGuards } from '../../http/middleware/permissions.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { AUDIT_ACTIONS, audit } from '../iam/audit.service.js';
 import { readStandings, readStandingsBreakdown, recomputeStandingsAtomic, countCompletedMatches } from './standings.service.js';
+import { readTitleTally } from './title-tally.service.js';
 
 // Standings = materialized org-level tables (read) + editable scoring rules (write).
 // Mounted under /championships alongside the events router.
@@ -31,6 +32,12 @@ export function makeStandingsRouter(prisma: Prisma): Router {
     const standings = await readStandings(prisma, req.params.id, scope, scopeId);
     const completed_matches = await countCompletedMatches(prisma, req.params.id, scope, scopeId);
     res.json({ scope, scope_id: scopeId, standings, completed_matches });
+  }));
+
+  // Ranking sports' master tally: per title, each club's place in every event, the
+  // title total and what it pays; plus each event's own standing.
+  router.get('/:id/title-tally', asyncHandler(async (req, res) => {
+    res.json(await readTitleTally(prisma, req.params.id));
   }));
 
   // Per-event breakdown for one org in a scope: which draws contributed how many points

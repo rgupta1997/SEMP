@@ -6,6 +6,8 @@ import type { ScoringFormat } from './scoring-rules.js';
 import { deriveTeamStats } from './team-stats.js';
 import { foldCareerStats, statSpecFor } from './stat-registry.js';
 import { COLUMN_MAP } from './category-lines.js';
+import { applyKnobs, readKnobs } from './format-knobs.js';
+import { applyOverrides } from './format-overrides.js';
 
 const basket = (side: 'A' | 'B', pts: number): RallyEvent => ({ t: 'point', side, pts });
 const whistle: RallyEvent = { t: 'endPeriod' };
@@ -46,6 +48,35 @@ describe('basketball has no draws', () => {
   it('a lead after the last quarter wins with no overtime', () => {
     const f = presetByKey('fiba_4x10')!;
     expect(play(f, [...levelQuarters(3), basket('A', 3), whistle]).state).toMatchObject({ ended: true, winner: 'A' });
+  });
+});
+
+// IIMK women's: 4 x 8, then 5-minute overtimes until someone leads (sheet BB01).
+describe('repeating overtime survives edits', () => {
+  const twoLevelOvertimes = [...levelQuarters(4), basket('A', 3), basket('B', 3), whistle, basket('A', 1), basket('B', 1), whistle];
+  const stillOvertime = (f: ScoringFormat) => {
+    expect(f.tieBreak?.extraTime).toMatchObject({ repeat: true, label: 'Overtime', minutes: 5 });
+    expect(play(f, twoLevelOvertimes).progress).toMatchObject({ phase: 'extraTime', extraPlayed: 2, periodMs: 5 * 60_000 });
+  };
+
+  it('the 4 x 8 preset has 8-minute quarters and repeating overtime', () => {
+    const f = presetByKey('basketball_4x8')!;
+    expect(play(f, []).progress.periodMs).toBe(8 * 60_000);
+    stillOvertime(f);
+  });
+
+  it('the format editor keeps repeat and the Overtime name', () => {
+    const fiba = presetByKey('fiba_4x10')!;
+    const edited = applyKnobs(fiba, { ...readKnobs(fiba), clockMinutes: 32 });
+    expect(play(edited, []).progress.periodMs).toBe(8 * 60_000);
+    stillOvertime(edited);
+    expect(applyKnobs(fiba, { ...readKnobs(fiba), extraTimeMinutes: 3 }).tieBreak?.extraTime).toMatchObject({ repeat: true, minutes: 3 });
+  });
+
+  it('a per-match override keeps repeat, for quarter and overtime length', () => {
+    const fiba = presetByKey('fiba_4x10')!;
+    stillOvertime(applyOverrides(fiba, { periodMinutes: 8 }));
+    expect(applyOverrides(fiba, { extraTimeMinutes: 3 }).tieBreak?.extraTime).toMatchObject({ repeat: true, label: 'Overtime', minutes: 3 });
   });
 });
 

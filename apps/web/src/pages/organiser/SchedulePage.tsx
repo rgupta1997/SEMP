@@ -12,7 +12,7 @@ import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
 import { Badge, Button, Card, cn, confirmDialog, EmptyState, Field, Input, Modal, SearchableSelect, Segmented, Select, Spinner, StatusBadge, StatusLegend, toast } from '../../components/ui';
 import { Bracket, fixtureStatusLabel } from '../../components/Bracket';
 import { FitName } from '../../components/FitName';
-import { GroupTables, openTieCount, tablesPath, TABLES_REFRESH_MS, type DrawTables } from '../../components/GroupTables';
+import { openTieCount, tablesPath, TABLES_REFRESH_MS, type DrawTables } from '../../components/GroupTables';
 import { useUrlState } from '../../components/primitives';
 import { RoundRobinGrid } from '../../components/RoundRobinGrid';
 import { ScheduleTimeline } from '../../components/ScheduleTimeline';
@@ -874,10 +874,11 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
         </div>
       </div>
       <div className="mt-3">
-        {openTies > 0 && !showVisual && (
+        {openTies > 0 && (
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
             <span>{openTies === 1 ? 'A tie needs' : `${openTies} ties need`} a hand-picked order before the next stage or the placings can be settled.</span>
-            <Button size="sm" variant="outline" onClick={() => setView('visual')}>View tables</Button>
+            {/* The group tables live on Results, under this discipline's Point tally tab. */}
+            <Button size="sm" variant="outline" onClick={() => drawNavigate(`/championships/${drawEventId}/results?tally=${td.id}`)}>View point tally</Button>
           </div>
         )}
         {isLoading ? <Spinner /> : fixtures.length === 0 ? (
@@ -932,7 +933,6 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
                 </div>
               );
             })}
-            {hasTables && <GroupTables drawId={td.id} canManage={canManage && !archived} />}
           </div>
         ) : (
           // Sized by the CARD (sidebar and display scaling change it), not the screen.

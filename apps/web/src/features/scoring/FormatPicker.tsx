@@ -94,6 +94,8 @@ export function describeFormat(f: MatchFormat): string {
     bits.push(r.gamesToWin > 1 ? `best of ${r.gamesToWin * 2 - 1} games` : 'one game');
     bits.push(`to ${r.gameTarget} points`);
     if (r.maxBoards) bits.push(`${r.maxBoards} boards a game`);
+    if (r.maxBoards && r.boardsWonDecides) bits.push('level: more boards won');
+    if (r.maxBoards && r.tieBreakBoards > 1) bits.push(`${r.tieBreakBoards} tie-break boards`);
     bits.push(`queen ${r.queenPoints}${r.queenCutoff ? ` until ${r.queenCutoff}` : ''}`);
     return bits.join(' · ');
   }

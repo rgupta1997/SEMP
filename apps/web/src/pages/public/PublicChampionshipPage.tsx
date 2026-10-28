@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useApi, fmtDate } from '../../lib/hooks';
 import { useAuth } from '../../lib/auth';
 import { BrandMark } from '../../components/BrandMark';
@@ -20,7 +20,9 @@ interface PublicOverview {
 // Unauthenticated, view-only championship page reached via a share token (/c/:token).
 // Shows Overview + Standings, fetched from the public (no-auth) API.
 export function PublicChampionshipPage({ token }: { token: string }) {
-  const [tab, setTab] = useState('overview');
+  // ?tab= lets sign-in bring a visitor back to the tab they were on.
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState(() => (['schedule', 'results', 'standings'].includes(searchParams.get('tab') ?? '') ? searchParams.get('tab')! : 'overview'));
   const { ctx, loading: authLoading } = useAuth();
   const signedOut = !authLoading && !ctx;
   const { data, isLoading } = useApi<PublicOverview>(token ? `/public/championships/${token}/overview` : null);
@@ -82,7 +84,8 @@ export function PublicChampionshipPage({ token }: { token: string }) {
         {tab === 'schedule' ? (
           <ChampionshipFixtures championshipId="" mode="schedule" apiBase={`/public/championships/${token}`} />
         ) : tab === 'results' ? (
-          <ChampionshipFixtures championshipId="" mode="results" apiBase={`/public/championships/${token}`} />
+          <ChampionshipFixtures championshipId="" mode="results" apiBase={`/public/championships/${token}`}
+            tally={{ championshipId: data.championship.id, signedIn: !signedOut && !authLoading }} />
         ) : tab === 'overview' ? (
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-3">

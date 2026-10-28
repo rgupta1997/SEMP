@@ -1,5 +1,5 @@
 import {
-  canonicalRacquetSport, carromLineStats, carromMatch, carromRulesOf, isCarromSport, type CarromBoard,
+  canonicalRacquetSport, carromLineStats, carromMatchOf, carromRulesOf, isCarromSport, readCarromState,
   chessLineStats, competitionTier, cricketCareerBag, deriveRacquetStats, type ChessGame,
   deriveTeamStats, netLineStats, effectiveEventSpec, eventTemplateFor, foldCricketCareer, isChessSport, isCricketSport,
   parseStoredFormat, playedContests, rankSubEvent, resolveFormat, seatIn, statSpecFor,
@@ -287,8 +287,8 @@ export async function buildPlayerStatRows(
     if (isCarromSport(sportName) && Array.isArray(carrom?.boards) && carrom.boards.length) {
       const frozen = parseStoredFormat((fx.live_state as { format?: unknown } | null)?.format);
       const rules = carromRulesOf(frozen ?? resolveFormat({ round: fx.round, stage_sequence: fx.stage_sequence }, { sport: sportName }).format);
-      const boards = (carrom.boards as CarromBoard[]).filter((b) => b && (b.winner === 'A' || b.winner === 'B'));
-      const match = carromMatch(boards, rules, carrom.firstBreak === 'B' ? 'B' : 'A');
+      const state = readCarromState(carrom) ?? { boards: [], firstBreak: 'A' as const };
+      const match = carromMatchOf(state, rules);
       const base = statOf;
       statOf = (userId) => {
         const side = sideOf.get(userId);
@@ -438,7 +438,7 @@ function contestRows(
           : opts.carrom && c.carrom?.boards.length
             ? (() => {
               const rules = carromRulesOf(c.format);
-              return carromLineStats(carromMatch(c.carrom.boards, rules, c.carrom.firstBreak), rules, seat.side);
+              return carromLineStats(carromMatchOf(c.carrom, rules), rules, seat.side);
             })()
             : derived?.players.find((x) => x.userId === userId)?.stats ?? {},
         occurred_on: opts.occurred,

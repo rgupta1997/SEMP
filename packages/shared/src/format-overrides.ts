@@ -100,7 +100,8 @@ export function applyOverrides(
     const periods = format.tieBreak?.extraTime?.periods ?? 2;
     next.tieBreak = {
       ...(format.tieBreak ?? {}),
-      extraTime: { periods, minutes: Math.max(1, overrides.extraTimeMinutes) },
+      // Spread first so a repeating overtime keeps repeating and keeps its name.
+      extraTime: { ...format.tieBreak?.extraTime, periods, minutes: Math.max(1, overrides.extraTimeMinutes) },
     };
   }
 
