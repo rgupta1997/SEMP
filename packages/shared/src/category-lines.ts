@@ -103,7 +103,8 @@ export const COLUMN_MAP: Record<Exclude<StatFamily, 'measured' | 'cricket'>, Rec
   invasion: {
     minutes: 'minutes',
     goals: 'goals', assists: 'assists', own_goals: 'own_goals', saves: 'saves',
-    yellows: 'yellows', reds: 'reds',
+    // Hockey's green card and penalty corner goals (rds-migrations 030).
+    greens: 'greens', pc_goals: 'pc_goals', yellows: 'yellows', reds: 'reds',
     pens_scored: 'pens_scored', pens_missed: 'pens_missed',
     points_scored: 'points_scored', fg_1: 'fg_1', fg_2: 'fg_2', fg_3: 'fg_3',
     rebounds: 'rebounds', steals: 'steals', blocks: 'blocks',

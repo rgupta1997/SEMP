@@ -1806,6 +1806,8 @@ model invasion_match_lines {
   shots              Int                @default(0)
   saves              Int                @default(0)
   clean_sheet        Boolean            @default(false)
+  greens             Int                @default(0)
+  pc_goals           Int                @default(0)
   yellows            Int                @default(0)
   reds               Int                @default(0)
   pens_scored        Int                @default(0)

@@ -2,9 +2,10 @@ import { ChevronDown, Undo2 } from 'lucide-react';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   aggregateScore, capLeader, changesEndsAfterUnit, effectiveLevel, foldRally, isDecider, isAggregate, periodsPlayed, resultEnvelope,
-  clockReading, formatClock, minuteLabel, tieProgress, shootoutState, shootoutLine, shootoutEnd,
+  clockReading, formatClock, minuteLabel, tieProgress, shootoutState, shootoutLine, shootoutEnd, shootoutTerms, type ShootoutTerms,
   isKhoKhoFormat, khoStatus, khoTurnLines, minChaseState, minChaseEnd, inningsEnd, formatChaseTime, parseChaseTime, KHO_END_LABEL, MIN_CHASE_GRACE_MS,
-  isKabaddiFormat, kabaddiStatus, canonicalTeamSport, goldenTossEnd, GOLDEN_RAIDS,
+  isKabaddiFormat, kabaddiStatus, canonicalTeamSport, goldenTossEnd, GOLDEN_RAIDS, isHockeySport, penaltyCorners,
+  activeSuspensions, cardRulesFor, escalatedCard,
   type ClockReading, type ShootoutState, type MinChaseState,
   statSpecFor, type EventTone, type KernelState, type RallyEvent, type RallyLog, type ScoringFormat,
   type Side, type StatEventSpec,
@@ -286,13 +287,14 @@ export function TeamDeck(p: TeamDeckProps) {
    * and reds, basketball shows fouls, and a sport that books nobody shows nothing at
    * all instead of two empty boxes.
    */
+  const corners = useMemo(() => (isHockeySport(format.sport) ? penaltyCorners(log) : null), [format.sport, log]);
   const cards = useMemo(() => {
     const toneByKind = new Map(events.map((e) => [e.key, e.tone]));
-    const tally = { A: { caution: 0, dismissal: 0 }, B: { caution: 0, dismissal: 0 } };
+    const tally = { A: { warning: 0, caution: 0, dismissal: 0 }, B: { warning: 0, caution: 0, dismissal: 0 } };
     for (const ev of log) {
       if (ev.t !== 'point' || !ev.kind) continue;
       const tone = toneByKind.get(ev.kind);
-      if (tone === 'caution' || tone === 'dismissal') tally[ev.side][tone] += 1;
+      if (tone === 'warning' || tone === 'caution' || tone === 'dismissal') tally[ev.side][tone] += 1;
     }
     return tally;
   }, [log, events]);
@@ -313,12 +315,12 @@ export function TeamDeck(p: TeamDeckProps) {
    */
   const playerCards = useMemo(() => {
     const toneByKind = new Map(events.map((e) => [e.key, e.tone]));
-    const tally = new Map<string, { caution: number; dismissal: number }>();
+    const tally = new Map<string, CardCounts>();
     for (const ev of log) {
       if (ev.t !== 'point' || !ev.kind || !ev.playerId) continue;
       const tone = toneByKind.get(ev.kind);
-      if (tone !== 'caution' && tone !== 'dismissal') continue;
-      const cur = tally.get(ev.playerId) ?? { caution: 0, dismissal: 0 };
+      if (tone !== 'warning' && tone !== 'caution' && tone !== 'dismissal') continue;
+      const cur = tally.get(ev.playerId) ?? { warning: 0, caution: 0, dismissal: 0 };
       tally.set(ev.playerId, { ...cur, [tone]: cur[tone] + 1 });
     }
     return tally;
@@ -344,7 +346,25 @@ export function TeamDeck(p: TeamDeckProps) {
    * table can name them. A non-scoring action (a card, an empty raid) is the same
    * event with pts 0 - it changes no score and is still a fact worth keeping.
    */
+  // Card rules (hockey): who is serving a suspension, and whether a repeat card escalates.
+  const cardRules = useMemo(() => cardRulesFor(format), [format]);
+  const suspended = cardRules && !state.ended ? activeSuspensions(log, cardRules, nowMs) : [];
+  const cardName = (key: string) => events.find((e) => e.key === key)?.label ?? key;
+
+  /** A tap, with the escalation question first when a repeat card should become the next one up. */
   const fire = (ev: StatEventSpec, value?: number) => {
+    const up = cardRules && actor ? escalatedCard(log, cardRules, actor, ev.key) : ev.key;
+    const upSpec = up !== ev.key ? events.find((e) => e.key === up) : undefined;
+    if (!upSpec) { record(ev, value); return; }
+    void confirmDialog({
+      title: `${nameFor(actor) ?? 'This player'} already has a ${cardName(ev.key).toLowerCase()}`,
+      message: `A second ${cardName(ev.key).toLowerCase()} becomes a ${upSpec.label.toLowerCase()} under this format's rules.`,
+      confirmLabel: `Record ${upSpec.label.toLowerCase()}`,
+      cancelLabel: `Keep ${cardName(ev.key).toLowerCase()}`,
+    }).then((ok) => record(ok ? upSpec : ev, value));
+  };
+
+  const record = (ev: StatEventSpec, value?: number) => {
     // A team action (kabaddi's all-out, technical point) names nobody.
     const teamAction = ev.perPlayer === false;
     const n = ev.value ? (value ?? 1) : undefined;
@@ -500,7 +520,8 @@ export function TeamDeck(p: TeamDeckProps) {
                       : 'bg-emerald-500 text-white hover:bg-emerald-600',
                   )}>
                   {clock.running ? 'Stop' : clock.started ? 'Start' : kho ? 'Start turn'
-                    : kab || canonicalTeamSport(format.sport) === 'frisbee' ? 'Start half' : 'Kick off'}
+                    : kab || canonicalTeamSport(format.sport) === 'frisbee' ? 'Start half'
+                    : canonicalTeamSport(format.sport) === 'hockey' ? `Start ${periodName.toLowerCase()}` : 'Kick off'}
                 </button>
               </>
             ) : (
@@ -546,6 +567,15 @@ export function TeamDeck(p: TeamDeckProps) {
           </div>
           <Discipline counts={cards.B} align="right" />
         </div>
+
+        {/* Hockey: penalty corners won, and scored from, per side. */}
+        {corners && (corners.A.won > 0 || corners.B.won > 0) && (
+          <div data-qa="penalty-corners" className="mt-1 grid grid-cols-[1fr_auto_1fr] items-center gap-2 font-mono text-[10px] tabular-nums text-white">
+            <span>{corners.A.won}{corners.A.scored ? ` (${corners.A.scored} scored)` : ''}</span>
+            <span className="text-[8px] font-bold uppercase tracking-wide text-on-brand">Penalty corners</span>
+            <span className="text-right">{corners.B.won}{corners.B.scored ? ` (${corners.B.scored} scored)` : ''}</span>
+          </div>
+        )}
 
         {format.officiatingMode === 'selfScored' && (
           <div className="mt-1 text-center text-[9px] font-semibold uppercase tracking-wide text-amber-300">
@@ -616,6 +646,24 @@ export function TeamDeck(p: TeamDeckProps) {
             onClick={() => push({ t: 'raidTurn', side: otherOf(kabNow.raider!) })}>
             Switch
           </Button>
+        </div>
+      )}
+
+      {/* Hockey: players serving a card suspension, counting down in match time. */}
+      {suspended.length > 0 && (
+        <div data-qa="suspensions" role="status"
+          className="flex shrink-0 flex-wrap items-center gap-1.5 rounded-lg border border-line px-2 py-1 text-[11px]">
+          <span className="font-semibold uppercase tracking-wide text-muted">Off</span>
+          {suspended.map((s) => (
+            <span key={s.playerId} className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold',
+              s.card === 'green' ? 'bg-green-100 text-green-900 dark:bg-green-500/15 dark:text-green-300'
+                : s.card === 'yellow' ? 'bg-yellow-100 text-yellow-900 dark:bg-yellow-500/15 dark:text-yellow-300'
+                : 'bg-red-100 text-red-900 dark:bg-red-500/15 dark:text-red-300')}>
+              <span className="max-w-[9rem] truncate">{s.playerName ?? nameFor(s.playerId) ?? 'Player'}</span>
+              <span className="text-[10px] opacity-75">{nameOf(s.side)}</span>
+              <span className="font-mono tabular-nums">{s.remainingMs === Infinity ? 'sent off' : formatClock(s.remainingMs)}</span>
+            </span>
+          ))}
         </div>
       )}
 
@@ -767,7 +815,7 @@ export function TeamDeck(p: TeamDeckProps) {
           />
         ) : progress.phase === 'penalties' ? (
           <Shootout
-            shoot={shoot} nameOf={nameOf} kicksEach={format.tieBreak?.penalties?.kicks ?? 5}
+            shoot={shoot} nameOf={nameOf} kicksEach={format.tieBreak?.penalties?.kicks ?? 5} terms={shootoutTerms(format.sport)}
             busy={!!p.disabled || !!p.busy} score={shown} roster={p.roster}
             onKick={(side, scored, kicker) => push({
               t: 'penaltyKick', side, scored,
@@ -1117,6 +1165,7 @@ const TONE: Record<EventTone, string> = {
   // filled, so it is legible as a goal that went the wrong way at a glance.
   ownGoal: 'border-2 border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-500/70 dark:bg-amber-500/15 dark:text-amber-100 dark:hover:bg-amber-500/25',
   good: 'border border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200 dark:hover:bg-sky-500/20',
+  warning: 'bg-green-600 text-white hover:bg-green-700 shadow-sm',
   caution: 'bg-yellow-400 text-yellow-950 hover:bg-yellow-500 shadow-sm dark:bg-yellow-400 dark:text-yellow-950',
   dismissal: 'bg-red-600 text-white hover:bg-red-700 shadow-sm',
   error: 'border border-line bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
@@ -1238,7 +1287,9 @@ function ClockPanel({ clock, periodLabel, period, busy, onAdjust, onToggle, onCl
  * penalties, and the terminal `end` event carries that reason so a record can say
  * so rather than presenting it as a win in normal time.
  */
-function Shootout({ shoot, nameOf, kicksEach, busy, score, roster, onKick, onUndo, onSettle }: {
+function Shootout({ shoot, nameOf, kicksEach, terms, busy, score, roster, onKick, onUndo, onSettle }: {
+  /** Hockey says shoot-out and shooter; football penalties and kicker. */
+  terms: ShootoutTerms;
   shoot: ShootoutState;
   nameOf: (s: Side) => string;
   kicksEach: number;
@@ -1265,7 +1316,7 @@ function Shootout({ shoot, nameOf, kicksEach, busy, score, roster, onKick, onUnd
     <Card className={cn(SURFACE, 'gap-3 p-3')} data-qa="shootout">
       <div className="shrink-0 text-center">
         <div className="text-[10px] uppercase tracking-wide text-muted">
-          {shoot.suddenDeath ? 'Sudden death' : `Penalties · ${kicksEach} kicks each`}
+          {shoot.suddenDeath ? 'Sudden death' : `${terms.title} · ${kicksEach} ${terms.each}`}
         </div>
         <div className="mt-0.5 font-mono text-3xl font-bold tabular-nums">
           {shoot.scored[0]}–{shoot.scored[1]}
@@ -1306,14 +1357,14 @@ function Shootout({ shoot, nameOf, kicksEach, busy, score, roster, onKick, onUnd
       {shoot.decided && shoot.winner ? (
         <div className="shrink-0 space-y-2">
           <p className="text-center text-sm font-semibold">
-            {shootoutLine(shoot, nameOf)}
+            {shootoutLine(shoot, nameOf, terms.title === 'Shoot-out' ? 'hockey' : null)}
           </p>
           <Button className="w-full" variant="primary" data-qa="shootout-settle"
             disabled={busy} onClick={() => onSettle(shoot.winner as Side)}>
             Record the result
           </Button>
           <Button className="w-full" size="sm" variant="outline" disabled={busy} onClick={onUndo}>
-            Undo the last kick
+            Undo the last {terms.attempt}
           </Button>
         </div>
       ) : (
@@ -1323,7 +1374,7 @@ function Shootout({ shoot, nameOf, kicksEach, busy, score, roster, onKick, onUnd
           </div>
           {squad.length > 0 && (
             <div className="space-y-1">
-              <div className="text-[10px] uppercase tracking-wide text-muted">Kicker (optional)</div>
+              <div className="text-[10px] uppercase tracking-wide text-muted">{terms.taker} (optional)</div>
               <PeopleGrid qa="shootout-kicker" value={kickerId}
                 options={[['', 'Not named'], ...squad.map((x): [string, string] => [x.id, x.name])]}
                 onChange={setKickerId} />
@@ -1341,7 +1392,7 @@ function Shootout({ shoot, nameOf, kicksEach, busy, score, roster, onKick, onUnd
           </div>
           <Button className="w-full" size="sm" variant="outline"
             disabled={busy || !shoot.kicks.length} onClick={onUndo}>
-            Undo the last kick
+            Undo the last {terms.attempt}
           </Button>
         </div>
       )}
@@ -1614,13 +1665,22 @@ function ScoreSide({ name, org, score, side, align = 'left', serving = false }: 
  * is how a card is recorded on every team sheet ever printed, and it needs no key.
  * Hidden entirely when nothing has been booked, so the board stays quiet.
  */
+/** Cards per side or player: green (hockey), yellow or foul, red. */
+type CardCounts = { warning: number; caution: number; dismissal: number };
+
 function Discipline({ counts, align = 'left' }: {
-  counts: { caution: number; dismissal: number }; align?: 'left' | 'right';
+  counts: CardCounts; align?: 'left' | 'right';
 }) {
-  if (!counts.caution && !counts.dismissal) return <div aria-hidden />;
+  if (!counts.warning && !counts.caution && !counts.dismissal) return <div aria-hidden />;
   return (
     <div className={cn('flex min-w-0 items-center gap-1.5',
       align === 'right' ? 'justify-end' : 'justify-start')}>
+      {counts.warning > 0 && (
+        <span className="flex items-center gap-0.5">
+          <span className="h-3 w-2 rounded-[1px] bg-green-500" />
+          <span className="font-mono text-[11px] font-bold tabular-nums text-white">{counts.warning}</span>
+        </span>
+      )}
       {counts.caution > 0 && (
         <span className="flex items-center gap-0.5">
           <span className="h-3 w-2 rounded-[1px] bg-yellow-400" />
@@ -1766,7 +1826,7 @@ function chipFont(label: string, extra: number): string {
  * upwards: "1" next to a single yellow is noise on a grid of sixteen, and one card
  * is what a bare pip already means.
  */
-function CardPips({ counts, on }: { counts: { caution: number; dismissal: number }; on: boolean }) {
+function CardPips({ counts, on }: { counts: CardCounts; on: boolean }) {
   const pip = (n: number, cls: string, label: string) => n > 0 && (
     <span className="flex items-center gap-px" title={`${n} ${label}${n > 1 ? 's' : ''}`}>
       <span className={cn('h-2.5 w-[6px] rounded-[1px] shadow-sm', cls)} />
@@ -1778,6 +1838,7 @@ function CardPips({ counts, on }: { counts: { caution: number; dismissal: number
   );
   return (
     <span className="flex shrink-0 items-center gap-0.5" aria-hidden>
+      {pip(counts.warning, 'bg-green-500', 'green card')}
       {pip(counts.caution, 'bg-yellow-400', 'caution')}
       {pip(counts.dismissal, 'bg-red-500', 'dismissal')}
     </span>
@@ -1787,7 +1848,7 @@ function CardPips({ counts, on }: { counts: { caution: number; dismissal: number
 function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0 }: {
   value: string; options: Array<[string, string]>; onChange: (v: string) => void; qa?: string;
   /** Cards booked per player id, so a chip can say who is already on a yellow. */
-  cards?: Map<string, { caution: number; dismissal: number }>;
+  cards?: Map<string, CardCounts>;
   /** Fouls that put a player out (basketball); 0 when the sport has no foul-out. */
   foulLimit?: number;
 }) {
@@ -1802,10 +1863,11 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0 }: {
         const on = value === v;
         const shown = v === '' ? label : labels[i];
         const booked = v ? cards?.get(v) : undefined;
-        const marks = booked && (booked.caution || booked.dismissal) ? booked : null;
+        const marks = booked && (booked.warning || booked.caution || booked.dismissal) ? booked : null;
         // Each pip is about two characters of the line, and a count is one more.
         const extra = marks
-          ? (marks.caution ? 2 + (marks.caution > 1 ? 1 : 0) : 0)
+          ? (marks.warning ? 2 + (marks.warning > 1 ? 1 : 0) : 0)
+            + (marks.caution ? 2 + (marks.caution > 1 ? 1 : 0) : 0)
             + (marks.dismissal ? 2 + (marks.dismissal > 1 ? 1 : 0) : 0)
           : 0;
         const fouledOut = foulLimit > 0 && (marks?.caution ?? 0) >= foulLimit;
@@ -1817,7 +1879,8 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0 }: {
             // carries the booking too rather than just repeating the label.
             title={fouledOut ? `${label} - fouled out (${marks!.caution} fouls)`
               : marks
-              ? `${label} - ${[marks.caution && `${marks.caution} ${foulLimit ? 'foul' : 'caution'}${marks.caution > 1 ? 's' : ''}`,
+              ? `${label} - ${[marks.warning && `${marks.warning} green card${marks.warning > 1 ? 's' : ''}`,
+                  marks.caution && `${marks.caution} ${foulLimit ? 'foul' : 'caution'}${marks.caution > 1 ? 's' : ''}`,
                   marks.dismissal && `${marks.dismissal} dismissal${marks.dismissal > 1 ? 's' : ''}`]
                   .filter(Boolean).join(', ')}${onLastFoul ? ', one from fouling out' : ''}`
               : label}

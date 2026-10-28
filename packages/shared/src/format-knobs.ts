@@ -4,6 +4,7 @@ import { isChessSport } from './chess.js';
 import { carromRulesOf, isCarromSport } from './carrom.js';
 import { isKhoKhoFormat } from './kho-kho.js';
 import { isKabaddiFormat } from './kabaddi.js';
+import { canonicalTeamSport } from './team-presets.js';
 import type {
   CapAction, CapTieRule, ChangeEndsRule, LevelSpec, OfficiatingMode,
   ScoringFormat, ServeMovement, PointScoring,
@@ -98,6 +99,8 @@ export interface FormatKnobs {
   khoKho: boolean;
   /** Read-only. Kabaddi settles a level knockout with extra time (then golden raid), never kicks. */
   kabaddi: boolean;
+  /** Read-only. Hockey's shoot-out is shooters, not kicks. */
+  hockey: boolean;
   /** Kabaddi: still level after extra time, a golden raid each, then a toss. */
   goldenRaidEnabled: boolean;
 
@@ -383,10 +386,16 @@ export const KNOB_SPECS: KnobSpec[] = [
     applies: (k) => k.kabaddi && !k.drawsAllowed },
   { key: 'shootoutEnabled', label: 'Penalty shoot-out', group: 'tieBreak', type: 'bool',
     hint: 'Settles it when the scores are still level after extra time. The scoreline is not changed - a 1-1 won on kicks is recorded 1-1.',
-    applies: (k) => k.periodShaped && !k.drawsAllowed && !k.khoKho && !k.kabaddi },
+    applies: (k) => k.periodShaped && !k.drawsAllowed && !k.khoKho && !k.kabaddi && !k.hockey },
+  { key: 'shootoutEnabled', label: 'Shoot-out', group: 'tieBreak', type: 'bool',
+    hint: 'Settles it when the scores are still level after any extra time: one-on-one shots. The scoreline is not changed.',
+    applies: (k) => k.hockey && !k.drawsAllowed },
+  { key: 'shootoutKicks', label: 'Shooters each', group: 'tieBreak', type: 'int', min: 1, max: 20,
+    hint: 'The opening round (FIH 5). Still level after that goes to sudden death, one each.',
+    applies: (k) => k.hockey && !k.drawsAllowed && k.shootoutEnabled },
   { key: 'shootoutKicks', label: 'Kicks each', group: 'tieBreak', type: 'int', min: 1, max: 20,
     hint: 'The opening round. Still level after that goes to sudden death, a pair at a time.',
-    applies: (k) => k.periodShaped && !k.drawsAllowed && k.shootoutEnabled && !k.khoKho && !k.kabaddi },
+    applies: (k) => k.periodShaped && !k.drawsAllowed && k.shootoutEnabled && !k.khoKho && !k.kabaddi && !k.hockey },
   { key: 'minimumChaseEnabled', label: 'Minimum chase', group: 'tieBreak', type: 'bool',
     hint: 'Still level: each side chases once more and the faster first out wins. The score stays level.',
     applies: (k) => k.khoKho && !k.drawsAllowed },
@@ -502,6 +511,7 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
     firstTo: top.firstTo ?? 0,
     khoKho: isKhoKhoFormat(f),
     kabaddi: isKabaddiFormat(f),
+    hockey: canonicalTeamSport(f.sport) === 'hockey',
     goldenRaidEnabled: !!f.tieBreak?.goldenRaid,
 
     officiatingMode: f.officiatingMode,
@@ -736,7 +746,7 @@ export function describeKnobs(k: FormatKnobs): string {
   if (!k.drawsAllowed && (k.extraTimeEnabled || kicks || minChase || universal || golden)) {
     const chain: string[] = [];
     if (k.extraTimeEnabled) chain.push(`ET ${k.extraTimePeriods}x${k.extraTimeMinutes} min${k.firstTo > 0 && !k.extraTimeFirstTo ? ' played in full' : ''}`);
-    if (kicks) chain.push(`${k.shootoutKicks} kicks`);
+    if (kicks) chain.push(k.hockey ? `shoot-out (${k.shootoutKicks} each)` : `${k.shootoutKicks} kicks`);
     if (minChase) chain.push('minimum chase');
     if (universal) chain.push('universal point');
     if (golden) chain.push('golden raid');

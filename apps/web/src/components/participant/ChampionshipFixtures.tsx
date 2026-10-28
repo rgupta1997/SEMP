@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { Calendar, Flag, MapPin } from 'lucide-react';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints, isKnockoutRound, KHO_END_LABEL, KHO_END_SHORT, khoSettlementOf, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints, isKnockoutRound, KHO_END_LABEL, KHO_END_SHORT, khoSettlementOf, shootoutLabel, shootoutOf, shootoutTerms, TBD_LABEL } from '@semp/shared';
 import { useApi, fmtDateTime } from '../../lib/hooks';
 import { Badge, Button, Card, EmptyState, ListToolbar, Modal, Segmented, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
 import { GroupTables } from '../GroupTables';
@@ -289,8 +289,8 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase, tally }: {
                           </span>
                         )}
                         {pens && (
-                          <span className="whitespace-nowrap text-[10px] font-semibold leading-3 text-brand-600 dark:text-brand-400" title="Won on penalties">
-                            {shootoutLabel(pens.home, pens.away)}
+                          <span className="whitespace-nowrap text-[10px] font-semibold leading-3 text-brand-600 dark:text-brand-400" title={`Won ${shootoutTerms(f.sport).phrase}`}>
+                            {shootoutLabel(pens.home, pens.away, f.sport)}
                           </span>
                         )}
                         {khoEnd && (

@@ -1,6 +1,7 @@
 import type { ScoringFormat, Side } from './scoring-rules.js';
 import { foldRally, misconductTerms, type RallyEvent, type RallyLog } from './rally-kernel.js';
 import { formatForPairing, resolveServer, type Pairing } from './serve-resolvers.js';
+import { shootoutTerms } from './tie-break.js';
 
 // ============================================================================
 // The rally log as TABLE ROWS, and back again.
@@ -331,9 +332,9 @@ export function shootoutOf(liveState: unknown): Shootout | null {
   return { home, away, winner: end.winner };
 }
 
-/** How a results line marks it: "7-7 (4-3 pens)". Pass the scores in display order. */
-export function shootoutLabel(first: number, second: number): string {
-  return `${first}–${second} pens`;
+/** How a results line marks it: "7-7 (4-3 pens)", hockey "4-3 SO". Pass the scores in display order. */
+export function shootoutLabel(first: number, second: number, sport?: string | null): string {
+  return `${first}–${second} ${shootoutTerms(sport).short}`;
 }
 
 /** Who served the first point, as persisted. Defaults to the home side. */

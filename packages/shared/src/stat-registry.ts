@@ -82,6 +82,7 @@ export type EventTone =
   | 'score'      // puts points on this side's board
   | 'ownGoal'    // puts points on the OTHER side's board
   | 'good'       // a positive act that scores nothing (a save, a dig, a rebound)
+  | 'warning'    // a green card: a short suspension, below a caution
   | 'caution'    // a yellow card, a foul
   | 'dismissal'  // a red card, a send-off
   | 'error';     // a miss, a turnover, a service error
@@ -96,6 +97,8 @@ export type MetricAmount = number | 'value' | { ifValueAtLeast: number } | { ifF
 export interface StatEventSpec extends EventTypeSpec {
   /** How the button reads at a glance. Defaults to score/error on the points alone. */
   tone?: EventTone;
+  /** A team count read straight off the log, not a player metric (hockey's penalty corners, hockey.ts). */
+  teamCount?: boolean;
   /**
    * The second person, because most interesting events involve two - goal + assist,
    * wicket + fielder, block + set. Recorded on the SAME row as the primary: an assist
@@ -417,6 +420,28 @@ const GOAL_METRICS: StatMetric[] = [
   perMatch('goals_per_match', 'Goals per match', 'G/M', 'goals'),
 ];
 
+// Hockey: football's actions plus the green card (2-minute suspension), a penalty is a
+// stroke, and goals come three ways - field goal, penalty corner, penalty stroke. A
+// corner awarded is the team's (hockey.ts counts them); a corner goal is the scorer's.
+const HOCKEY_LABEL: Record<string, string> = { goal: 'Field goal', pen_scored: 'Penalty stroke scored', pen_missed: 'Penalty stroke missed' };
+const HOCKEY_EVENTS: StatEventSpec[] = GOAL_EVENTS.flatMap((e) => [
+  ...(e.key === 'yellow' ? [ev('green', 'Green card', { greens: 1 }, { tone: 'warning' })] : []),
+  HOCKEY_LABEL[e.key] ? { ...e, label: HOCKEY_LABEL[e.key] } : e,
+  ...(e.key === 'goal' ? [
+    ev('pc_goal', 'Penalty corner goal', { goals: 1, pc_goals: 1 }, {
+      points: 1, tone: 'score', secondPlayer: { key: 'assist', label: 'Assisted by', optional: true }, secondPlayerMetrics: { assists: 1 },
+    }),
+    ev('pc', 'Penalty corner', {}, { perPlayer: false, teamCount: true, tone: 'good' }),
+  ] : []),
+]);
+const HOCKEY_METRIC_LABEL: Record<string, string> = { pens_scored: 'Penalty strokes scored', pens_missed: 'Penalty strokes missed' };
+const HOCKEY_FROM: Record<string, string[]> = { goals: ['goal', 'pc_goal', 'pen_scored'], assists: ['goal', 'pc_goal'] };
+const HOCKEY_METRICS: StatMetric[] = GOAL_METRICS.flatMap((m) => [
+  ...(m.key === 'yellows' ? [count('greens', 'Green cards', 'GC', { fromEvents: ['green'], higherIsBetter: false })] : []),
+  { ...m, ...(HOCKEY_METRIC_LABEL[m.key] ? { label: HOCKEY_METRIC_LABEL[m.key] } : {}), ...(HOCKEY_FROM[m.key] ? { fromEvents: HOCKEY_FROM[m.key] } : {}) },
+  ...(m.key === 'goals' ? [count('pc_goals', 'Penalty corner goals', 'PCG', { fromEvents: ['pc_goal'] })] : []),
+]);
+
 // Basketball counts the same shape with a different vocabulary, and its baskets are
 // worth one, two or three - which is what `value` on an event is for.
 // Free throws only: a made one is also an attempt. Field-goal misses aren't tracked -
@@ -731,7 +756,7 @@ export const TEAM_STAT_SPECS: SportStatSpec[] = [
   // invasion
   spec('football', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['GK', 'DEF', 'MID', 'FWD']),
   spec('futsal', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['GK', 'DEF', 'MID', 'FWD']),
-  spec('hockey', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['GK', 'DEF', 'MID', 'FWD']),
+  spec('hockey', 'invasion', HOCKEY_METRICS, HOCKEY_EVENTS, ['GK', 'DEF', 'MID', 'FWD']),
   spec('handball', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['GK', 'BACK', 'WING', 'PIVOT']),
   spec('frisbee', 'invasion', ULTIMATE_METRICS, ULTIMATE_EVENTS, ['handler', 'cutter']),
   {

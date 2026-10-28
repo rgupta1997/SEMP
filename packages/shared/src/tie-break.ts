@@ -1,5 +1,14 @@
 import type { RallyEvent, RallyLog, KernelState } from './rally-kernel.js';
 import type { ScoringFormat, Side, TieBreakSpec } from './scoring-rules.js';
+import { canonicalTeamSport } from './team-presets.js';
+
+/** How a sport names its shoot-out: hockey's 1 v 1 shoot-out, football's penalties. */
+export interface ShootoutTerms { title: string; each: string; taker: string; attempt: string; phrase: string; short: string }
+export function shootoutTerms(sport?: string | null): ShootoutTerms {
+  return canonicalTeamSport(sport) === 'hockey'
+    ? { title: 'Shoot-out', each: 'shooters each', taker: 'Shooter', attempt: 'shot', phrase: 'in the shoot-out', short: 'SO' }
+    : { title: 'Penalties', each: 'kicks each', taker: 'Kicker', attempt: 'kick', phrase: 'on penalties', short: 'pens' };
+}
 
 /**
  * SETTLING A LEVEL KNOCKOUT.
@@ -177,10 +186,11 @@ export function shootoutState(log: RallyLog, kicksEach: number): ShootoutState {
 }
 
 /** The line a scoresheet carries: "won 4-3 on penalties". */
-export function shootoutLine(st: ShootoutState, nameOf: (s: Side) => string): string {
-  if (!st.winner) return `${st.scored[0]}–${st.scored[1]} on penalties`;
+export function shootoutLine(st: ShootoutState, nameOf: (s: Side) => string, sport?: string | null): string {
+  const { phrase } = shootoutTerms(sport);
+  if (!st.winner) return `${st.scored[0]}–${st.scored[1]} ${phrase}`;
   const [w, l] = st.winner === 'A' ? [st.scored[0], st.scored[1]] : [st.scored[1], st.scored[0]];
-  return `${nameOf(st.winner)} won ${w}–${l} on penalties`;
+  return `${nameOf(st.winner)} won ${w}–${l} ${phrase}`;
 }
 
 /** The terminal event that closes a match settled by kicks. */

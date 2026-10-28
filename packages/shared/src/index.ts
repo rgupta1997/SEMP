@@ -23,6 +23,8 @@ export * from './chess.js';
 export * from './carrom.js';
 export * from './kho-kho.js';
 export * from './kabaddi.js';
+export * from './hockey.js';
+export * from './suspensions.js';
 export * from './result-summary.js';
 export * from './tie.js';
 export * from './played-contests.js';

@@ -995,7 +995,7 @@ export function ResultsPage() {
                             {pens && (
                               <span className="text-[10px] font-semibold leading-3 text-brand-600 dark:text-brand-400"
                                 title={`${teamLabel(pens.winner === 'A' ? f.home : f.away)} won on penalties`}>
-                                {shootoutLabel(pens.home, pens.away)}
+                                {shootoutLabel(pens.home, pens.away, f.sport)}
                               </span>
                             )}
                             {khoEnd && (

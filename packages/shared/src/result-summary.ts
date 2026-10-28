@@ -1,5 +1,7 @@
 import { boardsOnly, carromMatchOf, carromRulesOf, isCarromSport, readCarromState } from './carrom.js';
 import { CHESS_ENDINGS, isChessSport, type ChessEnding } from './chess.js';
+import { cornersLine, isHockeySport } from './hockey.js';
+import { readRallyLog } from './rally-rows.js';
 
 /**
  * A finished match's detail in one short line, home side first - shown under the bare
@@ -37,6 +39,9 @@ export function resultSummary(sportName: string | null | undefined, liveState: u
     }
     if (games.length > 1) return games.map((g) => (g.result === 'A' ? '1–0' : g.result === 'B' ? '0–1' : '½–½')).join(', ');
   }
+
+  // Hockey: the penalty corners each side won, and scored from.
+  if (isHockeySport(sportName)) return cornersLine(readRallyLog(liveState));
 
   return null;
 }

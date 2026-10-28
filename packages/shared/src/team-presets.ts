@@ -289,6 +289,26 @@ const INVASION: ScoringFormat[] = [
     sport: 'hockey', key: 'fih_4x15', name: 'FIH - four quarters of 15 minutes',
     levels: [period('Quarter', 'quarter'), aggregateMatch(4)], clock: cap(60, 'leaderWins'), endStates: LEAGUE,
   }),
+  // FIH knockouts: no extra time, a level match goes straight to a 5-a-side shoot-out.
+  fmt({
+    sport: 'hockey', key: 'fih_4x15_ko', name: 'FIH knockout - four quarters of 15 minutes, then shoot-out',
+    levels: [period('Quarter', 'quarter'), aggregateMatch(4)], clock: cap(60, 'leaderWins'), endStates: STRICT,
+    tieBreak: { penalties: SHOOTOUT },
+  }),
+  // Five-a-side (Inter-IIM): four quarters of 8, 5 playing and 5 reserves. League games can end level.
+  // Green 2 minutes, yellow 5; a second green is a yellow, a second yellow a red.
+  fmt({
+    sport: 'hockey', key: 'hockey5_4x8', name: 'Five-a-side - four quarters of 8 minutes',
+    levels: [period('Quarter', 'quarter'), aggregateMatch(4)], clock: cap(32, 'leaderWins'), endStates: LEAGUE,
+    rulesSheet: { playersOnField: 5, bench: 5, cardSuspensionMinutes: { green: 2, yellow: 5 }, cardEscalation: true },
+  }),
+  // The final: level after regulation plays 5 + 5 of extra time, then a 5-player shoot-out.
+  fmt({
+    sport: 'hockey', key: 'hockey5_4x8_final', name: 'Five-a-side final - four quarters of 8, extra time 5 + 5, then shoot-out',
+    levels: [period('Quarter', 'quarter'), aggregateMatch(4)], clock: cap(32, 'leaderWins'), endStates: STRICT,
+    tieBreak: { extraTime: { periods: 2, minutes: 5 }, penalties: SHOOTOUT },
+    rulesSheet: { playersOnField: 5, bench: 5, cardSuspensionMinutes: { green: 2, yellow: 5 }, cardEscalation: true },
+  }),
   fmt({
     sport: 'hockey', key: 'hockey_corp_2x20', name: 'Corporate - two halves of 20 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)], mode: 'selfScored',

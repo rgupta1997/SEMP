@@ -33,11 +33,16 @@ const USUAL: Record<string, { onField: number; bench: number }> = {
 };
 
 /** The usual side for a team sport, or null when the sport has no team sheet (combat, board…). */
-export function usualSide(sport?: string | null): { onField: number; bench: number } | null {
+export function usualSide(sport?: string | null, rulesSheet?: Record<string, unknown> | null): { onField: number; bench: number } | null {
   // Netball scores like basketball but fields seven.
   if (sport?.trim().toLowerCase() === 'netball') return { onField: 7, bench: 5 };
   const key = canonicalTeamSport(sport);
-  return key ? USUAL[key] ?? null : null;
+  const usual = key ? USUAL[key] ?? null : null;
+  // A format can field a different side (five-a-side hockey): its rules sheet wins.
+  const onField = Number(rulesSheet?.playersOnField);
+  if (!usual || !Number.isInteger(onField) || onField < 1) return usual;
+  const bench = Number(rulesSheet?.bench);
+  return { onField, bench: Number.isInteger(bench) && bench >= 0 ? bench : usual.bench };
 }
 
 export interface SheetPerson { id: string; name: string; role?: string | null; jersey?: number | null }

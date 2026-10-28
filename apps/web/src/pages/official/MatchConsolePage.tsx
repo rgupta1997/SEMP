@@ -1776,7 +1776,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
   const format = resolved.format;
   // Team sports whose actions are credited to a person - combat and board sports have
   // nobody to pick, and netball or tug of war record no individual actions to narrow.
-  const usual = (statSpecFor(sport)?.events?.length ?? 0) > 0 ? usualSide(sport) : null;
+  const usual = (statSpecFor(sport)?.events?.length ?? 0) > 0 ? usualSide(sport, format?.rulesSheet) : null;
 
   const squads = useMemo(() => ({ A: sheetSquad(homeTeam(fixture)), B: sheetSquad(awayTeam(fixture)) }), [fixture]);
   // Full rosters, not just two: an invasion sport attributes to eleven people, so
