@@ -115,6 +115,8 @@ export interface ShootoutState {
   taken: [number, number];
   /** Whose kick it is next. */
   next: Side;
+  /** Who kicked (or kicks) first - the toss, home unless recorded. */
+  first: Side;
   /** Past the opening round, where any split pair ends it. */
   suddenDeath: boolean;
   winner: Side | null;
@@ -130,7 +132,8 @@ const otherSide = (s: Side): Side => (s === 'A' ? 'B' : 'A');
  *
  * Two rules do the real work and both are easy to get wrong:
  *
- *   ALTERNATION. A and B kick alternately, A first. The next kicker is therefore a
+ *   ALTERNATION. The sides kick alternately, the toss winner first (home unless a
+ *   `shootoutFirst` event says otherwise). The next kicker is therefore a
  *   function of how many kicks have been taken, not of who took the last one - which
  *   matters after an undo.
  *
@@ -140,8 +143,10 @@ const otherSide = (s: Side): Side => (s === 'A' ? 'B' : 'A');
  */
 export function shootoutState(log: RallyLog, kicksEach: number): ShootoutState {
   const kicks: Array<{ side: Side; scored: boolean }> = [];
+  let first: Side = 'A';
   for (const ev of log) {
     if (ev.t === 'penaltyKick') kicks.push({ side: ev.side, scored: ev.scored });
+    else if (ev.t === 'shootoutFirst' && kicks.length === 0) first = ev.side;
   }
 
   const scored: [number, number] = [0, 0];
@@ -152,8 +157,8 @@ export function shootoutState(log: RallyLog, kicksEach: number): ShootoutState {
     if (k.scored) scored[i] += 1;
   }
 
-  // A kicks the odd-numbered kicks, B the even ones.
-  const next: Side = kicks.length % 2 === 0 ? 'A' : 'B';
+  // The first kicker takes the odd-numbered kicks, the other side the even ones.
+  const next: Side = kicks.length % 2 === 0 ? first : otherSide(first);
   const openingDone = taken[0] >= kicksEach && taken[1] >= kicksEach;
 
   let winner: Side | null = null;
@@ -178,6 +183,7 @@ export function shootoutState(log: RallyLog, kicksEach: number): ShootoutState {
     scored,
     taken,
     next,
+    first,
     suddenDeath: openingDone && winner === null,
     winner,
     decided: winner !== null,

@@ -112,6 +112,12 @@ export interface TieSpec {
   skipDeadInGroups?: boolean;  // the same, for league and group rounds; omitted = as skipDeadRubbers
   /** Chess: a rubber (board) may be drawn for ½ each, and the tie is won on points. */
   boardPoints?: boolean;
+  /**
+   * A level tie in a league or group round may be given to a side on a tie-break
+   * (Armageddon, a deciding rubber). Omitted: yes, except chess, where a drawn match is
+   * a draw. Knockouts always need a winner.
+   */
+  groupTiebreak?: boolean;
   rubbers: RubberSpec[];       // ordered
 }
 
@@ -156,6 +162,7 @@ export const tieSpecSchema: z.ZodType<TieSpec> = z.object({
   skipDeadRubbers: z.boolean(),
   skipDeadInGroups: z.boolean().optional(),
   boardPoints: z.boolean().optional(),
+  groupTiebreak: z.boolean().optional(),
   rubbers: z.array(rubberSpecSchema).min(1),
 });
 

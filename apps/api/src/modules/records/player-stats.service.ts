@@ -440,7 +440,10 @@ function contestRows(
               const rules = carromRulesOf(c.format);
               return carromLineStats(carromMatchOf(c.carrom, rules), rules, seat.side);
             })()
-            : derived?.players.find((x) => x.userId === userId)?.stats ?? {},
+            // Pool rubber: the frames each side won, from the frame-by-frame console.
+            : c.frames && c.score
+              ? { frames_won: c.score[seat.side === 'A' ? 0 : 1], frames_lost: c.score[seat.side === 'A' ? 1 : 0] }
+              : derived?.players.find((x) => x.userId === userId)?.stats ?? {},
         occurred_on: opts.occurred,
         lock_version: fx.lock_version,
       });

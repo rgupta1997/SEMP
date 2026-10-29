@@ -12,6 +12,9 @@ import { Badge, Button, Modal, Spinner, Textarea, toast } from './ui';
 interface TableRow {
   entity_id: string; name: string; short_name: string | null; rank: number;
   played: number; won: number; drawn: number; lost: number; points: number; score_for: number; score_against: number;
+  /** Kho kho's average difference time, seconds. */
+  adt?: number | null;
+  adt_estimated?: boolean;
 }
 interface PoolTable { pool: number | null; label: string; complete: boolean; rows: TableRow[]; ties: string[][] }
 export interface DrawTables {
@@ -153,6 +156,8 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
   onResolve: (entities: string[]) => void;
 }) {
   const tiedIds = new Set(pool.ties.flat());
+  // Kho kho tables carry ADT (the server sends it only for kho kho).
+  const showAdt = pool.rows.some((r) => r.adt !== undefined);
   // Teams level on every tie-breaker share a position (2, 2, 4) until an order is set.
   const shownRank = (r: PoolTable['rows'][number]) => {
     const tie = pool.ties.find((t) => t.includes(r.entity_id));
@@ -171,6 +176,9 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
               <th className="px-3 py-1.5 text-left">#</th>
               <th className="px-2 py-1.5 text-left">Team</th>
               {['P', 'W', 'D', 'L', 'For', 'Ag', 'Diff', 'Pts'].map((h) => <th key={h} className="px-2 py-1.5 text-right">{h}</th>)}
+              {showAdt && (
+                <th className="px-2 py-1.5 text-right normal-case" title="Average difference time, seconds: time defended per player out, minus time chased per opponent out. Group matches, regulation turns only.">ADT</th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -186,11 +194,20 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_against)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_for - r.score_against)}</td>
                 <td className="px-2 py-1.5 text-right font-semibold tabular-nums text-slate-900 dark:text-white">{formatPoints(r.points)}</td>
+                {showAdt && (
+                  <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums"
+                    title={r.adt_estimated ? 'A turn clock was not run: its full length was used.' : undefined}>
+                    {r.adt == null ? <span className="text-slate-400">-</span> : `${r.adt.toFixed(3)}${r.adt_estimated ? '*' : ''}`}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {showAdt && pool.rows.some((r) => r.adt_estimated) && (
+        <p className="border-t border-slate-100 px-3 py-1.5 text-[11px] text-slate-400 dark:border-slate-800">* A turn's clock was not run, so its full length was used.</p>
+      )}
       {pool.ties.map((t) => (
         <div key={t.join()} className="flex flex-wrap items-center justify-between gap-2 border-t border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
           <span>Tied: {t.map((id) => names[id] ?? id).join(', ')}. Level on {ranking.labels.join(', ').toLowerCase()}.</span>

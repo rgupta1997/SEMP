@@ -24,6 +24,7 @@ export * from './carrom.js';
 export * from './kho-kho.js';
 export * from './kabaddi.js';
 export * from './hockey.js';
+export * from './pool.js';
 export * from './suspensions.js';
 export * from './result-summary.js';
 export * from './tie.js';

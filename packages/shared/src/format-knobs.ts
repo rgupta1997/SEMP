@@ -2,9 +2,10 @@ import { isPeriodShaped, pluralizePeriodLabel } from './match-format.js';
 import { expediteConfig, ITTF_EXPEDITE } from './rally-kernel.js';
 import { isChessSport } from './chess.js';
 import { carromRulesOf, isCarromSport } from './carrom.js';
-import { isKhoKhoFormat } from './kho-kho.js';
+import { followOnCompulsoryAbove, followOnLead, isKhoKhoFormat } from './kho-kho.js';
 import { isKabaddiFormat } from './kabaddi.js';
 import { canonicalTeamSport } from './team-presets.js';
+import { cardMinutesFor, cardSportOf, escalationOn, type CardSport } from './suspensions.js';
 import type {
   CapAction, CapTieRule, ChangeEndsRule, LevelSpec, OfficiatingMode,
   ScoringFormat, ServeMovement, PointScoring,
@@ -97,10 +98,26 @@ export interface FormatKnobs {
   firstTo: number;
   /** Read-only. Kho kho offers the minimum chase instead of a shoot-out. */
   khoKho: boolean;
+  /** Kho kho: the first-innings lead from which a follow-on may be given. */
+  followOnLead: number;
+  /** Kho kho: a bigger lead makes the follow-on compulsory. Off = always the leader's choice. */
+  followOnCompulsoryEnabled: boolean;
+  followOnCompulsoryAbove: number;
   /** Read-only. Kabaddi settles a level knockout with extra time (then golden raid), never kicks. */
   kabaddi: boolean;
   /** Read-only. Hockey's shoot-out is shooters, not kicks. */
   hockey: boolean;
+  /** Read-only. The sport with card rules (hockey, futsal timers; football escalation); null for none. */
+  cardSport: CardSport | null;
+  /** Cards sit players out for a time, counted down on the console. Off: cards are only recorded. */
+  cardSuspensionsEnabled: boolean;
+  /** Hockey: green and yellow minutes. */
+  greenSuspensionMinutes: number;
+  yellowSuspensionMinutes: number;
+  /** Futsal: red card minutes (over early if the other side scores). */
+  redSuspensionMinutes: number;
+  /** A repeat card steps up: football/futsal second yellow is a red, hockey green -> yellow -> red. */
+  cardEscalationEnabled: boolean;
   /** Kabaddi: still level after extra time, a golden raid each, then a toss. */
   goldenRaidEnabled: boolean;
 
@@ -164,7 +181,7 @@ export interface KnobSpec {
   key: keyof FormatKnobs;
   label: string;
   hint?: string;
-  group: 'shape' | 'carrom' | 'serve' | 'ends' | 'clock' | 'tieBreak' | 'run';
+  group: 'shape' | 'carrom' | 'serve' | 'ends' | 'clock' | 'tieBreak' | 'cards' | 'run';
   type: 'int' | 'bool' | 'enum';
   min?: number;
   max?: number;
@@ -371,13 +388,23 @@ export const KNOB_SPECS: KnobSpec[] = [
   // makes a knockout a knockout, and these are the questions that follow from it.
   { key: 'extraTimeEnabled', label: 'Play extra time', group: 'tieBreak', type: 'bool',
     hint: 'Extra periods when the scores are level at full time.',
-    applies: (k) => k.periodShaped && !k.drawsAllowed },
+    applies: (k) => k.periodShaped && !k.drawsAllowed && !k.khoKho },
   { key: 'extraTimePeriods', label: 'Periods of extra time', group: 'tieBreak', type: 'int', min: 1, max: 4,
     hint: 'Both are always played out - a side that goes ahead in the first still has to survive the second.',
-    applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled },
+    applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled && !k.khoKho },
   { key: 'extraTimeMinutes', label: 'Minutes per extra period', group: 'tieBreak', type: 'int', min: 1, max: 60,
     hint: 'Each period, not the total. Two periods of 5 adds ten minutes.',
-    applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled },
+    applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled && !k.khoKho },
+  // Kho kho: one more inning (a turn each) before the minimum chase, if the rules ask for it.
+  { key: 'extraTimeEnabled', label: 'Extra inning before minimum chase', group: 'tieBreak', type: 'bool',
+    hint: 'Level at the end: one more inning is played, a turn each. Still level, the minimum chase decides. Off: straight to minimum chase.',
+    applies: (k) => k.khoKho && !k.drawsAllowed },
+  { key: 'extraTimePeriods', label: 'Extra turns', group: 'tieBreak', type: 'int', min: 1, max: 4,
+    hint: '2 = one inning, a turn each side.',
+    applies: (k) => k.khoKho && !k.drawsAllowed && k.extraTimeEnabled },
+  { key: 'extraTimeMinutes', label: 'Minutes per extra turn', group: 'tieBreak', type: 'int', min: 1, max: 60,
+    hint: 'Usually the same as a regular turn: IIMK 7 in groups, 9 in the eliminator and final.',
+    applies: (k) => k.khoKho && !k.drawsAllowed && k.extraTimeEnabled },
   { key: 'extraTimeFirstTo', label: 'Win score still ends it in extra time', group: 'tieBreak', type: 'bool',
     hint: 'On: the first side to the win score wins at once, even in extra time (level 12-12, the next goal wins). Off: extra time is played in full and the leader at the end wins.',
     applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled && k.firstTo > 0 && !k.khoKho },
@@ -396,6 +423,15 @@ export const KNOB_SPECS: KnobSpec[] = [
   { key: 'shootoutKicks', label: 'Kicks each', group: 'tieBreak', type: 'int', min: 1, max: 20,
     hint: 'The opening round. Still level after that goes to sudden death, a pair at a time.',
     applies: (k) => k.periodShaped && !k.drawsAllowed && k.shootoutEnabled && !k.khoKho && !k.kabaddi && !k.hockey },
+  // Kho kho's follow-on (two-innings formats only).
+  { key: 'followOnLead', label: 'Follow-on from a lead of', group: 'shape', type: 'int', min: 1, max: 99,
+    hint: 'After the first innings, a side this far ahead may make the other chase again. KKFI and IIMK: 9.',
+    applies: (k) => k.khoKho && k.unitsToWin >= 4 },
+  { key: 'followOnCompulsoryEnabled', label: 'Follow-on compulsory for a bigger lead', group: 'shape', type: 'bool',
+    hint: 'Off: always the leading side\'s choice. On: past the lead below, the console only offers the follow-on (IIMK: compulsory above 9).',
+    applies: (k) => k.khoKho && k.unitsToWin >= 4 },
+  { key: 'followOnCompulsoryAbove', label: 'Compulsory when the lead is more than', group: 'shape', type: 'int', min: 0, max: 99,
+    applies: (k) => k.khoKho && k.unitsToWin >= 4 && k.followOnCompulsoryEnabled },
   { key: 'minimumChaseEnabled', label: 'Minimum chase', group: 'tieBreak', type: 'bool',
     hint: 'Still level: each side chases once more and the faster first out wins. The score stays level.',
     applies: (k) => k.khoKho && !k.drawsAllowed },
@@ -407,6 +443,26 @@ export const KNOB_SPECS: KnobSpec[] = [
     applies: (k) => k.periodShaped && !k.khoKho && !k.kabaddi },
 
   // ---- run
+  // ---- cards (hockey, futsal)
+  { key: 'cardSuspensionsEnabled', label: 'Time card suspensions', group: 'cards', type: 'bool',
+    hint: 'On: a carded player sits out for a set time and the console counts it down, in match time. Off: cards are only recorded.',
+    applies: (k) => k.cardSport === 'hockey' || k.cardSport === 'futsal' },
+  { key: 'greenSuspensionMinutes', label: 'Green card minutes', group: 'cards', type: 'int', min: 1, max: 20,
+    hint: 'FIH and IIMK: 2.',
+    applies: (k) => k.cardSport === 'hockey' && k.cardSuspensionsEnabled },
+  { key: 'yellowSuspensionMinutes', label: 'Yellow card minutes', group: 'cards', type: 'int', min: 1, max: 20,
+    hint: 'FIH: at least 5 (10 for a serious offence). IIMK: 5.',
+    applies: (k) => k.cardSport === 'hockey' && k.cardSuspensionsEnabled },
+  { key: 'cardEscalationEnabled', label: 'Repeat cards step up', group: 'cards', type: 'bool',
+    hint: 'A second green becomes a yellow and a second yellow a red. The console asks before recording it. IIMK: on.',
+    applies: (k) => k.cardSport === 'hockey' },
+  { key: 'cardEscalationEnabled', label: 'Second yellow is a red', group: 'cards', type: 'bool',
+    hint: 'The Laws of the Game: a second yellow sends the player off. The console asks, and records it as a second-yellow red.',
+    applies: (k) => k.cardSport === 'football' || k.cardSport === 'futsal' },
+  { key: 'redSuspensionMinutes', label: 'Red card minutes', group: 'cards', type: 'int', min: 1, max: 20,
+    hint: 'The side plays short for this long, or until the other side scores. Futsal and IIMK: 2.',
+    applies: (k) => k.cardSport === 'futsal' && k.cardSuspensionsEnabled },
+
   { key: 'officiatingMode', label: 'Who scores', group: 'run', type: 'enum',
     hint: 'Self-scored changes the console: unlimited undo, no challenge UI, conduct points off, and both sides confirm the result.',
     options: [
@@ -424,6 +480,7 @@ export const KNOB_GROUPS: Array<{ key: KnobSpec['group']; label: string }> = [
   { key: 'ends', label: 'Ends & conduct' },
   { key: 'clock', label: 'Time cap' },
   { key: 'tieBreak', label: 'If it is still level' },
+  { key: 'cards', label: 'Cards' },
   { key: 'run', label: 'How it is run' },
 ];
 
@@ -510,8 +567,12 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
     universalPointEnabled: !!f.tieBreak?.universalPoint,
     firstTo: top.firstTo ?? 0,
     khoKho: isKhoKhoFormat(f),
+    followOnLead: followOnLead(f),
+    followOnCompulsoryEnabled: followOnCompulsoryAbove(f) != null,
+    followOnCompulsoryAbove: followOnCompulsoryAbove(f) ?? followOnLead(f),
     kabaddi: isKabaddiFormat(f),
     hockey: canonicalTeamSport(f.sport) === 'hockey',
+    ...cardKnobs(f),
     goldenRaidEnabled: !!f.tieBreak?.goldenRaid,
 
     officiatingMode: f.officiatingMode,
@@ -525,6 +586,19 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
     timeIncrementSeconds: readTimeControl(f.rulesSheet?.timeControl)[1],
 
     ...carromKnobs(f),
+  };
+}
+
+/** Card suspensions, read off the rules sheet; defaults are the sport's. */
+function cardKnobs(f: ScoringFormat) {
+  const m = cardMinutesFor(f) ?? {};
+  return {
+    cardSport: cardSportOf(f.sport),
+    cardSuspensionsEnabled: !!cardMinutesFor(f) && f.rulesSheet?.cardSuspensions !== false,
+    greenSuspensionMinutes: m.green ?? 2,
+    yellowSuspensionMinutes: m.yellow ?? 5,
+    redSuspensionMinutes: m.red ?? 2,
+    cardEscalationEnabled: escalationOn(f),
   };
 }
 
@@ -665,7 +739,7 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
           ? {
             // Keep basketball's repeat-while-level and its "Overtime" name; the editor has no knob for them.
             ...(f.tieBreak?.extraTime?.repeat ? { repeat: true } : {}),
-            ...(f.tieBreak?.extraTime?.label ? { label: f.tieBreak.extraTime.label } : {}),
+            ...(f.tieBreak?.extraTime?.label ? { label: f.tieBreak.extraTime.label } : k.khoKho ? { label: 'Extra turn' } : {}),
             ...(k.firstTo > 0 && !k.extraTimeFirstTo ? { fullTime: true } : {}),
             periods: Math.max(1, k.extraTimePeriods),
             minutes: Math.max(1, k.extraTimeMinutes),
@@ -680,6 +754,31 @@ export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): Sco
     // Chess keeps its time control on the rules sheet - shown to the arbiter, not enforced.
     ...(k.chess
       ? { rulesSheet: { ...(f.rulesSheet ?? {}), timeControl: `${Math.max(1, k.timeBaseMinutes)}+${Math.max(0, k.timeIncrementSeconds)}` } }
+      : {}),
+    // Kho kho's follow-on lives on the rules sheet, which kho-kho.ts reads.
+    ...(k.khoKho
+      ? {
+        rulesSheet: {
+          ...(f.rulesSheet ?? {}),
+          followOnLead: Math.max(1, k.followOnLead),
+          followOnCompulsoryAbove: k.followOnCompulsoryEnabled ? Math.max(0, k.followOnCompulsoryAbove) : null,
+        },
+      }
+      : {}),
+    // Card suspensions live on the rules sheet, which suspensions.ts reads.
+    ...(k.cardSport
+      ? {
+        rulesSheet: {
+          ...(f.rulesSheet ?? {}),
+          ...(k.cardSport === 'hockey' || k.cardSport === 'futsal' ? {
+            cardSuspensions: k.cardSuspensionsEnabled,
+            cardSuspensionMinutes: k.cardSport === 'hockey'
+              ? { green: Math.max(1, k.greenSuspensionMinutes), yellow: Math.max(1, k.yellowSuspensionMinutes) }
+              : { red: Math.max(1, k.redSuspensionMinutes), red2y: Math.max(1, k.redSuspensionMinutes) },
+          } : {}),
+          cardEscalation: k.cardEscalationEnabled,
+        },
+      }
       : {}),
     // Carrom keeps its board limit and queen on the rules sheet, which carrom.ts reads.
     ...(k.carrom && k.target > 1
@@ -732,6 +831,12 @@ export function describeKnobs(k: FormatKnobs): string {
     if (k.pointScoring === 'serverOnly') bits.push('server scores only');
     if (k.handicapEnabled) bits.push(`handicap ${k.handicapHome}–${k.handicapAway}`);
   }
+  if (k.cardSport === 'hockey') {
+    bits.push(k.cardSuspensionsEnabled ? `green ${k.greenSuspensionMinutes} / yellow ${k.yellowSuspensionMinutes} min off` : 'cards not timed');
+    if (k.cardEscalationEnabled) bits.push('repeat cards step up');
+  }
+  if (k.cardSport === 'futsal') bits.push(k.cardSuspensionsEnabled ? `red card ${k.redSuspensionMinutes} min off` : 'red card not timed');
+  if ((k.cardSport === 'football' || k.cardSport === 'futsal') && !k.cardEscalationEnabled) bits.push('second yellow not a red');
   if (k.clockEnabled) {
     bits.push(k.periodShaped
       ? `${k.clockMinutes} min cap (${Math.round(k.clockMinutes / Math.max(1, k.unitsToWin))}/period)`
@@ -745,7 +850,10 @@ export function describeKnobs(k: FormatKnobs): string {
   const golden = k.kabaddi && k.goldenRaidEnabled;
   if (!k.drawsAllowed && (k.extraTimeEnabled || kicks || minChase || universal || golden)) {
     const chain: string[] = [];
-    if (k.extraTimeEnabled) chain.push(`ET ${k.extraTimePeriods}x${k.extraTimeMinutes} min${k.firstTo > 0 && !k.extraTimeFirstTo ? ' played in full' : ''}`);
+    if (k.extraTimeEnabled) {
+      chain.push(k.khoKho ? `extra inning (${k.extraTimePeriods} x ${k.extraTimeMinutes} min turns)`
+        : `ET ${k.extraTimePeriods}x${k.extraTimeMinutes} min${k.firstTo > 0 && !k.extraTimeFirstTo ? ' played in full' : ''}`);
+    }
     if (kicks) chain.push(k.hockey ? `shoot-out (${k.shootoutKicks} each)` : `${k.shootoutKicks} kicks`);
     if (minChase) chain.push('minimum chase');
     if (universal) chain.push('universal point');

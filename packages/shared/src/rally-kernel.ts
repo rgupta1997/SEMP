@@ -135,6 +135,8 @@ export type RallyEvent =
    * a single `end` carrying reason 'penalties'.
    */
   | { t: 'penaltyKick'; side: Side; scored: boolean; playerId?: string; playerName?: string; at?: string; by?: string }
+  // The shoot-out toss: this side kicks first. Absent = home first.
+  | { t: 'shootoutFirst'; side: Side; at?: string; by?: string }
   /**
    * KHO KHO, read by kho-kho.ts, never scored. `chaseFirst`: the toss, who chases turn 1.
    * `followOn`: the side `side` leads after the first innings and sends the other in to
@@ -1465,19 +1467,55 @@ export function unitClock(format: ScoringFormat, log: RallyLog, firstServer: Sid
   return { elapsedMs: banked + (runFrom !== null ? Math.max(0, nowMs - runFrom) : 0), paused: runFrom === null };
 }
 
+/**
+ * A retirement under "award remaining": the games still needed go to the winner with
+ * their points - the unfinished one completed (21-15 from 15-10), any unplayed one 21-0 -
+ * so the game scores agree with the awarded headline. Two-level formats only (games in a
+ * match); null when it does not apply.
+ */
+function awardedUnits(format: ScoringFormat, state: KernelState, played: Pair[]): Pair[] | null {
+  const w = state.winner;
+  const top = format.levels.length - 1;
+  if (!state.ended || !w || top !== 1 || format.levels[top].decide === 'aggregate') return null;
+  if (state.reason !== 'retired' && state.reason !== 'disqualified') return null;
+  if (format.endStates.retirementScore !== 'freezeThenAwardRemaining') return null;
+  const wi = w === 'A' ? 0 : 1;
+  const li = 1 - wi;
+  const need = format.levels[top].target;
+  const won: Pair = [...state.score[top]] as Pair;
+  const out = played.map((u) => [...u] as Pair);
+  const base = format.levels[0];
+  let current: Pair | null = [...state.score[0]] as Pair;
+  while (won[wi] < need) {
+    // The game in hand first (at its own spec), then fresh ones; a deciding game may differ.
+    const deciding = won[0] === need - 1 && won[1] === need - 1;
+    const spec = current ? effectiveLevel(format, state, 0) : deciding && base.deciderOverride ? { ...base, ...base.deciderOverride } : base;
+    const game: Pair = current ?? [0, 0];
+    const reached = Math.max(spec.target, game[li] + spec.winBy);
+    game[wi] = Math.max(game[wi], spec.cap != null ? Math.min(spec.cap, reached) : reached);
+    out.push(game);
+    won[wi] += 1;
+    current = null;
+  }
+  return out;
+}
+
 export function resultEnvelope(format: ScoringFormat, state: KernelState): ResultEnvelope {
   const inner = state.finished.filter((u) => u.level === 0);
+  const awarded = awardedUnits(format, state, inner.map((u) => u.score));
   const pointsFor: Pair = [0, 0];
-  for (const u of inner) { pointsFor[0] += u.score[0]; pointsFor[1] += u.score[1]; }
-  pointsFor[0] += state.score[0][0];
-  pointsFor[1] += state.score[0][1];
+  for (const u of awarded ?? inner.map((x) => x.score)) { pointsFor[0] += u[0]; pointsFor[1] += u[1]; }
+  if (!awarded) {
+    pointsFor[0] += state.score[0][0];
+    pointsFor[1] += state.score[0][1];
+  }
   const top = format.levels.length - 1;
   return {
     outcome: state.outcome,
     winner: state.winner,
     reason: state.reason,
     headline: endPolicyHeadline(format, state, headline(format, state)),
-    unitScores: inner.map((u) => u.score),
+    unitScores: awarded ?? inner.map((u) => u.score),
     // An aggregate level counts periods played, not units won - nobody wins a half.
     unitsFor: format.levels[top]?.decide === 'aggregate'
       ? [periodsPlayed(state), periodsPlayed(state)]

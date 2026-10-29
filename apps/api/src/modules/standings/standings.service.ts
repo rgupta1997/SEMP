@@ -5,7 +5,7 @@ import {
   type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker,
 } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
-import { contingentKey, type ContingentRef } from '@semp/shared';
+import { contingentKey, poolTieTotalsOf, type ContingentRef } from '@semp/shared';
 import { assignStageSequence, inPlacingStage, placingStageSequences } from '../fixtures/domain/stage-tree.js';
 import { SCORED_STATUSES, accumulate, drawContext, levelOn, rankBy, runScheme, shareRanks, type EntityTally, type SchemeContext, type SchemeFixture } from './domain/schemes.js';
 import { convertEventTotals, type EventTotal } from './domain/event-conversion.js';
@@ -146,7 +146,14 @@ export function toSchemeFixture(f: DrawFixtureRow, homeKey: string | null, awayK
     away_points: typeof cp?.away === 'number' ? cp.away : null,
     no_result: isNoResult(f.live_state),
     pool_number: f.pool_number, stage_sequence: f.stage_sequence,
+    ...poolTieFields(f.live_state),
   };
+}
+
+/** A pool team tie's frames and balls per side, for the frames-won / net-ball tie-breakers. */
+export function poolTieFields(liveState: unknown): Pick<SchemeFixture, 'home_frames' | 'away_frames' | 'home_balls' | 'away_balls'> {
+  const t = poolTieTotalsOf(liveState);
+  return t ? { home_frames: t.frames[0], away_frames: t.frames[1], home_balls: t.balls[0], away_balls: t.balls[1] } : {};
 }
 
 /** The fixtures a scheme scores plus what it needs to know about the rest of the draw. */

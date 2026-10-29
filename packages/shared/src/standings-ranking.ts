@@ -116,6 +116,7 @@ const LABELS: Record<RankingFamily, Partial<Record<StandingsTiebreaker, string>>
 const COMMON_LABELS: Record<StandingsTiebreaker, string> = {
   points: 'Points', wins: 'Wins', lost: 'Fewest losses', head_to_head: 'Head-to-head',
   score_diff: 'Score difference', score_for: 'Score for',
+  frames_won: 'Frames won', ball_diff: 'Net ball difference',
 };
 
 export function tiebreakerLabel(tb: StandingsTiebreaker, sport?: string | null, entryType?: string | null): string {
@@ -124,10 +125,14 @@ export function tiebreakerLabel(tb: StandingsTiebreaker, sport?: string | null, 
 
 /** The tie-breakers an organiser can pick from, in a sensible display order. */
 export const TIEBREAKER_OPTIONS: StandingsTiebreaker[] = ['points', 'score_diff', 'score_for', 'head_to_head', 'wins', 'lost'];
+/** Read from the frames recorded in a pool team tie, so offered there only. */
+export const POOL_TIE_TIEBREAKERS: StandingsTiebreaker[] = ['frames_won', 'ball_diff'];
 
-/** The options that make sense for a sport. No sport (a default / format row) = all. */
+/** The options that make sense for a sport. No sport (a default / format row) = all general ones. */
 export function tiebreakerOptions(sport?: string | null, entryType?: string | null): StandingsTiebreaker[] {
-  return sport ? withoutScoreFor(TIEBREAKER_OPTIONS, rankingFamily(sport, entryType)) : TIEBREAKER_OPTIONS;
+  if (!sport) return TIEBREAKER_OPTIONS;
+  const own = withoutScoreFor(TIEBREAKER_OPTIONS, rankingFamily(sport, entryType));
+  return canonicalTeamSport(sport) === 'pool/snooker' && entryType === 'team' ? [...own, ...POOL_TIE_TIEBREAKERS] : own;
 }
 
 // ---------- Hand-picked tie resolutions ----------

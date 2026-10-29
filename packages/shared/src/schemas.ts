@@ -957,6 +957,12 @@ export const rankingRuleSchema = z.object({
   scheme: z.literal('ranking'),
   places: z.array(z.number().int().min(0)).min(1).default([5, 3, 1]),
   participation,
+  /**
+   * An institute may enter several competitors (the discipline's squad size). Off: every
+   * finisher takes a place and its points. On: only each institute's best finisher is
+   * placed, and the rest are passed over.
+   */
+  bestPerSide: z.boolean().optional(),
 });
 
 export const standingsRuleSchema = z.discriminatedUnion('scheme', [

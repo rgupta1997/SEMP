@@ -400,6 +400,8 @@ const GOAL_EVENTS: StatEventSpec[] = [
   ev('save', 'Save', { saves: 1 }, { tone: 'good' }),
   ev('yellow', 'Yellow card', { yellows: 1 }, { tone: 'caution' }),
   ev('red', 'Red card', { reds: 1 }, { tone: 'dismissal' }),
+  // A red from a second yellow: still a red, kept apart for fair-play points (3 vs a direct red's 4).
+  ev('red2y', 'Red card (second yellow)', { reds: 1 }, { tone: 'dismissal' }),
   ev('pen_scored', 'Penalty scored', { pens_scored: 1, goals: 1 }, { points: 1, tone: 'score' }),
   ev('pen_missed', 'Penalty missed', { pens_missed: 1 }, { tone: 'error' }),
 ];
@@ -411,7 +413,7 @@ const GOAL_METRICS: StatMetric[] = [
   count('own_goals', 'Own goals', 'OG', { fromEvents: ['own_goal'], higherIsBetter: false }),
   count('saves', 'Saves', 'Sv', { fromEvents: ['save'] }),
   count('yellows', 'Yellow cards', 'YC', { fromEvents: ['yellow'], higherIsBetter: false }),
-  count('reds', 'Red cards', 'RC', { fromEvents: ['red'], higherIsBetter: false }),
+  count('reds', 'Red cards', 'RC', { fromEvents: ['red', 'red2y'], higherIsBetter: false }),
   count('pens_scored', 'Penalties scored', 'PS', { fromEvents: ['pen_scored'] }),
   count('pens_missed', 'Penalties missed', 'PM', { fromEvents: ['pen_missed'], higherIsBetter: false }),
   // Shoot-out kicks: never goals. Counted from `penaltyKick` events in team-stats.ts.
@@ -424,7 +426,7 @@ const GOAL_METRICS: StatMetric[] = [
 // stroke, and goals come three ways - field goal, penalty corner, penalty stroke. A
 // corner awarded is the team's (hockey.ts counts them); a corner goal is the scorer's.
 const HOCKEY_LABEL: Record<string, string> = { goal: 'Field goal', pen_scored: 'Penalty stroke scored', pen_missed: 'Penalty stroke missed' };
-const HOCKEY_EVENTS: StatEventSpec[] = GOAL_EVENTS.flatMap((e) => [
+const HOCKEY_EVENTS: StatEventSpec[] = GOAL_EVENTS.filter((e) => e.key !== 'red2y').flatMap((e) => [
   ...(e.key === 'yellow' ? [ev('green', 'Green card', { greens: 1 }, { tone: 'warning' })] : []),
   HOCKEY_LABEL[e.key] ? { ...e, label: HOCKEY_LABEL[e.key] } : e,
   ...(e.key === 'goal' ? [

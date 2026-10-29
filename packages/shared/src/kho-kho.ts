@@ -1,4 +1,5 @@
-import { aggregateScore, type KernelState, type RallyEvent, type RallyLog } from './rally-kernel.js';
+import { aggregateScore, foldRally, type KernelState, type RallyEvent, type RallyLog } from './rally-kernel.js';
+import { periodLengthMs } from './match-clock.js';
 import type { ScoringFormat, Side } from './scoring-rules.js';
 import { canonicalTeamSport } from './team-presets.js';
 
@@ -33,6 +34,12 @@ export function followOnLead(format: ScoringFormat): number {
   return Number(format.rulesSheet?.followOnLead) || DEFAULT_FOLLOW_ON_LEAD;
 }
 
+/** A lead above this makes the follow-on compulsory (IIMK: above 9); null = always the leader's choice. */
+export function followOnCompulsoryAbove(format: ScoringFormat): number | null {
+  const v = format.rulesSheet?.followOnCompulsoryAbove;
+  return typeof v === 'number' && v >= 0 ? v : null;
+}
+
 export interface KhoStatus {
   /** Who chases the first turn (the toss). null until it is recorded. */
   firstChaser: Side | null;
@@ -40,8 +47,8 @@ export interface KhoStatus {
   followOnBy: Side | null;
   /** Who chases the turn in progress. null before the toss or once the match is over. */
   chaser: Side | null;
-  /** Offered at the end of the first innings when the lead is big enough. */
-  followOnOffer: { leader: Side; lead: number } | null;
+  /** Offered at the end of the first innings when the lead is big enough; compulsory past the format's limit. */
+  followOnOffer: { leader: Side; lead: number; compulsory: boolean } | null;
   /** A follow-on side still behind after its second chase: the leader has won. */
   wonByInnings: Side | null;
 }
@@ -77,7 +84,8 @@ export function khoStatus(format: ScoringFormat, log: RallyLog, state: KernelSta
   let followOnOffer: KhoStatus['followOnOffer'] = null;
   if (regulation >= 4 && done === 2 && !followOnBy && !pointSinceInnings && !state.ended) {
     const lead = Math.abs(total[0] - total[1]);
-    if (lead >= followOnLead(format)) followOnOffer = { leader: total[0] > total[1] ? 'A' : 'B', lead };
+    const above = followOnCompulsoryAbove(format);
+    if (lead >= followOnLead(format)) followOnOffer = { leader: total[0] > total[1] ? 'A' : 'B', lead, compulsory: above != null && lead > above };
   }
 
   let wonByInnings: Side | null = null;
@@ -234,4 +242,54 @@ export function khoTurnLines(format: ScoringFormat, log: RallyLog, state: Kernel
       ms: times[i] ?? null,
     };
   });
+}
+
+// ---- average difference time (ADT) -------------------------------------------
+
+/**
+ * One side's ADT inputs: time spent defending and the players it lost doing so, time
+ * spent chasing and the opponents it got out. Seconds-per-out from these give
+ * ADT = defending time per out conceded - chasing time per out made (higher is better).
+ */
+export interface AdtTally { defendMs: number; defendOuts: number; attackMs: number; attackOuts: number; estimated: boolean }
+
+export const emptyAdt = (): AdtTally => ({ defendMs: 0, defendOuts: 0, attackMs: 0, attackOuts: 0, estimated: false });
+
+/**
+ * Both sides' ADT inputs from one match: the regulation turns only, so extra turns and
+ * the minimum chase are left out (IIMK). A turn whose clock was not run counts at its
+ * full length, and the tally says so. Null when there is no toss or no turn finished.
+ */
+export function khoMatchAdt(format: ScoringFormat, log: RallyLog): Record<Side, AdtTally> | null {
+  const state = foldRally(format, log, 'A').state;
+  const regulation = format.levels[format.levels.length - 1]?.target ?? 0;
+  const perOut = Number(format.rulesSheet?.pointsPerOut) || 1;
+  const lines = khoTurnLines(format, log, state).filter((l) => l.turn <= regulation && l.chaser);
+  if (!lines.length) return null;
+  const out: Record<Side, AdtTally> = { A: emptyAdt(), B: emptyAdt() };
+  for (const l of lines) {
+    const chaser = l.chaser!;
+    const defender = other(chaser);
+    const ms = l.ms ?? periodLengthMs(format, l.turn - 1);
+    const outs = l.points / perOut;
+    out[chaser].attackMs += ms; out[chaser].attackOuts += outs;
+    out[defender].defendMs += ms; out[defender].defendOuts += outs;
+    if (l.ms == null) { out.A.estimated = true; out.B.estimated = true; }
+  }
+  return out;
+}
+
+/** Add one match's inputs to a running total. */
+export function addAdt(into: AdtTally, t: AdtTally): AdtTally {
+  return {
+    defendMs: into.defendMs + t.defendMs, defendOuts: into.defendOuts + t.defendOuts,
+    attackMs: into.attackMs + t.attackMs, attackOuts: into.attackOuts + t.attackOuts,
+    estimated: into.estimated || t.estimated,
+  };
+}
+
+/** ADT in seconds, to 3 decimals. No outs on a side counts as one, so a clean turn is not a division by zero. */
+export function adtOf(t: AdtTally): number {
+  const v = t.defendMs / 1000 / Math.max(1, t.defendOuts) - t.attackMs / 1000 / Math.max(1, t.attackOuts);
+  return Math.round(v * 1000) / 1000;
 }

@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { boardPointsTarget, buildTieSpec, formatPoints, isChessSport, tieLayoutsFor, type TieRubberDraft, type TieSpec } from '@semp/shared';
+import { boardPointsTarget, buildTieSpec, formatPoints, isChessSport, isFrameContest, isPoolSport, tieLayoutsFor, type TieRubberDraft, type TieSpec } from '@semp/shared';
 import { Button, Input, Select, cn } from '../../components/ui';
 
 // ============================================================================
 // Per-draw tie layout (which rubbers, how the tie is won) since events play their own
 // team formats. How each rubber is SCORED still comes from the sport and draw format.
 // ============================================================================
+
+const POOL_BEST_OF = [1, 3, 5, 7, 9];
 
 export interface TieLayoutValue {
   /** true = no layout of our own: the sport's standard tie applies. */
@@ -23,7 +25,10 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
   const [standard, setStandard] = useState(!stored);
   const [rubbers, setRubbers] = useState<TieRubberDraft[]>(() =>
     stored
-      ? stored.rubbers.map((r) => ({ label: r.label, size: r.size ?? (/doubles/i.test(r.label) ? 2 : 1) }))
+      ? stored.rubbers.map((r) => ({
+        label: r.label, size: r.size ?? (/doubles/i.test(r.label) ? 2 : 1),
+        ...(isFrameContest(r.contest) ? { frames: r.contest.segMax } : {}),
+      }))
       : layouts[0]?.rubbers ?? [{ label: 'Singles', size: 1 }]);
   const [target, setTarget] = useState<number>(stored?.winBy === 'count' ? stored.target ?? 0 : 0);
   // Dead rubbers: the sport standard skips them everywhere; a picked layout suggests playing
@@ -31,8 +36,13 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
   const [skipKnockout, setSkipKnockout] = useState(stored?.skipDeadRubbers ?? true);
   const [skipGroups, setSkipGroups] = useState(stored ? (stored.skipDeadInGroups ?? stored.skipDeadRubbers) : true);
   const [preset, setPreset] = useState<string>(stored ? 'custom' : 'standard');
+  // A level group tie: a draw, or won on a tie-break. Chess defaults to a draw.
+  const chessSport = isChessSport(sport);
+  // Pool: each rubber is best of its own number of frames.
+  const pool = isPoolSport(sport);
+  const [groupTb, setGroupTb] = useState<boolean>(stored?.groupTiebreak ?? !chessSport);
 
-  const emit = (next: { standard?: boolean; rubbers?: TieRubberDraft[]; target?: number; skipKnockout?: boolean; skipGroups?: boolean }) => {
+  const emit = (next: { standard?: boolean; rubbers?: TieRubberDraft[]; target?: number; skipKnockout?: boolean; skipGroups?: boolean; groupTb?: boolean }) => {
     const s = next.standard ?? standard;
     const r = next.rubbers ?? rubbers;
     const t = next.target ?? target;
@@ -42,6 +52,7 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
         target: t || null,
         skipDeadRubbers: next.skipKnockout ?? skipKnockout,
         skipDeadInGroups: next.skipGroups ?? skipGroups,
+        groupTiebreak: next.groupTb ?? groupTb,
       }),
     });
   };
@@ -53,8 +64,8 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
     setPreset(key);
     if (key === 'standard') {
       const def = layouts[0]?.rubbers ?? rubbers;
-      setStandard(true); setRubbers(def); setTarget(0); setSkipKnockout(true); setSkipGroups(true);
-      emit({ standard: true, rubbers: def, target: 0, skipKnockout: true, skipGroups: true });
+      setStandard(true); setRubbers(def); setTarget(0); setSkipKnockout(true); setSkipGroups(true); setGroupTb(!chessSport);
+      emit({ standard: true, rubbers: def, target: 0, skipKnockout: true, skipGroups: true, groupTb: !chessSport });
       return;
     }
     const layout = layouts.find((l) => l.key === key);
@@ -112,6 +123,16 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
               <option value="1">Singles</option>
               <option value="2">Doubles</option>
             </Select>
+            {pool && (
+              <Select
+                className="w-36 shrink-0"
+                value={String(r.frames ?? 5)}
+                aria-label={`Rubber ${i + 1} frames`}
+                onChange={(e) => edit(rubbers.map((x, j) => (j === i ? { ...x, frames: Number(e.target.value) } : x)))}
+              >
+                {POOL_BEST_OF.map((n) => <option key={n} value={n}>{n === 1 ? 'One frame' : `Best of ${n}`}</option>)}
+              </Select>
+            )}
             <button
               type="button"
               disabled={rubbers.length <= 1}
@@ -126,7 +147,7 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
         ))}
         <div>
           <Button size="sm" variant="subtle" disabled={rubbers.length >= 9}
-            onClick={() => edit([...rubbers, { label: `Rubber ${rubbers.length + 1}`, size: 1 }])}>
+            onClick={() => edit([...rubbers, { label: `Rubber ${rubbers.length + 1}`, size: 1, ...(pool ? { frames: rubbers[rubbers.length - 1]?.frames ?? 5 } : {}) }])}>
             + Add rubber
           </Button>
         </div>
@@ -168,8 +189,17 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
           </Select>
         </label>
       </div>
+      <label className="grid gap-1 text-xs text-slate-500 dark:text-slate-400">
+        A level league or group match
+        <Select value={groupTb ? 'tiebreak' : 'draw'}
+          onChange={(e) => { const v = e.target.value === 'tiebreak'; setGroupTb(v); own(); emit({ groupTb: v, standard: false }); }}>
+          <option value="draw">Stays a draw</option>
+          <option value="tiebreak">Can be won on a tie-break</option>
+        </Select>
+      </label>
       <p className="text-[11px] text-slate-400 dark:text-slate-500">
         Playing every rubber in league and group rounds keeps rubbers-won fair in the table and gives every player a match.
+        A knockout tie always needs a winner.
       </p>
     </div>
   );

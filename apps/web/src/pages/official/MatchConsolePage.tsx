@@ -14,13 +14,15 @@ import {
   hydrateTie, initTie, rubbersWon, tieScore, tieOutcome, tieTarget, rubberDef, decideRubber as decideRubberFn, reopenRubber as reopenRubberFn,
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
-import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
+import { hydrateEvent, hasResultIn, moveUnplacedTo, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
+import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
 import { carromHeadline, carromMatchOf, carromRulesOf, isCarromSport } from '@semp/shared';
 import { CarromResult, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
+import { PoolResult, hydratePool } from '../../features/scoring/PoolResult';
+import { isFrameContest, isPoolSport, poolRubber } from '@semp/shared';
 import { TieLayoutEditor, type TieLayoutValue } from '../../features/scoring/TieLayoutEditor';
-import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, isChessSport, isKnockoutFixture, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
-import { unitWinner, type TieSpec, type EventSpec, type ScoringMode, type ScoringFormat, type KernelState, type Pairing, type RallyLog, type RubberLineup, type Side } from '@semp/shared';
+import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, groupTiebreakAllowed, isChessSport, isKnockoutFixture, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
+import { unitWinner, type TieSpec, type EventSpec, type EventScoringOpts, type ScoringMode, type ScoringFormat, type KernelState, type Pairing, type RallyLog, type RubberLineup, type Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer, hydratePairSwap } from '../../features/scoring/RacquetDeck';
 import { LineupPanel } from '../../features/scoring/LineupPanel';
 import { ChessResult, EndingChips, chessGamesIn, chessSummary, hydrateChess, type ChessState } from '../../features/scoring/ChessResult';
@@ -508,8 +510,12 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
   const drawTie = (template.fixtureType === 'tie' && template.tie)
     ? template.tie
     : tieAllowed && !startedAsSingle ? tieTemplateFor(sportName)?.tie : undefined;
-  // Group and league rounds may play dead rubbers out; knockouts stop once decided.
-  const tieSpec = frozenTie ?? (drawTie ? tieForRound(drawTie, fixture?.round) : undefined);
+  // Group and league rounds may play dead rubbers out; knockouts stop once decided. Applied to a
+  // layout saved for this match as well - doing it twice changes nothing.
+  const tieSpec = frozenTie ? tieForRound(frozenTie, fixture?.round) : drawTie ? tieForRound(drawTie, fixture?.round) : undefined;
+  // The layout as set, before the round's rule: what "Edit rubbers" starts from, so saving
+  // it keeps the group and knockout dead-rubber settings apart.
+  const tieLayout = frozenTie ?? drawTie;
   // Chess ties are always won on board points, every board played - including draws
   // set up before the template said so.
   const consoleTieSpec = useMemo(
@@ -552,11 +558,16 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
   // ranking" (default) and detailed per-athlete - so scoring one never
   // clobbers the other. Snaps to whichever this fixture was last scored with.
   const [eventMode, setEventMode] = useState<'team' | 'detailed'>('team');
+  // Competitors an institute may enter in this event: the draw's squad size, else the discipline's.
+  const perInstitute: number = fixture?.tournament_disciplines?.squad_max ?? fixture?.tournament_disciplines?.disciplines?.squad_max ?? 1;
   const eventModeSeeded = useRef(false);
   useEffect(() => {
     if (eventModeSeeded.current || touched.current || !live) return;
     eventModeSeeded.current = true;
     if (live.live_state?.event) setEventMode('detailed');
+    // Nothing scored yet and an institute may enter more than one competitor (not a relay):
+    // only per-athlete entry can place two from the same institute.
+    else if (!live.live_state?.eventRanking && eventSpec && perInstitute > 1 && !isRelaySubEvent(eventSpec.subEvents[0])) setEventMode('detailed');
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
 
   // Measured/time single sports have no per-tick scoring, so they're manual-only.
@@ -737,7 +748,7 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
           ? <EventConsole key={`evd-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />
           : <EventRankingConsole key={`evr-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />)
         : structure === 'tie' && tieSpec
-          ? <TieConsole key={`tie-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={consoleTieSpec ?? tieSpec} mode={effectiveMode} live={live} invalidate={invalidate} onDone={onDone} />
+          ? <TieConsole key={`tie-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={consoleTieSpec ?? tieSpec} layout={tieLayout} mode={effectiveMode} live={live} invalidate={invalidate} onDone={onDone} />
           // Chess records each game's result - nothing is counted during play - so it
           // has its own screen rather than the generic two-number form.
           : isChessSport(sportName)
@@ -749,8 +760,8 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
             ? isCricketSport(sportName)
               ? <CricketManualResult key={`cman-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} live={live} invalidate={invalidate} onDone={onDone} />
               : <ManualResult key={`man-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} live={live} invalidate={invalidate} onDone={onDone}
-                  // Volleyball and throwball are set-shaped too: check against their own best-of, not a fixed 5.
-                  format={isRacquetSport(sportName) || statSpecFor(sportName)?.family === 'net'
+                  // Volleyball, throwball and pool are set-shaped too: check against their own best-of, not a fixed 5.
+                  format={isRacquetSport(sportName) || statSpecFor(sportName)?.family === 'net' || isPoolSport(sportName)
                     ? racquetFormatFor(fixture, (live?.live_state as any)?.format ?? null).format
                     : isCarromSport(sportName) ? carromResolved(fixture, (live?.live_state as any)?.format ?? null).format as ScoringFormat | null
                     : null} />
@@ -1828,14 +1839,17 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
     return <EmptyState title="No scoring format" description="This sport has no kernel format configured." />;
   }
 
-  const save = (nextLog: RallyLog, state: KernelState, done: boolean, after?: () => void, quiet = false) => {
+  const save = (nextLog: RallyLog, state: KernelState, done: boolean, after?: () => void, quiet = false, suspend = false) => {
     const env = resultEnvelope(format, state);
     // Only the KERNEL ends a match - the same guard the racquet console keeps, so a
     // sign-off part-way through cannot publish a 0-0 with no winner.
     const reallyDone = done && env.ended;
-    const st = reallyDone
+    // A suspended match is postponed with its score; the next tap resumes it.
+    const st = suspend
+      ? 'postponed'
+      : reallyDone
       ? 'completed'
-      : (status === 'scheduled' || status === 'completed' || status === 'confirmed' ? 'live' : status);
+      : (status === 'scheduled' || status === 'completed' || status === 'confirmed' || status === 'postponed' ? 'live' : status);
     const winner_team_id = !reallyDone || env.winner === null
       ? null
       : env.winner === 'A' ? fixture.home_team_id : fixture.away_team_id;
@@ -1863,8 +1877,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
         },
         // The attributed actions ARE the timeline here, and what the fact writer
         // reads to fill fixture_events.
-        live_log: teamTimeline(nextLog, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture)),
-          (format.clock?.minutes ?? 0) * 60_000),
+        live_log: teamTimeline(nextLog, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture)), format),
         home_score: env.headline[0],
         away_score: env.headline[1],
         status: st,
@@ -1889,7 +1902,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
     persist.mutate(
       {
         live_state: { ...(live?.live_state ?? {}), rally: log, clock: clockSnapshot(log), teamSheet: next },
-        live_log: teamTimeline(log, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture)), (format.clock?.minutes ?? 0) * 60_000),
+        live_log: teamTimeline(log, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture)), format),
       },
       { onError: (e: any) => toast.error(e.message) },
     );
@@ -1964,6 +1977,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       // Keep the deck's log too: an innings, minimum-chase or shoot-out sign-off adds
       // the ending event, and without it the deck kept showing the confirm card.
       onSignOff={(nextLog, state) => { setLog(nextLog); save(nextLog, state, true); }}
+      onSuspend={(nextLog, state) => save(nextLog, state, false, onDone, false, true)}
     />
     <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} defaultScore={formatWalkoverScore(format)} />
     </>
@@ -2002,8 +2016,9 @@ function clockSnapshot(log: RallyLog): { elapsedMs: number; running: boolean; at
  * is the whole reason a kabaddi raid or a football goal can now reach somebody's
  * career record.
  */
-function teamTimeline(log: RallyLog, homeName: string, awayName: string, fullMs = 0): LogEntry[] {
+function teamTimeline(log: RallyLog, homeName: string, awayName: string, format?: ScoringFormat | null): LogEntry[] {
   const nameOf = (s: Side) => (s === 'A' ? homeName : awayName);
+  const minutes = format ? eventMinuteLabels(format, log) : [];
   const out: LogEntry[] = [];
   // Shoot-out kicks scored so far, so the closing line can carry the tally.
   const kicks: [number, number] = [0, 0];
@@ -2026,7 +2041,7 @@ function teamTimeline(log: RallyLog, homeName: string, awayName: string, fullMs 
       // THE MINUTE, not the entry number, once the match has a clock running. This
       // is what is persisted and what every read-only view renders, so a goal shows
       // as 23' on the public page and not as "#7".
-      t: typeof any.clockMs === 'number' ? minuteLabel(any.clockMs, fullMs) : `#${i + 1}`,
+      t: minutes[i] ?? `#${i + 1}`,
       team: (any.side as Side) ?? (ev.t === 'end' ? any.winner ?? undefined : undefined),
       txt,
       ...(any.playerName ? { player: any.playerName } : {}),
@@ -2332,8 +2347,10 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
 // persistence (whole tie -> live_state.tie, headline = rubbers won); each rubber is
 // scored by the same per-contest deck. Detailed mode shows the live deck; manual mode
 // (and measured rubbers like pool/chess) just records the rubber winner.
-function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate, onDone }:
-  { fixture: any; fixtureId: string; spec: TieSpec; mode: ScoringMode; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, invalidate, onDone }:
+  { fixture: any; fixtureId: string; spec: TieSpec; layout?: TieSpec; mode: ScoringMode; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+  // The layout as edited (before this round's dead-rubber rule), after a change here.
+  const [layoutOverride, setLayoutOverride] = useState<TieSpec | null>(null);
   // A layout just changed here wins until the saved one comes back, so the rubbers on
   // screen and the spec describing them never disagree for a render.
   const [specOverride, setSpecOverride] = useState<TieSpec | null>(null);
@@ -2364,6 +2381,13 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
   const carromBaseResolved = useMemo(() => (carromTie ? carromResolved(fixture, null) : null), [fixture, carromTie]);
   const carromBase = (carromBaseResolved?.format ?? null) as ScoringFormat | null;
   const carromRulesFor = (r: RubberInstance) => carromRulesOf(r.format ?? carromBase);
+  // Pool rubbers are recorded frame by frame, best of the rubber's own frames. A layout saved
+  // before frames existed (winner only) keeps the winner buttons.
+  const poolTie = isPoolSport(sportNameOf(fixture));
+  const poolFramesOf = (i: number) => {
+    const c = rubberDef(spec, i);
+    return poolTie && isFrameContest(c) ? c.segMax : null;
+  };
   const homeRoster = useMemo(() => rosterPeople(homeTeam(fixture)), [fixture]);
   const awayRoster = useMemo(() => rosterPeople(awayTeam(fixture)), [fixture]);
   const nameOfId = useMemo(() => new Map([...homeRoster, ...awayRoster].map((p) => [p.id, p.name])), [homeRoster, awayRoster]);
@@ -2396,8 +2420,13 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
         await api('PATCH', `/tournament-disciplines/${td.id}`, { format_config });
       }
       // This match starts over on the new rubbers - nothing was scored, so nothing is lost.
-      const fresh = initTie(nextSpec);
-      setSpecOverride(nextSpec);
+      // This match plays it under its round's rule; the layout itself is kept as set. Chess keeps
+      // its board points (½ draws, every board played) at once, not only after a reload.
+      const ruled = tieForRound(nextSpec, fixture?.round);
+      const forRound = isChessSport(sport) ? { ...ruled, boardPoints: true, skipDeadRubbers: false, skipDeadInGroups: false } : ruled;
+      const fresh = initTie(forRound);
+      setSpecOverride(forRound);
+      setLayoutOverride(nextSpec);
       persist.mutate(
         { live_state: { ...(live?.live_state ?? {}), tie: fresh, tieSpec: nextSpec }, live_log: [] },
         { onError: (e: any) => toast.error(e.message) },
@@ -2429,7 +2458,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
     persist.mutate(
       // Keep other live_state keys (tie_blocked). Chess: home has white on board 1 by default
       // (FIDE "team named first"), saved so colour stats don't depend on a tap never made.
-      { live_state: { ...(live?.live_state ?? {}), tie: spec.boardPoints && !next.firstWhite ? { ...next, firstWhite: 'A' } : next, tieSpec: spec, noResult }, live_log: buildLog(next), home_score: a, away_score: b, status: st, winner_team_id },
+      { live_state: { ...(live?.live_state ?? {}), tie: spec.boardPoints && !next.firstWhite ? { ...next, firstWhite: 'A' } : next, tieSpec: layoutOverride ?? layout ?? spec, noResult }, live_log: buildLog(next), home_score: a, away_score: b, status: st, winner_team_id },
       { onSuccess, onError: (e: any) => { onErr?.(); toast.error(e.message); } },
     );
   };
@@ -2506,11 +2535,17 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
   // Chess boards, everything else rubbers - said the way the sport says it.
   const unit = spec.boardPoints ? 'board' : 'rubber';
   const knockout = isKnockoutFixture(fixture ?? {});
+  // A level league or group tie: drawn, or won on a tie-break, as the layout says (chess: drawn).
+  const groupTb = groupTiebreakAllowed(spec);
   const setTiebreak = (s: Side | undefined) => {
     const { tiebreakWinner: _drop, ...rest } = state;
     const next: TieState = s ? { ...rest, tiebreakWinner: s } : rest;
     setState(next); save(next, status);
   };
+  // A tie-break winner picked before the layout ruled it out does not stand in a group match.
+  useEffect(() => {
+    if (!knockout && !groupTb && state.tiebreakWinner && !submitting) setTiebreak(undefined);
+  }, [knockout, groupTb, state.tiebreakWinner]); // eslint-disable-line react-hooks/exhaustive-deps
   const signOff = async () => {
     if (!decided) { toast.error(`The tie isn’t decided yet - record ${unit} results until one side reaches ${formatPoints(target)}.`); return; }
     if (drawn && knockout) { toast.error('This is a knockout tie - record who won the tie-break before signing off.'); return; }
@@ -2556,6 +2591,11 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
       const rules = carromRulesFor(r);
       const h = carromHeadline(carromMatchOf(r.carrom, rules), rules);
       return r.winner ? `${r.winner === 'A' ? homeName : awayName} won ${h[0]}–${h[1]}` : `${h[0]}–${h[1]}`;
+    }
+    const bestOf = poolFramesOf(i);
+    if (bestOf && r.pool?.frames.length) {
+      const f = poolRubber(r.pool, bestOf).framesWon;
+      return r.winner ? `${r.winner === 'A' ? homeName : awayName} won ${f[0]}–${f[1]}` : `${f[0]}–${f[1]}`;
     }
     const games = rubberGames(r);
     if (r.winner) return `${r.winner === 'A' ? homeName : awayName} won${games ? ` ${games}` : ''}`;
@@ -2610,7 +2650,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
                     <p className="text-xs text-slate-600 dark:text-slate-300">
                       Change the {spec.boardPoints ? 'boards' : 'rubbers'} before play starts. Nothing has been scored yet, so nothing is lost.
                     </p>
-                    <TieLayoutEditor sport={sportNameOf(fixture) ?? ''} stored={spec} onChange={setLayoutDraft} />
+                    <TieLayoutEditor sport={sportNameOf(fixture) ?? ''} stored={layoutOverride ?? layout ?? spec} onChange={setLayoutDraft} />
                     <div className="flex flex-wrap justify-end gap-2">
                       <Button variant="outline" disabled={savingLayout} onClick={() => setEditingLayout(false)}>Cancel</Button>
                       <Button variant="outline" disabled={savingLayout || !layoutDraft} onClick={() => void saveLayout('match')}>Save for this match</Button>
@@ -2673,10 +2713,12 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
                   <div className="space-y-1.5 rounded-lg border border-amber-300 bg-amber-50 p-2 dark:border-amber-500/40 dark:bg-amber-500/10">
                     <div className="px-1 text-xs font-semibold text-amber-900 dark:text-amber-200">Level at {formatPoints(a)}–{formatPoints(b)}</div>
                     <p className="px-1 text-[11px] text-amber-900/80 dark:text-amber-200/80">
-                      {knockout ? 'A knockout tie needs a winner: record who won the tie-break.' : 'Sign off as a draw, or record who won the tie-break.'}
+                      {knockout ? 'A knockout tie needs a winner: record who won the tie-break.'
+                        : groupTb ? 'Sign off as a draw, or record who won the tie-break.'
+                        : 'A level group match is a draw under this layout: sign it off as a draw.'}
                     </p>
-                    <div className={cn('grid gap-1.5', knockout ? 'grid-cols-2' : 'grid-cols-3')}>
-                      {((knockout ? ['A', 'B'] : [undefined, 'A', 'B']) as Array<Side | undefined>).map((s) => (
+                    <div className={cn('grid gap-1.5', knockout ? 'grid-cols-2' : groupTb ? 'grid-cols-3' : 'grid-cols-1')}>
+                      {((knockout ? ['A', 'B'] : groupTb ? [undefined, 'A', 'B'] : [undefined]) as Array<Side | undefined>).map((s) => (
                         <Button key={s ?? 'none'} size="sm" variant={state.tiebreakWinner === s ? 'primary' : 'outline'} disabled={submitting}
                           onClick={() => { if (state.tiebreakWinner !== s) setTiebreak(s); }}>
                           <span className="truncate">{s ? (s === 'A' ? homeName : awayName) : 'Draw'}</span>
@@ -2698,7 +2740,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
 
             {active && (
               <Card className="mt-5">
-                <CardHeader title={active.label} subtitle={active.status === 'dead' ? 'Skipped (dead rubber)' : active.drawn ? 'Drawn - ½ each' : active.winner ? `${active.winner === 'A' ? homeName : awayName} won this ${unit}` : spec.boardPoints ? 'Record this board: a win, or a draw for ½ each.' : carromTie ? 'Board by board' : racquet && mode === 'detailed' ? 'Point by point' : rdef.archetype === 'time' ? 'Pick the winner of this rubber.' : `${rdef.segLabel} ${Math.min(active.state.seg, rdef.segMax)} of ${rdef.segMax}`} />
+                <CardHeader title={active.label} subtitle={active.status === 'dead' ? 'Skipped (dead rubber)' : active.drawn ? 'Drawn - ½ each' : active.winner ? `${active.winner === 'A' ? homeName : awayName} won this ${unit}` : spec.boardPoints ? 'Record this board: a win, or a draw for ½ each.' : carromTie ? 'Board by board' : poolFramesOf(state.activeRubber) ? `Frame by frame · best of ${poolFramesOf(state.activeRubber)}` : racquet && mode === 'detailed' ? 'Point by point' : rdef.archetype === 'time' ? 'Pick the winner of this rubber.' : `${rdef.segLabel} ${Math.min(active.state.seg, rdef.segMax)} of ${rdef.segMax}`} />
                 <CardBody className="space-y-4">
                   {active.status === 'dead' ? (
                     <div className="space-y-3 text-center">
@@ -2755,6 +2797,22 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
                             // the end: a decided rubber reopens.
                             if (done && m.winner) updateRubber(state.activeRubber, patch, m.winner);
                             else updateRubber(state.activeRubber, patch, undefined, !!active.winner && !m.decided);
+                          }}
+                        />
+                      ) : poolFramesOf(state.activeRubber) ? (
+                        <PoolResult
+                          key={`pool-${active.key}`}
+                          homeName={homeName}
+                          awayName={awayName}
+                          bestOf={poolFramesOf(state.activeRubber)!}
+                          initial={hydratePool(active.pool)}
+                          busy={submitting}
+                          onSave={(ps, done) => {
+                            const res = poolRubber(ps, poolFramesOf(state.activeRubber)!);
+                            const patch: Partial<RubberInstance> = { pool: ps, status: active.status === 'pending' ? 'live' : active.status };
+                            // Confirmed: the rubber goes to its winner. Undone below the winning frame: it reopens.
+                            if (done && res.winner) updateRubber(state.activeRubber, patch, res.winner);
+                            else updateRubber(state.activeRubber, patch, undefined, !!active.winner && !res.decided);
                           }}
                         />
                       ) : racquet && mode === 'detailed' && baseFormat?.format ? (
@@ -3077,15 +3135,31 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   // entrant on it (squad_max is 1) - shown up front instead of a phone lookup.
   const entrants: Array<{ user_id: string; name: string; phone: string | null; org_id: string | null; org: string | null }> =
     (fixture as any)?.event_entrants ?? [];
+  // One row per entry: the institute is part of the id, so the same account under two
+  // institutes (a data slip) can never merge two swimmers' places.
   const entrantRow = (e: (typeof entrants)[number]): ParticipantResult =>
-    ({ id: `e${e.user_id}`, name: e.name, phone: e.phone, org: e.org, orgId: e.org_id, category: pickOne ? fixedCategory : null, marks: {} });
+    ({ id: e.org_id ? `e${e.user_id}-${e.org_id}` : `e${e.user_id}`, name: e.name, phone: e.phone, org: e.org, orgId: e.org_id, category: pickOne ? fixedCategory : null, marks: {} });
+  // A relay is one entry per institute, with one time - its swimmers listed on the row.
+  const relay = isNamedDiscipline && isRelaySubEvent(spec.subEvents[0]);
+  const relayRows = (list: typeof entrants): ParticipantResult[] => {
+    const byOrg = new Map<string, typeof entrants>();
+    for (const e of list) {
+      const k = e.org_id ?? e.org ?? e.user_id;
+      byOrg.set(k, [...(byOrg.get(k) ?? []), e]);
+    }
+    return [...byOrg.values()].map((team) => ({
+      id: `t${team[0].org_id ?? team[0].user_id}`, name: team.map((m) => m.name).join(', '), phone: null,
+      org: team[0].org, orgId: team[0].org_id, category: pickOne ? fixedCategory : null, marks: {},
+    }));
+  };
+  const seedRows = (list: typeof entrants): ParticipantResult[] => (relay ? relayRows(list) : list.map(entrantRow));
 
   // The roster is the registration record, not something scoring edits - no add,
   // remove or phone lookup here, only scoring whoever is actually entered.
   const [state, setState] = useState<EventState>(() => {
     const hydrated = hydrateEvent(live?.live_state?.event);
     return hydrated.participants.length === 0 && entrants.length > 0
-      ? { participants: entrants.map(entrantRow) }
+      ? { participants: seedRows(entrants) }
       : hydrated;
   });
   const seeded = useRef(false);
@@ -3094,7 +3168,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     seeded.current = true;
     const hydrated = hydrateEvent(live.live_state?.event);
     setState(hydrated.participants.length === 0 && entrants.length > 0
-      ? { participants: entrants.map(entrantRow) }
+      ? { participants: seedRows(entrants) }
       : hydrated);
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
   // Armed by the first mark an official types, never by the seeding above - see the
@@ -3108,27 +3182,49 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   useEffect(() => {
     if (!entrants.length) return;
     setState((s) => {
+      // A relay row is the institute's: a newly registered institute adds a row, a new swimmer does not.
+      if (relay) {
+        const knownOrgs = new Set(s.participants.map((p) => p.orgId ?? p.org));
+        const missing = entrants.filter((e) => !knownOrgs.has(e.org_id ?? e.org));
+        return missing.length ? { participants: [...s.participants, ...relayRows(missing)] } : s;
+      }
       const known = new Set(s.participants.map((p) => (p.phone ?? '').replace(/\D/g, '')));
       const missing = entrants.filter((e) => !known.has((e.phone ?? '').replace(/\D/g, '')));
       return missing.length ? { participants: [...s.participants, ...missing.map(entrantRow)] } : s;
     });
   }, [entrants]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // "Whole sport" still mixes categories, but nobody's weight class is known in
-  // advance - so ONE is chosen for the whole session before scoring starts,
-  // rather than guessed per row (a blank row defaulting to the first category
-  // was the bug this replaces).
+  // "Whole sport" mixes categories on one screen: the picker is the class being entered.
+  // A competitor keeps the class their result went in; only those without one follow the picker.
   const [globalCategory, setGlobalCategoryState] = useState<string | null>(
-    () => state.participants.find((p) => p.category)?.category ?? null,
+    () => (state.participants.find((p) => p.category && !hasResultIn(p, p.category))
+      ?? state.participants.find((p) => p.category))?.category ?? null,
   );
-  const setGlobalCategory = (cat: string) => {
+  // Results typed in the class on screen since it was picked: switching away asks first.
+  const [enteredHere, setEnteredHere] = useState(false);
+  const moveFreeTo = (cat: string) => {
     setGlobalCategoryState(cat);
-    setState((s) => ({
-      participants: s.participants.map((p) => {
-        const prev = p.category ?? cat;
-        return { ...p, category: cat, marks: { [cat]: p.marks[prev] ?? null } };
-      }),
-    }));
+    setEnteredHere(false);
+    setState((s) => moveUnplacedTo(s, cat));
+  };
+  const setGlobalCategory = async (cat: string) => {
+    if (cat === globalCategory) return;
+    const done = globalCategory ? state.participants.filter((p) => p.category === globalCategory && hasResultIn(p, globalCategory)) : [];
+    if (globalCategory && enteredHere && done.length) {
+      const from = spec.subEvents.find((se) => se.key === globalCategory)?.label ?? nounLower;
+      const shown = done.slice(0, 6).map((p) => {
+        const m = p.marks[globalCategory];
+        return `${p.name || 'Unnamed'} (${resultStatusOf(p, globalCategory) ?? (typeof m === 'number' ? `${m}${spec.result.unit ? ` ${spec.result.unit}` : ''}` : '-')})`;
+      }).join(', ') + (done.length > 6 ? ` and ${done.length - 6} more` : '');
+      const ok = await confirmDialog({
+        title: `Save the ${from} results?`,
+        confirmLabel: 'Save and switch',
+        message: `${shown} stay in ${from}. In the next ${nounLower} their rows are locked - switch back to ${from} to change them.`,
+      });
+      if (!ok) return;
+      persistEvent(false);
+    }
+    moveFreeTo(cat);
   };
   const category = isNamedDiscipline ? fixedCategory : globalCategory;
 
@@ -3149,10 +3245,38 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const setOrg = (id: string, orgId: string) => patchP(id, { orgId: orgId || null, org: orgs.find((o) => o.id === orgId)?.name ?? null });
   void setOrg; // dead code - see comment above
 
+  // The Point System's say, as the team-ranking console already takes it: its points per
+  // place (the draw's ranking rule), whether only each institute's best finisher is placed,
+  // and the participation floor.
+  const rulePoints: number[] | null = Array.isArray((fixture as any)?.ranking_points) ? (fixture as any).ranking_points : null;
+  const scoreSpec: EventSpec = rulePoints
+    ? { ...spec, result: { ...spec.result, medalPoints: rulePoints }, subEvents: spec.subEvents.map(({ medalPoints: _m, ...se }) => se) }
+    : spec;
+  const scoringOpts: EventScoringOpts = {
+    bestPerSide: !!(fixture as any)?.ranking_best_only,
+    participation: Number((fixture as any)?.ranking_participation) || 0,
+  };
+
+  // DNS / DNF / DQ for one sub-event; blank clears it. The time typed beside it is kept, unranked.
+  const setStatus = (id: string, key: string, status: ResultStatus | null) => {
+    setTouched(true);
+    signedOff.current = false;
+    if (key === globalCategory) setEnteredHere(true);
+    setState((s) => ({
+      participants: s.participants.map((p) => {
+        if (p.id !== id) return p;
+        const { [key]: _old, ...rest } = p.statuses ?? {};
+        const statuses = status ? { ...rest, [key]: status } : rest;
+        return { ...p, statuses };
+      }),
+    }));
+  };
+
   const persist = useLiveSave(fixtureId, invalidate);
   const setMark = (id: string, key: string, n: number | null) => {
     setTouched(true);
     signedOff.current = false;
+    if (key === globalCategory) setEnteredHere(true);
     setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, marks: { ...p.marks, [key]: n } } : p)) }));
   };
 
@@ -3165,9 +3289,11 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     // Drops any "Team ranking" org-placement data - see persistRanking's matching
     // comment on why a stale key here would double up on medals.
     const { eventRanking: _staleSimple, ...restLiveState } = (live?.live_state ?? {}) as Record<string, unknown>;
+    // A race counts in the standings once it is signed off, not from a half-entered draft.
+    const counts = complete || fixture.status === 'completed';
     return persist.mutate(
       {
-        live_state: { ...restLiveState, event: state, eventStandings: detailedContributions(spec, state) },
+        live_state: { ...restLiveState, event: state, eventStandings: counts ? detailedContributions(scoreSpec, state, scoringOpts) : [] },
         // AN AUTOSAVE MOVES DATA, NOT THE MATCH. Saving by hand takes a scheduled
         // event live, which is right - somebody deliberately recorded a result. Two
         // seconds after a keystroke is not that, and it would fire the "match is now
@@ -3189,25 +3315,25 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   // silently: no toast, no spinner, no button greying out mid-entry.
   useDraftAutosave(state, () => persistEvent(false, true), touched);
 
-  const agg = aggregateEvent(spec, state);
-  const blocks = subEventResults(spec, state);
+  const agg = aggregateEvent(scoreSpec, state, scoringOpts);
+  const blocks = subEventResults(scoreSpec, state, scoringOpts);
   // The one active category carries its OWN unit/direction - a "400m" reads as
   // seconds/fastest-wins even though the sport's other events don't share that unit.
   const activeSubEvent = category ? spec.subEvents.find((se) => se.key === category) : undefined;
   const activeMeta = markMetaFor(spec, activeSubEvent);
   const unit = activeMeta.unit ? ` (${activeMeta.unit})` : '';
-  const pts = (spec.result.medalPoints ?? [5, 3, 1]).join(' / ');
+  const pts = (scoreSpec.result.medalPoints ?? [5, 3, 1]).join(' / ');
   const best = (activeSubEvent?.winnerIs ?? spec.result.winnerIs) === 'min' ? 'fastest' : 'best';
   // Plain-English explanation of how marks become org points, by aggregate rule.
   const scoringText = spec.result.aggregate === 'sumBest'
     ? `Each org's points are the sum of its athletes' marks.`
     : spec.result.aggregate === 'medals'
-      ? `Each ${nounLower} is ranked (${best} wins) - the top finishers earn ${pts} points for their org. An org's total is the sum across every ${nounLower}.`
+      ? `Each ${nounLower} is ranked (${best} wins) - the top finishers earn ${pts} points for their institute${scoringOpts.bestPerSide ? ' (only its best finisher is placed)' : ''}. A ${nounLower} counts in the standings once it is signed off.`
       : `Each ${nounLower} awards placement points down the order to each finisher's org; an org's total is the sum across every ${nounLower}.`;
   const subtitle = pickOne
     ? isNamedDiscipline
       ? `Enter each competitor's total${unit} for ${spec.subEvents[0]?.label ?? noun}.`
-      : `Choose the ${nounLower} this session is scoring, then enter each competitor's total${unit}.`
+      : `Pick a ${nounLower}, then enter its competitors' totals${unit}. Each keeps the ${nounLower} their total was entered in.`
     : isNamedDiscipline
       ? `Enter each competitor's mark${unit} for ${spec.subEvents[0]?.label ?? noun}.`
       : `Enter each competitor's mark per ${nounLower}${unit}.`;
@@ -3245,19 +3371,34 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
             <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
               {state.participants.map((p) => (
                 <div key={p.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</span>
+                  {/* The institute too: two swimmers can share a name, and a relay row is the institute's. */}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-slate-700 dark:text-slate-200" title={p.name}>{p.name || 'Unnamed'}</span>
+                    {p.org && <span className="block truncate text-[11px] text-slate-400 dark:text-slate-500">{p.org}</span>}
+                  </span>
                   {category && (
                     <span className="hidden flex-1 truncate text-center text-xs text-slate-400 dark:text-slate-500 sm:block">
-                      {spec.subEvents.find((se) => se.key === category)?.label ?? noun}
+                      {spec.subEvents.find((se) => se.key === (p.category ?? category))?.label ?? noun}
                     </span>
                   )}
-                  {category ? (
-                    <div className="w-32 shrink-0">
-                      <MarkInput
-                        value={p.marks[category] ?? null} isTime={activeMeta.isTime}
-                        placeholder={activeMeta.isTime ? undefined : placeholderFor(activeMeta.unit)}
-                        onChange={(n) => setMark(p.id, category, n)} ariaLabel={`${p.name || 'competitor'} ${markLabel}`}
-                      />
+                  {/* Their result is in another class: shown, not editable from here. */}
+                  {category && p.category && p.category !== category && hasResultIn(p, p.category) ? (
+                    <span className="shrink-0 rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                      title={`Switch to ${spec.subEvents.find((se) => se.key === p.category)?.label ?? 'their class'} to change this`}>
+                      {spec.subEvents.find((se) => se.key === p.category)?.label ?? noun} · {resultStatusOf(p, p.category)
+                        ?? `${p.marks[p.category]}${spec.result.unit ? ` ${spec.result.unit}` : ''}`}
+                    </span>
+                  ) : category ? (
+                    <div className="flex shrink-0 items-start gap-1.5">
+                      <div className="w-32">
+                        <MarkInput
+                          value={p.marks[category] ?? null} isTime={activeMeta.isTime} disabled={!!resultStatusOf(p, category)}
+                          placeholder={activeMeta.isTime ? undefined : placeholderFor(activeMeta.unit)}
+                          onChange={(n) => setMark(p.id, category, n)} ariaLabel={`${p.name || 'competitor'} ${markLabel}`}
+                        />
+                      </div>
+                      <StatusSelect value={resultStatusOf(p, category)} onChange={(st) => setStatus(p.id, category, st)}
+                        ariaLabel={`${p.name || 'competitor'} status`} />
                     </div>
                   ) : (
                     <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">Choose a {nounLower} above</span>
@@ -3269,7 +3410,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
             state.participants.map((p) => (
               <div key={p.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
                 <Field label="Competitor" compact>
-                  <p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</p>
+                  <p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}{p.org ? <span className="font-normal text-slate-400 dark:text-slate-500"> · {p.org}</span> : null}</p>
                 </Field>
                 <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {spec.subEvents.map((se) => {
@@ -3278,10 +3419,12 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
                       <label key={se.key} className="block">
                         <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
                         <MarkInput
-                          value={p.marks[se.key] ?? null} isTime={seMeta.isTime}
+                          value={p.marks[se.key] ?? null} isTime={seMeta.isTime} disabled={!!resultStatusOf(p, se.key)}
                           placeholder={seMeta.isTime ? undefined : placeholderFor(seMeta.unit)}
                           onChange={(n) => setMark(p.id, se.key, n)} ariaLabel={`${p.name || 'competitor'} ${se.label}`}
                         />
+                        <StatusSelect value={resultStatusOf(p, se.key)} onChange={(st) => setStatus(p.id, se.key, st)}
+                          ariaLabel={`${p.name || 'competitor'} ${se.label} status`} className="mt-1 w-full" />
                       </label>
                     );
                   })}
@@ -3326,10 +3469,14 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
                 <div key={b.key}>
                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{b.label}</div>
                   <ul className="space-y-1">
-                    {b.rows.map((r) => (
-                      <li key={r.rank} className="flex items-center justify-between gap-2 text-sm">
-                        <span className="truncate text-slate-600 dark:text-slate-300">{r.rank}. {r.name}{r.org ? <span className="text-slate-400 dark:text-slate-500"> · {r.org}</span> : null}</span>
-                        <span className="shrink-0 tabular-nums text-slate-500 dark:text-slate-400">{bMeta.isTime ? formatTime(r.mark) : r.mark}{!bMeta.isTime && bMeta.unit ? ` ${bMeta.unit}` : ''} · +{r.points}</span>
+                    {b.rows.map((r, i) => (
+                      <li key={`${r.rank ?? r.status}-${i}`} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="truncate text-slate-600 dark:text-slate-300">{r.rank != null ? `${r.rank}. ` : ''}{r.name}{r.org ? <span className="text-slate-400 dark:text-slate-500"> · {r.org}</span> : null}</span>
+                        {r.status ? (
+                          <span className="shrink-0 text-xs font-semibold text-rose-600 dark:text-rose-400" title={RESULT_STATUS_LABEL[r.status]}>{r.status}</span>
+                        ) : (
+                          <span className="shrink-0 tabular-nums text-slate-500 dark:text-slate-400">{bMeta.isTime ? formatTime(r.mark!) : r.mark}{!bMeta.isTime && bMeta.unit ? ` ${bMeta.unit}` : ''} · +{r.points}</span>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -3353,23 +3500,51 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
 // Numeric/time mark cell. Keeps the raw string the official typed (so mid-entry values
 // like "1:0" aren't reformatted under the cursor) and emits the parsed number upward;
 // only re-seeds from props when the stored value changes externally (e.g. live reload).
-function MarkInput({ value, isTime, placeholder, onChange, ariaLabel }: { value: number | null; isTime: boolean; placeholder?: string; onChange: (n: number | null) => void; ariaLabel?: string }) {
+/** DNS / DNF / DQ beside a mark; blank means a result is expected. */
+function StatusSelect({ value, onChange, ariaLabel, className }: { value: ResultStatus | null; onChange: (s: ResultStatus | null) => void; ariaLabel: string; className?: string }) {
+  return (
+    <Select value={value ?? ''} aria-label={ariaLabel} title={value ? RESULT_STATUS_LABEL[value] : 'Has a result'}
+      className={cn('w-20 shrink-0 text-xs', value && 'text-rose-600 dark:text-rose-400', className)}
+      onChange={(e) => onChange((e.target.value || null) as ResultStatus | null)}>
+      <option value="">-</option>
+      {RESULT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+    </Select>
+  );
+}
+
+function MarkInput({ value, isTime, placeholder, onChange, ariaLabel, disabled }: { value: number | null; isTime: boolean; placeholder?: string; onChange: (n: number | null) => void; ariaLabel?: string; disabled?: boolean }) {
   const fmt = (v: number | null) => (v == null ? '' : isTime ? formatTime(v) : String(v));
   const [raw, setRaw] = useState(() => fmt(value));
   const emitted = useRef(value);
   useEffect(() => { if (value !== emitted.current) { emitted.current = value; setRaw(fmt(value)); } }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A time that is not valid keeps the last good one stored and says why, rather than
+  // saving a typo as some other time ("1:75") or as the fastest swim ("0").
+  const [error, setError] = useState<string | null>(null);
   const handle = (s: string) => {
     setRaw(s);
-    const n = isTime ? parseTimeInput(s) : (s.trim() === '' ? null : Number(s));
+    if (isTime) {
+      const t = readTimeInput(s);
+      setError(t.error);
+      if (t.error) return;
+      emitted.current = t.value;
+      onChange(t.value);
+      return;
+    }
+    const n = s.trim() === '' ? null : Number(s);
     emitted.current = n;
     onChange(n);
   };
   return (
-    <Input
-      type={isTime ? 'text' : 'number'} inputMode={isTime ? 'decimal' : 'numeric'}
-      value={raw} onChange={(e) => handle(e.target.value)} onBlur={() => setRaw(fmt(emitted.current))}
-      className="text-center" aria-label={ariaLabel} placeholder={isTime ? 'mm:ss.s' : (placeholder ?? '')}
-    />
+    <div className="grid gap-0.5">
+      {/* Decimal keypad for every mark: a 182.5 kg total or a 5.42 m jump needs the point on phones. */}
+      <Input
+        type={isTime ? 'text' : 'number'} inputMode="decimal" step={isTime ? undefined : 'any'}
+        value={raw} disabled={disabled} onChange={(e) => handle(e.target.value)} onBlur={() => { if (!error) setRaw(fmt(emitted.current)); }}
+        className={cn('text-center', error && 'border-red-400 focus:ring-red-300 dark:border-red-500/60')}
+        aria-label={ariaLabel} aria-invalid={!!error || undefined} placeholder={isTime ? 'mm:ss.s' : (placeholder ?? '')}
+      />
+      {error && <span role="alert" className="text-[10px] leading-tight text-red-600 dark:text-red-400">{error}</span>}
+    </div>
   );
 }
 

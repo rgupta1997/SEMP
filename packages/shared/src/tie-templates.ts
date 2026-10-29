@@ -10,6 +10,8 @@ import type { ContestSpec, FormatTemplate, RubberSpec, ScoringMode, TieSpec } fr
 // rubbers themselves are the "games" of the match; these are the sets inside one.
 const rallyGame = (segMax = 3): ContestSpec => ({ archetype: 'rally', segLabel: 'Set', segMax, pointButtons: [1] });
 const setsOf = (segMax: number, segLabel: string): ContestSpec => ({ archetype: 'sets', segLabel, segMax, pointButtons: [1] });
+// A pool rubber: best of `n` frames, recorded frame by frame (pool.ts).
+const framesOf = (n: number): ContestSpec => ({ archetype: 'sets', segLabel: 'Frame', segMax: n, pointButtons: [1] });
 const decide = (segLabel: string): ContestSpec => ({ archetype: 'time', segLabel, segMax: 1, pointButtons: [], manualHint: `Pick the winner of this ${segLabel.toLowerCase()}.` });
 
 const tie = (scoringMode: ScoringMode, rubbers: RubberSpec[], opts?: Partial<TieSpec>): FormatTemplate => ({
@@ -53,12 +55,13 @@ const TIE_TEMPLATES: Record<string, FormatTemplate> = {
     { key: 'ws', label: "Women's Singles", contest: setsOf(7, 'Game') },
     { key: 'mwd', label: "Men/Women's Doubles", contest: setsOf(9, 'Game') },
   ]),
-  'pool/snooker': tie('manual', [
-    { key: 'ms1', label: 'Men Singles', contest: decide('Frame') },
-    { key: 'ms2', label: 'Men Singles', contest: decide('Frame') },
-    { key: 'ws', label: 'Women Singles', contest: decide('Frame') },
-    { key: 'xd', label: 'Mixed Doubles', contest: decide('Frame') },
-    { key: 'md', label: 'Men Doubles', contest: decide('Frame') },
+  // Each rubber best of 5 frames, scored frame by frame so a tie's frames can rank it.
+  'pool/snooker': tie('detailed', [
+    { key: 'ms1', label: 'Men Singles', contest: framesOf(5) },
+    { key: 'ms2', label: 'Men Singles', contest: framesOf(5) },
+    { key: 'ws', label: 'Women Singles', contest: framesOf(5) },
+    { key: 'xd', label: 'Mixed Doubles', contest: framesOf(5) },
+    { key: 'md', label: 'Men Doubles', contest: framesOf(5) },
   ]),
   // Olympiad style: a board may be drawn (½ each), the match is won on board points
   // (2½-1½), and every board is played - board points also order the standings.
@@ -86,6 +89,14 @@ export function isGroupRound(round?: string | null): boolean {
   return !!round && /^(round \d+|pool .+)$/i.test(round.trim());
 }
 
+/** A rubber scored frame by frame (pool), whose segMax is its best-of. */
+export const isFrameContest = (c?: ContestSpec | null): c is ContestSpec => !!c && c.archetype === 'sets' && c.segLabel === 'Frame';
+
+/** Whether a level league or group tie may be won on a tie-break: the layout's choice, else not for chess. */
+export function groupTiebreakAllowed(spec: Pick<TieSpec, 'groupTiebreak' | 'boardPoints'>): boolean {
+  return spec.groupTiebreak ?? !spec.boardPoints;
+}
+
 /**
  * The tie as it applies to one fixture: dead rubbers are played out in league and
  * group rounds when the layout says so (rubbers won can decide a table), and skipped
@@ -105,6 +116,8 @@ export interface TieRubberDraft {
   label: string;
   /** Players per side: 1 singles, 2 doubles. */
   size: number;
+  /** Pool: best of this many frames (3, 5, 7); omitted = the sport's own. */
+  frames?: number;
 }
 
 export interface TieLayout {
@@ -113,8 +126,8 @@ export interface TieLayout {
   rubbers: TieRubberDraft[];
 }
 
-const S = (label: string): TieRubberDraft => ({ label, size: 1 });
-const D = (label: string): TieRubberDraft => ({ label, size: 2 });
+const S = (label: string, frames?: number): TieRubberDraft => ({ label, size: 1, ...(frames ? { frames } : {}) });
+const D = (label: string, frames?: number): TieRubberDraft => ({ label, size: 2, ...(frames ? { frames } : {}) });
 
 const RACQUET_LAYOUTS: TieLayout[] = [
   { key: 'five', name: 'Five rubbers - MS, WS, MD, WD, XD',
@@ -131,6 +144,36 @@ const RACQUET_LAYOUTS: TieLayout[] = [
     rubbers: [S('Singles 1'), D('Doubles 1'), S('Singles 2'), D('Doubles 2'), S('Singles 3')] },
 ];
 
+// Inter-IIM badminton and table tennis share one order: every rubber played in the group
+// stage, dead ones skipped in knockouts (the split a picked layout comes with).
+const IIM_FIVE_THREE: TieLayout[] = [
+  { key: 'iim_men', name: 'Inter-IIM men - MS, MS, MD, MS, MD',
+    rubbers: [S("Men's Singles 1"), S("Men's Singles 2"), D("Men's Doubles 1"), S("Men's Singles 3"), D("Men's Doubles 2")] },
+  { key: 'iim_women', name: 'Inter-IIM women - WS, WD, WS',
+    rubbers: [S("Women's Singles 1"), D("Women's Doubles"), S("Women's Singles 2")] },
+];
+
+// Layouts for one sport only, offered after the racquet library.
+const SPORT_LAYOUTS: Record<string, TieLayout[]> = {
+  badminton: IIM_FIVE_THREE,
+  'table tennis': IIM_FIVE_THREE,
+  'table-tennis': IIM_FIVE_THREE,
+  // Inter-IIM 8-ball: men 3 singles and 2 doubles, each best of 5; women 2 singles and a
+  // doubles, best of 3. Doubles first - the rulebook's order when teams don't agree one.
+  'pool/snooker': [
+    { key: 'iim_men', name: 'Inter-IIM men - 2 doubles, 3 singles, best of 5 frames',
+      rubbers: [D("Men's Doubles 1", 5), D("Men's Doubles 2", 5), S("Men's Singles 1", 5), S("Men's Singles 2", 5), S("Men's Singles 3", 5)] },
+    { key: 'iim_women', name: 'Inter-IIM women - doubles, 2 singles, best of 3 frames',
+      rubbers: [D("Women's Doubles", 3), S("Women's Singles 1", 3), S("Women's Singles 2", 3)] },
+  ],
+  tennis: [
+    { key: 'iim_men', name: 'Inter-IIM men - MS, MD, MS',
+      rubbers: [S("Men's Singles 1"), D("Men's Doubles"), S("Men's Singles 2")] },
+    { key: 'iim_women', name: 'Inter-IIM women - WS, WD, WS',
+      rubbers: [S("Women's Singles 1"), D("Women's Doubles"), S("Women's Singles 2")] },
+  ],
+};
+
 const RACQUET_TIE_SPORTS = new Set(['table tennis', 'table-tennis', 'badminton', 'tennis', 'squash', 'pickleball']);
 
 /** The ready-made layouts offered for a sport, its own default first. */
@@ -139,13 +182,16 @@ export function tieLayoutsFor(sport?: string | null): TieLayout[] {
   const own = tieTemplateFor(name)?.tie;
   const sportDefault: TieLayout[] = own
     ? [{ key: 'default', name: `Standard (${own.rubbers.length} rubbers)`,
-      rubbers: own.rubbers.map((r) => ({ label: r.label, size: r.size ?? (/doubles/i.test(r.label) ? 2 : 1) })) }]
+      rubbers: own.rubbers.map((r) => ({
+        label: r.label, size: r.size ?? (/doubles/i.test(r.label) ? 2 : 1),
+        ...(isFrameContest(r.contest) ? { frames: r.contest.segMax } : {}),
+      })) }]
     : [];
-  if (!RACQUET_TIE_SPORTS.has(name)) return sportDefault;
+  if (!RACQUET_TIE_SPORTS.has(name)) return [...sportDefault, ...(SPORT_LAYOUTS[name] ?? [])];
   // The racquet library, minus any that just repeat the sport's own default.
   const same = (l: TieLayout) => own && l.rubbers.length === own.rubbers.length
     && l.rubbers.every((r, i) => r.label === own.rubbers[i].label);
-  return [...sportDefault, ...RACQUET_LAYOUTS.filter((l) => !same(l))];
+  return [...sportDefault, ...RACQUET_LAYOUTS.filter((l) => !same(l)), ...(SPORT_LAYOUTS[name] ?? [])];
 }
 
 /**
@@ -156,21 +202,23 @@ export function tieLayoutsFor(sport?: string | null): TieLayout[] {
 export function buildTieSpec(
   sport: string | null | undefined,
   rubbers: TieRubberDraft[],
-  opts: { target?: number | null; skipDeadRubbers?: boolean; skipDeadInGroups?: boolean } = {},
+  opts: { target?: number | null; skipDeadRubbers?: boolean; skipDeadInGroups?: boolean; groupTiebreak?: boolean } = {},
 ): TieSpec {
   const own = tieTemplateFor(sport)?.tie;
   const contest: ContestSpec = own?.rubbers[0]?.contest ?? rallyGame(3);
+  // A rubber's own best-of frames (pool), else the sport's contest.
   const target = opts.target && opts.target > 0 ? Math.min(opts.target, rubbers.length) : undefined;
   return {
     winBy: target ? 'count' : 'majority',
     ...(target ? { target } : {}),
     skipDeadRubbers: opts.skipDeadRubbers ?? true,
     ...(opts.skipDeadInGroups !== undefined ? { skipDeadInGroups: opts.skipDeadInGroups } : {}),
+    ...(opts.groupTiebreak !== undefined ? { groupTiebreak: opts.groupTiebreak } : {}),
     rubbers: rubbers.map((r, i) => ({
       key: `r${i + 1}`,
       label: r.label.trim() || `Rubber ${i + 1}`,
       size: Math.max(1, Math.min(2, r.size)),
-      contest,
+      contest: r.frames ? framesOf(Math.max(1, Math.round(r.frames))) : contest,
     })),
   };
 }

@@ -378,6 +378,28 @@ const TENNIS: ScoringFormat[] = [
     levels: [tennisGame(true), tennisSet(6, 5, 7, 2, 1), match(1)],
     serve: tennisServe, mode: 'selfScored', changeEnds: 'oddCumulativeUnits', doubles: true,
   }),
+  // Inter-IIM: one advantage set - men to 6 with a 10-point tie-break at 6-6, women to 5
+  // with a 7-point tie-break at 5-5. Semis and finals may be best of 3 if both teams agree.
+  fmt({
+    sport: 'tennis', key: 'iim_men_set6_tb10', name: 'Inter-IIM men - one set to 6, 10-point tie-break at 6-6',
+    levels: [tennisGame(), tennisSet(6, 6, 10), match(1)],
+    serve: tennisServe, mode: 'officiated', changeEnds: 'oddCumulativeUnits',
+  }),
+  fmt({
+    sport: 'tennis', key: 'iim_men_set6_tb10_bo3', name: 'Inter-IIM men - best of 3 sets to 6, 10-point tie-breaks',
+    levels: [tennisGame(), tennisSet(6, 6, 10), match(2)],
+    serve: tennisServe, mode: 'officiated', changeEnds: 'oddCumulativeUnits',
+  }),
+  fmt({
+    sport: 'tennis', key: 'iim_women_set5_tb7', name: 'Inter-IIM women - one set to 5, 7-point tie-break at 5-5',
+    levels: [tennisGame(), tennisSet(5, 5, 7), match(1)],
+    serve: tennisServe, mode: 'officiated', changeEnds: 'oddCumulativeUnits',
+  }),
+  fmt({
+    sport: 'tennis', key: 'iim_women_set5_tb7_bo3', name: 'Inter-IIM women - best of 3 sets to 5, 7-point tie-breaks',
+    levels: [tennisGame(), tennisSet(5, 5, 7), match(2)],
+    serve: tennisServe, mode: 'officiated', changeEnds: 'oddCumulativeUnits',
+  }),
   fmt({
     sport: 'tennis', key: 'match_tb_10_shootout', name: '10-point shootout - one championship tie-break',
     // Flat: the tie-break IS the match. No games, no sets - the level array collapses
@@ -472,6 +494,12 @@ const SQUASH: ScoringFormat[] = [
   fmt({
     sport: 'squash', key: 'pars11_bo3', name: 'Club / league - PARS 11, best of 3',
     levels: [sqGame(11), match(2)], serve: squashParsServe, mode: 'selfScored', changeEnds: 'never',
+  }),
+  // Inter-IIM: games to 11, 2 clear from 10-10, but first to 21 wins if nobody gets clear.
+  fmt({
+    sport: 'squash', key: 'iim_pars11_bo3_cap21', name: 'Inter-IIM - PARS 11, best of 3, ceiling 21',
+    levels: [sqGame(11, 2, 21), match(2)], serve: squashParsServe, mode: 'officiated', changeEnds: 'never',
+    rulesSheet: { timeoutSecondsPerPlayer: 90, betweenGamesSeconds: 120 },
   }),
   fmt({
     sport: 'squash', key: 'english9_bo5', name: 'English / hand-in-hand-out - 9 points, best of 5',

@@ -102,6 +102,7 @@ export function ruleSummary(rule: StandingsRule, sport?: string | null, entryTyp
   } else if (rule.scheme === 'medal') parts.push(`Gold ${rule.gold} · Silver ${rule.silver} · Bronze ${rule.bronze}`);
   else if (rule.scheme === 'ranking') {
     parts.push(rule.places.map((p, i) => `${ordinal(i + 1)} ${p}`).join(' · '));
+    if (rule.bestPerSide) parts.push('best finisher per institute only');
   }
   if (rule.participation) parts.push(`Participation ${rule.participation}`);
   return parts.join('  ·  ');
@@ -294,6 +295,10 @@ function RuleForm({ value, onChange, option, inherited }: {
               <Button size="sm" variant="ghost" onClick={() => onChange({ ...value, places: value.places.slice(0, -1) })}>- Remove last</Button>
             )}
           </div>
+          <Check checked={!!value.bestPerSide}
+            onChange={(v) => onChange({ ...value, bestPerSide: v || undefined })}
+            label="Only each institute's best finisher scores"
+            hint="How many an institute may enter is the discipline's squad size. Off: every finisher takes a place, so one institute can be 1st and 2nd. On: its other finishers are passed over and the next institute moves up." />
         </>
       )}
 

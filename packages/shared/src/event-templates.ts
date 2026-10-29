@@ -19,8 +19,9 @@ const event = (
 });
 
 const EVENT_TEMPLATES: Record<string, FormatTemplate> = {
-  // 13 events (rulebook): 11 individual races pay 5/3/1, the 2 mixed relays pay 10/7/3.
-  // Each race is ranked (fastest wins) and the top finishers earn their org those points.
+  // The Inter-IIM list: individual races pay 5/3/1, relays 10/7/4 (a draw's Point System
+  // rule, when set, wins over these). Men swim the 100m free; women do not. Keys are kept
+  // stable ('relay' is still the mixed freestyle relay) so saved race results stay attached.
   swimming: event(
     { resultType: 'time', winnerIs: 'min', unit: 's', aggregate: 'medals', medalPoints: [5, 3, 1] },
     [
@@ -28,15 +29,24 @@ const EVENT_TEMPLATES: Record<string, FormatTemplate> = {
       { key: 'm50f', label: "Men's 50m Freestyle" },
       { key: 'm100f', label: "Men's 100m Freestyle" },
       { key: 'm25bk', label: "Men's 25m Backstroke" },
-      { key: 'm25fly', label: "Men's 25m Butterfly" },
+      { key: 'm50bk', label: "Men's 50m Backstroke" },
       { key: 'm25br', label: "Men's 25m Breaststroke" },
+      { key: 'm50br', label: "Men's 50m Breaststroke" },
+      { key: 'm25fly', label: "Men's 25m Butterfly" },
+      { key: 'm50fly', label: "Men's 50m Butterfly" },
       { key: 'w25f', label: "Women's 25m Freestyle" },
       { key: 'w50f', label: "Women's 50m Freestyle" },
       { key: 'w25bk', label: "Women's 25m Backstroke" },
-      { key: 'w25fly', label: "Women's 25m Butterfly" },
+      { key: 'w50bk', label: "Women's 50m Backstroke" },
       { key: 'w25br', label: "Women's 25m Breaststroke" },
-      { key: 'relay', label: 'Mixed 4x25m Freestyle Relay', kind: 'relay', medalPoints: [10, 7, 3] },
-      { key: 'relayMedley', label: 'Mixed 4x25m Medley Relay', kind: 'relay', medalPoints: [10, 7, 3] },
+      { key: 'w50br', label: "Women's 50m Breaststroke" },
+      { key: 'w25fly', label: "Women's 25m Butterfly" },
+      { key: 'w50fly', label: "Women's 50m Butterfly" },
+      { key: 'relayMenFree', label: "Men's 4x25m Freestyle Relay", kind: 'relay', medalPoints: [10, 7, 4] },
+      { key: 'relayMenMedley', label: "Men's 4x25m Medley Relay", kind: 'relay', medalPoints: [10, 7, 4] },
+      { key: 'relayWomenFree', label: "Women's 4x25m Freestyle Relay", kind: 'relay', medalPoints: [10, 7, 4] },
+      { key: 'relayWomenMedley', label: "Women's 4x25m Medley Relay", kind: 'relay', medalPoints: [10, 7, 4] },
+      { key: 'relay', label: 'Mixed 4x25m Freestyle Relay (2 men + 2 women)', kind: 'relay', medalPoints: [10, 7, 4] },
     ],
     { subEventNoun: 'Race' },
   ),

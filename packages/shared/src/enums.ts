@@ -157,7 +157,8 @@ export type StandingsScheme = (typeof STANDINGS_SCHEME)[number];
 
 // Ordered tiebreakers for a group / league table (applied left-to-right). score_diff and
 // score_for read each match's headline score, so they mean goals, sets or rubbers by sport.
-export const STANDINGS_TIEBREAKER = ['points', 'wins', 'lost', 'head_to_head', 'score_diff', 'score_for'] as const;
+// frames_won / ball_diff: pool team ties only (frames and balls summed over the rubbers).
+export const STANDINGS_TIEBREAKER = ['points', 'wins', 'lost', 'head_to_head', 'score_diff', 'score_for', 'frames_won', 'ball_diff'] as const;
 // The order a stage gets when nobody set one (older saved stages carry it explicitly).
 export const STAGE_DEFAULT_TIEBREAKERS: StandingsTiebreaker[] = ['points', 'wins', 'lost'];
 export type StandingsTiebreaker = (typeof STANDINGS_TIEBREAKER)[number];

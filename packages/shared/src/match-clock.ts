@@ -123,6 +123,35 @@ export function matchMinute(msElapsed: number): number {
   return Math.floor(Math.max(0, msElapsed) / 60000) + 1;
 }
 
+/** How long period `i` (0-based) runs in ms: regulation, then extra time. 0 when untimed. */
+export function periodLengthMs(
+  format: { clock?: { minutes: number } | null; levels: Array<{ target: number }>; tieBreak?: { extraTime?: { minutes: number } | null } | null },
+  i: number,
+): number {
+  const regulation = Math.max(1, format.levels[format.levels.length - 1]?.target ?? 1);
+  if (i < regulation) return ((format.clock?.minutes ?? 0) * 60_000) / regulation;
+  return (format.tieBreak?.extraTime?.minutes ?? 0) * 60_000;
+}
+
+/**
+ * Each event's minute across the whole match, the way a scoresheet cites it: the
+ * second of two 20-minute halves starts at 21', its stoppage reads 40+2'. Null for an
+ * event the clock was not running for.
+ */
+export function eventMinuteLabels(format: Parameters<typeof periodLengthMs>[0], log: RallyLog): Array<string | null> {
+  let period = 0;
+  let offset = 0;
+  return log.map((ev) => {
+    const clockMs = (ev as { clockMs?: number }).clockMs;
+    const full = periodLengthMs(format, period);
+    const label = typeof clockMs === 'number' && ev.t !== 'endPeriod'
+      ? (full > 0 && clockMs >= full ? `${Math.floor((offset + full) / 60_000)}+${matchMinute(clockMs - full)}'` : `${matchMinute(offset + clockMs)}'`)
+      : null;
+    if (ev.t === 'endPeriod') { offset += full; period += 1; }
+    return label;
+  });
+}
+
 /** "23'", or "45+2'" once the period is into stoppage. */
 export function minuteLabel(msElapsed: number, fullMs: number): string {
   if (fullMs > 0 && msElapsed >= fullMs) {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyKnobs, readKnobs, knobsFor } from './format-knobs.js';
 import {
-  chaserOfTurn, formatChaseTime, khoStatus, khoTurnLines, minChaseEnd, minChaseState, parseChaseTime,
+  addAdt, adtOf, chaserOfTurn, emptyAdt, formatChaseTime, khoMatchAdt, khoStatus, khoTurnLines, minChaseEnd, minChaseState, parseChaseTime,
 } from './kho-kho.js';
 import { foldRally, type RallyEvent } from './rally-kernel.js';
 import { presetByKey } from './racquet-presets.js';
@@ -59,8 +59,27 @@ describe('follow-on', () => {
   ];
 
   it('is offered at the end of the first innings when the lead is 9 or more', () => {
-    expect(status(innings1(12, 3)).followOnOffer).toEqual({ leader: 'A', lead: 9 });
+    expect(status(innings1(12, 3)).followOnOffer).toEqual({ leader: 'A', lead: 9, compulsory: false });
     expect(status(innings1(11, 3)).followOnOffer).toBeNull();
+  });
+
+  // Sheet KK03: optional at the follow-on lead, compulsory past a limit when the format says so.
+  it("is the leader's choice unless the format makes a bigger lead compulsory", async () => {
+    const { applyKnobs, knobsFor, readKnobs } = await import('./format-knobs.js');
+    const k = readKnobs(f);
+    expect(k).toMatchObject({ followOnLead: 9, followOnCompulsoryEnabled: false, followOnCompulsoryAbove: 9 });
+    expect(knobsFor({ ...k, followOnCompulsoryEnabled: true }).map((s) => s.key))
+      .toEqual(expect.arrayContaining(['followOnLead', 'followOnCompulsoryEnabled', 'followOnCompulsoryAbove']));
+    const iim = applyKnobs(f, { ...k, followOnCompulsoryEnabled: true, followOnCompulsoryAbove: 9 });
+    const st = (log: RallyEvent[]) => khoStatus(iim, log, foldRally(iim, log).state);
+    expect(st(innings1(12, 3)).followOnOffer).toEqual({ leader: 'A', lead: 9, compulsory: false });
+    expect(st(innings1(13, 3)).followOnOffer).toEqual({ leader: 'A', lead: 10, compulsory: true });
+    // Switched back off: never compulsory.
+    const off = applyKnobs(iim, { ...readKnobs(iim), followOnCompulsoryEnabled: false });
+    expect(khoStatus(off, innings1(15, 3), foldRally(off, innings1(15, 3)).state).followOnOffer?.compulsory).toBe(false);
+    // The follow-on lead itself is a setting too.
+    const at6 = applyKnobs(f, { ...k, followOnLead: 6 });
+    expect(khoStatus(at6, innings1(9, 3), foldRally(at6, innings1(9, 3)).state).followOnOffer?.lead).toBe(6);
   });
 
   it('is not offered once the third turn has started', () => {
@@ -167,5 +186,71 @@ describe('format editor', () => {
     expect(keys).not.toContain('shootoutEnabled');
     expect(applyKnobs(f, k).tieBreak?.minimumChase).toBe(true);
     expect(applyKnobs(f, { ...k, minimumChaseEnabled: false }).tieBreak).toBeNull();
+  });
+});
+
+// Sheet KK01: an extra inning before the minimum chase, set in the editor.
+describe('extra inning before minimum chase', () => {
+  it('the editor offers it for kho kho in kho kho words, off by default', async () => {
+    const { applyKnobs, describeKnobs, knobsFor, readKnobs } = await import('./format-knobs.js');
+    const f = presetByKey('kho_2x7')!;
+    const k = readKnobs(f);
+    expect(k.extraTimeEnabled).toBe(false);
+    const labels = knobsFor({ ...k, extraTimeEnabled: true }).filter((s) => s.group === 'tieBreak').map((s) => s.label);
+    expect(labels).toEqual(expect.arrayContaining(['Extra inning before minimum chase', 'Extra turns', 'Minutes per extra turn', 'Minimum chase']));
+    expect(labels).not.toContain('Play extra time');
+    const withInning = applyKnobs(f, { ...k, extraTimeEnabled: true, extraTimePeriods: 2, extraTimeMinutes: 7 });
+    expect(withInning.tieBreak).toMatchObject({ extraTime: { periods: 2, minutes: 7, label: 'Extra turn' }, minimumChase: true });
+    expect(describeKnobs(readKnobs(withInning))).toContain('extra inning (2 x 7 min turns) then minimum chase');
+  });
+
+  it('level after four turns plays the extra turns, then the minimum chase', () => {
+    const base = presetByKey('kho_2x7')!;
+    const f = { ...base, tieBreak: { extraTime: { periods: 2, minutes: 7, label: 'Extra turn' }, minimumChase: true } };
+    const t = (side: 'A' | 'B'): RallyEvent => ({ t: 'point', side, pts: 1, kind: 'touch' } as RallyEvent);
+    const end: RallyEvent = { t: 'endPeriod' };
+    const level: RallyEvent[] = [{ t: 'chaseFirst', side: 'A' } as RallyEvent, t('A'), end, t('B'), end, end, end];
+    expect(tieProgress(f, foldRally(f, level).state, [1, 1]).phase).toBe('extraTime');
+    expect(tieProgress(f, foldRally(f, [...level, end, end]).state, [1, 1]).phase).toBe('minimumChase');
+    expect(foldRally(f, [...level, t('A'), end, end]).state).toMatchObject({ ended: true, winner: 'A' });
+  });
+});
+
+// Sheet KK02: average difference time from the turn records.
+describe('average difference time', () => {
+  const f = presetByKey('kho_2x7')!; // 4 turns of 7 minutes
+  const out = (side: 'A' | 'B'): RallyEvent => ({ t: 'point', side, pts: 1, kind: 'touch' } as RallyEvent);
+  const endAt = (min: number): RallyEvent => ({ t: 'endPeriod', clockMs: min * 60_000 } as RallyEvent);
+  // A chases turns 1 and 3, B turns 2 and 4.
+  const log: RallyEvent[] = [
+    { t: 'chaseFirst', side: 'A' } as RallyEvent,
+    out('A'), out('A'), out('A'), endAt(7),    // A gets 3 out in 420 s
+    out('B'), out('B'), endAt(7),             // B gets 2 out in 420 s
+    out('A'), out('A'), out('A'), endAt(7),   // A 3 more
+    out('B'), out('B'), endAt(7),             // B 2 more
+  ];
+
+  it('works out each side from the regulation turns', () => {
+    const m = khoMatchAdt(f, log)!;
+    expect(m.A).toMatchObject({ attackMs: 840_000, attackOuts: 6, defendMs: 840_000, defendOuts: 4, estimated: false });
+    // A: 840/4 - 840/6 = 210 - 140 = 70. B: 840/6 - 840/4 = -70.
+    expect(adtOf(m.A)).toBe(70);
+    expect(adtOf(m.B)).toBe(-70);
+  });
+
+  it('adds up over matches, and a turn with no clock counts at full length', () => {
+    const noClock = log.map((e) => (e.t === 'endPeriod' ? ({ t: 'endPeriod' } as RallyEvent) : e));
+    const m = khoMatchAdt(f, noClock)!;
+    expect(m.A).toMatchObject({ attackMs: 840_000, estimated: true });
+    const both = addAdt(addAdt(emptyAdt(), khoMatchAdt(f, log)!.A), m.A);
+    expect(both).toMatchObject({ attackOuts: 12, defendOuts: 8, estimated: true });
+  });
+
+  it('leaves out extra turns and returns nothing before the toss', () => {
+    const extra = { ...f, tieBreak: { extraTime: { periods: 2, minutes: 7 }, minimumChase: true } };
+    const level: RallyEvent[] = [{ t: 'chaseFirst', side: 'A' } as RallyEvent, out('A'), endAt(7), out('B'), endAt(7), endAt(7), endAt(7), out('A'), endAt(7), endAt(7)];
+    expect(khoMatchAdt(extra, level)!.A.attackMs).toBe(4 * 7 * 60_000 / 2);
+    expect(khoMatchAdt(f, [out('A')])).toBeNull();
+    expect(adtOf({ defendMs: 420_000, defendOuts: 0, attackMs: 0, attackOuts: 0, estimated: false })).toBe(420);
   });
 });

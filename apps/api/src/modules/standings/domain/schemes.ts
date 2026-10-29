@@ -39,6 +39,11 @@ export interface SchemeFixture {
   /** Stage metadata: which pool and which stage of a multi-stage draw. */
   pool_number?: number | null;
   stage_sequence?: number | null;
+  /** Pool team ties: frames won and balls won by (the loser's balls left), summed over rubbers. */
+  home_frames?: number;
+  away_frames?: number;
+  home_balls?: number;
+  away_balls?: number;
 }
 
 export interface EntityTally {
@@ -51,6 +56,10 @@ export interface EntityTally {
   // Internal sort aids (goals for/against) - not persisted as columns.
   gf: number;
   ga: number;
+  // Pool team ties: frames won, and balls for / against (net ball difference).
+  frames?: number;
+  balls_for?: number;
+  balls_against?: number;
   // Walkovers lost - a side whose every result is one is a no-show (no participation).
   wo: number;
   // Scheme-specific counts surfaced to the UI (e.g. { gold: 2 }, { semi_finalist: 1 }).
@@ -60,7 +69,7 @@ export interface EntityTally {
 }
 
 function emptyTally(entity_id: string): EntityTally {
-  return { entity_id, played: 0, won: 0, drawn: 0, lost: 0, points: 0, gf: 0, ga: 0, wo: 0, detail: {} };
+  return { entity_id, played: 0, won: 0, drawn: 0, lost: 0, points: 0, gf: 0, ga: 0, frames: 0, balls_for: 0, balls_against: 0, wo: 0, detail: {} };
 }
 
 // A result that counts: a played match, or a walkover with its winner (a forfeit is a
@@ -90,6 +99,8 @@ function leagueTally(fixtures: SchemeFixture[], win: number, draw: number, loss:
     const played = f.status !== 'walkover';
     if (played && home && f.home_score != null) { home.gf += f.home_score; home.ga += f.away_score ?? 0; }
     if (played && away && f.away_score != null) { away.gf += f.away_score; away.ga += f.home_score ?? 0; }
+    if (played && home) addFrames(home, f.home_frames, f.home_balls, f.away_balls);
+    if (played && away) addFrames(away, f.away_frames, f.away_balls, f.home_balls);
 
     const isDraw = f.winner_team_id == null
       && (f.no_result === true || (f.home_score != null && f.away_score != null && f.home_score === f.away_score));
@@ -106,6 +117,12 @@ function leagueTally(fixtures: SchemeFixture[], win: number, draw: number, loss:
   return table;
 }
 
+function addFrames(row: EntityTally, frames = 0, ballsFor = 0, ballsAgainst = 0) {
+  row.frames = (row.frames ?? 0) + frames;
+  row.balls_for = (row.balls_for ?? 0) + ballsFor;
+  row.balls_against = (row.balls_against ?? 0) + ballsAgainst;
+}
+
 const isNoShow = (t: EntityTally) => t.played > 0 && t.wo === t.played;
 
 // ---------- Group / league table ranking ----------
@@ -117,6 +134,8 @@ function metric(r: EntityTally, t: StandingsTiebreaker): number {
     case 'lost': return -r.lost; // fewer losses ranks higher
     case 'score_diff': return r.gf - r.ga;
     case 'score_for': return r.gf;
+    case 'frames_won': return r.frames ?? 0;
+    case 'ball_diff': return (r.balls_for ?? 0) - (r.balls_against ?? 0);
     case 'head_to_head': return 0; // needs the fixtures - handled by rankGroup
   }
 }

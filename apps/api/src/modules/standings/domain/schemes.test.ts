@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_STANDINGS_RULE, type StandingsRule } from '@semp/shared';
-import { runScheme, rankBy, accumulate, levelOn, shareRanks, type SchemeFixture, type EntityTally } from './schemes.js';
+import { rankGroup, runScheme, rankBy, accumulate, levelOn, shareRanks, type SchemeFixture, type EntityTally } from './schemes.js';
 
 // One team per org for brevity: team_id === org_id.
 function fx(home: string, away: string, hs: number, as: number, round: string | null = null): SchemeFixture {
@@ -269,5 +269,35 @@ describe('shared positions in a table', () => {
     const t = (id: string, points: number, won: number) => ({ entity_id: id, played: 3, won, drawn: 0, lost: 3 - won, points, gf: 0, ga: 0, wo: 0, detail: {} });
     const rows = shareRanks(rankBy([t('A', 9, 3), t('B', 6, 2), t('C', 6, 2), t('D', 0, 0)], ['points', 'wins', 'lost']), levelOn(['points', 'wins', 'lost']));
     expect(rows.map((r) => [r.entity_id, r.rank])).toEqual([['A', 1], ['B', 2], ['C', 2], ['D', 4]]);
+  });
+});
+
+describe('pool team ties: frames won and net ball difference', () => {
+  const pool = (home: string, away: string, hs: number, as: number, frames: [number, number], balls: [number, number]): SchemeFixture =>
+    ({ ...fx(home, away, hs, as), home_frames: frames[0], away_frames: frames[1], home_balls: balls[0], away_balls: balls[1] });
+  // A, B and C each win one tie 3-2: level on points and rubbers.
+  const fixtures = [
+    pool('A', 'B', 3, 2, [10, 8], [12, 9]),
+    pool('B', 'C', 3, 2, [10, 9], [14, 6]),
+    pool('C', 'A', 3, 2, [10, 9], [11, 11]),
+  ];
+
+  it('frames won separates teams level on points', () => {
+    const { rows } = rankGroup(fixtures, { win: 2, draw: 1, loss: 0, tiebreakers: ['points', 'frames_won'] });
+    // Frames: A 19, B 18, C 19 - A and C stay level.
+    expect(rows.map((r) => [r.entity_id, r.frames])).toEqual([['A', 19], ['C', 19], ['B', 18]]);
+  });
+
+  it('net ball difference then splits what frames left level', () => {
+    const { rows, ties } = rankGroup(fixtures, { win: 2, draw: 1, loss: 0, tiebreakers: ['points', 'frames_won', 'ball_diff'] });
+    // Balls: A 23-20 (+3), C 17-25 (-8).
+    expect(rows.map((r) => r.entity_id)).toEqual(['A', 'C', 'B']);
+    expect(ties).toEqual([]);
+  });
+
+  it('a walkover adds no frames or balls', () => {
+    const wo = { ...pool('A', 'B', 0, 0, [9, 0], [8, 0]), status: 'walkover', winner_team_id: 'A' };
+    const { rows } = rankGroup([wo], { win: 2, draw: 1, loss: 0, tiebreakers: ['points'] });
+    expect(rows.find((r) => r.entity_id === 'A')).toMatchObject({ frames: 0, balls_for: 0 });
   });
 });

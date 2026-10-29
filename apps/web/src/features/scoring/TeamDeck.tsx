@@ -2,10 +2,10 @@ import { ChevronDown, Undo2 } from 'lucide-react';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   aggregateScore, capLeader, changesEndsAfterUnit, effectiveLevel, foldRally, isDecider, isAggregate, periodsPlayed, resultEnvelope,
-  clockReading, formatClock, minuteLabel, tieProgress, shootoutState, shootoutLine, shootoutEnd, shootoutTerms, type ShootoutTerms,
+  clockReading, formatClock, eventMinuteLabels, tieProgress, shootoutState, shootoutLine, shootoutEnd, shootoutTerms, type ShootoutTerms,
   isKhoKhoFormat, khoStatus, khoTurnLines, minChaseState, minChaseEnd, inningsEnd, formatChaseTime, parseChaseTime, KHO_END_LABEL, MIN_CHASE_GRACE_MS,
   isKabaddiFormat, kabaddiStatus, canonicalTeamSport, goldenTossEnd, GOLDEN_RAIDS, isHockeySport, penaltyCorners,
-  activeSuspensions, cardRulesFor, escalatedCard,
+  activeSuspensions, cardRulesFor, escalatedCard, sentOffPlayers, isPeriodShaped,
   type ClockReading, type ShootoutState, type MinChaseState,
   statSpecFor, type EventTone, type KernelState, type RallyEvent, type RallyLog, type ScoringFormat,
   type Side, type StatEventSpec,
@@ -71,6 +71,8 @@ export interface TeamDeckProps {
   recorded?: boolean;
   /** A knockout fixture needs a winner, so a rain draw is not offered. */
   knockout?: boolean;
+  /** Stop for now (rain, light): saved as postponed with the score; the next tap resumes it. */
+  onSuspend?: (log: RallyLog, state: KernelState) => void;
   /**
    * What follows a recorded result - the award and the lock. Passed in rather than
    * built here: the deck knows the match is over, and the page knows what the
@@ -349,6 +351,8 @@ export function TeamDeck(p: TeamDeckProps) {
   // Card rules (hockey): who is serving a suspension, and whether a repeat card escalates.
   const cardRules = useMemo(() => cardRulesFor(format), [format]);
   const suspended = cardRules && !state.ended ? activeSuspensions(log, cardRules, nowMs) : [];
+  // Sent off for the match: not picked for an action, and not replaced by a substitute.
+  const sentOff = useMemo(() => sentOffPlayers(log, cardRules), [log, cardRules]);
   const cardName = (key: string) => events.find((e) => e.key === key)?.label ?? key;
 
   /** A tap, with the escalation question first when a repeat card should become the next one up. */
@@ -442,10 +446,13 @@ export function TeamDeck(p: TeamDeckProps) {
         // which it is before they do it, not after.
         : level && repeatingExtra
           ? `Still ${shown[0]}–${shown[1]}. Another ${periodName.toLowerCase()} of ${extraSpec!.minutes} minutes is played.`
-          : level && inExtra && format.tieBreak?.penalties
-          ? `Still ${shown[0]}–${shown[1]} after extra time. This goes to a penalty shoot-out.`
           : level && !inExtra && format.tieBreak?.extraTime
             ? `Level at ${shown[0]}–${shown[1]}. This goes to ${(extraSpec?.label ?? 'extra time').toLowerCase()}${extraSpec?.repeat ? ` (${extraSpec.minutes} min, repeated until someone leads)` : ''}.`
+            // Straight to kicks (no extra time), or after it.
+            : level && format.tieBreak?.penalties
+            ? `${inExtra ? 'Still' : 'Level at'} ${shown[0]}–${shown[1]}${inExtra ? ' after extra time' : ''}. This goes to a ${shootoutTerms(format.sport).title === 'Shoot-out' ? 'shoot-out' : 'penalty shoot-out'}.`
+            : level && format.tieBreak?.goldenRaid
+            ? `${inExtra ? 'Still' : 'Level at'} ${shown[0]}–${shown[1]}. This goes to golden raids: a fresh toss, then the first point wins.`
             : level && format.tieBreak?.universalPoint
               ? `Level at ${shown[0]}-${shown[1]}. Universal point: the next goal wins the match.`
               : `This is the last ${periodName.toLowerCase()}. The match is decided on the total, currently ${shown[0]}–${shown[1]}.`,
@@ -671,13 +678,17 @@ export function TeamDeck(p: TeamDeckProps) {
         <div data-qa="kho-follow-on" role="status"
           className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg bg-amber-100 px-3 py-1.5 text-sm font-semibold text-amber-900 dark:bg-amber-500/15 dark:text-amber-300">
           <span className="mr-auto">
-            {nameOf(khoNow.followOnOffer.leader)} lead by {khoNow.followOnOffer.lead} after the first innings - follow-on?
+            {nameOf(khoNow.followOnOffer.leader)} lead by {khoNow.followOnOffer.lead} after the first innings
+            {khoNow.followOnOffer.compulsory ? ' - the follow-on is compulsory' : ' - follow-on?'}
           </span>
           <Button size="sm" className="h-7" disabled={p.disabled || p.busy}
             onClick={() => push({ t: 'followOn', side: khoNow.followOnOffer!.leader })}>
             {nameOf(otherOf(khoNow.followOnOffer.leader))} chase again
           </Button>
-          <Button size="sm" variant="subtle" className="h-7" onClick={() => setFollowOnDismissed(true)}>No follow-on</Button>
+          {/* Past the format's compulsory lead there is no choice to decline. */}
+          {!khoNow.followOnOffer.compulsory && (
+            <Button size="sm" variant="subtle" className="h-7" onClick={() => setFollowOnDismissed(true)}>No follow-on</Button>
+          )}
         </div>
       )}
 
@@ -702,7 +713,7 @@ export function TeamDeck(p: TeamDeckProps) {
               <PeopleGrid
                 value="" qa="sub-off"
                 options={(p.roster?.[cameOn[0].side] ?? []).map((x) => [x.id, x.name] as [string, string])}
-                cards={playerCards}
+                cards={playerCards} blocked={sentOff}
                 onChange={(v) => settleSub(v)}
               />
             </div>
@@ -713,7 +724,7 @@ export function TeamDeck(p: TeamDeckProps) {
         ) : /* The log first: after full time it is how the result gets checked before
             confirming. With the result card first, Log did nothing once a match ended. */
         surface === 'log' ? (
-          <Timeline log={log} nameOf={nameOf} nameFor={nameFor} fullMs={fullMs}
+          <Timeline log={log} nameOf={nameOf} nameFor={nameFor} format={format}
             onClose={() => setSurface('act')} />
         ) : state.ended ? (
           // TWO STAGES, NOT ONE. Confirming writes the score; it does not make the
@@ -817,6 +828,7 @@ export function TeamDeck(p: TeamDeckProps) {
           <Shootout
             shoot={shoot} nameOf={nameOf} kicksEach={format.tieBreak?.penalties?.kicks ?? 5} terms={shootoutTerms(format.sport)}
             busy={!!p.disabled || !!p.busy} score={shown} roster={p.roster}
+            onFirst={(side) => push({ t: 'shootoutFirst', side })}
             onKick={(side, scored, kicker) => push({
               t: 'penaltyKick', side, scored,
               ...(kicker ? { playerId: kicker.id, playerName: kicker.name } : {}),
@@ -843,6 +855,7 @@ export function TeamDeck(p: TeamDeckProps) {
             format={format} state={state} nameOf={nameOf} shown={shown} played={played}
             totalPeriods={totalPeriods} bestOf={maxUnits !== totalPeriods ? maxUnits : undefined}
             periodLabel={lv.label} finishing={finishing} knockout={p.knockout}
+            onSuspend={p.onSuspend && (() => { setFinishing(false); p.onSuspend!(log, state); })}
             onFinishing={setFinishing} onEvent={push} onClose={() => setSurface('act')}
           />
         ) : (
@@ -888,7 +901,7 @@ export function TeamDeck(p: TeamDeckProps) {
                   <PeopleGrid
                     value={actor} qa={`actor-${side}`}
                     options={players.map((x) => [x.id, x.name] as [string, string])}
-                    cards={playerCards} foulLimit={foulLimit}
+                    cards={playerCards} foulLimit={foulLimit} blocked={sentOff}
                     onChange={(v) => { setActor(v); if (v === second) setSecond(''); setAssistOpen(false); }}
                   />
                   {subs.length > 0 && (
@@ -904,7 +917,7 @@ export function TeamDeck(p: TeamDeckProps) {
                           <PeopleGrid
                             value={actor} qa={`actor-sub-${side}`}
                             options={subs.map((x) => [x.id, x.name] as [string, string])}
-                            cards={playerCards} foulLimit={foulLimit}
+                            cards={playerCards} foulLimit={foulLimit} blocked={sentOff}
                             onChange={(v) => { setActor(v); if (v === second) setSecond(''); setAssistOpen(false); }}
                           />
                         </div>
@@ -1143,7 +1156,7 @@ const SURFACE = 'absolute inset-0 flex flex-col overflow-hidden';
 /** The "Not sure" choice for a required second person: records the action, credits nobody. */
 const UNSURE = '?';
 
-const PASSIVE: ReadonlySet<string> = new Set(['clockStart', 'clockPause', 'clockAdjust', 'timeout', 'setServe', 'chaseFirst', 'followOn', 'minChase', 'raidFirst', 'raidTurn', 'goldenRaid']);
+const PASSIVE: ReadonlySet<string> = new Set(['clockStart', 'clockPause', 'clockAdjust', 'timeout', 'setServe', 'chaseFirst', 'followOn', 'minChase', 'raidFirst', 'raidTurn', 'goldenRaid', 'shootoutFirst']);
 
 /** A panel toggle that is currently open - readable as "on" without going solid. */
 const PANEL_OPEN = 'border-brand-300 bg-brand-50 text-brand-700 ring-1 ring-brand-200 dark:border-brand-500/50 dark:bg-brand-500/10 dark:text-brand-200 dark:ring-brand-500/30';
@@ -1287,7 +1300,9 @@ function ClockPanel({ clock, periodLabel, period, busy, onAdjust, onToggle, onCl
  * penalties, and the terminal `end` event carries that reason so a record can say
  * so rather than presenting it as a win in normal time.
  */
-function Shootout({ shoot, nameOf, kicksEach, terms, busy, score, roster, onKick, onUndo, onSettle }: {
+function Shootout({ shoot, nameOf, kicksEach, terms, busy, score, roster, onFirst, onKick, onUndo, onSettle }: {
+  /** The toss: who kicks first, changeable until the first kick. */
+  onFirst: (side: Side) => void;
   /** Hockey says shoot-out and shooter; football penalties and kicker. */
   terms: ShootoutTerms;
   shoot: ShootoutState;
@@ -1325,6 +1340,19 @@ function Shootout({ shoot, nameOf, kicksEach, terms, busy, score, roster, onKick
           match level at {score[0]}–{score[1]}
         </div>
       </div>
+
+      {/* The toss decides who kicks first; fixed once the first kick is taken. */}
+      {shoot.kicks.length === 0 && (
+        <div data-qa="shootout-first" className="flex shrink-0 flex-wrap items-center justify-center gap-1.5 text-[11px]">
+          <span className="text-muted">Won the toss, {terms.attempt}s first:</span>
+          {(['A', 'B'] as Side[]).map((s) => (
+            <Button key={s} size="sm" variant={shoot.first === s ? 'primary' : 'outline'} className="h-6 max-w-[40%] truncate px-2 text-[11px]"
+              disabled={busy} onClick={() => { if (shoot.first !== s) onFirst(s); }}>
+              {nameOf(s)}
+            </Button>
+          ))}
+        </div>
+      )}
 
       {/* The grid an official actually reads: a row per side, a mark per kick. */}
       {/* Name column as wide as the longer name, shrinking (then "…") only when the
@@ -1845,8 +1873,10 @@ function CardPips({ counts, on }: { counts: CardCounts; on: boolean }) {
   );
 }
 
-function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0 }: {
+function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0, blocked }: {
   value: string; options: Array<[string, string]>; onChange: (v: string) => void; qa?: string;
+  /** Sent off: shown, but can't be picked. */
+  blocked?: Set<string>;
   /** Cards booked per player id, so a chip can say who is already on a yellow. */
   cards?: Map<string, CardCounts>;
   /** Fouls that put a player out (basketball); 0 when the sport has no foul-out. */
@@ -1875,9 +1905,11 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0 }: {
         return (
           <button key={v || '_none'} type="button" data-qa-value={v}
             data-fouled-out={fouledOut || undefined}
+            disabled={!!v && !!blocked?.has(v) && !on}
             // The tooltip is the only place the name is guaranteed whole, so it now
             // carries the booking too rather than just repeating the label.
-            title={fouledOut ? `${label} - fouled out (${marks!.caution} fouls)`
+            title={v && blocked?.has(v) ? `${label} - sent off, can't be picked or replaced`
+              : fouledOut ? `${label} - fouled out (${marks!.caution} fouls)`
               : marks
               ? `${label} - ${[marks.warning && `${marks.warning} green card${marks.warning > 1 ? 's' : ''}`,
                   marks.caution && `${marks.caution} ${foulLimit ? 'foul' : 'caution'}${marks.caution > 1 ? 's' : ''}`,
@@ -1886,7 +1918,7 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0 }: {
               : label}
             onClick={() => onChange(v)}
             className={cn(
-              'flex h-8 items-center justify-center gap-1 overflow-hidden rounded-full px-2 text-center font-semibold transition active:scale-[0.97]',
+              'flex h-8 items-center justify-center gap-1 overflow-hidden rounded-full px-2 text-center font-semibold transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50',
               chipFont(shown, extra),
               on
                 ? 'bg-brand-600 text-white shadow-sm'
@@ -1912,15 +1944,16 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0 }: {
  * this the only way to know whether a goal went in with the right scorer was to
  * undo it and do it again.
  */
-function Timeline({ log, nameOf, nameFor, fullMs, onClose }: {
+function Timeline({ log, nameOf, nameFor, format, onClose }: {
   log: RallyLog;
   nameOf: (s: Side) => string;
   nameFor: (id: string) => string | undefined;
-  /** The period's length, so stoppage prints as 45+2' rather than 47'. */
-  fullMs: number;
+  /** The format, so minutes run on across halves and stoppage prints as 45+2'. */
+  format: ScoringFormat;
   onClose: () => void;
 }) {
   const rows = [...log.entries()].reverse();
+  const minutes = useMemo(() => eventMinuteLabels(format, log), [format, log]);
   // Shoot-out kicks scored up to and including each entry.
   const tally: Array<[number, number]> = [];
   log.reduce<[number, number]>((acc, ev, i) => {
@@ -1945,9 +1978,7 @@ function Timeline({ log, nameOf, nameFor, fullMs, onClose }: {
                   official scans for - "when was the second goal?" - so it leads the
                   row, and the bare entry number steps aside for it. */}
               <span className="w-10 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted">
-                {typeof (ev as { clockMs?: number }).clockMs === 'number'
-                  ? minuteLabel((ev as { clockMs: number }).clockMs, fullMs)
-                  : i + 1}
+                {minutes[i] ?? i + 1}
               </span>
               <span className="min-w-0 flex-1">
                 {ev.t === 'endPeriod' ? (
@@ -1992,6 +2023,8 @@ function Timeline({ log, nameOf, nameFor, fullMs, onClose }: {
                   <span className="text-muted">{nameOf(ev.side)} raid first (toss)</span>
                 ) : ev.t === 'raidTurn' ? (
                   <span className="text-amber-700 dark:text-amber-300">Raid switched: {nameOf(ev.side)} to raid</span>
+                ) : ev.t === 'shootoutFirst' ? (
+                  <span className="text-muted">{nameOf(ev.side)} kick first in the shoot-out (toss)</span>
                 ) : ev.t === 'goldenRaid' ? (
                   <span className="text-amber-700 dark:text-amber-300">Golden raid toss: {nameOf(ev.side)} raid first</span>
                 ) : ev.t === 'chaseFirst' ? (
@@ -2018,10 +2051,11 @@ function Timeline({ log, nameOf, nameFor, fullMs, onClose }: {
 
 /** Corrections and the ways a match ends that the rules did not produce. */
 function MorePanel({
-  format, state, nameOf, shown, played, totalPeriods, bestOf, periodLabel, finishing, onFinishing, onEvent, onClose, knockout,
+  format, state, nameOf, shown, played, totalPeriods, bestOf, periodLabel, finishing, onFinishing, onEvent, onClose, knockout, onSuspend,
 }: {
   format: ScoringFormat;
   knockout?: boolean;
+  onSuspend?: () => void;
   state: KernelState;
   /** Set for a sets match ("best of 5"); absent when every period is played. */
   bestOf?: number;
@@ -2037,6 +2071,10 @@ function MorePanel({
 }) {
   // Optional detail for a rain decision: "led by 2 when called off", "pull contest 52m-47m".
   const [rainNote, setRainNote] = useState('');
+  // Level for a draw: the total in a timed or one-set match, sets (or games) won in a match of sets.
+  const top = format.levels.length - 1;
+  const bySets = !isAggregate(format) && (format.levels[top]?.target ?? 1) > 1;
+  const levelNow = bySets ? (state.score[top]?.[0] ?? 0) === (state.score[top]?.[1] ?? 0) : shown[0] === shown[1];
   const rain = async (winner: Side | null) => {
     const note = rainNote.trim();
     const ok = await confirmDialog({
@@ -2072,7 +2110,9 @@ function MorePanel({
           </div>
         </div>
 
-        {format.penaltyEvents !== 'off' && (
+        {/* A conduct point (racquet, volleyball). Hidden for timed team sports, where it
+            read as "penalty awarded" and added an unattributed goal. */}
+        {format.penaltyEvents !== 'off' && !isPeriodShaped(format) && (
           <div>
             <div className="mb-1 text-[10px] uppercase tracking-wide text-muted">Penalty point to</div>
             <div className="flex flex-wrap gap-1.5">
@@ -2139,7 +2179,7 @@ function MorePanel({
                   </Button>
                 );
               })()}
-              {format.endStates.drawsAllowed && shown[0] === shown[1] && (
+              {format.endStates.drawsAllowed && levelNow && (
                 <Button size="sm" variant="subtle"
                   onClick={async () => {
                     const ok = await confirmDialog({
@@ -2163,6 +2203,19 @@ function MorePanel({
                   {!knockout && <Button size="sm" variant="outline" onClick={() => void rain(null)}>Draw</Button>}
                 </div>
               </div>
+              {onSuspend && (
+                <Button size="sm" variant="outline"
+                  onClick={async () => {
+                    const ok = await confirmDialog({
+                      title: 'Suspend this match?',
+                      message: 'It is marked postponed and the score is kept. Open it again and carry on from here.',
+                      confirmLabel: 'Suspend',
+                    });
+                    if (ok) onSuspend();
+                  }}>
+                  Suspend - resume later
+                </Button>
+              )}
               <Button size="sm" variant="subtle"
                 onClick={async () => {
                   const ok = await confirmDialog({

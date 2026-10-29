@@ -140,6 +140,13 @@ const NET: ScoringFormat[] = [
     sport: 'volleyball', key: 'fivb_25_bo3', name: 'Best of 3 sets to 25 (decider 15)',
     levels: [vSet(25, 15, 13), unitsMatch(2)], serve: VOLLEY_SERVE, changeEnds: 'atDeciderMidpoint',
   }),
+  // Every set to 25, the third included (Inter-IIM league, and every women's match).
+  // The deciding set changes ends at 13, its midpoint.
+  fmt({
+    sport: 'volleyball', key: 'vb_bo3_25_all', name: 'Best of 3 sets to 25',
+    levels: [{ key: 'set', label: 'Set', target: 25, winBy: 2, cap: null, switchEndsAt: 13 }, unitsMatch(2)],
+    serve: VOLLEY_SERVE, changeEnds: 'atDeciderMidpoint',
+  }),
   fmt({
     sport: 'volleyball', key: 'corp_21_bo3', name: 'Corporate - best of 3 sets to 21 (decider 15)',
     levels: [vSet(21, 15), unitsMatch(2)], serve: VOLLEY_SERVE, mode: 'selfScored', changeEnds: 'never',
@@ -161,6 +168,12 @@ const NET: ScoringFormat[] = [
   fmt({
     sport: 'throwball', key: 'tb_bo3_21', name: 'Best of 3 sets to 21',
     levels: [vSet(21, 21), unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'never',
+  }),
+  // Every set to 25 by 2, the third included (Inter-IIM).
+  fmt({
+    sport: 'throwball', key: 'tb_bo3_25_all', name: 'Best of 3 sets to 25',
+    levels: [{ key: 'set', label: 'Set', target: 25, winBy: 2, cap: null, switchEndsAt: null }, unitsMatch(2)],
+    serve: THROW_SERVE, changeEnds: 'never',
   }),
   // The international (ITF / USA) shape: sets to 25 by 2, a deciding third to 15.
   fmt({
@@ -226,6 +239,25 @@ const INVASION: ScoringFormat[] = [
       shootOut: 'five kicks each, then sudden death',
     },
   }),
+  // Nine-a-side (Inter-IIM): 9 playing and up to 7 substitutes. Every match but the final
+  // is 2 x 20; a knockout level after it plays 10 + 10 of extra time, then penalties.
+  fmt({
+    sport: 'football', key: 'football9_2x20', name: 'Nine-a-side - two halves of 20 minutes',
+    levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(40, 'leaderWins'), endStates: LEAGUE,
+    rulesSheet: { playersOnField: 9, bench: 7 },
+  }),
+  fmt({
+    sport: 'football', key: 'football9_ko_2x20', name: 'Nine-a-side knockout - two halves of 20, extra time 10 + 10, then penalties',
+    levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(40, 'leaderWins', 'organiserDecides'), endStates: STRICT,
+    tieBreak: { extraTime: { periods: 2, minutes: 10 }, penalties: SHOOTOUT },
+    rulesSheet: { playersOnField: 9, bench: 7 },
+  }),
+  fmt({
+    sport: 'football', key: 'football9_final_2x30', name: 'Nine-a-side final - two halves of 30, extra time 10 + 10, then penalties',
+    levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(60, 'leaderWins', 'organiserDecides'), endStates: STRICT,
+    tieBreak: { extraTime: { periods: 2, minutes: 10 }, penalties: SHOOTOUT },
+    rulesSheet: { playersOnField: 9, bench: 7 },
+  }),
   fmt({
     sport: 'football', key: 'fifa_2x45', name: 'Two halves of 45 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(90, 'leaderWins'),
@@ -248,6 +280,17 @@ const INVASION: ScoringFormat[] = [
   fmt({
     sport: 'futsal', key: 'futsal_2x20', name: 'Two halves of 20 minutes',
     levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(40, 'leaderWins'), endStates: LEAGUE,
+  }),
+  // Inter-IIM: two halves of 10. Groups can end level; semi-finals and the final go
+  // straight to a 3-kick shoot-out, then sudden death (no extra time).
+  fmt({
+    sport: 'futsal', key: 'futsal_2x10', name: 'Two halves of 10 minutes',
+    levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(20, 'leaderWins'), endStates: LEAGUE,
+  }),
+  fmt({
+    sport: 'futsal', key: 'futsal_ko_2x10', name: 'Knockout - two halves of 10 minutes, 3-kick shoot-out',
+    levels: [period('Half', 'half'), aggregateMatch(2)], clock: cap(20, 'leaderWins'), endStates: STRICT,
+    tieBreak: { penalties: { kicks: 3 } },
   }),
   fmt({
     sport: 'futsal', key: 'futsal_2x15', name: 'Two halves of 15 minutes',

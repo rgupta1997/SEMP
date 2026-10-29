@@ -115,7 +115,7 @@ describe('follow-on', () => {
   const innings1: RallyEvent[] = [toss('A'), ...outs('B', 12), whistle(), ...outs('A', 2, 'a'), whistle()];
 
   it('is offered to the leader with the right lead', () => {
-    expect(play(four, innings1).kho.followOnOffer).toEqual({ leader: 'A', lead: 10 });
+    expect(play(four, innings1).kho.followOnOffer).toEqual({ leader: 'A', lead: 10, compulsory: false });
   });
 
   it('declined: the offer disappears once turn 3 starts and the order is unchanged', () => {

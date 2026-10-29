@@ -1,5 +1,6 @@
 import {
-  contingentKey, findTieResolution, isKnockoutRound, readTieResolutions, tiebreakerLabel,
+  addAdt, adtOf, contingentKey, emptyAdt, findTieResolution, isKhoKhoFormat, isKnockoutRound, khoMatchAdt, parseStoredFormat,
+  readRallyLog, readTieResolutions, tiebreakerLabel, type AdtTally,
   type GroupRanking, type StandingsScheme, type TieResolution,
 } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
@@ -13,6 +14,10 @@ import { DRAW_FIXTURE_FIELDS, loadRuleIndex, ruleFromIndex, schemeInput, toSchem
 export interface TableRow {
   entity_id: string; name: string; short_name: string | null; rank: number;
   played: number; won: number; drawn: number; lost: number; points: number; score_for: number; score_against: number;
+  /** Kho kho: average difference time over the pool's matches, seconds to 3 decimals; null when none could be read. */
+  adt?: number | null;
+  /** Some turn's clock was not run, so its full length was used. */
+  adt_estimated?: boolean;
 }
 export interface PoolTable { pool: number | null; label: string; complete: boolean; rows: TableRow[]; ties: string[][] }
 export interface DrawTables {
@@ -78,6 +83,22 @@ export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTa
   const resolutions = readTieResolutions(td.format_config);
 
   const tableAll = all.filter((f) => !isKnockoutRound(f.round));
+  // Kho kho: each team's ADT inputs over a pool's finished matches, read off the turn logs.
+  const kho = isKhoKhoFormat({ sport: sport ?? '' });
+  const rawOf = new Map(all.map((f, i) => [f, td.fixtures[i]] as const));
+  const adtFor = (poolAll: typeof all): Map<string, AdtTally> => {
+    const sums = new Map<string, AdtTally>();
+    for (const f of poolAll) {
+      if (f.status !== 'completed' || !f.home_entity_id || !f.away_entity_id) continue;
+      const live = rawOf.get(f)?.live_state as { format?: unknown } | null;
+      const format = parseStoredFormat(live?.format);
+      const m = format ? khoMatchAdt(format, readRallyLog(live)) : null;
+      if (!m) continue;
+      sums.set(f.home_entity_id, addAdt(sums.get(f.home_entity_id) ?? emptyAdt(), m.A));
+      sums.set(f.away_entity_id, addAdt(sums.get(f.away_entity_id) ?? emptyAdt(), m.B));
+    }
+    return sums;
+  };
   const stages = [...new Set(tableAll.map((f) => f.stage_sequence ?? 1))].sort((a, b) => a - b).map((stage) => {
     const ranking = ctx.rankingFor!(stage);
     const stageAll = tableAll.filter((f) => (f.stage_sequence ?? 1) === stage);
@@ -85,9 +106,11 @@ export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTa
       const poolAll = stageAll.filter((f) => (f.pool_number ?? null) === pool);
       const complete = poolAll.length > 0 && poolAll.every((f) => SETTLED.has(f.status));
       const g = rankGroup(fixtures.filter((f) => !isKnockoutRound(f.round) && (f.stage_sequence ?? 1) === stage && (f.pool_number ?? null) === pool), ranking, resolverFor(resolutions, 'pool', stage, pool));
+      const adt = kho ? adtFor(poolAll) : null;
       const rows: TableRow[] = g.rows.map((r) => ({
         entity_id: r.entity_id, name: names[r.entity_id]?.name ?? 'Unknown', short_name: names[r.entity_id]?.short ?? null, rank: r.rank!,
         played: r.played, won: r.won, drawn: r.drawn, lost: r.lost, points: r.points, score_for: r.gf, score_against: r.ga,
+        ...(adt ? { adt: adt.has(r.entity_id) ? adtOf(adt.get(r.entity_id)!) : null, adt_estimated: !!adt.get(r.entity_id)?.estimated } : {}),
       }));
       // Teams yet to finish a match still belong on the table.
       const seen = new Set(rows.map((r) => r.entity_id));

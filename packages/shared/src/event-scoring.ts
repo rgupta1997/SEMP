@@ -12,6 +12,28 @@ export interface ParticipantResult {
   orgId?: string | null;                 // org id (an entered org of the championship)
   category?: string | null;              // for pickOne events: the single sub-event contested
   marks: Record<string, number | null>;  // subEvent.key -> mark (time/weight/points)
+  /** subEvent.key -> why there is no result: did not start, did not finish, disqualified. */
+  statuses?: Record<string, ResultStatus>;
+}
+
+/** Why a competitor has no result in a sub-event. Such a competitor is never ranked. */
+export const RESULT_STATUSES = ['DNS', 'DNF', 'DQ'] as const;
+export type ResultStatus = (typeof RESULT_STATUSES)[number];
+export const RESULT_STATUS_LABEL: Record<ResultStatus, string> = { DNS: 'Did not start', DNF: 'Did not finish', DQ: 'Disqualified' };
+
+/**
+ * Competed in a sub-event: a result, or a DQ / DNF (a powerlifter with three failed attempts
+ * at one lift still lifted). A DNS is a no-show.
+ */
+export function tookPart(p: Pick<ParticipantResult, 'marks' | 'statuses'>, subKey: string): boolean {
+  const status = resultStatusOf(p, subKey);
+  return status ? status !== 'DNS' : typeof p.marks[subKey] === 'number';
+}
+
+/** The competitor's status in a sub-event, or null when they have (or are waiting for) a result. */
+export function resultStatusOf(p: Pick<ParticipantResult, 'statuses'>, subKey: string): ResultStatus | null {
+  const s = p.statuses?.[subKey];
+  return s && (RESULT_STATUSES as readonly string[]).includes(s) ? s : null;
 }
 
 export interface EventState { participants: ParticipantResult[] }
@@ -41,6 +63,8 @@ export function effectiveEventSpec(spec: EventSpec, discipline: DisciplineRef): 
   const original = discipline.name
     ? spec.subEvents.find((se) => normalizeLabel(se.label) === normalizeLabel(discipline.name!))
     : undefined;
+  // A relay keeps saying so: it is scored as one entry per institute, not per swimmer.
+  const kind = original?.kind ?? (/\brelay\b/i.test(label) ? 'relay' : undefined);
   return {
     ...spec,
     subEvents: [{
@@ -48,8 +72,17 @@ export function effectiveEventSpec(spec: EventSpec, discipline: DisciplineRef): 
       ...(original?.resultType ? { resultType: original.resultType } : {}),
       ...(original?.winnerIs ? { winnerIs: original.winnerIs } : {}),
       ...(original?.unit ? { unit: original.unit } : {}),
+      ...(kind ? { kind } : {}),
     }],
   };
+}
+
+/** How a per-competitor event is scored beyond its spec: the Point System's say. */
+export interface EventScoringOpts {
+  /** Only each institute's best finisher is placed; the rest are passed over. */
+  bestPerSide?: boolean;
+  /** Points to an institute that had a finisher but earned no place points. */
+  participation?: number;
 }
 
 // One row of the simple team-ranking model (the default for events): an org's place.
@@ -75,12 +108,19 @@ export function placementPoints(place: number | null | undefined, medalPoints: n
 // earns that place's points, and the next distinct mark skips the places they consumed -
 // so two equal firsts both score gold and there is no silver (rulebook: equal results
 // both take the points). Organiser overrides happen upstream by editing the marks.
-export function rankSubEvent(spec: EventSpec, state: EventState, subKey: string): Map<string, number> {
+export function rankSubEvent(spec: EventSpec, state: EventState, subKey: string, opts: EventScoringOpts = {}): Map<string, number> {
   const winnerIs = spec.subEvents.find((se) => se.key === subKey)?.winnerIs ?? spec.result.winnerIs;
-  const entries = state.participants
-    .map((p) => ({ id: p.id, mark: p.marks[subKey] }))
-    .filter((e): e is { id: string; mark: number } => typeof e.mark === 'number');
+  // A DNS / DNF / DQ is never ranked, whatever time was typed beside it.
+  let entries = state.participants
+    .filter((p) => !resultStatusOf(p, subKey))
+    .map((p) => ({ id: p.id, side: keyOf(p), mark: p.marks[subKey] }))
+    .filter((e): e is { id: string; side: string; mark: number } => typeof e.mark === 'number');
   entries.sort((a, b) => (winnerIs === 'min' ? a.mark - b.mark : b.mark - a.mark));
+  // Best per institute: its other finishers take no place, so the next institute moves up.
+  if (opts.bestPerSide) {
+    const seen = new Set<string>();
+    entries = entries.filter((e) => (seen.has(e.side) ? false : (seen.add(e.side), true)));
+  }
   const ranks = new Map<string, number>();
   let prevMark: number | null = null;
   let prevRank = 0;
@@ -99,7 +139,7 @@ export interface AggRow { key: string; label: string; points: number }
 //   medals      -> medalPoints[rank-1] per sub-event
 //   placePoints -> (N - rank + 1) per sub-event
 //   sumBest     -> sum of each participant's marks across sub-events
-export function aggregateEvent(spec: EventSpec, state: EventState): AggRow[] {
+export function aggregateEvent(spec: EventSpec, state: EventState, opts: EventScoringOpts = {}): AggRow[] {
   const points = new Map<string, number>();
   const labels = new Map<string, string>();
   const bump = (p: ParticipantResult, pts: number) => {
@@ -120,7 +160,7 @@ export function aggregateEvent(spec: EventSpec, state: EventState): AggRow[] {
       // Each sub-event may override the medal scale (e.g. relays pay 10/7/3, individual
       // events 5/3/1). Falls back to the event-level scale when not set.
       const medals = se.medalPoints ?? defaultMedals;
-      const ranks = rankSubEvent(spec, state, se.key);
+      const ranks = rankSubEvent(spec, state, se.key, opts);
       for (const [pid, rank] of ranks) {
         const p = state.participants.find((x) => x.id === pid);
         if (!p) continue;
@@ -160,7 +200,7 @@ export function rankingContributions(rows: EventRankingRow[], medalPoints: numbe
 // Per-org standings contribution from the detailed per-athlete console: points via the
 // aggregation rule, medals from each sub-event's top-3 athletes' orgs. Only athletes with
 // an orgId count towards standings (individual entries are display-only).
-export function detailedContributions(spec: EventSpec, state: EventState): EventOrgContribution[] {
+export function detailedContributions(spec: EventSpec, state: EventState, opts: EventScoringOpts = {}): EventOrgContribution[] {
   const byOrg = new Map<string, EventOrgContribution>();
   const ensure = (orgId: string, org: string) => {
     let c = byOrg.get(orgId);
@@ -170,14 +210,14 @@ export function detailedContributions(spec: EventSpec, state: EventState): Event
 
   // Points: aggregateEvent keys org-bearing participants by orgId; credit those.
   const orgIds = new Set(state.participants.map((p) => p.orgId).filter((x): x is string => !!x));
-  for (const row of aggregateEvent(spec, state)) {
+  for (const row of aggregateEvent(spec, state, opts)) {
     if (orgIds.has(row.key)) ensure(row.key, row.label).points += row.points;
   }
 
   // Medals: each sub-event's top-3 athletes' orgs earn gold/silver/bronze.
   if (spec.result.aggregate !== 'sumBest') {
     for (const se of spec.subEvents) {
-      const ranks = rankSubEvent(spec, state, se.key);
+      const ranks = rankSubEvent(spec, state, se.key, opts);
       for (const [pid, rank] of ranks) {
         if (rank > 3) continue;
         const p = state.participants.find((x) => x.id === pid);
@@ -188,5 +228,17 @@ export function detailedContributions(spec: EventSpec, state: EventState): Event
     }
   }
 
+  // The participation floor: an institute that took part but earned no place points.
+  if (opts.participation && opts.participation > 0) {
+    for (const p of state.participants) {
+      if (!p.orgId || !spec.subEvents.some((se) => tookPart(p, se.key))) continue;
+      const c = ensure(p.orgId, labelOf(p));
+      if (c.points === 0) { c.points = opts.participation; c.participation = 1; }
+    }
+  }
+
   return [...byOrg.values()];
 }
+
+/** A relay sub-event: one entry (and one time) per institute. */
+export const isRelaySubEvent = (se?: { kind?: string } | null): boolean => se?.kind === 'relay';

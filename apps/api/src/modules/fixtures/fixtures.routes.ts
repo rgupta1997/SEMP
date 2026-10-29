@@ -602,6 +602,8 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     // every ranked org, instead of the template default.
     const ranking_points = rule?.scheme === 'ranking' ? rule.places : null;
     const ranking_participation = rule?.scheme === 'ranking' ? rule.participation : 0;
+    // Several competitors per institute: only its best one placed, when the rule says so.
+    const ranking_best_only = rule?.scheme === 'ranking' ? !!rule.bestPerSide : false;
     // Every scoring format this fixture could resolve to, so the console can walk
     // the ladder (fixture -> round -> draw -> sport default) without a second round
     // trip per rung. WITHOUT THIS the console received no format rows at all, so
@@ -647,7 +649,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     }
 
     res.json({
-      ...fixture, point_scheme: rule?.scheme ?? null, ranking_points, ranking_participation,
+      ...fixture, point_scheme: rule?.scheme ?? null, ranking_points, ranking_participation, ranking_best_only,
       scoring_formats, event_entrants,
     });
   }));
