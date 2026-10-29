@@ -5,13 +5,14 @@ import {
   clockReading, formatClock, eventMinuteLabels, tieProgress, shootoutState, shootoutLine, shootoutEnd, shootoutTerms, type ShootoutTerms,
   isKhoKhoFormat, khoStatus, khoTurnLines, minChaseState, minChaseEnd, inningsEnd, formatChaseTime, parseChaseTime, KHO_END_LABEL, MIN_CHASE_GRACE_MS,
   isKabaddiFormat, kabaddiStatus, canonicalTeamSport, goldenTossEnd, GOLDEN_RAIDS, isHockeySport, penaltyCorners,
-  activeSuspensions, cardRulesFor, escalatedCard, sentOffPlayers, isPeriodShaped,
+  activeSuspensions, cardRulesFor, escalatedCard, sentOffPlayers, isPeriodShaped, timeoutRules, timeoutsLeft, timeoutsAllowedNow,
   type ClockReading, type ShootoutState, type MinChaseState,
   statSpecFor, type EventTone, type KernelState, type RallyEvent, type RallyLog, type ScoringFormat,
   type Side, type StatEventSpec,
 } from '@semp/shared';
 import { Button, Card, Input, cn, confirmDialog, toast } from '../../components/ui';
 import { FitName } from '../../components/FitName';
+import { Countdown } from './RacquetDeck';
 
 // ============================================================================
 // The console for everything that is not a racquet sport.
@@ -184,15 +185,17 @@ export function TeamDeck(p: TeamDeckProps) {
     return () => window.clearInterval(id);
   }, [clock.running]);
 
-  const push = (ev: RallyEvent) => {
+  const push = (ev: RallyEvent) => pushAll([ev]);
+  const pushAll = (evs: RallyEvent[]) => {
     if (p.disabled) return;
     // WHERE IN THE MATCH, stamped once, here. Every event that is not itself a clock
     // control carries the time it happened at, so the log can cite a goal as 23'
     // however the clock is corrected afterwards.
-    const stamped = ev.t === 'clockStart' || ev.t === 'clockPause' || ev.t === 'clockAdjust'
+    const at = new Date().toISOString();
+    const stamped = evs.map((ev) => (ev.t === 'clockStart' || ev.t === 'clockPause' || ev.t === 'clockAdjust'
       ? ev
-      : { ...ev, ...(clock.started ? { clockMs: clock.elapsedMs } : {}) };
-    const next = [...log, { ...stamped, at: new Date().toISOString() }];
+      : { ...ev, ...(clock.started ? { clockMs: clock.elapsedMs } : {}) }));
+    const next = [...log, ...stamped.map((ev) => ({ ...ev, at }))];
     p.onChange(next, foldRally(format, next, 'A').state);
   };
 
@@ -213,6 +216,35 @@ export function TeamDeck(p: TeamDeckProps) {
   };
 
   const nameOf = (s: Side) => (s === 'A' ? p.homeName : p.awayName);
+
+  // Timeouts (volleyball, throwball, kabaddi, frisbee, basketball): the allowance left per side, and a banner for the one just called.
+  const toRules = timeoutRules(format);
+  const toLeft = useMemo(() => timeoutsLeft(format, log, 'A'), [format, log]);
+  // This period's allowance: basketball's 4th quarter and overtimes differ.
+  const toAllowed = useMemo(() => timeoutsAllowedNow(format, log, 'A'), [format, log]);
+  const [timeoutEnded, setTimeoutEnded] = useState(-1);
+  const toIdx = (() => {
+    let i = log.length - 1;
+    if (log[i]?.t === 'clockPause') i -= 1;
+    return log[i]?.t === 'timeout' ? i : -1;
+  })();
+  const activeTimeout = toIdx >= 0 && timeoutEnded !== toIdx ? (log[toIdx] as Extract<RallyEvent, { t: 'timeout' }>) : null;
+  const callTimeout = async (s: Side) => {
+    if (toLeft && toLeft[s] === 0) {
+      const ok = await confirmDialog({
+        title: `${nameOf(s)} has no timeouts left`,
+        message: 'They have used their allowance. Record another one anyway?',
+        confirmLabel: 'Record timeout',
+      });
+      if (!ok) return;
+    }
+    // A running match clock stops for the timeout and starts again when it ends.
+    pushAll(clock.running ? [{ t: 'timeout', side: s }, { t: 'clockPause' }] : [{ t: 'timeout', side: s }]);
+  };
+  const endTimeout = () => {
+    setTimeoutEnded(toIdx);
+    if (log[toIdx + 1]?.t === 'clockPause' && !clock.running) push({ t: 'clockStart' });
+  };
   const shortOf = (s: Side) => (s === 'A' ? p.homeShort : p.awayShort) || nameOf(s);
   const played = periodsPlayed(state);
   const totalPeriods = format.levels[format.levels.length - 1].target;
@@ -604,6 +636,43 @@ export function TeamDeck(p: TeamDeckProps) {
               {nameOf(s)}
             </Button>
           ))}
+        </div>
+      )}
+
+      {activeTimeout && toRules && (
+        <div data-qa="timeout-banner" role="status"
+          className="flex shrink-0 items-center gap-2 rounded-lg bg-violet-100 px-3 py-1 text-[12px] font-semibold text-violet-900 dark:bg-violet-500/15 dark:text-violet-200">
+          <span className="mr-auto truncate">
+            Timeout - {nameOf(activeTimeout.side)} <Countdown from={activeTimeout.at} seconds={toRules.seconds} />
+          </span>
+          <Button size="sm" variant="subtle" className="h-6 px-2 text-[11px]" onClick={endTimeout}>End timeout</Button>
+        </div>
+      )}
+
+      {/* Timeouts left per side, as dots, with the button that calls one. */}
+      {toRules && toLeft && !state.ended && (
+        <div data-qa="timeouts" className="grid shrink-0 grid-cols-2 gap-1.5">
+          {(['A', 'B'] as Side[]).map((s) => {
+            const allowed = toAllowed ?? 0;
+            const per = toRules.perGame != null ? lv.label.toLowerCase() : 'match';
+            const left = toLeft[s];
+            return (
+              <div key={s} className={cn('flex min-w-0 items-center gap-1.5 rounded-lg border border-line px-2 py-0.5 text-[11px]', s === 'B' && 'flex-row-reverse')}>
+                <span className="min-w-0 truncate font-semibold text-muted">{nameOf(s)}</span>
+                <span className={cn('flex shrink-0 items-center gap-1', s === 'B' ? 'mr-auto' : 'ml-auto')}
+                  aria-label={`${left} of ${allowed} timeouts left this ${per}`} title={`${left} of ${allowed} left this ${per}`}>
+                  {Array.from({ length: allowed }, (_, i) => (
+                    <span key={i} className={cn('inline-block h-2.5 w-2.5 rounded-full border-2',
+                      i < left ? 'border-violet-500 bg-violet-500' : 'border-slate-300 bg-transparent dark:border-slate-600')} />
+                  ))}
+                </span>
+                <Button size="sm" variant={left === 0 ? 'subtle' : 'outline'} className={cn('h-6 shrink-0 px-2 text-[11px]', left === 0 && 'opacity-50')}
+                  disabled={p.disabled || p.busy} onClick={() => callTimeout(s)}>
+                  Timeout
+                </Button>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -1998,6 +2067,8 @@ function Timeline({ log, nameOf, nameFor, format, onClose }: {
                   </>
                 ) : ev.t === 'setServe' ? (
                   <span className="text-muted">{nameOf(ev.side)} to serve</span>
+                ) : ev.t === 'timeout' ? (
+                  <span className="text-muted">Timeout - {nameOf(ev.side)}</span>
                 ) : ev.t === 'clockStart' ? (
                   <span className="text-muted">Clock started</span>
                 ) : ev.t === 'clockPause' ? (

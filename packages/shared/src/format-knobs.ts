@@ -1,5 +1,6 @@
 import { isPeriodShaped, pluralizePeriodLabel } from './match-format.js';
-import { expediteConfig, ITTF_EXPEDITE } from './rally-kernel.js';
+import { expediteConfig, ITTF_EXPEDITE, timeoutRules } from './rally-kernel.js';
+import { canonicalRacquetSport } from './racquet-presets.js';
 import { isChessSport } from './chess.js';
 import { carromRulesOf, isCarromSport } from './carrom.js';
 import { followOnCompulsoryAbove, followOnLead, isKhoKhoFormat } from './kho-kho.js';
@@ -69,6 +70,16 @@ export interface FormatKnobs {
   expediteEnabled: boolean;
   /** Playing minutes in a game before expedite comes in. */
   expediteMinutes: number;
+  /** Read-only. Its console counts timeouts: the racquet sports, volleyball, throwball, kabaddi, frisbee, basketball. */
+  countsTimeouts: boolean;
+  /** Timeouts each side may call: how many, counted per game or per match, and how long. */
+  timeoutsEnabled: boolean;
+  timeoutsCount: number;
+  timeoutsPer: 'game' | 'match';
+  timeoutSeconds: number;
+  /** Period-shaped, per period: the allowance in the last regulation period and in each extra-time period. */
+  timeoutsLastPeriod: number;
+  timeoutsExtraTime: number;
 
   // ---- the clock
   clockEnabled: boolean;
@@ -345,6 +356,26 @@ export const KNOB_SPECS: KnobSpec[] = [
   { key: 'expediteMinutes', label: 'Minutes before expedite', group: 'ends', type: 'int', min: 1, max: 60,
     hint: 'Playing time in one game. ITTF: 10.',
     applies: (k) => !k.periodShaped && k.movement === 'everyN' && k.officiatingMode === 'officiated' && k.expediteEnabled },
+  { key: 'timeoutsEnabled', label: 'Timeouts', group: 'ends', type: 'bool',
+    hint: 'Each side can call a timeout; the console counts what is left and times it.',
+    applies: (k) => k.countsTimeouts },
+  { key: 'timeoutsCount', label: 'Timeouts per side', group: 'ends', type: 'int', min: 1, max: 10,
+    applies: (k) => k.countsTimeouts && k.timeoutsEnabled },
+  { key: 'timeoutsPer', label: 'Counted per', group: 'ends', type: 'enum',
+    hint: 'Per game, set or half: the allowance starts again each one. Per match: one allowance for the whole match.',
+    options: [
+      { value: 'match', label: 'Whole match' },
+      { value: 'game', label: 'Each game / set / half' },
+    ],
+    applies: (k) => k.countsTimeouts && k.timeoutsEnabled },
+  { key: 'timeoutSeconds', label: 'Seconds per timeout', group: 'ends', type: 'int', min: 10, max: 600,
+    applies: (k) => k.countsTimeouts && k.timeoutsEnabled },
+  { key: 'timeoutsLastPeriod', label: 'Timeouts in the last period', group: 'ends', type: 'int', min: 0, max: 10,
+    hint: 'Inter-IIM basketball allows 2 in the 4th quarter.',
+    applies: (k) => k.countsTimeouts && k.timeoutsEnabled && k.timeoutsPer === 'game' && k.periodShaped },
+  { key: 'timeoutsExtraTime', label: 'Timeouts in each extra-time period', group: 'ends', type: 'int', min: 0, max: 10,
+    hint: 'Inter-IIM basketball allows 1 per overtime.',
+    applies: (k) => k.countsTimeouts && k.timeoutsEnabled && k.timeoutsPer === 'game' && k.periodShaped && k.extraTimeEnabled },
 
   // ---- clock
   { key: 'clockEnabled', label: 'Time cap', group: 'clock', type: 'bool',
@@ -548,6 +579,8 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
     penaltiesEnabled: f.penaltyEvents !== 'off',
     expediteEnabled: !!expediteConfig(f),
     expediteMinutes: expediteConfig(f)?.afterMinutes ?? ITTF_EXPEDITE.afterMinutes,
+    countsTimeouts: !!canonicalRacquetSport(f.sport) || TIMEOUT_TEAM_SPORTS.has(canonicalTeamSport(f.sport) ?? ''),
+    ...timeoutKnobs(f),
 
     clockEnabled: !!f.clock,
     clockMinutes: f.clock?.minutes ?? 20,
@@ -587,6 +620,52 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
 
     ...carromKnobs(f),
   };
+}
+
+/** Team sports whose console has the timeout button. */
+const TIMEOUT_TEAM_SPORTS = new Set(['volleyball', 'throwball', 'kabaddi', 'frisbee', 'basketball']);
+
+/** Timeouts, read off the rules sheet or the sport's own rule (table tennis, pickleball). */
+function timeoutKnobs(f: ScoringFormat) {
+  const r = timeoutRules(f);
+  const n = r?.perGame ?? r?.perMatch ?? null;
+  return {
+    timeoutsEnabled: n != null,
+    timeoutsCount: n ?? 1,
+    timeoutsPer: (r?.perGame != null ? 'game' : 'match') as 'game' | 'match',
+    timeoutSeconds: r?.seconds ?? 60,
+    timeoutsLastPeriod: r?.lastPeriod ?? n ?? 1,
+    timeoutsExtraTime: r?.extraTime ?? n ?? 1,
+  };
+}
+
+/**
+ * Writes the timeout knobs to the rules sheet - only where they differ from the sport's
+ * own rule, so a table tennis or pickleball format keeps following it (pickleball's
+ * allowance changes with the game target).
+ */
+function withTimeouts(out: ScoringFormat, k: FormatKnobs, prior: ScoringFormat): ScoringFormat {
+  if (!k.countsTimeouts) return out;
+  const { timeouts: _old, ...sheet } = (out.rulesSheet ?? {}) as Record<string, unknown>;
+  const perPeriod = k.timeoutsPer === 'game' && k.periodShaped;
+  const count = Math.max(1, k.timeoutsCount);
+  const want = k.timeoutsEnabled
+    ? {
+      perGame: k.timeoutsPer === 'game' ? count : null,
+      perMatch: k.timeoutsPer === 'match' ? count : null,
+      seconds: Math.max(10, k.timeoutSeconds),
+      // Only kept when they differ from the usual allowance.
+      ...(perPeriod && k.timeoutsLastPeriod !== count ? { lastPeriod: Math.max(0, k.timeoutsLastPeriod) } : {}),
+      ...(perPeriod && k.extraTimeEnabled && k.timeoutsExtraTime !== count ? { extraTime: Math.max(0, k.timeoutsExtraTime) } : {}),
+    }
+    : false;
+  const base = timeoutRules({ ...out, rulesSheet: sheet });
+  const same = want === false
+    ? base == null
+    : base != null && base.perGame === want.perGame && base.perMatch === want.perMatch && base.seconds === want.seconds
+      && (base.lastPeriod ?? null) === (want.lastPeriod ?? null) && (base.extraTime ?? null) === (want.extraTime ?? null);
+  if (same && (prior.rulesSheet as { timeouts?: unknown } | undefined)?.timeouts === undefined) return out;
+  return { ...out, rulesSheet: same ? sheet : { ...sheet, timeouts: want } };
 }
 
 /** Card suspensions, read off the rules sheet; defaults are the sport's. */
@@ -641,6 +720,10 @@ export function isEditable(f: ScoringFormat): boolean {
  * hand-built badminton format still naming the right partner to serve.
  */
 export function applyKnobs(f: ScoringFormat, k: FormatKnobs, name?: string): ScoringFormat {
+  return withTimeouts(buildFormat(f, k, name), k, f);
+}
+
+function buildFormat(f: ScoringFormat, k: FormatKnobs, name?: string): ScoringFormat {
   const baseInner = f.levels[0];
   const baseTop = f.levels[f.levels.length - 1];
   const baseServe = baseInner.serve ?? f.serve;
@@ -859,6 +942,14 @@ export function describeKnobs(k: FormatKnobs): string {
     if (universal) chain.push('universal point');
     if (golden) chain.push('golden raid');
     bits.push(chain.join(' then '));
+  }
+  if (k.countsTimeouts && k.timeoutsEnabled) {
+    const per = k.timeoutsPer === 'game' ? (k.periodLabel || 'game').toLowerCase() : 'match';
+    const extras = k.timeoutsPer === 'game' && k.periodShaped
+      ? [k.timeoutsLastPeriod !== k.timeoutsCount ? `${k.timeoutsLastPeriod} in the last` : '',
+        k.extraTimeEnabled && k.timeoutsExtraTime !== k.timeoutsCount ? `${k.timeoutsExtraTime} per extra period` : ''].filter(Boolean)
+      : [];
+    bits.push(`${k.timeoutsCount} timeout${k.timeoutsCount === 1 ? '' : 's'} a ${per} (${k.timeoutSeconds}s)${extras.length ? `, ${extras.join(', ')}` : ''}`);
   }
   return bits.join(' · ');
 }

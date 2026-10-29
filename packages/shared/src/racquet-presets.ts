@@ -499,7 +499,8 @@ const SQUASH: ScoringFormat[] = [
   fmt({
     sport: 'squash', key: 'iim_pars11_bo3_cap21', name: 'Inter-IIM - PARS 11, best of 3, ceiling 21',
     levels: [sqGame(11, 2, 21), match(2)], serve: squashParsServe, mode: 'officiated', changeEnds: 'never',
-    rulesSheet: { timeoutSecondsPerPlayer: 90, betweenGamesSeconds: 120 },
+    // One 90-second timeout per player per match.
+    rulesSheet: { timeouts: { perMatch: 1, seconds: 90 }, betweenGamesSeconds: 120 },
   }),
   fmt({
     sport: 'squash', key: 'english9_bo5', name: 'English / hand-in-hand-out - 9 points, best of 5',

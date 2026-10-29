@@ -489,16 +489,31 @@ export function misconductTerms(sport?: string | null): { warning: string; foul:
 
 /** How many timeouts each side may call, and how long one lasts. */
 export interface TimeoutRules {
-  /** Per side per game (pickleball); unused ones do not carry over. */
+  /** Per side per game, set or half (pickleball, volleyball, kabaddi); unused ones do not carry over. */
   perGame: number | null;
   /** Per side per match (table tennis). */
   perMatch: number | null;
   seconds: number;
+  /** Period-shaped, per period only: a different allowance in the last regulation period (Inter-IIM basketball Q4: 2). */
+  lastPeriod?: number | null;
+  /** Period-shaped, per period only: the allowance in each extra-time period (basketball overtime: 1). */
+  extraTime?: number | null;
+}
+
+/** The allowance for the unit at `index` (0-based): the last regulation period and extra time may differ. */
+function timeoutAllowance(format: ScoringFormat, rules: TimeoutRules, index: number): number | null {
+  if (rules.perGame == null) return rules.perMatch;
+  const top = format.levels[format.levels.length - 1];
+  if (top.decide !== 'aggregate') return rules.perGame;
+  if (index >= top.target) return rules.extraTime ?? rules.perGame;
+  if (index === top.target - 1) return rules.lastPeriod ?? rules.perGame;
+  return rules.perGame;
 }
 
 /**
  * The format's timeout allowance: `rulesSheet.timeouts` when set (false turns them off),
- * else the sport's rule - pickleball 2 a game (3 in games to 21), table tennis 1 a match.
+ * else the sport's rule - pickleball 2 a game (3 in games to 21), table tennis 1 a match,
+ * volleyball and throwball 2 of 30 seconds a set, kabaddi 2 of 30 seconds a half (Inter-IIM).
  */
 export function timeoutRules(format: ScoringFormat): TimeoutRules | null {
   const own = (format.rulesSheet as { timeouts?: Partial<TimeoutRules> | false } | undefined)?.timeouts;
@@ -508,6 +523,8 @@ export function timeoutRules(format: ScoringFormat): TimeoutRules | null {
     ? { perGame: format.levels[0].target >= 21 ? 3 : 2, perMatch: null, seconds: 60 }
     : sport === 'table tennis'
     ? { perGame: null, perMatch: 1, seconds: 60 }
+    : sport === 'volleyball' || sport === 'throwball' || sport === 'kabaddi'
+    ? { perGame: 2, perMatch: null, seconds: 30 }
     : null;
   if (!own) return base;
   return { perGame: null, perMatch: null, seconds: 60, ...base, ...own };
@@ -516,8 +533,7 @@ export function timeoutRules(format: ScoringFormat): TimeoutRules | null {
 /** Timeouts each side has left now: per game, or per match. Never below 0. */
 export function timeoutsLeft(format: ScoringFormat, log: RallyLog, firstServer: Side = 'A'): Record<Side, number> | null {
   const rules = timeoutRules(format);
-  const allowed = rules?.perGame ?? rules?.perMatch;
-  if (!rules || allowed == null) return null;
+  if (!rules || (rules.perGame ?? rules.perMatch) == null) return null;
   const used: Record<Side, number> = { A: 0, B: 0 };
   let state = initKernel(format, firstServer);
   for (const ev of log) {
@@ -527,7 +543,16 @@ export function timeoutsLeft(format: ScoringFormat, log: RallyLog, firstServer: 
     // A new game starts a new allowance.
     if (rules.perGame != null && state.finished.filter((u) => u.level === 0).length > games) used.A = used.B = 0;
   }
+  const allowed = timeoutAllowance(format, rules, state.finished.filter((u) => u.level === 0).length) ?? 0;
   return { A: Math.max(0, allowed - used.A), B: Math.max(0, allowed - used.B) };
+}
+
+/** How many timeouts each side gets in the game, set or period being played now. */
+export function timeoutsAllowedNow(format: ScoringFormat, log: RallyLog, firstServer: Side = 'A'): number | null {
+  const rules = timeoutRules(format);
+  if (!rules) return null;
+  const state = foldRally(format, log, firstServer).state;
+  return timeoutAllowance(format, rules, state.finished.filter((u) => u.level === 0).length);
 }
 
 /** True when the expedite system may still be introduced in the game under way. */

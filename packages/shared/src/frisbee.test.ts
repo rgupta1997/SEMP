@@ -89,7 +89,7 @@ describe('format editor', () => {
     const off = applyKnobs(f, { ...k, firstTo: 0, universalPointEnabled: false });
     expect(off.levels[1].firstTo).toBeUndefined();
     expect(off.tieBreak).toBeNull();
-    expect(describeKnobs(k)).toBe('2 halves · first to 13 · 40 min cap (20/period) · universal point');
+    expect(describeKnobs(k)).toBe('2 halves · first to 13 · 40 min cap (20/period) · universal point · 1 timeout a match (60s)');
   });
 });
 

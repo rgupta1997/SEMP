@@ -74,6 +74,9 @@ const period = (label: string, key = label.toLowerCase()): LevelSpec =>
   ({ key, label, target: 1, winBy: 1, cap: null, terminator: 'clock' });
 
 /** An aggregate match: `target` is how many periods are played. */
+/** Inter-IIM basketball: one 1-minute timeout a quarter, two in the 4th; an overtime gets one like a quarter. */
+const IIM_BASKETBALL_TIMEOUTS = { perGame: 1, perMatch: null, seconds: 60, lastPeriod: 2 };
+
 const aggregateMatch = (periods: number): LevelSpec =>
   ({ key: 'match', label: 'Match', target: periods, winBy: 1, cap: null, decide: 'aggregate' });
 
@@ -307,13 +310,21 @@ const INVASION: ScoringFormat[] = [
     endStates: STRICT,
     rulesSheet: { shotClockSeconds: 24, foulsToDisqualify: 5, timeoutsPerHalf: 2, overtime: '5 minutes, repeated until a side leads' },
   }),
+  // Inter-IIM men: FIBA's 4 x 10 with the rulebook's timeouts - 1 a quarter, 2 in the 4th, 1 per overtime.
+  fmt({
+    sport: 'basketball', key: 'iim_4x10', name: 'Inter-IIM - four quarters of 10 minutes',
+    levels: [period('Quarter', 'quarter'), aggregateMatch(4)], clock: cap(40, 'leaderWins', 'organiserDecides'),
+    tieBreak: BASKETBALL_OVERTIME,
+    endStates: STRICT,
+    rulesSheet: { shotClockSeconds: 24, foulsToDisqualify: 5, timeouts: IIM_BASKETBALL_TIMEOUTS, overtime: '5 minutes, repeated until a side leads' },
+  }),
   fmt({
     sport: 'basketball', key: 'basketball_4x8', name: 'Four quarters of 8 minutes',
-    // Shorter quarters (IIMK women's games), same FIBA overtime.
+    // Shorter quarters (IIMK women's games), same FIBA overtime, the rulebook's timeouts.
     levels: [period('Quarter', 'quarter'), aggregateMatch(4)], clock: cap(32, 'leaderWins', 'organiserDecides'),
     tieBreak: BASKETBALL_OVERTIME,
     endStates: STRICT,
-    rulesSheet: { shotClockSeconds: 24, foulsToDisqualify: 5, timeoutsPerHalf: 2, overtime: '5 minutes, repeated until a side leads' },
+    rulesSheet: { shotClockSeconds: 24, foulsToDisqualify: 5, timeouts: IIM_BASKETBALL_TIMEOUTS, overtime: '5 minutes, repeated until a side leads' },
   }),
   fmt({
     sport: 'basketball', key: 'basketball_corp_2x10', name: 'Corporate - two halves of 10 minutes',
@@ -381,7 +392,8 @@ const INVASION: ScoringFormat[] = [
     sport: 'frisbee', key: 'ultimate_2x20', name: 'First to 13, 40-minute cap (two halves of 20)',
     levels: [period('Half', 'half'), { ...aggregateMatch(2), firstTo: 13 }],
     clock: cap(40, 'leaderWins'), endStates: STRICT, tieBreak: { universalPoint: true },
-    rulesSheet: { timeoutsPerTeam: 1, timeoutSeconds: 60, halftimeMinutes: 5 },
+    // Inter-IIM: one 1-minute timeout per team a match, off the clock.
+    rulesSheet: { timeouts: { perMatch: 1, seconds: 60 }, halftimeMinutes: 5 },
   }),
   // The final: still level at the cap plays extra time of 8 + 8 first.
   fmt({
@@ -389,7 +401,7 @@ const INVASION: ScoringFormat[] = [
     levels: [period('Half', 'half'), { ...aggregateMatch(2), firstTo: 13 }],
     clock: cap(40, 'leaderWins'), endStates: STRICT,
     tieBreak: { extraTime: { periods: 2, minutes: 8 }, universalPoint: true },
-    rulesSheet: { timeoutsPerTeam: 1, timeoutSeconds: 60, extraTime: 'two halves of 8, then universal point' },
+    rulesSheet: { timeouts: { perMatch: 1, seconds: 60 }, extraTime: 'two halves of 8, then universal point' },
   }),
 ];
 

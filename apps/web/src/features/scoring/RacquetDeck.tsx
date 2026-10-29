@@ -1411,7 +1411,7 @@ function intervalDue(
 }
 
 /** Time left in a break, counted from the point that started it. */
-function Countdown({ from, seconds }: { from?: string; seconds: number }) {
+export function Countdown({ from, seconds }: { from?: string; seconds: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
