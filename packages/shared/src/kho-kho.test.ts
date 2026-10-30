@@ -246,6 +246,13 @@ describe('average difference time', () => {
     expect(both).toMatchObject({ attackOuts: 12, defendOuts: 8, estimated: true });
   });
 
+  it('a turn ended late counts as its set length', () => {
+    // Turn 1 ended at 7:30 of a 7-minute turn: still 420 s, not 450 s.
+    const late = log.map((e, i) => (i === 4 ? endAt(7.5) : e));
+    expect(khoMatchAdt(f, late)!.A).toMatchObject({ attackMs: 840_000, defendMs: 840_000 });
+    expect(adtOf(khoMatchAdt(f, late)!.A)).toBe(70);
+  });
+
   it('leaves out extra turns and returns nothing before the toss', () => {
     const extra = { ...f, tieBreak: { extraTime: { periods: 2, minutes: 7 }, minimumChase: true } };
     const level: RallyEvent[] = [{ t: 'chaseFirst', side: 'A' } as RallyEvent, out('A'), endAt(7), out('B'), endAt(7), endAt(7), endAt(7), out('A'), endAt(7), endAt(7)];

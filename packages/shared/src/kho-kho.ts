@@ -270,7 +270,9 @@ export function khoMatchAdt(format: ScoringFormat, log: RallyLog): Record<Side, 
   for (const l of lines) {
     const chaser = l.chaser!;
     const defender = other(chaser);
-    const ms = l.ms ?? periodLengthMs(format, l.turn - 1);
+    // A turn ended late (7:30 of a 7-minute turn) counts as its set length: play stops on time.
+    const full = periodLengthMs(format, l.turn - 1);
+    const ms = l.ms == null ? full : full > 0 ? Math.min(l.ms, full) : l.ms;
     const outs = l.points / perOut;
     out[chaser].attackMs += ms; out[chaser].attackOuts += outs;
     out[defender].defendMs += ms; out[defender].defendOuts += outs;

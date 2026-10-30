@@ -36,6 +36,17 @@ export const TBD_LABEL = 'TBD';
 export const isNoResult = (liveState: unknown): boolean =>
   (liveState as { noResult?: unknown } | null)?.noResult === true;
 
+/** Called off as a draw with no points for either side (the official's choice) - flagged in live_state. */
+export const isNoPointsDraw = (liveState: unknown): boolean =>
+  (liveState as { drawNoPoints?: unknown } | null)?.drawNoPoints === true;
+
+/** A walkover whose scoreline counts in the table (its format said so when it was recorded). */
+export const walkoverCountsOf = (liveState: unknown): boolean =>
+  (liveState as { walkoverCounts?: unknown } | null)?.walkoverCounts === true;
+
+/** Drawn by an official's call whatever the score: no result, or a draw with or without points. */
+export const isCalledDraw = (liveState: unknown): boolean => isNoResult(liveState) || isNoPointsDraw(liveState);
+
 /** The round label the knockout generators give the play-off for third. */
 export const THIRD_PLACE_ROUND = '3rd Place';
 
@@ -158,7 +169,8 @@ export type StandingsScheme = (typeof STANDINGS_SCHEME)[number];
 // Ordered tiebreakers for a group / league table (applied left-to-right). score_diff and
 // score_for read each match's headline score, so they mean goals, sets or rubbers by sport.
 // frames_won / ball_diff: pool team ties only (frames and balls summed over the rubbers).
-export const STANDINGS_TIEBREAKER = ['points', 'wins', 'lost', 'head_to_head', 'score_diff', 'score_for', 'frames_won', 'ball_diff'] as const;
+// adt: kho-kho's average difference time over the group matches.
+export const STANDINGS_TIEBREAKER = ['points', 'wins', 'lost', 'head_to_head', 'score_diff', 'score_for', 'frames_won', 'ball_diff', 'adt'] as const;
 // The order a stage gets when nobody set one (older saved stages carry it explicitly).
 export const STAGE_DEFAULT_TIEBREAKERS: StandingsTiebreaker[] = ['points', 'wins', 'lost'];
 export type StandingsTiebreaker = (typeof STANDINGS_TIEBREAKER)[number];

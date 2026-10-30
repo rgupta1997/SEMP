@@ -3,7 +3,7 @@ import {
   DISMISSALS, DISMISSALS_OFF_NO_BALL, DISMISSALS_OFF_WIDE, DISMISSALS_ON_FREE_HIT,
   chaseLine, cricketHeadline, economy, extrasLine, foldCricket, inningsLine,
   oversLeft, oversOf, runRate, strikeRate,
-  type CricketEvent, type CricketFormat, type CricketLog, type CricketState, type Dismissal,
+  type CricketEvent, type CricketFormat, type CricketLog, type CricketSide, type CricketState, type Dismissal,
 } from '@semp/shared';
 import { Button, Card, cn, confirmDialog } from '../../components/ui';
 
@@ -83,7 +83,7 @@ type Innings = CricketState['innings'][number];
 type Delivery = Extract<CricketEvent, { t: 'ball' }>;
 
 /** Which surface the middle region is showing. */
-type Surface = 'pad' | 'extra' | 'wicket' | 'card' | 'more' | 'finish';
+type Surface = 'pad' | 'extra' | 'wicket' | 'card' | 'more' | 'finish' | 'toss';
 
 const RUNS = [0, 1, 2, 3, 4, 6];
 
@@ -196,6 +196,8 @@ export function CricketDeck(p: CricketDeckProps) {
   const inn = state.innings[state.current];
 
   const [surface, setSurface] = useState<Surface>('pad');
+  // "Skip the toss" is for this screen only: naming the opening batter settles it for good.
+  const [tossSkipped, setTossSkipped] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const height = useViewportHeight(root);
 
@@ -297,14 +299,21 @@ export function CricketDeck(p: CricketDeckProps) {
   // design rather than by mistake.
   const lone = format.lastManStands && !!inn.strikerId && !inn.nonStrikerId
     && inn.wickets >= format.wicketsToEndInnings - 1;
+  // THE TOSS, before anything else: it decides who bats first. Changeable until the first
+  // ball; skipping it leaves the home side batting first, as before.
+  const first = state.innings[0];
+  const beforeFirstBall = state.innings.length === 1 && first.balls === 0 && first.wides === 0 && first.noBalls === 0 && first.runs === 0;
+  const needsToss = beforeFirstBall && !state.toss && !first.strikerId && !tossSkipped && !state.ended;
+  const sideName = (s: CricketSide) => (s === 'A' ? p.homeName : p.awayName);
   const needsStriker = !inn.strikerId && !inn.ended && !state.ended;
   const needsNonStriker = !inn.nonStrikerId && !inn.ended && !state.ended && !lone;
   const needsBowler = !inn.bowlerId && !inn.ended && !state.ended;
 
   // What the middle region must show, whatever the scorer last asked for: a missing
   // bowler or batter outranks the pad, because no ball can be recorded without them.
-  const required: Surface | 'needStriker' | 'needNonStriker' | 'needBowler' | null =
+  const required: Surface | 'needToss' | 'needStriker' | 'needNonStriker' | 'needBowler' | null =
     state.ended || inn.ended ? null
+      : needsToss ? 'needToss'
       : needsStriker ? 'needStriker'
         : needsNonStriker ? 'needNonStriker'
           : needsBowler ? 'needBowler'
@@ -312,8 +321,8 @@ export function CricketDeck(p: CricketDeckProps) {
 
   // A surface the scorer opened deliberately still wins over the pad - but never over
   // something the rules require first.
-  const showing: Surface | 'needStriker' | 'needNonStriker' | 'needBowler' =
-    surface === 'card' || surface === 'more' || surface === 'finish'
+  const showing: Surface | 'needToss' | 'needStriker' | 'needNonStriker' | 'needBowler' =
+    surface === 'card' || surface === 'more' || surface === 'finish' || (surface === 'toss' && beforeFirstBall)
       ? surface
       : required ?? surface;
 
@@ -329,6 +338,7 @@ export function CricketDeck(p: CricketDeckProps) {
         <div className="flex items-baseline justify-between gap-3">
           <div className="min-w-0">
             <div className="truncate text-[11px] uppercase tracking-wide text-muted">
+              {inn.superOver ? <span className="font-semibold text-amber-600 dark:text-amber-300">Super Over {inn.superOver} · </span> : null}
               {battingName} batting
             </div>
             <div data-qa="cricket-innings-line"
@@ -338,7 +348,9 @@ export function CricketDeck(p: CricketDeckProps) {
           </div>
           <div className="shrink-0 text-right text-xs leading-tight text-muted">
             <div className="tabular-nums">RR {runRate(inn, format.ballsPerOver).toFixed(2)}</div>
-            {format.oversPerInnings !== null && <div>of {format.oversPerInnings} ov</div>}
+            {inn.maxBalls
+              ? <div>of {inn.maxBalls / format.ballsPerOver} ov</div>
+              : format.oversPerInnings !== null && <div>of {format.oversPerInnings} ov</div>}
             {/* Extras belong beside the score, not in the line of small print below:
                 clipped to "Ex 1 (" it was worse than useless. */}
             <div className="tabular-nums">Ex {extrasLine(inn)}</div>
@@ -353,6 +365,15 @@ export function CricketDeck(p: CricketDeckProps) {
 
         {/* One line, truncated. Three wrapped lines of context cost more of the
             screen than the run pad could spare. */}
+        {state.toss && (
+          <div data-qa="cricket-toss" className="mt-1 flex items-center gap-2 truncate text-[11px] text-muted">
+            <span className="truncate">{sideName(state.toss.winner)} won the toss and chose to {state.toss.elected}</span>
+            {beforeFirstBall && !state.ended && (
+              <button type="button" className="shrink-0 font-semibold underline underline-offset-2" onClick={() => setSurface('toss')}>Change</button>
+            )}
+          </div>
+        )}
+
         <div className="mt-1 flex items-center gap-x-3 overflow-hidden whitespace-nowrap text-[11px] text-muted">
           <span className="shrink-0 tabular-nums">{p.homeName} {headline[0]}</span>
           <span className="shrink-0 tabular-nums">{p.awayName} {headline[1]}</span>
@@ -399,6 +420,14 @@ export function CricketDeck(p: CricketDeckProps) {
 
       {/* ---------------- the working surface: everything swaps HERE ---------------- */}
       <div data-qa="cricket-region" className="relative min-h-0 flex-1">
+        {(showing === 'needToss' || showing === 'toss') && (
+          <TossPanel
+            homeName={p.homeName} awayName={p.awayName} current={state.toss}
+            onRecord={(winner, elected) => push({ t: 'toss', winner, elected })}
+            onSkip={showing === 'needToss' ? () => setTossSkipped(true) : () => setSurface('pad')}
+            skipLabel={showing === 'needToss' ? `Skip - ${p.homeName} bat first` : 'Cancel'}
+          />
+        )}
         {showing === 'needStriker' && (
           <PickPanel
             title="Who is on strike?"
@@ -720,6 +749,44 @@ function PadButton({ label, sub, tone, disabled, onClick }: {
  * every single over. It is also where a stuck console announces itself, so it says
  * plainly why the list is short.
  */
+/** Who won the toss, and what they chose. Recording it decides who bats first. */
+function TossPanel({ homeName, awayName, current, onRecord, onSkip, skipLabel }: {
+  homeName: string; awayName: string; current?: { winner: CricketSide; elected: 'bat' | 'bowl' };
+  onRecord: (winner: CricketSide, elected: 'bat' | 'bowl') => void; onSkip: () => void; skipLabel: string;
+}) {
+  const [winner, setWinner] = useState<CricketSide | null>(current?.winner ?? null);
+  const name = (s: CricketSide) => (s === 'A' ? homeName : awayName);
+  const choice = (selected: boolean) => cn(
+    'min-h-[3rem] rounded-lg border px-2 py-1.5 text-sm font-semibold transition active:scale-[0.98]',
+    selected ? 'border-brand-500 bg-brand-50 text-brand-800 dark:bg-brand-500/15 dark:text-brand-200'
+      : 'border-line bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700',
+  );
+  return (
+    <Card data-qa="toss-panel" className={cn(SURFACE_BOX, 'gap-3 p-3')}>
+      <h3 className="shrink-0 text-sm font-semibold">Who won the toss?</h3>
+      <div className="grid shrink-0 grid-cols-2 gap-1.5">
+        {(['A', 'B'] as CricketSide[]).map((s) => (
+          <button key={s} type="button" className={choice(winner === s)} onClick={() => setWinner(s)}>
+            <span className="line-clamp-2">{name(s)}</span>
+          </button>
+        ))}
+      </div>
+      {winner && (
+        <>
+          <h3 className="shrink-0 text-sm font-semibold">{name(winner)} chose to</h3>
+          <div className="grid shrink-0 grid-cols-2 gap-1.5">
+            <button type="button" className={choice(false)} onClick={() => onRecord(winner, 'bat')}>Bat first</button>
+            <button type="button" className={choice(false)} onClick={() => onRecord(winner, 'bowl')}>Bowl first</button>
+          </div>
+        </>
+      )}
+      <div className="mt-auto shrink-0">
+        <Button size="sm" variant="subtle" onClick={onSkip}>{skipLabel}</Button>
+      </div>
+    </Card>
+  );
+}
+
 function PickPanel({ title, note, people, empty, detailOf, onPick }: {
   title: string; note?: string; people: CricketPerson[]; empty: string;
   detailOf?: (id: string) => string | null; onPick: (id: string) => void;
@@ -1174,7 +1241,7 @@ function Scorecard({ state, nameOf, ballsPerOver, onClose }: {
         {state.innings.map((inn) => (
           <div key={inn.innings} className="space-y-2">
             <div className="text-xs font-semibold uppercase tracking-wide">
-              Innings {inn.innings} - {inningsLine(inn, ballsPerOver)}
+              {inn.superOver ? `Super Over ${inn.superOver}` : `Innings ${inn.innings}`} - {inningsLine(inn, ballsPerOver)}
               {inn.endedBy ? <span className="font-normal text-muted"> ({inn.endedBy.replace('_', ' ')})</span> : null}
             </div>
 

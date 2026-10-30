@@ -16,7 +16,7 @@ import {
 } from '../../features/scoring/tie';
 import { hydrateEvent, hasResultIn, moveUnplacedTo, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
 import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
-import { carromHeadline, carromMatchOf, carromRulesOf, isCarromSport } from '@semp/shared';
+import { carromHeadline, carromMatchOf, carromRulesOf, drawSettlement, isCarromSport } from '@semp/shared';
 import { CarromResult, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
 import { PoolResult, hydratePool } from '../../features/scoring/PoolResult';
 import { isFrameContest, isPoolSport, poolRubber } from '@semp/shared';
@@ -1242,8 +1242,9 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
           timing: rallyTiming(format, nextLog, firstServer),
           // Snapshot on first write, then leave alone.
           format: (live?.live_state as any)?.format ?? format,
-          // Abandoned as "no result": standings share the points whatever the score.
-          noResult: reallyDone && state.outcome === 'void',
+          // Abandoned, or called off drawn: shared points (or none, the official's choice) whatever the score.
+          noResult: reallyDone && drawSettlement(state, nextLog).noResult,
+          drawNoPoints: reallyDone && drawSettlement(state, nextLog).drawNoPoints,
         },
         live_log: rallyTimeline(format, nextLog, firstServer, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
         // A walkover carries the format's walkover scoreline (2-0), unless the organiser enters it.
@@ -1566,7 +1567,7 @@ function cricketTimeline(state: CricketState, homeName: string, awayName: string
   for (const inn of state.innings) {
     const side = inn.battingSide === 'A' ? homeName : awayName;
     out.unshift({
-      t: `Innings ${inn.innings}`,
+      t: inn.superOver ? `Super Over ${inn.superOver}` : `Innings ${inn.innings}`,
       team: inn.battingSide,
       txt: `${side} ${inningsLine(inn, state.format.ballsPerOver)}`
         + (inn.endedBy ? ` - ${inn.endedBy.replace('_', ' ')}` : ''),
@@ -1872,8 +1873,9 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
           clock: clockSnapshot(nextLog),
           format: (live?.live_state as any)?.format ?? format,
           ...(sheet ? { teamSheet: sheet } : {}),
-          // Abandoned as "no result": standings share the points whatever the score.
-          noResult: reallyDone && state.outcome === 'void',
+          // Abandoned, or called off drawn: shared points (or none, the official's choice) whatever the score.
+          noResult: reallyDone && drawSettlement(state, nextLog).noResult,
+          drawNoPoints: reallyDone && drawSettlement(state, nextLog).drawNoPoints,
         },
         // The attributed actions ARE the timeline here, and what the fact writer
         // reads to fill fixture_events.
@@ -1979,7 +1981,8 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       onSignOff={(nextLog, state) => { setLog(nextLog); save(nextLog, state, true); }}
       onSuspend={(nextLog, state) => save(nextLog, state, false, onDone, false, true)}
     />
-    <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} defaultScore={formatWalkoverScore(format)} />
+    <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} defaultScore={formatWalkoverScore(format)}
+      countsInDifference={!!format?.endStates?.countWalkoverInDifference} />
     </>
   );
 }
@@ -2556,12 +2559,18 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
       return;
     }
     const { a, b } = tieScore(spec, state);
+    // A group tie that plays every rubber, decided with some still to play: ask, don't block
+    // (a side may concede the rest). Knockout ties mark them skipped, so this stays 0 there.
+    const unplayed = playable;
     const ok = await confirmDialog({
-      title: drawn ? 'Confirm a drawn tie' : 'Confirm final result',
-      confirmLabel: drawn ? 'Sign off as a draw' : 'Sign off',
+      title: unplayed > 0
+        ? `${unplayed} ${unit}${unplayed === 1 ? '' : 's'} still to play in this group tie. Sign off anyway?`
+        : drawn ? 'Confirm a drawn tie' : 'Confirm final result',
+      confirmLabel: unplayed > 0 ? 'Sign off anyway' : drawn ? 'Sign off as a draw' : 'Sign off',
       message: drawn
         ? `${homeName} ${formatPoints(a)} - ${formatPoints(b)} ${awayName}. Every ${unit} has been played and neither side reached ${formatPoints(target)}, so this tie is drawn. Standings will record it as a draw for both sides.`
-        : `${homeName} ${formatPoints(a)} - ${formatPoints(b)} ${awayName}${level && w ? `, ${w === 'A' ? homeName : awayName} on tie-break` : ''}. This completes the tie and updates standings.`,
+        : `${homeName} ${formatPoints(a)} - ${formatPoints(b)} ${awayName}${level && w ? `, ${w === 'A' ? homeName : awayName} on tie-break` : ''}. This completes the tie and updates standings.`
+          + (unplayed > 0 ? ` The ${unit}s not played are left out of the result.` : ''),
     });
     if (!ok) return;
     setSubmitting(true);
@@ -3721,10 +3730,12 @@ function DirectResult({ def, homeName, awayName, homeOrg, awayOrg, initialA, ini
 // Walkover needs a winner and a reason - a plain status flip would leave the match
 // with no result. Opens a popup to capture both, then records it via /live (which
 // also advances the winner in a bracket draw).
-function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeTeamId, awayTeamId, invalidate, onDone, defaultScore, className }:
+function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeTeamId, awayTeamId, invalidate, onDone, defaultScore, countsInDifference, className }:
   { fixtureId: string; homeName: string; awayName: string; homeOrg?: string; awayOrg?: string; homeTeamId: string | null; awayTeamId: string | null; invalidate: (string | null)[]; onDone: () => void;
     /** The format's walkover scoreline, winner first (e.g. 21-0). Blank = none recorded unless typed. */
-    defaultScore?: [number, number] | null; className?: string }) {
+    defaultScore?: [number, number] | null;
+    /** The format counts the walkover score in score difference (football). Unknown = it does not. */
+    countsInDifference?: boolean; className?: string }) {
   const [open, setOpen] = useState(false);
   const [winner, setWinner] = useState<'home' | 'away'>('home');
   const [reason, setReason] = useState('');
@@ -3734,12 +3745,12 @@ function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeT
   const submit = () => {
     if (!reason.trim()) { toast.error('Add a walkover reason'); return; }
     const winner_team_id = winner === 'home' ? homeTeamId : awayTeamId;
-    // A scoreline only when both numbers are given; it never counts toward score difference.
+    // A scoreline only when both numbers are given; it counts in score difference only where the format says so.
     const score = winScore !== '' && loseScore !== ''
       ? (winner === 'home' ? { home_score: Number(winScore), away_score: Number(loseScore) } : { home_score: Number(loseScore), away_score: Number(winScore) })
       : {};
     mut.mutate(
-      { status: 'walkover', winner_team_id, notes: reason.trim(), ...score },
+      { status: 'walkover', winner_team_id, notes: reason.trim(), ...score, walkover_counts: !!countsInDifference },
       { onSuccess: () => { setOpen(false); onDone(); }, onError: (e: any) => toast.error(e.message) },
     );
   };
@@ -3766,7 +3777,9 @@ function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeT
                 <span className="text-slate-400">-</span>
                 <Input className="w-20 text-center" inputMode="numeric" value={loseScore} onChange={(e) => setLoseScore(digits(e.target.value))} placeholder="Loser" aria-label="Loser score" />
               </div>
-              <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">The rulebook's walkover score, e.g. 2-0 in football. Left out of score difference.</p>
+              <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                The rulebook's walkover score, e.g. 2-0 in football. {countsInDifference ? 'Counts in score difference, like a played result.' : 'Left out of score difference.'}
+              </p>
             </div>
             <div className="mt-3">
               <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Reason</span>
@@ -3795,8 +3808,8 @@ function formatWalkoverScore(format: ScoringFormat | null | undefined): [number,
 }
 
 /** "No-show?" row under a console that has no walkover control of its own. */
-function WalkoverRow({ fixture, fixtureId, invalidate, onDone, defaultScore }:
-  { fixture: any; fixtureId: string; invalidate: (string | null)[]; onDone: () => void; defaultScore?: [number, number] | null }) {
+function WalkoverRow({ fixture, fixtureId, invalidate, onDone, defaultScore, countsInDifference }:
+  { fixture: any; fixtureId: string; invalidate: (string | null)[]; onDone: () => void; defaultScore?: [number, number] | null; countsInDifference?: boolean }) {
   const open = !['completed', 'walkover', 'cancelled', 'bye'].includes(fixture.status) && fixture.scorecard_status !== 'locked';
   if (!open || !fixture.home_team_id || !fixture.away_team_id) return null;
   return (
@@ -3805,7 +3818,7 @@ function WalkoverRow({ fixture, fixtureId, invalidate, onDone, defaultScore }:
       <WalkoverButton fixtureId={fixtureId} homeName={teamLabel(homeTeam(fixture))} awayName={teamLabel(awayTeam(fixture))}
         homeOrg={orgLabel(homeTeam(fixture))} awayOrg={orgLabel(awayTeam(fixture))}
         homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id}
-        invalidate={invalidate} onDone={onDone} defaultScore={defaultScore} className="justify-center" />
+        invalidate={invalidate} onDone={onDone} defaultScore={defaultScore} countsInDifference={countsInDifference} className="justify-center" />
     </div>
   );
 }

@@ -554,6 +554,12 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         persisted = false; // live_* columns not migrated yet - headline still saved
       }
     }
+    // A walkover keeps whether its format counts the scoreline in the table (read by standings).
+    if (b.status === 'walkover' && typeof b.walkover_counts === 'boolean') {
+      await prisma.$executeRaw`
+        update fixtures set live_state = jsonb_set(coalesce(live_state, '{}'::jsonb), '{walkoverCounts}', ${JSON.stringify(b.walkover_counts)}::jsonb, true)
+        where id = ${req.params.id}::uuid`;
+    }
     // Recompute standings AFTER both writes, so a freshly-persisted eventStandings (event
     // sign-off) is reflected - recomputing before the live_state write would read the old
     // contribution and leave the materialized table stale.

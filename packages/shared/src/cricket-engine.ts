@@ -74,6 +74,8 @@ export type CricketEvent =
   | { t: 'setBatter'; end: BatterEnd; batterId: string; at?: string }
   /** The innings is over. `overs` and `all_out` are also detected automatically. */
   | { t: 'endInnings'; reason: InningsEnd; at?: string }
+  /** The toss: who won it and what they chose. Decides who bats first; changeable until the first ball. */
+  | { t: 'toss'; winner: CricketSide; elected: 'bat' | 'bowl'; at?: string }
   /** Terminal: abandoned, conceded, a result the officials declared. */
   | { t: 'end'; reason: 'normal' | 'abandoned' | 'conceded' | 'rain' | 'override'; winner?: CricketSide | null; at?: string };
 
@@ -136,6 +138,11 @@ export interface InningsState {
   target?: number;
   /** The next delivery is a free hit (a no-ball was bowled). */
   freeHit: boolean;
+  /** A Super Over innings: which one (1, 2...). Its runs settle the tie, not the match total. */
+  superOver?: number;
+  /** Super Over limits: one over, two wickets. Unset = the format's. */
+  maxBalls?: number;
+  maxWickets?: number;
 }
 
 export interface CricketState {
@@ -160,6 +167,10 @@ export interface CricketState {
    * on the floor; five runs decides a box-cricket match.
    */
   penaltiesFor: { A: number; B: number };
+  /** The toss, when recorded. */
+  toss?: { winner: CricketSide; elected: 'bat' | 'bowl' };
+  /** Super Over penalty runs to a side whose Super Over innings has not started yet. */
+  superOverHeld?: { A: number; B: number };
 }
 
 const emptyInnings = (innings: number, battingSide: CricketSide): InningsState => ({
@@ -235,6 +246,8 @@ const clone = (s: CricketState): CricketState => ({
   // Copied, not shared: a penalty written into the clone must not reach back into
   // the state the caller still holds, or undo stops being a truncate.
   penaltiesFor: { ...(s.penaltiesFor ?? { A: 0, B: 0 }) },
+  ...(s.superOverHeld ? { superOverHeld: { ...s.superOverHeld } } : {}),
+  ...(s.toss ? { toss: { ...s.toss } } : {}),
   innings: s.innings.map((i) => ({
     ...i,
     batting: i.batting.map((b) => ({ ...b })),
@@ -255,6 +268,19 @@ export function stepCricket(prev: CricketState, ev: CricketEvent): { state: Cric
   if (!inn) return { state: prev, step };
 
   switch (ev.t) {
+    case 'toss': {
+      // Only before the first ball: the toss decides who bats first, and a change of
+      // mind before play starts the opening innings again with the other side.
+      const first = state.innings[0];
+      if (state.innings.length > 1 || first.balls > 0 || first.wides > 0 || first.noBalls > 0 || first.runs > 0) {
+        return { state: prev, step };
+      }
+      state.toss = { winner: ev.winner, elected: ev.elected };
+      const batsFirst = ev.elected === 'bat' ? ev.winner : other(ev.winner);
+      if (first.battingSide !== batsFirst) state.innings[0] = emptyInnings(1, batsFirst);
+      break;
+    }
+
     case 'setBowler':
       // A BOWLER MAY NOT BOWL CONSECUTIVE OVERS. Refused rather than corrected,
       // because silently substituting somebody else would put the next six balls
@@ -285,6 +311,18 @@ export function stepCricket(prev: CricketState, ev: CricketEvent): { state: Cric
       if (ev.side === inn.battingSide) {
         inn.runs += ev.runs;
         inn.penaltyRuns += ev.runs;
+        step.runsScored = ev.runs;
+      } else if (inn.superOver) {
+        // In a Super Over they count in the Super Over: into the other side's innings
+        // of this pair (raising the chase), or waiting for it to start.
+        const theirs = state.innings.find((i) => i.superOver === inn.superOver && i.battingSide === ev.side);
+        if (theirs) {
+          theirs.runs += ev.runs;
+          theirs.penaltyRuns += ev.runs;
+          if (inn.target !== undefined) inn.target += ev.runs;
+        } else {
+          state.superOverHeld = { ...(state.superOverHeld ?? { A: 0, B: 0 }), [ev.side]: (state.superOverHeld?.[ev.side] ?? 0) + ev.runs };
+        }
         step.runsScored = ev.runs;
       } else {
         // Awarded against the batting side, so they are the OTHER side's runs. That
@@ -489,8 +527,9 @@ function settleInnings(state: CricketState, step: CricketStep): void {
   const inn = state.innings[state.current];
   if (inn.ended) return;
 
-  const oversDone = f.oversPerInnings !== null && inn.balls >= f.oversPerInnings * f.ballsPerOver;
-  const allOut = inn.wickets >= f.wicketsToEndInnings;
+  const maxBalls = inn.maxBalls ?? (f.oversPerInnings !== null ? f.oversPerInnings * f.ballsPerOver : null);
+  const oversDone = maxBalls !== null && inn.balls >= maxBalls;
+  const allOut = inn.wickets >= (inn.maxWickets ?? f.wicketsToEndInnings);
   const chased = inn.target !== undefined && totalOf(inn) >= inn.target;
 
   if (!oversDone && !allOut && !chased) return;
@@ -506,6 +545,12 @@ function advance(state: CricketState, step: CricketStep): void {
   const f = state.format;
   const played = state.innings.length;
   const totalInnings = f.inningsPerSide * 2;
+  const prevInn = state.innings[state.current];
+
+  if (prevInn.superOver) {
+    advanceSuperOver(state, step, prevInn);
+    return;
+  }
 
   if (played < totalInnings) {
     const prev = state.innings[state.current];
@@ -535,13 +580,63 @@ function advance(state: CricketState, step: CricketStep): void {
   step.matchEnded = state.ended;
 }
 
+/** Opens Super Over `round`: one over, two wickets; the side that batted second last bats first. */
+function startSuperOver(state: CricketState, round: number): void {
+  const f = state.format;
+  const last = state.innings[state.innings.length - 1];
+  // The side that batted second bats first: in the match for the first Super Over,
+  // in the last Super Over for the next one.
+  const side = last.battingSide;
+  const inn: InningsState = { ...emptyInnings(state.innings.length + 1, side), superOver: round, maxBalls: f.ballsPerOver, maxWickets: 2 };
+  drainSuperOverHeld(state, inn);
+  state.innings.push(inn);
+  state.current = state.innings.length - 1;
+}
+
+function drainSuperOverHeld(state: CricketState, inn: InningsState): void {
+  const held = state.superOverHeld?.[inn.battingSide] ?? 0;
+  if (!held) return;
+  inn.runs += held;
+  inn.penaltyRuns += held;
+  state.superOverHeld = { ...state.superOverHeld!, [inn.battingSide]: 0 };
+}
+
+/** After a Super Over innings: the reply, or the result, or another Super Over if level again. */
+function advanceSuperOver(state: CricketState, step: CricketStep, done: InningsState): void {
+  const f = state.format;
+  const pair = state.innings.filter((i) => i.superOver === done.superOver);
+  if (pair.length === 1) {
+    const reply: InningsState = {
+      ...emptyInnings(state.innings.length + 1, other(done.battingSide)),
+      superOver: done.superOver, maxBalls: f.ballsPerOver, maxWickets: 2, target: done.runs + 1,
+    };
+    drainSuperOverHeld(state, reply);
+    state.innings.push(reply);
+    state.current = state.innings.length - 1;
+    return;
+  }
+  const [first, second] = pair;
+  if (first.runs === second.runs) {
+    state.margin = `Super Over ${done.superOver} tied - another to follow`;
+    startSuperOver(state, done.superOver! + 1);
+    return;
+  }
+  const winner = first.runs > second.runs ? first.battingSide : second.battingSide;
+  state.ended = true;
+  state.reason = state.reason ?? 'normal';
+  state.outcome = 'win';
+  state.winner = winner;
+  state.margin = done.superOver === 1 ? 'won the Super Over' : `won Super Over ${done.superOver}`;
+  step.matchEnded = true;
+}
+
 /** Runs a side has scored across all its innings. */
 export function aggregateFor(state: CricketState, side: CricketSide): number {
   // Plus anything still held: a penalty awarded against the side batting last has
   // no innings left to drain into, and must still count towards the result.
   const held = state.penaltiesFor?.[side] ?? 0;
   return state.innings
-    .filter((i) => i.battingSide === side)
+    .filter((i) => i.battingSide === side && !i.superOver)
     .reduce((n, i) => n + i.runs, held);
 }
 
@@ -562,9 +657,16 @@ function decide(state: CricketState): void {
   state.reason = state.reason ?? 'normal';
 
   if (a === b) {
+    // Level: a Super Over settles it when the format says so (the match total stays tied).
+    if (f.superOverOnTie) {
+      state.ended = false;
+      state.margin = 'tied - Super Over';
+      startSuperOver(state, 1);
+      return;
+    }
     state.outcome = 'tie';
     state.winner = null;
-    state.margin = f.superOverOnTie ? 'tied - super over to follow' : 'tied';
+    state.margin = 'tied';
     return;
   }
 

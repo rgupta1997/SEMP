@@ -115,7 +115,9 @@ export type RallyEvent =
    */
   | { t: 'endPeriod'; reason?: string; by?: string; at?: string; clockMs?: number }
   /** Terminal, out-of-band: retirement, walkover, override. */
-  | { t: 'end'; outcome: Outcome; reason: EndReason; winner?: Side | null; note?: string; by?: string; at?: string }
+  | { t: 'end'; outcome: Outcome; reason: EndReason; winner?: Side | null; note?: string; by?: string; at?: string;
+      /** A draw called off unfinished (rain): share the draw points, or give neither side any. */
+      drawPoints?: 'shared' | 'none' }
   /**
    * THE MATCH CLOCK, as events rather than as a field.
    *
@@ -977,7 +979,10 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
         deciderReceiverSwitch(spec, lv, state, before, base.inDecider);
         base.unitsWon = cascade(format, state, state.pointLevel);
         base.unitsWon = [...base.unitsWon, ...afterBuzzer(format, state, base.unitsWon.length > 0)];
-        if (!state.ended) aggregateFinish(format, state);
+        if (!state.ended) aggregateFinish(format, state, isRaidEnd(ev.kind));
+      } else if (!state.ended && isRaidEnd(ev.kind)) {
+        // A golden raid can end on a tap that scores nothing (an empty raid after a bonus).
+        aggregateFinish(format, state, true);
       }
       break;
     }
@@ -1129,7 +1134,13 @@ export function isDecider(format: ScoringFormat, state: KernelState, i: number):
  * the first side to `firstTo` wins at once, and once every period - extra time
  * included - is played level, the next point wins (`universalPoint`).
  */
-function aggregateFinish(format: ScoringFormat, state: KernelState): void {
+/** Kabaddi taps that end a raid. A bonus is an add-on to a raid, not an ending. */
+export const RAID_ENDS: ReadonlySet<string> = new Set([
+  'raid', 'bonus_raid', 'empty_raid', 'raider_out', 'dod_failed', 'tackle', 'super_tackle', 'defender_out_raid',
+]);
+const isRaidEnd = (kind?: string) => !!kind && RAID_ENDS.has(kind);
+
+function aggregateFinish(format: ScoringFormat, state: KernelState, raidEnded = false): void {
   const top = format.levels[format.levels.length - 1];
   if (top?.decide !== 'aggregate') return;
   const [a, b] = aggregateScore(state);
@@ -1140,9 +1151,10 @@ function aggregateFinish(format: ScoringFormat, state: KernelState): void {
   const inFullExtra = !!format.tieBreak?.extraTime?.fullTime && played >= top.target;
   const reachedTarget = !!top.firstTo && !inFullExtra && Math.max(a, b) >= top.firstTo;
   const allPlayed = played >= top.target + (format.tieBreak?.extraTime?.periods ?? 0);
-  // A golden raid is the same rule: any point once everything is played level wins it.
-  const golden = !!format.tieBreak?.goldenRaid && allPlayed;
-  const universal = (!!format.tieBreak?.universalPoint || golden) && allPlayed;
+  // A golden raid is decided when the raid ENDS, on the points it scored for either side:
+  // a bonus then a tackle is 1-1, still level, and the other team gets its golden raid.
+  const golden = !!format.tieBreak?.goldenRaid && allPlayed && raidEnded;
+  const universal = (!!format.tieBreak?.universalPoint && allPlayed) || golden;
   if (!reachedTarget && !universal) return;
   state.ended = true;
   state.outcome = 'win';
@@ -1547,5 +1559,17 @@ export function resultEnvelope(format: ScoringFormat, state: KernelState): Resul
       : top > 0 ? ([...state.score[top]] as Pair) : [0, 0],
     pointsFor,
     ended: state.ended,
+  };
+}
+
+/**
+ * How a finished match's draw is scored. A void (abandoned) or a called-off draw with points
+ * shared counts as drawn whatever the score; "no points" is drawn with nothing for either side.
+ */
+export function drawSettlement(state: KernelState, log: RallyLog): { noResult: boolean; drawNoPoints: boolean } {
+  const end = [...log].reverse().find((e): e is Extract<RallyEvent, { t: 'end' }> => e.t === 'end');
+  return {
+    noResult: state.outcome === 'void' || (state.outcome === 'draw' && end?.drawPoints === 'shared'),
+    drawNoPoints: state.outcome === 'draw' && end?.drawPoints === 'none',
   };
 }

@@ -629,7 +629,11 @@ const COMBAT: ScoringFormat[] = [
 // registry
 // ============================================================================
 
-export const TEAM_PRESETS: ScoringFormat[] = [...NET, ...INVASION, ...RAID, ...BOARD, ...COMBAT];
+// Football counts a walkover's scoreline in goal difference, as a forfeit result does.
+const footballWalkovers = (f: ScoringFormat): ScoringFormat =>
+  (f.sport === 'football' ? { ...f, endStates: { ...f.endStates, countWalkoverInDifference: true } } : f);
+
+export const TEAM_PRESETS: ScoringFormat[] = [...NET, ...INVASION.map(footballWalkovers), ...RAID, ...BOARD, ...COMBAT];
 
 /** Sport-name aliases, so a lookup by the catalogue's spelling works either way. */
 const ALIASES: Record<string, string> = {

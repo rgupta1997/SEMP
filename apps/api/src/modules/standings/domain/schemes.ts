@@ -1,4 +1,4 @@
-import {
+import { addAdt, adtOf, emptyAdt, type AdtTally,
   knockoutRoundSize, KNOCKOUT_ROUND, FINALIST_DETAIL_KEY, THIRD_PLACE_ROUND, findTieResolution,
   groupRankingFor, isKnockoutRound, type GroupRanking, type StandingsRule, type StandingsPlacement,
   type StandingsTiebreaker, type TieResolution,
@@ -36,6 +36,13 @@ export interface SchemeFixture {
   away_points?: number | null;
   /** Abandoned as "no result": both sides share the draw points, whatever the score. */
   no_result?: boolean;
+  /** Called off drawn with no points: a draw for both, worth nothing. */
+  draw_no_points?: boolean;
+  /** A walkover whose scoreline counts in score difference (its format said so). */
+  walkover_counts?: boolean;
+  /** Kho-kho: each side's ADT inputs from this match's regulation turns. */
+  home_adt?: AdtTally;
+  away_adt?: AdtTally;
   /** Stage metadata: which pool and which stage of a multi-stage draw. */
   pool_number?: number | null;
   stage_sequence?: number | null;
@@ -56,6 +63,8 @@ export interface EntityTally {
   // Internal sort aids (goals for/against) - not persisted as columns.
   gf: number;
   ga: number;
+  // Kho-kho: ADT inputs summed over the group matches.
+  adt?: AdtTally;
   // Pool team ties: frames won, and balls for / against (net ball difference).
   frames?: number;
   balls_for?: number;
@@ -95,18 +104,21 @@ function leagueTally(fixtures: SchemeFixture[], win: number, draw: number, loss:
     if (!home && !away) continue;
     if (home) home.played++;
     if (away) away.played++;
-    // A walkover's scoreline (2-0 by policy) is not play: it stays out of score difference.
-    const played = f.status !== 'walkover';
+    // A walkover's scoreline (2-0 by policy) stays out of score difference, unless its format counts it.
+    const played = f.status !== 'walkover' || f.walkover_counts === true;
     if (played && home && f.home_score != null) { home.gf += f.home_score; home.ga += f.away_score ?? 0; }
     if (played && away && f.away_score != null) { away.gf += f.away_score; away.ga += f.home_score ?? 0; }
+    if (played && home && f.home_adt) home.adt = addAdt(home.adt ?? emptyAdt(), f.home_adt);
+    if (played && away && f.away_adt) away.adt = addAdt(away.adt ?? emptyAdt(), f.away_adt);
     if (played && home) addFrames(home, f.home_frames, f.home_balls, f.away_balls);
     if (played && away) addFrames(away, f.away_frames, f.away_balls, f.home_balls);
 
     const isDraw = f.winner_team_id == null
-      && (f.no_result === true || (f.home_score != null && f.away_score != null && f.home_score === f.away_score));
+      && (f.no_result === true || f.draw_no_points === true || (f.home_score != null && f.away_score != null && f.home_score === f.away_score));
     if (isDraw) {
-      if (home) { home.drawn++; home.points += draw; }
-      if (away) { away.drawn++; away.points += draw; }
+      const pts = f.draw_no_points ? 0 : draw;
+      if (home) { home.drawn++; home.points += pts; }
+      if (away) { away.drawn++; away.points += pts; }
     } else if (f.winner_team_id) {
       const homeWon = f.winner_team_id === f.home_team_id;
       if (home) { if (homeWon) { home.won++; home.points += win; } else { home.lost++; home.points += loss; } }
@@ -136,6 +148,8 @@ function metric(r: EntityTally, t: StandingsTiebreaker): number {
     case 'score_for': return r.gf;
     case 'frames_won': return r.frames ?? 0;
     case 'ball_diff': return (r.balls_for ?? 0) - (r.balls_against ?? 0);
+    // No timed match yet: below every team that has one, and level with each other.
+    case 'adt': return r.adt ? adtOf(r.adt) : Number.NEGATIVE_INFINITY;
     case 'head_to_head': return 0; // needs the fixtures - handled by rankGroup
   }
 }
@@ -342,6 +356,12 @@ export function tablePlacings(fixtures: SchemeFixture[], rule: Extract<Standings
   const ranked = pools.map((pool) => {
     const g = rankGroup(stageFx.filter((f) => (f.pool_number ?? null) === pool), ranking, resolverFor(ctx.resolutions, 'pool', stage, pool));
     g.rows.forEach((r) => { poolRank.set(r.entity_id, r.rank!); out.records.set(r.entity_id, r); out.poolOf.set(r.entity_id, pool); });
+    // Teams still level in their group share its better position, so the cross-group step
+    // compares all of them (B and C both "2nd") instead of an arbitrary one.
+    for (const tie of g.ties) {
+      const best = Math.min(...tie.map((id) => poolRank.get(id) ?? Infinity));
+      tie.forEach((id) => poolRank.set(id, best));
+    }
     poolTies.push(...g.ties);
     return g;
   });

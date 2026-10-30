@@ -301,3 +301,73 @@ describe('pool team ties: frames won and net ball difference', () => {
     expect(rows.find((r) => r.entity_id === 'A')).toMatchObject({ frames: 0, balls_for: 0 });
   });
 });
+
+// Inter-IIM carrom: A beat B 2-1, B beat C 2-0, C beat A 2-0. All won one; B has most games won (3),
+// A and C are level on 2 - the rulebook's tie-break game, so the table must flag them, not split on net games.
+describe('carrom group order', () => {
+  it('ranks by matches won, then games won, and leaves A and C tied', async () => {
+    const { defaultGroupRanking } = await import('@semp/shared');
+    const ranking = defaultGroupRanking('Carrom');
+    const { rows, ties } = rankGroup([fx('A', 'B', 2, 1), fx('B', 'C', 2, 0), fx('C', 'A', 2, 0)], ranking);
+    expect(rows[0].entity_id).toBe('B');
+    expect(ties.map((t) => [...t].sort())).toEqual([['A', 'C']]);
+  });
+});
+
+// Called off for rain as a draw: the official chooses shared points or none; never a loss.
+describe('rain draws at an unequal score', () => {
+  const ranking = { win: 3, draw: 1, loss: 0, tiebreakers: ['points'] as const };
+  it('shared points: both drawn with the draw points, though it was 6-5', () => {
+    const { rows } = rankGroup([{ ...fx('A', 'B', 6, 5), winner_team_id: null, no_result: true }], { ...ranking, tiebreakers: ['points'] });
+    expect(rows.find((r) => r.entity_id === 'A')).toMatchObject({ drawn: 1, lost: 0, points: 1 });
+    expect(rows.find((r) => r.entity_id === 'B')).toMatchObject({ drawn: 1, lost: 0, points: 1 });
+  });
+  it('no points: both drawn, nothing to either side', () => {
+    const { rows } = rankGroup([{ ...fx('A', 'B', 6, 5), winner_team_id: null, draw_no_points: true }], { ...ranking, tiebreakers: ['points'] });
+    for (const id of ['A', 'B']) expect(rows.find((r) => r.entity_id === id)).toMatchObject({ played: 1, drawn: 1, lost: 0, won: 0, points: 0 });
+  });
+});
+
+// A walkover 2-0: counted in goal difference only when its format said so when recorded.
+describe('walkover score in goal difference', () => {
+  const wo = (counts?: boolean): SchemeFixture => ({ ...fx('A', 'B', 2, 0), status: 'walkover', ...(counts !== undefined ? { walkover_counts: counts } : {}) });
+  const rank = (f: SchemeFixture) => rankGroup([f], { win: 3, draw: 1, loss: 0, tiebreakers: ['points'] }).rows;
+  it('counts when the format counts it', () => {
+    const rows = rank(wo(true));
+    expect(rows.find((r) => r.entity_id === 'A')).toMatchObject({ won: 1, points: 3, gf: 2, ga: 0 });
+    expect(rows.find((r) => r.entity_id === 'B')).toMatchObject({ lost: 1, gf: 0, ga: 2 });
+  });
+  it('left out otherwise (and for walkovers recorded before), the win still counts', () => {
+    for (const f of [wo(false), wo()]) {
+      expect(rank(f).find((r) => r.entity_id === 'A')).toMatchObject({ won: 1, points: 3, gf: 0, ga: 0 });
+    }
+  });
+});
+
+// Kho-kho: teams level on points ranked by ADT over their group matches (higher first).
+describe('kho-kho ADT tie-breaker', () => {
+  const t = (defendMs: number, defendOuts: number, attackMs: number, attackOuts: number) => ({ defendMs, defendOuts, attackMs, attackOuts, estimated: false });
+  const kho = (home: string, away: string, hs: number, as: number, h: ReturnType<typeof t>, a: ReturnType<typeof t>): SchemeFixture =>
+    ({ ...fx(home, away, hs, as), home_adt: h, away_adt: a });
+  const ranking = { win: 2, draw: 0, loss: 0, tiebreakers: ['points', 'adt'] as ('points' | 'adt')[] };
+
+  it('A, B and C each win once: ADT orders them, with no tie left', () => {
+    // A: defends 840 s for 4 outs, chases 840 s for 6 -> 210 - 140 = +70 (one match each way summed).
+    const fixtures = [
+      kho('A', 'B', 10, 8, t(420_000, 2, 420_000, 3), t(420_000, 3, 420_000, 2)),
+      kho('B', 'C', 9, 7, t(420_000, 3, 420_000, 3), t(420_000, 3, 420_000, 3)),
+      kho('C', 'A', 9, 6, t(420_000, 2, 420_000, 2), t(420_000, 2, 420_000, 3)),
+    ];
+    const { rows, ties } = rankGroup(fixtures, ranking);
+    expect(rows.every((r) => r.points === 2)).toBe(true);
+    // A: (840/4) - (840/6) = 70. B: (840/6) - (840/5) = -28. C: (840/5) - (840/5) = 0.
+    expect(rows.map((r) => r.entity_id)).toEqual(['A', 'C', 'B']);
+    expect(ties).toEqual([]);
+  });
+
+  it('teams with no timed match yet stay level with each other, below the rest', () => {
+    const { rows, ties } = rankGroup([fx('A', 'B', 10, 8), fx('B', 'A', 10, 8)], ranking);
+    expect(rows.map((r) => r.points)).toEqual([2, 2]);
+    expect(ties.length).toBe(1);
+  });
+});

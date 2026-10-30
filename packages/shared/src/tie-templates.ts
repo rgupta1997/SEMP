@@ -5,6 +5,7 @@
 // so the web console/setup AND the API (demo seeder, matrix import) share one source.
 
 import type { ContestSpec, FormatTemplate, RubberSpec, ScoringMode, TieSpec } from './scoring.js';
+import { isKnockoutRound } from './enums.js';
 
 // A rubber scored as best-of-`segMax` sets (badminton/TT/squash: best of 3 sets). The
 // rubbers themselves are the "games" of the match; these are the sets inside one.
@@ -81,12 +82,12 @@ export function tieTemplateFor(name?: string | null): FormatTemplate | undefined
 }
 
 /**
- * A league or group round, as the fixture generators name them ("Round 3",
- * "Pool A - Match 2"). Knockout rounds ("Final", "SF", "QF", "R16", "3rd Place")
- * and anything unrecognised are not.
+ * A league or group round: any named round that is not a knockout one ("Final", "SF",
+ * "QF", "R16", "3rd Place") - "Round 3", "Pool A - Match 2", "Group A", "Added". The same
+ * test the standings use, so a hand-made group fixture still plays its dead rubbers.
  */
 export function isGroupRound(round?: string | null): boolean {
-  return !!round && /^(round \d+|pool .+)$/i.test(round.trim());
+  return !!round?.trim() && !isKnockoutRound(round.trim());
 }
 
 /** A rubber scored frame by frame (pool), whose segMax is its best-of. */
@@ -158,6 +159,13 @@ const SPORT_LAYOUTS: Record<string, TieLayout[]> = {
   badminton: IIM_FIVE_THREE,
   'table tennis': IIM_FIVE_THREE,
   'table-tennis': IIM_FIVE_THREE,
+  // Inter-IIM carrom: group ties are the three doubles (win 2); the final adds the two singles (win 3).
+  carrom: [
+    { key: 'iim_group', name: 'Inter-IIM group - MD, WD, XD (win 2)',
+      rubbers: [D("Men's Doubles"), D("Women's Doubles"), D("Mixed Doubles")] },
+    { key: 'iim_final', name: 'Inter-IIM final - MD, WD, XD, MS, WS (win 3)',
+      rubbers: [D("Men's Doubles"), D("Women's Doubles"), D("Mixed Doubles"), S("Men's Singles"), S("Women's Singles")] },
+  ],
   // Inter-IIM 8-ball: men 3 singles and 2 doubles, each best of 5; women 2 singles and a
   // doubles, best of 3. Doubles first - the rulebook's order when teams don't agree one.
   'pool/snooker': [

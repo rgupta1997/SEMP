@@ -1,4 +1,4 @@
-import type { KernelState, RallyLog } from './rally-kernel.js';
+import { RAID_ENDS, type KernelState, type RallyLog } from './rally-kernel.js';
 import type { ScoringFormat, Side } from './scoring-rules.js';
 import { canonicalTeamSport } from './team-presets.js';
 
@@ -13,10 +13,8 @@ import { canonicalTeamSport } from './team-presets.js';
 // Everything is read from the log, so undo and a second device agree.
 // ============================================================================
 
-/** Taps that end a raid. Bonus is an add-on to a scoring raid, not an ending. */
-export const RAID_ENDS: ReadonlySet<string> = new Set([
-  'raid', 'bonus_raid', 'empty_raid', 'raider_out', 'dod_failed', 'tackle', 'super_tackle', 'defender_out_raid',
-]);
+// RAID_ENDS (taps that end a raid) lives in the kernel, which decides golden raids on them.
+export { RAID_ENDS };
 
 const other = (s: Side): Side => (s === 'A' ? 'B' : 'A');
 

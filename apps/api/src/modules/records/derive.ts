@@ -5,6 +5,7 @@ import {
   type EventState, type FormatTemplate, type LifetimeEntryKind, type MatchOutcome, type Medal,
   type StandingsPlacement,
 } from '@semp/shared';
+import { isCalledDraw } from '@semp/shared';
 import { inPlacingStage, placingStagesOf } from '../fixtures/domain/stage-tree.js';
 
 // What a locked result MEANS - as pure functions, with no database anywhere in
@@ -267,6 +268,7 @@ function ordinal(n: number): string {
 const outcomeFor = (fx: DerivableFixture, teamId: string | null): MatchOutcome | null => {
   if (!teamId || !fx.home_team_id || !fx.away_team_id) return null;
   if (fx.winner_team_id) return fx.winner_team_id === teamId ? 'won' : 'lost';
+  if (isCalledDraw(fx.live_state)) return 'drew';
   if (fx.home_score != null && fx.away_score != null && fx.home_score === fx.away_score) return 'drew';
   return null;
 };

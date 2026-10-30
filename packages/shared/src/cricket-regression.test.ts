@@ -778,8 +778,10 @@ describe('8. the result', () => {
       ...open('a1', 'a2', 'o1'), run(4), { t: 'endInnings', reason: 'declared' },
       ...open('b1', 'b2', 'p1'), run(4), { t: 'endInnings', reason: 'declared' },
     ]);
-    expect(s.outcome).toBe('tie');
-    expect(s.margin).toContain('super over');
+    // Not over: a Super Over follows, the side that batted second (B) batting first.
+    expect(s.ended).toBe(false);
+    expect(s.margin).toContain('Super Over');
+    expect(s.innings[s.current]).toMatchObject({ superOver: 1, battingSide: 'B' });
   });
 
   it('8.7 the headline standings read is runs per side', () => {

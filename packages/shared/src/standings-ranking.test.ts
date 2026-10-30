@@ -193,3 +193,29 @@ describe('group tie-breakers: a stage only overrides the Point System when someo
     expect(groupRankingFor(null, 'Table Tennis', { tiebreakers: ['points', 'wins', 'lost'] }).tiebreakers).toEqual(defaultGroupRanking('Table Tennis').tiebreakers);
   });
 });
+
+// Inter-IIM carrom: matches won, then games won; still level is a tie-break game (hand-picked).
+describe('carrom group order', () => {
+  it('defaults to points, then games won', () => {
+    expect(defaultGroupRanking('Carrom').tiebreakers).toEqual(['points', 'score_for']);
+  });
+
+  it('a team tie can always pick games won, and calls it that', () => {
+    expect(tiebreakerOptions('Carrom', 'team')).toContain('score_for');
+    expect(tiebreakerLabel('score_for', 'Carrom', 'team')).toBe('Games won');
+    expect(tiebreakerLabel('score_diff', 'Carrom', 'team')).toBe('Games won (net)');
+    // Other tie sports are unchanged.
+    expect(tiebreakerOptions('Badminton', 'team')).not.toContain('score_for');
+    expect(tiebreakerLabel('score_diff', 'Badminton', 'team')).toBe('Matches won (net)');
+  });
+});
+
+// Kho-kho: level on points, ranked by ADT; still level, a minimum chase and a hand-picked order.
+describe('kho-kho group order', () => {
+  it('defaults to points, then ADT, and offers ADT only for kho-kho', () => {
+    expect(defaultGroupRanking('Kho Kho').tiebreakers).toEqual(['points', 'adt']);
+    expect(tiebreakerOptions('Kho Kho').slice(0, 2)).toEqual(['points', 'adt']);
+    expect(tiebreakerLabel('adt', 'Kho Kho')).toBe('ADT (average difference time)');
+    expect(tiebreakerOptions('Football')).not.toContain('adt');
+  });
+});

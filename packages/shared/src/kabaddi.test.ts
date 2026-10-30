@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { kabaddiStatus } from './kabaddi.js';
 import { goldenTossEnd, khoSettlementOf } from './kho-kho.js';
 import { tieProgress } from './tie-break.js';
-import { foldRally, type RallyEvent } from './rally-kernel.js';
+import { aggregateScore, foldRally, type RallyEvent } from './rally-kernel.js';
 import { presetByKey } from './racquet-presets.js';
 import { statSpecFor } from './stat-registry.js';
 import { deriveTeamStats } from './team-stats.js';
@@ -219,5 +219,47 @@ describe('golden raid', () => {
     expect(knobsFor(readKnobs(presetByKey('ultimate_2x20')!)).map((s) => s.key)).not.toContain('goldenRaidEnabled');
     expect(applyKnobs(ko, { ...k, goldenRaidEnabled: false }).tieBreak?.goldenRaid).toBeUndefined();
     expect(describeKnobs(k)).toContain('ET 2x3 min then golden raid');
+  });
+});
+
+// A golden raid is decided when the raid ENDS, on the points it scored for either side.
+describe('golden raid decided at the end of the raid', () => {
+  const ko = presetByKey('kabaddi_ko_2x20_et')!;
+  const half: RallyEvent = { t: 'endPeriod' };
+  const levelAfterExtra: RallyEvent[] = [{ t: 'raidFirst', side: 'A' }, raid('A', 2), half, raid('B', 2), half, half, half];
+  const golden = (...evs: RallyEvent[]) => [...levelAfterExtra, { t: 'goldenRaid', side: 'A' } as RallyEvent, ...evs];
+  const bonus = (side: 'A' | 'B'): RallyEvent => ({ t: 'point', side, pts: 1, kind: 'bonus' });
+  const tackle = (side: 'A' | 'B'): RallyEvent => ({ t: 'point', side, pts: 1, kind: 'tackle' });
+  const play = (log: RallyEvent[]) => foldRally(ko, log).state;
+
+  it('a bonus alone does not end it: the raid is still on', () => {
+    const st = play(golden(bonus('A')));
+    expect(st.ended).toBe(false);
+    expect(kabaddiStatus(golden(bonus('A')), st)).toMatchObject({ raider: 'A', goldenRaids: 0 });
+  });
+
+  it('bonus then caught is 1-1: still level, and the other team gets its golden raid', () => {
+    const log = golden(bonus('A'), tackle('B'));
+    const st = play(log);
+    expect(st.ended).toBe(false);
+    expect(kabaddiStatus(log, st)).toMatchObject({ raider: 'B', goldenRaids: 1, goldenTossDue: false });
+    // B's golden raid scores: B win.
+    expect(play([...log, raid('B', 1)])).toMatchObject({ ended: true, winner: 'B', reason: 'golden_raid' });
+  });
+
+  it('bonus then a 2-point touch wins it 3-0, with all 3 on the board', () => {
+    const st = play(golden(bonus('A'), raid('A', 2)));
+    expect(st).toMatchObject({ ended: true, winner: 'A', reason: 'golden_raid' });
+    // Level 2-2 after extra time, then 3 from the golden raid.
+    expect(aggregateScore(st)).toEqual([5, 2]);
+  });
+
+  it('bonus, then back safely recorded as an empty raid, still wins on the bonus', () => {
+    expect(play(golden(bonus('A'), empty('A')))).toMatchObject({ ended: true, winner: 'A', reason: 'golden_raid' });
+  });
+
+  it('a single bonus raid or a single raid point still wins at once', () => {
+    expect(play(golden({ t: 'point', side: 'A', pts: 1, kind: 'bonus_raid' }))).toMatchObject({ ended: true, winner: 'A' });
+    expect(play(golden(raid('A', 1)))).toMatchObject({ ended: true, winner: 'A' });
   });
 });

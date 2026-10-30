@@ -1,6 +1,6 @@
-import { KNOCKOUT_ROUND, THIRD_PLACE_ROUND, contingentKey, groupRankingFor, isChessSport, isNoResult, readTieResolutions, stageConfigSchema } from '@semp/shared';
+import { KNOCKOUT_ROUND, THIRD_PLACE_ROUND, contingentKey, groupRankingFor, isChessSport, isNoPointsDraw, isNoResult, readTieResolutions, walkoverCountsOf, stageConfigSchema } from '@semp/shared';
 import type { Prisma } from '../../../infra/prisma.js';
-import { poolTieFields, resolveRuleForDraw } from '../../standings/standings.service.js';
+import { khoAdtFields, poolTieFields, resolveRuleForDraw } from '../../standings/standings.service.js';
 import { advanceInBracket } from '../bracket.js';
 import { matchAudience, notifyMatch } from '../match-audience.js';
 import { resolverFor } from '../../standings/domain/schemes.js';
@@ -55,8 +55,11 @@ function toSchemeFixture(f: FixtureRow): PoolFixture {
     home_score: f.home_score, away_score: f.away_score,
     winner_team_id: f.winner_team_id,
     no_result: isNoResult(f.live_state),
+    draw_no_points: isNoPointsDraw(f.live_state),
+    walkover_counts: walkoverCountsOf(f.live_state),
     pool_number: f.pool_number, stage_sequence: f.stage_sequence,
     ...poolTieFields(f.live_state),
+    ...khoAdtFields(f.live_state),
   };
 }
 

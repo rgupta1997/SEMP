@@ -203,3 +203,27 @@ describe('level teams share a position (IIMK), unless the organiser orders them'
     expect([rows.B.points, rows.D.points]).toEqual([4, 1]);
   });
 });
+
+// A group tie nobody has ordered yet: both tied teams take part in the cross-group placing,
+// instead of one of them silently counting as the runner-up and the other as 3rd.
+describe('an unresolved group tie in cross-group placings', () => {
+  const fx = (h: string, a: string, hs: number, as: number, o: Partial<SchemeFixture> = {}): SchemeFixture => ({
+    status: 'completed', round: null, home_team_id: h, away_team_id: a, home_entity_id: h, away_entity_id: a,
+    home_score: hs, away_score: as, winner_team_id: hs > as ? h : hs < as ? a : null, pool_number: 1, stage_sequence: 1, ...o });
+  const ranking = { win: 2, draw: 1, loss: 0, tiebreakers: ['points', 'score_diff'] as GroupRanking['tiebreakers'] };
+  const rule: StandingsRule = { scheme: 'placement', points: { winner: 10, runner_up: 7, third_place: 4 }, participation: 1, table_placings: true, ranking } as StandingsRule;
+  // Group 1: A wins both; B and C draw and lose to A by the same score - level on everything.
+  const all = [
+    fx('A', 'B', 1, 0), fx('A', 'C', 1, 0), fx('B', 'C', 1, 1),
+    fx('D', 'E', 3, 0, { pool_number: 2 }), fx('D', 'F', 3, 0, { pool_number: 2 }), fx('E', 'F', 1, 0, { pool_number: 2 }),
+    fx('A', 'D', 2, 1, { round: 'Final', pool_number: null }),
+  ];
+
+  it('B and C both count as level runners-up: neither is dropped to 3rd in the group', () => {
+    const ctx = drawContext(all, () => ranking, []);
+    const pts = Object.fromEntries(runScheme(all, rule, true, ctx).map((r) => [r.entity_id, r.points]));
+    expect(pts.B).toBe(pts.C);
+    expect(pts.C).toBe(4);
+    expect(pendingPlacingTies(all, rule, ctx)).toEqual([{ stage: 1, entities: ['B', 'C', 'E'], from: 3, to: 4 }]);
+  });
+});

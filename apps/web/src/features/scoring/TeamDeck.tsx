@@ -484,7 +484,7 @@ export function TeamDeck(p: TeamDeckProps) {
             : level && format.tieBreak?.penalties
             ? `${inExtra ? 'Still' : 'Level at'} ${shown[0]}–${shown[1]}${inExtra ? ' after extra time' : ''}. This goes to a ${shootoutTerms(format.sport).title === 'Shoot-out' ? 'shoot-out' : 'penalty shoot-out'}.`
             : level && format.tieBreak?.goldenRaid
-            ? `${inExtra ? 'Still' : 'Level at'} ${shown[0]}–${shown[1]}. This goes to golden raids: a fresh toss, then the first point wins.`
+            ? `${inExtra ? 'Still' : 'Level at'} ${shown[0]}–${shown[1]}. This goes to golden raids: a fresh toss, then the side ahead when a raid ends wins.`
             : level && format.tieBreak?.universalPoint
               ? `Level at ${shown[0]}-${shown[1]}. Universal point: the next goal wins the match.`
               : `This is the last ${periodName.toLowerCase()}. The match is decided on the total, currently ${shown[0]}–${shown[1]}.`,
@@ -566,7 +566,7 @@ export function TeamDeck(p: TeamDeckProps) {
             ) : (
               <div className="font-mono text-[10px] uppercase tracking-wider text-on-brand">
                 {progress.phase === 'universalPoint' ? 'Next goal wins'
-                  : progress.phase === 'goldenRaid' ? 'First point wins'
+                  : progress.phase === 'goldenRaid' ? 'Ahead after the raid wins'
                   : progress.phase === 'penalties' || progress.phase === 'minimumChase' ? 'Level' : aggregate ? 'Total' : lv.label}
               </div>
             )}
@@ -713,7 +713,7 @@ export function TeamDeck(p: TeamDeckProps) {
               : 'border border-line text-slate-700 dark:text-slate-200')}>
           <span className="mr-auto truncate">
             {kabNow.goldenStarted
-              ? `Golden raid ${Math.min(kabNow.goldenRaids + 1, GOLDEN_RAIDS)} of ${GOLDEN_RAIDS}: ${nameOf(kabNow.raider)} raiding · the first point wins`
+              ? `Golden raid ${Math.min(kabNow.goldenRaids + 1, GOLDEN_RAIDS)} of ${GOLDEN_RAIDS}: ${nameOf(kabNow.raider)} raiding · ahead when the raid ends wins`
               : kabNow.doOrDie
               ? `Do-or-die raid: ${nameOf(kabNow.raider)} must score, or the raider is out`
               : `${nameOf(kabNow.raider)} raiding${kabNow.emptyStreak ? ` · ${kabNow.emptyStreak} empty in a row` : ''}`}
@@ -1504,7 +1504,7 @@ function Shootout({ shoot, nameOf, kicksEach, terms, busy, score, roster, onFirs
 /**
  * Kabaddi golden raid tosses: the fresh toss for who raids first, then - when both
  * golden raids were empty - the toss that decides the match. The raids themselves are
- * tapped on the usual buttons; the first point wins.
+ * tapped on the usual buttons; the side ahead when the raid ends wins.
  */
 function GoldenRaidToss({ nameOf, busy, score, final, onToss, onUndo, onSettle }: {
   nameOf: (s: Side) => string;
@@ -1531,7 +1531,7 @@ function GoldenRaidToss({ nameOf, busy, score, final, onToss, onUndo, onSettle }
         <p className="mt-1 text-xs text-muted">
           {final
             ? 'A toss decides the match. Pick the team that won it.'
-            : 'Fresh toss: the winner raids first. Baulk line counts as the bonus line. The first point wins; an empty raid passes the golden raid to the other team.'}
+            : 'Fresh toss: the winner raids first. Baulk line counts as the bonus line. Record the raid as usual (bonus, touches, tackle): the side ahead when it ends wins; level, the other team gets its golden raid.'}
         </p>
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -2146,13 +2146,31 @@ function MorePanel({
   const top = format.levels.length - 1;
   const bySets = !isAggregate(format) && (format.levels[top]?.target ?? 1) > 1;
   const levelNow = bySets ? (state.score[top]?.[0] ?? 0) === (state.score[top]?.[1] ?? 0) : shown[0] === shown[1];
+  // A rain draw asks first: share the draw points, or give neither side any.
+  const [rainDrawAsk, setRainDrawAsk] = useState(false);
+  const rainDraw = (drawPoints: 'shared' | 'none') => {
+    const note = rainNote.trim();
+    setRainDrawAsk(false);
+    onFinishing(false);
+    setRainNote('');
+    onEvent({ t: 'end', outcome: 'draw', reason: 'weather', winner: null, drawPoints, ...(note ? { note } : {}) });
+  };
+  // The score the rain decision is taken on: sets won in a match of sets, else the total.
+  const rainScore: [number, number] = bySets
+    ? [state.score[top]?.[0] ?? 0, state.score[top]?.[1] ?? 0]
+    : [shown[0] ?? 0, shown[1] ?? 0];
+  const scoreText = `${nameOf('A')} ${rainScore[0]}-${rainScore[1]} ${nameOf('B')}${bySets ? ' in sets' : ''}`;
   const rain = async (winner: Side | null) => {
     const note = rainNote.trim();
+    // The score, and a check only when the side picked is behind: the officials apply the
+    // rain rule (a pull contest can go to the side behind), the console just asks again.
+    const behind = !!winner && rainScore[winner === 'A' ? 0 : 1] < rainScore[winner === 'A' ? 1 : 0];
     const ok = await confirmDialog({
-      title: winner ? `Called off for rain - ${nameOf(winner)} win?` : 'Called off for rain - record a draw?',
-      confirmLabel: 'Record it',
-      message: (winner ? `${nameOf(winner)} take the match under the weather rule.` : 'The match is recorded as drawn.')
-        + ` Results show it as rain, not a concession.${note ? ` Note: ${note}` : ''}`,
+      title: !winner ? 'Called off for rain - record a draw?'
+        : behind ? `${nameOf(winner)} are behind in score - make them the winner anyway?`
+        : `Called off for rain - ${nameOf(winner)} win?`,
+      confirmLabel: behind ? 'Make them the winner' : 'Record it',
+      message: `Score: ${scoreText}.${note ? ` Note: ${note}` : ''}`,
     });
     if (!ok) return;
     onFinishing(false);
@@ -2271,8 +2289,21 @@ function MorePanel({
                   {(['A', 'B'] as Side[]).map((side) => (
                     <Button key={side} size="sm" variant="outline" onClick={() => void rain(side)}>{nameOf(side)} win</Button>
                   ))}
-                  {!knockout && <Button size="sm" variant="outline" onClick={() => void rain(null)}>Draw</Button>}
+                  {!knockout && <Button size="sm" variant={rainDrawAsk ? 'primary' : 'outline'} onClick={() => setRainDrawAsk(!rainDrawAsk)}>Draw</Button>}
                 </div>
+                {rainDrawAsk && (
+                  <div data-qa="rain-draw-points" className="grid gap-1.5 rounded-md bg-slate-50 p-2 dark:bg-slate-800/60">
+                    <div className="text-xs font-semibold">
+                      Drawn at {shown[0]}-{shown[1]}. Give both teams the draw points?
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Button size="sm" onClick={() => rainDraw('shared')}>Yes, share the points</Button>
+                      <Button size="sm" variant="outline" onClick={() => rainDraw('none')}>No points</Button>
+                      <Button size="sm" variant="subtle" onClick={() => setRainDrawAsk(false)}>Back</Button>
+                    </div>
+                    <div className="text-[11px] text-muted">Either way it counts as a draw for both teams, never a loss.</div>
+                  </div>
+                )}
               </div>
               {onSuspend && (
                 <Button size="sm" variant="outline"

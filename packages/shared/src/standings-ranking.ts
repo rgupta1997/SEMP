@@ -49,6 +49,10 @@ export function rankingFamily(sport?: string | null, entryType?: string | null):
 }
 
 const STANDARD_ORDER: StandingsTiebreaker[] = ['points', 'score_diff', 'score_for', 'head_to_head'];
+// Carrom: matches won, then games won. Still level is a tie-break game, then a hand-picked order.
+const CARROM_ORDER: StandingsTiebreaker[] = ['points', 'score_for'];
+// Kho-kho: points, then ADT. Still level is a minimum chase, then a hand-picked order.
+const KHO_ORDER: StandingsTiebreaker[] = ['points', 'adt'];
 
 // Match points per sport, from the common rulebooks (IIMK uses the same values).
 const POINTS_BY_TEAM_SPORT: Record<string, [number, number, number]> = {
@@ -68,6 +72,8 @@ export function defaultGroupRanking(sport?: string | null): GroupRanking {
   if (family === 'runs') return { win: 2, draw: 1, loss: 0, tiebreakers: ['points', 'wins', 'score_diff', 'head_to_head'] };
   if (canonicalRacquetSport(sport) === 'squash') return { win: 2, draw: 1, loss: 0, tiebreakers: withoutScoreFor(STANDARD_ORDER, family) };
   const [win, draw, loss] = POINTS_BY_TEAM_SPORT[canonicalTeamSport(sport) ?? ''] ?? [3, 1, 0];
+  if (canonicalTeamSport(sport) === 'carrom') return { win, draw, loss, tiebreakers: CARROM_ORDER };
+  if (canonicalTeamSport(sport) === 'kho-kho') return { win, draw, loss, tiebreakers: KHO_ORDER };
   return { win, draw, loss, tiebreakers: withoutScoreFor(STANDARD_ORDER, family) };
 }
 
@@ -117,10 +123,16 @@ const COMMON_LABELS: Record<StandingsTiebreaker, string> = {
   points: 'Points', wins: 'Wins', lost: 'Fewest losses', head_to_head: 'Head-to-head',
   score_diff: 'Score difference', score_for: 'Score for',
   frames_won: 'Frames won', ball_diff: 'Net ball difference',
+  adt: 'ADT (average difference time)',
 };
 
+// A carrom tie's rubbers are "games" in the rulebook, not matches.
+const CARROM_TIE_LABELS: Partial<Record<StandingsTiebreaker, string>> = { score_diff: 'Games won (net)', score_for: 'Games won' };
+
 export function tiebreakerLabel(tb: StandingsTiebreaker, sport?: string | null, entryType?: string | null): string {
-  return LABELS[rankingFamily(sport, entryType)][tb] ?? COMMON_LABELS[tb];
+  const family = rankingFamily(sport, entryType);
+  if (family === 'ties' && canonicalTeamSport(sport) === 'carrom' && CARROM_TIE_LABELS[tb]) return CARROM_TIE_LABELS[tb]!;
+  return LABELS[family][tb] ?? COMMON_LABELS[tb];
 }
 
 /** The tie-breakers an organiser can pick from, in a sensible display order. */
@@ -131,7 +143,9 @@ export const POOL_TIE_TIEBREAKERS: StandingsTiebreaker[] = ['frames_won', 'ball_
 /** The options that make sense for a sport. No sport (a default / format row) = all general ones. */
 export function tiebreakerOptions(sport?: string | null, entryType?: string | null): StandingsTiebreaker[] {
   if (!sport) return TIEBREAKER_OPTIONS;
-  const own = withoutScoreFor(TIEBREAKER_OPTIONS, rankingFamily(sport, entryType));
+  // Carrom ranks on games won (Inter-IIM), so it keeps "score for" even as a team tie.
+  const own = canonicalTeamSport(sport) === 'carrom' ? TIEBREAKER_OPTIONS : withoutScoreFor(TIEBREAKER_OPTIONS, rankingFamily(sport, entryType));
+  if (canonicalTeamSport(sport) === 'kho-kho') return ['points', 'adt', ...own.filter((t) => t !== 'points')];
   return canonicalTeamSport(sport) === 'pool/snooker' && entryType === 'team' ? [...own, ...POOL_TIE_TIEBREAKERS] : own;
 }
 

@@ -7,6 +7,7 @@ import {
   type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
   type FormatTemplate, type MatchOutcome, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
+import { isCalledDraw } from '@semp/shared';
 import { Prisma } from '@prisma/client';
 import type { Db } from '../../infra/prisma.js';
 import { writeCategoryLines, type CategoryLineInput } from './category-lines.service.js';
@@ -370,6 +371,7 @@ export async function buildPlayerStatRows(
 function outcomeForFixture(fx: StatFixture, side: Side): MatchOutcome | null {
   const teamId = side === 'A' ? fx.home_team_id : fx.away_team_id;
   if (fx.winner_team_id) return fx.winner_team_id === teamId ? 'won' : 'lost';
+  if (isCalledDraw(fx.live_state)) return 'drew';
   if (fx.home_score != null && fx.away_score != null) {
     if (fx.home_score === fx.away_score) return 'drew';
     const homeWon = fx.home_score > fx.away_score;

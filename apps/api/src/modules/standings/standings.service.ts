@@ -1,11 +1,11 @@
 import {
   KNOCKOUT_ROUND, DEFAULT_RANKING_RULE, DEFAULT_STANDINGS_RULE, EVENT_TITLE_GROUP, TITLE_GROUP_LABEL, chessStandingsRule, formatPoints, groupRankingFor, inheritRanking,
-  isChessSport, isNoResult, isRankingFormatName, isRankingSport, readTieResolutions, SPORT_TITLES_SCOPE, eventTitleIn, groupsForTitle, sportTitlesSchema, stageConfigSchema, standingsRuleSchema, titlePlacingFor,
+  isCalledDraw, isChessSport, isNoPointsDraw, isNoResult, walkoverCountsOf, isRankingFormatName, isRankingSport, readTieResolutions, SPORT_TITLES_SCOPE, eventTitleIn, groupsForTitle, sportTitlesSchema, stageConfigSchema, standingsRuleSchema, titlePlacingFor,
   type SportTitlesConfig, type StandingsRule,
   type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker,
 } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
-import { contingentKey, poolTieTotalsOf, type ContingentRef } from '@semp/shared';
+import { contingentKey, isKhoKhoFormat, khoMatchAdt, parseStoredFormat, poolTieTotalsOf, readRallyLog, type ContingentRef } from '@semp/shared';
 import { assignStageSequence, inPlacingStage, placingStageSequences } from '../fixtures/domain/stage-tree.js';
 import { SCORED_STATUSES, accumulate, drawContext, levelOn, rankBy, runScheme, shareRanks, type EntityTally, type SchemeContext, type SchemeFixture } from './domain/schemes.js';
 import { convertEventTotals, type EventTotal } from './domain/event-conversion.js';
@@ -145,9 +145,20 @@ export function toSchemeFixture(f: DrawFixtureRow, homeKey: string | null, awayK
     home_points: typeof cp?.home === 'number' ? cp.home : null,
     away_points: typeof cp?.away === 'number' ? cp.away : null,
     no_result: isNoResult(f.live_state),
+    draw_no_points: isNoPointsDraw(f.live_state),
+    walkover_counts: walkoverCountsOf(f.live_state),
     pool_number: f.pool_number, stage_sequence: f.stage_sequence,
     ...poolTieFields(f.live_state),
+    ...khoAdtFields(f.live_state),
   };
+}
+
+/** Kho-kho: each side's ADT inputs from a match's turn log, for the ADT tie-breaker. */
+export function khoAdtFields(liveState: unknown): Pick<SchemeFixture, 'home_adt' | 'away_adt'> {
+  const format = parseStoredFormat((liveState as { format?: unknown } | null)?.format);
+  if (!format || !isKhoKhoFormat(format)) return {};
+  const m = khoMatchAdt(format, readRallyLog(liveState));
+  return m ? { home_adt: m.A, away_adt: m.B } : {};
 }
 
 /** A pool team tie's frames and balls per side, for the frames-won / net-ball tie-breakers. */
@@ -625,12 +636,12 @@ export async function readStandingsBreakdown(
         result = 'bye';
       } else {
         const myTeam = isHome ? f.home_team_id : f.away_team_id;
-        if (f.winner_team_id == null && (isNoResult(f.live_state) || (myScore != null && oppScore != null && myScore === oppScore))) result = 'drawn';
+        if (f.winner_team_id == null && (isCalledDraw(f.live_state) || (myScore != null && oppScore != null && myScore === oppScore))) result = 'drawn';
         else if (f.winner_team_id === myTeam) result = 'won';
         else result = 'lost';
         // Per-match points only exist for the per-match schemes; placement/medal points
         // are earned at the draw level (stage reached / final rank), shown via `detail`.
-        if (rule.scheme === 'league_points') points = result === 'won' ? rule.win : result === 'drawn' ? rule.draw : rule.loss;
+        if (rule.scheme === 'league_points') points = result === 'won' ? rule.win : result === 'drawn' ? (isNoPointsDraw(f.live_state) ? 0 : rule.draw) : rule.loss;
         else if (rule.scheme === 'custom') { const cp = (f.live_state as any)?.custom_points ?? null; const v = isHome ? cp?.home : cp?.away; points = typeof v === 'number' ? v : null; }
       }
       matches.push({ round: f.round, opponent, result, score, points });

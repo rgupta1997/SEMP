@@ -157,7 +157,8 @@ export function cricketScorecard(
   const appeared = new Set<string>();
   const sideOf = new Map<string, CricketSide>();
 
-  for (const inn of state.innings) {
+  // Super Over innings are left out: they settle a tie and are not part of anyone's record.
+  for (const inn of state.innings.filter((i) => !i.superOver)) {
     const bowlingSide = other(inn.battingSide);
 
     for (const line of inn.batting) {

@@ -5,7 +5,7 @@ import {
 import { presetByKey } from './racquet-presets.js';
 import { teamPresetsFor } from './team-presets.js';
 import { scoringFormatSchema, type Side } from './scoring-rules.js';
-import { foldRally, initKernel, step, timeoutRules, timeoutsAllowedNow, timeoutsLeft, type RallyEvent, type RallyLog } from './rally-kernel.js';
+import { drawSettlement, foldRally, initKernel, step, timeoutRules, timeoutsAllowedNow, timeoutsLeft, type RallyEvent, type RallyLog } from './rally-kernel.js';
 
 const fmt = (k: string) => presetByKey(k)!;
 const points = (side: Side, n: number): RallyLog =>
@@ -572,5 +572,37 @@ describe('basketball timeouts', () => {
     // Saving the Inter-IIM preset untouched keeps its rule exactly.
     const iim = fmt('iim_4x10');
     expect(timeoutRules(applyKnobs(iim, readKnobs(iim)))).toEqual(timeoutRules(iim));
+  });
+});
+
+// How a called-off draw is scored: the official's choice on the end event.
+describe('drawSettlement', () => {
+  const f = fmt('futsal_2x10');
+  const end = (extra: Partial<Extract<RallyEvent, { t: 'end' }>>): RallyLog =>
+    [{ t: 'point', side: 'A' }, { t: 'end', outcome: 'draw', reason: 'weather', winner: null, ...extra } as RallyEvent];
+  it('shared points, no points, abandoned, and a plain draw', () => {
+    const at = (log: RallyLog) => drawSettlement(foldRally(f, log, 'A').state, log);
+    expect(at(end({ drawPoints: 'shared' }))).toEqual({ noResult: true, drawNoPoints: false });
+    expect(at(end({ drawPoints: 'none' }))).toEqual({ noResult: false, drawNoPoints: true });
+    expect(at([{ t: 'end', outcome: 'void', reason: 'abandoned', winner: null }])).toEqual({ noResult: true, drawNoPoints: false });
+    expect(at(end({}))).toEqual({ noResult: false, drawNoPoints: false });
+  });
+});
+
+// A walkover's score in the table: football counts it (FIFA), other sports do not unless set.
+describe('walkover score in the table', () => {
+  it('football presets count it; others do not', () => {
+    for (const key of ['football9_2x20', 'football9_ko_2x20', 'fifa_2x45']) expect(fmt(key).endStates.countWalkoverInDifference, key).toBe(true);
+    for (const key of ['futsal_2x10', 'hockey5_4x8', 'pkl_2x20']) expect(fmt(key).endStates.countWalkoverInDifference, key).toBe(false);
+  });
+
+  it('is a switch in the editor, kept on save and changeable', () => {
+    const fb = fmt('football9_2x20');
+    expect(readKnobs(fb).walkoverCountsInDifference).toBe(true);
+    expect(applyKnobs(fb, readKnobs(fb)).endStates.countWalkoverInDifference).toBe(true);
+    expect(applyKnobs(fb, { ...readKnobs(fb), walkoverCountsInDifference: false }).endStates.countWalkoverInDifference).toBe(false);
+    const hk = fmt('hockey5_4x8');
+    expect(knobsFor(readKnobs(hk)).some((s) => s.key === 'walkoverCountsInDifference')).toBe(true);
+    expect(applyKnobs(hk, { ...readKnobs(hk), walkoverCountsInDifference: true }).endStates.countWalkoverInDifference).toBe(true);
   });
 });

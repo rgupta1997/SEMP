@@ -93,7 +93,7 @@ export function tieProgress(
   if (tb?.minimumChase) {
     return { phase: 'minimumChase', extraPlayed, extraTotal, periodMs: extraMs, levelAfterRegulation };
   }
-  // Kabaddi: golden raids - the first point wins, the kernel ends the match on it.
+  // Kabaddi: golden raids - the side ahead when a raid ends wins; the kernel ends the match on it.
   if (tb?.goldenRaid) {
     return { phase: 'goldenRaid', extraPlayed, extraTotal, periodMs: extraMs, levelAfterRegulation };
   }
