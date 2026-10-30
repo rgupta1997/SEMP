@@ -2,8 +2,7 @@ import { PrismaClient } from '@prisma/client';
 
 // Single PrismaClient, created here and shared with every persistence adapter
 // via the composition root. The domain/application layers never import this.
-// Interactive transactions default to 5s; raised so slow links don't abort mid-write.
-export const prisma = new PrismaClient({ transactionOptions: { timeout: 120_000 } });
+export const prisma = new PrismaClient();
 
 export type Prisma = typeof prisma;
 
