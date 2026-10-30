@@ -82,23 +82,44 @@ export type EventTone =
   | 'score'      // puts points on this side's board
   | 'ownGoal'    // puts points on the OTHER side's board
   | 'good'       // a positive act that scores nothing (a save, a dig, a rebound)
+  | 'warning'    // a green card: a short suspension, below a caution
   | 'caution'    // a yellow card, a foul
   | 'dismissal'  // a red card, a send-off
   | 'error';     // a miss, a turnover, a service error
 
+/**
+ * How much one event adds to a metric: a count, the event's own magnitude, or 1 only
+ * when a condition holds - a raid of 3+ points is a super raid, a raid flagged 'dod'
+ * scored in a do-or-die.
+ */
+export type MetricAmount = number | 'value' | { ifValueAtLeast: number } | { ifFlag: string };
+
 export interface StatEventSpec extends EventTypeSpec {
   /** How the button reads at a glance. Defaults to score/error on the points alone. */
   tone?: EventTone;
+  /** A team count read straight off the log, not a player metric (hockey's penalty corners, hockey.ts). */
+  teamCount?: boolean;
   /**
    * The second person, because most interesting events involve two - goal + assist,
    * wicket + fielder, block + set. Recorded on the SAME row as the primary: an assist
    * captured as a separate tap is an assist that never gets captured.
    */
-  secondPlayer?: { key: string; label: string; optional: boolean };
+  secondPlayer?: {
+    key: string; label: string; optional: boolean;
+    /** Picked from the OTHER side's roster - kho kho's chaser on a defender's out. */
+    fromOpponent?: boolean;
+  };
+  /**
+   * Which side may record it - the attacking side (kho kho's chasers, kabaddi's
+   * raiders) or the defending one. Unset means either side, as in every other sport.
+   */
+  role?: 'attack' | 'defend';
   /** A magnitude, where the event carries one (a raid worth 3 points). */
   value?: { label: string; unit?: string; min?: number; max?: number };
-  metrics: Record<string, number | 'value'>;
-  secondPlayerMetrics?: Record<string, number>;
+  /** The magnitude IS the score: a 3-point raid puts 3 on the board. */
+  scoresValue?: boolean;
+  metrics: Record<string, MetricAmount>;
+  secondPlayerMetrics?: Record<string, MetricAmount>;
   /**
    * The POINT goes to the other side, the RECORD stays with this player.
    *
@@ -338,7 +359,7 @@ export const RACQUET_STAT_SPECS: SportStatSpec[] = [
 // ============================================================================
 
 const ev = (
-  key: string, label: string, metrics: Record<string, number | 'value'>,
+  key: string, label: string, metrics: Record<string, MetricAmount>,
   o: Partial<StatEventSpec> = {},
 ): StatEventSpec => ({ key, label, perPlayer: true, metrics, ...o });
 
@@ -379,6 +400,8 @@ const GOAL_EVENTS: StatEventSpec[] = [
   ev('save', 'Save', { saves: 1 }, { tone: 'good' }),
   ev('yellow', 'Yellow card', { yellows: 1 }, { tone: 'caution' }),
   ev('red', 'Red card', { reds: 1 }, { tone: 'dismissal' }),
+  // A red from a second yellow: still a red, kept apart for fair-play points (3 vs a direct red's 4).
+  ev('red2y', 'Red card (second yellow)', { reds: 1 }, { tone: 'dismissal' }),
   ev('pen_scored', 'Penalty scored', { pens_scored: 1, goals: 1 }, { points: 1, tone: 'score' }),
   ev('pen_missed', 'Penalty missed', { pens_missed: 1 }, { tone: 'error' }),
 ];
@@ -390,7 +413,7 @@ const GOAL_METRICS: StatMetric[] = [
   count('own_goals', 'Own goals', 'OG', { fromEvents: ['own_goal'], higherIsBetter: false }),
   count('saves', 'Saves', 'Sv', { fromEvents: ['save'] }),
   count('yellows', 'Yellow cards', 'YC', { fromEvents: ['yellow'], higherIsBetter: false }),
-  count('reds', 'Red cards', 'RC', { fromEvents: ['red'], higherIsBetter: false }),
+  count('reds', 'Red cards', 'RC', { fromEvents: ['red', 'red2y'], higherIsBetter: false }),
   count('pens_scored', 'Penalties scored', 'PS', { fromEvents: ['pen_scored'] }),
   count('pens_missed', 'Penalties missed', 'PM', { fromEvents: ['pen_missed'], higherIsBetter: false }),
   // Shoot-out kicks: never goals. Counted from `penaltyKick` events in team-stats.ts.
@@ -398,6 +421,28 @@ const GOAL_METRICS: StatMetric[] = [
   count('shootout_missed', 'Shoot-out penalties missed', 'SoM', { higherIsBetter: false }),
   perMatch('goals_per_match', 'Goals per match', 'G/M', 'goals'),
 ];
+
+// Hockey: football's actions plus the green card (2-minute suspension), a penalty is a
+// stroke, and goals come three ways - field goal, penalty corner, penalty stroke. A
+// corner awarded is the team's (hockey.ts counts them); a corner goal is the scorer's.
+const HOCKEY_LABEL: Record<string, string> = { goal: 'Field goal', pen_scored: 'Penalty stroke scored', pen_missed: 'Penalty stroke missed' };
+const HOCKEY_EVENTS: StatEventSpec[] = GOAL_EVENTS.filter((e) => e.key !== 'red2y').flatMap((e) => [
+  ...(e.key === 'yellow' ? [ev('green', 'Green card', { greens: 1 }, { tone: 'warning' })] : []),
+  HOCKEY_LABEL[e.key] ? { ...e, label: HOCKEY_LABEL[e.key] } : e,
+  ...(e.key === 'goal' ? [
+    ev('pc_goal', 'Penalty corner goal', { goals: 1, pc_goals: 1 }, {
+      points: 1, tone: 'score', secondPlayer: { key: 'assist', label: 'Assisted by', optional: true }, secondPlayerMetrics: { assists: 1 },
+    }),
+    ev('pc', 'Penalty corner', {}, { perPlayer: false, teamCount: true, tone: 'good' }),
+  ] : []),
+]);
+const HOCKEY_METRIC_LABEL: Record<string, string> = { pens_scored: 'Penalty strokes scored', pens_missed: 'Penalty strokes missed' };
+const HOCKEY_FROM: Record<string, string[]> = { goals: ['goal', 'pc_goal', 'pen_scored'], assists: ['goal', 'pc_goal'] };
+const HOCKEY_METRICS: StatMetric[] = GOAL_METRICS.flatMap((m) => [
+  ...(m.key === 'yellows' ? [count('greens', 'Green cards', 'GC', { fromEvents: ['green'], higherIsBetter: false })] : []),
+  { ...m, ...(HOCKEY_METRIC_LABEL[m.key] ? { label: HOCKEY_METRIC_LABEL[m.key] } : {}), ...(HOCKEY_FROM[m.key] ? { fromEvents: HOCKEY_FROM[m.key] } : {}) },
+  ...(m.key === 'goals' ? [count('pc_goals', 'Penalty corner goals', 'PCG', { fromEvents: ['pc_goal'] })] : []),
+]);
 
 // Basketball counts the same shape with a different vocabulary, and its baskets are
 // worth one, two or three - which is what `value` on an event is for.
@@ -434,30 +479,130 @@ const BASKET_METRICS: StatMetric[] = [
   perMatch('points_per_match', 'Points per match', 'P/M', 'points_scored'),
 ];
 
+// Ultimate (WFDF): a goal is a catch in the end zone, the assist is the throw. No
+// cards, no penalties, no keeper - football's set was wrong here. A Callahan is a
+// defender's catch in the end zone they attack: a goal and a block in one.
+const ULTIMATE_EVENTS: StatEventSpec[] = [
+  ev('goal', 'Goal', { goals: 1 }, {
+    points: 1, tone: 'score',
+    secondPlayer: { key: 'assist', label: 'Assisted by (thrower)', optional: true },
+    secondPlayerMetrics: { assists: 1 },
+  }),
+  ev('callahan', 'Callahan', { goals: 1, blocks: 1 }, { points: 1, tone: 'score' }),
+  ev('ul_block', 'Block (D)', { blocks: 1 }, { tone: 'good' }),
+  ev('ul_turnover', 'Turnover', { turnovers: 1 }, { tone: 'error' }),
+];
+
+const ULTIMATE_METRICS: StatMetric[] = [
+  ...UNIVERSAL,
+  count('goals', 'Goals', 'G', { fromEvents: ['goal', 'callahan'], headline: true }),
+  count('assists', 'Assists', 'A', { fromEvents: ['goal'], headline: true }),
+  count('blocks', 'Blocks (Ds)', 'D', { fromEvents: ['ul_block', 'callahan'], headline: true }),
+  count('turnovers', 'Turnovers', 'TO', { fromEvents: ['ul_turnover'], higherIsBetter: false }),
+  perMatch('goals_per_match', 'Goals per match', 'G/M', 'goals'),
+];
+
 // ---- raid & tag ------------------------------------------------------------
 
+// Kabaddi (AKFI / IIMK rules). The raiding side records how the raid ended, the
+// defending side its tackles; a tackle names the raider from the other roster. A
+// scoring raid of 3+ is a super raid, and one flagged 'dod' was won in a do-or-die.
+const KAB_RAIDER = { key: 'raider', label: 'Raider tackled', optional: true, fromOpponent: true };
+const RAID_WON = { raids: 1, successful_raids: 1, do_or_die_won: { ifFlag: 'dod' } } as const;
+
 const RAID_EVENTS: StatEventSpec[] = [
-  ev('raid', 'Raid', { raid_points: 'value', raids: 1, successful_raids: 1 }, {
-    value: { label: 'Points', min: 0, max: 7 },
+  ev('raid', 'Raid', { ...RAID_WON, raid_points: 'value', super_raids: { ifValueAtLeast: 3 } }, {
+    value: { label: 'Points', min: 1, max: 7 }, scoresValue: true, tone: 'score', role: 'attack',
   }),
-  ev('empty_raid', 'Empty raid', { raids: 1 }, { tone: 'error' }),
-  ev('tackle', 'Tackle', { tackle_points: 1, tackles: 1 }, { points: 1 }),
-  ev('super_tackle', 'Super tackle', { tackle_points: 2, tackles: 1, super_tackles: 1 }, { points: 2 }),
-  ev('bonus', 'Bonus point', { bonus_points: 1 }, { points: 1 }),
-  ev('allout', 'All out', { all_outs: 1 }, { points: 2, perPlayer: false }),
+  // On top of a raid's touch points; a raid that only won the bonus is the next one.
+  ev('bonus', '+ Bonus', { bonus_points: 1 }, { points: 1, tone: 'score', role: 'attack' }),
+  ev('bonus_raid', 'Bonus only', { ...RAID_WON, bonus_points: 1 }, { points: 1, tone: 'score', role: 'attack' }),
+  ev('empty_raid', 'Empty raid', { raids: 1 }, { tone: 'error', role: 'attack' }),
+  // Out without a tackle - stepped out, lost or late chant: the defence scores.
+  ev('raider_out', 'Raider out', { raids: 1, times_out: 1 }, { points: 1, forOpponent: true, tone: 'ownGoal', role: 'attack' }),
+  // The third empty raid in a row: the raider is out and the defence scores.
+  ev('dod_failed', 'Do-or-die failed', { raids: 1, times_out: 1 }, { points: 1, forOpponent: true, tone: 'ownGoal', role: 'attack' }),
+  ev('tackle', 'Tackle +1', { tackle_points: 1, tackles: 1 }, {
+    points: 1, tone: 'score', role: 'defend', secondPlayer: KAB_RAIDER, secondPlayerMetrics: { raids: 1, times_out: 1 },
+  }),
+  ev('super_tackle', 'Super tackle +2', { tackle_points: 2, tackles: 1, super_tackles: 1 }, {
+    points: 2, tone: 'score', role: 'defend', secondPlayer: KAB_RAIDER, secondPlayerMetrics: { raids: 1, times_out: 1 },
+  }),
+  // Out of bounds, or into the raiders' court before the raid ended: the raiders score.
+  // Alongside a scoring raid it does not end the raid; tap it before the raid's own ending.
+  ev('defender_out', 'Defender out', { times_out: 1 }, { points: 1, forOpponent: true, tone: 'ownGoal', role: 'defend' }),
+  // The raid's only point came from a defender going out: ends the raid, not an empty one.
+  ev('defender_out_raid', 'Defender out, raid ends', { times_out: 1 }, { points: 1, forOpponent: true, tone: 'ownGoal', role: 'defend' }),
+  // The team's, not one player's.
+  ev('allout', 'All out +2', { all_outs: 1 }, { points: 2, perPlayer: false, tone: 'score' }),
+  ev('technical', 'Technical point', {}, { points: 1, perPlayer: false, tone: 'score' }),
+  ev('kab_yellow', 'Yellow card', { yellows: 1 }, { tone: 'caution' }),
+  ev('kab_red', 'Red card', { reds: 1 }, { tone: 'dismissal' }),
 ];
 
 const RAID_METRICS: StatMetric[] = [
   ...UNIVERSAL,
   count('raid_points', 'Raid points', 'RP', { fromEvents: ['raid'], per: 'value', headline: true }),
-  count('raids', 'Raids', 'Rd', { fromEvents: ['raid', 'empty_raid'] }),
-  count('successful_raids', 'Successful raids', 'SR', { fromEvents: ['raid'] }),
+  // Every raid, however it ended - including the ones the raider was tackled on.
+  count('raids', 'Raids', 'Rd', { fromEvents: ['raid', 'bonus_raid', 'empty_raid', 'raider_out', 'dod_failed', 'tackle', 'super_tackle'] }),
+  count('successful_raids', 'Successful raids', 'SR', { fromEvents: ['raid', 'bonus_raid'] }),
   rate('raid_strike_rate', 'Raid strike rate', 'RSR', ['successful_raids', 'raids'], true),
+  count('super_raids', 'Super raids', 'SRd', { fromEvents: ['raid'] }),
+  count('do_or_die_won', 'Do-or-die raids won', 'DoD', { fromEvents: ['raid', 'bonus_raid'] }),
   count('tackle_points', 'Tackle points', 'TP', { fromEvents: ['tackle', 'super_tackle'], per: 'value', headline: true }),
   count('tackles', 'Tackles', 'Tk', { fromEvents: ['tackle', 'super_tackle'] }),
   count('super_tackles', 'Super tackles', 'ST', { fromEvents: ['super_tackle'] }),
-  count('bonus_points', 'Bonus points', 'BP', { fromEvents: ['bonus'] }),
+  count('bonus_points', 'Bonus points', 'BP', { fromEvents: ['bonus', 'bonus_raid'] }),
+  count('times_out', 'Times out', 'Out', {
+    fromEvents: ['raider_out', 'dod_failed', 'tackle', 'super_tackle', 'defender_out', 'defender_out_raid'], higherIsBetter: false,
+  }),
   count('all_outs', 'All outs', 'AO', { fromEvents: ['allout'] }),
+  count('yellows', 'Yellow cards', 'YC', { fromEvents: ['kab_yellow'], higherIsBetter: false }),
+  count('reds', 'Red cards', 'RC', { fromEvents: ['kab_red'], higherIsBetter: false }),
+];
+
+// Kho kho: every way out on the KKFI score sheet, tapped on the DEFENDER who went out.
+// The point goes to the chasing side; the chaser who made the out rides along.
+// Required: the console asks for the chaser on every such out ("Not sure" is allowed),
+// or the chasers' career stats would only fill when a scorer remembered to open a row.
+const KHO_CHASER = { key: 'chaser', label: 'Out by (chaser)', optional: false, fromOpponent: true };
+const khoOut = (key: string, label: string, metrics: Record<string, number>, chaserMetrics?: Record<string, number>) =>
+  ev(key, label, { times_out: 1, ...metrics }, {
+    points: 1, forOpponent: true, tone: 'ownGoal', role: 'defend',
+    ...(chaserMetrics ? { secondPlayer: KHO_CHASER, secondPlayerMetrics: { touch_points: 1, ...chaserMetrics } } : {}),
+  });
+
+const KHO_EVENTS: StatEventSpec[] = [
+  khoOut('kho_touch', 'Touched out', {}, {}),
+  khoOut('kho_pole_dive', 'Pole dive out', {}, { pole_dive_outs: 1 }),
+  khoOut('kho_dive', 'Dive out', {}, { dive_outs: 1 }),
+  khoOut('kho_sudden_attack', 'Sudden attack', {}, { sudden_attack_outs: 1 }),
+  khoOut('kho_out_of_field', 'Out of field', { out_of_field_outs: 1 }),
+  khoOut('kho_late_entry', 'Late entry', { late_entries: 1 }),
+  // A chaser's foul is cleared by a back kho - it scores nothing, it is only recorded.
+  ev('kho_foul', 'Foul', { kho_fouls: 1 }, { tone: 'error', role: 'attack' }),
+  ev('kho_yellow', 'Yellow card', { yellows: 1 }, { tone: 'caution' }),
+  ev('kho_red', 'Red card', { reds: 1 }, { tone: 'dismissal' }),
+];
+
+const KHO_METRICS: StatMetric[] = [
+  ...UNIVERSAL,
+  count('touch_points', 'Defenders put out', 'Outs', {
+    fromEvents: ['kho_touch', 'kho_pole_dive', 'kho_dive', 'kho_sudden_attack'], headline: true,
+  }),
+  count('pole_dive_outs', 'Pole dive outs', 'PDO', { fromEvents: ['kho_pole_dive'] }),
+  count('dive_outs', 'Dive outs', 'DvO', { fromEvents: ['kho_dive'] }),
+  count('sudden_attack_outs', 'Sudden attack outs', 'SAO', { fromEvents: ['kho_sudden_attack'] }),
+  count('times_out', 'Times out defending', 'TO', {
+    fromEvents: ['kho_touch', 'kho_pole_dive', 'kho_dive', 'kho_sudden_attack', 'kho_out_of_field', 'kho_late_entry'],
+    higherIsBetter: false, headline: true,
+  }),
+  count('out_of_field_outs', 'Out of field', 'OoF', { fromEvents: ['kho_out_of_field'], higherIsBetter: false }),
+  count('late_entries', 'Late entries', 'LE', { fromEvents: ['kho_late_entry'], higherIsBetter: false }),
+  count('kho_fouls', 'Chasing fouls', 'F', { fromEvents: ['kho_foul'], higherIsBetter: false }),
+  count('yellows', 'Yellow cards', 'YC', { fromEvents: ['kho_yellow'], higherIsBetter: false }),
+  count('reds', 'Red cards', 'RC', { fromEvents: ['kho_red'], higherIsBetter: false }),
+  perMatch('outs_per_match', 'Outs per match', 'O/M', 'touch_points'),
 ];
 
 // ---- net (team) ------------------------------------------------------------
@@ -613,16 +758,16 @@ export const TEAM_STAT_SPECS: SportStatSpec[] = [
   // invasion
   spec('football', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['GK', 'DEF', 'MID', 'FWD']),
   spec('futsal', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['GK', 'DEF', 'MID', 'FWD']),
-  spec('hockey', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['GK', 'DEF', 'MID', 'FWD']),
+  spec('hockey', 'invasion', HOCKEY_METRICS, HOCKEY_EVENTS, ['GK', 'DEF', 'MID', 'FWD']),
   spec('handball', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['GK', 'BACK', 'WING', 'PIVOT']),
-  spec('frisbee', 'invasion', GOAL_METRICS, GOAL_EVENTS, ['handler', 'cutter']),
+  spec('frisbee', 'invasion', ULTIMATE_METRICS, ULTIMATE_EVENTS, ['handler', 'cutter']),
   {
     ...spec('basketball', 'invasion', BASKET_METRICS, BASKET_EVENTS, ['PG', 'SG', 'SF', 'PF', 'C']),
     attempts: { missEvents: ['ft_miss'], metrics: ['ftm', 'fta'] },
   },
   // raid
   spec('kabaddi', 'raid', RAID_METRICS, RAID_EVENTS, ['raider', 'defender', 'all-rounder']),
-  spec('kho-kho', 'raid', RAID_METRICS, RAID_EVENTS, ['attacker', 'defender']),
+  spec('kho-kho', 'raid', KHO_METRICS, KHO_EVENTS, ['chaser', 'defender']),
   // net
   spec('volleyball', 'net', NET_METRICS, NET_EVENTS, ['setter', 'outside', 'middle', 'opposite', 'libero']),
   spec('throwball', 'net', THROW_METRICS, THROW_EVENTS),

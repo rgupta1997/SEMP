@@ -293,7 +293,7 @@ export function OrgProfilePanel({ orgId }: { orgId: string }) {
             {canManage && <Button size="sm" variant="outline" disabled={archived} title={archivedTitle} onClick={() => setEditing(true)}>Edit details</Button>}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 14, marginTop: 14 }}>
-            {([['Name', org.name], ['Kind', org.kind], ['City', org.city ?? '—'], ['Code', org.code ?? '—']] as const).map(([k, v]) => (
+            {([['Name', org.name], ['Kind', org.kind], ['City', org.city ?? '-'], ['Code', org.code ?? '-']] as const).map(([k, v]) => (
               <div key={k}>
                 <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--muted)' }}>{k}</div>
                 <div style={{ fontSize: 14, color: 'var(--ink-2)', marginTop: 4 }}>{v}</div>
@@ -466,7 +466,7 @@ function OrgDangerZone({ orgId, orgName, onDelete, deleting }: {
               {heading('This organisation is archived', '#92400E')}
               <p style={note}>
                 Archived on {fmtDate(data.archived_at)}. It's hidden, and its hosted events are archived with it.
-                It stays like this until you retrieve it — nothing is deleted.
+                It stays like this until you retrieve it - nothing is deleted.
               </p>
             </div>
             <Button disabled={busy} onClick={() => run(`/organizations/${orgId}/retrieve`, 'Organisation retrieved')}>

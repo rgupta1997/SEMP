@@ -111,7 +111,7 @@ function SportsTab() {
     <div style={cardStyle}>
       <h3 style={{ fontFamily: POP, fontWeight: 800, fontSize: 16, margin: '0 0 4px' }}>Sports you play</h3>
       <p style={{ margin: '0 0 6px', fontSize: 13, color: 'var(--muted)' }}>Taken from the squads you belong to.</p>
-      {sports.length === 0 ? <p style={emptyStyle}>No sports yet — join a squad and they appear here.</p>
+      {sports.length === 0 ? <p style={emptyStyle}>No sports yet - join a squad and they appear here.</p>
         : <>
           {page_.map(([sport, v]) => (
             <div key={sport} style={rowStyle}>
@@ -259,11 +259,11 @@ function CertificateRow({ c }: { c: CertRow }) {
 
           <dl style={{ flex: '1 1 240px', minWidth: 0, margin: 0, fontSize: 13 }}>
             <DetailLine label="Serial" mono>{c.serial}</DetailLine>
-            <DetailLine label="Issued to">{c.payload?.recipient_name ?? '—'}</DetailLine>
-            <DetailLine label="Event">{c.championships?.name ?? '—'}</DetailLine>
-            <DetailLine label="Sport">{c.payload?.sport ?? '—'}</DetailLine>
-            <DetailLine label="Award">{c.payload?.title ?? '—'}</DetailLine>
-            <DetailLine label="Issued by">{c.organizations?.name ?? '—'}</DetailLine>
+            <DetailLine label="Issued to">{c.payload?.recipient_name ?? '-'}</DetailLine>
+            <DetailLine label="Event">{c.championships?.name ?? '-'}</DetailLine>
+            <DetailLine label="Sport">{c.payload?.sport ?? '-'}</DetailLine>
+            <DetailLine label="Award">{c.payload?.title ?? '-'}</DetailLine>
+            <DetailLine label="Issued by">{c.organizations?.name ?? '-'}</DetailLine>
             <DetailLine label="Issued on">{new Date(c.issued_at).toLocaleDateString()}</DetailLine>
             {c.revoked_at && <DetailLine label="Withdrawn">{new Date(c.revoked_at).toLocaleDateString()}</DetailLine>}
 
@@ -648,7 +648,7 @@ function VerifiedRecordsNotice({ visible }: { visible: boolean }) {
       <div>
         <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ok-ink)' }}>Verified records are always visible</div>
         <div style={{ fontSize: 12.5, color: '#33604A', marginTop: 2, lineHeight: 1.55 }}>
-          Results written by a locked scorecard cannot be edited or hidden — not by you, and not by the
+          Results written by a locked scorecard cannot be edited or hidden - not by you, and not by the
           institution that issued them. That is what makes them worth something.
         </div>
       </div>

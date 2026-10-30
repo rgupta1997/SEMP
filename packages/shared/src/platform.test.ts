@@ -5,13 +5,16 @@ import { presetsFor } from './racquet-presets.js';
 describe('built-in format visibility', () => {
   const tennis = presetsFor('tennis').map((p) => p.presetKey!);
 
-  it('tennis offers ITF Standard, League standard and Grand Slam by default', () => {
-    expect(tennis.filter((k) => isPresetShown(k, {}))).toEqual(['itf_standard_bo3', 'grand_slam_bo5', 'no_ad_match_tb_bo3']);
+  it('tennis offers ITF Standard, League standard, Grand Slam and the Inter-IIM sets by default', () => {
+    expect(tennis.filter((k) => isPresetShown(k, {}))).toEqual([
+      'itf_standard_bo3', 'grand_slam_bo5', 'no_ad_match_tb_bo3',
+      'iim_men_set6_tb10', 'iim_men_set6_tb10_bo3', 'iim_women_set5_tb7', 'iim_women_set5_tb7_bo3',
+    ]);
   });
 
-  it('squash offers WSF/PSA, Club/league, Doubles and English 9 best of 5 by default', () => {
+  it('squash offers WSF/PSA, Club/league, Inter-IIM, Doubles and English 9 best of 5 by default', () => {
     expect(presetsFor('squash').map((p) => p.presetKey!).filter((k) => isPresetShown(k, {})))
-      .toEqual(['wsf_pars11_bo5', 'pars11_bo3', 'english9_bo5', 'doubles_pars11_bo3']);
+      .toEqual(['wsf_pars11_bo5', 'pars11_bo3', 'iim_pars11_bo3_cap21', 'english9_bo5', 'doubles_pars11_bo3']);
   });
 
   it('table tennis offers ITTF best of 5 and 7, Classic 21 and the corporate game to 21 by default', () => {

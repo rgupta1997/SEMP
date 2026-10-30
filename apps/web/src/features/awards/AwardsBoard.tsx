@@ -44,7 +44,7 @@ export function AwardsBoard({ awards }: { awards: BoardEventAward[] }) {
             <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">{scopeOf(a)}</span>
             <span className="min-w-0 truncate">
               <span className="font-medium text-slate-800 dark:text-slate-200">{a.award_name}</span>
-              <span className="text-slate-500 dark:text-slate-400"> · {a.recipient_name ?? '—'}{a.recipient_kind === 'team' ? ' (team)' : ''}</span>
+              <span className="text-slate-500 dark:text-slate-400"> · {a.recipient_name ?? '-'}{a.recipient_kind === 'team' ? ' (team)' : ''}</span>
             </span>
           </li>
         ))}
@@ -60,7 +60,7 @@ export function MatchAwardsLine({ awards }: { awards: BoardMatchAward[] }) {
     <div data-qa="match-awards" className="flex min-w-0 items-center gap-1.5 truncate text-[12px] text-slate-500 dark:text-slate-400">
       <Medal size={12} className="shrink-0 text-amber-500" aria-hidden />
       <span className="truncate">
-        {awards.map((a) => `${a.award_name}: ${a.recipient_name ?? '—'}`).join(' · ')}
+        {awards.map((a) => `${a.award_name}: ${a.recipient_name ?? '-'}`).join(' · ')}
       </span>
     </div>
   );

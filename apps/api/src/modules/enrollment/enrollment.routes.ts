@@ -204,7 +204,7 @@ export function makeEnrollmentRouter(prisma: Prisma): Router {
     const label = entry.org_units?.name ?? entry.organizations?.name ?? 'That entry';
     const teams = await prisma.team_entries.count({ where: { championship_organization_id: entry.id } });
     if (teams > 0) {
-      throw new BusinessRuleError(`${label} has ${teams} team${teams === 1 ? '' : 's'} in this championship. Remove them first — withdrawing would delete squads people have already been picked for.`);
+      throw new BusinessRuleError(`${label} has ${teams} team${teams === 1 ? '' : 's'} in this championship. Remove them first - withdrawing would delete squads people have already been picked for.`);
     }
 
     await prisma.championship_organizations.delete({ where: { id: entry.id } });

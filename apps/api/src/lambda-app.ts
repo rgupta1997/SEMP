@@ -12,7 +12,7 @@ import { prisma } from './infra/prisma.js';
 import { buildApp } from './http/server.js';
 
 // Built once per warm Lambda container (module scope), then reused across
-// invocations — same singleton PrismaClient as the Render deployment, just
+// invocations - same singleton PrismaClient as the Render deployment, just
 // without the `.listen()` call, since API Gateway owns the socket instead.
 const app = buildApp(prisma);
 

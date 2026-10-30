@@ -4,7 +4,7 @@ import { useApi } from '../lib/hooks';
 import { useAuth } from '../lib/auth';
 import { usePageTitle } from '../lib/pageTitle';
 import { Spinner } from '../components/ui';
-import { formatPoints } from '@semp/shared';
+import { formatPoints, KHO_END_LABEL, KHO_END_SHORT } from '@semp/shared';
 
 // My Game - personal landing screen (PG-10, F-040..F-044). A new account lands here with
 // nothing, so empty states must read as a beginning, not a broken page.
@@ -18,6 +18,8 @@ interface Match {
   my_score: number | null; opp_score: number | null;
   /** Shoot-out kicks [mine, theirs] when a level match was settled on penalties. */
   pens?: [number, number] | null;
+  /** Kho kho: settled on minimum chase or won by an innings. */
+  settled?: 'minimum_chase' | 'innings' | null;
   result: 'won' | 'lost' | 'drawn' | 'bye' | null;
   reason?: string;
 }
@@ -288,7 +290,7 @@ export function MyGamePage() {
                   display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: MONO, fontSize: 11, fontWeight: 700,
                 }}>!</span>
                 <span style={{ flex: 1, fontSize: 13.5, color: C.fg2 }}>
-                  {p.reason} — {[p.sport, p.championship?.name].filter(Boolean).join(' · ')}
+                  {p.reason} - {[p.sport, p.championship?.name].filter(Boolean).join(' · ')}
                 </span>
                 <span aria-hidden style={{ color: C.faint }}>›</span>
               </div>
@@ -351,6 +353,7 @@ export function MyGamePage() {
                 <span style={{ fontFamily: MONO, fontSize: 13, color: C.navy, minWidth: 62 }}>
                   {r.my_score != null ? formatPoints(r.my_score) : '–'} · {r.opp_score != null ? formatPoints(r.opp_score) : '–'}
                   {r.pens && <span style={{ display: 'block', fontSize: 10, color: C.fg3 }} title="Penalty shoot-out">{r.pens[0]}–{r.pens[1]} pens</span>}
+                  {r.settled && <span style={{ display: 'block', fontSize: 10, color: C.fg3 }} title={KHO_END_LABEL[r.settled]}>{KHO_END_SHORT[r.settled]}</span>}
                 </span>
                 <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: C.fg2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {r.my_team?.name} vs {r.opponent?.name ?? 'TBC'}

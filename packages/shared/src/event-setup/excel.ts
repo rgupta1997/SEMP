@@ -1,5 +1,5 @@
 /*
- * READING AN UPLOADED WORKBOOK INTO GRIDS — the one way both the dashboard (in the
+ * READING AN UPLOADED WORKBOOK INTO GRIDS - the one way both the dashboard (in the
  * browser) and the CLI (in node) turn a SheetJS workbook into the string grids the
  * validator reads, so the two can never read the same file differently.
  *
@@ -12,7 +12,7 @@ export const SETUP_WORKBOOK_LIMITS = { bytes: 2 * 1024 * 1024, sheets: 20, rows:
 
 /**
  * How to `XLSX.read` an uploaded workbook before `setupSheetsFromWorkbook`.
- * `cellNF` keeps each cell's number format — without it a date cell is a bare
+ * `cellNF` keeps each cell's number format - without it a date cell is a bare
  * number and its date-ness is lost, so a cell formatted mm/dd/yyyy could only be read
  * from its display text, month-first. `dateNF` covers the locale short date (format 14).
  */
@@ -43,7 +43,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 
 /**
  * A real Excel date cell, as the template asks for it: YYYY-MM-DD (plus HH:MM when
- * it also carries a time). Taken from the cell's VALUE, never its display text — a
+ * it also carries a time). Taken from the cell's VALUE, never its display text - a
  * cell formatted mm/dd/yyyy shows "10/11/2026" for 11 October, which a day-first
  * reader would take for 10 November. Time-only cells (a kickoff typed as 9:00 AM)
  * are left as Excel shows them; the validator reads those.
@@ -71,7 +71,7 @@ function isoDateText(XLSX: SetupXlsxLike, cell: Cell): string | null {
 /**
  * The cells that actually hold something, as a range from A1.
  *
- * From A1, not the sheet's own `!ref`, so grid row i is always Excel row i+1 — the
+ * From A1, not the sheet's own `!ref`, so grid row i is always Excel row i+1 - the
  * validator reports issues by Excel row number, and a sheet whose data starts at B3
  * would otherwise be off by two in every message. And from the cells, not `!ref`,
  * because a sheet formatted down to row 1,048,576 claims a range a million rows long.

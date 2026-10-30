@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  boardsOnly, carromRulesOf, describeCricketFormat, describeTimeControl, formatLength, isCarromSport, isChessSport, isCricketFormat, isPeriodShaped, knobModelFor, parseRoundFormats,
-  pluralizePeriodLabel, resolveRounds, whyNotEditable,
-  type AnyKnobSpec, type AnyKnobs, type MatchFormat, type RoundFormatRule,
+  KNOCKOUT_ROUND, boardsOnly, carromRulesOf, describeCricketFormat, describeTimeControl, formatLength,
+  isCarromSport, isChessSport, isCricketFormat, isPeriodShaped, knobModelFor, parseRoundFormats,
+  pluralizePeriodLabel, resolveRounds, whyNotEditable, type AnyKnobSpec, type AnyKnobs, type MatchFormat,
+  type RoundFormatRule,
 } from '@semp/shared';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
@@ -32,7 +33,8 @@ interface ShelfResponse {
   /** What the draw plays with nothing chosen, when that is not the first preset (Rapid / Blitz chess). */
   defaultPresetKey?: string | null;
   /** The rounds this draw HAS, or will have once generated. Never a guess. */
-  rounds?: Array<{ round: string; matches: number; stageSequence: number }>;
+  /** `stageWide`: every pool / league match of that stage, in one row - a rule for the stage, not a round. */
+  rounds?: Array<{ round: string; matches: number; stageSequence: number; stageWide?: boolean }>;
   entrants?: number;
 }
 
@@ -92,6 +94,8 @@ export function describeFormat(f: MatchFormat): string {
     bits.push(r.gamesToWin > 1 ? `best of ${r.gamesToWin * 2 - 1} games` : 'one game');
     bits.push(`to ${r.gameTarget} points`);
     if (r.maxBoards) bits.push(`${r.maxBoards} boards a game`);
+    if (r.maxBoards && r.boardsWonDecides) bits.push('level: more boards won');
+    if (r.maxBoards && r.tieBreakBoards > 1) bits.push(`${r.tieBreakBoards} tie-break boards`);
     bits.push(`queen ${r.queenPoints}${r.queenCutoff ? ` until ${r.queenCutoff}` : ''}`);
     return bits.join(' · ');
   }
@@ -603,7 +607,7 @@ function KnobField({ spec, knobs, onSet }: {
  * the entrant count before - so a rule can only ever be set on a round that exists.
  */
 function RoundFormatTable({ rounds, entrants, options, drawFormatId, drawFormat, rules, onChange }: {
-  rounds: Array<{ round: string; matches: number; stageSequence: number }>;
+  rounds: Array<{ round: string; matches: number; stageSequence: number; stageWide?: boolean }>;
   entrants: number;
   options: Array<{ id: string | null; label: string; format: MatchFormat; group: string }>;
   drawFormatId: string | null;
@@ -626,29 +630,33 @@ function RoundFormatTable({ rounds, entrants, options, drawFormatId, drawFormat,
   const valueOf = (o: { id: string | null; format: MatchFormat }) =>
     o.id ? `id:${o.id}` : `preset:${o.format.presetKey ?? ''}`;
 
-  const ruleFor = (round: string, stage: number) =>
-    rules.find((r) => r.round === round && (r.stageSequence ?? stage) === stage);
+  type Row = { round: string; stageSequence: number; stageWide?: boolean };
+  // A stage-wide row (pool / league matches) owns the rule with NO round for its stage.
+  const isRuleOf = (r: RoundFormatRule, row: Row) => (row.stageWide
+    ? r.round === undefined && r.stageSequence === row.stageSequence
+    : r.round === row.round && (r.stageSequence ?? row.stageSequence) === row.stageSequence);
 
-  const currentValue = (round: string, stage: number) => {
-    const r = ruleFor(round, stage);
+  const currentValue = (row: Row) => {
+    const r = rules.find((x) => isRuleOf(x, row));
     if (!r) return '';
     return r.formatId ? `id:${r.formatId}` : `preset:${r.presetKey ?? ''}`;
   };
 
-  const set = (round: string, stage: number, value: string) => {
-    const rest = rules.filter((r) => !(r.round === round && (r.stageSequence ?? stage) === stage));
+  const set = (row: Row, value: string) => {
+    const rest = rules.filter((r) => !isRuleOf(r, row));
     if (!value) { onChange(rest); return; }
     const [kind, key] = value.split(':');
-    const rule: RoundFormatRule = kind === 'id'
-      ? { round, stageSequence: stage, formatId: key }
-      : { round, stageSequence: stage, presetKey: key };
-    // Specific-round rules first, so a later stage-wide rule can never shadow one.
-    onChange([rule, ...rest]);
+    const target = row.stageWide ? { stageSequence: row.stageSequence } : { round: row.round, stageSequence: row.stageSequence };
+    const rule: RoundFormatRule = kind === 'id' ? { ...target, formatId: key } : { ...target, presetKey: key };
+    // Specific-round rules first and stage-wide ones last: first match wins, so a
+    // stage rule can never shadow a round's own.
+    onChange(row.stageWide ? [...rest, rule] : [rule, ...rest]);
   };
 
-  // What each round resolves to right now, so the table shows the whole picture.
+  // What each round resolves to right now, so the table shows the whole picture. A
+  // stage row resolves as any match of its stage that names no specific round.
   const resolved = resolveRounds(
-    rounds.map((r) => ({ round: r.round, matches: r.matches, stageSequence: r.stageSequence })),
+    rounds.map((r) => ({ round: r.stageWide ? '\u0000stage' : r.round, matches: r.matches, stageSequence: r.stageSequence })),
     // A built-in draw default has no id - its key stands in, as the console reads it.
     { round_formats: rules, scoring_format_id: drawFormatId ?? undefined, scoring_preset_key: drawFormatId ? null : drawFormat?.presetKey ?? null },
     options.filter((o) => o.id).map((o) => ({ id: o.id as string, config: o.format, name: o.label })),
@@ -691,14 +699,14 @@ function RoundFormatTable({ rounds, entrants, options, drawFormatId, drawFormat,
                       {res?.format?.name ?? drawFormat?.name ?? '-'}
                     </div>
                     <div className="text-[10px] text-slate-400 dark:text-slate-500">
-                      {res?.overridden ? 'this round only' : 'inherited'}
+                      {res?.overridden ? (r.stageWide ? 'every match in this stage' : 'this round only') : 'inherited'}
                     </div>
                   </td>
                   <td className="px-3 py-2">
                     <Select
                       className="!py-1 text-xs"
-                      value={currentValue(r.round, r.stageSequence)}
-                      onChange={(e) => set(r.round, r.stageSequence, e.target.value)}
+                      value={currentValue(r)}
+                      onChange={(e) => set(r, e.target.value)}
                       aria-label={`Format for ${r.round}`}
                     >
                       <option value="">Same as the draw</option>
@@ -722,7 +730,7 @@ function RoundFormatTable({ rounds, entrants, options, drawFormatId, drawFormat,
         <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
           Quick set
         </span>
-        {rounds.some((r) => r.round === 'Final') && (
+        {rounds.some((r) => r.round === KNOCKOUT_ROUND.final) && (
           <Button size="sm" variant="subtle"
             onClick={() => {
               // The longest format on the shelf is what "the final plays longer"
@@ -731,8 +739,8 @@ function RoundFormatTable({ rounds, entrants, options, drawFormatId, drawFormat,
               // has no levels, and this is where that crashed.
               const longest = [...options].sort((a, b) => formatLength(b.format) - formatLength(a.format))[0];
               if (!longest) return;
-              const fin = rounds.find((r) => r.round === 'Final')!;
-              set('Final', fin.stageSequence, valueOf(longest));
+              const fin = rounds.find((r) => r.round === KNOCKOUT_ROUND.final)!;
+              set(fin, valueOf(longest));
             }}>
             Final plays the longest format
           </Button>

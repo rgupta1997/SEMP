@@ -36,7 +36,7 @@ export interface MyMatchStats {
 
 const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 const pct = (won: number, played: number): string =>
-  played > 0 ? `${Math.round((won / played) * 100)}%` : '—';
+  played > 0 ? `${Math.round((won / played) * 100)}%` : '-';
 const overs = (balls: number, per = 6) => `${Math.floor(balls / per)}.${balls % per}`;
 
 /**
@@ -124,7 +124,7 @@ async function cricketGroups(db: Db, lineId: string): Promise<StatGroup[]> {
         { label: 'Balls faced', value: n(b.balls_faced) },
         { label: 'Fours', value: n(b.fours) },
         { label: 'Sixes', value: n(b.sixes) },
-        { label: 'Strike rate', value: b.balls_faced ? Math.round((b.runs / b.balls_faced) * 100) : '—' },
+        { label: 'Strike rate', value: b.balls_faced ? Math.round((b.runs / b.balls_faced) * 100) : '-' },
         { label: 'How out', value: b.dismissal.replace(/_/g, ' ') },
       ],
     });
@@ -146,7 +146,7 @@ async function cricketGroups(db: Db, lineId: string): Promise<StatGroup[]> {
         { label: 'Runs conceded', value: n(b.runs_conceded) },
         { label: 'Wickets', value: n(b.wickets) },
         { label: 'Maidens', value: n(b.maidens) },
-        { label: 'Economy', value: b.balls_bowled ? (b.runs_conceded / (b.balls_bowled / 6)).toFixed(2) : '—' },
+        { label: 'Economy', value: b.balls_bowled ? (b.runs_conceded / (b.balls_bowled / 6)).toFixed(2) : '-' },
         { label: 'Dot balls', value: n(b.dots) },
         { label: 'Wides / no-balls', value: `${n(b.wides)} / ${n(b.no_balls)}` },
       ],

@@ -343,7 +343,7 @@ export function AddPlayersModal({
               <p className="flex items-start gap-2 rounded-xl bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
                 <KeyRound size={14} className="mt-0.5 shrink-0" aria-hidden />
                 <span>
-                  Shown only now — once you close this they cannot be retrieved, only reset. Each person
+                  Shown only now - once you close this they cannot be retrieved, only reset. Each person
                   is asked to choose their own password the first time they sign in.
                 </span>
               </p>
@@ -400,7 +400,7 @@ export function AddPlayersModal({
     >
       <div className="space-y-4">
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          Search first — anyone already on Sportagon is linked to their existing account. Want them on a
+          Search first - anyone already on Sportagon is linked to their existing account. Want them on a
           different login instead (say, a work email)? Use <UserPlus size={12} className="inline -mt-0.5" aria-hidden /> next
           to a match to start a new account on that same number. Only add someone below if the search
           genuinely can't find them.
@@ -537,7 +537,7 @@ export function AddPlayersModal({
               {[...linked.values()].map((u) => (
                 <div key={u.id} className="rounded-xl bg-brand-50/60 p-2 dark:bg-brand-500/10">
                   <div className={`grid gap-2 ${cols}`}>
-                    <div className="flex items-center truncate px-3 py-2 text-sm text-slate-500 dark:text-slate-400">{u.phone ?? '—'}</div>
+                    <div className="flex items-center truncate px-3 py-2 text-sm text-slate-500 dark:text-slate-400">{u.phone ?? '-'}</div>
                     <div className="flex items-center truncate px-3 py-2 text-sm font-medium text-slate-800 dark:text-slate-200" title={u.name}>{u.name}</div>
                     <div className="flex items-center truncate px-3 py-2 text-sm text-slate-500 dark:text-slate-400" title={u.email}>{u.email}</div>
                     <Input placeholder="Roll no." value={u.member_code} onChange={(e) => setLinkedField(u.id, { member_code: e.target.value })} />
@@ -620,7 +620,7 @@ export function AddPlayersModal({
 
         {units.length === 0 && !unitsError && (
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            No {labels.campus.toLowerCase()} or {labels.department.toLowerCase()} exists yet — add them under
+            No {labels.campus.toLowerCase()} or {labels.department.toLowerCase()} exists yet - add them under
             the organisation's Campuses &amp; Units screen and people can be placed as they are added.
           </p>
         )}

@@ -139,11 +139,14 @@ describe('the whole chain, per family', () => {
   });
 
   it('every loggable action of every team sport produces at least one metric', () => {
-    // An action with no metrics is a tap that only ever becomes a timeline entry.
+    // An action with no metrics is a tap that only ever becomes a timeline entry -
+    // unless it is a team action that scores (kabaddi's technical point): the score is its record,
+    // or a team count read off the log (hockey's penalty corners).
     const empty: string[] = [];
     for (const spec of TEAM_STAT_SPECS) {
       for (const e of spec.events) {
-        if (!Object.keys(e.metrics).length) empty.push(`${spec.sport}/${e.key}`);
+        const scoringTeamAction = e.perPlayer === false && ((e.points ?? 0) > 0 || !!e.teamCount);
+        if (!Object.keys(e.metrics).length && !scoringTeamAction) empty.push(`${spec.sport}/${e.key}`);
       }
     }
     expect(empty).toEqual([]);

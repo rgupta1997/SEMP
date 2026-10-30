@@ -46,8 +46,8 @@ const DEFS: Record<string, Partial<SportDef> & { archetype: Archetype }> = {
       { key: 'bonus',  label: 'Bonus +1',  points: 1, perPlayer: true },
       { key: 'allout', label: 'All Out +2', points: 2 },
     ] },
-  'kho-kho':      { archetype: 'points', segLabel: 'Innings', segMax: 2, pointButtons: [1, 2] },
-  frisbee:        { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1] },
+  'kho-kho':      { archetype: 'points', segLabel: 'Turn',    segMax: 4, pointButtons: [1] },
+  frisbee:        { archetype: 'points', segLabel: 'Half',    segMax: 2, pointButtons: [1], manualHint: 'Goals per half. First to 13 wins; level at the cap goes to the universal point.' },
 
   // ── Set / game sports: win a segment, the most segments wins ─────────────────
   volleyball:     { archetype: 'sets',  segLabel: 'Set',   segMax: 5, pointButtons: [1] },

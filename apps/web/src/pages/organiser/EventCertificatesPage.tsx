@@ -5,6 +5,7 @@ import { ARCHIVED_READ_ONLY_MESSAGE } from '@semp/shared';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation } from '../../lib/hooks';
 import { useWorkspace } from '../../lib/useWorkspace';
+import { usePermissions } from '../../lib/permissions';
 import { GenerateModal } from '../organization/certificates/GenerateModal';
 import type { Template } from '../organization/certificates/shared';
 import { Badge, Button, EmptyState, PageHeader, Select, Spinner, SURFACE, toast } from '../../components/ui';
@@ -27,6 +28,10 @@ interface Cert {
 
 export function EventCertificatesPage() {
   const { championship, eventId, canManage } = useEvent();
+  // A sport organiser issues for the sports they run; the server enforces the same.
+  const scope = usePermissions().organiserScope(eventId);
+  const sportScope = Array.isArray(scope) ? scope : undefined;
+  const canIssue = canManage || !!sportScope?.length;
   const host = (championship as any).host_organization as { id: string; name: string } | null;
   const [generating, setGenerating] = useState(false);
   // Refused by the server too; disabled here so nobody walks the wizard first.
@@ -52,14 +57,16 @@ export function EventCertificatesPage() {
   );
 
   const listPath = host ? `/organizations/${host.id}/certificates?championship_id=${eventId}` : null;
-  const { data, isLoading, error } = useApi<{ rows: Cert[] } | Cert[]>(listPath);
+  const { data, isLoading, error } = useApi<{ rows: Cert[]; access?: 'issuer' | 'event' | 'sports' } | Cert[]>(listPath);
   // Fetched only once the generate dialog is open. Asking earlier is a request that
   // can only fail for anybody who is not an issuer here, which is most organisers.
   const templates = useApi<{ rows: Template[] }>(
-    host && generating ? `/organizations/${host.id}/certificate-templates` : null,
+    host && generating ? `/organizations/${host.id}/certificate-templates?championship_id=${eventId}` : null,
   );
 
   const rows: Cert[] = Array.isArray(data) ? data : data?.rows ?? [];
+  // The certificate's own page is in the institution's workspace, for its issuers.
+  const issuer = !Array.isArray(data) && data?.access === 'issuer';
   // Organising an event and administering the institution behind it are different
   // jobs, and often different people. The register belongs to the institution, so
   // an organiser without standing there is told whose permission they need rather
@@ -122,21 +129,21 @@ export function EventCertificatesPage() {
     <div className="pb-16">
       <PageHeader
         title="Certificates"
-        subtitle={`Issued by ${host.name}, from this event's locked results.`}
+        subtitle={sportScope ? `Issued by ${host.name}, for the sports you organise.` : `Issued by ${host.name}, from this event's locked results.`}
       >
         {/* The full issued register is an ORGANIZATION-workspace surface (every
             certificate the institution has ever issued, across every event) - it
             stays on the org's own Certificates page, not duplicated as a shortcut
             here on the event's. */}
-        {canManage && generateButton}
+        {canIssue && generateButton}
       </PageHeader>
 
       {rows.length === 0 ? (
         <EmptyState
           icon={<Award size={24} />}
           title="Nothing issued for this event yet"
-          description="Certificates are generated from locked results — never typed in by hand. Lock a scorecard and the medals, placements and awards behind it become issuable."
-          action={canManage ? generateButton : undefined}
+          description="Certificates are generated from locked results - never typed in by hand. Lock a scorecard and the medals, placements and awards behind it become issuable."
+          action={canIssue ? generateButton : undefined}
         />
       ) : (
         <div className={`overflow-x-auto ${SURFACE}`}>
@@ -153,12 +160,14 @@ export function EventCertificatesPage() {
               {rows.map((c) => (
                 <tr key={c.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
                   <td className="px-4 py-3">
-                    <Link
-                      to={`/organizations/${host.id}/certificates/${c.id}`}
-                      className="font-semibold text-slate-900 hover:text-brand-600 dark:text-slate-100"
-                    >
-                      {c.recipient_name}
-                    </Link>
+                    {issuer ? (
+                      <Link
+                        to={`/organizations/${host.id}/certificates/${c.id}`}
+                        className="font-semibold text-slate-900 hover:text-brand-600 dark:text-slate-100"
+                      >
+                        {c.recipient_name}
+                      </Link>
+                    ) : <span className="font-semibold text-slate-900 dark:text-slate-100">{c.recipient_name}</span>}
                   </td>
                   <td className="px-4 py-3 font-mono text-[12px] text-slate-600 dark:text-slate-300">{c.serial}</td>
                   <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
@@ -184,6 +193,7 @@ export function EventCertificatesPage() {
           templatesLoading={!templates.data}
           onClose={() => setGenerating(false)}
           invalidate={[listPath]}
+          sportScope={sportScope}
         />
       )}
     </div>

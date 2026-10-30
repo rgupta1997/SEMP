@@ -16,7 +16,7 @@ describe('the downloads follow the step switches', () => {
   for (const type of SETUP_EVENT_TYPES) {
     for (const step of SETUP_STEP_KEYS) {
       for (const mode of SETUP_STEP_MODES) {
-        it(`${type}: ${step} = ${mode} — the sample for these switches validates with no errors`, () => {
+        it(`${type}: ${step} = ${mode} - the sample for these switches validates with no errors`, () => {
           const steps = { ...SETUP_DEFAULT_STEPS[type], [step]: mode };
           expect(errorsFor(type, steps)).toEqual([]);
         });
@@ -50,7 +50,7 @@ describe('the downloads follow the step switches', () => {
     expect(setupTemplateGrids('intra', steps).map((g) => g.name)).not.toContain('People');
   });
 
-  it('writes, for every setting, exactly the headers the validator reads — no more, no fewer', () => {
+  it('writes, for every setting, exactly the headers the validator reads - no more, no fewer', () => {
     for (const type of SETUP_EVENT_TYPES) {
       for (const step of SETUP_STEP_KEYS) {
         for (const mode of SETUP_STEP_MODES) {

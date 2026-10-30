@@ -1,5 +1,5 @@
 /*
- * NAMES — how the validator compares the free text clients type: people, squads,
+ * NAMES - how the validator compares the free text clients type: people, squads,
  * competitors, grounds. Pure string helpers; no knowledge of sheets.
  */
 

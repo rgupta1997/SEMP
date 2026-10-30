@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints, shootoutOf, TBD_LABEL } from '@semp/shared';
+import { knockoutRoundSize, KNOCKOUT_ROUND, EARLY_END_LABEL, earlyEndOf, formatPoints, KHO_END_SHORT, khoSettlementOf, shootoutOf, TBD_LABEL } from '@semp/shared';
 import { cn, StatusBadge } from './ui';
 import { fmtDateTime } from '../lib/hooks';
 import { describeSlot, describeTieBlocked, isTieBlockedFor } from '../lib/stageTree';
@@ -46,17 +46,17 @@ export function fixtureStatusLabel(status?: string | null): string | undefined {
 // Human-friendly column heading from the generator's terse round labels.
 function roundTitle(round: string | null, teamsInRound: number): string {
   switch (round) {
-    case 'Final': return 'Final';
-    case 'SF': return 'Semi-finals';
-    case 'QF': return 'Quarter-finals';
+    case KNOCKOUT_ROUND.final: return 'Final';
+    case KNOCKOUT_ROUND.semiFinal: return 'Semi-finals';
+    case KNOCKOUT_ROUND.quarterFinal: return 'Quarter-finals';
     default:
-      if (round && /^R\d+$/.test(round)) return `Round of ${round.slice(1)}`;
+      if (knockoutRoundSize(round) > 0) return `Round of ${knockoutRoundSize(round)}`;
       return round ?? `Round of ${teamsInRound}`;
   }
 }
 
-function TeamRow({ name, org, score, isWinner, decided, warning, note, pens }:
-  { name: string; org?: string; score: number | null | undefined; isWinner: boolean; decided: boolean; warning?: boolean; note?: string | null; pens?: number | null }) {
+function TeamRow({ name, org, score, isWinner, decided, warning, note, pens, settled }:
+  { name: string; org?: string; score: number | null | undefined; isWinner: boolean; decided: boolean; warning?: boolean; note?: string | null; pens?: number | null; settled?: string | null }) {
   return (
     <div
       className={cn(
@@ -82,6 +82,8 @@ function TeamRow({ name, org, score, isWinner, decided, warning, note, pens }:
           {formatPoints(score)}
           {/* Shoot-out kicks scored, beside a level score. */}
           {pens != null && <span className="ml-1 text-[10px] font-semibold text-brand-600 dark:text-brand-400" title="Penalty shoot-out">({pens})</span>}
+          {/* Kho kho: how a level or lopsided match was settled, on the winner's row. */}
+          {settled && <span className="ml-1 text-[10px] font-semibold text-brand-600 dark:text-brand-400">({settled})</span>}
         </span>
       )}
     </div>
@@ -113,12 +115,14 @@ function MatchCard({ fixture, x, top, teamName, teamOrg, onSelect, onScore }:
   const early = decided ? earlyEndOf(fixture.live_state) : null;
   const noteFor = (teamId: string | null) => (early && fixture.winner_team_id !== teamId ? EARLY_END_LABEL[early] : null);
   const pens = decided ? shootoutOf(fixture.live_state) : null;
+  const khoEnd = decided ? khoSettlementOf(fixture.live_state) : null;
+  const settledFor = (side: 'A' | 'B') => (khoEnd?.winner === side ? KHO_END_SHORT[khoEnd.reason] : null);
 
   const teamRows = (
     <div className="border-t border-slate-100 dark:border-slate-800">
-      <TeamRow name={home} org={homeOrg} score={fixture.home_score} isWinner={decided && fixture.winner_team_id === fixture.home_team_id} decided={decided} warning={!!homeTieMsg} note={noteFor(fixture.home_team_id)} pens={pens?.home} />
+      <TeamRow name={home} org={homeOrg} score={fixture.home_score} isWinner={decided && fixture.winner_team_id === fixture.home_team_id} decided={decided} warning={!!homeTieMsg} note={noteFor(fixture.home_team_id)} pens={pens?.home} settled={settledFor('A')} />
       <div className="border-t border-slate-100 dark:border-slate-800" />
-      <TeamRow name={away} org={awayOrg} score={isBye ? null : fixture.away_score} isWinner={decided && fixture.winner_team_id === fixture.away_team_id} decided={decided} warning={!!awayTieMsg} note={noteFor(fixture.away_team_id)} pens={pens?.away} />
+      <TeamRow name={away} org={awayOrg} score={isBye ? null : fixture.away_score} isWinner={decided && fixture.winner_team_id === fixture.away_team_id} decided={decided} warning={!!awayTieMsg} note={noteFor(fixture.away_team_id)} pens={pens?.away} settled={settledFor('B')} />
     </div>
   );
 

@@ -545,7 +545,7 @@ export function SportStatsPanel({ userId }: { userId?: string }) {
 
       <p style={{ fontSize: 11.5, color: 'var(--ink-4)', margin: 0 }}>
         Only results from locked scorecards count. A result that is unlocked for a
-        correction drops out until it is locked again — these figures are rebuilt from
+        correction drops out until it is locked again - these figures are rebuilt from
         the record each time, never adjusted by hand.
       </p>
     </div>

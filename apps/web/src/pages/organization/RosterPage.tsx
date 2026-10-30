@@ -62,7 +62,7 @@ function EditTeamModal({ team, onClose }: { team: any; onClose: () => void }) {
             <option value="">The whole organisation</option>
             {units.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.parent ? `${u.name} · ${u.parent.name}` : `${u.name} — whole ${labels.campus.toLowerCase()}`}
+                {u.parent ? `${u.name} · ${u.parent.name}` : `${u.name} - whole ${labels.campus.toLowerCase()}`}
               </option>
             ))}
           </Select>
@@ -142,7 +142,7 @@ function AddPlayersPanel({ teamId, team, institutionId, existingUserIds, remaini
   // is almost always placement rather than the squad. Naming the unit turns "where
   // is everybody" into a job somebody can go and do.
   const scopeNote = unitName
-    ? `Only people in ${unitName} can play for this squad. Somebody missing is not in it yet — add them on the Campuses & Units screen.`
+    ? `Only people in ${unitName} can play for this squad. Somebody missing is not in it yet - add them on the Campuses & Units screen.`
     : null;
   const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const allChecked = shown.length > 0 && shown.every((u) => selected.has(u.id));

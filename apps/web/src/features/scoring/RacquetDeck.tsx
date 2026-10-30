@@ -496,7 +496,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" disabled={p.disabled}
               onClick={() => push({ t: 'expedite', reason: 'time', inRally: true })}>
-              Ball was in play — replay the rally
+              Ball was in play - replay the rally
             </Button>
             <Button size="sm" variant="outline" disabled={p.disabled}
               onClick={() => push({ t: 'expedite', reason: 'time', inRally: false })}>
@@ -505,7 +505,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
             <Button size="sm" variant="subtle" className="ml-auto"
               title="Hide this for the rest of the match - the rule is not applied"
               onClick={() => declineExpedite(true)}>
-              Dismiss — not playing expedite
+              Dismiss - not playing expedite
             </Button>
           </div>
         </div>
@@ -521,7 +521,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
       {expediteDue && expediteExempt && !expediteDeclined && (
         <div className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
           {expedite!.afterMinutes} minutes of play reached, but {pts[0] + pts[1]} points have been scored
-          (score {pts[0]}–{pts[1]}; {expedite!.exemptAtTotal} or more) — the expedite system does not apply in this game.
+          (score {pts[0]}–{pts[1]}; {expedite!.exemptAtTotal} or more) - the expedite system does not apply in this game.
         </div>
       )}
 
@@ -592,7 +592,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
       {activeTimeout && toRules && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg bg-violet-100 px-3 py-2 text-sm font-semibold text-violet-900 dark:bg-violet-500/15 dark:text-violet-200">
           <span className="mr-auto">
-            Timeout — {nameOf(activeTimeout.side)} <Countdown from={activeTimeout.at} seconds={toRules.seconds} />
+            Timeout - {nameOf(activeTimeout.side)} <Countdown from={activeTimeout.at} seconds={toRules.seconds} />
           </span>
           <Button size="sm" variant="subtle" onClick={endTimeout}>End timeout</Button>
         </div>
@@ -776,8 +776,8 @@ export function RacquetDeck(p: RacquetDeckProps) {
       {rescoring && (
         <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-300">
           {state.ended
-            ? 'Rescoring — the score still finishes the match, so press Undo to take points back before scoring on.'
-            : 'Rescoring — the result is not saved as final until you confirm it again.'}
+            ? 'Rescoring - the score still finishes the match, so press Undo to take points back before scoring on.'
+            : 'Rescoring - the result is not saved as final until you confirm it again.'}
           {' '}
           <button type="button" className="font-semibold underline underline-offset-2"
             onClick={() => setRescoring(false)}>
@@ -1253,7 +1253,7 @@ function ToolPanel({ format, state, log, homeName, awayName, doubles, firstServe
   const terms = misconductTerms(format.sport);
   const disqualify = async (side: Side) => {
     const ok = await confirmDialog({
-      title: `${terms.removal} — disqualify ${nameOf(side)}?`,
+      title: `${terms.removal} - disqualify ${nameOf(side)}?`,
       message: `The match is awarded to ${nameOf(side === 'A' ? 'B' : 'A')}. The score so far is kept on the record.`,
       confirmLabel: 'Disqualify',
     });
@@ -1272,7 +1272,7 @@ function ToolPanel({ format, state, log, homeName, awayName, doubles, firstServe
   return (
     <Card className="grid gap-3 p-3">
       <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-        Corrections — the court outranks the engine
+        Corrections - the court outranks the engine
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -1350,7 +1350,7 @@ function ToolPanel({ format, state, log, homeName, awayName, doubles, firstServe
           <span className="text-xs text-slate-500 dark:text-slate-400">Expedite system:</span>
           <Button size="sm" variant="subtle"
             onClick={() => onEvent({ t: 'expedite', reason: 'request', inRally: false })}>
-            Start — both players asked
+            Start - both players asked
           </Button>
         </div>
       )}
@@ -1411,7 +1411,7 @@ function intervalDue(
 }
 
 /** Time left in a break, counted from the point that started it. */
-function Countdown({ from, seconds }: { from?: string; seconds: number }) {
+export function Countdown({ from, seconds }: { from?: string; seconds: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
@@ -1507,10 +1507,10 @@ function describe(t: ReturnType<typeof foldRally>['trace'][number], nameOf: (s: 
       // Under serverOnly scoring a receiver win is a side-out, not a point - and the
       // timeline has to say so or the log reads as a scoring error.
       return t.scored
-        ? `${ev.kind === 'ace' ? 'Ace — point' : 'Point'} to ${nameOf(t.scored)}${ev.kind === 'expedite_returns' ? ` · ${ev.label ?? 'expedite returns'}` : ''}`
-        : `${nameOf(ev.side)} won the rally — side-out, no point`;
+        ? `${ev.kind === 'ace' ? 'Ace - point' : 'Point'} to ${nameOf(t.scored)}${ev.kind === 'expedite_returns' ? ` · ${ev.label ?? 'expedite returns'}` : ''}`
+        : `${nameOf(ev.side)} won the rally - side-out, no point`;
     case 'expedite':
-      return `Expedite system in — ${ev.reason === 'request' ? 'both players asked' : 'time limit'}${ev.inRally ? ' · rally replayed' : ''}`;
+      return `Expedite system in - ${ev.reason === 'request' ? 'both players asked' : 'time limit'}${ev.inRally ? ' · rally replayed' : ''}`;
     case 'switchPairServer':
       return ev.side ? `${nameOf(ev.side)}: partners swap starting courts` : 'Other partner serves first this game';
     case 'switchReceiver': return `${nameOf(ev.side)}: partners swap receiving sides`;
@@ -1518,16 +1518,16 @@ function describe(t: ReturnType<typeof foldRally>['trace'][number], nameOf: (s: 
     case 'switchBox': return 'Server switched service box';
     case 'clockPause': return 'Game clock paused';
     case 'clockStart': return 'Game clock resumed';
-    case 'let': return 'Let — rally replayed';
+    case 'let': return 'Let - rally replayed';
     case 'fault':
       // The kernel scores a second fault for the receiver: that is a double fault.
-      return t.scored ? `Double fault · ${nameOf(ev.side)} — point to ${nameOf(t.scored)}` : `Fault · ${nameOf(ev.side)} — second serve`;
+      return t.scored ? `Double fault · ${nameOf(ev.side)} - point to ${nameOf(t.scored)}` : `Fault · ${nameOf(ev.side)} - second serve`;
     case 'penalty':
       return ev.card === 'red'
-        ? `${misconductTerms(sport).foul} to ${nameOf(ev.side === 'A' ? 'B' : 'A')} — point to ${nameOf(ev.side)}`
+        ? `${misconductTerms(sport).foul} to ${nameOf(ev.side === 'A' ? 'B' : 'A')} - point to ${nameOf(ev.side)}`
         : `Conduct point to ${nameOf(ev.side)}`;
     case 'card': return `${misconductTerms(sport).warning} to ${nameOf(ev.against)}`;
-    case 'timeout': return `Timeout — ${nameOf(ev.side)}`;
+    case 'timeout': return `Timeout - ${nameOf(ev.side)}`;
     case 'awardServe': return `Serve awarded to ${nameOf(ev.side)}`;
     case 'awardUnit': return `Unit awarded to ${nameOf(ev.side)}${ev.reason ? ` · ${ev.reason}` : ''}`;
     case 'adjust': return `${ev.delta > 0 ? '+' : ''}${ev.delta} ${nameOf(ev.side)}${ev.reason ? ` · ${ev.reason}` : ''}`;
@@ -1535,8 +1535,8 @@ function describe(t: ReturnType<typeof foldRally>['trace'][number], nameOf: (s: 
     case 'capFired': return 'Time up';
     case 'end':
       return ev.reason === 'disqualified' && ev.winner
-        ? `${nameOf(ev.winner === 'A' ? 'B' : 'A')} disqualified — match to ${nameOf(ev.winner)}`
-        : `${ev.reason}${ev.winner ? ` — ${nameOf(ev.winner)}` : ''}`;
+        ? `${nameOf(ev.winner === 'A' ? 'B' : 'A')} disqualified - match to ${nameOf(ev.winner)}`
+        : `${ev.reason}${ev.winner ? ` - ${nameOf(ev.winner)}` : ''}`;
     default: return '';
   }
 }
@@ -1588,7 +1588,7 @@ function FinishPanel({ format, state, homeName, awayName, onEvent, onSuspend, on
           End this match
         </div>
         <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-          Not finished yet — {lv.label.toLowerCase()} at{' '}
+          Not finished yet - {lv.label.toLowerCase()} at{' '}
           <span className="font-mono tabular-nums">{pts[0]}–{pts[1]}</span>
           {env.unitScores.length > 0 && (
             <> · {env.unitScores.map((u) => `${u[0]}–${u[1]}`).join(', ')}</>
@@ -1624,14 +1624,14 @@ function FinishPanel({ format, state, homeName, awayName, onEvent, onSuspend, on
         <Button size="sm" variant="subtle"
           onClick={() => {
             if (level && !drawOnTime) {
-              toast.error('Scores are level and this format does not allow a draw — play the next point.');
+              toast.error('Scores are level and this format does not allow a draw - play the next point.');
               return;
             }
             end(level ? null : leader, 'cap',
-              level ? 'Record a draw?' : `Time up — ${nameOf(leader!)} leads?`,
+              level ? 'Record a draw?' : `Time up - ${nameOf(leader!)} leads?`,
               level ? 'The match is recorded as drawn.' : `${nameOf(leader!)} takes the match on the score at the buzzer.`);
           }}>
-          Time up ({format.clock.minutes} min) — {level ? 'record a draw' : `${nameOf(leader!)} leads`}
+          Time up ({format.clock.minutes} min) - {level ? 'record a draw' : `${nameOf(leader!)} leads`}
         </Button>
       )}
 
@@ -1655,13 +1655,13 @@ function FinishPanel({ format, state, homeName, awayName, onEvent, onSuspend, on
                   });
                   if (ok) onSuspend();
                 }}>
-                Suspend — resume later
+                Suspend - resume later
               </Button>
             )}
             <Button size="sm" variant="outline"
-              onClick={() => end(null, 'abandoned', 'No result — share the points?',
+              onClick={() => end(null, 'abandoned', 'No result - share the points?',
                 'The match is closed with no winner. Both sides get the same points in the table, whatever the score.', 'void')}>
-              No result — share the points
+              No result - share the points
             </Button>
           </div>
         </div>
@@ -1669,7 +1669,7 @@ function FinishPanel({ format, state, homeName, awayName, onEvent, onSuspend, on
 
       <button type="button" className="text-left text-xs text-slate-400 underline underline-offset-2 dark:text-slate-500"
         onClick={onCancel}>
-        Cancel — go back to scoring
+        Cancel - go back to scoring
       </button>
     </Card>
   );

@@ -1,9 +1,12 @@
 import {
-  PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor, playedContests, seatIn,
-  earlyEndOf, formatPoints, shootoutOf, THIRD_PLACE_ROUND, type EarlyEnd, type PlayedContest,
-  type AchievementKind, type EventSpec, type EventState, type FormatTemplate,
-  type LifetimeEntryKind, type MatchOutcome, type Medal, type StandingsPlacement,
+  KNOCKOUT_ROUND, PLACEMENT_LABEL, MEDAL_LABEL, rankSubEvent, effectiveEventSpec, eventTemplateFor,
+  playedContests, seatIn, earlyEndOf, formatPoints, KHO_END_SHORT, KHO_RESULT_WORDS, khoSettlementOf,
+  shootoutOf, THIRD_PLACE_ROUND, type EarlyEnd, type PlayedContest, type AchievementKind, type EventSpec,
+  type EventState, type FormatTemplate, type LifetimeEntryKind, type MatchOutcome, type Medal,
+  type StandingsPlacement,
 } from '@semp/shared';
+import { isCalledDraw } from '@semp/shared';
+import { inPlacingStage, placingStagesOf } from '../fixtures/domain/stage-tree.js';
 
 // What a locked result MEANS - as pure functions, with no database anywhere in
 // sight (J4-E2, J4-E4).
@@ -62,6 +65,8 @@ export interface DerivableAward {
 export interface DerivableFixture {
   id: string;
   round: string | null;
+  /** Which stage of a multi-stage draw; a Plate stage awards no medals. */
+  stage_sequence?: number | null;
   status: string;
   home_team_id: string | null;
   away_team_id: string | null;
@@ -153,7 +158,7 @@ export function verdictsOf(fx: Pick<DerivableFixture, 'round' | 'status' | 'winn
   const round = (fx.round ?? '').trim();
 
   switch (round) {
-    case 'Final':
+    case KNOCKOUT_ROUND.final:
       return [
         { team_id: winner, kind: 'medal', medal: 'gold', placement: 'winner' },
         ...(loser ? [{ team_id: loser, kind: 'medal', medal: 'silver', placement: 'runner_up' } as Verdict] : []),
@@ -164,9 +169,9 @@ export function verdictsOf(fx: Pick<DerivableFixture, 'round' | 'status' | 'winn
         ...(loser ? [{ team_id: loser, kind: 'placement', placement: 'fourth_place' } as Verdict] : []),
       ];
     // The eliminated side, and only them. The winner goes on to be judged later.
-    case 'SF':
+    case KNOCKOUT_ROUND.semiFinal:
       return loser ? [{ team_id: loser, kind: 'placement', placement: 'semi_finalist' }] : [];
-    case 'QF':
+    case KNOCKOUT_ROUND.quarterFinal:
       return loser ? [{ team_id: loser, kind: 'placement', placement: 'quarter_finalist' }] : [];
     // League fixtures and early rounds (R16, R32, …) decide no placement - a
     // league is settled by the standings table, not by any one match.
@@ -263,6 +268,7 @@ function ordinal(n: number): string {
 const outcomeFor = (fx: DerivableFixture, teamId: string | null): MatchOutcome | null => {
   if (!teamId || !fx.home_team_id || !fx.away_team_id) return null;
   if (fx.winner_team_id) return fx.winner_team_id === teamId ? 'won' : 'lost';
+  if (isCalledDraw(fx.live_state)) return 'drew';
   if (fx.home_score != null && fx.away_score != null && fx.home_score === fx.away_score) return 'drew';
   return null;
 };
@@ -293,24 +299,30 @@ function entryTitle(fx: DerivableFixture, teamId: string | null): string {
   const verb = outcome === 'won' ? 'Won' : outcome === 'lost' ? 'Lost' : outcome === 'drew' ? 'Drew' : null;
   // Stopped early: "Won (opponent retired)" / "Lost (retired)" - never a match played out.
   const early = earlyEndOf(fx.live_state);
-  const why = early && verb ? ` (${outcome === 'won' ? `opponent ${EARLY_END_WORD[early]}` : EARLY_END_WORD[early]})` : '';
+  // Rain is nobody's doing, so both sides read the same.
+  const why = early && verb ? ` (${outcome === 'won' && early !== 'weather' ? `opponent ${EARLY_END_WORD[early]}` : EARLY_END_WORD[early]})` : '';
   // Settled by a shoot-out: "Won 4-3 on penalties", my kicks first.
   const pens = verb ? shootoutOf(fx.live_state) : null;
   if (pens) {
     const [a, b] = teamId && teamId === fx.away_team_id ? [pens.away, pens.home] : [pens.home, pens.away];
     return `${versus}${TITLE_SEP}${verb} ${a}-${b} on penalties`;
   }
+  // Kho kho: "Won on minimum chase", "Lost by an innings".
+  const kho = verb ? khoSettlementOf(fx.live_state) : null;
+  if (kho) return `${versus}${TITLE_SEP}${verb} ${KHO_RESULT_WORDS[kho.reason]}`;
   return verb ? `${versus}${TITLE_SEP}${verb}${why}` : versus;
 }
 
-const EARLY_END_WORD: Record<EarlyEnd, string> = { retired: 'retired', disqualified: 'disqualified', conceded: 'conceded' };
+const EARLY_END_WORD: Record<EarlyEnd, string> = { retired: 'retired', disqualified: 'disqualified', conceded: 'conceded', weather: 'called off for rain' };
 
 /** "7-7", or "7-7 (4-3 pens)" when a shoot-out settled it. Home first, like the fixture. */
 function fixtureScore(fx: DerivableFixture): string | null {
   if (fx.home_score == null || fx.away_score == null) return null;
   const pens = shootoutOf(fx.live_state);
   const base = `${formatPoints(fx.home_score)}-${formatPoints(fx.away_score)}`;
-  return pens ? `${base} (${pens.home}-${pens.away} pens)` : base;
+  if (pens) return `${base} (${pens.home}-${pens.away} pens)`;
+  const kho = khoSettlementOf(fx.live_state);
+  return kho ? `${base} (${KHO_END_SHORT[kho.reason]})` : base;
 }
 
 /**
@@ -345,7 +357,9 @@ export function deriveRecords({ fixture: fx, participants, awards }: DeriveInput
     teamId === fx.home_team_id ? fx.home_team_name : teamId === fx.away_team_id ? fx.away_team_name : null;
 
   // ---- 1 · knockout medals and placements (J4-E4-S1) -----------------------
-  for (const v of verdictsOf(fx)) {
+  // A consolation (Plate) bracket has its own "Final" but decides no medal.
+  const decidesPlacings = inPlacingStage(placingStagesOf(fx.format_config), fx.stage_sequence);
+  for (const v of decidesPlacings ? verdictsOf(fx) : []) {
     const medal = v.kind === 'medal' ? v.medal : null;
     const title = medal
       ? `${MEDAL_LABEL[medal]} - ${eventLabel}`

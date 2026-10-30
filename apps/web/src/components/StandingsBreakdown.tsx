@@ -1,4 +1,4 @@
-import { FINALIST_DETAIL_KEY } from '@semp/shared';
+import { FINALIST_DETAIL_KEY, formatPoints } from '@semp/shared';
 import { useApi } from '../lib/hooks';
 import { Badge, Spinner, cn } from './ui';
 
@@ -28,7 +28,18 @@ const DETAIL_LABELS: Record<string, string> = {
   winner: 'Winner', runner_up: 'Runner-up', [FINALIST_DETAIL_KEY]: 'Finalist', third_place: '3rd place', fourth_place: '4th place',
   semi_finalist: 'Semi-finalist', quarter_finalist: 'Quarter-finalist',
   gold: 'Gold', silver: 'Silver', bronze: 'Bronze', participation: 'Participation',
+  match_points: 'Match points', adjustment: 'Adjustment',
 };
+// Keys whose value is points, not a count.
+const VALUE_KEYS = new Set(['match_points', 'adjustment']);
+const ordinal = (n: number) => (n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`);
+const detailLabel = (k: string, v: number) => {
+  if (VALUE_KEYS.has(k)) return `${DETAIL_LABELS[k]} ${formatPoints(v)}`;
+  const place = k.match(/^event_place_(\d+)$/);
+  const label = place ? `${ordinal(Number(place[1]))} place` : DETAIL_LABELS[k] ?? k;
+  return `${label}${v > 1 ? ` ×${v}` : ''}`;
+};
+const signed = (n: number) => `${n < 0 ? '' : '+'}${formatPoints(n)}`;
 
 const RESULT_STYLE: Record<BreakdownMatch['result'], { label: string; cls: string }> = {
   won: { label: 'W', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' },
@@ -62,7 +73,7 @@ export function StandingsBreakdown({ base, scope, scopeId, entityId }: { base: s
               <span className="font-semibold text-emerald-600 dark:text-emerald-400">{e.won}W</span>
               <span>{e.drawn}D</span>
               <span className="text-rose-500">{e.lost}L</span>
-              <Badge tone="brand">+{e.points} pts</Badge>
+              <Badge tone="brand">{signed(e.points)} pts</Badge>
             </div>
           </div>
 
@@ -70,7 +81,7 @@ export function StandingsBreakdown({ base, scope, scopeId, entityId }: { base: s
           {Object.keys(e.detail).length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {Object.entries(e.detail).map(([k, v]) => (
-                <Badge key={k} tone="violet">{DETAIL_LABELS[k] ?? k}{v > 1 ? ` ×${v}` : ''}</Badge>
+                <Badge key={k} tone="violet">{detailLabel(k, v)}</Badge>
               ))}
             </div>
           )}

@@ -75,7 +75,7 @@ export function OrgAchievementsPage() {
               <div className="px-4 py-10 text-center">
                 <Trophy size={22} className="mx-auto mb-2 text-slate-300 dark:text-slate-600" aria-hidden />
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Nothing here yet. Honours appear the moment a result is locked — they are never entered by hand.
+                  Nothing here yet. Honours appear the moment a result is locked - they are never entered by hand.
                 </p>
               </div>
             ) : (
@@ -113,7 +113,7 @@ export function OrgAchievementsPage() {
                       <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">
                         {p.gold ? `${p.gold}🥇 ` : ''}{p.silver ? `${p.silver}🥈 ` : ''}{p.bronze ? `${p.bronze}🥉` : ''}
                         {p.awards ? ` ${p.awards}★` : ''}
-                        {!p.total_medals && !p.awards ? '—' : ''}
+                        {!p.total_medals && !p.awards ? '-' : ''}
                       </span>
                     </li>
                   ))}

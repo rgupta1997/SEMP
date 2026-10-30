@@ -645,7 +645,7 @@ export function makeTeamsRouter(prisma: Prisma): Router {
         const names = [...new Set(entries.map((e) => e.championships?.name).filter(Boolean))];
         throw new BusinessRuleError(
           `“${team.name}” is entered in ${names.length === 1 ? `“${names[0]}”` : `${names.length} championships`}. `
-          + 'Withdraw it first — moving a squad after it has entered would change which campus its results belong to.',
+          + 'Withdraw it first - moving a squad after it has entered would change which campus its results belong to.',
         );
       }
 

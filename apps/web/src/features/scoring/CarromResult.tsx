@@ -1,7 +1,7 @@
 import { ChevronDown } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  CARROM_COINS, boardsOnly, carromBoardPoints, carromHeadline, carromMatch, queenCoversFor, readCarromState,
+  CARROM_COINS, boardsOnly, carromBoardPoints, carromHeadline, carromMatchOf, carromTieBreakNote, queenCoversFor, readCarromState,
   type CarromBoard, type CarromBoardsState, type CarromGame, type CarromRules, type QueenCover, type Side,
 } from '@semp/shared';
 import { Button, Card, CardBody, CardHeader, cn, confirmDialog, toast } from '../../components/ui';
@@ -20,7 +20,7 @@ export function hydrateCarrom(raw: unknown): CarromState {
 export function CarromResult({ homeName, awayName, rules, initial, disabled, busy, onSave, rubber, formatName, provenance }: {
   homeName: string; awayName: string;
   rules: CarromRules;
-  /** The format being scored ("ICF — best of 3 games to 25"), and where it came from. */
+  /** The format being scored ("ICF - best of 3 games to 25"), and where it came from. */
   formatName?: string;
   provenance?: string;
   /** A rubber of a team tie: confirming it settles the rubber, not the fixture. */
@@ -41,7 +41,7 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
   }, [initial]);
 
   const nameOf = (s: Side) => (s === 'A' ? homeName : awayName);
-  const match = useMemo(() => carromMatch(state.boards, rules, state.firstBreak), [state, rules]);
+  const match = useMemo(() => carromMatchOf(state, rules), [state, rules]);
   const onlyBoards = boardsOnly(rules);
   const queenCovers = queenCoversFor(rules);
   const update = (next: CarromState) => { edited.current = true; setState(next); onSave(next, false); };
@@ -98,15 +98,33 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
     resetEntry();
   };
 
-  const undo = () => update({ ...state, boards: state.boards.slice(0, -1) });
+  // Undo takes back the last thing recorded: a retirement after the last board, else the board.
+  const retirements = state.retirements ?? [];
+  const lastIsRetirement = retirements.length > 0 && retirements[retirements.length - 1].afterBoards === state.boards.length;
+  const undo = () => update(lastIsRetirement
+    ? { ...state, retirements: retirements.slice(0, -1) }
+    : { ...state, boards: state.boards.slice(0, -1) });
 
+  // Retired hurt or conceded (Inter-IIM: no replacement): the game in progress goes to the other side.
+  const retire = async (side: Side) => {
+    const ok = await confirmDialog({
+      title: `${nameOf(side)} retire from game ${match.current.game}?`,
+      confirmLabel: 'Retire',
+      message: `Game ${match.current.game} goes to ${nameOf(side === 'A' ? 'B' : 'A')}. Boards already played stay on the sheet`
+        + (multiGame ? ', and the next game starts.' : '.') + ' Undo takes it back.',
+    });
+    if (ok) { update({ ...state, retirements: [...retirements, { afterBoards: state.boards.length, side }] }); resetEntry(); }
+  };
+
+  const retiredSides = match.games.flatMap((g) => (g.retired ? [g.retired] : []));
   const confirm = async () => {
     if (!match.decided || !match.winner) { toast.error('The match is not decided yet.'); return; }
     const ok = await confirmDialog({
       title: rubber ? 'Confirm this rubber' : 'Confirm final result',
       confirmLabel: rubber ? 'Record rubber' : 'Sign off',
       message: `${nameOf(match.winner)} win ${headline[match.winner === 'A' ? 0 : 1]}-${headline[match.winner === 'A' ? 1 : 0]}`
-        + ` in ${headlineUnit}. `
+        + ` in ${headlineUnit}`
+        + (retiredSides.length ? ` (${retiredSides.map(nameOf).join(', ')} retired)` : '') + '. '
         + (rubber ? 'The rubber goes to them in the tie.' : 'This completes the match and updates standings.'),
     });
     if (ok) onSave(state, true);
@@ -117,7 +135,7 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
     : match.decided
       ? `${nameOf(match.winner!)} win the ${rubber ? 'rubber' : 'match'} - ready to confirm`
       : match.current.tieBreak
-        ? `Level after ${rules.maxBoards} boards - the next board decides the game`
+        ? carromTieBreakNote(rules, match.current)
         : state.boards.length === 0
           ? 'Pick who breaks first, then record each board as it finishes'
           : 'Record the next board when it finishes';
@@ -159,7 +177,7 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
                 <span>Game {match.current.game}</span>
                 <span className="font-normal text-slate-500 dark:text-slate-400">
                   {match.current.tieBreak
-                    ? `level after ${rules.maxBoards} boards · tie-breaker board`
+                    ? (match.current.tieBreakScore ? `tie-break board ${match.current.tieBreakBoard} · ${match.current.tieBreakScore[0]}-${match.current.tieBreakScore[1]}` : `level after ${rules.maxBoards} boards · tie-breaker board`)
                     : `board ${match.current.board}${rules.maxBoards ? ` of ${rules.maxBoards}` : ''} · to ${rules.gameTarget}`}
                 </span>
               </div>
@@ -196,7 +214,7 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-base font-bold text-slate-900 dark:text-slate-100">
                 {multiGame && <span className="text-slate-500 dark:text-slate-400">Game {match.current.game} · </span>}
-                {match.current.tieBreak ? 'Tie-breaker board' : `Board ${match.current.board}`}
+                {match.current.tieBreak ? (match.current.tieBreakBoard ? `Tie-break board ${match.current.tieBreakBoard}` : 'Tie-breaker board') : `Board ${match.current.board}`}
               </div>
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-700">
                 <Disc white /> {nameOf(match.nextBreaker)} breaks · plays white
@@ -298,6 +316,18 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
               </button>
             )}
 
+            {/* A side retiring hurt or conceding gives up this game, not the whole match. */}
+            {!onlyBoards && (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <span>Retired hurt or conceded:</span>
+                {(['A', 'B'] as Side[]).map((s) => (
+                  <Button key={s} size="sm" variant="ghost" disabled={disabled || busy} onClick={() => retire(s)}>
+                    {nameOf(s)} retire
+                  </Button>
+                ))}
+              </div>
+            )}
+
             {/* What recording this board will do, before it is recorded. */}
             <div className="flex flex-wrap items-center gap-3 border-t border-brand-200 pt-3 dark:border-brand-500/20">
               {ready && winner ? (
@@ -332,7 +362,9 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
             {status}
           </span>
           <div className="ml-auto flex gap-2">
-            {state.boards.length > 0 && <Button variant="outline" disabled={disabled || busy} onClick={undo}>Undo last board</Button>}
+            {(state.boards.length > 0 || lastIsRetirement) && (
+              <Button variant="outline" disabled={disabled || busy} onClick={undo}>{lastIsRetirement ? 'Undo retirement' : 'Undo last board'}</Button>
+            )}
             <Button disabled={disabled || busy || !match.decided} onClick={confirm}>{rubber ? 'Confirm rubber' : 'Confirm result'}</Button>
           </div>
         </div>
@@ -356,7 +388,7 @@ function GameSheet({ title, game, nameOf, onlyBoards, open }: {
         <span className="font-semibold text-slate-900 dark:text-slate-100">{title}</span>
         <span className="flex min-w-0 items-center gap-2">
           {!onlyBoards && <span className="font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">{game.score[0]}–{game.score[1]}</span>}
-          {game.winner && <span className="truncate text-xs text-emerald-700 dark:text-emerald-300">{nameOf(game.winner)} won</span>}
+          {game.winner && <span className="truncate text-xs text-emerald-700 dark:text-emerald-300">{nameOf(game.winner)} won{game.retired ? ` · ${nameOf(game.retired)} retired` : ''}</span>}
           <span className="text-slate-400 transition group-open:rotate-180" aria-hidden>▾</span>
         </span>
       </summary>

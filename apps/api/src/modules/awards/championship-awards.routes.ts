@@ -24,6 +24,16 @@ export function makeChampionshipAwardsRouter(prisma: Prisma): Router {
   const manager = guards.championshipManager(async (req) => req.params.id);
   // Reads are the whole organising team's, sport organisers included.
   const viewer = guards.championshipViewer(async (req) => req.params.id);
+  // Giving awards: the whole event and its tournaments are the overall organiser's; a
+  // sport within a tournament is open to whoever runs that sport here.
+  const awardWriter = guards.sportManager(async (req) => {
+    const scope = req.body ?? {};
+    if (scope.level === 'tournament_sport' && typeof scope.tournament_sport_id === 'string') {
+      const ctx = await guards.resolvers.sportOfTournamentSport(scope.tournament_sport_id);
+      return ctx && ctx.championshipId === req.params.id ? ctx : null;
+    }
+    return { championshipId: req.params.id, sportId: '' }; // no sport: overall organisers only
+  });
 
   const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
   const scopeFromQuery = (q: Record<string, unknown>): ScopeInput => {
@@ -129,7 +139,7 @@ export function makeChampionshipAwardsRouter(prisma: Prisma): Router {
   }));
 
   // Replace one scope's awards.
-  router.put('/:id/awards', manager, validateBody(championshipAwardsSchema), asyncHandler(async (req, res) => {
+  router.put('/:id/awards', awardWriter, validateBody(championshipAwardsSchema), asyncHandler(async (req, res) => {
     const { awards, ...scopeInput } = req.body as ReturnType<typeof championshipAwardsSchema.parse>;
     const scope = await resolveAwardScope(prisma, req.params.id, scopeInput);
     const [types, participants] = await Promise.all([scopeAwardTypes(prisma, scope), scopeParticipants(prisma, scope)]);

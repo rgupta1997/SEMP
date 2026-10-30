@@ -167,6 +167,11 @@ export interface LevelSpec {
   terminator?: Terminator;
   /** How this level is decided from the units below. Defaults to `units`. */
   decide?: Decider;
+  /**
+   * Aggregate match only: the first side to this TOTAL wins at once, clock or not -
+   * ultimate's "first to 13 within a 40-minute cap".
+   */
+  firstTo?: number;
   /** Hard ceiling - reaching it wins regardless of margin. null = unbounded deuce. */
   cap: number | null;
   /** Handicap start, applied at the beginning of every unit at this level. */
@@ -280,6 +285,8 @@ export interface TieBreakSpec {
     repeat?: boolean;
     /** What the period is called on the board - "Overtime" rather than "Extra time". */
     label?: string;
+    /** Ultimate: extra time runs its full length; reaching `firstTo` no longer ends the match in it. */
+    fullTime?: boolean;
   } | null;
   /**
    * The shoot-out. `kicks` each in the first round; level after that goes to
@@ -289,6 +296,21 @@ export interface TieBreakSpec {
    * recorded 2-2, won on penalties, which is how every record of it reads.
    */
   penalties?: { kicks: number } | null;
+  /**
+   * Kho kho: still level, each side chases once more and the faster first out wins.
+   * Like a shoot-out it leaves the scoreline level (see kho-kho.ts).
+   */
+  minimumChase?: boolean | null;
+  /**
+   * Ultimate: still level after the last period (and any extra time), the next point
+   * wins - the "universal point". Decided by the kernel on that point.
+   */
+  universalPoint?: boolean | null;
+  /**
+   * Kabaddi: still level after extra time, a fresh toss and a golden raid each, the
+   * first point winning; level after both, a toss decides (kabaddi.ts).
+   */
+  goldenRaid?: boolean | null;
 }
 
 export interface ScoringFormat {
@@ -333,6 +355,12 @@ export const END_REASONS = [
   // decided it. Kept distinct from 'normal' so a record can say "won on penalties"
   // rather than quietly presenting a shoot-out win as a win in normal time.
   'extra_time', 'penalties',
+  // Kho kho: the faster first out after a level match, and a follow-on side still behind.
+  'minimum_chase', 'innings',
+  // Called off for rain or bad light: awarded on the rulebook's weather rule, or drawn.
+  'weather',
+  // Kabaddi: the first point of a golden raid, or the toss when both were empty.
+  'golden_raid', 'toss',
 ] as const;
 export type EndReason = (typeof END_REASONS)[number];
 
@@ -374,6 +402,7 @@ export const levelSpecSchema: z.ZodType<LevelSpec, z.ZodTypeDef, unknown> = z.la
   winBy: z.number().int().positive(),
   terminator: z.enum(TERMINATORS).optional(),
   decide: z.enum(DECIDERS).optional(),
+  firstTo: z.number().int().positive().optional(),
   cap: z.number().int().positive().nullable(),
   startingScore: z.tuple([z.number().int(), z.number().int()]).optional(),
   pointLabels: z.array(z.string()).optional(),
@@ -407,10 +436,14 @@ export const tieBreakSpecSchema: z.ZodType<TieBreakSpec> = z.object({
     minutes: z.number().int().min(1).max(60),
     repeat: z.boolean().optional(),
     label: z.string().min(1).max(30).optional(),
+    fullTime: z.boolean().optional(),
   }).nullable().optional(),
   penalties: z.object({
     kicks: z.number().int().min(1).max(20),
   }).nullable().optional(),
+  minimumChase: z.boolean().nullable().optional(),
+  universalPoint: z.boolean().nullable().optional(),
+  goldenRaid: z.boolean().nullable().optional(),
 });
 
 export const scoringFormatSchema = z.object({

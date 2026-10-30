@@ -214,10 +214,10 @@ export function ChampionshipMatrixImportPage() {
             <div className="space-y-2">
               <div className="text-xs font-semibold text-amber-700 dark:text-amber-400">
                 {createOrgId
-                  ? `These phones match no existing user — they'll be created in ${createOrgId === '__section__'
+                  ? `These phones match no existing user - they'll be created in ${createOrgId === '__section__'
                       ? "each person's section organization"
                       : `"${organizations.find((o) => o.id === createOrgId)?.name ?? 'the selected org'}"`}:`
-                  : 'These phones match no existing user and will be skipped — pick a "Create missing users in" option above, or add them to Users first:'}
+                  : 'These phones match no existing user and will be skipped - pick a "Create missing users in" option above, or add them to Users first:'}
               </div>
               <UnmatchedTable rows={validation.unmatched} />
             </div>
@@ -252,7 +252,7 @@ export function ChampionshipMatrixImportPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  New logins (change required on first sign-in). Share securely — email is derived from phone.
+                  New logins (change required on first sign-in). Share securely - email is derived from phone.
                 </div>
                 <Button
                   size="sm"
@@ -286,7 +286,7 @@ export function ChampionshipMatrixImportPage() {
           )}
           {result.unmatched.length > 0 && (
             <div className="space-y-2">
-              <div className="text-xs font-semibold text-amber-700 dark:text-amber-400">Skipped — no user matched these phones:</div>
+              <div className="text-xs font-semibold text-amber-700 dark:text-amber-400">Skipped - no user matched these phones:</div>
               <UnmatchedTable rows={result.unmatched} />
             </div>
           )}

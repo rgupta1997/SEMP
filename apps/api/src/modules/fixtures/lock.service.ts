@@ -1,5 +1,5 @@
 import type { Request } from 'express';
-import { THIRD_PLACE_ROUND, formatPoints, isKnockoutFixture } from '@semp/shared';
+import { KNOCKOUT_ROUND, THIRD_PLACE_ROUND, formatPoints, isKnockoutFixture } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
 import { BusinessRuleError, NotFoundError } from '../../shared/errors.js';
 import { friendlyError } from '../../http/middleware/error.js';
@@ -148,7 +148,7 @@ async function assertKnockoutHasWinner(_tx: Db, fx: {
   // A walkover or a bye is decided without play and carries its own winner rules.
   if (fx.status === 'walkover' || fx.status === 'bye') return;
   if (!isKnockoutFixture(fx)) return;
-  const final = fx.round === 'Final' || fx.round === THIRD_PLACE_ROUND;
+  const final = fx.round === KNOCKOUT_ROUND.final || fx.round === THIRD_PLACE_ROUND;
   throw new BusinessRuleError(
     'This is a knockout match, so one side has to go through - but no winner is recorded. '
     + 'Play a decider, or open the scorecard and set the winner, then lock it. '
@@ -544,7 +544,7 @@ export async function unlockScorecard(prisma: Prisma, req: Request, fixtureId: s
     action: AUDIT_ACTIONS.fixtureUnlocked,
     target: { type: 'fixtures', id: fx.id, label },
     championshipId,
-    summary: `Unlocked the scorecard for ${label} to correct it — "${trimmed}"`,
+    summary: `Unlocked the scorecard for ${label} to correct it - "${trimmed}"`,
     diff: {
       scorecard_status: { from: 'locked', to: 'submitted' },
       lock_version: { from: fromVersion, to: fx.lock_version },

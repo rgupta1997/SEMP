@@ -52,7 +52,7 @@ const card: React.CSSProperties = {
 function initials(name: string) {
   // Letters and digits only - a team called "Carrom (Mixed)" must not initialise to "C(".
   const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
-  return words.slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '—';
+  return words.slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '-';
 }
 
 export function OrgDashboardPage() {
@@ -300,7 +300,7 @@ export function OrgDashboardPage() {
           </div>
           {(data?.achievements ?? []).length === 0 ? (
             <p style={{ margin: '10px 0 0', fontSize: 13.5, color: C.fg4 }}>
-              Nothing yet. Achievements are written when a scorecard locks — they are not entered by hand.
+              Nothing yet. Achievements are written when a scorecard locks - they are not entered by hand.
             </p>
           ) : data!.achievements.map((a) => (
             <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 0', borderTop: '1px solid #EFF2F7' }}>

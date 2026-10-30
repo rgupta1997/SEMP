@@ -44,7 +44,7 @@ const ALLOWED = new Set([
   'winners', 'unforced_errors', 'lets', 'break_points_played', 'break_points_won',
   'break_points_saved', 'break_points_faced', 'love_holds', 'bagels', 'won_from_set_down', 'retired', 'walkover_received', 'whitewash',
   // invasion
-  'goals', 'assists', 'own_goals', 'shots', 'saves', 'clean_sheet', 'yellows', 'reds',
+  'goals', 'assists', 'own_goals', 'shots', 'saves', 'clean_sheet', 'greens', 'pc_goals', 'yellows', 'reds',
   'pens_scored', 'pens_missed', 'points_scored', 'fg_1', 'fg_2', 'fg_3', 'rebounds',
   'steals', 'blocks', 'turnovers', 'fouls', 'started',
   'ftm', 'fta', 'shootout_scored', 'shootout_missed',
@@ -52,6 +52,7 @@ const ALLOWED = new Set([
   'raid_points', 'raids', 'successful_raids', 'super_raids', 'do_or_die_won',
   'tackle_points', 'tackles', 'super_tackles', 'bonus_points', 'all_outs',
   'touch_points', 'dream_run_seconds',
+  'pole_dive_outs', 'dive_outs', 'sudden_attack_outs', 'times_out', 'out_of_field_outs', 'late_entries', 'kho_fouls',
   // net
   'kills', 'digs', 'service_errors', 'attack_errors', 'reception_errors', 'sets_played',
   // board

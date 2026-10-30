@@ -204,6 +204,11 @@ const WHOLE = '__whole__';
 // Squad size is a property of the entry type, not a free-form number: an individual
 // entry is one competitor, doubles is a pair. `fixed` types can't be edited; team /
 // relay keep sensible starting squads the organiser can still adjust.
+// In a ranking sport (swimming, athletics) an "individual" entry is an institute's competitors
+// in one race, so how many it may enter is the organiser's to set; elsewhere it is one person.
+const squadIsFixed = (entry: string, sportName?: string | null) =>
+  (SQUAD_BY_ENTRY[entry]?.fixed ?? false) && !(entry === 'individual' && isRankingSport(sportName));
+
 const SQUAD_BY_ENTRY: Record<string, { min: number; max: number; fixed: boolean }> = {
   individual: { min: 1, max: 1, fixed: true },
   doubles: { min: 2, max: 2, fixed: true },
@@ -226,7 +231,7 @@ function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues,
   const [wholeEntry, setWholeEntry] = useState('individual');
   const [wholeMin, setWholeMin] = useState('1');
   const [wholeMax, setWholeMax] = useState('1');
-  const wholeSquadFixed = SQUAD_BY_ENTRY[wholeEntry]?.fixed ?? false;
+  const wholeSquadFixed = squadIsFixed(wholeEntry, sportName);
   const onWholeEntryChange = (v: string) => {
     setWholeEntry(v);
     const s = SQUAD_BY_ENTRY[v];
@@ -410,7 +415,7 @@ function AddDisciplineModal({ tournamentSport, sportName, existing = [], venues,
                 </Select>
               </Field>
               <Field label="Squad min"><Input type="number" min={1} value={wholeMin} disabled={wholeSquadFixed} onChange={(e) => setWholeMin(e.target.value)} /></Field>
-              <Field label="Squad max"><Input type="number" min={1} value={wholeMax} disabled={wholeSquadFixed} onChange={(e) => setWholeMax(e.target.value)} /></Field>
+              <Field label="Squad max" hint={isRankingSport(sportName) && wholeEntry === 'individual' ? 'How many competitors an institute may enter in each race.' : undefined}><Input type="number" min={1} value={wholeMax} disabled={wholeSquadFixed} onChange={(e) => setWholeMax(e.target.value)} /></Field>
             </div>
           )}
         </div>
@@ -444,7 +449,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
   const storedTie: TieSpec | undefined = storedScoring?.fixtureType === 'tie' ? storedScoring.tie : undefined;
   const offersTie = entryType === 'team' && tieLayoutsFor(sportName).length > 0;
   const sportFormatName = formats.find((f) => f.id === sportFormatId)?.name;
-  const squadFixed = SQUAD_BY_ENTRY[entryType]?.fixed ?? false;
+  const squadFixed = squadIsFixed(entryType, sportName);
   const onEntryTypeChange = (v: string) => {
     setEntryType(v);
     const s = SQUAD_BY_ENTRY[v];
@@ -549,7 +554,7 @@ function EditDisciplineModal({ discipline, sportName, sportFormatId, venues, for
           </Select>
         </Field>
         <Field label="Squad min"><Input type="number" min={1} value={squadMin} disabled={squadFixed} onChange={(e) => setSquadMin(e.target.value)} /></Field>
-        <Field label="Squad max"><Input type="number" min={1} value={squadMax} disabled={squadFixed} onChange={(e) => setSquadMax(e.target.value)} /></Field>
+        <Field label="Squad max" hint={isRankingSport(sportName) && entryType === 'individual' ? 'How many competitors an institute may enter in this race.' : undefined}><Input type="number" min={1} value={squadMax} disabled={squadFixed} onChange={(e) => setSquadMax(e.target.value)} /></Field>
       </div>
       <Field label="Status">
         <Select value={status} onChange={(e) => setStatus(e.target.value)}>

@@ -7,13 +7,24 @@
 import type { EventSpec } from '@semp/shared';
 import {
   aggregateEvent, placementPoints, rankSubEvent,
-  type AggRow, type EventOrgContribution, type EventState, type ParticipantResult,
+  resultStatusOf,
+  type AggRow, type EventOrgContribution, type EventScoringOpts, type EventState, type ParticipantResult, type ResultStatus,
 } from '@semp/shared';
 
 export { aggregateEvent, placementPoints, rankSubEvent };
 export type { AggRow, EventOrgContribution, EventState, ParticipantResult };
 
 export function initEvent(): EventState { return { participants: [] }; }
+
+/** A result (a mark, or DNS / DNF / DQ) in this category. */
+export function hasResultIn(p: ParticipantResult, cat?: string | null): boolean {
+  return !!cat && (typeof p.marks[cat] === 'number' || !!resultStatusOf(p, cat));
+}
+
+/** One-screen categories: the class picker moves only competitors without a result; the rest keep theirs. */
+export function moveUnplacedTo(state: EventState, cat: string): EventState {
+  return { participants: state.participants.map((p) => (hasResultIn(p, p.category) ? p : { ...p, category: cat, marks: {} })) };
+}
 
 export function hydrateEvent(raw: any): EventState {
   const ps = Array.isArray(raw?.participants) ? raw.participants : [];
@@ -26,23 +37,36 @@ export function hydrateEvent(raw: any): EventState {
       orgId: p?.orgId ?? null,
       category: typeof p?.category === 'string' ? p.category : null,
       marks: p?.marks && typeof p.marks === 'object' ? p.marks : {},
+      ...(p?.statuses && typeof p.statuses === 'object' ? { statuses: p.statuses } : {}),
     })),
   };
 }
 
 // Times are stored as seconds (number). Officials may type plain seconds ("62.4") or
-// mm:ss(.s) ("1:02.4"); both parse to the same value. Returns null for blank/garbage.
-export function parseTimeInput(raw: string): number | null {
+// m:ss(.s) ("1:02.4"); both parse to the same value. A typo is refused with a reason,
+// never read as some other time: one colon at most, under 60 seconds after it, above 0.
+export function readTimeInput(raw: string): { value: number | null; error: string | null } {
   const s = raw.trim();
-  if (!s) return null;
+  if (!s) return { value: null, error: null };
+  const plain = /^\d+(\.\d+)?$/;
   if (s.includes(':')) {
-    const [m, sec] = s.split(':');
-    const mm = Number(m); const ss = Number(sec);
-    if (!isFinite(mm) || !isFinite(ss)) return null;
-    return mm * 60 + ss;
+    const parts = s.split(':');
+    if (parts.length !== 2 || !/^\d+$/.test(parts[0]) || !plain.test(parts[1])) {
+      return { value: null, error: 'Use seconds (31.45) or minutes:seconds (1:02.45).' };
+    }
+    const ss = Number(parts[1]);
+    if (ss >= 60) return { value: null, error: 'Seconds after the colon must be under 60.' };
+    const total = Number(parts[0]) * 60 + ss;
+    return total > 0 ? { value: total, error: null } : { value: null, error: 'A time must be more than 0.' };
   }
+  if (!plain.test(s)) return { value: null, error: 'Use seconds (31.45) or minutes:seconds (1:02.45).' };
   const n = Number(s);
-  return isFinite(n) ? n : null;
+  return n > 0 ? { value: n, error: null } : { value: null, error: 'A time must be more than 0.' };
+}
+
+/** The time typed, in seconds; null when blank or not a valid time. */
+export function parseTimeInput(raw: string): number | null {
+  return readTimeInput(raw).value;
 }
 
 // Inverse of parseTimeInput for display: under a minute stays plain seconds; a minute
@@ -63,17 +87,19 @@ export interface RankRow { orgId: string | null; org: string; place: number | nu
 // Per-sub-event ranking shown to the official so the points trail is visible ("who placed
 // where, and what their org earned"). Only meaningful for rank-based aggregates
 // (medals/placePoints); a sumBest event has no per-sub ranking, so this returns [].
-export interface SubEventRow { rank: number; name: string; org?: string | null; mark: number; points: number }
+/** A placed finisher (rank, mark), or one with a DNS / DNF / DQ (no rank, no points). */
+export interface SubEventRow { rank: number | null; name: string; org?: string | null; mark: number | null; points: number; status?: ResultStatus }
 export interface SubEventBlock { key: string; label: string; rows: SubEventRow[] }
 
-export function subEventResults(spec: EventSpec, state: EventState): SubEventBlock[] {
+export function subEventResults(spec: EventSpec, state: EventState, opts: EventScoringOpts = {}): SubEventBlock[] {
   if (spec.result.aggregate === 'sumBest') return [];
-  const medals = spec.result.medalPoints ?? [5, 3, 1];
   const n = state.participants.length;
   const blocks: SubEventBlock[] = [];
   for (const se of spec.subEvents) {
-    const ranks = rankSubEvent(spec, state, se.key);
-    if (ranks.size === 0) continue;
+    // A sub-event's own scale (a relay's) wins over the event's, as the standings score it.
+    const medals = se.medalPoints ?? spec.result.medalPoints ?? [5, 3, 1];
+    const ranks = rankSubEvent(spec, state, se.key, opts);
+    if (ranks.size === 0 && !state.participants.some((p) => resultStatusOf(p, se.key))) continue;
     const rows: SubEventRow[] = [];
     for (const [pid, rank] of ranks) {
       const p = state.participants.find((x) => x.id === pid);
@@ -81,7 +107,12 @@ export function subEventResults(spec: EventSpec, state: EventState): SubEventBlo
       const points = spec.result.aggregate === 'medals' ? (medals[rank - 1] ?? 0) : Math.max(0, n - rank + 1);
       rows.push({ rank, name: p.name || 'Unnamed', org: p.org ?? null, mark: p.marks[se.key] as number, points });
     }
-    rows.sort((a, b) => a.rank - b.rank);
+    rows.sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+    // Then whoever has a status, so the record says why they were not placed.
+    for (const p of state.participants) {
+      const status = resultStatusOf(p, se.key);
+      if (status) rows.push({ rank: null, name: p.name || 'Unnamed', org: p.org ?? null, mark: null, points: 0, status });
+    }
     blocks.push({ key: se.key, label: se.label, rows });
   }
   return blocks;

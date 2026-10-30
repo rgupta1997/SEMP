@@ -224,7 +224,7 @@ describe('the career fold', () => {
 
   it('shows an em dash rather than 0/0 for somebody who has not bowled', () => {
     const c = foldCricketCareer(1, [bat({ runs: 5, dismissal: 'bowled' })], [], []);
-    expect(bestBowlingLine(c)).toBe('—');
-    expect(highScoreLine(foldCricketCareer(0, [], [], []))).toBe('—');
+    expect(bestBowlingLine(c)).toBe('-');
+    expect(highScoreLine(foldCricketCareer(0, [], [], []))).toBe('-');
   });
 });

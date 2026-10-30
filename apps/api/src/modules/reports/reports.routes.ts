@@ -362,7 +362,7 @@ export function makeReportsRouter(prisma: Prisma): Router {
       },
       needs_attention: attention,
       // J2-E8-S1: never presented as a final position.
-      basis: 'Live figures — this championship is still in progress.',
+      basis: 'Live figures - this championship is still in progress.',
       as_of: new Date().toISOString(),
     });
   }));

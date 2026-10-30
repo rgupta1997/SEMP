@@ -80,7 +80,7 @@ export function PlanSurface({ ladder, statePath, actionPath }: PlanSurfaceProps)
       const until = sub ? formatDate(sub.current_period_end) : 'the end of your current period';
       const ok = await confirmDialog({
         title: `Move down to ${plan.name}?`,
-        message: `Nothing changes until ${until} — you keep everything you have paid for until then. After that, features not on ${plan.name} become unavailable. Nothing you have created is deleted, and it all comes back if you resubscribe.`,
+        message: `Nothing changes until ${until} - you keep everything you have paid for until then. After that, features not on ${plan.name} become unavailable. Nothing you have created is deleted, and it all comes back if you resubscribe.`,
         confirmLabel: 'Schedule it',
       });
       if (!ok) return;

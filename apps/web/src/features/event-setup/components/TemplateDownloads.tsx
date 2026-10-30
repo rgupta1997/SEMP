@@ -6,7 +6,7 @@ import { downloadSetupWorkbook } from '../xlsx';
 import { FOCUS_RING } from './pills';
 
 /**
- * "Download template" and "Download sample" for one event type — or, given a setup,
+ * "Download template" and "Download sample" for one event type - or, given a setup,
  * for that setup's switches and named after it.
  */
 export function TemplateButtons({ type, compact = false, forSetup }: {

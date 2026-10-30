@@ -103,7 +103,8 @@ export const COLUMN_MAP: Record<Exclude<StatFamily, 'measured' | 'cricket'>, Rec
   invasion: {
     minutes: 'minutes',
     goals: 'goals', assists: 'assists', own_goals: 'own_goals', saves: 'saves',
-    yellows: 'yellows', reds: 'reds',
+    // Hockey's green card and penalty corner goals (rds-migrations 030).
+    greens: 'greens', pc_goals: 'pc_goals', yellows: 'yellows', reds: 'reds',
     pens_scored: 'pens_scored', pens_missed: 'pens_missed',
     points_scored: 'points_scored', fg_1: 'fg_1', fg_2: 'fg_2', fg_3: 'fg_3',
     rebounds: 'rebounds', steals: 'steals', blocks: 'blocks',
@@ -116,6 +117,12 @@ export const COLUMN_MAP: Record<Exclude<StatFamily, 'measured' | 'cricket'>, Rec
     raid_points: 'raid_points', raids: 'raids', successful_raids: 'successful_raids',
     tackle_points: 'tackle_points', tackles: 'tackles', super_tackles: 'super_tackles',
     bonus_points: 'bonus_points', all_outs: 'all_outs',
+    super_raids: 'super_raids', do_or_die_won: 'do_or_die_won',
+    // Kho kho shares the table (rds-migrations 027).
+    touch_points: 'touch_points', pole_dive_outs: 'pole_dive_outs', dive_outs: 'dive_outs',
+    sudden_attack_outs: 'sudden_attack_outs', times_out: 'times_out',
+    out_of_field_outs: 'out_of_field_outs', late_entries: 'late_entries', kho_fouls: 'kho_fouls',
+    yellows: 'yellows', reds: 'reds',
   },
   net: {
     minutes: 'minutes',

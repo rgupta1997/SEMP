@@ -445,7 +445,7 @@ describe('5. reopening a rubber', () => {
 });
 
 // ============================================================================
-// 6. REHYDRATION — what comes back out of live_state
+// 6. REHYDRATION - what comes back out of live_state
 // ============================================================================
 
 describe('6. rehydrating a persisted tie', () => {

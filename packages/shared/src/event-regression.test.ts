@@ -121,7 +121,7 @@ describe('1. the event templates on the shelf', () => {
     }
   });
 
-  it('1.3 every medal scale is descending — gold is never worth less than silver', () => {
+  it('1.3 every medal scale is descending - gold is never worth less than silver', () => {
     for (const { sport, event: e } of SHELF) {
       const scales = [e.result.medalPoints, ...e.subEvents.map((x) => x.medalPoints)];
       for (const scale of scales) {
@@ -192,7 +192,7 @@ describe('2. ranking one sub-event', () => {
     expectRankingSound(r, 3);
   });
 
-  it('2.3 A DEAD HEAT SHARES THE PLACE and consumes the one below — 1,1,3', () => {
+  it('2.3 A DEAD HEAT SHARES THE PLACE and consumes the one below - 1,1,3', () => {
     // Two equal firsts both take gold and there is no silver. "1,1,2" would invent a
     // silver medallist and shift everybody behind them up a place.
     const st = state(P('a', { '50free': 28 }), P('b', { '50free': 28 }), P('c', { '50free': 31 }));
@@ -227,7 +227,7 @@ describe('2. ranking one sub-event', () => {
     expectRankingSound(r, 4);
   });
 
-  it('2.6 NOBODY WITHOUT A MARK IS RANKED — a did-not-start is not last', () => {
+  it('2.6 NOBODY WITHOUT A MARK IS RANKED - a did-not-start is not last', () => {
     const st = state(
       P('a', { '50free': 28 }), P('b', { '50free': null }), P('c', {}),
     );
@@ -306,7 +306,7 @@ describe('4. the event total', () => {
     expect(rows.find((r) => r.key === 'o2')?.points).toBe(8);
   });
 
-  it('4.2 A SUB-EVENT MAY OVERRIDE THE SCALE — a relay can pay more than a heat', () => {
+  it('4.2 A SUB-EVENT MAY OVERRIDE THE SCALE - a relay can pay more than a heat', () => {
     const s = spec({
       subEvents: [SE('heat'), { ...SE('relay'), medalPoints: [10, 7, 3] }],
     });
@@ -603,5 +603,111 @@ describe('6. a whole meet', () => {
     const { spec: s, state: st } = meet(777);
     expect(JSON.stringify(detailedContributions(s, st)))
       .toBe(JSON.stringify(detailedContributions(s, st)));
+  });
+});
+
+// Sheet SW02 (and the template half of SW01): the Inter-IIM swimming list.
+describe('the Inter-IIM swimming events', () => {
+  const sw = eventTemplateFor('swimming')!.event!;
+  const labels = sw.subEvents.map((x) => x.label);
+
+  it('has every IIMK race: 25/50 of each stroke, the men\u2019s 100m free, and five relays', () => {
+    for (const g of ["Men's", "Women's"]) {
+      for (const r of ['25m Freestyle', '50m Freestyle', '25m Backstroke', '50m Backstroke', '25m Breaststroke', '50m Breaststroke', '25m Butterfly', '50m Butterfly']) {
+        expect(labels).toContain(`${g} ${r}`);
+      }
+      expect(labels).toContain(`${g} 4x25m Freestyle Relay`);
+      expect(labels).toContain(`${g} 4x25m Medley Relay`);
+    }
+    expect(labels).toContain("Men's 100m Freestyle");
+    expect(labels).not.toContain("Women's 100m Freestyle");
+    expect(labels.some((l) => /mixed.*medley/i.test(l))).toBe(false);
+    expect(sw.subEvents).toHaveLength(22);
+  });
+
+  it('relays pay 10/7/4, individual races 5/3/1, and the mixed relay keeps its key', () => {
+    const relays = sw.subEvents.filter((x) => x.kind === 'relay');
+    expect(relays).toHaveLength(5);
+    for (const r of relays) expect(r.medalPoints).toEqual([10, 7, 4]);
+    expect(sw.result.medalPoints).toEqual([5, 3, 1]);
+    expect(sw.subEvents.find((x) => x.key === 'relay')?.label).toMatch(/Mixed 4x25m Freestyle/);
+  });
+});
+
+// SW04: several swimmers per institute, the best-finisher option, and relays as one entry.
+describe('several competitors per institute', () => {
+  const race = spec({ subEvents: [SE('50free')] });
+  // Rahul and Vikram swim for IIM A, Arjun for IIM B, Karan for IIM C.
+  const swim = state(
+    P('rahul', { '50free': 28.1 }, { orgId: 'A', org: 'IIM A' }),
+    P('vikram', { '50free': 29.0 }, { orgId: 'A', org: 'IIM A' }),
+    P('arjun', { '50free': 29.5 }, { orgId: 'B', org: 'IIM B' }),
+    P('karan', { '50free': 30.2 }, { orgId: 'C', org: 'IIM C' }),
+  );
+  const pts = (c: EventOrgContribution[]) => Object.fromEntries(c.map((x) => [x.orgId, x.points]));
+
+  it('every finisher scores by default: one institute can be 1st and 2nd', () => {
+    const c = detailedContributions(race, swim);
+    expect(pts(c)).toEqual({ A: 8, B: 1, C: 0 });
+    expect(c.find((x) => x.orgId === 'A')).toMatchObject({ gold: 1, silver: 1, bronze: 0 });
+  });
+
+  it('best finisher only: the other is passed over and the next institute moves up', () => {
+    const ranks = rankSubEvent(race, swim, '50free', { bestPerSide: true });
+    expect([...ranks.entries()]).toEqual([['rahul', 1], ['arjun', 2], ['karan', 3]]);
+    expect(pts(detailedContributions(race, swim, { bestPerSide: true }))).toEqual({ A: 5, B: 3, C: 1 });
+  });
+
+  it('the participation floor goes to an institute that finished without a place', () => {
+    const c = detailedContributions(race, swim, { participation: 1 });
+    expect(c.find((x) => x.orgId === 'C')).toMatchObject({ points: 1, participation: 1 });
+    expect(c.find((x) => x.orgId === 'A')?.points).toBe(8);
+  });
+
+  it('a named relay race keeps the relay kind; an individual race does not', async () => {
+    const { effectiveEventSpec, isRelaySubEvent } = await import('./event-scoring.js');
+    const sw = eventTemplateFor('swimming')!.event!;
+    const relay = effectiveEventSpec(sw, { id: 'd1', name: "Men's 4x25m Medley Relay" });
+    expect(isRelaySubEvent(relay.subEvents[0])).toBe(true);
+    // A discipline named differently from the template still reads as a relay.
+    expect(isRelaySubEvent(effectiveEventSpec(sw, { id: 'd2', name: 'Open Relay' }).subEvents[0])).toBe(true);
+    expect(isRelaySubEvent(effectiveEventSpec(sw, { id: 'd3', name: "Men's 50m Freestyle" }).subEvents[0])).toBe(false);
+  });
+});
+
+// SW05: DNS / DNF / DQ - never ranked, and the reason is kept.
+describe('result statuses', () => {
+  const race = spec({ subEvents: [SE('50free')] });
+
+  it('a disqualified swimmer is not ranked even with a time, and the next one moves up', async () => {
+    const { resultStatusOf } = await import('./event-scoring.js');
+    const st = state(
+      P('rahul', { '50free': 28.1 }, { orgId: 'A', statuses: { '50free': 'DQ' } }),
+      P('arjun', { '50free': 29.5 }, { orgId: 'B' }),
+      P('karan', { '50free': null }, { orgId: 'C', statuses: { '50free': 'DNS' } }),
+    );
+    expect([...rankSubEvent(race, st, '50free').entries()]).toEqual([['arjun', 1]]);
+    expect(resultStatusOf(st.participants[0], '50free')).toBe('DQ');
+    expect(resultStatusOf(st.participants[1], '50free')).toBeNull();
+    const c = detailedContributions(race, st, { participation: 1 });
+    expect(c.find((x) => x.orgId === 'B')?.points).toBe(5);
+    // A disqualified swimmer took part: the participation point. An absent one (DNS) did not.
+    expect(c.find((x) => x.orgId === 'A')).toMatchObject({ points: 1, participation: 1, gold: 0 });
+    expect(c.find((x) => x.orgId === 'C')).toBeUndefined();
+  });
+
+  it('a lifter who bombs out (three failed attempts at one lift) is DQ, unranked, and still earns participation', () => {
+    const lifts = spec({ subEvents: [SE('m66')], result: { resultType: 'weight', winnerIs: 'max', unit: 'kg', aggregate: 'medals', medalPoints: [10, 7, 4] } });
+    const st = state(
+      P('rahul', { m66: 400 }, { orgId: 'A' }),
+      P('neel', { m66: null }, { orgId: 'B', statuses: { m66: 'DQ' } }),
+      P('dev', { m66: null }, { orgId: 'C', statuses: { m66: 'DNF' } }),
+      P('om', { m66: null }, { orgId: 'D', statuses: { m66: 'DNS' } }),
+    );
+    expect([...rankSubEvent(lifts, st, 'm66').entries()]).toEqual([['rahul', 1]]);
+    const c = detailedContributions(lifts, st, { participation: 1 });
+    expect(Object.fromEntries(c.map((x) => [x.orgId, x.points]))).toEqual({ A: 10, B: 1, C: 1 });
+    // Without a participation rule a DQ earns nothing.
+    expect(detailedContributions(lifts, st).find((x) => x.orgId === 'B')).toBeUndefined();
   });
 });

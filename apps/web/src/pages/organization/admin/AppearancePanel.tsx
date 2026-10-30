@@ -101,7 +101,7 @@ export function AppearancePanel({ orgId }: { orgId: string }) {
               <div className="min-w-0">
                 <h3 className="t-section text-slate-900 dark:text-slate-100">Workspace colour</h3>
                 <p className="t-meta mt-1 max-w-prose">
-                  One colour, and the whole workspace follows it — the sidebar, buttons,
+                  One colour, and the whole workspace follows it - the sidebar, buttons,
                   links and highlights. Everyone in this organisation sees it; people in
                   their own space or in someone else’s event do not.
                 </p>

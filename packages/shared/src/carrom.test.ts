@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ICF_CARROM_RULES, carromBoardPoints, carromHeadline, carromLineStats, carromMatch, carromRulesOf, isCarromSport, queenCoversFor,
+  ICF_CARROM_RULES, carromBoardPoints, carromHeadline, carromMatchOf, carromTieBreakNote, readCarromState, carromLineStats, carromMatch, carromRulesOf, isCarromSport, queenCoversFor,
   type CarromBoard, type QueenCover,
 } from './carrom.js';
 import { presetByKey } from './racquet-presets.js';
@@ -9,6 +9,7 @@ import { toCategoryRow } from './category-lines.js';
 import { tieTemplateFor } from './tie-templates.js';
 import { decideRubber, hydrateTie, initTie, reopenRubber } from './tie.js';
 import { playedContests } from './played-contests.js';
+import { applyKnobs, describeKnobs, knobsFor, readKnobs } from './format-knobs.js';
 
 const b = (winner: 'A' | 'B', coinsLeft: number, queen: QueenCover = 'loser'): CarromBoard => ({ winner, coinsLeft, queen });
 const R = ICF_CARROM_RULES;
@@ -181,5 +182,146 @@ describe('the carrom presets', () => {
   it('knows carrom by name', () => {
     expect(isCarromSport(' Carrom ')).toBe(true);
     expect(isCarromSport('chess')).toBe(false);
+  });
+});
+
+// Sheet CA01: Inter-IIM, one game of 4 boards or 16 points, queen 3 up to and including 13.
+describe('the Inter-IIM carrom game', () => {
+  const f = presetByKey('iim_4boards_16')!;
+  const rules = carromRulesOf(f);
+
+  it('is one game to 16 with a 4-board limit and the queen off from 14', () => {
+    expect(rules).toMatchObject({ gameTarget: 16, gamesToWin: 1, maxBoards: 4, queenPoints: 3, queenCutoff: 14 });
+    expect(carromBoardPoints(b('A', 2, 'winner'), 13, rules)).toBe(5);
+    expect(carromBoardPoints(b('A', 2, 'winner'), 14, rules)).toBe(2);
+  });
+
+  it('ends at 16, or on the higher total after 4 boards', () => {
+    expect(carromMatch([b('A', 9, 'winner'), b('A', 5)], rules)).toMatchObject({ decided: true, winner: 'A' });
+    const four = carromMatch([b('A', 5), b('B', 3), b('A', 4), b('B', 2)], rules);
+    expect(four).toMatchObject({ decided: true, winner: 'A' });
+    expect(carromHeadline(four, rules)).toEqual([9, 5]);
+  });
+});
+
+describe('carrom in the format editor', () => {
+  it('offers the game, board limit and queen, not serves or a clock', () => {
+    const keys = knobsFor(readKnobs(presetByKey('icf_bo3_boards')!)).map((s) => s.key);
+    expect(keys).toEqual(expect.arrayContaining(['target', 'unitsToWin', 'carromMaxBoards', 'carromQueenPoints', 'carromQueenCutoff', 'carromQueenMustBeCovered']));
+    expect(keys).not.toContain('movement');
+    expect(keys).not.toContain('clockEnabled');
+    expect(keys).not.toContain('winBy');
+  });
+
+  it('turns the ICF preset into the Inter-IIM game', () => {
+    const icf = presetByKey('icf_bo3_boards')!;
+    const k = readKnobs(icf);
+    const iim = applyKnobs(icf, { ...k, unitsToWin: 1, target: 16, carromMaxBoards: 4, carromQueenCutoff: 14 });
+    expect(carromRulesOf(iim)).toMatchObject({ gameTarget: 16, gamesToWin: 1, maxBoards: 4, queenPoints: 3, queenCutoff: 14, queenMustBeCovered: true });
+    expect(describeKnobs(readKnobs(iim))).toBe('single game to 16 · 4 boards a game · queen 3 below 14');
+  });
+
+  it('can switch the board limit and the queen cutoff off', () => {
+    const icf = presetByKey('icf_bo3_boards')!;
+    const off = applyKnobs(icf, { ...readKnobs(icf), carromMaxBoardsEnabled: false, carromQueenCutoffEnabled: false });
+    expect(carromRulesOf(off)).toMatchObject({ maxBoards: null, queenCutoff: null });
+  });
+
+  it('leaves a boards-only format alone and describes it in boards', () => {
+    const bo5 = presetByKey('boards_bo5')!;
+    const k = readKnobs(bo5);
+    expect(knobsFor(k).map((s) => s.key)).not.toContain('carromQueenPoints');
+    expect(applyKnobs(bo5, k).rulesSheet).toEqual(bo5.rulesSheet);
+    expect(describeKnobs(k)).toBe('best of 5 boards');
+  });
+});
+
+// Inter-IIM tie-break: level on points, more boards won; still level, 2 boards totalled.
+describe('the Inter-IIM level game', () => {
+  const rules = carromRulesOf(presetByKey('iim_4boards_16')!);
+  // 6-6 after 4 boards, A won 3 of them.
+  const sixAll = [b('A', 2), b('A', 2), b('B', 6), b('A', 2)];
+  // 6-6 after 4 boards, 2 boards each.
+  const evenBoards = [b('A', 3), b('B', 3), b('A', 3), b('B', 3)];
+
+  it('goes to the side that won more boards, with no extra board', () => {
+    const m = carromMatch(sixAll, rules);
+    expect(m).toMatchObject({ decided: true, winner: 'A' });
+    expect(carromHeadline(m, rules)).toEqual([6, 6]);
+  });
+
+  it('level on boards too: plays 2 tie-break boards and the higher total over them wins', () => {
+    const one = carromMatch([...evenBoards, b('B', 2)], rules);
+    expect(one.decided).toBe(false);
+    expect(one.current).toMatchObject({ tieBreak: true, tieBreakBoard: 2, tieBreakScore: [0, 2] });
+    // B led the first tie-break board, A takes the pair 5-2.
+    expect(carromMatch([...evenBoards, b('B', 2), b('A', 5)], rules)).toMatchObject({ decided: true, winner: 'A' });
+    expect(carromTieBreakNote(rules, one.current)).toBe('Level on points and boards won after 4 boards - tie-break board 2 of 2 (tie-break 0-2)');
+  });
+
+  it('tie-break totals level after 2: the next board decides', () => {
+    const level = carromMatch([...evenBoards, b('B', 2), b('A', 2)], rules);
+    expect(level.decided).toBe(false);
+    expect(carromMatch([...evenBoards, b('B', 2), b('A', 2), b('B', 1)], rules)).toMatchObject({ decided: true, winner: 'B' });
+  });
+
+  it('reaching 16 during the tie-break does not end it early', () => {
+    const big = carromMatch([...evenBoards, b('A', 9, 'winner')], rules);
+    expect(big.decided).toBe(false);
+  });
+});
+
+describe('ICF level game is unchanged', () => {
+  it('level after 8 boards: the next board decides, boards won not counted', () => {
+    const eight = [b('A', 1), b('A', 1), b('A', 1), b('A', 1), b('A', 1), b('A', 1), b('A', 1), b('B', 7)];
+    const m = carromMatch(eight, R);
+    expect(m.decided).toBe(false);
+    expect(m.current.tieBreakScore).toBeUndefined();
+    expect(carromMatch([...eight, b('B', 1)], { ...R, gamesToWin: 1 })).toMatchObject({ decided: true, winner: 'B' });
+  });
+
+  it('editor shows the controls and sets them, ICF defaults stay as they were', () => {
+    const icf = presetByKey('icf_bo3_boards')!;
+    const k = readKnobs(icf);
+    expect(k).toMatchObject({ carromBoardsWonDecides: false, carromTieBreakBoards: 1 });
+    expect(knobsFor(k).map((s) => s.key)).toEqual(expect.arrayContaining(['carromBoardsWonDecides', 'carromTieBreakBoards']));
+    const iim = applyKnobs(icf, { ...k, carromBoardsWonDecides: true, carromTieBreakBoards: 2 });
+    expect(carromRulesOf(iim)).toMatchObject({ boardsWonDecides: true, tieBreakBoards: 2 });
+    expect(describeKnobs(readKnobs(presetByKey('iim_4boards_16')!))).toBe('single game to 16 · 4 boards a game · level: more boards won · 2 tie-break boards · queen 3 below 14');
+  });
+});
+
+// Sheet CA03: retired hurt or conceded - the game goes to the opponent, no replacement.
+describe('a side retiring from a carrom game', () => {
+  const iim = carromRulesOf(presetByKey('iim_4boards_16')!);
+
+  it('gives the game in progress to the other side, boards played stay', () => {
+    const m = carromMatch([b('B', 5), b('A', 2)], iim, 'A', [{ afterBoards: 2, side: 'B' }]);
+    expect(m).toMatchObject({ decided: true, winner: 'A' });
+    expect(m.games[0]).toMatchObject({ retired: 'B', winner: 'A', score: [2, 5] });
+    expect(m.games[0].boards).toHaveLength(2);
+  });
+
+  it('can concede before a board is played', () => {
+    expect(carromMatch([], iim, 'A', [{ afterBoards: 0, side: 'A' }])).toMatchObject({ decided: true, winner: 'B' });
+  });
+
+  it('in a best of 3 costs only that game; the next game goes on', () => {
+    const m = carromMatch([b('A', 9, 'winner'), b('A', 9, 'winner'), b('A', 9, 'winner'), b('B', 3)], R, 'A', [{ afterBoards: 3, side: 'A' }]);
+    expect(m.gamesWon).toEqual([1, 1]);
+    expect(m.decided).toBe(false);
+    expect(m.games[1]).toMatchObject({ retired: 'A', winner: 'B' });
+    expect(m.games[2].boards).toHaveLength(1);
+  });
+
+  it('is kept when read back from storage, and junk is dropped', () => {
+    const s = readCarromState({ boards: [b('A', 2)], firstBreak: 'A', retirements: [{ afterBoards: 1, side: 'B' }, { afterBoards: 9, side: 'A' }, { side: 'X' }] })!;
+    expect(s.retirements).toEqual([{ afterBoards: 1, side: 'B' }]);
+    expect(carromMatchOf(s, iim)).toMatchObject({ decided: true, winner: 'A' });
+  });
+
+  it('counts the game as played and lost for the retiring side', () => {
+    const m = carromMatch([b('B', 5)], R, 'A', [{ afterBoards: 1, side: 'B' }]);
+    expect(carromLineStats(m, R, 'B')).toMatchObject({ carrom_games: 1, carrom_games_lost: 1 });
   });
 });

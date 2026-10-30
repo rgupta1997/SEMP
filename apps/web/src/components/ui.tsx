@@ -322,7 +322,7 @@ export function StatusBadge({ status, label, className }: { status?: string | nu
 // standings). The caller owns the data + interval; this just renders the timestamp
 // and a manual refresh button.
 export function RefreshBar({ updatedAt, isFetching, onRefresh, cooldownMs = 10000, className = '' }: { updatedAt?: number; isFetching?: boolean; onRefresh: () => void; cooldownMs?: number; className?: string }) {
-  const label = updatedAt ? new Date(updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
+  const label = updatedAt ? new Date(updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
   // After a manual refresh, lock the button for `cooldownMs` (tick down the remaining
   // seconds) so spectators can't hammer it - the table still auto-refreshes on its own.
   const [cooldown, setCooldown] = useState(0);

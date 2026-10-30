@@ -5,7 +5,7 @@ import {
 import { presetByKey } from './racquet-presets.js';
 import { teamPresetsFor } from './team-presets.js';
 import { scoringFormatSchema, type Side } from './scoring-rules.js';
-import { foldRally, initKernel, step, type RallyEvent, type RallyLog } from './rally-kernel.js';
+import { drawSettlement, foldRally, initKernel, step, timeoutRules, timeoutsAllowedNow, timeoutsLeft, type RallyEvent, type RallyLog } from './rally-kernel.js';
 
 const fmt = (k: string) => presetByKey(k)!;
 const points = (side: Side, n: number): RallyLog =>
@@ -235,7 +235,7 @@ describe('chess formats in the editor', () => {
 describe('describeKnobs', () => {
   it('says what the format actually does', () => {
     expect(describeKnobs(readKnobs(fmt('sprint_9_serve3'))))
-      .toBe('best of 3 to 9 · win by 2 · cap 11 · serve every 3');
+      .toBe('best of 3 to 9 · win by 2 · cap 11 · serve every 3 · 1 timeout a match (60s)');
     expect(describeKnobs(readKnobs(fmt('english9_bo5'))))
       .toContain('server scores only');
   });
@@ -269,8 +269,8 @@ describe('period-shaped formats (kho-kho, kabaddi...)', () => {
     // this whole knob split exists: a period-shaped match's clock is one
     // whole-match total, and typing that without seeing what it works out to
     // per period is how a 4-period match quietly gets a 1-minute period.
-    expect(describeKnobs(readKnobs(fmt('kho_4turns')))).toBe('4 turns · 36 min cap (9/period)');
-    expect(describeKnobs(readKnobs(fmt('kho_2x9')))).toBe('2 innings · 18 min cap (9/period)');
+    expect(describeKnobs(readKnobs(fmt('kho_4turns')))).toBe('4 turns · 36 min cap (9/period) · minimum chase');
+    expect(describeKnobs(readKnobs(fmt('kho_2x9')))).toBe('2 turns · 18 min cap (9/period) · minimum chase');
   });
 
   it('offers "Minutes per period" instead of "Minutes" for a period-shaped format, and round-trips through the total it actually stores', () => {
@@ -418,5 +418,191 @@ describe('the expedite system knob', () => {
     expect(off.plugins?.other).toBe(1);
     const selfScored = applyKnobs(base, { ...k, officiatingMode: 'selfScored' });
     expect(selfScored.plugins?.expedite).toBeUndefined();
+  });
+});
+
+// Timeouts: a setting for racquet formats, the sport's own rule until someone changes it.
+describe('timeout knobs', () => {
+  it('the Inter-IIM squash preset gives each player one 90-second timeout a match', () => {
+    const f = fmt('iim_pars11_bo3_cap21');
+    expect(timeoutRules(f)).toEqual({ perGame: null, perMatch: 1, seconds: 90 });
+    expect(timeoutsLeft(f, [{ t: 'timeout', side: 'A' }])).toEqual({ A: 0, B: 1 });
+    expect(describeKnobs(readKnobs(f))).toContain('1 timeout a match (90s)');
+  });
+
+  it('are offered for racquet sports only', () => {
+    const shown = (f: Parameters<typeof readKnobs>[0]) => knobsFor(readKnobs(f)).some((s) => s.key === 'timeoutsEnabled');
+    expect(shown(fmt('iim_pars11_bo3_cap21'))).toBe(true);
+    expect(shown(fmt('ittf_bo5_11'))).toBe(true);
+    expect(shown(teamPresetsFor('football')[0])).toBe(false);
+  });
+
+  it('saving untouched keeps the sport rule instead of writing it down', () => {
+    const tt = fmt('ittf_bo5_11');
+    expect(applyKnobs(tt, readKnobs(tt)).rulesSheet?.timeouts).toBeUndefined();
+    // Pickleball's allowance still follows the game target after a save.
+    const pb = fmt('usap_single_game_15');
+    expect(applyKnobs(pb, readKnobs(pb)).rulesSheet?.timeouts).toBeUndefined();
+  });
+
+  it('an organiser can change, count per game, or switch them off', () => {
+    const sq = fmt('iim_pars11_bo3_cap21');
+    const perGame = applyKnobs(sq, { ...readKnobs(sq), timeoutsCount: 2, timeoutsPer: 'game', timeoutSeconds: 60 });
+    expect(timeoutRules(perGame)).toEqual({ perGame: 2, perMatch: null, seconds: 60 });
+    const off = applyKnobs(sq, { ...readKnobs(sq), timeoutsEnabled: false });
+    expect(timeoutRules(off)).toBeNull();
+    expect(readKnobs(off).timeoutsEnabled).toBe(false);
+    // Turning table tennis's built-in timeout off is written down, so it sticks.
+    const tt = fmt('ittf_bo5_11');
+    expect(timeoutRules(applyKnobs(tt, { ...readKnobs(tt), timeoutsEnabled: false }))).toBeNull();
+  });
+});
+
+// Volleyball: 2 timeouts of 30 seconds a set (FIVB and Inter-IIM), counted on the team console.
+describe('volleyball timeouts', () => {
+  const vb = fmt('vb_bo3_25_all');
+  it('every volleyball format gets 2 a set by default, starting again each set', () => {
+    expect(timeoutRules(vb)).toEqual({ perGame: 2, perMatch: null, seconds: 30 });
+    const twoA: RallyLog = [{ t: 'timeout', side: 'A' }, { t: 'timeout', side: 'A' }];
+    expect(timeoutsLeft(vb, twoA)).toEqual({ A: 0, B: 2 });
+    const setWon: RallyLog = Array.from({ length: 25 }, () => ({ t: 'point', side: 'A' } as RallyEvent));
+    expect(timeoutsLeft(vb, [...twoA, ...setWon])).toEqual({ A: 2, B: 2 });
+  });
+
+  it('the editor offers them, says "a set", and can change them', () => {
+    const k = readKnobs(vb);
+    expect(knobsFor(k).some((s) => s.key === 'timeoutsEnabled')).toBe(true);
+    expect(describeKnobs(k)).toContain('2 timeouts a set (30s)');
+    expect(applyKnobs(vb, k).rulesSheet?.timeouts).toBeUndefined();
+    expect(timeoutRules(applyKnobs(vb, { ...k, timeoutsCount: 1, timeoutSeconds: 60 }))).toEqual({ perGame: 1, perMatch: null, seconds: 60 });
+    expect(timeoutRules(applyKnobs(vb, { ...k, timeoutsEnabled: false }))).toBeNull();
+  });
+});
+
+// Throwball 2 a set, kabaddi 2 a half (Inter-IIM); kabaddi's clock stops for one.
+describe('throwball and kabaddi timeouts', () => {
+  it('throwball: 2 a set, starting again each set', () => {
+    const tb = fmt('tb_bo3_25_all');
+    expect(timeoutRules(tb)).toEqual({ perGame: 2, perMatch: null, seconds: 30 });
+    const setWon: RallyLog = Array.from({ length: 25 }, () => ({ t: 'point', side: 'B' } as RallyEvent));
+    expect(timeoutsLeft(tb, [{ t: 'timeout', side: 'B' }])).toEqual({ A: 2, B: 1 });
+    expect(timeoutsLeft(tb, [{ t: 'timeout', side: 'B' }, ...setWon])).toEqual({ A: 2, B: 2 });
+    expect(describeKnobs(readKnobs(tb))).toContain('2 timeouts a set (30s)');
+  });
+
+  it('kabaddi: 2 a half, starting again at half-time, on every kabaddi format', () => {
+    for (const key of ['pkl_2x20', 'kabaddi_ko_2x20_et']) {
+      const kb = fmt(key);
+      expect(timeoutRules(kb)).toEqual({ perGame: 2, perMatch: null, seconds: 30 });
+      const used: RallyLog = [{ t: 'timeout', side: 'A' }, { t: 'timeout', side: 'A' }];
+      expect(timeoutsLeft(kb, used)).toEqual({ A: 0, B: 2 });
+      expect(timeoutsLeft(kb, [...used, { t: 'endPeriod' }])).toEqual({ A: 2, B: 2 });
+    }
+    const k = readKnobs(fmt('pkl_2x20'));
+    expect(knobsFor(k).some((s) => s.key === 'timeoutsEnabled')).toBe(true);
+    expect(describeKnobs(k)).toContain('2 timeouts a half (30s)');
+  });
+
+  it('other team sports have none and are not offered the setting', () => {
+    for (const key of ['football9_2x20', 'hockey5_4x8', 'futsal_2x10']) {
+      expect(timeoutRules(fmt(key))).toBeNull();
+      expect(knobsFor(readKnobs(fmt(key))).some((s) => s.key === 'timeoutsEnabled')).toBe(false);
+    }
+  });
+});
+
+// Frisbee: the Inter-IIM presets carry one 1-minute timeout a match; other formats can turn it on.
+describe('frisbee timeouts', () => {
+  it('the IIMK presets give each team one a match', () => {
+    for (const key of ['ultimate_2x20', 'ultimate_final_2x20']) {
+      const f = fmt(key);
+      expect(timeoutRules(f)).toEqual({ perGame: null, perMatch: 1, seconds: 60 });
+      // Half-time does not give it back.
+      expect(timeoutsLeft(f, [{ t: 'timeout', side: 'B' }, { t: 'endPeriod' }])).toEqual({ A: 1, B: 0 });
+      expect(describeKnobs(readKnobs(f))).toContain('1 timeout a match (60s)');
+    }
+  });
+
+  it('another frisbee format has none until the organiser turns them on', () => {
+    const other = fmt('ultimate_to_15');
+    expect(timeoutRules(other)).toBeNull();
+    const k = readKnobs(other);
+    expect(knobsFor(k).some((s) => s.key === 'timeoutsEnabled')).toBe(true);
+    const on = applyKnobs(other, { ...k, timeoutsEnabled: true, timeoutsCount: 2, timeoutsPer: 'match', timeoutSeconds: 75 });
+    expect(timeoutRules(on)).toEqual({ perGame: null, perMatch: 2, seconds: 75 });
+  });
+});
+
+// Inter-IIM basketball: 1 a quarter, 2 in the 4th, 1 per overtime. FIBA's own preset is untouched.
+describe('basketball timeouts', () => {
+  const basket = (side: 'A' | 'B'): RallyEvent => ({ t: 'point', side, pts: 2 });
+  const quarter: RallyLog = [basket('A'), basket('B'), { t: 'endPeriod' }];
+  const quarters = (n: number): RallyLog => Array.from({ length: n }, () => quarter).flat();
+
+  it('1 a quarter, 2 in the 4th, 1 in each overtime, on both Inter-IIM presets', () => {
+    for (const key of ['iim_4x10', 'basketball_4x8']) {
+      const f = fmt(key);
+      expect(timeoutsAllowedNow(f, [])).toBe(1);
+      expect(timeoutsLeft(f, [{ t: 'timeout', side: 'A' }])).toEqual({ A: 0, B: 1 });
+      // A new quarter gives it back.
+      expect(timeoutsLeft(f, [{ t: 'timeout', side: 'A' }, { t: 'endPeriod' }])).toEqual({ A: 1, B: 1 });
+      // The 4th quarter: 2 each.
+      expect(timeoutsAllowedNow(f, quarters(3))).toBe(2);
+      expect(timeoutsLeft(f, [...quarters(3), { t: 'timeout', side: 'B' }])).toEqual({ A: 2, B: 1 });
+      // Level after four: overtime, 1 each, and again in a second overtime.
+      expect(timeoutsAllowedNow(f, quarters(4))).toBe(1);
+      expect(timeoutsAllowedNow(f, quarters(5))).toBe(1);
+      expect(describeKnobs(readKnobs(f))).toContain('1 timeout a quarter (60s), 2 in the last');
+    }
+  });
+
+  it('FIBA 4 x 10 has no timeouts set; the editor can add per-quarter ones', () => {
+    const fiba = fmt('fiba_4x10');
+    expect(timeoutRules(fiba)).toBeNull();
+    const k = readKnobs(fiba);
+    const keys = knobsFor({ ...k, timeoutsEnabled: true, timeoutsPer: 'game' }).map((s) => s.key);
+    expect(keys).toEqual(expect.arrayContaining(['timeoutsLastPeriod', 'timeoutsExtraTime']));
+    const on = applyKnobs(fiba, { ...k, timeoutsEnabled: true, timeoutsPer: 'game', timeoutsCount: 1, timeoutSeconds: 60, timeoutsLastPeriod: 2, timeoutsExtraTime: 1 });
+    expect(timeoutRules(on)).toEqual({ perGame: 1, perMatch: null, seconds: 60, lastPeriod: 2 });
+    // A different overtime allowance is kept, and counted once the quarters are played.
+    const ot2 = applyKnobs(fiba, { ...k, timeoutsEnabled: true, timeoutsPer: 'game', timeoutsCount: 2, timeoutSeconds: 60, timeoutsLastPeriod: 3, timeoutsExtraTime: 1 });
+    expect(timeoutRules(ot2)).toEqual({ perGame: 2, perMatch: null, seconds: 60, lastPeriod: 3, extraTime: 1 });
+    expect(timeoutsAllowedNow(ot2, quarters(4))).toBe(1);
+    expect(describeKnobs(readKnobs(ot2))).toContain('2 timeouts a quarter (60s), 3 in the last, 1 per extra period');
+    // Saving the Inter-IIM preset untouched keeps its rule exactly.
+    const iim = fmt('iim_4x10');
+    expect(timeoutRules(applyKnobs(iim, readKnobs(iim)))).toEqual(timeoutRules(iim));
+  });
+});
+
+// How a called-off draw is scored: the official's choice on the end event.
+describe('drawSettlement', () => {
+  const f = fmt('futsal_2x10');
+  const end = (extra: Partial<Extract<RallyEvent, { t: 'end' }>>): RallyLog =>
+    [{ t: 'point', side: 'A' }, { t: 'end', outcome: 'draw', reason: 'weather', winner: null, ...extra } as RallyEvent];
+  it('shared points, no points, abandoned, and a plain draw', () => {
+    const at = (log: RallyLog) => drawSettlement(foldRally(f, log, 'A').state, log);
+    expect(at(end({ drawPoints: 'shared' }))).toEqual({ noResult: true, drawNoPoints: false });
+    expect(at(end({ drawPoints: 'none' }))).toEqual({ noResult: false, drawNoPoints: true });
+    expect(at([{ t: 'end', outcome: 'void', reason: 'abandoned', winner: null }])).toEqual({ noResult: true, drawNoPoints: false });
+    expect(at(end({}))).toEqual({ noResult: false, drawNoPoints: false });
+  });
+});
+
+// A walkover's score in the table: football counts it (FIFA), other sports do not unless set.
+describe('walkover score in the table', () => {
+  it('football presets count it; others do not', () => {
+    for (const key of ['football9_2x20', 'football9_ko_2x20', 'fifa_2x45']) expect(fmt(key).endStates.countWalkoverInDifference, key).toBe(true);
+    for (const key of ['futsal_2x10', 'hockey5_4x8', 'pkl_2x20']) expect(fmt(key).endStates.countWalkoverInDifference, key).toBe(false);
+  });
+
+  it('is a switch in the editor, kept on save and changeable', () => {
+    const fb = fmt('football9_2x20');
+    expect(readKnobs(fb).walkoverCountsInDifference).toBe(true);
+    expect(applyKnobs(fb, readKnobs(fb)).endStates.countWalkoverInDifference).toBe(true);
+    expect(applyKnobs(fb, { ...readKnobs(fb), walkoverCountsInDifference: false }).endStates.countWalkoverInDifference).toBe(false);
+    const hk = fmt('hockey5_4x8');
+    expect(knobsFor(readKnobs(hk)).some((s) => s.key === 'walkoverCountsInDifference')).toBe(true);
+    expect(applyKnobs(hk, { ...readKnobs(hk), walkoverCountsInDifference: true }).endStates.countWalkoverInDifference).toBe(true);
   });
 });

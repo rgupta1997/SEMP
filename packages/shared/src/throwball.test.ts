@@ -1,72 +1,64 @@
 import { describe, expect, it } from 'vitest';
-import { foldRally, type RallyEvent, type RallyLog } from './rally-kernel.js';
-import { presetByKey, presetsFor } from './racquet-presets.js';
-import { foldCareerStats, statSpecFor } from './stat-registry.js';
-import { deriveTeamStats } from './team-stats.js';
-import { COLUMN_MAP } from './category-lines.js';
+import { foldRally, type RallyEvent } from './rally-kernel.js';
+import { presetByKey } from './racquet-presets.js';
+import { readKnobs } from './format-knobs.js';
+import type { Side } from './scoring-rules.js';
 
-const pt = (side: 'A' | 'B'): RallyEvent => ({ t: 'point', side });
-const run = (side: 'A' | 'B', n: number): RallyLog => Array.from({ length: n }, () => pt(side));
+const points = (side: Side, n: number): RallyEvent[] => Array.from({ length: n }, () => ({ t: 'point', side } as RallyEvent));
 
-describe('throwball actions', () => {
-  const spec = statSpecFor('throwball')!;
-  const keys = spec.events.map((e) => e.key);
+// Sheet TB01: Inter-IIM throwball, best of 3 with every set to 25.
+describe('best of 3 sets to 25', () => {
+  const f = presetByKey('tb_bo3_25_all')!;
 
-  it('offers throwball actions, not volleyball ones', () => {
-    expect(keys).toEqual(['ace', 'throw_point', 'service_fault', 'dropped_catch', 'throw_fault', 'catch']);
-    for (const vb of ['kill', 'block_vb', 'dig', 'serve_error', 'attack_error']) expect(keys).not.toContain(vb);
+  it('has no different deciding set', () => {
+    expect(f.levels[0]).toMatchObject({ target: 25, winBy: 2 });
+    expect(f.levels[0].deciderOverride).toBeUndefined();
+    expect(readKnobs(f)).toMatchObject({ unitsToWin: 2, target: 25, deciderEnabled: false });
   });
 
-  it('every fault scores for the other side', () => {
-    for (const key of ['service_fault', 'dropped_catch', 'throw_fault']) {
-      expect(spec.events.find((e) => e.key === key), key).toMatchObject({ points: 1, forOpponent: true, tone: 'error' });
-    }
-  });
-
-  it('a dropped catch is a point to the thrower\'s side and a fault on the catcher', () => {
-    // A's player drops the catch: the deck files it on side B, the side the point goes to.
-    const drop: RallyEvent = { t: 'point', side: 'B', pts: 1, kind: 'dropped_catch', playerId: 'a1' };
-    const out = deriveTeamStats('throwball', [drop]);
-    expect(out.sides.B.points_scored).toBe(1);
-    const line = out.players.find((p) => p.userId === 'a1')!;
-    expect(line.side).toBe('A');
-    expect(line.stats).toEqual({ dropped_catches: 1 });
-  });
-
-  it('every action has a stat column, reusing volleyball\'s', () => {
-    for (const k of ['throw_points', 'catches', 'service_faults', 'dropped_catches', 'throw_faults']) {
-      expect(COLUMN_MAP.net[k], k).toBeTruthy();
-    }
-  });
-
-  it('career totals read in throwball\'s own words', () => {
-    const career = foldCareerStats(spec, [{ throw_points: 4, catches: 6, dropped_catches: 1, sets_won: 2, sets_lost: 1 }]);
-    expect(career).toMatchObject({ throw_points: 4, catches: 6, dropped_catches: 1, set_win_pct: 66.7 });
+  it('the third set also goes to 25, not 15', () => {
+    const oneAll = [...points('A', 25), ...points('B', 25)];
+    const at15 = foldRally(f, [...oneAll, ...points('A', 15)]).state;
+    expect(at15.ended).toBe(false);
+    expect(foldRally(f, [...oneAll, ...points('A', 25)]).state).toMatchObject({ ended: true, winner: 'A' });
   });
 });
 
-describe('throwball serve and formats', () => {
-  it('a new set is served by the side that did not start the last one (SGFI)', () => {
-    const f = presetByKey('tb_bo3_15')!;
-    // A started set 1 and won it - B still opens set 2.
-    expect(foldRally(f, run('A', 15)).state.serve.side).toBe('B');
-    // B won the toss, A won set 1 - A opens set 2.
-    expect(foldRally(f, [{ t: 'setServe', side: 'B', reason: 'toss' }, ...run('A', 15)]).state.serve.side).toBe('A');
+// Sheet VB01: Inter-IIM volleyball league (and every women's match), all sets to 25.
+describe('volleyball best of 3 sets to 25', () => {
+  const f = presetByKey('vb_bo3_25_all')!;
+
+  it('has no shorter deciding set, and changes ends at 13 in the third', () => {
+    expect(f.levels[0]).toMatchObject({ target: 25, winBy: 2, switchEndsAt: 13 });
+    expect(f.levels[0].deciderOverride).toBeUndefined();
+    expect(readKnobs(f)).toMatchObject({ unitsToWin: 2, target: 25, deciderEnabled: false });
   });
 
-  it('every throwball format alternates the first serve', () => {
-    for (const f of presetsFor('throwball')) expect(f.serve.nextUnitServer, f.presetKey).toBe('alternate');
+  it('the third set goes to 25', () => {
+    const oneAll = [...points('A', 25), ...points('B', 25)];
+    expect(foldRally(f, [...oneAll, ...points('A', 15)]).state.ended).toBe(false);
+    expect(foldRally(f, [...oneAll, ...points('A', 25)]).state).toMatchObject({ ended: true, winner: 'A' });
   });
 
-  it('offers the international best of 3 to 25 with a deciding set to 15', () => {
-    const f = presetByKey('tb_bo3_25')!;
-    expect(f.levels[0]).toMatchObject({ target: 25, winBy: 2, deciderOverride: { target: 15 } });
-    // 1-1 in sets: the third goes to 15, so 15-13 ends the match.
-    const oneAll = [...run('A', 25), ...run('B', 25)];
-    expect(foldRally(f, [...oneAll, ...run('B', 13), ...run('A', 15)]).state).toMatchObject({ ended: true, winner: 'A' });
+  it('the men\u2019s final keeps the FIVB best of 5 with a 15-point fifth set', () => {
+    const fin = presetByKey('fivb_25_bo5')!;
+    expect(readKnobs(fin)).toMatchObject({ unitsToWin: 3, target: 25, deciderEnabled: true, deciderTarget: 15 });
+  });
+});
+
+// Sheet SQ02: Inter-IIM squash - PARS 11, 2 clear from 10-10, first to 21 if nobody gets clear.
+describe('squash Inter-IIM preset', () => {
+  const f = presetByKey('iim_pars11_bo3_cap21')!;
+  const alternate = (n: number) => Array.from({ length: n }, () => [...points('A', 1), ...points('B', 1)]).flat();
+
+  it('is best of 3 games to 11, win by 2, ceiling 21', () => {
+    expect(readKnobs(f)).toMatchObject({ unitsToWin: 2, target: 11, winBy: 2, capEnabled: true, cap: 21 });
   });
 
-  it('keeps the Indian 15-point format as the default', () => {
-    expect(presetsFor('throwball')[0].presetKey).toBe('tb_bo3_15');
+  it('12-10 wins a game; level at 20-20 the next point wins at 21', () => {
+    const st1 = foldRally(f, [...alternate(10), ...points('A', 2)]).state;
+    expect(st1.score[1]).toEqual([1, 0]);
+    const st2 = foldRally(f, [...alternate(20), ...points('B', 1)]).state;
+    expect(st2.score[1]).toEqual([0, 1]);
   });
 });

@@ -17,6 +17,7 @@ import { resolveMatchAwards, type MatchAwardInput } from '../awards/match-awards
 import { generateFixtures, type TeamRef } from './domain/generators/index.js';
 import { generateAllStages } from './domain/stage-orchestrator.js';
 import { resolveStageAdvancement } from './domain/stage-resolver.js';
+import { guardEventSignOff, isEventWrite } from './domain/event-signoff.js';
 import { clashesByFixture, findClashes } from './domain/clashes.js';
 import { recomputeStandingsForFixtureAtomic, resolveRuleForDraw, resolveSchemeForDraw } from '../standings/standings.service.js';
 import { notify } from '@semp/notifications/server/notify.js';
@@ -100,7 +101,7 @@ async function remindCustomPointsIfNeeded(prisma: Prisma, fixtureId: string, sen
     const cp = (fx.live_state as any)?.custom_points;
     if (cp && (typeof cp.home === 'number' || typeof cp.away === 'number')) return; // points already entered
     const formatId = td?.format_id ?? td?.tournament_sports?.format_id ?? null;
-    const scheme = await resolveSchemeForDraw(prisma, championshipId, td?.discipline_id ?? null, formatId);
+    const scheme = await resolveSchemeForDraw(prisma, championshipId, td?.discipline_id ?? null, formatId, td?.tournament_sports?.sports?.name);
     if (scheme !== 'custom') return;
     const organiserRole = await prisma.roles.findFirst({ where: roleWhereByCode(ROLE_CODES.organiser), select: { id: true } });
     if (!organiserRole) return;
@@ -389,7 +390,8 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         // format_config.scoring every time a staged draw was generated.
         prisma.tournament_disciplines.update({
           where: { id: td.id },
-          data: { format_config: { ...(td.format_config as object), ...req.body.config } },
+          // A new draw has new ties: hand-picked orders from the old one no longer apply.
+          data: { format_config: { ...(td.format_config as object), ...req.body.config, tieResolutions: [] } },
         }),
       ]);
 
@@ -450,7 +452,12 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     // admin alike. Changing it means unlocking it first, with a reason, on the record.
     await assertNotLocked(prisma, req.params.id);
     await assertChampionshipStarted(prisma, req.params.id);
-    const b = req.body ?? {};
+    let b = req.body ?? {};
+    // A late draft from an event console can't undo a ranking sign-off (event-signoff.ts).
+    if (isEventWrite(b)) {
+      const current = await prisma.fixtures.findUnique({ where: { id: req.params.id }, select: { status: true, live_state: true } });
+      b = guardEventSignOff(current ? { status: String(current.status), live_state: current.live_state } : null, b);
+    }
     await assertScoreShape(prisma, b, { fixtureId: req.params.id });
     // Only touch fields that were actually sent, so a status-only change (e.g.
     // walkover/postpone/cancel) doesn't clobber the score or live snapshot.
@@ -464,7 +471,10 @@ export function makeFixturesRouter(prisma: Prisma): Router {
       // Same rule as /result: this is what the 30-minute auto-lock sweep reads, so
       // it is stamped fresh on every 'completed' confirmation and cleared the
       // moment the fixture is no longer finished (e.g. reopened back to 'live').
-      data.completed_at = b.status === 'completed' ? new Date() : null;
+      data.completed_at = b.status === 'completed' || b.status === 'walkover' ? new Date() : null;
+    }
+    if (b.status === 'walkover' && !b.winner_team_id) {
+      throw new BusinessRuleError('A walkover needs a winner - pick the side that was awarded the match.');
     }
     // Scoring a match (going live or completing) requires both teams to be known - a
     // TBD bracket slot can't be played. Fetch once and reuse for the winner check.
@@ -544,6 +554,12 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         persisted = false; // live_* columns not migrated yet - headline still saved
       }
     }
+    // A walkover keeps whether its format counts the scoreline in the table (read by standings).
+    if (b.status === 'walkover' && typeof b.walkover_counts === 'boolean') {
+      await prisma.$executeRaw`
+        update fixtures set live_state = jsonb_set(coalesce(live_state, '{}'::jsonb), '{walkoverCounts}', ${JSON.stringify(b.walkover_counts)}::jsonb, true)
+        where id = ${req.params.id}::uuid`;
+    }
     // Recompute standings AFTER both writes, so a freshly-persisted eventStandings (event
     // sign-off) is reflected - recomputing before the live_state write would read the old
     // contribution and leave the materialized table stale.
@@ -586,12 +602,14 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     const tdx = fixture.tournament_disciplines;
     const champId = tdx?.tournament_sports?.tournaments?.championships?.id;
     const formatId = tdx?.format_id ?? tdx?.tournament_sports?.format_id ?? null;
-    const rule = champId ? await resolveRuleForDraw(prisma, champId, tdx?.discipline_id ?? null, formatId) : null;
+    const rule = champId ? await resolveRuleForDraw(prisma, champId, tdx?.discipline_id ?? null, formatId, undefined, tdx?.tournament_sports?.sports?.name) : null;
     // `ranking_points` / `ranking_participation` let the ranking console award the
     // organiser-configured placement points (1st/2nd/3rd/…) + a participation floor for
     // every ranked org, instead of the template default.
     const ranking_points = rule?.scheme === 'ranking' ? rule.places : null;
     const ranking_participation = rule?.scheme === 'ranking' ? rule.participation : 0;
+    // Several competitors per institute: only its best one placed, when the rule says so.
+    const ranking_best_only = rule?.scheme === 'ranking' ? !!rule.bestPerSide : false;
     // Every scoring format this fixture could resolve to, so the console can walk
     // the ladder (fixture -> round -> draw -> sport default) without a second round
     // trip per rung. WITHOUT THIS the console received no format rows at all, so
@@ -637,7 +655,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     }
 
     res.json({
-      ...fixture, point_scheme: rule?.scheme ?? null, ranking_points, ranking_participation,
+      ...fixture, point_scheme: rule?.scheme ?? null, ranking_points, ranking_participation, ranking_best_only,
       scoring_formats, event_entrants,
     });
   }));
@@ -750,8 +768,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     const home = req.body.home_score ?? null;
     const away = req.body.away_score ?? null;
 
-    let winner = req.body.winner_team_id ?? null;
-    if (winner === null && home !== null && away !== null) {
+    const draw = req.body.draw === true;
+    let winner = draw ? null : req.body.winner_team_id ?? null;
+    if (!draw && winner === null && home !== null && away !== null) {
       if (home > away) winner = fixture.home_team_id;
       else if (away > home) winner = fixture.away_team_id;
       else winner = null; // draw
@@ -768,10 +787,14 @@ export function makeFixturesRouter(prisma: Prisma): Router {
         winner_team_id: winner,
         status: req.body.status ?? 'completed',
         notes: req.body.notes ?? fixture.notes,
+        // A draw at unequal (or no) scores is a called-off match: flag it so the points are shared.
+        ...(draw || winner != null
+          ? { live_state: { ...((fixture.live_state as object | null) ?? {}), noResult: draw && (home == null || away == null || home !== away) } }
+          : {}),
         // Restarts the 30-minute auto-lock grace period on every confirmation of
         // 'completed' (a correction shouldn't let a stale timestamp fire mid-edit),
         // and clears it the moment the result is no longer finished.
-        completed_at: (req.body.status ?? 'completed') === 'completed' ? new Date() : null,
+        completed_at: ['completed', 'walkover'].includes(req.body.status ?? 'completed') ? new Date() : null,
       },
     });
     await refreshStandings(prisma, req.params.id);
@@ -1038,6 +1061,38 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     next();
   });
 
+  // A walkover without a winner scores nobody and advances nobody, so the editor
+  // can't save one. The winner may come in the body or already be on the fixture.
+  const walkoverWinner: RequestHandler = asyncHandler(async (req, _res, next) => {
+    if (req.body?.status !== 'walkover') return next();
+    const existing = req.params.id
+      ? await prisma.fixtures.findUnique({ where: { id: req.params.id }, select: { home_team_id: true, away_team_id: true, winner_team_id: true } })
+      : null;
+    const home = 'home_team_id' in req.body ? req.body.home_team_id : existing?.home_team_id;
+    const away = 'away_team_id' in req.body ? req.body.away_team_id : existing?.away_team_id;
+    const winner = 'winner_team_id' in req.body ? req.body.winner_team_id : existing?.winner_team_id;
+    if (!winner) throw new BusinessRuleError('A walkover needs a winner - pick the side that was awarded the match.');
+    if (winner !== home && winner !== away) throw new BusinessRuleError('Winner must be one of the two teams in this match');
+    next();
+  });
+
+  // A result set from the editor counts like one from the console: standings,
+  // bracket advancement and the auto-lock clock all follow it.
+  const RESULT_FIELDS = ['status', 'winner_team_id', 'home_score', 'away_score'] as const;
+  const applyEditorResult = async (id: string, before: any, after: any) => {
+    if (!before || RESULT_FIELDS.every((k) => before[k] === after[k])) return;
+    // Same auto-lock clock as /result and /live, restarted only when the status moves.
+    if (before.status !== after.status) {
+      const done = after.status === 'completed' || after.status === 'walkover';
+      await prisma.fixtures.update({ where: { id }, data: { completed_at: done ? new Date() : null } });
+    }
+    await refreshStandings(prisma, id);
+    if ((after.status === 'completed' || after.status === 'walkover') && after.winner_team_id) {
+      await advanceWinner(prisma, id);
+      await resolveStageAdvancement(prisma, after.tournament_discipline_id);
+    }
+  };
+
   // Manual edits through the generic editor (schedule/venue/opponent/cancel) - the
   // one PATCH path that isn't a bespoke route above, so it's the only place these
   // four can actually change. Only fires on a genuine change, never on an
@@ -1079,9 +1134,12 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     updateSchema: updateFixtureSchema,
     listFilters: ['tournament_discipline_id'],
     orderBy: [{ pool_number: 'asc' }, { bracket_position: 'asc' }, { created_at: 'asc' }],
-    createGuards: [crudGuard, scoreShape],
-    writeGuards: [crudGuard, notLocked, scoreShape],
-    afterUpdate: notifyFixtureFieldChanges,
+    createGuards: [crudGuard, scoreShape, walkoverWinner],
+    writeGuards: [crudGuard, notLocked, scoreShape, walkoverWinner],
+    afterUpdate: async (id, before, after) => {
+      await notifyFixtureFieldChanges(id, before, after);
+      await applyEditorResult(id, before, after);
+    },
     // Clearing the per-match rules means SQL NULL, and Prisma will not take a plain
     // `null` for a nullable Json column - it wants DbNull, which the shared schema
     // cannot name. Translate it on the way past.

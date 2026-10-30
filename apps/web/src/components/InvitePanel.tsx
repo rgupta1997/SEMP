@@ -213,7 +213,7 @@ function CampusInvites({ eventId, path, readOnly }: { eventId: string; path: str
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="max-w-prose text-sm text-slate-500 dark:text-slate-400">
           Choose which of your own campuses and batches take part. They are in straight
-          away — there is nobody outside the organisation to accept. Each one's
+          away - there is nobody outside the organisation to accept. Each one's
           administrator then builds its squads and enters them; you do not enter rosters.
         </p>
         {units.length > invited.length && (
@@ -225,7 +225,7 @@ function CampusInvites({ eventId, path, readOnly }: { eventId: string; path: str
 
       {units.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400 dark:border-slate-800 dark:text-slate-500">
-          Nothing to add yet. Create a campus — and set it Active — on the organisation's
+          Nothing to add yet. Create a campus - and set it Active - on the organisation's
           Campuses &amp; Units screen.
         </div>
       ) : (

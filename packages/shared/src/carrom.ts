@@ -40,11 +40,19 @@ export interface CarromBoard {
   fouls?: { A: number; B: number };
 }
 
+/**
+ * A side retiring (hurt) or conceding: the game in progress goes to the other side.
+ * `afterBoards` is how many boards had been recorded in the whole match at the time.
+ */
+export interface CarromRetirement { afterBoards: number; side: Side }
+
 /** A carrom match as recorded - stored in live_state.carrom, or on a tie rubber. */
 export interface CarromBoardsState {
   boards: CarromBoard[];
   /** Who broke (and so played white on) the first board - the toss. */
   firstBreak: Side;
+  /** Games given up mid-way, in the order they happened. */
+  retirements?: CarromRetirement[];
 }
 
 /** A stored carrom state, tolerating anything malformed; null when there is none. */
@@ -55,7 +63,12 @@ export function readCarromState(raw: unknown): CarromBoardsState | null {
   const boards = r.boards.filter((b): b is CarromBoard =>
     !!b && typeof b === 'object' && ((b as CarromBoard).winner === 'A' || (b as CarromBoard).winner === 'B')
     && typeof (b as CarromBoard).coinsLeft === 'number');
-  return { boards, firstBreak: r.firstBreak === 'B' ? 'B' : 'A' };
+  const raw2 = (raw as { retirements?: unknown }).retirements;
+  const retirements = (Array.isArray(raw2) ? raw2 : []).filter((x): x is CarromRetirement =>
+    !!x && typeof x === 'object' && ((x as CarromRetirement).side === 'A' || (x as CarromRetirement).side === 'B')
+    && Number.isInteger((x as CarromRetirement).afterBoards) && (x as CarromRetirement).afterBoards >= 0
+    && (x as CarromRetirement).afterBoards <= boards.length);
+  return { boards, firstBreak: r.firstBreak === 'B' ? 'B' : 'A', ...(retirements.length ? { retirements } : {}) };
 }
 
 export interface CarromRules {
@@ -70,10 +83,15 @@ export interface CarromRules {
   queenCutoff: number | null;
   /** ICF: a board cannot end with the queen uncovered, so 'none' is not offered. */
   queenMustBeCovered: boolean;
+  /** Level on points at the board limit: more boards won takes the game (Inter-IIM). */
+  boardsWonDecides: boolean;
+  /** Tie-break boards played and totalled on their own. 1 = ICF, the next board decides. */
+  tieBreakBoards: number;
 }
 
 export const ICF_CARROM_RULES: CarromRules = {
   gameTarget: 25, gamesToWin: 2, maxBoards: 8, queenPoints: 3, queenCutoff: 22, queenMustBeCovered: true,
+  boardsWonDecides: false, tieBreakBoards: 1,
 };
 
 /** The queen choices a format offers. */
@@ -93,8 +111,13 @@ export function carromRulesOf(format: { levels: Array<{ target: number }>; rules
     queenPoints: num(sheet.queenPoints) ?? 3,
     queenCutoff: num(sheet.queenCutoff),
     queenMustBeCovered: sheet.queenMustBeCovered === true,
+    boardsWonDecides: sheet.boardsWonDecides === true,
+    tieBreakBoards: Math.max(1, Math.round(num(sheet.tieBreakBoards) ?? 1)),
   };
 }
+
+/** Uses the boards-won check or a multi-board tie-break, instead of ICF's one deciding board. */
+const extendedTieBreak = (rules: CarromRules): boolean => rules.boardsWonDecides || rules.tieBreakBoards > 1;
 
 const other = (s: Side): Side => (s === 'A' ? 'B' : 'A');
 
@@ -115,6 +138,10 @@ export interface CarromGame {
   winner: Side | null;
   /** Level after the board limit: the next board is a tie-breaker. */
   tieBreak: boolean;
+  /** Points on the tie-break boards alone, when they are totalled (tieBreakBoards > 1 or boardsWonDecides). */
+  tieBreakScore?: [number, number];
+  /** The side that retired or conceded, when the game ended that way (the other side won it). */
+  retired?: Side;
 }
 
 export interface CarromMatch {
@@ -125,7 +152,7 @@ export interface CarromMatch {
   /** Who breaks the next board to be played. */
   nextBreaker: Side;
   /** Where the next board goes: the game in progress (or the next one) and its board number. */
-  current: { game: number; board: number; tieBreak: boolean };
+  current: { game: number; board: number; tieBreak: boolean; tieBreakBoard?: number; tieBreakScore?: [number, number] };
 }
 
 /**
@@ -135,14 +162,32 @@ export interface CarromMatch {
  * open the last one. A game's score is capped at its target - 25 is the most a game
  * can be won by - and boards recorded after the match is decided are ignored.
  */
-export function carromMatch(boards: CarromBoard[], rules: CarromRules, firstBreak: Side = 'A'): CarromMatch {
+export function carromMatch(boards: CarromBoard[], rules: CarromRules, firstBreak: Side = 'A', retirements: CarromRetirement[] = []): CarromMatch {
   const games: CarromGame[] = [];
   const won: [number, number] = [0, 0];
   let game: CarromGame = { boards: [], score: [0, 0], winner: null, tieBreak: false };
   let opener = firstBreak;
   let decided = false;
 
-  for (const b of boards) {
+  const closeGame = () => {
+    won[game.winner === 'A' ? 0 : 1] += 1;
+    games.push(game);
+    decided = won[0] >= rules.gamesToWin || won[1] >= rules.gamesToWin;
+    opener = other(opener);
+    game = { boards: [], score: [0, 0], winner: null, tieBreak: false };
+  };
+  // A retirement recorded at this point ends the game in progress for the other side.
+  const retireAt = (count: number) => {
+    for (const r of retirements) {
+      if (decided || r.afterBoards !== count) continue;
+      game.winner = other(r.side);
+      game.retired = r.side;
+      closeGame();
+    }
+  };
+
+  for (const [i, b] of boards.entries()) {
+    retireAt(i);
     if (decided) break;
     const breaker = game.boards.length % 2 === 0 ? opener : other(opener);
     const wi = b.winner === 'A' ? 0 : 1;
@@ -153,24 +198,29 @@ export function carromMatch(boards: CarromBoard[], rules: CarromRules, firstBrea
     const played = game.boards.length;
     const reached = game.score[0] >= rules.gameTarget || game.score[1] >= rules.gameTarget;
     const limit = !boardsOnly(rules) && rules.maxBoards != null && played >= rules.maxBoards;
-    if (reached || boardsOnly(rules)) {
+    if (game.tieBreak && game.tieBreakScore) {
+      // Totalled tie-break boards: the higher total once they are all played; still level, the next board that splits them.
+      game.tieBreakScore[wi] += points;
+      const [x, y] = game.tieBreakScore;
+      if (played - rules.maxBoards! >= rules.tieBreakBoards && x !== y) game.winner = x > y ? 'A' : 'B';
+    } else if (reached || boardsOnly(rules)) {
       game.winner = game.score[0] >= rules.gameTarget ? 'A' : game.score[1] >= rules.gameTarget ? 'B' : b.winner;
     } else if (limit) {
       // Over the board limit: the higher score wins; level means the board just played
       // was a tie-breaker (it decides) or the next one will be.
       if (game.score[0] !== game.score[1]) game.winner = game.score[0] > game.score[1] ? 'A' : 'B';
-      else if (game.tieBreak) game.winner = b.winner;
+      else if (extendedTieBreak(rules)) {
+        const wonA = game.boards.filter((x) => x.winner === 'A').length;
+        const wonB = game.boards.length - wonA;
+        if (rules.boardsWonDecides && wonA !== wonB) game.winner = wonA > wonB ? 'A' : 'B';
+        else { game.tieBreak = true; game.tieBreakScore = [0, 0]; }
+      } else if (game.tieBreak) game.winner = b.winner;
       else game.tieBreak = true;
       if (!game.winner && played > rules.maxBoards!) game.winner = b.winner;
     }
-    if (game.winner) {
-      won[game.winner === 'A' ? 0 : 1] += 1;
-      games.push(game);
-      decided = won[0] >= rules.gamesToWin || won[1] >= rules.gamesToWin;
-      opener = other(opener);
-      game = { boards: [], score: [0, 0], winner: null, tieBreak: false };
-    }
+    if (game.winner) closeGame();
   }
+  retireAt(boards.length);
   const inProgress = !decided && game.boards.length > 0;
   if (inProgress) games.push(game);
   const nextBreaker = game.boards.length % 2 === 0 ? opener : other(opener);
@@ -180,8 +230,27 @@ export function carromMatch(boards: CarromBoard[], rules: CarromRules, firstBrea
     winner: decided ? (won[0] > won[1] ? 'A' : 'B') : null,
     decided,
     nextBreaker,
-    current: { game: games.length + (inProgress ? 0 : 1), board: game.boards.length + 1, tieBreak: game.tieBreak },
+    current: {
+      game: games.length + (inProgress ? 0 : 1), board: game.boards.length + 1, tieBreak: game.tieBreak,
+      ...(game.tieBreakScore
+        ? { tieBreakBoard: game.boards.length - (rules.maxBoards ?? 0) + 1, tieBreakScore: [...game.tieBreakScore] as [number, number] }
+        : {}),
+    },
   };
+}
+
+/** A recorded match, retirements included. */
+export const carromMatchOf = (state: CarromBoardsState, rules: CarromRules): CarromMatch =>
+  carromMatch(state.boards, rules, state.firstBreak, state.retirements);
+
+/** What the console says while a game is in its tie-break. */
+export function carromTieBreakNote(rules: CarromRules, current: CarromMatch['current']): string {
+  if (!current.tieBreakScore) return `Level after ${rules.maxBoards} boards - the next board decides the game`;
+  const level = rules.boardsWonDecides ? 'on points and boards won' : 'on points';
+  const n = current.tieBreakBoard ?? 1;
+  const [a, b] = current.tieBreakScore;
+  const which = n <= rules.tieBreakBoards ? `tie-break board ${n} of ${rules.tieBreakBoards}` : 'tie-break totals level, the next board decides';
+  return `Level ${level} after ${rules.maxBoards} boards - ${which} (tie-break ${a}-${b})`;
 }
 
 /**

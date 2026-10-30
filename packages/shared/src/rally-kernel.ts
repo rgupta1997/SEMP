@@ -57,6 +57,8 @@ export type RallyEvent =
     kind?: string; label?: string;
     /** A magnitude the metric sums, where it differs from the points scored. */
     value?: number;
+    /** Circumstances a metric can key on - kabaddi's 'dod' (a do-or-die raid). */
+    flags?: string[];
   }
   /** Replayed rally: no score, no serve movement. */
   | { t: 'let'; at?: string }
@@ -113,7 +115,9 @@ export type RallyEvent =
    */
   | { t: 'endPeriod'; reason?: string; by?: string; at?: string; clockMs?: number }
   /** Terminal, out-of-band: retirement, walkover, override. */
-  | { t: 'end'; outcome: Outcome; reason: EndReason; winner?: Side | null; by?: string; at?: string }
+  | { t: 'end'; outcome: Outcome; reason: EndReason; winner?: Side | null; note?: string; by?: string; at?: string;
+      /** A draw called off unfinished (rain): share the draw points, or give neither side any. */
+      drawPoints?: 'shared' | 'none' }
   /**
    * THE MATCH CLOCK, as events rather than as a field.
    *
@@ -133,6 +137,25 @@ export type RallyEvent =
    * a single `end` carrying reason 'penalties'.
    */
   | { t: 'penaltyKick'; side: Side; scored: boolean; playerId?: string; playerName?: string; at?: string; by?: string }
+  // The shoot-out toss: this side kicks first. Absent = home first.
+  | { t: 'shootoutFirst'; side: Side; at?: string; by?: string }
+  /**
+   * KHO KHO, read by kho-kho.ts, never scored. `chaseFirst`: the toss, who chases turn 1.
+   * `followOn`: the side `side` leads after the first innings and sends the other in to
+   * chase again. `minChase`: one side's time to its first out in the minimum chase
+   * (`ms` null = no out inside the limit).
+   */
+  | { t: 'chaseFirst'; side: Side; at?: string; by?: string }
+  | { t: 'followOn'; side: Side; at?: string; by?: string }
+  | { t: 'minChase'; side: Side; ms: number | null; at?: string; by?: string }
+  /**
+   * KABADDI, read by kabaddi.ts, never scored. `raidFirst`: the toss, who raids first.
+   * `raidTurn`: an official's correction - `side` raids next.
+   */
+  | { t: 'raidFirst'; side: Side; at?: string; by?: string }
+  | { t: 'raidTurn'; side: Side; at?: string; by?: string }
+  // Kabaddi: the golden raid toss - this side raids first. Marks where the golden raids begin.
+  | { t: 'goldenRaid'; side: Side; at?: string; by?: string }
   | { t: 'clockStart'; at?: string; by?: string }
   | { t: 'clockPause'; at?: string; by?: string }
   /** An official's correction. `toMs` is the elapsed time the clock now reads. */
@@ -468,16 +491,31 @@ export function misconductTerms(sport?: string | null): { warning: string; foul:
 
 /** How many timeouts each side may call, and how long one lasts. */
 export interface TimeoutRules {
-  /** Per side per game (pickleball); unused ones do not carry over. */
+  /** Per side per game, set or half (pickleball, volleyball, kabaddi); unused ones do not carry over. */
   perGame: number | null;
   /** Per side per match (table tennis). */
   perMatch: number | null;
   seconds: number;
+  /** Period-shaped, per period only: a different allowance in the last regulation period (Inter-IIM basketball Q4: 2). */
+  lastPeriod?: number | null;
+  /** Period-shaped, per period only: the allowance in each extra-time period (basketball overtime: 1). */
+  extraTime?: number | null;
+}
+
+/** The allowance for the unit at `index` (0-based): the last regulation period and extra time may differ. */
+function timeoutAllowance(format: ScoringFormat, rules: TimeoutRules, index: number): number | null {
+  if (rules.perGame == null) return rules.perMatch;
+  const top = format.levels[format.levels.length - 1];
+  if (top.decide !== 'aggregate') return rules.perGame;
+  if (index >= top.target) return rules.extraTime ?? rules.perGame;
+  if (index === top.target - 1) return rules.lastPeriod ?? rules.perGame;
+  return rules.perGame;
 }
 
 /**
  * The format's timeout allowance: `rulesSheet.timeouts` when set (false turns them off),
- * else the sport's rule - pickleball 2 a game (3 in games to 21), table tennis 1 a match.
+ * else the sport's rule - pickleball 2 a game (3 in games to 21), table tennis 1 a match,
+ * volleyball and throwball 2 of 30 seconds a set, kabaddi 2 of 30 seconds a half (Inter-IIM).
  */
 export function timeoutRules(format: ScoringFormat): TimeoutRules | null {
   const own = (format.rulesSheet as { timeouts?: Partial<TimeoutRules> | false } | undefined)?.timeouts;
@@ -487,6 +525,8 @@ export function timeoutRules(format: ScoringFormat): TimeoutRules | null {
     ? { perGame: format.levels[0].target >= 21 ? 3 : 2, perMatch: null, seconds: 60 }
     : sport === 'table tennis'
     ? { perGame: null, perMatch: 1, seconds: 60 }
+    : sport === 'volleyball' || sport === 'throwball' || sport === 'kabaddi'
+    ? { perGame: 2, perMatch: null, seconds: 30 }
     : null;
   if (!own) return base;
   return { perGame: null, perMatch: null, seconds: 60, ...base, ...own };
@@ -495,8 +535,7 @@ export function timeoutRules(format: ScoringFormat): TimeoutRules | null {
 /** Timeouts each side has left now: per game, or per match. Never below 0. */
 export function timeoutsLeft(format: ScoringFormat, log: RallyLog, firstServer: Side = 'A'): Record<Side, number> | null {
   const rules = timeoutRules(format);
-  const allowed = rules?.perGame ?? rules?.perMatch;
-  if (!rules || allowed == null) return null;
+  if (!rules || (rules.perGame ?? rules.perMatch) == null) return null;
   const used: Record<Side, number> = { A: 0, B: 0 };
   let state = initKernel(format, firstServer);
   for (const ev of log) {
@@ -506,7 +545,16 @@ export function timeoutsLeft(format: ScoringFormat, log: RallyLog, firstServer: 
     // A new game starts a new allowance.
     if (rules.perGame != null && state.finished.filter((u) => u.level === 0).length > games) used.A = used.B = 0;
   }
+  const allowed = timeoutAllowance(format, rules, state.finished.filter((u) => u.level === 0).length) ?? 0;
   return { A: Math.max(0, allowed - used.A), B: Math.max(0, allowed - used.B) };
+}
+
+/** How many timeouts each side gets in the game, set or period being played now. */
+export function timeoutsAllowedNow(format: ScoringFormat, log: RallyLog, firstServer: Side = 'A'): number | null {
+  const rules = timeoutRules(format);
+  if (!rules) return null;
+  const state = foldRally(format, log, firstServer).state;
+  return timeoutAllowance(format, rules, state.finished.filter((u) => u.level === 0).length);
 }
 
 /** True when the expedite system may still be introduced in the game under way. */
@@ -931,6 +979,10 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
         deciderReceiverSwitch(spec, lv, state, before, base.inDecider);
         base.unitsWon = cascade(format, state, state.pointLevel);
         base.unitsWon = [...base.unitsWon, ...afterBuzzer(format, state, base.unitsWon.length > 0)];
+        if (!state.ended) aggregateFinish(format, state, isRaidEnd(ev.kind));
+      } else if (!state.ended && isRaidEnd(ev.kind)) {
+        // A golden raid can end on a tap that scores nothing (an empty raid after a bonus).
+        aggregateFinish(format, state, true);
       }
       break;
     }
@@ -1077,6 +1129,39 @@ export function isDecider(format: ScoringFormat, state: KernelState, i: number):
  * match stays open so extra time or a shoot-out can settle it, which is the honest
  * behaviour rather than inventing a winner.
  */
+/**
+ * Two ways an aggregate match ends on a point rather than a whistle (ultimate):
+ * the first side to `firstTo` wins at once, and once every period - extra time
+ * included - is played level, the next point wins (`universalPoint`).
+ */
+/** Kabaddi taps that end a raid. A bonus is an add-on to a raid, not an ending. */
+export const RAID_ENDS: ReadonlySet<string> = new Set([
+  'raid', 'bonus_raid', 'empty_raid', 'raider_out', 'dod_failed', 'tackle', 'super_tackle', 'defender_out_raid',
+]);
+const isRaidEnd = (kind?: string) => !!kind && RAID_ENDS.has(kind);
+
+function aggregateFinish(format: ScoringFormat, state: KernelState, raidEnded = false): void {
+  const top = format.levels[format.levels.length - 1];
+  if (top?.decide !== 'aggregate') return;
+  const [a, b] = aggregateScore(state);
+  if (a === b) return;
+  const lead: Side = a > b ? 'A' : 'B';
+  const played = state.finished.filter((u) => u.level === 0).length;
+  // Extra time played in full: the win score stops counting once regulation is over.
+  const inFullExtra = !!format.tieBreak?.extraTime?.fullTime && played >= top.target;
+  const reachedTarget = !!top.firstTo && !inFullExtra && Math.max(a, b) >= top.firstTo;
+  const allPlayed = played >= top.target + (format.tieBreak?.extraTime?.periods ?? 0);
+  // A golden raid is decided when the raid ENDS, on the points it scored for either side:
+  // a bonus then a tackle is 1-1, still level, and the other team gets its golden raid.
+  const golden = !!format.tieBreak?.goldenRaid && allPlayed && raidEnded;
+  const universal = (!!format.tieBreak?.universalPoint && allPlayed) || golden;
+  if (!reachedTarget && !universal) return;
+  state.ended = true;
+  state.outcome = 'win';
+  state.winner = lead;
+  state.reason = state.reason ?? (golden && !reachedTarget ? 'golden_raid' : 'normal');
+}
+
 function endPeriod(format: ScoringFormat, state: KernelState): FinishedUnit[] {
   const at = state.pointLevel;
   const spec = effectiveLevel(format, state, at);
@@ -1110,6 +1195,10 @@ function endPeriod(format: ScoringFormat, state: KernelState): FinishedUnit[] {
 
   const played = state.finished.filter((u) => u.level === 0).length;
   if (played < topSpec.target) return [unit];
+  // Extra time is played out in full - a lead after its first half is not a win yet
+  // (TieBreakSpec.extraTime). A repeating overtime (basketball) decides every period.
+  const extra = format.tieBreak?.extraTime;
+  if (extra && !extra.repeat && played > topSpec.target && played < topSpec.target + extra.periods) return [unit];
 
   // Last period done: decide on the total.
   const total = aggregateScore(state);
@@ -1415,24 +1504,72 @@ export function unitClock(format: ScoringFormat, log: RallyLog, firstServer: Sid
   return { elapsedMs: banked + (runFrom !== null ? Math.max(0, nowMs - runFrom) : 0), paused: runFrom === null };
 }
 
+/**
+ * A retirement under "award remaining": the games still needed go to the winner with
+ * their points - the unfinished one completed (21-15 from 15-10), any unplayed one 21-0 -
+ * so the game scores agree with the awarded headline. Two-level formats only (games in a
+ * match); null when it does not apply.
+ */
+function awardedUnits(format: ScoringFormat, state: KernelState, played: Pair[]): Pair[] | null {
+  const w = state.winner;
+  const top = format.levels.length - 1;
+  if (!state.ended || !w || top !== 1 || format.levels[top].decide === 'aggregate') return null;
+  if (state.reason !== 'retired' && state.reason !== 'disqualified') return null;
+  if (format.endStates.retirementScore !== 'freezeThenAwardRemaining') return null;
+  const wi = w === 'A' ? 0 : 1;
+  const li = 1 - wi;
+  const need = format.levels[top].target;
+  const won: Pair = [...state.score[top]] as Pair;
+  const out = played.map((u) => [...u] as Pair);
+  const base = format.levels[0];
+  let current: Pair | null = [...state.score[0]] as Pair;
+  while (won[wi] < need) {
+    // The game in hand first (at its own spec), then fresh ones; a deciding game may differ.
+    const deciding = won[0] === need - 1 && won[1] === need - 1;
+    const spec = current ? effectiveLevel(format, state, 0) : deciding && base.deciderOverride ? { ...base, ...base.deciderOverride } : base;
+    const game: Pair = current ?? [0, 0];
+    const reached = Math.max(spec.target, game[li] + spec.winBy);
+    game[wi] = Math.max(game[wi], spec.cap != null ? Math.min(spec.cap, reached) : reached);
+    out.push(game);
+    won[wi] += 1;
+    current = null;
+  }
+  return out;
+}
+
 export function resultEnvelope(format: ScoringFormat, state: KernelState): ResultEnvelope {
   const inner = state.finished.filter((u) => u.level === 0);
+  const awarded = awardedUnits(format, state, inner.map((u) => u.score));
   const pointsFor: Pair = [0, 0];
-  for (const u of inner) { pointsFor[0] += u.score[0]; pointsFor[1] += u.score[1]; }
-  pointsFor[0] += state.score[0][0];
-  pointsFor[1] += state.score[0][1];
+  for (const u of awarded ?? inner.map((x) => x.score)) { pointsFor[0] += u[0]; pointsFor[1] += u[1]; }
+  if (!awarded) {
+    pointsFor[0] += state.score[0][0];
+    pointsFor[1] += state.score[0][1];
+  }
   const top = format.levels.length - 1;
   return {
     outcome: state.outcome,
     winner: state.winner,
     reason: state.reason,
     headline: endPolicyHeadline(format, state, headline(format, state)),
-    unitScores: inner.map((u) => u.score),
+    unitScores: awarded ?? inner.map((u) => u.score),
     // An aggregate level counts periods played, not units won - nobody wins a half.
     unitsFor: format.levels[top]?.decide === 'aggregate'
       ? [periodsPlayed(state), periodsPlayed(state)]
       : top > 0 ? ([...state.score[top]] as Pair) : [0, 0],
     pointsFor,
     ended: state.ended,
+  };
+}
+
+/**
+ * How a finished match's draw is scored. A void (abandoned) or a called-off draw with points
+ * shared counts as drawn whatever the score; "no points" is drawn with nothing for either side.
+ */
+export function drawSettlement(state: KernelState, log: RallyLog): { noResult: boolean; drawNoPoints: boolean } {
+  const end = [...log].reverse().find((e): e is Extract<RallyEvent, { t: 'end' }> => e.t === 'end');
+  return {
+    noResult: state.outcome === 'void' || (state.outcome === 'draw' && end?.drawPoints === 'shared'),
+    drawNoPoints: state.outcome === 'draw' && end?.drawPoints === 'none',
   };
 }

@@ -158,7 +158,7 @@ export async function certificateTrail(prisma: Prisma, certificateId: string) {
   for (const s of scans) {
     trail.push({
       at: s.verified_at,
-      label: s.outcome === 'authentic' ? 'Verified' : `Checked — ${s.outcome}`,
+      label: s.outcome === 'authentic' ? 'Verified' : `Checked - ${s.outcome}`,
       detail: 'QR scan',
       tone: s.outcome === 'authentic' ? undefined : 'warning',
     });
@@ -167,7 +167,7 @@ export async function certificateTrail(prisma: Prisma, certificateId: string) {
     trail.push({
       at: cert.revoked_at,
       label: 'Withdrawn',
-      detail: `${cert.revoked_reason ?? ''}${cert.users_certificates_revoked_byTousers?.name ? ` — ${cert.users_certificates_revoked_byTousers.name}` : ''}`.trim(),
+      detail: `${cert.revoked_reason ?? ''}${cert.users_certificates_revoked_byTousers?.name ? ` - ${cert.users_certificates_revoked_byTousers.name}` : ''}`.trim(),
       tone: 'warning',
     });
   }

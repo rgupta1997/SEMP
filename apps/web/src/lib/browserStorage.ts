@@ -57,3 +57,12 @@ export const newTeamIds = {
     try { sessionStorage.setItem(newTeamIdsKey(orgId), JSON.stringify([...ids])); } catch { /* private mode etc. */ }
   },
 };
+
+const RETURN_AFTER_LOGIN_KEY = 'semp_return_after_login';
+/** Where to land after signing in, when a signed-out page sent the visitor to log in
+ *  (e.g. the public share page's point tally). Session-only; read once. */
+export const returnAfterLogin = {
+  get: (): string | null => { try { return sessionStorage.getItem(RETURN_AFTER_LOGIN_KEY); } catch { return null; } },
+  set: (path: string): void => { try { sessionStorage.setItem(RETURN_AFTER_LOGIN_KEY, path); } catch { /* private mode */ } },
+  clear: (): void => { try { sessionStorage.removeItem(RETURN_AFTER_LOGIN_KEY); } catch { /* private mode */ } },
+};

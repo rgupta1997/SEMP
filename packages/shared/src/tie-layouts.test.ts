@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { formatTemplateSchema } from './scoring.js';
-import { buildTieSpec, isGroupRound, tieForRound, tieLayoutsFor, tieTemplateFor } from './tie-templates.js';
+import { buildTieSpec, groupTiebreakAllowed, isGroupRound, tieForRound, tieLayoutsFor, tieTemplateFor } from './tie-templates.js';
+import { tieSpecSchema } from './scoring.js';
 import { decideRubber, initTie, rubberSize, tieOutcome, tieTarget } from './tie.js';
 
 describe('tie layouts an organiser can pick', () => {
@@ -16,6 +17,25 @@ describe('tie layouts an organiser can pick', () => {
   it('offers only its own standard for a non-racquet tie sport, and nothing for a sport with no ties', () => {
     expect(tieLayoutsFor('chess').map((l) => l.key)).toEqual(['default']);
     expect(tieLayoutsFor('football')).toEqual([]);
+  });
+
+  // Sheet BD03: Inter-IIM badminton order, badminton only.
+  it('badminton and table tennis offer the Inter-IIM men and women orders', () => {
+    const bd = tieLayoutsFor('Badminton');
+    const men = bd.find((l) => l.key === 'iim_men')!;
+    expect(men.rubbers.map((r) => [r.label, r.size])).toEqual([
+      ["Men's Singles 1", 1], ["Men's Singles 2", 1], ["Men's Doubles 1", 2], ["Men's Singles 3", 1], ["Men's Doubles 2", 2],
+    ]);
+    expect(bd.find((l) => l.key === 'iim_women')!.rubbers.map((r) => r.size)).toEqual([1, 2, 1]);
+    // Table tennis plays the same Inter-IIM order (sheet TT02); squash does not get it.
+    expect(tieLayoutsFor('Table Tennis').find((l) => l.key === 'iim_men')?.rubbers.map((r) => r.size)).toEqual([1, 1, 2, 1, 2]);
+    expect(tieLayoutsFor('Table Tennis').find((l) => l.key === 'iim_women')?.rubbers.map((r) => r.size)).toEqual([1, 2, 1]);
+    expect(tieLayoutsFor('Squash').map((l) => l.key)).not.toContain('iim_men');
+    // Built as a tie: majority of 5, group rubbers all played, knockouts stop once decided.
+    const spec = buildTieSpec('badminton', men.rubbers, { skipDeadRubbers: true, skipDeadInGroups: false });
+    expect(spec.rubbers).toHaveLength(5);
+    expect(tieForRound(spec, 'Pool A - Match 1').skipDeadRubbers).toBe(false);
+    expect(tieForRound(spec, 'Final').skipDeadRubbers).toBe(true);
   });
 });
 
@@ -57,8 +77,9 @@ describe('dead rubbers by stage', () => {
   const split = buildTieSpec('table tennis', rubbers, { skipDeadRubbers: true, skipDeadInGroups: false });
 
   it('recognises league and group rounds, and nothing else', () => {
-    expect(['Round 3', 'Pool A - Match 2', 'pool b - match 1'].every(isGroupRound)).toBe(true);
-    expect(['Final', 'SF', 'QF', 'R16', '3rd Place', 'Event', '', null].some(isGroupRound)).toBe(false);
+    // Any named round that is not a knockout one: hand-made "Group A" and late-entrant "Added" too.
+    expect(['Round 3', 'Pool A - Match 2', 'pool b - match 1', 'Group A', 'Added', 'League match 4'].every(isGroupRound)).toBe(true);
+    expect(['Final', 'SF', 'QF', 'R16', '3rd Place', '', '  ', null].some(isGroupRound)).toBe(false);
   });
 
   it('every racquet sport has a standard tie, so "Sport standard" always builds one', () => {
@@ -79,8 +100,66 @@ describe('dead rubbers by stage', () => {
     expect(k.rubbers[2].status).toBe('dead');
   });
 
+  // Sheet BD01: the console applies the round rule to a layout saved for one match too.
+  it('applying the round rule twice changes nothing, and keeps the knockout setting', () => {
+    const group = tieForRound(split, 'Pool A - Match 1');
+    expect(tieForRound(group, 'Pool A - Match 1')).toEqual(group);
+    expect(group.skipDeadInGroups).toBe(split.skipDeadInGroups);
+    // The layout as set still has both settings, so a knockout reads its own.
+    expect(tieForRound(split, 'Final').skipDeadRubbers).toBe(true);
+    expect(group.skipDeadRubbers).toBe(false);
+  });
+
   it('a layout saved before the split behaves exactly as it did', () => {
     const old = buildTieSpec('table tennis', rubbers, { skipDeadRubbers: true });
     expect(tieForRound(old, 'Round 1')).toBe(old);
+  });
+});
+
+// Sheet CH03: whether a level group tie can be won on a tie-break is the layout's choice.
+describe('level group ties', () => {
+  const two = [{ label: 'Board 1', size: 1 }, { label: 'Board 2', size: 1 }];
+
+  it('chess defaults to a draw, other sports keep the tie-break choice', () => {
+    expect(groupTiebreakAllowed(tieTemplateFor('chess')!.tie!)).toBe(false);
+    expect(groupTiebreakAllowed(tieTemplateFor('badminton')!.tie!)).toBe(true);
+  });
+
+  it('the layout can switch it either way, and it survives saving', () => {
+    const on = buildTieSpec('chess', two, { groupTiebreak: true });
+    expect(groupTiebreakAllowed({ ...on, boardPoints: true })).toBe(true);
+    const off = buildTieSpec('badminton', two, { groupTiebreak: false });
+    expect(groupTiebreakAllowed(off)).toBe(false);
+    expect(tieSpecSchema.parse(off).groupTiebreak).toBe(false);
+    // The round rule keeps it.
+    expect(tieForRound({ ...off, skipDeadInGroups: false }, 'Round 1').groupTiebreak).toBe(false);
+  });
+});
+
+describe('Inter-IIM carrom layouts', () => {
+  it('group: the three doubles, won on 2; final: plus both singles, won on 3', () => {
+    const layouts = tieLayoutsFor('Carrom');
+    expect(layouts.map((l) => l.key)).toEqual(['default', 'iim_group', 'iim_final']);
+    const group = layouts.find((l) => l.key === 'iim_group')!;
+    expect(group.rubbers.map((r) => [r.label, r.size])).toEqual([["Men's Doubles", 2], ["Women's Doubles", 2], ["Mixed Doubles", 2]]);
+    expect(tieTarget(buildTieSpec('Carrom', group.rubbers))).toBe(2);
+    const final = layouts.find((l) => l.key === 'iim_final')!;
+    expect(final.rubbers.map((r) => r.size)).toEqual([2, 2, 2, 1, 1]);
+    expect(tieTarget(buildTieSpec('Carrom', final.rubbers))).toBe(3);
+  });
+});
+
+// A hand-made group fixture ("Group A") plays every rubber like a generated one; a final stops at 3-0.
+describe('dead rubbers by round name', () => {
+  const men = tieLayoutsFor('Badminton').find((l) => l.key === 'iim_men')!;
+  const spec = buildTieSpec('Badminton', men.rubbers, { skipDeadRubbers: true, skipDeadInGroups: false });
+  for (const round of ['Group A', 'Added', 'Pool A - Match 1']) {
+    it(`"${round}" is a group match: every rubber is played`, () => {
+      expect(tieForRound(spec, round).skipDeadRubbers).toBe(false);
+    });
+  }
+  it('"Final" and "SF" stop once the tie is decided', () => {
+    expect(tieForRound(spec, 'Final').skipDeadRubbers).toBe(true);
+    expect(tieForRound(spec, 'SF').skipDeadRubbers).toBe(true);
   });
 });

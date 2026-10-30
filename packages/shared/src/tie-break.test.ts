@@ -166,6 +166,13 @@ describe('the phases of a level knockout', () => {
     expect(tieProgress(fest, st, [2, 1]).phase).toBe('done');
   });
 
+  it('plays both extra halves out: a lead after the first is not yet a win', () => {
+    const log: RallyLog = [goal('A'), goal('B'), endHalf, endHalf, goal('A'), endHalf];
+    const st = foldRally(fest, log, 'A').state;
+    expect(st.ended).toBe(false);
+    expect(foldRally(fest, [...log, endHalf], 'A').state).toMatchObject({ ended: true, winner: 'A' });
+  });
+
   it('reaches penalties only once both extra halves are played out', () => {
     const afterOne: RallyLog = [goal('A'), goal('B'), endHalf, endHalf, endHalf];
     const one = foldRally(fest, afterOne, 'A').state;

@@ -152,23 +152,26 @@ function CategoryCountPill({ orgId, championshipId, category, filters, tone, onC
   );
 }
 
-function RecipientsStep({ orgId, championship, filters, setFilter, enabled, onToggleCategory, onSelectAll, onCount }: {
+function RecipientsStep({ orgId, championship, filters, setFilter, enabled, onToggleCategory, onSelectAll, onCount, categories, sportScope }: {
   orgId: string; championship: Champ; filters: Filters; setFilter: (p: Partial<Filters>) => void;
   enabled: Record<RecipientCategory, boolean>; onToggleCategory: (c: RecipientCategory) => void; onSelectAll: () => void;
   onCount: (c: RecipientCategory, count: CategoryCount) => void;
+  categories: RecipientCategory[]; sportScope?: string[];
 }) {
   const { data: tournaments = [] } = useApi<any[]>(`/tournaments?championship_id=${championship.id}`);
   const tournamentId = tournaments[0]?.id;
   const { data: tsports = [] } = useApi<any[]>(tournamentId ? `/tournament-sports?tournament_id=${tournamentId}` : null);
   const { data: allSports = [] } = useApi<any[]>('/sports');
   const sportName = new Map((allSports as any[]).map((s) => [s.id, s.name]));
-  const sportOptions = [...new Map(tsports.map((ts: any) => [ts.sport_id, ts])).values()];
+  // A sport organiser picks one of their own sports; there is no "All games" for them.
+  const sportOptions = [...new Map(tsports.map((ts: any) => [ts.sport_id, ts])).values()]
+    .filter((ts: any) => !sportScope || sportScope.includes(ts.sport_id));
 
   const activeTournamentSport = tsports.find((ts: any) => ts.sport_id === filters.sportId);
   const { data: disciplineRows = [] } = useApi<any[]>(activeTournamentSport ? `/tournament-disciplines?tournament_sport_id=${activeTournamentSport.id}` : null);
   const { data: teamRows = [] } = useApi<any[]>(filters.tournamentDisciplineId ? `/teams?tournament_discipline_id=${filters.tournamentDisciplineId}` : null);
 
-  const allSelected = CATEGORIES.every((c) => enabled[c]);
+  const allSelected = categories.every((c) => enabled[c]);
 
   return (
     <div className="grid gap-5">
@@ -178,8 +181,8 @@ function RecipientsStep({ orgId, championship, filters, setFilter, enabled, onTo
           <label className="grid gap-1 text-xs">
             <span className="font-medium text-slate-600 dark:text-slate-400">Game</span>
             <Select value={filters.sportId} onChange={(e) => setFilter({ sportId: e.target.value, tournamentDisciplineId: '', teamId: '' })}>
-              <option value="">All games</option>
-              {sportOptions.map((ts: any) => <option key={ts.sport_id} value={ts.sport_id}>{sportName.get(ts.sport_id) ?? '—'}</option>)}
+              {!sportScope && <option value="">All games</option>}
+              {sportOptions.map((ts: any) => <option key={ts.sport_id} value={ts.sport_id}>{sportName.get(ts.sport_id) ?? '-'}</option>)}
             </Select>
           </label>
           <label className="grid gap-1 text-xs">
@@ -198,7 +201,7 @@ function RecipientsStep({ orgId, championship, filters, setFilter, enabled, onTo
           </label>
         </div>
         <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
-          Team only narrows Winners, Awards, Participation and Coaches — Organising team and Officials are event-wide.
+          Team only narrows Winners, Awards, Participation and Coaches - Organising team and Officials are event-wide.
         </p>
         {enabled.awards && (
           <label className="mt-3 grid max-w-xs gap-1 text-xs">
@@ -218,7 +221,7 @@ function RecipientsStep({ orgId, championship, filters, setFilter, enabled, onTo
           </button>
         }>Who gets certified</SectionLabel>
         <div className="mt-2 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-          {CATEGORIES.map((c) => {
+          {categories.map((c) => {
             const meta = CATEGORY_META[c];
             return (
               <label key={c} className={cn(
@@ -312,7 +315,7 @@ function TemplatesStep({ orgId, enabledCategories, templates, hasDefault, missin
           <div className="font-semibold text-sky-900 dark:text-sky-300">Automated rules aren't wired up yet</div>
           <p className="mt-0.5 text-sm text-sky-800/80 dark:text-sky-300/70">
             A category set to a rule other than "Manual run only" will be skipped when you click Generate, rather than
-            issue on its own — set it back to manual to include it in this run.
+            issue on its own - set it back to manual to include it in this run.
           </p>
         </div>
       )}
@@ -374,12 +377,14 @@ function CategoryReview({ orgId, championshipId, category, filters, templateName
 
 /* ----------------------------- Wizard ----------------------------- */
 
-function Wizard({ orgId, championship, templates, templatesLoading, onClose, invalidate }: {
+function Wizard({ orgId, championship, templates, templatesLoading, onClose, invalidate, sportScope }: {
   orgId: string; championship: Champ; templates: Template[]; templatesLoading: boolean;
-  onClose: () => void; invalidate: (string | null)[];
+  onClose: () => void; invalidate: (string | null)[]; sportScope?: string[];
 }) {
   const [step, setStep] = useState(0);
-  const [filters, setFilters] = useState<Filters>({ sportId: '', tournamentDisciplineId: '', teamId: '', awardLevel: '' });
+  // A sport organiser issues only sport categories, for one of their sports.
+  const categories = sportScope ? CATEGORIES.filter((c) => !isEventWide(c)) : CATEGORIES;
+  const [filters, setFilters] = useState<Filters>({ sportId: sportScope?.[0] ?? '', tournamentDisciplineId: '', teamId: '', awardLevel: '' });
   const [enabled, setEnabled] = useState<Record<RecipientCategory, boolean>>({
     winners: true, awards: true, participation: true, organising: false, officials: false, coaches: false,
   });
@@ -399,13 +404,13 @@ function Wizard({ orgId, championship, templates, templatesLoading, onClose, inv
   const setFilter = (patch: Partial<Filters>) => setFilters((f) => ({ ...f, ...patch }));
   const toggleCategory = (c: RecipientCategory) => setEnabled((e) => ({ ...e, [c]: !e[c] }));
   const selectAll = () => {
-    const allOn = CATEGORIES.every((c) => enabled[c]);
-    setEnabled(Object.fromEntries(CATEGORIES.map((c) => [c, !allOn])) as any);
+    const allOn = categories.every((c) => enabled[c]);
+    setEnabled((e) => ({ ...e, ...Object.fromEntries(categories.map((c) => [c, !allOn])) }));
   };
   const setTemplateId = (c: RecipientCategory, v: string) => setTemplateIdState((t) => ({ ...t, [c]: v }));
   const setTrigger = (c: RecipientCategory, v: Trigger) => setTriggerState((t) => ({ ...t, [c]: v }));
 
-  const enabledCategories = CATEGORIES.filter((c) => enabled[c]);
+  const enabledCategories = categories.filter((c) => enabled[c]);
   const enabledManualCategories = enabledCategories.filter((c) => trigger[c] === 'manual');
   const enabledDeferredCategories = enabledCategories.filter((c) => trigger[c] !== 'manual');
 
@@ -538,7 +543,7 @@ function Wizard({ orgId, championship, templates, templatesLoading, onClose, inv
             {Object.entries(outcome).map(([category, r]) => (
               <div key={category} className="flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
                 <span className="font-medium text-slate-700 dark:text-slate-300">{CATEGORY_META[category as RecipientCategory].label}</span>
-                <span className="text-slate-500 dark:text-slate-400">{r.issued} issued{r.skipped ? `, ${r.skipped} skipped` : ''}{r.note ? ` — ${r.note}` : ''}</span>
+                <span className="text-slate-500 dark:text-slate-400">{r.issued} issued{r.skipped ? `, ${r.skipped} skipped` : ''}{r.note ? ` - ${r.note}` : ''}</span>
               </div>
             ))}
           </div>
@@ -547,7 +552,7 @@ function Wizard({ orgId, championship, templates, templatesLoading, onClose, inv
         <RecipientsStep
           orgId={orgId} championship={championship} filters={filters} setFilter={setFilter}
           enabled={enabled} onToggleCategory={toggleCategory} onSelectAll={selectAll}
-          onCount={setCount}
+          onCount={setCount} categories={categories} sportScope={sportScope}
         />
       ) : step === 1 ? (
         <TemplatesStep
@@ -565,7 +570,7 @@ function Wizard({ orgId, championship, templates, templatesLoading, onClose, inv
           </div>
           {enabledDeferredCategories.length > 0 && (
             <p className="rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:bg-sky-500/10 dark:text-sky-300/80">
-              {enabledDeferredCategories.map((c) => CATEGORY_META[c].label).join(', ')} — set to an automatic issuing rule, so not included in this manual run.
+              {enabledDeferredCategories.map((c) => CATEGORY_META[c].label).join(', ')} - set to an automatic issuing rule, so not included in this manual run.
             </p>
           )}
           <div className="grid gap-3">
@@ -589,9 +594,11 @@ function Wizard({ orgId, championship, templates, templatesLoading, onClose, inv
   );
 }
 
-export function GenerateModal({ orgId, championship, templates, templatesLoading = false, onClose, invalidate }: {
+export function GenerateModal({ orgId, championship, templates, templatesLoading = false, onClose, invalidate, sportScope }: {
   orgId: string; championship?: Champ; templates: Template[]; templatesLoading?: boolean;
   onClose: () => void; invalidate: (string | null)[];
+  /** A sport organiser's sports: the run is limited to them (and to sport categories). */
+  sportScope?: string[];
 }) {
   const [champId, setChampId] = useState('');
   const champs = useApi<{ rows: Array<{ id: string; name: string; pending: number }> }>(
@@ -620,5 +627,5 @@ export function GenerateModal({ orgId, championship, templates, templatesLoading
     );
   }
 
-  return <Wizard orgId={orgId} championship={championship} templates={templates} templatesLoading={templatesLoading} onClose={onClose} invalidate={invalidate} />;
+  return <Wizard orgId={orgId} championship={championship} templates={templates} templatesLoading={templatesLoading} onClose={onClose} invalidate={invalidate} sportScope={sportScope} />;
 }

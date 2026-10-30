@@ -3,6 +3,7 @@ import { canonicalRacquetSport } from './racquet-presets.js';
 import { formatForPairing } from './serve-resolvers.js';
 import { CHESS_ENDINGS, isChessSport, whiteOnBoard, type ChessEnding } from './chess.js';
 import { readCarromState, type CarromBoardsState } from './carrom.js';
+import { poolRubber, readPoolState } from './pool.js';
 import type { ScoringFormat, Side } from './scoring-rules.js';
 import { playersPerSide, readLineup, resolveMatchLineup, type RubberLineup } from './tie.js';
 import type { MatchPosition } from './enums.js';
@@ -41,6 +42,8 @@ export interface PlayedContest {
   /** The rules it was played under, when it was scored point by point. */
   format: ScoringFormat | null;
   firstServer: Side;
+  /** Pool: `score` is frames won, recorded frame by frame. */
+  frames?: boolean;
   /** Units won per side (games, frames, boards), home first. null when unknown. */
   score: [number, number] | null;
 }
@@ -87,6 +90,9 @@ export function playedContests(input: {
       const format = r?.format && typeof r.format === 'object' ? (r.format as ScoringFormat) : null;
       const log = logOf(r?.rally);
       const firstServer = side(r?.firstServer) ?? 'A';
+      // Pool: frames won, best of the rubber's own frames (every frame when no layout was saved).
+      const pool = readPoolState(r?.pool);
+      const bestOf = Number(ls.tieSpec?.rubbers?.[i]?.contest?.segMax) || 99;
       contests.push({
         rubberKey: typeof r?.key === 'string' ? r.key : null,
         rubberLabel: typeof r?.label === 'string' ? r.label : null,
@@ -102,7 +108,8 @@ export function playedContests(input: {
         log,
         format,
         firstServer,
-        score: scoreOf(format, log, firstServer, lineup, r?.state),
+        score: pool?.frames.length ? poolRubber(pool, bestOf).framesWon : scoreOf(format, log, firstServer, lineup, r?.state),
+        ...(pool?.frames.length ? { frames: true } : {}),
       });
     }
     return { kind: 'contests', contests };

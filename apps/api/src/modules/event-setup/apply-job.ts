@@ -1,4 +1,4 @@
-// THE APPLY JOB — one run of the engine over a validated setup, and the bookkeeping
+// THE APPLY JOB - one run of the engine over a validated setup, and the bookkeeping
 // around it (status, report, credentials). Called two ways:
 //
 //   - locally (tsx / any long-lived process): detached inside the request that started

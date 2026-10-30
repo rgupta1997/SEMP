@@ -110,7 +110,7 @@ export function CheckoutModal({
                 </div>
               </div>
               <div className="text-right text-sm font-semibold tabular-nums dark:text-slate-100">
-                {q ? formatPaise(q.subtotal) : '—'}
+                {q ? formatPaise(q.subtotal) : '-'}
               </div>
             </div>
 

@@ -73,7 +73,7 @@ export function TemplateGalleryPage() {
         <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Your templates</h2>
         {templates.isLoading ? <Skeleton className="h-64" /> : mine.length === 0 ? (
           <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
-            {q || category ? 'No template matches that.' : 'None yet — start from one of the designs below.'}
+            {q || category ? 'No template matches that.' : 'None yet - start from one of the designs below.'}
           </p>
         ) : (
           <div className="flex flex-wrap gap-4">

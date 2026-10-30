@@ -170,7 +170,7 @@ export function MyChampionshipsPage() {
                     {c.archived_at && (
                       <div className="mt-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
                         {c.archived_with_org
-                          ? 'Archived with its organisation — retrieve the organisation to bring it back'
+                          ? 'Archived with its organisation - retrieve the organisation to bring it back'
                           : `Deleted permanently on ${fmtDate(archivePurgeDate(c.archived_at))} (${archiveDaysLeft(c.archived_at)} days left) unless retrieved`}
                       </div>
                     )}

@@ -1,5 +1,5 @@
 import {
-  canonicalRacquetSport, carromLineStats, carromMatch, carromRulesOf, isCarromSport, type CarromBoard,
+  canonicalRacquetSport, carromLineStats, carromMatchOf, carromRulesOf, isCarromSport, readCarromState,
   chessLineStats, competitionTier, cricketCareerBag, deriveRacquetStats, type ChessGame,
   deriveTeamStats, netLineStats, effectiveEventSpec, eventTemplateFor, foldCricketCareer, isChessSport, isCricketSport,
   parseStoredFormat, playedContests, rankSubEvent, resolveFormat, seatIn, statSpecFor,
@@ -7,6 +7,7 @@ import {
   type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
   type FormatTemplate, type MatchOutcome, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
+import { isCalledDraw } from '@semp/shared';
 import { Prisma } from '@prisma/client';
 import type { Db } from '../../infra/prisma.js';
 import { writeCategoryLines, type CategoryLineInput } from './category-lines.service.js';
@@ -287,8 +288,8 @@ export async function buildPlayerStatRows(
     if (isCarromSport(sportName) && Array.isArray(carrom?.boards) && carrom.boards.length) {
       const frozen = parseStoredFormat((fx.live_state as { format?: unknown } | null)?.format);
       const rules = carromRulesOf(frozen ?? resolveFormat({ round: fx.round, stage_sequence: fx.stage_sequence }, { sport: sportName }).format);
-      const boards = (carrom.boards as CarromBoard[]).filter((b) => b && (b.winner === 'A' || b.winner === 'B'));
-      const match = carromMatch(boards, rules, carrom.firstBreak === 'B' ? 'B' : 'A');
+      const state = readCarromState(carrom) ?? { boards: [], firstBreak: 'A' as const };
+      const match = carromMatchOf(state, rules);
       const base = statOf;
       statOf = (userId) => {
         const side = sideOf.get(userId);
@@ -370,6 +371,7 @@ export async function buildPlayerStatRows(
 function outcomeForFixture(fx: StatFixture, side: Side): MatchOutcome | null {
   const teamId = side === 'A' ? fx.home_team_id : fx.away_team_id;
   if (fx.winner_team_id) return fx.winner_team_id === teamId ? 'won' : 'lost';
+  if (isCalledDraw(fx.live_state)) return 'drew';
   if (fx.home_score != null && fx.away_score != null) {
     if (fx.home_score === fx.away_score) return 'drew';
     const homeWon = fx.home_score > fx.away_score;
@@ -438,9 +440,12 @@ function contestRows(
           : opts.carrom && c.carrom?.boards.length
             ? (() => {
               const rules = carromRulesOf(c.format);
-              return carromLineStats(carromMatch(c.carrom.boards, rules, c.carrom.firstBreak), rules, seat.side);
+              return carromLineStats(carromMatchOf(c.carrom, rules), rules, seat.side);
             })()
-            : derived?.players.find((x) => x.userId === userId)?.stats ?? {},
+            // Pool rubber: the frames each side won, from the frame-by-frame console.
+            : c.frames && c.score
+              ? { frames_won: c.score[seat.side === 'A' ? 0 : 1], frames_lost: c.score[seat.side === 'A' ? 1 : 0] }
+              : derived?.players.find((x) => x.userId === userId)?.stats ?? {},
         occurred_on: opts.occurred,
         lock_version: fx.lock_version,
       });

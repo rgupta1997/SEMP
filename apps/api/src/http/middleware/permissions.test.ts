@@ -292,4 +292,13 @@ describe('sport-limited organiser', () => {
   it('reports its sports as its scope', async () => {
     expect(await makeGuards(footballOrganiser()).eventScope('org1', 'c1')).toEqual(['football']);
   });
+  // Awards: a whole-event or tournament scope names no sport, so only an overall
+  // organiser passes; a sport-within-tournament scope passes its own sport organiser.
+  it('gives awards only within its own sport', async () => {
+    const g = makeGuards(footballOrganiser());
+    expect((await run(g.sportManager(async () => ({ championshipId: 'c1', sportId: '' })), ORGANISER)).ok).toBe(false);
+    expect((await run(g.sportManager(async () => ({ championshipId: 'c1', sportId: 'football' })), ORGANISER)).ok).toBe(true);
+    const overall = makeGuards(fakePrisma({ organiserChampionshipIds: ['c1'], organiserUserId: 'org1' }));
+    expect((await run(overall.sportManager(async () => ({ championshipId: 'c1', sportId: '' })), ORGANISER)).ok).toBe(true);
+  });
 });

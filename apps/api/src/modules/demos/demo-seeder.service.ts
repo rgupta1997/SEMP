@@ -8,9 +8,9 @@
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import {
-  DEMO_DEFAULT_SPORTS, demoOrgNamesFor, detailedContributions,
-  tieTemplateFor, eventTemplateFor, initTie, decideRubber, tieWinner, rubbersWon,
-  type CreateDemoSandboxInput, type DemoChampKind,
+  KNOCKOUT_ROUND, DEMO_DEFAULT_SPORTS, demoOrgNamesFor, detailedContributions, tieTemplateFor,
+  eventTemplateFor, initTie, decideRubber, tieWinner, rubbersWon, type CreateDemoSandboxInput,
+  type DemoChampKind,
 } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { recomputeStandingsAtomic } from '../standings/standings.service.js';
@@ -156,7 +156,7 @@ async function seedChampionship(prisma: Prisma, ctx: ChampCtx): Promise<void> {
     id: champId,
     name: `${clientName} ${recipe.nameSuffix}`,
     slug: `${slug}-${recipe.kind}-championship`,
-    description: `${clientName} ${recipe.nameSuffix} — powered by Sportagon.`,
+    description: `${clientName} ${recipe.nameSuffix} - powered by Sportagon.`,
     venue: `${clientName} Sports Arena`,
     start_date: startAt, end_date: endAt,
     status: 'ongoing', // scoring requires ongoing; college flips to completed at the end
@@ -352,7 +352,7 @@ async function seedChampionship(prisma: Prisma, ctx: ChampCtx): Promise<void> {
     const finalId = randomUUID();
     fixtures.push({
       ...base(d.tdId, {
-        round: 'Final', bracket_position: 1,
+        round: KNOCKOUT_ROUND.final, bracket_position: 1,
         ...(finalDecided ? completedHeadline(sfWinners[0], sfWinners[1]) : { home_team_id: null, away_team_id: null, status: 'scheduled' }),
       }),
       id: finalId,

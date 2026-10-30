@@ -74,7 +74,7 @@ export function EventSettingsPage() {
               hint="Whose event this is. Certificates for it carry this organisation's name and signature."
             >
               <Select value={hostOrgId} onChange={(e) => setHostOrgId(e.target.value)}>
-                <option value="">Nobody — an individual is hosting</option>
+                <option value="">Nobody - an individual is hosting</option>
                 {hostable.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
               </Select>
             </Field>
@@ -166,7 +166,7 @@ function DangerZone({ eventId, name, onDelete, deleting }: {
         <CardHeader title="Archived" subtitle={`Archived with its organisation on ${fmtDate(data.archived_at)}`} />
         <CardBody>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            This championship was archived together with its organisation. It isn't on a 90-day clock — it comes back
+            This championship was archived together with its organisation. It isn't on a 90-day clock - it comes back
             when the organisation is retrieved, from the organisation's Administration → Organization Profile.
           </p>
         </CardBody>

@@ -216,6 +216,37 @@ describe('a round rule can name a built-in preset', () => {
   });
 });
 
+describe('a pool stage gets one rule, the knockout its own', () => {
+  // IIMK kho kho: pools play 7-minute turns, the knockout 9. The editor saves the pool
+  // row as a stage-wide rule (no round) after the specific ones.
+  const draw = {
+    sport: 'kho-kho',
+    scoring_preset_key: 'kho_2x7',
+    round_formats: [
+      { round: 'Final', stageSequence: 2, presetKey: 'kho_4turns' },
+      { round: 'SF', stageSequence: 2, presetKey: 'kho_4turns' },
+      { stageSequence: 1, presetKey: 'kho_2x7' },
+    ],
+  };
+
+  it('every pool match takes the stage rule, whatever its own label', () => {
+    for (const round of ['Pool A - Match 1', 'Pool B - Match 6']) {
+      const r = resolveFormat({ round, stage_sequence: 1 }, draw, []);
+      expect(r.layer).toBe('stage');
+      expect(r.format?.presetKey).toBe('kho_2x7');
+    }
+  });
+
+  it('the knockout rounds take their own', () => {
+    expect(resolveFormat({ round: 'Final', stage_sequence: 2 }, draw, []).format?.presetKey).toBe('kho_4turns');
+    expect(resolveFormat({ round: 'SF', stage_sequence: 2 }, draw, []).format?.presetKey).toBe('kho_4turns');
+  });
+
+  it('a stage rule is a valid saved rule', () => {
+    expect(parseRoundFormats([{ stageSequence: 1, presetKey: 'kho_2x7' }])).toHaveLength(1);
+  });
+});
+
 describe('resolving every round at once', () => {
   it('says what each round plays and whether it is inherited or overridden', () => {
     const draw = {

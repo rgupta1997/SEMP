@@ -157,7 +157,8 @@ export function cricketScorecard(
   const appeared = new Set<string>();
   const sideOf = new Map<string, CricketSide>();
 
-  for (const inn of state.innings) {
+  // Super Over innings are left out: they settle a tie and are not part of anyone's record.
+  for (const inn of state.innings.filter((i) => !i.superOver)) {
     const bowlingSide = other(inn.battingSide);
 
     for (const line of inn.batting) {
@@ -339,13 +340,13 @@ export function foldCricketCareer(
 
 /** "84*" / "17" - how a high score is printed. */
 export function highScoreLine(c: CricketCareer): string {
-  if (c.inningsBatted === 0) return '—';
+  if (c.inningsBatted === 0) return '-';
   return `${c.highScore}${c.highScoreNotOut ? '*' : ''}`;
 }
 
 /** "5/23" - how best bowling is printed. */
 export function bestBowlingLine(c: CricketCareer): string {
-  if (c.inningsBowled === 0) return '—';
+  if (c.inningsBowled === 0) return '-';
   return `${c.bestInningsWickets}/${c.bestInningsRuns}`;
 }
 

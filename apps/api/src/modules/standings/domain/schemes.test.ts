@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_STANDINGS_RULE, type StandingsRule } from '@semp/shared';
-import { runScheme, rankBy, accumulate, type SchemeFixture, type EntityTally } from './schemes.js';
+import { rankGroup, runScheme, rankBy, accumulate, levelOn, shareRanks, type SchemeFixture, type EntityTally } from './schemes.js';
 
 // One team per org for brevity: team_id === org_id.
 function fx(home: string, away: string, hs: number, as: number, round: string | null = null): SchemeFixture {
@@ -15,8 +15,17 @@ function fx(home: string, away: string, hs: number, as: number, round: string | 
 
 const byId = (rows: EntityTally[]) => Object.fromEntries(rows.map((r) => [r.entity_id, r]));
 
+// A classic 3 / 1 / 0 league, independent of whatever the built-in default is.
+const league310: StandingsRule = { scheme: 'league_points', win: 3, draw: 1, loss: 0, participation: 0, tiebreakers: ['points', 'wins', 'lost'] };
+
+describe('the built-in default', () => {
+  it('is 2 / 1 / 0 per match', () => {
+    expect(DEFAULT_STANDINGS_RULE).toMatchObject({ scheme: 'league_points', win: 2, draw: 1, loss: 0, participation: 0 });
+  });
+});
+
 describe('league_points scheme', () => {
-  const rule = DEFAULT_STANDINGS_RULE; // 3 / 1 / 0
+  const rule = league310;
 
   it('awards win/draw/loss points and counts P/W/D/L', () => {
     const rows = byId(runScheme([fx('A', 'B', 2, 0), fx('A', 'C', 1, 1), fx('B', 'C', 3, 1)], rule));
@@ -246,11 +255,129 @@ describe('medal position points are withheld until the discipline is decided', (
 describe('accumulate across draws', () => {
   it('sums points and merges medal/placement detail by org', () => {
     const acc = new Map<string, EntityTally>();
-    accumulate(acc, runScheme([fx('A', 'B', 2, 0)], DEFAULT_STANDINGS_RULE)); // A +3
+    accumulate(acc, runScheme([fx('A', 'B', 2, 0)], league310)); // A +3
     accumulate(acc, runScheme([fx('A', 'B', 1, 0)], { scheme: 'medal', gold: 5, silver: 3, bronze: 1, participation: 0 })); // A gold +5
     const a = acc.get('A')!;
     expect(a.points).toBe(8);
     expect(a.detail.gold).toBe(1);
     expect(a.played).toBe(2);
+  });
+});
+
+describe('shared positions in a table', () => {
+  it('rows level on every tie-breaker share the better rank: 1, 2, 2, 4', () => {
+    const t = (id: string, points: number, won: number) => ({ entity_id: id, played: 3, won, drawn: 0, lost: 3 - won, points, gf: 0, ga: 0, wo: 0, detail: {} });
+    const rows = shareRanks(rankBy([t('A', 9, 3), t('B', 6, 2), t('C', 6, 2), t('D', 0, 0)], ['points', 'wins', 'lost']), levelOn(['points', 'wins', 'lost']));
+    expect(rows.map((r) => [r.entity_id, r.rank])).toEqual([['A', 1], ['B', 2], ['C', 2], ['D', 4]]);
+  });
+});
+
+describe('pool team ties: frames won and net ball difference', () => {
+  const pool = (home: string, away: string, hs: number, as: number, frames: [number, number], balls: [number, number]): SchemeFixture =>
+    ({ ...fx(home, away, hs, as), home_frames: frames[0], away_frames: frames[1], home_balls: balls[0], away_balls: balls[1] });
+  // A, B and C each win one tie 3-2: level on points and rubbers.
+  const fixtures = [
+    pool('A', 'B', 3, 2, [10, 8], [12, 9]),
+    pool('B', 'C', 3, 2, [10, 9], [14, 6]),
+    pool('C', 'A', 3, 2, [10, 9], [11, 11]),
+  ];
+
+  it('frames won separates teams level on points', () => {
+    const { rows } = rankGroup(fixtures, { win: 2, draw: 1, loss: 0, tiebreakers: ['points', 'frames_won'] });
+    // Frames: A 19, B 18, C 19 - A and C stay level.
+    expect(rows.map((r) => [r.entity_id, r.frames])).toEqual([['A', 19], ['C', 19], ['B', 18]]);
+  });
+
+  it('net ball difference then splits what frames left level', () => {
+    const { rows, ties } = rankGroup(fixtures, { win: 2, draw: 1, loss: 0, tiebreakers: ['points', 'frames_won', 'ball_diff'] });
+    // Balls: A 23-20 (+3), C 17-25 (-8).
+    expect(rows.map((r) => r.entity_id)).toEqual(['A', 'C', 'B']);
+    expect(ties).toEqual([]);
+  });
+
+  it('a walkover adds no frames or balls', () => {
+    const wo = { ...pool('A', 'B', 0, 0, [9, 0], [8, 0]), status: 'walkover', winner_team_id: 'A' };
+    const { rows } = rankGroup([wo], { win: 2, draw: 1, loss: 0, tiebreakers: ['points'] });
+    expect(rows.find((r) => r.entity_id === 'A')).toMatchObject({ frames: 0, balls_for: 0 });
+  });
+});
+
+// Inter-IIM carrom: A beat B 2-1, B beat C 2-0, C beat A 2-0. All won one; B has most games won (3),
+// A and C are level on 2 - the rulebook's tie-break game, so the table must flag them, not split on net games.
+describe('carrom group order', () => {
+  it('ranks by matches won, then games won, and leaves A and C tied', async () => {
+    const { defaultGroupRanking } = await import('@semp/shared');
+    const ranking = defaultGroupRanking('Carrom');
+    const { rows, ties } = rankGroup([fx('A', 'B', 2, 1), fx('B', 'C', 2, 0), fx('C', 'A', 2, 0)], ranking);
+    expect(rows[0].entity_id).toBe('B');
+    expect(ties.map((t) => [...t].sort())).toEqual([['A', 'C']]);
+  });
+});
+
+// Called off for rain as a draw: the official chooses shared points or none; never a loss.
+describe('rain draws at an unequal score', () => {
+  const ranking = { win: 3, draw: 1, loss: 0, tiebreakers: ['points'] as const };
+  it('shared points: both drawn with the draw points, though it was 6-5', () => {
+    const { rows } = rankGroup([{ ...fx('A', 'B', 6, 5), winner_team_id: null, no_result: true }], { ...ranking, tiebreakers: ['points'] });
+    expect(rows.find((r) => r.entity_id === 'A')).toMatchObject({ drawn: 1, lost: 0, points: 1 });
+    expect(rows.find((r) => r.entity_id === 'B')).toMatchObject({ drawn: 1, lost: 0, points: 1 });
+  });
+  it('no points: both drawn, nothing to either side', () => {
+    const { rows } = rankGroup([{ ...fx('A', 'B', 6, 5), winner_team_id: null, draw_no_points: true }], { ...ranking, tiebreakers: ['points'] });
+    for (const id of ['A', 'B']) expect(rows.find((r) => r.entity_id === id)).toMatchObject({ played: 1, drawn: 1, lost: 0, won: 0, points: 0 });
+  });
+});
+
+// A walkover 2-0: counted in goal difference only when its format said so when recorded.
+describe('walkover score in goal difference', () => {
+  const wo = (counts?: boolean): SchemeFixture => ({ ...fx('A', 'B', 2, 0), status: 'walkover', ...(counts !== undefined ? { walkover_counts: counts } : {}) });
+  const rank = (f: SchemeFixture) => rankGroup([f], { win: 3, draw: 1, loss: 0, tiebreakers: ['points'] }).rows;
+  it('counts when the format counts it', () => {
+    const rows = rank(wo(true));
+    expect(rows.find((r) => r.entity_id === 'A')).toMatchObject({ won: 1, points: 3, gf: 2, ga: 0 });
+    expect(rows.find((r) => r.entity_id === 'B')).toMatchObject({ lost: 1, gf: 0, ga: 2 });
+  });
+  it('left out otherwise (and for walkovers recorded before), the win still counts', () => {
+    for (const f of [wo(false), wo()]) {
+      expect(rank(f).find((r) => r.entity_id === 'A')).toMatchObject({ won: 1, points: 3, gf: 0, ga: 0 });
+    }
+  });
+});
+
+// Kho-kho: teams level on points ranked by ADT over their group matches (higher first).
+describe('kho-kho ADT tie-breaker', () => {
+  const t = (defendMs: number, defendOuts: number, attackMs: number, attackOuts: number) => ({ defendMs, defendOuts, attackMs, attackOuts, estimated: false });
+  const kho = (home: string, away: string, hs: number, as: number, h: ReturnType<typeof t>, a: ReturnType<typeof t>): SchemeFixture =>
+    ({ ...fx(home, away, hs, as), home_adt: h, away_adt: a });
+  const ranking = { win: 2, draw: 0, loss: 0, tiebreakers: ['points', 'adt'] as ('points' | 'adt')[] };
+
+  it('A, B and C each win once: ADT orders them, with no tie left', () => {
+    // A: defends 840 s for 4 outs, chases 840 s for 6 -> 210 - 140 = +70 (one match each way summed).
+    const fixtures = [
+      kho('A', 'B', 10, 8, t(420_000, 2, 420_000, 3), t(420_000, 3, 420_000, 2)),
+      kho('B', 'C', 9, 7, t(420_000, 3, 420_000, 3), t(420_000, 3, 420_000, 3)),
+      kho('C', 'A', 9, 6, t(420_000, 2, 420_000, 2), t(420_000, 2, 420_000, 3)),
+    ];
+    const { rows, ties } = rankGroup(fixtures, ranking);
+    expect(rows.every((r) => r.points === 2)).toBe(true);
+    // A: (840/4) - (840/6) = 70. B: (840/6) - (840/5) = -28. C: (840/5) - (840/5) = 0.
+    expect(rows.map((r) => r.entity_id)).toEqual(['A', 'C', 'B']);
+    expect(ties).toEqual([]);
+  });
+
+  it('teams with no timed match yet stay level with each other, below the rest', () => {
+    const { rows, ties } = rankGroup([fx('A', 'B', 10, 8), fx('B', 'A', 10, 8)], ranking);
+    expect(rows.map((r) => r.points)).toEqual([2, 2]);
+    expect(ties.length).toBe(1);
+  });
+});
+
+// A no-show is a team whose every match was a walkover loss - even where the walkover score counts.
+describe('no-show with counted walkovers', () => {
+  it('a team that lost every match by a counted walkover is still a no-show', () => {
+    const wo = (h: string, a: string): SchemeFixture => ({ ...fx(h, a, 2, 0), status: 'walkover', walkover_counts: true });
+    const { rows } = rankGroup([wo('A', 'C'), wo('B', 'C'), fx('A', 'B', 1, 0)], { win: 3, draw: 1, loss: 0, tiebreakers: ['points'] });
+    const c = rows.find((r) => r.entity_id === 'C')!;
+    expect(c).toMatchObject({ played: 2, lost: 2, wo: 2, ga: 4 });
   });
 });

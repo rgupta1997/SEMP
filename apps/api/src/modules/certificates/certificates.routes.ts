@@ -5,6 +5,8 @@ import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
 import { can } from '../../http/middleware/can.js';
+import { makeGuards } from '../../http/middleware/permissions.js';
+import { assertSportIssue, type IssueAccess } from './issue-access.js';
 import { BusinessRuleError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { assertNotArchived } from '../championships/championship-archive.service.js';
 import { assertOrgNotArchived } from '../iam/organization-archive.service.js';
@@ -80,6 +82,24 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
     if (!allowed) throw new ForbiddenError('You do not have permission to issue certificates for this institution.');
   };
 
+  // The event's organisers issue for the event's host organisation too: an overall
+  // organiser for the whole event, a sport organiser for their sports only. Revoking,
+  // templates and the institution's full register stay with its own issuers.
+  const guards = makeGuards(prisma);
+  const issueAccess = async (req: any, organizationId: string, championshipId?: string | null): Promise<IssueAccess> => {
+    try {
+      await assertIssuer(req, organizationId);
+      return 'issuer';
+    } catch (err) {
+      if (!championshipId) throw err;
+      const champ = await prisma.championships.findUnique({ where: { id: championshipId }, select: { host_organization_id: true } });
+      if (champ?.host_organization_id !== organizationId) throw err;
+      const scope = await guards.eventScope(req.user!.id, championshipId);
+      if (!scope || (Array.isArray(scope) && scope.length === 0)) throw err;
+      return scope;
+    }
+  };
+
   // ---- the manager's dashboard ------------------------------------------------
   router.get('/organizations/:id/certificates/overview', asyncHandler(async (req, res) => {
     await assertIssuer(req, req.params.id);
@@ -99,7 +119,7 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
 
   // ---- templates (J4-E6) -----------------------------------------------------
   router.get('/organizations/:id/certificate-templates', asyncHandler(async (req, res) => {
-    await assertIssuer(req, req.params.id);
+    await issueAccess(req, req.params.id, typeof req.query.championship_id === 'string' ? req.query.championship_id : null);
     const rows = await prisma.certificate_templates.findMany({
       where: { organization_id: req.params.id, archived_at: null },
       orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
@@ -296,12 +316,13 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
   // ---- Recipients step: live counts and the Review-step list -----------------
   router.get('/organizations/:id/certificates/candidates', asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
-    await assertIssuer(req, organizationId);
+    const access = await issueAccess(req, organizationId, typeof req.query.championship_id === 'string' ? req.query.championship_id : null);
     const q = candidatesQuerySchema.parse({
       championship_id: req.query.championship_id, category: req.query.category,
       sport_id: req.query.sport_id, tournament_discipline_id: req.query.tournament_discipline_id, team_id: req.query.team_id,
       award_level: req.query.award_level || undefined,
     });
+    assertSportIssue(access, q.category, q.sport_id);
     const champ = await prisma.championships.findUnique({ where: { id: q.championship_id }, select: { id: true } });
     if (!champ) throw new NotFoundError('Championship');
 
@@ -330,8 +351,8 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
   // ---- bulk issue (J4-E7) ----------------------------------------------------
   router.post('/organizations/:id/certificates/generate', validateBody(generateSchema), asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
-    await assertIssuer(req, organizationId);
     const body = req.body as z.infer<typeof generateSchema>;
+    assertSportIssue(await issueAccess(req, organizationId, body.championship_id), body.category, body.filters?.sport_id);
     // Issuing is a change to the event, and an archived event takes none.
     await assertNotArchived(prisma, body.championship_id);
 
@@ -538,9 +559,14 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
 
   router.get('/organizations/:id/certificates', asyncHandler(async (req, res) => {
     const organizationId = req.params.id;
-    await assertIssuer(req, organizationId);
     const query = req.query as Record<string, string | undefined>;
-    const where = registerWhere(organizationId, query) as any;
+    const access = await issueAccess(req, organizationId, query.championship_id);
+    let where = registerWhere(organizationId, query) as any;
+    // A sport organiser sees this event's certificates for their sports only.
+    if (Array.isArray(access)) {
+      const names = (await prisma.sports.findMany({ where: { id: { in: access } }, select: { name: true } })).map((s) => s.name);
+      where = { AND: [where, { OR: names.map((n) => ({ payload: { path: ['sport'], equals: n } })) }] };
+    }
 
     const pageSize = Math.min(Math.max(Number(query.page_size) || 25, 1), 200);
     const page = Math.max(Number(query.page) || 1, 1);
@@ -551,9 +577,10 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
         skip: (page - 1) * pageSize, take: pageSize, select: REGISTER_SELECT,
       }),
       prisma.certificates.count({ where }),
-      prisma.certificates.count({ where: { organization_id: organizationId } }),
-      prisma.certificates.count({ where: { organization_id: organizationId, revoked_at: { not: null } } }),
-      prisma.certificate_verifications.count({ where: { certificates: { organization_id: organizationId } } }),
+      // Totals are the institution's own figures; an event organiser sees their slice.
+      prisma.certificates.count({ where: access === 'issuer' ? { organization_id: organizationId } : where }),
+      prisma.certificates.count({ where: access === 'issuer' ? { organization_id: organizationId, revoked_at: { not: null } } : { AND: [where, { revoked_at: { not: null } }] } }),
+      prisma.certificate_verifications.count({ where: { certificates: access === 'issuer' ? { organization_id: organizationId } : where } }),
     ]);
 
     const byCert = await scanCounts(rows.map((r) => r.id));
@@ -566,6 +593,8 @@ export function makeCertificatesRouter(prisma: Prisma): Router {
         status: statusOf({ ...r, _scans: byCert.get(r.id) ?? 0 }),
       })),
       page: { page, page_size: pageSize, matching, pages: Math.max(Math.ceil(matching / pageSize), 1) },
+      // 'issuer' = the institution's own issuer; otherwise an event organiser's slice.
+      access: access === 'issuer' ? 'issuer' : Array.isArray(access) ? 'sports' : 'event',
       summary: { total, revoked, live: total - revoked, verification_scans: scans },
     });
   }));

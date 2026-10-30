@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { STANDINGS_TIEBREAKER, type StandingsTiebreaker } from './enums.js';
+import { STAGE_DEFAULT_TIEBREAKERS, STANDINGS_TIEBREAKER, type StandingsTiebreaker } from './enums.js';
 
 // A tournament discipline's draw as an ordered, possibly-branching tree of stages.
 // Stage 1 (the tree root) always has real entrants; every stage beyond that is
@@ -53,6 +53,8 @@ export interface GroupStage {
   // This stage's own qualification tiebreak order - independent of the
   // championship-level StandingsRule.tiebreakers used for the points table.
   tiebreakers: StandingsTiebreaker[];
+  /** Match points for this stage's tables. Unset = the discipline's ranking or the sport default. */
+  points?: { win: number; draw: number; loss: number };
   branches: Branch[]; // >= 1
 }
 
@@ -93,7 +95,8 @@ export const groupStageSchema: z.ZodType<GroupStage, z.ZodTypeDef, unknown> = z.
   type: z.literal('group'),
   numGroups: z.number().int().min(1),
   doubleRound: z.boolean().optional(),
-  tiebreakers: z.array(z.enum(STANDINGS_TIEBREAKER)).min(1).default(['points', 'wins', 'lost']),
+  tiebreakers: z.array(z.enum(STANDINGS_TIEBREAKER)).min(1).default(STAGE_DEFAULT_TIEBREAKERS),
+  points: z.object({ win: z.number().min(0).max(100), draw: z.number().min(0).max(100), loss: z.number().min(0).max(100) }).optional(),
   branches: z.array(branchSchema).min(1),
 }));
 

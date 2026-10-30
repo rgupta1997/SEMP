@@ -59,7 +59,7 @@ export function CertificateDetailPage() {
     // means letting somebody else check it, and they will not have an account.
     try {
       await navigator.clipboard.writeText(c.verify_url);
-      toast.success('Verification link copied', 'Anyone can open it — no account needed.');
+      toast.success('Verification link copied', 'Anyone can open it - no account needed.');
     } catch { toast.error('Could not copy the link', c.verify_url); }
   };
 
@@ -128,14 +128,14 @@ export function CertificateDetailPage() {
               <Row label="Certificate ID"><span className="font-mono text-xs">{c.serial}</span></Row>
               <Row label="Type">{c.certificate_templates?.name ?? 'Default'}</Row>
               <Row label="Recipient">{c.recipient_name}</Row>
-              <Row label="Team">{c.team?.name ?? '—'}</Row>
+              <Row label="Team">{c.team?.name ?? '-'}</Row>
               <Row label="Event">
                 {c.championships
                   ? <Link to={`/championships/${c.championships.id}`} className="text-brand-600 hover:underline dark:text-brand-400">{c.championships.name}</Link>
-                  : '—'}
+                  : '-'}
               </Row>
-              <Row label="Sport">{c.sport ?? '—'}</Row>
-              <Row label="Achievement">{c.title ?? '—'}</Row>
+              <Row label="Sport">{c.sport ?? '-'}</Row>
+              <Row label="Achievement">{c.title ?? '-'}</Row>
               <Row label="Issue date">{shortDate(c.issued_at)}</Row>
               <Row label="Issued by">{c.issued_by_name ?? 'System'}</Row>
               <Row label="Status"><CertStatus status={c.status} /></Row>

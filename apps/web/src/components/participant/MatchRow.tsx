@@ -3,8 +3,8 @@ import { fmtDateTime } from '../../lib/hooks';
 import { cn } from '../ui';
 import { ResultBadge } from './ResultBadge';
 import type { MatchSummary } from './types';
-import { formatPoints, TBD_LABEL } from '@semp/shared';
-
+import { formatPoints, KHO_RESULT_WORDS, shootoutTerms, TBD_LABEL } from '@semp/shared';
+
 // One match as a clickable card - stacks cleanly on mobile, row-like on desktop.
 // `showEvent` adds the championship name (used on the cross-championship dashboard/list).
 export function MatchRow({ match, showEvent = true }: { match: MatchSummary; showEvent?: boolean }) {
@@ -44,7 +44,8 @@ export function MatchRow({ match, showEvent = true }: { match: MatchSummary; sho
           {teamLine(myName, match.my_score, true, hasScore && won, match.pens?.[0])}
           {teamLine(oppName, match.opp_score, false, hasScore && lost, match.pens?.[1])}
         </div>
-        {match.pens && <div className="mt-0.5 text-xs font-semibold text-brand-600 dark:text-brand-400">{won ? 'Won' : 'Lost'} {match.pens[0]}–{match.pens[1]} on penalties</div>}
+        {match.pens && <div className="mt-0.5 text-xs font-semibold text-brand-600 dark:text-brand-400">{won ? 'Won' : 'Lost'} {match.pens[0]}–{match.pens[1]} {shootoutTerms(match.sport).phrase}</div>}
+        {match.settled && (won || lost) && <div className="mt-0.5 text-xs font-semibold text-brand-600 dark:text-brand-400">{won ? 'Won' : 'Lost'} {KHO_RESULT_WORDS[match.settled]}</div>}
         {match.opponent?.organization && <div className="mt-0.5 truncate text-xs text-slate-400 dark:text-slate-500">{match.opponent.organization}</div>}
         <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{fmtDateTime(match.scheduled_at)}</div>
       </div>

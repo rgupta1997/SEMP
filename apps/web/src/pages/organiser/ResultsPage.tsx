@@ -2,9 +2,9 @@ import { useMemo, useState, type ReactNode } from 'react';
 import {
   CheckCircle2, ChevronRight, Clock, Eye, Flag, Lock, LockOpen, MapPin, Pencil, Radio, ShieldCheck, Users,
 } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints, resultSummary, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndNoteOf, earlyEndOf, formatPoints, isKnockoutRound, KHO_END_LABEL, KHO_END_SHORT, khoSettlementOf, resultSummary, shootoutLabel, shootoutOf, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { AwardsBoard, MatchAwardsLine, type AwardsBoardData, type BoardMatchAward } from '../../features/awards/AwardsBoard';
 import { useAuth } from '../../lib/auth';
@@ -12,14 +12,18 @@ import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
 import { titleCase, whenLabel } from '../../lib/format';
 import {
-  Badge, Button, Card, EmptyState, FilterChips, Modal, Select, Spinner, StatusBadge, Textarea, cn, confirmDialog, toast,
+  Badge, Button, Card, EmptyState, FilterChips, Modal, Segmented, Select, Spinner, StatusBadge, Textarea, cn, confirmDialog, toast,
 } from '../../components/ui';
+import { GroupTables } from '../../components/GroupTables';
+import { EventTallyTable, TitleTallyCard, hasTally as sportHasTally, titleTallyPath, type TitleTallyResponse } from '../../components/TitleTally';
 import { useUrlState, usePreserveScroll } from '../../components/primitives';
 
 // A flattened fixture row from GET /championships/:id/fixtures.
 interface ResultRow {
   /** Catalogue sport - which organisers may act on this match. */
   sport_id?: string | null;
+  /** The draw (sport discipline) this match belongs to. */
+  tournament_discipline_id?: string | null;
   /** Sequential within the championship - how a person refers to this match. */
   match_no?: number | null;
   /** When it is played. Rendered as Today / Tomorrow / 28th Aug, 2026 · 7:30 PM. */
@@ -498,15 +502,33 @@ export function ResultsPage() {
   // Grouped from the FILTERED rows, so choosing "Awaiting review" narrows the
   // sport headings too rather than leaving empty ones behind.
   const groups = useMemo(() => {
-    const map = new Map<string, { key: string; sport: string | null; discipline: string | null; icon: string | null; rows: ResultRow[] }>();
+    const map = new Map<string, { key: string; sport: string | null; sportId: string | null; drawId: string | null; discipline: string | null; icon: string | null; rows: ResultRow[] }>();
     for (const f of sortRows(visibleRows)) {
       const key = `${f.sport ?? ''}__${f.discipline ?? ''}`;
       let g = map.get(key);
-      if (!g) { g = { key, sport: f.sport, discipline: f.discipline, icon: f.sport_icon, rows: [] }; map.set(key, g); }
+      if (!g) { g = { key, sport: f.sport, sportId: f.sport_id ?? null, drawId: f.tournament_discipline_id ?? null, discipline: f.discipline, icon: f.sport_icon, rows: [] }; map.set(key, g); }
       g.rows.push(f);
     }
     return [...map.values()];
   }, [visibleRows, sortRows]);
+
+  // Each discipline with pools or a league table has a Point tally tab (its group tables).
+  // Opened straight from the Schedule's tie banner via ?tally=<draw id>.
+  const [searchParams] = useSearchParams();
+  // Ranking sports: the master title tally (top of the sport) and each event's standing.
+  const { data: tally } = useApi<TitleTallyResponse>(titleTallyPath(eventId!));
+  const eventTallyOf = (drawId: string | null) => (drawId ? tally?.events.find((e) => e.draw_id === drawId) : undefined);
+  const sportTallyOf = (sportId: string | null) => tally?.sports.find((s) => s.sport_id === sportId);
+  const [tallyOpen, setTallyOpen] = useState<Set<string>>(() => new Set(searchParams.get('tally') ? [searchParams.get('tally')!] : []));
+  const hasTally = (drawId: string | null) => !!drawId && (!!eventTallyOf(drawId)
+    || fixtures.some((f) => f.tournament_discipline_id === drawId && f.round !== 'Event' && !isKnockoutRound(f.round)));
+  // The title tally sits once, at the top of a ranking sport's first section.
+  const firstGroupOfSport = (key: string, sportId: string | null) => groups.find((x) => x.sportId === sportId)?.key === key;
+  const setTally = (drawId: string, open: boolean) => setTallyOpen((s) => {
+    const next = new Set(s);
+    if (open) next.add(drawId); else next.delete(drawId);
+    return next;
+  });
 
   const matchLabel = (f: ResultRow) =>
     (f.home || f.away) ? `${teamLabel(f.home) || TBD_LABEL} vs ${teamLabel(f.away) || TBD_LABEL}` : (f.discipline ?? f.sport ?? 'This event');
@@ -693,7 +715,7 @@ export function ResultsPage() {
           every row now, and this links straight there. */}
       {hiddenCount > 0 && (
         <p className="t-meta">
-          {hiddenCount} scheduled {hiddenCount === 1 ? 'match is' : 'matches are'} not shown here —
+          {hiddenCount} scheduled {hiddenCount === 1 ? 'match is' : 'matches are'} not shown here -
           they appear once scoring starts.{' '}
           <Link to={`/championships/${eventId}/schedule`} className="font-medium underline underline-offset-2">
             Score a match from Schedule
@@ -718,6 +740,9 @@ export function ResultsPage() {
         <div className="space-y-6">
           {groups.map((g) => (
             <section key={g.key} className="space-y-2">
+              {firstGroupOfSport(g.key, g.sportId) && sportHasTally(sportTallyOf(g.sportId)) && (
+                <TitleTallyCard tally={sportTallyOf(g.sportId)!} />
+              )}
               <div className="flex items-center gap-2 px-1">
                 <span className="text-base">{g.icon ?? '◇'}</span>
                 <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">
@@ -725,9 +750,18 @@ export function ResultsPage() {
                   {g.discipline && <span className="font-medium text-slate-400 dark:text-slate-500"> · {g.discipline}</span>}
                 </h3>
                 <Badge tone="slate">{g.rows.length}</Badge>
+                {hasTally(g.drawId) && (
+                  <Segmented size="sm" value={tallyOpen.has(g.drawId!) ? 'tally' : 'matches'}
+                    onChange={(v) => setTally(g.drawId!, v === 'tally')}
+                    options={[{ value: 'matches', label: 'Matches' }, { value: 'tally', label: 'Point tally' }]} />
+                )}
               </div>
 
-              {g.rows.map((f) => {
+              {g.drawId && tallyOpen.has(g.drawId) && hasTally(g.drawId)
+                ? (eventTallyOf(g.drawId)
+                  ? <EventTallyTable event={eventTallyOf(g.drawId)!} />
+                  : <GroupTables drawId={g.drawId} canManage={canManageSport(g.sportId) && !archived} />)
+                : g.rows.map((f) => {
                 // Ranking events (powerlifting/swimming/athletics) have no head-to-head
                 // matchup - the generator emits one team-less fixture with round 'Event'.
                 // Showing "TBD vs TBD" there is wrong: there's no opponent to decide, so
@@ -752,11 +786,14 @@ export function ResultsPage() {
                 const early = earlyEndOf(f.live_state);
                 // How it went, home first: carrom game scores, chess game results or ending.
                 const summary = scored ? resultSummary(f.sport, f.live_state) : null;
+                const endNote = early ? earlyEndNoteOf(f.live_state) : null;
                 const earlyNote = (won: boolean) => early && scored && !won && (homeWon || awayWon) && (
-                  <span className="ml-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400">({EARLY_END_LABEL[early]})</span>
+                  <span className="ml-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400" title={endNote ?? undefined}>({EARLY_END_LABEL[early]})</span>
                 );
                 // Level after play and settled on penalties: the kicks sit beside the score.
                 const pens = scored ? shootoutOf(f.live_state) : null;
+                // Kho kho: a minimum chase (score still level) or a win by an innings.
+                const khoEnd = scored ? khoSettlementOf(f.live_state) : null;
                 const pensNote = (kicks: number) => pens && (
                   <span className="ml-1 text-[11px] font-semibold text-brand-600 dark:text-brand-400" title="Penalty shoot-out">({kicks})</span>
                 );
@@ -883,6 +920,11 @@ export function ResultsPage() {
                               </span>
                             </div>
                           ))}
+                          {khoEnd && (
+                            <span className="truncate text-[12px] font-semibold text-brand-600 dark:text-brand-400">
+                              {teamLabel(khoEnd.winner === 'A' ? f.home : f.away)} {KHO_END_LABEL[khoEnd.reason]}
+                            </span>
+                          )}
                           {summary && <span className="t-num truncate text-[12px] text-slate-500 dark:text-slate-400">{summary}</span>}
                         </div>
                       )}
@@ -891,7 +933,7 @@ export function ResultsPage() {
 
                     {/* ---------------- lg+ : the three-column row ---------------- */}
                     <div className="hidden items-center gap-x-2 lg:contents">
-                    {/* Left cell (1fr): match type — always shown in full.
+                    {/* Left cell (1fr): match type - always shown in full.
                         Both outer cells are equal 1fr so the auto center column is
                         always physically centered regardless of their content widths. */}
                     {/* Each line carries its own tooltip, so a cut-off line shows ITS full text
@@ -953,7 +995,13 @@ export function ResultsPage() {
                             {pens && (
                               <span className="text-[10px] font-semibold leading-3 text-brand-600 dark:text-brand-400"
                                 title={`${teamLabel(pens.winner === 'A' ? f.home : f.away)} won on penalties`}>
-                                {shootoutLabel(pens.home, pens.away)}
+                                {shootoutLabel(pens.home, pens.away, f.sport)}
+                              </span>
+                            )}
+                            {khoEnd && (
+                              <span className="text-[10px] font-semibold leading-3 text-brand-600 dark:text-brand-400"
+                                title={`${teamLabel(khoEnd.winner === 'A' ? f.home : f.away)} ${KHO_END_LABEL[khoEnd.reason]}`}>
+                                {KHO_END_SHORT[khoEnd.reason]}
                               </span>
                             )}
                           </span>

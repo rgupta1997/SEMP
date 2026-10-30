@@ -1,5 +1,5 @@
 /*
- * THE STANDARD TEMPLATE'S VALIDATOR — a filled-in workbook in, issues and a
+ * THE STANDARD TEMPLATE'S VALIDATOR - a filled-in workbook in, issues and a
  * blueprint out.
  *
  * Pure and deterministic: no database, no clock, no randomness. It never throws on
@@ -352,7 +352,7 @@ function run(input: SetupWorkbookInput, issues: SetupIssue[]): SetupValidationRe
     for (const s of group) {
       const had = seen.get(s.nameNorm);
       if (had) {
-        error('duplicate_squad_name', `Two squads in ${draw.label} are called "${s.name}" (Squads rows ${had.row} and ${s.row}). Squad names must be unique in a draw — rename one, for example by adding its ${competitorWord} ("${s.name} (${s.competitor})").`, { sheet: 'Squads', row: s.row, column: 'Squad name' });
+        error('duplicate_squad_name', `Two squads in ${draw.label} are called "${s.name}" (Squads rows ${had.row} and ${s.row}). Squad names must be unique in a draw - rename one, for example by adding its ${competitorWord} ("${s.name} (${s.competitor})").`, { sheet: 'Squads', row: s.row, column: 'Squad name' });
       } else seen.set(s.nameNorm, s);
     }
     const codes = new Map<string, SquadRec>();
@@ -627,7 +627,7 @@ function run(input: SetupWorkbookInput, issues: SetupIssue[]): SetupValidationRe
           target = cands[0];
         }
         if (!target) {
-          warn('people_row_unmatched', `People row ${r.row} ("${nm || id}") is not on any squad, so it is not used. People only adds contacts to squad members — check the spelling matches Squads, or add the person to a squad.`, { sheet: 'People', row: r.row, column: 'Name' });
+          warn('people_row_unmatched', `People row ${r.row} ("${nm || id}") is not on any squad, so it is not used. People only adds contacts to squad members - check the spelling matches Squads, or add the person to a squad.`, { sheet: 'People', row: r.row, column: 'Name' });
           continue;
         }
         if (idk && !target.idks.includes(idk)) { target.idks.push(idk); target.ids.push(id); byPersonIdk.set(idk, target); }
@@ -996,7 +996,7 @@ function run(input: SetupWorkbookInput, issues: SetupIssue[]): SetupValidationRe
         }
       }
       // The blueprint carries only rows that are whole, and never a "Winner of" that
-      // points at a row left out — so it stays self-consistent even while errors stand.
+      // points at a row left out - so it stays self-consistent even while errors stand.
       let kept = rows.filter((x) => isComplete(x) && !x.dupId);
       for (let before = -1; before !== kept.length;) {
         before = kept.length;
@@ -1175,7 +1175,7 @@ function readEvent(
   grid: unknown[][] | null, type: SetupEventType, sink: IssueSink,
   error: (code: string, message: string, where?: Where) => void,
   warn: (code: string, message: string, where?: Where) => void,
-  /** The Event fields this setup needs (setupWorkbookLayout) — e.g. no venue when venue and fixtures are skipped. */
+  /** The Event fields this setup needs (setupWorkbookLayout) - e.g. no venue when venue and fixtures are skipped. */
   required: ReadonlySet<string>,
 ): EventInfo {
   const sheet = templateSheet('Event');
@@ -1191,7 +1191,7 @@ function readEvent(
         error('missing_field', `The Event sheet has no "${c.header}" row. Add a row with "${c.header}" in the Field column and its value next to it${c.hint ? ` (${c.hint})` : ''}.`, { sheet: 'Event', column: c.header });
       } else if (!f.value) {
         const example = typeof c.example === 'string' ? c.example : c.example?.[type] ?? '';
-        error('missing_field', `"${c.header}" on the Event sheet is blank. Fill it in${c.hint ? ` — ${c.hint}` : '.'}${example ? ` Example: ${example}` : ''}`, at(c.key));
+        error('missing_field', `"${c.header}" on the Event sheet is blank. Fill it in${c.hint ? ` - ${c.hint}` : '.'}${example ? ` Example: ${example}` : ''}`, at(c.key));
       }
     }
   }
@@ -1215,7 +1215,7 @@ function readEvent(
   const dayRaw = v('day_dates');
   if (dayRaw) {
     for (const part of dayRaw.split(/;|,(?=\s*day\s*\d)|\s+(?=day\s*\d)/i).map(tidy).filter(Boolean)) {
-      const m = part.match(/^day\s*(\d+)\s*(?:=|:|–|—|-(?=\s))\s*(.+)$/i);
+      const m = part.match(/^day\s*(\d+)\s*(?:=|:|–|-|-(?=\s))\s*(.+)$/i);
       const date = m ? parseDate(m[2]) : null;
       if (!m || !date) {
         error('bad_day_dates', `Day dates on the Event sheet has "${part}", which could not be read. Write each day as Day 1=2026-10-17, separated by semicolons.`, at('day_dates'));
@@ -1374,7 +1374,7 @@ function readDraws(
         error('preset_wrong_sport', `${label} (Draws row ${r.row}): Scoring preset "${presetKey}" is for ${preset.sport}, not ${sport}. Use a ${sport} preset or leave it blank.`, at('Scoring preset'));
       } else {
         const bits = [minutes ? `${minutes} min` : '', extra ? `${extra} min extra time` : '', pens ? 'penalties' : ''].filter(Boolean);
-        spec.scoring = { presetKey, name: `${sport} ${disc} — ${bits.length ? bits.join(', ') : preset.name}` };
+        spec.scoring = { presetKey, name: `${sport} ${disc} - ${bits.length ? bits.join(', ') : preset.name}` };
         if (minutes !== undefined) spec.scoring.matchMinutes = minutes;
         if (extra !== undefined) spec.scoring.extraTimeMinutes = extra;
         if (pens !== undefined) spec.scoring.penaltyKicks = pens;
@@ -1383,7 +1383,7 @@ function readDraws(
         }
       }
     } else if (minutes !== undefined || extra !== undefined || pens !== undefined) {
-      info('timing_without_preset', `${label}: Match minutes, extra time and penalties only time the schedule here — the scoring format is ${sport}'s default. Set a Scoring preset to change how matches are scored.`, at('Scoring preset'));
+      info('timing_without_preset', `${label}: Match minutes, extra time and penalties only time the schedule here - the scoring format is ${sport}'s default. Set a Scoring preset to change how matches are scored.`, at('Scoring preset'));
     }
 
     const rec: DrawRec = {

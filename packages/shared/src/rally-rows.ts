@@ -1,6 +1,7 @@
 import type { ScoringFormat, Side } from './scoring-rules.js';
 import { foldRally, misconductTerms, type RallyEvent, type RallyLog } from './rally-kernel.js';
 import { formatForPairing, resolveServer, type Pairing } from './serve-resolvers.js';
+import { shootoutTerms } from './tie-break.js';
 
 // ============================================================================
 // The rally log as TABLE ROWS, and back again.
@@ -268,9 +269,9 @@ export function readRallyLog(liveState: unknown): RallyLog {
 }
 
 /** A match that stopped before the score could finish it. */
-export type EarlyEnd = 'retired' | 'disqualified' | 'conceded';
+export type EarlyEnd = 'retired' | 'disqualified' | 'conceded' | 'weather';
 
-const EARLY_ENDS: ReadonlySet<string> = new Set<EarlyEnd>(['retired', 'disqualified', 'conceded']);
+const EARLY_ENDS: ReadonlySet<string> = new Set<EarlyEnd>(['retired', 'disqualified', 'conceded', 'weather']);
 
 /**
  * Why a match ended early, read from its log: the last `end` event, if nothing was
@@ -291,7 +292,19 @@ export const EARLY_END_LABEL: Record<EarlyEnd, string> = {
   retired: 'ret.',
   disqualified: 'DSQ',
   conceded: 'conceded',
+  weather: 'rain',
 };
+
+/** The official's note on an early end ("pull contest 52m-47m"), when one was given. */
+export function earlyEndNoteOf(liveState: unknown): string | null {
+  if (!earlyEndOf(liveState)) return null;
+  const log = readRallyLog(liveState);
+  for (let i = log.length - 1; i >= 0; i--) {
+    const ev = log[i];
+    if (ev.t === 'end') return ev.note?.trim() || null;
+  }
+  return null;
+}
 
 /** A level match settled by a penalty shoot-out: kicks scored by each side (A = home). */
 export interface Shootout {
@@ -319,9 +332,9 @@ export function shootoutOf(liveState: unknown): Shootout | null {
   return { home, away, winner: end.winner };
 }
 
-/** How a results line marks it: "7-7 (4-3 pens)". Pass the scores in display order. */
-export function shootoutLabel(first: number, second: number): string {
-  return `${first}–${second} pens`;
+/** How a results line marks it: "7-7 (4-3 pens)", hockey "4-3 SO". Pass the scores in display order. */
+export function shootoutLabel(first: number, second: number, sport?: string | null): string {
+  return `${first}–${second} ${shootoutTerms(sport).short}`;
 }
 
 /** Who served the first point, as persisted. Defaults to the home side. */

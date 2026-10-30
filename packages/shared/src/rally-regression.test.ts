@@ -299,14 +299,14 @@ describe('2. one rally, every outcome it can have', () => {
     expect(s.score[0]).toEqual([1, 0]);
   });
 
-  it('2.6 a point can carry a magnitude — a three-pointer is one action worth three', () => {
+  it('2.6 a point can carry a magnitude - a three-pointer is one action worth three', () => {
     const bb = fmt('fiba_4x10');
     const s = play(bb, [pt('A', 3), pt('A', 2), pt('B')]);
     expect(aggregateScore(s)).toEqual([5, 1]);
     expectSound(bb, s);
   });
 
-  it('2.7 AN EXPLICIT ZERO SCORES NOTHING — it is an action, not a point', () => {
+  it('2.7 AN EXPLICIT ZERO SCORES NOTHING - it is an action, not a point', () => {
     // Outside the racquet family a tap is an ACTION, and most actions score nothing:
     // a card, a save, a missed penalty, an empty raid, a dig. The console sends
     // `pts: 0` for exactly those. Clamping to a minimum of one turned every one of
@@ -357,7 +357,7 @@ describe('2. one rally, every outcome it can have', () => {
 });
 
 // ============================================================================
-// 3. THE UNIT — target, margin, cap, deuce
+// 3. THE UNIT - target, margin, cap, deuce
 // ============================================================================
 
 describe('3. winning a unit', () => {
@@ -609,7 +609,7 @@ describe('5. courts and ends', () => {
 });
 
 // ============================================================================
-// 6. NESTING — games inside sets inside a match
+// 6. NESTING - games inside sets inside a match
 // ============================================================================
 
 describe('6. nesting', () => {
@@ -771,7 +771,7 @@ describe('7. corrections', () => {
     expectSound(f, s);
   });
 
-  it('7.8 the fold is pure — the same log twice gives the same state', () => {
+  it('7.8 the fold is pure - the same log twice gives the same state', () => {
     const log: RallyLog = [
       ...rally(9), { t: 'let' }, { t: 'fault', side: 'A' },
       { t: 'penalty', side: 'B' }, { t: 'adjust', side: 'A', delta: -1 },
@@ -872,7 +872,7 @@ describe('8. the clock', () => {
 // ============================================================================
 
 describe('9. periods and aggregate sports', () => {
-  it('9.1 a football half is not won — the match is decided on the total', () => {
+  it('9.1 a football half is not won - the match is decided on the total', () => {
     const f = fmt('fifa_2x45');
     expect(isAggregate(f)).toBe(true);
     const s = play(f, [...pts('A', 2), { t: 'endPeriod' }, ...pts('B', 1), { t: 'endPeriod' }], 'A');
@@ -1003,7 +1003,7 @@ describe('10. the result', () => {
 });
 
 // ============================================================================
-// 11. REACHABILITY — every preset can actually be finished
+// 11. REACHABILITY - every preset can actually be finished
 // ============================================================================
 
 /**

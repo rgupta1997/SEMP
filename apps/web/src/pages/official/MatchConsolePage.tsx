@@ -14,13 +14,15 @@ import {
   hydrateTie, initTie, rubbersWon, tieScore, tieOutcome, tieTarget, rubberDef, decideRubber as decideRubberFn, reopenRubber as reopenRubberFn,
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
-import { hydrateEvent, aggregateEvent, subEventResults, parseTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, minuteLabel, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
-import { carromHeadline, carromMatch, carromRulesOf, isCarromSport } from '@semp/shared';
+import { hydrateEvent, hasResultIn, moveUnplacedTo, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
+import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
+import { carromHeadline, carromMatchOf, carromRulesOf, drawSettlement, isCarromSport } from '@semp/shared';
 import { CarromResult, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
+import { PoolResult, hydratePool } from '../../features/scoring/PoolResult';
+import { isFrameContest, isPoolSport, poolRubber } from '@semp/shared';
 import { TieLayoutEditor, type TieLayoutValue } from '../../features/scoring/TieLayoutEditor';
-import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, isChessSport, isKnockoutFixture, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
-import { unitWinner, type TieSpec, type EventSpec, type ScoringMode, type ScoringFormat, type KernelState, type Pairing, type RallyLog, type RubberLineup, type Side } from '@semp/shared';
+import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, groupTiebreakAllowed, isChessSport, isKnockoutFixture, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
+import { unitWinner, type TieSpec, type EventSpec, type EventScoringOpts, type ScoringMode, type ScoringFormat, type KernelState, type Pairing, type RallyLog, type RubberLineup, type Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer, hydratePairSwap } from '../../features/scoring/RacquetDeck';
 import { LineupPanel } from '../../features/scoring/LineupPanel';
 import { ChessResult, EndingChips, chessGamesIn, chessSummary, hydrateChess, type ChessState } from '../../features/scoring/ChessResult';
@@ -508,8 +510,12 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
   const drawTie = (template.fixtureType === 'tie' && template.tie)
     ? template.tie
     : tieAllowed && !startedAsSingle ? tieTemplateFor(sportName)?.tie : undefined;
-  // Group and league rounds may play dead rubbers out; knockouts stop once decided.
-  const tieSpec = frozenTie ?? (drawTie ? tieForRound(drawTie, fixture?.round) : undefined);
+  // Group and league rounds may play dead rubbers out; knockouts stop once decided. Applied to a
+  // layout saved for this match as well - doing it twice changes nothing.
+  const tieSpec = frozenTie ? tieForRound(frozenTie, fixture?.round) : drawTie ? tieForRound(drawTie, fixture?.round) : undefined;
+  // The layout as set, before the round's rule: what "Edit rubbers" starts from, so saving
+  // it keeps the group and knockout dead-rubber settings apart.
+  const tieLayout = frozenTie ?? drawTie;
   // Chess ties are always won on board points, every board played - including draws
   // set up before the template said so.
   const consoleTieSpec = useMemo(
@@ -552,11 +558,16 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
   // ranking" (default) and detailed per-athlete - so scoring one never
   // clobbers the other. Snaps to whichever this fixture was last scored with.
   const [eventMode, setEventMode] = useState<'team' | 'detailed'>('team');
+  // Competitors an institute may enter in this event: the draw's squad size, else the discipline's.
+  const perInstitute: number = fixture?.tournament_disciplines?.squad_max ?? fixture?.tournament_disciplines?.disciplines?.squad_max ?? 1;
   const eventModeSeeded = useRef(false);
   useEffect(() => {
     if (eventModeSeeded.current || touched.current || !live) return;
     eventModeSeeded.current = true;
     if (live.live_state?.event) setEventMode('detailed');
+    // Nothing scored yet and an institute may enter more than one competitor (not a relay):
+    // only per-athlete entry can place two from the same institute.
+    else if (!live.live_state?.eventRanking && eventSpec && perInstitute > 1 && !isRelaySubEvent(eventSpec.subEvents[0])) setEventMode('detailed');
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
 
   // Measured/time single sports have no per-tick scoring, so they're manual-only.
@@ -737,7 +748,7 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
           ? <EventConsole key={`evd-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />
           : <EventRankingConsole key={`evr-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={eventSpec} live={live} invalidate={invalidate} />)
         : structure === 'tie' && tieSpec
-          ? <TieConsole key={`tie-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={consoleTieSpec ?? tieSpec} mode={effectiveMode} live={live} invalidate={invalidate} onDone={onDone} />
+          ? <TieConsole key={`tie-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} spec={consoleTieSpec ?? tieSpec} layout={tieLayout} mode={effectiveMode} live={live} invalidate={invalidate} onDone={onDone} />
           // Chess records each game's result - nothing is counted during play - so it
           // has its own screen rather than the generic two-number form.
           : isChessSport(sportName)
@@ -749,8 +760,8 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
             ? isCricketSport(sportName)
               ? <CricketManualResult key={`cman-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} live={live} invalidate={invalidate} onDone={onDone} />
               : <ManualResult key={`man-${fixtureId}`} fixture={fixture} fixtureId={fixtureId} def={singleDef} live={live} invalidate={invalidate} onDone={onDone}
-                  // Volleyball and throwball are set-shaped too: check against their own best-of, not a fixed 5.
-                  format={isRacquetSport(sportName) || statSpecFor(sportName)?.family === 'net'
+                  // Volleyball, throwball and pool are set-shaped too: check against their own best-of, not a fixed 5.
+                  format={isRacquetSport(sportName) || statSpecFor(sportName)?.family === 'net' || isPoolSport(sportName)
                     ? racquetFormatFor(fixture, (live?.live_state as any)?.format ?? null).format
                     : isCarromSport(sportName) ? carromResolved(fixture, (live?.live_state as any)?.format ?? null).format as ScoringFormat | null
                     : null} />
@@ -1055,7 +1066,7 @@ function PostMatchActions({ fixture, fixtureId, invalidate }:
     if (potmType && !potm && !locked) {
       const ok = await confirmDialog({
         title: 'Lock without a player of the match?',
-        message: 'A locked scorecard cannot be changed, and that includes its awards — this match would keep no player of the match unless it is unlocked again.',
+        message: 'A locked scorecard cannot be changed, and that includes its awards - this match would keep no player of the match unless it is unlocked again.',
         confirmLabel: 'Lock anyway',
       });
       if (!ok) return;
@@ -1105,7 +1116,7 @@ function PostMatchActions({ fixture, fixtureId, invalidate }:
       {locked ? (
         <div className="rounded-xl border border-line bg-slate-50 px-3 py-2 text-center text-sm dark:bg-slate-800/60">
           <span className="font-semibold">🔒 Scorecard locked</span>
-          <span className="text-muted"> — official and permanent.</span>
+          <span className="text-muted"> - official and permanent.</span>
         </div>
       ) : (
         <>
@@ -1113,7 +1124,7 @@ function PostMatchActions({ fixture, fixtureId, invalidate }:
             {lock.isPending ? 'Locking…' : 'Lock scorecard'}
           </Button>
           <p className="text-center text-[11px] text-muted">
-            Locking makes the result official and permanent, and is the last step — awards cannot be changed afterwards. Organiser only.
+            Locking makes the result official and permanent, and is the last step - awards cannot be changed afterwards. Organiser only.
           </p>
         </>
       )}
@@ -1231,8 +1242,9 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
           timing: rallyTiming(format, nextLog, firstServer),
           // Snapshot on first write, then leave alone.
           format: (live?.live_state as any)?.format ?? format,
-          // Abandoned as "no result": standings share the points whatever the score.
-          noResult: reallyDone && state.outcome === 'void',
+          // Abandoned, or called off drawn: shared points (or none, the official's choice) whatever the score.
+          noResult: reallyDone && drawSettlement(state, nextLog).noResult,
+          drawNoPoints: reallyDone && drawSettlement(state, nextLog).drawNoPoints,
         },
         live_log: rallyTimeline(format, nextLog, firstServer, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
         // A walkover carries the format's walkover scoreline (2-0), unless the organiser enters it.
@@ -1279,7 +1291,7 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
       {squadIsBigger && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
           {who.source === 'skipped'
-            ? <span>Players not named — this result counts for the team only.</span>
+            ? <span>Players not named - this result counts for the team only.</span>
             : <span>Players: {namesOf(who.lineup?.A)?.join(' / ')} vs {namesOf(who.lineup?.B)?.join(' / ')}</span>}
           <button type="button" className="font-semibold underline underline-offset-2" onClick={() => setPickingPlayers(true)}>
             {who.source === 'skipped' ? 'Name players' : 'Change players'}
@@ -1443,6 +1455,8 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
           // reproducible under the rules it was played under.
           format: (live?.live_state as any)?.format ?? format,
           ...(sheet ? { teamSheet: sheet } : {}),
+          // Abandoned or drawn: standings share the points whatever the runs.
+          noResult: reallyDone && (state.outcome === 'void' || state.outcome === 'draw'),
         },
         live_log: cricketTimeline(state, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
         // The headline is RUNS per side, which is what standings compare.
@@ -1535,6 +1549,7 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
       onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
       onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
     />
+    <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} />
     </>
   );
 }
@@ -1552,10 +1567,10 @@ function cricketTimeline(state: CricketState, homeName: string, awayName: string
   for (const inn of state.innings) {
     const side = inn.battingSide === 'A' ? homeName : awayName;
     out.unshift({
-      t: `Innings ${inn.innings}`,
+      t: inn.superOver ? `Super Over ${inn.superOver}` : `Innings ${inn.innings}`,
       team: inn.battingSide,
       txt: `${side} ${inningsLine(inn, state.format.ballsPerOver)}`
-        + (inn.endedBy ? ` — ${inn.endedBy.replace('_', ' ')}` : ''),
+        + (inn.endedBy ? ` - ${inn.endedBy.replace('_', ' ')}` : ''),
       kind: 'innings',
     });
   }
@@ -1586,11 +1601,11 @@ function rallyTimeline(format: any, log: RallyLog, firstServer: Side, homeName: 
     const ev = t.event;
     const other = (s: Side): Side => (s === 'A' ? 'B' : 'A');
     const txt = ev.t === 'point'
-      ? (t.scored ? `${ev.kind === 'ace' ? 'Ace — point' : 'Point'} to ${nameOf(t.scored)}` : `${nameOf(ev.side)} won the rally — no point`)
-      : ev.t === 'fault' ? (t.scored ? `Double fault · ${nameOf(ev.side)} — point to ${nameOf(t.scored)}` : `Fault · ${nameOf(ev.side)}`)
+      ? (t.scored ? `${ev.kind === 'ace' ? 'Ace - point' : 'Point'} to ${nameOf(t.scored)}` : `${nameOf(ev.side)} won the rally - no point`)
+      : ev.t === 'fault' ? (t.scored ? `Double fault · ${nameOf(ev.side)} - point to ${nameOf(t.scored)}` : `Fault · ${nameOf(ev.side)}`)
       : ev.t === 'card' ? `${misconductTerms(format?.sport).warning} to ${nameOf(ev.against)}`
-      : ev.t === 'timeout' ? `Timeout — ${nameOf(ev.side)}`
-      : ev.t === 'penalty' && ev.card === 'red' ? `${misconductTerms(format?.sport).foul} to ${nameOf(other(ev.side))} — point to ${nameOf(ev.side)}`
+      : ev.t === 'timeout' ? `Timeout - ${nameOf(ev.side)}`
+      : ev.t === 'penalty' && ev.card === 'red' ? `${misconductTerms(format?.sport).foul} to ${nameOf(other(ev.side))} - point to ${nameOf(ev.side)}`
       : ev.t === 'end' && ev.reason === 'disqualified' && ev.winner ? `${nameOf(other(ev.winner))} disqualified`
       : RALLY_EVENT_TEXT[ev.t] ?? ev.t;
     out.unshift({
@@ -1674,9 +1689,12 @@ function ChessConsole({ fixture, fixtureId, live, invalidate, onDone }:
   };
 
   return (
-    <ChessResult homeName={homeName} awayName={awayName} gamesInMatch={gamesInMatch} needsWinner={isKnockoutFixture(fixture ?? {})}
-      timeControl={timeControl} initial={initial}
-      busy={persist.isPending} onSave={save} />
+    <>
+      <ChessResult homeName={homeName} awayName={awayName} gamesInMatch={gamesInMatch} needsWinner={isKnockoutFixture(fixture ?? {})}
+        timeControl={timeControl} initial={initial}
+        busy={persist.isPending} onSave={save} />
+      <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} />
+    </>
   );
 }
 
@@ -1694,7 +1712,7 @@ function CarromConsole({ fixture, fixtureId, live, invalidate, onDone }:
   const [status, setStatus] = useState<string>(fixture.status);
 
   const save = (state: CarromState, done: boolean) => {
-    const m = carromMatch(state.boards, rules, state.firstBreak);
+    const m = carromMatchOf(state, rules);
     const [h, a] = carromHeadline(m, rules);
     const winner_team_id = m.winner === 'A' ? fixture.home_team_id : m.winner === 'B' ? fixture.away_team_id : null;
     const st = done ? 'completed' : (status === 'scheduled' || status === 'completed' ? 'live' : status);
@@ -1723,8 +1741,13 @@ function CarromConsole({ fixture, fixtureId, live, invalidate, onDone }:
     );
   };
 
-  return <CarromResult homeName={homeName} awayName={awayName} rules={rules} formatName={format?.name} provenance={resolved.source}
-    initial={initial} busy={persist.isPending} onSave={save} />;
+  return (
+    <>
+      <CarromResult homeName={homeName} awayName={awayName} rules={rules} formatName={format?.name} provenance={resolved.source}
+        initial={initial} busy={persist.isPending} onSave={save} />
+      <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} />
+    </>
+  );
 }
 
 function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
@@ -1765,7 +1788,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
   const format = resolved.format;
   // Team sports whose actions are credited to a person - combat and board sports have
   // nobody to pick, and netball or tug of war record no individual actions to narrow.
-  const usual = (statSpecFor(sport)?.events?.length ?? 0) > 0 ? usualSide(sport) : null;
+  const usual = (statSpecFor(sport)?.events?.length ?? 0) > 0 ? usualSide(sport, format?.rulesSheet) : null;
 
   const squads = useMemo(() => ({ A: sheetSquad(homeTeam(fixture)), B: sheetSquad(awayTeam(fixture)) }), [fixture]);
   // Full rosters, not just two: an invasion sport attributes to eleven people, so
@@ -1817,14 +1840,17 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
     return <EmptyState title="No scoring format" description="This sport has no kernel format configured." />;
   }
 
-  const save = (nextLog: RallyLog, state: KernelState, done: boolean, after?: () => void, quiet = false) => {
+  const save = (nextLog: RallyLog, state: KernelState, done: boolean, after?: () => void, quiet = false, suspend = false) => {
     const env = resultEnvelope(format, state);
     // Only the KERNEL ends a match - the same guard the racquet console keeps, so a
     // sign-off part-way through cannot publish a 0-0 with no winner.
     const reallyDone = done && env.ended;
-    const st = reallyDone
+    // A suspended match is postponed with its score; the next tap resumes it.
+    const st = suspend
+      ? 'postponed'
+      : reallyDone
       ? 'completed'
-      : (status === 'scheduled' || status === 'completed' || status === 'confirmed' ? 'live' : status);
+      : (status === 'scheduled' || status === 'completed' || status === 'confirmed' || status === 'postponed' ? 'live' : status);
     const winner_team_id = !reallyDone || env.winner === null
       ? null
       : env.winner === 'A' ? fixture.home_team_id : fixture.away_team_id;
@@ -1847,11 +1873,13 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
           clock: clockSnapshot(nextLog),
           format: (live?.live_state as any)?.format ?? format,
           ...(sheet ? { teamSheet: sheet } : {}),
+          // Abandoned, or called off drawn: shared points (or none, the official's choice) whatever the score.
+          noResult: reallyDone && drawSettlement(state, nextLog).noResult,
+          drawNoPoints: reallyDone && drawSettlement(state, nextLog).drawNoPoints,
         },
         // The attributed actions ARE the timeline here, and what the fact writer
         // reads to fill fixture_events.
-        live_log: teamTimeline(nextLog, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture)),
-          (format.clock?.minutes ?? 0) * 60_000),
+        live_log: teamTimeline(nextLog, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture)), format),
         home_score: env.headline[0],
         away_score: env.headline[1],
         status: st,
@@ -1876,7 +1904,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
     persist.mutate(
       {
         live_state: { ...(live?.live_state ?? {}), rally: log, clock: clockSnapshot(log), teamSheet: next },
-        live_log: teamTimeline(log, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture)), (format.clock?.minutes ?? 0) * 60_000),
+        live_log: teamTimeline(log, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture)), format),
       },
       { onError: (e: any) => toast.error(e.message) },
     );
@@ -1941,14 +1969,20 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       // enabled Undo beneath it a straight contradiction.
       disabled={fixture.scorecard_status === 'locked'}
       recorded={status === 'completed'}
+      knockout={isKnockoutFixture(fixture ?? {})}
       afterResult={<PostMatchActions fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} />}
       onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
       // NO onDone HERE. Confirming used to navigate straight back to the results
       // list, which is what made the award and the lock unreachable from the match
       // that had just finished: the console was gone before either was offered.
       // The card below now carries both, and leaving is the official's own choice.
-      onSignOff={(nextLog, state) => save(nextLog, state, true)}
+      // Keep the deck's log too: an innings, minimum-chase or shoot-out sign-off adds
+      // the ending event, and without it the deck kept showing the confirm card.
+      onSignOff={(nextLog, state) => { setLog(nextLog); save(nextLog, state, true); }}
+      onSuspend={(nextLog, state) => save(nextLog, state, false, onDone, false, true)}
     />
+    <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} defaultScore={formatWalkoverScore(format)}
+      countsInDifference={!!format?.endStates?.countWalkoverInDifference} />
     </>
   );
 }
@@ -1985,8 +2019,9 @@ function clockSnapshot(log: RallyLog): { elapsedMs: number; running: boolean; at
  * is the whole reason a kabaddi raid or a football goal can now reach somebody's
  * career record.
  */
-function teamTimeline(log: RallyLog, homeName: string, awayName: string, fullMs = 0): LogEntry[] {
+function teamTimeline(log: RallyLog, homeName: string, awayName: string, format?: ScoringFormat | null): LogEntry[] {
   const nameOf = (s: Side) => (s === 'A' ? homeName : awayName);
+  const minutes = format ? eventMinuteLabels(format, log) : [];
   const out: LogEntry[] = [];
   // Shoot-out kicks scored so far, so the closing line can carry the tally.
   const kicks: [number, number] = [0, 0];
@@ -2009,7 +2044,7 @@ function teamTimeline(log: RallyLog, homeName: string, awayName: string, fullMs 
       // THE MINUTE, not the entry number, once the match has a clock running. This
       // is what is persisted and what every read-only view renders, so a goal shows
       // as 23' on the public page and not as "#7".
-      t: typeof any.clockMs === 'number' ? minuteLabel(any.clockMs, fullMs) : `#${i + 1}`,
+      t: minutes[i] ?? `#${i + 1}`,
       team: (any.side as Side) ?? (ev.t === 'end' ? any.winner ?? undefined : undefined),
       txt,
       ...(any.playerName ? { player: any.playerName } : {}),
@@ -2315,8 +2350,10 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
 // persistence (whole tie -> live_state.tie, headline = rubbers won); each rubber is
 // scored by the same per-contest deck. Detailed mode shows the live deck; manual mode
 // (and measured rubbers like pool/chess) just records the rubber winner.
-function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate, onDone }:
-  { fixture: any; fixtureId: string; spec: TieSpec; mode: ScoringMode; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, invalidate, onDone }:
+  { fixture: any; fixtureId: string; spec: TieSpec; layout?: TieSpec; mode: ScoringMode; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
+  // The layout as edited (before this round's dead-rubber rule), after a change here.
+  const [layoutOverride, setLayoutOverride] = useState<TieSpec | null>(null);
   // A layout just changed here wins until the saved one comes back, so the rubbers on
   // screen and the spec describing them never disagree for a render.
   const [specOverride, setSpecOverride] = useState<TieSpec | null>(null);
@@ -2347,6 +2384,13 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
   const carromBaseResolved = useMemo(() => (carromTie ? carromResolved(fixture, null) : null), [fixture, carromTie]);
   const carromBase = (carromBaseResolved?.format ?? null) as ScoringFormat | null;
   const carromRulesFor = (r: RubberInstance) => carromRulesOf(r.format ?? carromBase);
+  // Pool rubbers are recorded frame by frame, best of the rubber's own frames. A layout saved
+  // before frames existed (winner only) keeps the winner buttons.
+  const poolTie = isPoolSport(sportNameOf(fixture));
+  const poolFramesOf = (i: number) => {
+    const c = rubberDef(spec, i);
+    return poolTie && isFrameContest(c) ? c.segMax : null;
+  };
   const homeRoster = useMemo(() => rosterPeople(homeTeam(fixture)), [fixture]);
   const awayRoster = useMemo(() => rosterPeople(awayTeam(fixture)), [fixture]);
   const nameOfId = useMemo(() => new Map([...homeRoster, ...awayRoster].map((p) => [p.id, p.name])), [homeRoster, awayRoster]);
@@ -2379,8 +2423,13 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
         await api('PATCH', `/tournament-disciplines/${td.id}`, { format_config });
       }
       // This match starts over on the new rubbers - nothing was scored, so nothing is lost.
-      const fresh = initTie(nextSpec);
-      setSpecOverride(nextSpec);
+      // This match plays it under its round's rule; the layout itself is kept as set. Chess keeps
+      // its board points (½ draws, every board played) at once, not only after a reload.
+      const ruled = tieForRound(nextSpec, fixture?.round);
+      const forRound = isChessSport(sport) ? { ...ruled, boardPoints: true, skipDeadRubbers: false, skipDeadInGroups: false } : ruled;
+      const fresh = initTie(forRound);
+      setSpecOverride(forRound);
+      setLayoutOverride(nextSpec);
       persist.mutate(
         { live_state: { ...(live?.live_state ?? {}), tie: fresh, tieSpec: nextSpec }, live_log: [] },
         { onError: (e: any) => toast.error(e.message) },
@@ -2407,10 +2456,12 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
     const { a, b } = tieScore(spec, next);
     const w = tieOutcome(spec, next).winner;
     const winner_team_id = done ? (w === 'A' ? fixture.home_team_id : w === 'B' ? fixture.away_team_id : null) : null;
+    // A finished tie with no winner shares the points even if the score is not level.
+    const noResult = done && w == null && a !== b;
     persist.mutate(
       // Keep other live_state keys (tie_blocked). Chess: home has white on board 1 by default
       // (FIDE "team named first"), saved so colour stats don't depend on a tap never made.
-      { live_state: { ...(live?.live_state ?? {}), tie: spec.boardPoints && !next.firstWhite ? { ...next, firstWhite: 'A' } : next, tieSpec: spec }, live_log: buildLog(next), home_score: a, away_score: b, status: st, winner_team_id },
+      { live_state: { ...(live?.live_state ?? {}), tie: spec.boardPoints && !next.firstWhite ? { ...next, firstWhite: 'A' } : next, tieSpec: layoutOverride ?? layout ?? spec, noResult }, live_log: buildLog(next), home_score: a, away_score: b, status: st, winner_team_id },
       { onSuccess, onError: (e: any) => { onErr?.(); toast.error(e.message); } },
     );
   };
@@ -2487,11 +2538,17 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
   // Chess boards, everything else rubbers - said the way the sport says it.
   const unit = spec.boardPoints ? 'board' : 'rubber';
   const knockout = isKnockoutFixture(fixture ?? {});
+  // A level league or group tie: drawn, or won on a tie-break, as the layout says (chess: drawn).
+  const groupTb = groupTiebreakAllowed(spec);
   const setTiebreak = (s: Side | undefined) => {
     const { tiebreakWinner: _drop, ...rest } = state;
     const next: TieState = s ? { ...rest, tiebreakWinner: s } : rest;
     setState(next); save(next, status);
   };
+  // A tie-break winner picked before the layout ruled it out does not stand in a group match.
+  useEffect(() => {
+    if (!knockout && !groupTb && state.tiebreakWinner && !submitting) setTiebreak(undefined);
+  }, [knockout, groupTb, state.tiebreakWinner]); // eslint-disable-line react-hooks/exhaustive-deps
   const signOff = async () => {
     if (!decided) { toast.error(`The tie isn’t decided yet - record ${unit} results until one side reaches ${formatPoints(target)}.`); return; }
     if (drawn && knockout) { toast.error('This is a knockout tie - record who won the tie-break before signing off.'); return; }
@@ -2502,12 +2559,18 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
       return;
     }
     const { a, b } = tieScore(spec, state);
+    // A group tie that plays every rubber, decided with some still to play: ask, don't block
+    // (a side may concede the rest). Knockout ties mark them skipped, so this stays 0 there.
+    const unplayed = playable;
     const ok = await confirmDialog({
-      title: drawn ? 'Confirm a drawn tie' : 'Confirm final result',
-      confirmLabel: drawn ? 'Sign off as a draw' : 'Sign off',
+      title: unplayed > 0
+        ? `${unplayed} ${unit}${unplayed === 1 ? '' : 's'} still to play in this group tie. Sign off anyway?`
+        : drawn ? 'Confirm a drawn tie' : 'Confirm final result',
+      confirmLabel: unplayed > 0 ? 'Sign off anyway' : drawn ? 'Sign off as a draw' : 'Sign off',
       message: drawn
         ? `${homeName} ${formatPoints(a)} - ${formatPoints(b)} ${awayName}. Every ${unit} has been played and neither side reached ${formatPoints(target)}, so this tie is drawn. Standings will record it as a draw for both sides.`
-        : `${homeName} ${formatPoints(a)} - ${formatPoints(b)} ${awayName}${level && w ? `, ${w === 'A' ? homeName : awayName} on tie-break` : ''}. This completes the tie and updates standings.`,
+        : `${homeName} ${formatPoints(a)} - ${formatPoints(b)} ${awayName}${level && w ? `, ${w === 'A' ? homeName : awayName} on tie-break` : ''}. This completes the tie and updates standings.`
+          + (unplayed > 0 ? ` The ${unit}s not played are left out of the result.` : ''),
     });
     if (!ok) return;
     setSubmitting(true);
@@ -2535,8 +2598,13 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
     if (r.drawn) return spec.boardPoints ? 'Drawn ½–½' : 'Drawn';
     if (carromTie && r.carrom?.boards.length) {
       const rules = carromRulesFor(r);
-      const h = carromHeadline(carromMatch(r.carrom.boards, rules, r.carrom.firstBreak), rules);
+      const h = carromHeadline(carromMatchOf(r.carrom, rules), rules);
       return r.winner ? `${r.winner === 'A' ? homeName : awayName} won ${h[0]}–${h[1]}` : `${h[0]}–${h[1]}`;
+    }
+    const bestOf = poolFramesOf(i);
+    if (bestOf && r.pool?.frames.length) {
+      const f = poolRubber(r.pool, bestOf).framesWon;
+      return r.winner ? `${r.winner === 'A' ? homeName : awayName} won ${f[0]}–${f[1]}` : `${f[0]}–${f[1]}`;
     }
     const games = rubberGames(r);
     if (r.winner) return `${r.winner === 'A' ? homeName : awayName} won${games ? ` ${games}` : ''}`;
@@ -2591,7 +2659,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
                     <p className="text-xs text-slate-600 dark:text-slate-300">
                       Change the {spec.boardPoints ? 'boards' : 'rubbers'} before play starts. Nothing has been scored yet, so nothing is lost.
                     </p>
-                    <TieLayoutEditor sport={sportNameOf(fixture) ?? ''} stored={spec} onChange={setLayoutDraft} />
+                    <TieLayoutEditor sport={sportNameOf(fixture) ?? ''} stored={layoutOverride ?? layout ?? spec} onChange={setLayoutDraft} />
                     <div className="flex flex-wrap justify-end gap-2">
                       <Button variant="outline" disabled={savingLayout} onClick={() => setEditingLayout(false)}>Cancel</Button>
                       <Button variant="outline" disabled={savingLayout || !layoutDraft} onClick={() => void saveLayout('match')}>Save for this match</Button>
@@ -2654,10 +2722,12 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
                   <div className="space-y-1.5 rounded-lg border border-amber-300 bg-amber-50 p-2 dark:border-amber-500/40 dark:bg-amber-500/10">
                     <div className="px-1 text-xs font-semibold text-amber-900 dark:text-amber-200">Level at {formatPoints(a)}–{formatPoints(b)}</div>
                     <p className="px-1 text-[11px] text-amber-900/80 dark:text-amber-200/80">
-                      {knockout ? 'A knockout tie needs a winner: record who won the tie-break.' : 'Sign off as a draw, or record who won the tie-break.'}
+                      {knockout ? 'A knockout tie needs a winner: record who won the tie-break.'
+                        : groupTb ? 'Sign off as a draw, or record who won the tie-break.'
+                        : 'A level group match is a draw under this layout: sign it off as a draw.'}
                     </p>
-                    <div className={cn('grid gap-1.5', knockout ? 'grid-cols-2' : 'grid-cols-3')}>
-                      {((knockout ? ['A', 'B'] : [undefined, 'A', 'B']) as Array<Side | undefined>).map((s) => (
+                    <div className={cn('grid gap-1.5', knockout ? 'grid-cols-2' : groupTb ? 'grid-cols-3' : 'grid-cols-1')}>
+                      {((knockout ? ['A', 'B'] : groupTb ? [undefined, 'A', 'B'] : [undefined]) as Array<Side | undefined>).map((s) => (
                         <Button key={s ?? 'none'} size="sm" variant={state.tiebreakWinner === s ? 'primary' : 'outline'} disabled={submitting}
                           onClick={() => { if (state.tiebreakWinner !== s) setTiebreak(s); }}>
                           <span className="truncate">{s ? (s === 'A' ? homeName : awayName) : 'Draw'}</span>
@@ -2679,7 +2749,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
 
             {active && (
               <Card className="mt-5">
-                <CardHeader title={active.label} subtitle={active.status === 'dead' ? 'Skipped (dead rubber)' : active.drawn ? 'Drawn - ½ each' : active.winner ? `${active.winner === 'A' ? homeName : awayName} won this ${unit}` : spec.boardPoints ? 'Record this board: a win, or a draw for ½ each.' : carromTie ? 'Board by board' : racquet && mode === 'detailed' ? 'Point by point' : rdef.archetype === 'time' ? 'Pick the winner of this rubber.' : `${rdef.segLabel} ${Math.min(active.state.seg, rdef.segMax)} of ${rdef.segMax}`} />
+                <CardHeader title={active.label} subtitle={active.status === 'dead' ? 'Skipped (dead rubber)' : active.drawn ? 'Drawn - ½ each' : active.winner ? `${active.winner === 'A' ? homeName : awayName} won this ${unit}` : spec.boardPoints ? 'Record this board: a win, or a draw for ½ each.' : carromTie ? 'Board by board' : poolFramesOf(state.activeRubber) ? `Frame by frame · best of ${poolFramesOf(state.activeRubber)}` : racquet && mode === 'detailed' ? 'Point by point' : rdef.archetype === 'time' ? 'Pick the winner of this rubber.' : `${rdef.segLabel} ${Math.min(active.state.seg, rdef.segMax)} of ${rdef.segMax}`} />
                 <CardBody className="space-y-4">
                   {active.status === 'dead' ? (
                     <div className="space-y-3 text-center">
@@ -2708,7 +2778,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                         {active.lineup
                           ? <span>Players: {namesOf(active.lineup.A)!.join(' / ')} vs {namesOf(active.lineup.B)!.join(' / ')}</span>
-                          : <span>Players not named — this rubber counts for the team only.</span>}
+                          : <span>Players not named - this rubber counts for the team only.</span>}
                         <button type="button" className="font-semibold underline underline-offset-2" onClick={() => setEditingLineup(state.activeRubber)}>
                           {active.lineup ? 'Change players' : 'Name players'}
                         </button>
@@ -2726,7 +2796,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
                           busy={submitting}
                           onSave={(cs, done) => {
                             const fmt = active.format ?? carromBase ?? undefined;
-                            const m = carromMatch(cs.boards, carromRulesFor(active), cs.firstBreak);
+                            const m = carromMatchOf(cs, carromRulesFor(active));
                             const patch: Partial<RubberInstance> = {
                               carrom: cs,
                               ...(cs.boards.length && fmt ? { format: fmt } : {}),
@@ -2736,6 +2806,22 @@ function TieConsole({ fixture, fixtureId, spec: specProp, mode, live, invalidate
                             // the end: a decided rubber reopens.
                             if (done && m.winner) updateRubber(state.activeRubber, patch, m.winner);
                             else updateRubber(state.activeRubber, patch, undefined, !!active.winner && !m.decided);
+                          }}
+                        />
+                      ) : poolFramesOf(state.activeRubber) ? (
+                        <PoolResult
+                          key={`pool-${active.key}`}
+                          homeName={homeName}
+                          awayName={awayName}
+                          bestOf={poolFramesOf(state.activeRubber)!}
+                          initial={hydratePool(active.pool)}
+                          busy={submitting}
+                          onSave={(ps, done) => {
+                            const res = poolRubber(ps, poolFramesOf(state.activeRubber)!);
+                            const patch: Partial<RubberInstance> = { pool: ps, status: active.status === 'pending' ? 'live' : active.status };
+                            // Confirmed: the rubber goes to its winner. Undone below the winning frame: it reopens.
+                            if (done && res.winner) updateRubber(state.activeRubber, patch, res.winner);
+                            else updateRubber(state.activeRubber, patch, undefined, !!active.winner && !res.decided);
                           }}
                         />
                       ) : racquet && mode === 'detailed' && baseFormat?.format ? (
@@ -2883,11 +2969,12 @@ const ordinal = (n: number): string => {
 // detailed per-athlete state in live_state.eventRanking, so the two modes don't clobber.
 function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   { fixture: any; fixtureId: string; spec: EventSpec; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[] }) {
-  const champId = eventInfo(fixture)?.id;
-  const { data: parts } = useApi<{ organizations: { orgId: string; org: { id: string; name: string } | null }[] }>(
-    champId ? `/championships/${champId}/participants` : null);
-  const orgs = (parts?.organizations ?? [])
-    .map((o) => ({ id: o.org?.id ?? o.orgId, name: o.org?.name ?? 'Unaffiliated' }))
+  // Only the clubs entered in THIS event can be ranked (not every club in the championship).
+  const drawId = (fixture as any)?.tournament_discipline_id as string | undefined;
+  const { data: entrants, isLoading: entrantsLoading } = useApi<Array<{ organizations?: { id: string; name: string } | null; organization_id: string }>>(
+    drawId ? `/teams?tournament_discipline_id=${drawId}` : null);
+  const orgs = [...new Map((entrants ?? []).map((t) => [t.organizations?.id ?? t.organization_id, t.organizations?.name ?? 'Unaffiliated'])).entries()]
+    .map(([id, name]) => ({ id, name }))
     .sort((a, b) => a.name.localeCompare(b.name));
   // Organiser-configured ranking points (from the "Ranking" point system on the Standings
   // settings, resolved server-side per draw) win; otherwise the template default.
@@ -2910,10 +2997,13 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   // too, and autosaving that would write the fixture's own ranking back to it the
   // moment anybody so much as opened the console.
   const [touched, setTouched] = useState(false);
+  // Set by "Save & sign off": a draft still waiting must not land after it and undo it.
+  const signedOff = useRef(false);
 
   const persist = useLiveSave(fixtureId, invalidate);
   const setPlace = (orgId: string, place: number | null) => {
     setTouched(true);
+    signedOff.current = false;
     setPlaces((p) => { const n = { ...p }; if (place) n[orgId] = place; else delete n[orgId]; return n; });
   };
   // Championship points for an org. Participation is a consolation floor, NOT a top-up:
@@ -2930,6 +3020,8 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   // (points + medals) the standings service reads - so events feed the championship table
   // without the server needing the event spec. `complete` signs the event off.
   const persistRanking = (complete: boolean, quiet = false) => {
+    if (quiet && signedOff.current) return; // a late draft: the sign-off stands
+    if (complete) signedOff.current = true;
     const rows = orgs.map((o) => ({ orgId: o.id, org: o.name, place: places[o.id] ?? null, points: pointsFor(o.id) }));
     // Drops any detailed per-athlete data this fixture was PREVIOUSLY scored
     // with - a stale `event` key here is what let derive.ts's two medal paths
@@ -2972,16 +3064,18 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
       <Card>
-        <CardHeader title="Team ranking" subtitle={`Set each team's finishing place — points are awarded by placement (${medalPoints.join(' / ')}).`} />
+        <CardHeader title="Team ranking" subtitle={`Set each team's finishing place - points are awarded by placement (${medalPoints.join(' / ')}).`} />
         <CardBody className="space-y-2">
-          {orgs.length === 0 ? (
-            <p className="text-sm text-slate-400 dark:text-slate-500">No teams have joined this championship yet.</p>
+          {entrantsLoading || !entrants ? (
+            <p className="text-sm text-slate-400 dark:text-slate-500">Loading the event's entrants…</p>
+          ) : orgs.length === 0 ? (
+            <p className="text-sm text-slate-400 dark:text-slate-500">No teams are entered in this event yet.</p>
           ) : orgs.map((o) => (
             <div key={o.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-800">
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{o.name}</span>
               <div className="flex items-center gap-2">
                 <Select value={places[o.id] ?? ''} onChange={(e) => setPlace(o.id, e.target.value ? Number(e.target.value) : null)} className="w-28">
-                  <option value="">— place —</option>
+                  <option value="">- place -</option>
                   {Array.from({ length: n }, (_, i) => i + 1).map((pl) => <option key={pl} value={pl}>{ordinal(pl)}</option>)}
                 </Select>
                 <span className="w-8 text-right text-sm font-bold tabular-nums text-slate-500 dark:text-slate-400">{pointsFor(o.id)}</span>
@@ -3050,15 +3144,31 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   // entrant on it (squad_max is 1) - shown up front instead of a phone lookup.
   const entrants: Array<{ user_id: string; name: string; phone: string | null; org_id: string | null; org: string | null }> =
     (fixture as any)?.event_entrants ?? [];
+  // One row per entry: the institute is part of the id, so the same account under two
+  // institutes (a data slip) can never merge two swimmers' places.
   const entrantRow = (e: (typeof entrants)[number]): ParticipantResult =>
-    ({ id: `e${e.user_id}`, name: e.name, phone: e.phone, org: e.org, orgId: e.org_id, category: pickOne ? fixedCategory : null, marks: {} });
+    ({ id: e.org_id ? `e${e.user_id}-${e.org_id}` : `e${e.user_id}`, name: e.name, phone: e.phone, org: e.org, orgId: e.org_id, category: pickOne ? fixedCategory : null, marks: {} });
+  // A relay is one entry per institute, with one time - its swimmers listed on the row.
+  const relay = isNamedDiscipline && isRelaySubEvent(spec.subEvents[0]);
+  const relayRows = (list: typeof entrants): ParticipantResult[] => {
+    const byOrg = new Map<string, typeof entrants>();
+    for (const e of list) {
+      const k = e.org_id ?? e.org ?? e.user_id;
+      byOrg.set(k, [...(byOrg.get(k) ?? []), e]);
+    }
+    return [...byOrg.values()].map((team) => ({
+      id: `t${team[0].org_id ?? team[0].user_id}`, name: team.map((m) => m.name).join(', '), phone: null,
+      org: team[0].org, orgId: team[0].org_id, category: pickOne ? fixedCategory : null, marks: {},
+    }));
+  };
+  const seedRows = (list: typeof entrants): ParticipantResult[] => (relay ? relayRows(list) : list.map(entrantRow));
 
   // The roster is the registration record, not something scoring edits - no add,
   // remove or phone lookup here, only scoring whoever is actually entered.
   const [state, setState] = useState<EventState>(() => {
     const hydrated = hydrateEvent(live?.live_state?.event);
     return hydrated.participants.length === 0 && entrants.length > 0
-      ? { participants: entrants.map(entrantRow) }
+      ? { participants: seedRows(entrants) }
       : hydrated;
   });
   const seeded = useRef(false);
@@ -3067,39 +3177,63 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     seeded.current = true;
     const hydrated = hydrateEvent(live.live_state?.event);
     setState(hydrated.participants.length === 0 && entrants.length > 0
-      ? { participants: entrants.map(entrantRow) }
+      ? { participants: seedRows(entrants) }
       : hydrated);
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
   // Armed by the first mark an official types, never by the seeding above - see the
   // matching comment in EventRankingConsole.
   const [touched, setTouched] = useState(false);
+  // Set by "Save & sign off": a draft still waiting must not land after it and undo it.
+  const signedOff = useRef(false);
 
   // A late registration folds in automatically, matched by phone (the same
   // handle resolveFixtureParticipants uses at lock time) - never by hand.
   useEffect(() => {
     if (!entrants.length) return;
     setState((s) => {
+      // A relay row is the institute's: a newly registered institute adds a row, a new swimmer does not.
+      if (relay) {
+        const knownOrgs = new Set(s.participants.map((p) => p.orgId ?? p.org));
+        const missing = entrants.filter((e) => !knownOrgs.has(e.org_id ?? e.org));
+        return missing.length ? { participants: [...s.participants, ...relayRows(missing)] } : s;
+      }
       const known = new Set(s.participants.map((p) => (p.phone ?? '').replace(/\D/g, '')));
       const missing = entrants.filter((e) => !known.has((e.phone ?? '').replace(/\D/g, '')));
       return missing.length ? { participants: [...s.participants, ...missing.map(entrantRow)] } : s;
     });
   }, [entrants]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // "Whole sport" still mixes categories, but nobody's weight class is known in
-  // advance - so ONE is chosen for the whole session before scoring starts,
-  // rather than guessed per row (a blank row defaulting to the first category
-  // was the bug this replaces).
+  // "Whole sport" mixes categories on one screen: the picker is the class being entered.
+  // A competitor keeps the class their result went in; only those without one follow the picker.
   const [globalCategory, setGlobalCategoryState] = useState<string | null>(
-    () => state.participants.find((p) => p.category)?.category ?? null,
+    () => (state.participants.find((p) => p.category && !hasResultIn(p, p.category))
+      ?? state.participants.find((p) => p.category))?.category ?? null,
   );
-  const setGlobalCategory = (cat: string) => {
+  // Results typed in the class on screen since it was picked: switching away asks first.
+  const [enteredHere, setEnteredHere] = useState(false);
+  const moveFreeTo = (cat: string) => {
     setGlobalCategoryState(cat);
-    setState((s) => ({
-      participants: s.participants.map((p) => {
-        const prev = p.category ?? cat;
-        return { ...p, category: cat, marks: { [cat]: p.marks[prev] ?? null } };
-      }),
-    }));
+    setEnteredHere(false);
+    setState((s) => moveUnplacedTo(s, cat));
+  };
+  const setGlobalCategory = async (cat: string) => {
+    if (cat === globalCategory) return;
+    const done = globalCategory ? state.participants.filter((p) => p.category === globalCategory && hasResultIn(p, globalCategory)) : [];
+    if (globalCategory && enteredHere && done.length) {
+      const from = spec.subEvents.find((se) => se.key === globalCategory)?.label ?? nounLower;
+      const shown = done.slice(0, 6).map((p) => {
+        const m = p.marks[globalCategory];
+        return `${p.name || 'Unnamed'} (${resultStatusOf(p, globalCategory) ?? (typeof m === 'number' ? `${m}${spec.result.unit ? ` ${spec.result.unit}` : ''}` : '-')})`;
+      }).join(', ') + (done.length > 6 ? ` and ${done.length - 6} more` : '');
+      const ok = await confirmDialog({
+        title: `Save the ${from} results?`,
+        confirmLabel: 'Save and switch',
+        message: `${shown} stay in ${from}. In the next ${nounLower} their rows are locked - switch back to ${from} to change them.`,
+      });
+      if (!ok) return;
+      persistEvent(false);
+    }
+    moveFreeTo(cat);
   };
   const category = isNamedDiscipline ? fixedCategory : globalCategory;
 
@@ -3114,14 +3248,44 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     .sort((a, b) => a.name.localeCompare(b.name));
   const patchP = (id: string, patch: Partial<ParticipantResult>) => {
     setTouched(true);
+    signedOff.current = false;
     setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
   };
   const setOrg = (id: string, orgId: string) => patchP(id, { orgId: orgId || null, org: orgs.find((o) => o.id === orgId)?.name ?? null });
   void setOrg; // dead code - see comment above
 
+  // The Point System's say, as the team-ranking console already takes it: its points per
+  // place (the draw's ranking rule), whether only each institute's best finisher is placed,
+  // and the participation floor.
+  const rulePoints: number[] | null = Array.isArray((fixture as any)?.ranking_points) ? (fixture as any).ranking_points : null;
+  const scoreSpec: EventSpec = rulePoints
+    ? { ...spec, result: { ...spec.result, medalPoints: rulePoints }, subEvents: spec.subEvents.map(({ medalPoints: _m, ...se }) => se) }
+    : spec;
+  const scoringOpts: EventScoringOpts = {
+    bestPerSide: !!(fixture as any)?.ranking_best_only,
+    participation: Number((fixture as any)?.ranking_participation) || 0,
+  };
+
+  // DNS / DNF / DQ for one sub-event; blank clears it. The time typed beside it is kept, unranked.
+  const setStatus = (id: string, key: string, status: ResultStatus | null) => {
+    setTouched(true);
+    signedOff.current = false;
+    if (key === globalCategory) setEnteredHere(true);
+    setState((s) => ({
+      participants: s.participants.map((p) => {
+        if (p.id !== id) return p;
+        const { [key]: _old, ...rest } = p.statuses ?? {};
+        const statuses = status ? { ...rest, [key]: status } : rest;
+        return { ...p, statuses };
+      }),
+    }));
+  };
+
   const persist = useLiveSave(fixtureId, invalidate);
   const setMark = (id: string, key: string, n: number | null) => {
     setTouched(true);
+    signedOff.current = false;
+    if (key === globalCategory) setEnteredHere(true);
     setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, marks: { ...p.marks, [key]: n } } : p)) }));
   };
 
@@ -3129,12 +3293,16 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   // top three) the standings service reads, so detailed event results feed the
   // championship table + medal tally too. `complete` signs the event off.
   const persistEvent = (complete: boolean, quiet = false) => {
+    if (quiet && signedOff.current) return; // a late draft: the sign-off stands
+    if (complete) signedOff.current = true;
     // Drops any "Team ranking" org-placement data - see persistRanking's matching
     // comment on why a stale key here would double up on medals.
     const { eventRanking: _staleSimple, ...restLiveState } = (live?.live_state ?? {}) as Record<string, unknown>;
+    // A race counts in the standings once it is signed off, not from a half-entered draft.
+    const counts = complete || fixture.status === 'completed';
     return persist.mutate(
       {
-        live_state: { ...restLiveState, event: state, eventStandings: detailedContributions(spec, state) },
+        live_state: { ...restLiveState, event: state, eventStandings: counts ? detailedContributions(scoreSpec, state, scoringOpts) : [] },
         // AN AUTOSAVE MOVES DATA, NOT THE MATCH. Saving by hand takes a scheduled
         // event live, which is right - somebody deliberately recorded a result. Two
         // seconds after a keystroke is not that, and it would fire the "match is now
@@ -3156,25 +3324,25 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   // silently: no toast, no spinner, no button greying out mid-entry.
   useDraftAutosave(state, () => persistEvent(false, true), touched);
 
-  const agg = aggregateEvent(spec, state);
-  const blocks = subEventResults(spec, state);
+  const agg = aggregateEvent(scoreSpec, state, scoringOpts);
+  const blocks = subEventResults(scoreSpec, state, scoringOpts);
   // The one active category carries its OWN unit/direction - a "400m" reads as
   // seconds/fastest-wins even though the sport's other events don't share that unit.
   const activeSubEvent = category ? spec.subEvents.find((se) => se.key === category) : undefined;
   const activeMeta = markMetaFor(spec, activeSubEvent);
   const unit = activeMeta.unit ? ` (${activeMeta.unit})` : '';
-  const pts = (spec.result.medalPoints ?? [5, 3, 1]).join(' / ');
+  const pts = (scoreSpec.result.medalPoints ?? [5, 3, 1]).join(' / ');
   const best = (activeSubEvent?.winnerIs ?? spec.result.winnerIs) === 'min' ? 'fastest' : 'best';
   // Plain-English explanation of how marks become org points, by aggregate rule.
   const scoringText = spec.result.aggregate === 'sumBest'
     ? `Each org's points are the sum of its athletes' marks.`
     : spec.result.aggregate === 'medals'
-      ? `Each ${nounLower} is ranked (${best} wins) — the top finishers earn ${pts} points for their org. An org's total is the sum across every ${nounLower}.`
+      ? `Each ${nounLower} is ranked (${best} wins) - the top finishers earn ${pts} points for their institute${scoringOpts.bestPerSide ? ' (only its best finisher is placed)' : ''}. A ${nounLower} counts in the standings once it is signed off.`
       : `Each ${nounLower} awards placement points down the order to each finisher's org; an org's total is the sum across every ${nounLower}.`;
   const subtitle = pickOne
     ? isNamedDiscipline
       ? `Enter each competitor's total${unit} for ${spec.subEvents[0]?.label ?? noun}.`
-      : `Choose the ${nounLower} this session is scoring, then enter each competitor's total${unit}.`
+      : `Pick a ${nounLower}, then enter its competitors' totals${unit}. Each keeps the ${nounLower} their total was entered in.`
     : isNamedDiscipline
       ? `Enter each competitor's mark${unit} for ${spec.subEvents[0]?.label ?? noun}.`
       : `Enter each competitor's mark per ${nounLower}${unit}.`;
@@ -3195,7 +3363,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
           {pickOne && !isNamedDiscipline && (
             <Field label={noun} hint={!category ? `Choose a ${nounLower} before scoring anyone in this session.` : undefined}>
               <Select value={category ?? ''} onChange={(e) => setGlobalCategory(e.target.value)}>
-                <option value="" disabled>— Choose {nounLower} —</option>
+                <option value="" disabled>- Choose {nounLower} -</option>
                 {spec.subEvents.map((se) => <option key={se.key} value={se.key}>{se.label}</option>)}
               </Select>
             </Field>
@@ -3212,19 +3380,34 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
             <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
               {state.participants.map((p) => (
                 <div key={p.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</span>
+                  {/* The institute too: two swimmers can share a name, and a relay row is the institute's. */}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-slate-700 dark:text-slate-200" title={p.name}>{p.name || 'Unnamed'}</span>
+                    {p.org && <span className="block truncate text-[11px] text-slate-400 dark:text-slate-500">{p.org}</span>}
+                  </span>
                   {category && (
                     <span className="hidden flex-1 truncate text-center text-xs text-slate-400 dark:text-slate-500 sm:block">
-                      {spec.subEvents.find((se) => se.key === category)?.label ?? noun}
+                      {spec.subEvents.find((se) => se.key === (p.category ?? category))?.label ?? noun}
                     </span>
                   )}
-                  {category ? (
-                    <div className="w-32 shrink-0">
-                      <MarkInput
-                        value={p.marks[category] ?? null} isTime={activeMeta.isTime}
-                        placeholder={activeMeta.isTime ? undefined : placeholderFor(activeMeta.unit)}
-                        onChange={(n) => setMark(p.id, category, n)} ariaLabel={`${p.name || 'competitor'} ${markLabel}`}
-                      />
+                  {/* Their result is in another class: shown, not editable from here. */}
+                  {category && p.category && p.category !== category && hasResultIn(p, p.category) ? (
+                    <span className="shrink-0 rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                      title={`Switch to ${spec.subEvents.find((se) => se.key === p.category)?.label ?? 'their class'} to change this`}>
+                      {spec.subEvents.find((se) => se.key === p.category)?.label ?? noun} · {resultStatusOf(p, p.category)
+                        ?? `${p.marks[p.category]}${spec.result.unit ? ` ${spec.result.unit}` : ''}`}
+                    </span>
+                  ) : category ? (
+                    <div className="flex shrink-0 items-start gap-1.5">
+                      <div className="w-32">
+                        <MarkInput
+                          value={p.marks[category] ?? null} isTime={activeMeta.isTime} disabled={!!resultStatusOf(p, category)}
+                          placeholder={activeMeta.isTime ? undefined : placeholderFor(activeMeta.unit)}
+                          onChange={(n) => setMark(p.id, category, n)} ariaLabel={`${p.name || 'competitor'} ${markLabel}`}
+                        />
+                      </div>
+                      <StatusSelect value={resultStatusOf(p, category)} onChange={(st) => setStatus(p.id, category, st)}
+                        ariaLabel={`${p.name || 'competitor'} status`} />
                     </div>
                   ) : (
                     <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">Choose a {nounLower} above</span>
@@ -3236,7 +3419,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
             state.participants.map((p) => (
               <div key={p.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
                 <Field label="Competitor" compact>
-                  <p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</p>
+                  <p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}{p.org ? <span className="font-normal text-slate-400 dark:text-slate-500"> · {p.org}</span> : null}</p>
                 </Field>
                 <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {spec.subEvents.map((se) => {
@@ -3245,10 +3428,12 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
                       <label key={se.key} className="block">
                         <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
                         <MarkInput
-                          value={p.marks[se.key] ?? null} isTime={seMeta.isTime}
+                          value={p.marks[se.key] ?? null} isTime={seMeta.isTime} disabled={!!resultStatusOf(p, se.key)}
                           placeholder={seMeta.isTime ? undefined : placeholderFor(seMeta.unit)}
                           onChange={(n) => setMark(p.id, se.key, n)} ariaLabel={`${p.name || 'competitor'} ${se.label}`}
                         />
+                        <StatusSelect value={resultStatusOf(p, se.key)} onChange={(st) => setStatus(p.id, se.key, st)}
+                          ariaLabel={`${p.name || 'competitor'} ${se.label} status`} className="mt-1 w-full" />
                       </label>
                     );
                   })}
@@ -3293,10 +3478,14 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
                 <div key={b.key}>
                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{b.label}</div>
                   <ul className="space-y-1">
-                    {b.rows.map((r) => (
-                      <li key={r.rank} className="flex items-center justify-between gap-2 text-sm">
-                        <span className="truncate text-slate-600 dark:text-slate-300">{r.rank}. {r.name}{r.org ? <span className="text-slate-400 dark:text-slate-500"> · {r.org}</span> : null}</span>
-                        <span className="shrink-0 tabular-nums text-slate-500 dark:text-slate-400">{bMeta.isTime ? formatTime(r.mark) : r.mark}{!bMeta.isTime && bMeta.unit ? ` ${bMeta.unit}` : ''} · +{r.points}</span>
+                    {b.rows.map((r, i) => (
+                      <li key={`${r.rank ?? r.status}-${i}`} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="truncate text-slate-600 dark:text-slate-300">{r.rank != null ? `${r.rank}. ` : ''}{r.name}{r.org ? <span className="text-slate-400 dark:text-slate-500"> · {r.org}</span> : null}</span>
+                        {r.status ? (
+                          <span className="shrink-0 text-xs font-semibold text-rose-600 dark:text-rose-400" title={RESULT_STATUS_LABEL[r.status]}>{r.status}</span>
+                        ) : (
+                          <span className="shrink-0 tabular-nums text-slate-500 dark:text-slate-400">{bMeta.isTime ? formatTime(r.mark!) : r.mark}{!bMeta.isTime && bMeta.unit ? ` ${bMeta.unit}` : ''} · +{r.points}</span>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -3320,23 +3509,51 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
 // Numeric/time mark cell. Keeps the raw string the official typed (so mid-entry values
 // like "1:0" aren't reformatted under the cursor) and emits the parsed number upward;
 // only re-seeds from props when the stored value changes externally (e.g. live reload).
-function MarkInput({ value, isTime, placeholder, onChange, ariaLabel }: { value: number | null; isTime: boolean; placeholder?: string; onChange: (n: number | null) => void; ariaLabel?: string }) {
+/** DNS / DNF / DQ beside a mark; blank means a result is expected. */
+function StatusSelect({ value, onChange, ariaLabel, className }: { value: ResultStatus | null; onChange: (s: ResultStatus | null) => void; ariaLabel: string; className?: string }) {
+  return (
+    <Select value={value ?? ''} aria-label={ariaLabel} title={value ? RESULT_STATUS_LABEL[value] : 'Has a result'}
+      className={cn('w-20 shrink-0 text-xs', value && 'text-rose-600 dark:text-rose-400', className)}
+      onChange={(e) => onChange((e.target.value || null) as ResultStatus | null)}>
+      <option value="">-</option>
+      {RESULT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+    </Select>
+  );
+}
+
+function MarkInput({ value, isTime, placeholder, onChange, ariaLabel, disabled }: { value: number | null; isTime: boolean; placeholder?: string; onChange: (n: number | null) => void; ariaLabel?: string; disabled?: boolean }) {
   const fmt = (v: number | null) => (v == null ? '' : isTime ? formatTime(v) : String(v));
   const [raw, setRaw] = useState(() => fmt(value));
   const emitted = useRef(value);
   useEffect(() => { if (value !== emitted.current) { emitted.current = value; setRaw(fmt(value)); } }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A time that is not valid keeps the last good one stored and says why, rather than
+  // saving a typo as some other time ("1:75") or as the fastest swim ("0").
+  const [error, setError] = useState<string | null>(null);
   const handle = (s: string) => {
     setRaw(s);
-    const n = isTime ? parseTimeInput(s) : (s.trim() === '' ? null : Number(s));
+    if (isTime) {
+      const t = readTimeInput(s);
+      setError(t.error);
+      if (t.error) return;
+      emitted.current = t.value;
+      onChange(t.value);
+      return;
+    }
+    const n = s.trim() === '' ? null : Number(s);
     emitted.current = n;
     onChange(n);
   };
   return (
-    <Input
-      type={isTime ? 'text' : 'number'} inputMode={isTime ? 'decimal' : 'numeric'}
-      value={raw} onChange={(e) => handle(e.target.value)} onBlur={() => setRaw(fmt(emitted.current))}
-      className="text-center" aria-label={ariaLabel} placeholder={isTime ? 'mm:ss.s' : (placeholder ?? '')}
-    />
+    <div className="grid gap-0.5">
+      {/* Decimal keypad for every mark: a 182.5 kg total or a 5.42 m jump needs the point on phones. */}
+      <Input
+        type={isTime ? 'text' : 'number'} inputMode="decimal" step={isTime ? undefined : 'any'}
+        value={raw} disabled={disabled} onChange={(e) => handle(e.target.value)} onBlur={() => { if (!error) setRaw(fmt(emitted.current)); }}
+        className={cn('text-center', error && 'border-red-400 focus:ring-red-300 dark:border-red-500/60')}
+        aria-label={ariaLabel} aria-invalid={!!error || undefined} placeholder={isTime ? 'mm:ss.s' : (placeholder ?? '')}
+      />
+      {error && <span role="alert" className="text-[10px] leading-tight text-red-600 dark:text-red-400">{error}</span>}
+    </div>
   );
 }
 
@@ -3513,23 +3730,34 @@ function DirectResult({ def, homeName, awayName, homeOrg, awayOrg, initialA, ini
 // Walkover needs a winner and a reason - a plain status flip would leave the match
 // with no result. Opens a popup to capture both, then records it via /live (which
 // also advances the winner in a bracket draw).
-function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeTeamId, awayTeamId, invalidate, onDone }:
-  { fixtureId: string; homeName: string; awayName: string; homeOrg?: string; awayOrg?: string; homeTeamId: string | null; awayTeamId: string | null; invalidate: (string | null)[]; onDone: () => void }) {
+function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeTeamId, awayTeamId, invalidate, onDone, defaultScore, countsInDifference, className }:
+  { fixtureId: string; homeName: string; awayName: string; homeOrg?: string; awayOrg?: string; homeTeamId: string | null; awayTeamId: string | null; invalidate: (string | null)[]; onDone: () => void;
+    /** The format's walkover scoreline, winner first (e.g. 21-0). Blank = none recorded unless typed. */
+    defaultScore?: [number, number] | null;
+    /** The format counts the walkover score in score difference (football). Unknown = it does not. */
+    countsInDifference?: boolean; className?: string }) {
   const [open, setOpen] = useState(false);
   const [winner, setWinner] = useState<'home' | 'away'>('home');
   const [reason, setReason] = useState('');
+  const [winScore, setWinScore] = useState(defaultScore ? String(defaultScore[0]) : '');
+  const [loseScore, setLoseScore] = useState(defaultScore ? String(defaultScore[1]) : '');
   const mut = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/live`, body), invalidate);
   const submit = () => {
     if (!reason.trim()) { toast.error('Add a walkover reason'); return; }
     const winner_team_id = winner === 'home' ? homeTeamId : awayTeamId;
+    // A scoreline only when both numbers are given; it counts in score difference only where the format says so.
+    const score = winScore !== '' && loseScore !== ''
+      ? (winner === 'home' ? { home_score: Number(winScore), away_score: Number(loseScore) } : { home_score: Number(loseScore), away_score: Number(winScore) })
+      : {};
     mut.mutate(
-      { status: 'walkover', winner_team_id, notes: reason.trim() },
+      { status: 'walkover', winner_team_id, notes: reason.trim(), ...score, walkover_counts: !!countsInDifference },
       { onSuccess: () => { setOpen(false); onDone(); }, onError: (e: any) => toast.error(e.message) },
     );
   };
+  const digits = (v: string) => v.replace(/[^\d]/g, '').slice(0, 3);
   return (
     <>
-      <Button variant="outline" className="w-full justify-start" onClick={() => setOpen(true)}>Walkover</Button>
+      <Button variant="outline" className={className ?? 'w-full justify-start'} onClick={() => setOpen(true)}>Walkover</Button>
       {open && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4" onClick={() => setOpen(false)}>
           <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
@@ -3538,9 +3766,20 @@ function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeT
             <div className="mt-4">
               <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Winner</span>
               <Select value={winner} onChange={(e) => setWinner(e.target.value as 'home' | 'away')}>
-                <option value="home">{homeOrg ? `${homeName} — ${homeOrg}` : homeName}</option>
-                <option value="away">{awayOrg ? `${awayName} — ${awayOrg}` : awayName}</option>
+                <option value="home">{homeOrg ? `${homeName} - ${homeOrg}` : homeName}</option>
+                <option value="away">{awayOrg ? `${awayName} - ${awayOrg}` : awayName}</option>
               </Select>
+            </div>
+            <div className="mt-3">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Walkover score (optional)</span>
+              <div className="flex items-center gap-2">
+                <Input className="w-20 text-center" inputMode="numeric" value={winScore} onChange={(e) => setWinScore(digits(e.target.value))} placeholder="Winner" aria-label="Winner score" />
+                <span className="text-slate-400">-</span>
+                <Input className="w-20 text-center" inputMode="numeric" value={loseScore} onChange={(e) => setLoseScore(digits(e.target.value))} placeholder="Loser" aria-label="Loser score" />
+              </div>
+              <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                The rulebook's walkover score, e.g. 2-0 in football. {countsInDifference ? 'Counts in score difference, like a played result.' : 'Left out of score difference.'}
+              </p>
             </div>
             <div className="mt-3">
               <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Reason</span>
@@ -3554,6 +3793,33 @@ function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeT
         </div>
       )}
     </>
+  );
+}
+
+/** The walkover scoreline a kernel format implies, winner first. Null when the organiser enters it. */
+function formatWalkoverScore(format: ScoringFormat | null | undefined): [number, number] | null {
+  const rule = format?.endStates?.walkoverScoreline;
+  if (!format || !rule || rule === 'organiserEnters') return null;
+  if (rule === 'zeroZero') return [0, 0];
+  const top = format.levels.length - 1;
+  if (format.levels[top]?.decide === 'aggregate') return null;
+  const lv = top > 0 && format.levels[top].target <= 1 ? format.levels[top - 1] : format.levels[top];
+  return lv ? [lv.target, 0] : null;
+}
+
+/** "No-show?" row under a console that has no walkover control of its own. */
+function WalkoverRow({ fixture, fixtureId, invalidate, onDone, defaultScore, countsInDifference }:
+  { fixture: any; fixtureId: string; invalidate: (string | null)[]; onDone: () => void; defaultScore?: [number, number] | null; countsInDifference?: boolean }) {
+  const open = !['completed', 'walkover', 'cancelled', 'bye'].includes(fixture.status) && fixture.scorecard_status !== 'locked';
+  if (!open || !fixture.home_team_id || !fixture.away_team_id) return null;
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm dark:border-slate-800">
+      <span className="text-slate-500 dark:text-slate-400">A side didn't turn up or withdrew?</span>
+      <WalkoverButton fixtureId={fixtureId} homeName={teamLabel(homeTeam(fixture))} awayName={teamLabel(awayTeam(fixture))}
+        homeOrg={orgLabel(homeTeam(fixture))} awayOrg={orgLabel(awayTeam(fixture))}
+        homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id}
+        invalidate={invalidate} onDone={onDone} defaultScore={defaultScore} countsInDifference={countsInDifference} className="justify-center" />
+    </div>
   );
 }
 
@@ -3571,7 +3837,7 @@ function LockScorecardPanel({ fixtureId, scorecardStatus, invalidate }:
     return (
       <div className="mb-4 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-800/60">
         <span className="font-semibold text-slate-600 dark:text-slate-300">🔒 Scorecard locked</span>
-        <span className="text-slate-400 dark:text-slate-500">— this result is now official and permanent.</span>
+        <span className="text-slate-400 dark:text-slate-500">- this result is now official and permanent.</span>
       </div>
     );
   }
@@ -3702,7 +3968,7 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
     winner === 'draw' || (hs != null && as != null) ? 'Draw' : '-';
 
   const submit = (status: 'live' | 'completed') => {
-    saveResult.mutate({ home_score: hs, away_score: as, winner_team_id: winnerId, status, notes: notes || undefined },
+    saveResult.mutate({ home_score: hs, away_score: as, winner_team_id: winnerId, draw: winner === 'draw' || undefined, status, notes: notes || undefined },
       { onSuccess: status === 'completed' ? onDone : undefined, onError: (e: any) => toast.error(e.message) });
   };
 
@@ -3746,8 +4012,8 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
           {/* Both buttons, not just complete: an impossible games tally (2-3 in a
               best-of-3) is never a valid state to save, live or final - the match
               would already be over the moment either side reached the threshold. */}
-          <Button variant="outline" disabled={saveResult.isPending || !gamesValid} onClick={() => submit('live')}>Save (keep live)</Button>
-          <Button disabled={saveResult.isPending || !gamesValid} onClick={() => submit('completed')}>{saveResult.isPending ? 'Saving…' : 'Save & complete'}</Button>
+          <Button variant="outline" disabled={saveResult.isPending || (!gamesValid && winner !== 'draw')} onClick={() => submit('live')}>Save (keep live)</Button>
+          <Button disabled={saveResult.isPending || (!gamesValid && winner !== 'draw')} onClick={() => submit('completed')}>{saveResult.isPending ? 'Saving…' : 'Save & complete'}</Button>
         </div>
       </CardBody>
     </Card>
@@ -3760,30 +4026,50 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
 // /live (not /result) so wickets & overs land in live_state and the "runs/wkts (overs)"
 // score renders everywhere - the bare runs alone would drop the wickets the official
 // typed. inn/batting and any other live keys are preserved by spreading the snapshot.
+/**
+ * The ball-by-ball score as the Manual form's starting point: each side's runs (match total,
+ * Super Overs left out), wickets and balls, and the winner once the match has one.
+ */
+function cricketManualSeed(ls: any): { runsA: number; wktA: number; ballsA: number; runsB: number; wktB: number; ballsB: number; decidedFor: 'A' | 'B' | null } | null {
+  const log = Array.isArray(ls?.cricket) ? (ls.cricket as CricketLog) : null;
+  if (!log?.length || !isCricketFormat(ls?.format)) return null;
+  const st = foldCricket(ls.format, log).state;
+  const { A, B } = cricketSideTotals(st);
+  return { runsA: A.runs, wktA: A.wickets, ballsA: A.balls, runsB: B.runs, wktB: B.wickets, ballsB: B.balls, decidedFor: st.ended ? st.winner : null };
+}
+
 function CricketManualResult({ fixture, fixtureId, live, invalidate, onDone }:
   { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
   const homeName = teamLabel(homeTeam(fixture));
   const awayName = teamLabel(awayTeam(fixture));
   const homeOrg = orgLabel(homeTeam(fixture));
   const awayOrg = orgLabel(awayTeam(fixture));
-  // Seed from the saved live snapshot (the only place wickets/overs live). The live
-  // query can land after mount, so re-seed once it arrives - mirrors LiveConsole.
-  const seed = hydrate(live?.live_state);
-  const [rA, setRA] = useState(String(seed.runsA ?? 0));
-  const [wA, setWA] = useState(String(seed.wktA ?? 0));
-  const [oA, setOA] = useState(oversStr(seed.ballsA ?? 0));
-  const [rB, setRB] = useState(String(seed.runsB ?? 0));
-  const [wB, setWB] = useState(String(seed.wktB ?? 0));
-  const [oB, setOB] = useState(oversStr(seed.ballsB ?? 0));
-  const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>('auto');
+  // Seed from the ball-by-ball record when there is one (so switching from it keeps the score
+  // and a Super Over winner), else the saved quick-entry snapshot. The live query can land
+  // after mount, so re-seed once it arrives - mirrors LiveConsole.
+  const seedOf = (ls: any) => {
+    const ball = cricketManualSeed(ls);
+    const s = ball ?? hydrate(ls);
+    const pick: 'auto' | 'home' | 'away' = ball?.decidedFor === 'A' ? 'home' : ball?.decidedFor === 'B' ? 'away' : 'auto';
+    return { runsA: s.runsA ?? 0, wktA: s.wktA ?? 0, ballsA: s.ballsA ?? 0, runsB: s.runsB ?? 0, wktB: s.wktB ?? 0, ballsB: s.ballsB ?? 0, pick };
+  };
+  const seed = seedOf(live?.live_state);
+  const [rA, setRA] = useState(String(seed.runsA));
+  const [wA, setWA] = useState(String(seed.wktA));
+  const [oA, setOA] = useState(oversStr(seed.ballsA));
+  const [rB, setRB] = useState(String(seed.runsB));
+  const [wB, setWB] = useState(String(seed.wktB));
+  const [oB, setOB] = useState(oversStr(seed.ballsB));
+  const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>(seed.pick);
   const [notes, setNotes] = useState(fixture.notes ?? '');
   const seeded = useRef(false);
   useEffect(() => {
     if (seeded.current || !live) return;
     seeded.current = true;
-    const s = hydrate(live.live_state);
-    setRA(String(s.runsA ?? 0)); setWA(String(s.wktA ?? 0)); setOA(oversStr(s.ballsA ?? 0));
-    setRB(String(s.runsB ?? 0)); setWB(String(s.wktB ?? 0)); setOB(oversStr(s.ballsB ?? 0));
+    const s = seedOf(live.live_state);
+    setRA(String(s.runsA)); setWA(String(s.wktA)); setOA(oversStr(s.ballsA));
+    setRB(String(s.runsB)); setWB(String(s.wktB)); setOB(oversStr(s.ballsB));
+    setWinner(s.pick);
   }, [live]);
 
   const save = useLiveSave(fixtureId, invalidate);
@@ -3803,7 +4089,7 @@ function CricketManualResult({ fixture, fixtureId, live, invalidate, onDone }:
   const submit = (status: 'live' | 'completed') => {
     const ns: MatchState = { ...hydrate(live?.live_state), runsA, wktA: num(wA), ballsA: oversToBalls(oA), runsB, wktB: num(wB), ballsB: oversToBalls(oB) };
     save.mutate(
-      { live_state: ns, live_log: live?.live_log ?? [], home_score: runsA, away_score: runsB, status, winner_team_id: winnerId, notes: notes || null },
+      { live_state: { ...ns, noResult: winner === 'draw' && runsA !== runsB }, live_log: live?.live_log ?? [], home_score: runsA, away_score: runsB, status, winner_team_id: winnerId, notes: notes || null },
       { onSuccess: status === 'completed' ? onDone : undefined, onError: (e: any) => toast.error(e.message) },
     );
   };

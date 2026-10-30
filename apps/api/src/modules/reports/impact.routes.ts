@@ -124,7 +124,7 @@ export function makeImpactBuilder(prisma: Prisma, fetchers: {
     return {
       // Exactly the wording J5-E5-S1 specifies, including "Verified data" - which is
       // only true because every figure below comes from locked results.
-      title: `${(org?.name ?? '').toUpperCase()} — SPORTS IMPACT ${label}`,
+      title: `${(org?.name ?? '').toUpperCase()} - SPORTS IMPACT ${label}`,
       footer: 'Powered by Sportagon EOS · Verified data',
       organization: { name: org?.name ?? '', logo_url: org?.logo_url ?? null, verified: org?.verified ?? false },
       season, season_label: label,

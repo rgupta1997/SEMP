@@ -1,3 +1,4 @@
+import { knockoutRoundLabel } from '@semp/shared';
 export function nextPowerOfTwo(n: number): number {
   let p = 1;
   while (p < n) p *= 2;
@@ -22,10 +23,5 @@ export function seedOrder(size: number): number[] {
 
 // Human-friendly round label given the number of teams remaining in that round.
 export function roundLabel(teamsInRound: number): string {
-  switch (teamsInRound) {
-    case 2: return 'Final';
-    case 4: return 'SF';
-    case 8: return 'QF';
-    default: return `R${teamsInRound}`;
-  }
+  return knockoutRoundLabel(teamsInRound);
 }

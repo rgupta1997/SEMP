@@ -173,7 +173,7 @@ describe('setupFileName', () => {
   it('names the download of a setup after the setup', () => {
     expect(setupFileName('sportagon-event-template-intra.xlsx', 'WNS Football Championship 2026'))
       .toBe('sportagon-event-template-intra-wns-football-championship-2026.xlsx');
-    expect(setupFileName('sportagon-event-sample-inter.xlsx', '  Inter IIM — 2026 ')).toBe('sportagon-event-sample-inter-inter-iim-2026.xlsx');
+    expect(setupFileName('sportagon-event-sample-inter.xlsx', '  Inter IIM - 2026 ')).toBe('sportagon-event-sample-inter-inter-iim-2026.xlsx');
     expect(setupFileName('sportagon-event-template-campus.xlsx', '!!!')).toBe('sportagon-event-template-campus.xlsx');
   });
 });

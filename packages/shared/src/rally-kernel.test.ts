@@ -5,7 +5,7 @@ import {
 } from './rally-kernel.js';
 import { defaultFormatFor, presetByKey, presetsFor, RACQUET_PRESETS } from './racquet-presets.js';
 import { formatForPairing, resolveServer, serveCall } from './serve-resolvers.js';
-import { earlyEndOf } from './rally-rows.js';
+import { earlyEndNoteOf, earlyEndOf } from './rally-rows.js';
 import { scoringFormatSchema, type ScoringFormat, type Side } from './scoring-rules.js';
 import { deriveRacquetStats, foldCareerStats, statSpecFor } from './stat-registry.js';
 
@@ -892,6 +892,17 @@ describe('a match stopped early', () => {
     expect(earlyEndOf({ rally: [{ t: 'end', outcome: 'win', reason: 'retired', winner: 'A' }, ...pts(1)] })).toBeNull();
     expect(earlyEndOf({})).toBeNull();
   });
+  // Sheet FR02: rain is its own reason, never a concession, with the official's note.
+  it('reads a rain decision and its note, win or draw', () => {
+    const won = { rally: [...pts(5), { t: 'end', outcome: 'win', reason: 'weather', winner: 'A', note: 'pull contest 52m-47m' }] };
+    expect(earlyEndOf(won)).toBe('weather');
+    expect(earlyEndNoteOf(won)).toBe('pull contest 52m-47m');
+    const drawn = { rally: [{ t: 'end', outcome: 'draw', reason: 'weather', winner: null }] };
+    expect(earlyEndOf(drawn)).toBe('weather');
+    expect(earlyEndNoteOf(drawn)).toBeNull();
+    const folded = foldRally(presetByKey('ultimate_2x20')!, won.rally as RallyLog, 'A').state;
+    expect(folded).toMatchObject({ ended: true, winner: 'A', reason: 'weather' });
+  });
 });
 
 describe('misconduct', () => {
@@ -989,6 +1000,19 @@ describe('the buzzer', () => {
   });
 
   it('still draws a level aggregate at the cap when the format allows one', () => {
+    const f = fmtOf('pkl_2x20');
+    const log: RallyEvent[] = [
+      ...Array.from({ length: 8 }, () => ({ t: 'point', side: 'A' }) as RallyEvent),
+      { t: 'endPeriod' },
+      ...Array.from({ length: 8 }, () => ({ t: 'point', side: 'B' }) as RallyEvent),
+      { t: 'capFired' },
+    ];
+    const r = foldRally(f, log);
+    expect(r.state.outcome).toBe('draw');
+    expect(r.state.winner).toBeNull();
+  });
+
+  it('kho kho allows no draw: level at the cap stays open for the minimum chase', () => {
     const f = fmtOf('kho_4turns');
     const log: RallyEvent[] = [
       ...Array.from({ length: 8 }, () => ({ t: 'point', side: 'A' }) as RallyEvent),
@@ -998,8 +1022,8 @@ describe('the buzzer', () => {
       { t: 'capFired' },
     ];
     const r = foldRally(f, log);
-    expect(r.state.outcome).toBe('draw');
-    expect(r.state.winner).toBeNull();
+    expect(r.state.ended).toBe(false);
+    expect(r.state.outcome).toBeNull();
   });
 });
 

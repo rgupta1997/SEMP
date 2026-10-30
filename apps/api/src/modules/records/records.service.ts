@@ -28,7 +28,7 @@ import { deriveRecords, type DerivableAward, type DerivableFixture, type Derivab
 /** Everything the derivation needs, in one query. */
 export const FIXTURE_FOR_RECORDS = {
   select: {
-    id: true, round: true, status: true, scheduled_at: true, updated_at: true,
+    id: true, round: true, stage_sequence: true, status: true, scheduled_at: true, updated_at: true,
     home_team_id: true, away_team_id: true, home_score: true, away_score: true,
     winner_team_id: true, live_state: true, lock_version: true,
     teams_fixtures_home_team_idToteams: { select: { name: true } },
@@ -94,6 +94,7 @@ export function toDerivableFixture(fx: any): DerivableFixture {
     discipline_name: fx.tournament_disciplines?.disciplines?.name ?? null,
     discipline_entry_type: fx.tournament_disciplines?.disciplines?.entry_type ?? null,
     format_config: fx.tournament_disciplines?.format_config ?? null,
+    stage_sequence: fx.stage_sequence,
     live_state: fx.live_state,
   };
 }

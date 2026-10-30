@@ -1,5 +1,7 @@
-import { boardsOnly, carromMatch, carromRulesOf, isCarromSport, readCarromState } from './carrom.js';
+import { boardsOnly, carromMatchOf, carromRulesOf, isCarromSport, readCarromState } from './carrom.js';
 import { CHESS_ENDINGS, isChessSport, type ChessEnding } from './chess.js';
+import { cornersLine, isHockeySport } from './hockey.js';
+import { readRallyLog } from './rally-rows.js';
 
 /**
  * A finished match's detail in one short line, home side first - shown under the bare
@@ -23,8 +25,8 @@ export function resultSummary(sportName: string | null | undefined, liveState: u
       : null;
     const rules = carromRulesOf(format);
     if (boardsOnly(rules) || rules.gamesToWin <= 1) return null;
-    const games = carromMatch(state.boards, rules, state.firstBreak).games.filter((g) => g.winner);
-    return games.length ? games.map((g) => `${g.score[0]}–${g.score[1]}`).join(', ') : null;
+    const games = carromMatchOf(state, rules).games.filter((g) => g.winner);
+    return games.length ? games.map((g) => `${g.score[0]}–${g.score[1]}${g.retired ? ' (ret.)' : ''}`).join(', ') : null;
   }
 
   if (isChessSport(sportName)) {
@@ -37,6 +39,9 @@ export function resultSummary(sportName: string | null | undefined, liveState: u
     }
     if (games.length > 1) return games.map((g) => (g.result === 'A' ? '1–0' : g.result === 'B' ? '0–1' : '½–½')).join(', ');
   }
+
+  // Hockey: the penalty corners each side won, and scored from.
+  if (isHockeySport(sportName)) return cornersLine(readRallyLog(liveState));
 
   return null;
 }

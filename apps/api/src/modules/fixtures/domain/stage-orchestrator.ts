@@ -1,5 +1,5 @@
 import { BusinessRuleError } from '../../../shared/errors.js';
-import { THIRD_PLACE_ROUND, type Branch, type StageNode } from '@semp/shared';
+import { KNOCKOUT_ROUND, THIRD_PLACE_ROUND, type Branch, type StageNode } from '@semp/shared';
 import type { GeneratedFixture, TeamRef } from './generators/types.js';
 import { generateGroups } from './generators/groups.js';
 import { generateKnockout } from './generators/knockout.js';
@@ -162,7 +162,7 @@ function generateRawFixturesForNode(node: StageNode, entrants: TeamRef[]): Annot
 function wireThirdPlaceIfPresent(fixtures: AnnotatedFixture[]): void {
   const thirdPlace = fixtures.find((f) => f.round === THIRD_PLACE_ROUND);
   if (!thirdPlace) return;
-  const sfs = fixtures.filter((f) => f.round === 'SF');
+  const sfs = fixtures.filter((f) => f.round === KNOCKOUT_ROUND.semiFinal);
   if (sfs.length !== 2) return; // defensive; always exactly 2 SFs when thirdPlaceMatch is requested on a >=4-team bracket
   thirdPlace.homeSlotLabelOverride = `L${sfs[0].bracketPosition}`;
   thirdPlace.awaySlotLabelOverride = `L${sfs[1].bracketPosition}`;

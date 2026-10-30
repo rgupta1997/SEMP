@@ -120,7 +120,7 @@ export function RollImportPage() {
         const made = res.credentials?.length ?? 0;
         toast.success(
           `Imported ${res.applied ?? 0} ${res.applied === 1 ? 'person' : 'people'}`,
-          made > 0 ? `${made} new sign-in${made === 1 ? '' : 's'} to share — download them before leaving.` : undefined,
+          made > 0 ? `${made} new sign-in${made === 1 ? '' : 's'} to share - download them before leaving.` : undefined,
         );
       }
     } catch (e: any) {
@@ -190,7 +190,7 @@ export function RollImportPage() {
             <ShieldAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
             <span>
               Gender, date of birth and scholarship status are optional. When supplied they are stored for
-              aggregate reporting only — they are never displayed against a named person, in the directory,
+              aggregate reporting only - they are never displayed against a named person, in the directory,
               on a profile, or in any export. “Prefer not to say” is kept as its own answer rather than
               treated as missing.
             </span>
@@ -232,8 +232,8 @@ export function RollImportPage() {
                       <tr key={r.index} className={r.verdict === 'reject' ? 'bg-rose-50/50 dark:bg-rose-500/5' : undefined}>
                         <td className="px-3 py-2 text-slate-400 tnum">{r.index + 2}</td>
                         <td className="px-3 py-2">
-                          <div className="font-medium">{r.name ?? '—'}</div>
-                          <div className="text-xs text-slate-500 dark:text-slate-400">{[r.email, r.phone].filter(Boolean).join(' · ') || '—'}</div>
+                          <div className="font-medium">{r.name ?? '-'}</div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400">{[r.email, r.phone].filter(Boolean).join(' · ') || '-'}</div>
                         </td>
                         <td className="px-3 py-2"><Badge tone={VERDICT_TONE[r.verdict]}>{VERDICT_LABEL[r.verdict]}</Badge></td>
                         <td className="px-3 py-2 text-xs text-slate-600 dark:text-slate-300">{r.message}</td>
@@ -254,7 +254,7 @@ export function RollImportPage() {
             title="3 · Import"
             subtitle={
               report.summary.reject > 0
-                ? `${importable} rows will be imported. The ${report.summary.reject} rejected rows are skipped — fix them and upload again.`
+                ? `${importable} rows will be imported. The ${report.summary.reject} rejected rows are skipped - fix them and upload again.`
                 : `${importable} rows will be imported.`
             }
           />
@@ -288,7 +288,7 @@ export function RollImportPage() {
         <Card>
           <CardHeader
             title={`Sign-ins for ${credentials.length} new ${credentials.length === 1 ? 'account' : 'accounts'}`}
-            subtitle="Share these with the people concerned. They are shown only now — once you leave this page they cannot be retrieved, only reset."
+            subtitle="Share these with the people concerned. They are shown only now - once you leave this page they cannot be retrieved, only reset."
             action={<Button size="sm" onClick={downloadCredentials}>Download CSV</Button>}
           />
           <CardBody className="space-y-3">
@@ -297,7 +297,7 @@ export function RollImportPage() {
               <span>
                 Each person is asked to choose their own password the first time they sign in.
                 Until they do, anyone who knows their name and phone number can work out this
-                one — so hand them out directly rather than posting the list somewhere shared.
+                one - so hand them out directly rather than posting the list somewhere shared.
               </span>
             </p>
             <div className={`max-h-80 overflow-auto ${INSET}`}>

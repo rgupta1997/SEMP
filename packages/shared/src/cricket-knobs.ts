@@ -84,7 +84,7 @@ export const CRICKET_KNOB_GROUPS: Array<{ key: CricketKnobSpec['group']; label: 
 export const CRICKET_KNOB_SPECS: CricketKnobSpec[] = [
   // ---- innings
   { key: 'limitedOvers', label: 'Limited overs', group: 'innings', type: 'bool',
-    hint: 'Off means unlimited overs — a Test or a timeless match, which ends on wickets or on time.' },
+    hint: 'Off means unlimited overs - a Test or a timeless match, which ends on wickets or on time.' },
   { key: 'oversPerInnings', label: 'Overs an innings', group: 'innings', type: 'int', min: 1, max: 100,
     applies: (k) => k.limitedOvers },
   { key: 'ballsPerOver', label: 'Balls an over', group: 'innings', type: 'int', min: 1, max: 12,
@@ -102,7 +102,7 @@ export const CRICKET_KNOB_SPECS: CricketKnobSpec[] = [
   { key: 'bowlerLimitEnabled', label: 'Limit overs per bowler', group: 'bowling', type: 'bool',
     hint: 'Stops one bowler bowling the whole innings. A Test has no limit.' },
   { key: 'maxOversPerBowler', label: 'Maximum overs a bowler', group: 'bowling', type: 'int', min: 1, max: 50,
-    hint: 'T20 is 4, an ODI is 10 — a fifth of the innings.',
+    hint: 'T20 is 4, an ODI is 10 - a fifth of the innings.',
     applies: (k) => k.bowlerLimitEnabled },
   { key: 'powerplayEnabled', label: 'Powerplay', group: 'bowling', type: 'bool',
     hint: 'Recorded on the scorecard. Fielding restrictions are not enforced by the console.',

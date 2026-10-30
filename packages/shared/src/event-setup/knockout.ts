@@ -17,7 +17,7 @@ export class KnockoutSheetError extends Error {
 /**
  * Rebuild the bracket a schedule sheet describes. The final is the one match no
  * other match feeds; walking it left to right gives every round's matches in bracket
- * order. A squad that appears one round above the first is a bye — it becomes a
+ * order. A squad that appears one round above the first is a bye - it becomes a
  * first-round pair with an empty side, exactly how the product's manual knockout
  * (generateManualKnockout) expresses one. Throws KnockoutSheetError on any sheet that
  * is not a clean single-elimination tree.
@@ -82,7 +82,7 @@ export function knockoutFromRows(rows: SetupMatchRowSpec[]): KnockoutLayout {
       if ('winnerOf' in s) {
         // A feeder comes from the round right before. The one exception: a match
         // between two squads that BOTH had a first-round bye sits in round two but
-        // looks like a first-round match (depth 1) — e.g. 5 squads, "D v E" in round two.
+        // looks like a first-round match (depth 1) - e.g. 5 squads, "D v E" in round two.
         const d = depth(s);
         if (d !== r && !(r === 2 && d === 1)) throw new KnockoutSheetError(`${matchId} takes the winner of ${s.winnerOf}, which is not in the round before it`, matchId);
         visit(s.winnerOf, r - 1);
@@ -92,7 +92,7 @@ export function knockoutFromRows(rows: SetupMatchRowSpec[]): KnockoutLayout {
         counters[0]++;
         pairs.push({ home: s.squadKey, away: null });
       } else {
-        throw new KnockoutSheetError(`${matchId}: a squad enters more than one round in — only one-round byes are supported`, matchId);
+        throw new KnockoutSheetError(`${matchId}: a squad enters more than one round in - only one-round byes are supported`, matchId);
       }
     }
   };

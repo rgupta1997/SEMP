@@ -266,7 +266,7 @@ describe('Draws sheet', () => {
     const r = run('intra', sample('intra'));
     expect(bp(r).draws).toEqual([{
       key: 'd1', sport: 'Football', discipline: 'Mixed', format: 'Knockout', squadMin: 6, squadMax: 10, thirdPlace: false,
-      scoring: { presetKey: 'fest_2x10_ko', name: 'Football Mixed — 20 min, 5 min extra time, penalties', matchMinutes: 20, extraTimeMinutes: 5, penaltyKicks: 5 },
+      scoring: { presetKey: 'fest_2x10_ko', name: 'Football Mixed - 20 min, 5 min extra time, penalties', matchMinutes: 20, extraTimeMinutes: 5, penaltyKicks: 5 },
     }]);
   });
 
