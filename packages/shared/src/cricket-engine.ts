@@ -329,6 +329,8 @@ export function stepCricket(prev: CricketState, ev: CricketEvent): { state: Cric
         // side has no innings open to hold them, so they wait in the match-level
         // bucket and are drained into their innings when it starts.
         state.penaltiesFor[ev.side] += ev.runs;
+        // In the chase they add to the total being chased, so the target goes up with them.
+        if (inn.target !== undefined) inn.target += ev.runs;
         step.runsScored = ev.runs;
       }
       break;
@@ -717,6 +719,17 @@ export function undoCricket(
  * Not wickets, not innings won: a cricket result is a run total, and the wickets
  * only phrase the margin.
  */
+/** Each side's match runs, wickets and legal balls (Super Overs left out), for a summary or Manual form. */
+export function cricketSideTotals(state: CricketState): Record<CricketSide, { runs: number; wickets: number; balls: number }> {
+  const main = state.innings.filter((i) => !i.superOver);
+  const of = (side: CricketSide) => ({
+    runs: aggregateFor(state, side),
+    wickets: main.filter((i) => i.battingSide === side).reduce((n, i) => n + i.wickets, 0),
+    balls: main.filter((i) => i.battingSide === side).reduce((n, i) => n + i.balls, 0),
+  });
+  return { A: of('A'), B: of('B') };
+}
+
 export function cricketHeadline(state: CricketState): [number, number] {
   return [aggregateFor(state, 'A'), aggregateFor(state, 'B')];
 }

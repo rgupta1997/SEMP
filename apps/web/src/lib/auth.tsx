@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { api, tokenStore } from './api';
+import { api, ApiError, tokenStore } from './api';
 import { realtimeAuthChanged, clearRealtimeToken } from './realtime';
 
 // Every login is a `user`; `system` is the platform super-admin shell. There are
@@ -46,6 +46,8 @@ export interface AuthContext {
 interface AuthState {
   ctx: AuthContext | null;
   loading: boolean;
+  /** The saved sign-in could not be checked yet (network or server blip): retrying, still signed in. */
+  reconnecting: boolean;
   availableRoles: AppRole[];
   activeRole: AppRole;
   setActiveRole: (r: AppRole) => void;
@@ -82,6 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [ctx, setCtx] = useState<AuthContext | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reconnecting, setReconnecting] = useState(false);
   const [activeRole, setActiveRoleState] = useState<AppRole>('user');
   const [justLoggedIn, setJustLoggedIn] = useState(false);
 
@@ -108,14 +111,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!tokenStore.get()) { setLoading(false); return; }
-    refresh().catch(() => {
-      tokenStore.clear();
-      // A stale token that no longer resolves (server restarted, session
-      // expired) forces the same trip back to the login page a logout does -
-      // so it needs the same cleanup, or the next sign-in inherits whichever
-      // workspace was showing before.
-      forgetWorkspaceChoices();
-    }).finally(() => setLoading(false));
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const check = (attempt: number) => {
+      refresh().then(() => { setReconnecting(false); setLoading(false); }).catch((e) => {
+        if (stopped) return;
+        // Only the server saying the sign-in is no longer valid ends the session.
+        if (e instanceof ApiError && [401, 403, 404].includes(e.status)) {
+          tokenStore.clear();
+          // Same cleanup a logout does, or the next sign-in inherits the last workspace.
+          forgetWorkspaceChoices();
+          setReconnecting(false);
+          setLoading(false);
+          return;
+        }
+        // A network or server blip keeps the sign-in: retry, backing off to 15 s.
+        setReconnecting(true);
+        timer = setTimeout(() => check(attempt + 1), Math.min(15_000, 2_000 * 2 ** attempt));
+      });
+    };
+    check(0);
+    return () => { stopped = true; if (timer) clearTimeout(timer); };
   }, []);
 
   /**
@@ -239,7 +255,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const availableRoles = useMemo(() => (ctx ? rolesFor(ctx) : []), [ctx]);
 
   return (
-    <Ctx.Provider value={{ ctx, loading, availableRoles, activeRole, setActiveRole, login, signup, adoptSession, changePassword, refresh, logout, justLoggedIn, clearJustLoggedIn: () => setJustLoggedIn(false) }}>
+    <Ctx.Provider value={{ ctx, loading, reconnecting, availableRoles, activeRole, setActiveRole, login, signup, adoptSession, changePassword, refresh, logout, justLoggedIn, clearJustLoggedIn: () => setJustLoggedIn(false) }}>
       {children}
     </Ctx.Provider>
   );

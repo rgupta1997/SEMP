@@ -15,7 +15,7 @@ import {
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, hasResultIn, moveUnplacedTo, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
+import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
 import { carromHeadline, carromMatchOf, carromRulesOf, drawSettlement, isCarromSport } from '@semp/shared';
 import { CarromResult, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
 import { PoolResult, hydratePool } from '../../features/scoring/PoolResult';
@@ -4026,30 +4026,50 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
 // /live (not /result) so wickets & overs land in live_state and the "runs/wkts (overs)"
 // score renders everywhere - the bare runs alone would drop the wickets the official
 // typed. inn/batting and any other live keys are preserved by spreading the snapshot.
+/**
+ * The ball-by-ball score as the Manual form's starting point: each side's runs (match total,
+ * Super Overs left out), wickets and balls, and the winner once the match has one.
+ */
+function cricketManualSeed(ls: any): { runsA: number; wktA: number; ballsA: number; runsB: number; wktB: number; ballsB: number; decidedFor: 'A' | 'B' | null } | null {
+  const log = Array.isArray(ls?.cricket) ? (ls.cricket as CricketLog) : null;
+  if (!log?.length || !isCricketFormat(ls?.format)) return null;
+  const st = foldCricket(ls.format, log).state;
+  const { A, B } = cricketSideTotals(st);
+  return { runsA: A.runs, wktA: A.wickets, ballsA: A.balls, runsB: B.runs, wktB: B.wickets, ballsB: B.balls, decidedFor: st.ended ? st.winner : null };
+}
+
 function CricketManualResult({ fixture, fixtureId, live, invalidate, onDone }:
   { fixture: any; fixtureId: string; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[]; onDone: () => void }) {
   const homeName = teamLabel(homeTeam(fixture));
   const awayName = teamLabel(awayTeam(fixture));
   const homeOrg = orgLabel(homeTeam(fixture));
   const awayOrg = orgLabel(awayTeam(fixture));
-  // Seed from the saved live snapshot (the only place wickets/overs live). The live
-  // query can land after mount, so re-seed once it arrives - mirrors LiveConsole.
-  const seed = hydrate(live?.live_state);
-  const [rA, setRA] = useState(String(seed.runsA ?? 0));
-  const [wA, setWA] = useState(String(seed.wktA ?? 0));
-  const [oA, setOA] = useState(oversStr(seed.ballsA ?? 0));
-  const [rB, setRB] = useState(String(seed.runsB ?? 0));
-  const [wB, setWB] = useState(String(seed.wktB ?? 0));
-  const [oB, setOB] = useState(oversStr(seed.ballsB ?? 0));
-  const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>('auto');
+  // Seed from the ball-by-ball record when there is one (so switching from it keeps the score
+  // and a Super Over winner), else the saved quick-entry snapshot. The live query can land
+  // after mount, so re-seed once it arrives - mirrors LiveConsole.
+  const seedOf = (ls: any) => {
+    const ball = cricketManualSeed(ls);
+    const s = ball ?? hydrate(ls);
+    const pick: 'auto' | 'home' | 'away' = ball?.decidedFor === 'A' ? 'home' : ball?.decidedFor === 'B' ? 'away' : 'auto';
+    return { runsA: s.runsA ?? 0, wktA: s.wktA ?? 0, ballsA: s.ballsA ?? 0, runsB: s.runsB ?? 0, wktB: s.wktB ?? 0, ballsB: s.ballsB ?? 0, pick };
+  };
+  const seed = seedOf(live?.live_state);
+  const [rA, setRA] = useState(String(seed.runsA));
+  const [wA, setWA] = useState(String(seed.wktA));
+  const [oA, setOA] = useState(oversStr(seed.ballsA));
+  const [rB, setRB] = useState(String(seed.runsB));
+  const [wB, setWB] = useState(String(seed.wktB));
+  const [oB, setOB] = useState(oversStr(seed.ballsB));
+  const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>(seed.pick);
   const [notes, setNotes] = useState(fixture.notes ?? '');
   const seeded = useRef(false);
   useEffect(() => {
     if (seeded.current || !live) return;
     seeded.current = true;
-    const s = hydrate(live.live_state);
-    setRA(String(s.runsA ?? 0)); setWA(String(s.wktA ?? 0)); setOA(oversStr(s.ballsA ?? 0));
-    setRB(String(s.runsB ?? 0)); setWB(String(s.wktB ?? 0)); setOB(oversStr(s.ballsB ?? 0));
+    const s = seedOf(live.live_state);
+    setRA(String(s.runsA)); setWA(String(s.wktA)); setOA(oversStr(s.ballsA));
+    setRB(String(s.runsB)); setWB(String(s.wktB)); setOB(oversStr(s.ballsB));
+    setWinner(s.pick);
   }, [live]);
 
   const save = useLiveSave(fixtureId, invalidate);

@@ -183,7 +183,7 @@ function AuthenticatedRoutes() {
 }
 
 function AppRoutes() {
-  const { ctx, loading, justLoggedIn, clearJustLoggedIn, activeRole } = useAuth();
+  const { ctx, loading, reconnecting, logout, justLoggedIn, clearJustLoggedIn, activeRole } = useAuth();
 
   // Consume the one-shot login flag once we've acted on it (below).
   useEffect(() => { if (justLoggedIn) { clearJustLoggedIn(); returnAfterLogin.clear(); } }, [justLoggedIn, clearJustLoggedIn]);
@@ -218,7 +218,23 @@ function AppRoutes() {
   // indistinguishable from a phishing page.
   if (inviteMatch?.params.token) return <InviteAcceptPage token={inviteMatch.params.token} />;
 
-  if (loading) return <div className="grid h-screen place-items-center"><Spinner /></div>;
+  if (loading) return (
+    <div className="grid h-screen place-items-center">
+      <div className="grid justify-items-center gap-3 px-4 text-center">
+        <Spinner />
+        {reconnecting && (
+          <>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Can't reach the server. Retrying - you're still signed in.</p>
+            {/* A way out if the server stays down: a fresh page with no saved sign-in. */}
+            <button type="button" className="text-xs font-semibold text-slate-500 underline underline-offset-2 dark:text-slate-400"
+              onClick={() => { logout(); window.location.reload(); }}>
+              Sign out instead
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
   // Logged out: a public marketing landing page at the root, with the sign-in
   // screen at /login. Any other path falls through to the landing page.
   if (!ctx) return (

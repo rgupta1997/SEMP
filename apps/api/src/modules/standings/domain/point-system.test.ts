@@ -219,11 +219,52 @@ describe('an unresolved group tie in cross-group placings', () => {
     fx('A', 'D', 2, 1, { round: 'Final', pool_number: null }),
   ];
 
-  it('B and C both count as level runners-up: neither is dropped to 3rd in the group', () => {
+  it('B and C stay level with each other, and the better runner-up E is placed ahead of both', () => {
     const ctx = drawContext(all, () => ranking, []);
     const pts = Object.fromEntries(runScheme(all, rule, true, ctx).map((r) => [r.entity_id, r.points]));
+    // E won a group match (2 pts) and is 3rd; B and C (1 pt, level) share 4th, worth participation here.
+    expect(pts.E).toBe(4);
     expect(pts.B).toBe(pts.C);
-    expect(pts.C).toBe(4);
-    expect(pendingPlacingTies(all, rule, ctx)).toEqual([{ stage: 1, entities: ['B', 'C', 'E'], from: 3, to: 4 }]);
+    expect(pts.C).toBe(1);
+    expect(pendingPlacingTies(all, rule, ctx)).toEqual([]);
+  });
+
+  // Pool 2's runner-up F is level with B and C on points and difference: all three tie for 3rd.
+  const level = [
+    fx('A', 'B', 1, 0), fx('A', 'C', 1, 0), fx('B', 'C', 1, 1),
+    fx('D', 'E', 3, 0, { pool_number: 2 }), fx('D', 'F', 1, 0, { pool_number: 2 }), fx('E', 'F', 0, 0, { pool_number: 2 }),
+    fx('A', 'D', 2, 1, { round: 'Final', pool_number: null }),
+  ];
+  const placing = (order: string[]): TieResolution => ({ scope: 'placing', stage: 1, pool: null, order, reason: 'decided by the committee', by: null, at: '2026-10-30' });
+
+  it('the three tied for 3rd wait for an order, and "Set order" is applied', () => {
+    expect(pendingPlacingTies(level, rule, drawContext(level, () => ranking, []))).toEqual([{ stage: 1, entities: ['B', 'C', 'F'], from: 3, to: 4 }]);
+    const ctx = drawContext(level, () => ranking, [placing(['C', 'F', 'B'])]);
+    const pts = Object.fromEntries(runScheme(level, rule, true, ctx).map((r) => [r.entity_id, r.points]));
+    expect([pts.C, pts.F, pts.B]).toEqual([4, 1, 1]);
+    expect(pendingPlacingTies(level, rule, ctx)).toEqual([]);
+  });
+});
+
+// One league, then a final: two teams level for 3rd. "Set order" decides who is 3rd.
+describe('"Set order" in a single league', () => {
+  const fx = (h: string, a: string, hs: number, as: number, o: Partial<SchemeFixture> = {}): SchemeFixture => ({
+    status: 'completed', round: null, home_team_id: h, away_team_id: a, home_entity_id: h, away_entity_id: a,
+    home_score: hs, away_score: as, winner_team_id: hs > as ? h : hs < as ? a : null, pool_number: 1, stage_sequence: 1, ...o });
+  const ranking = { win: 2, draw: 1, loss: 0, tiebreakers: ['points', 'score_diff'] as GroupRanking['tiebreakers'] };
+  const rule = { scheme: 'placement', points: { winner: 10, runner_up: 7, third_place: 4 }, participation: 1, table_placings: true, ranking } as StandingsRule;
+  // A and B top the league and play the final; C and D draw and lose the rest by the same scores.
+  const all = [
+    fx('A', 'B', 1, 0), fx('A', 'C', 1, 0), fx('A', 'D', 1, 0), fx('B', 'C', 1, 0), fx('B', 'D', 1, 0), fx('C', 'D', 1, 1),
+    fx('A', 'B', 2, 1, { round: 'Final', pool_number: null }),
+  ];
+
+  it('without an order C and D wait; with "D, then C" saved, D is 3rd', () => {
+    expect(pendingPlacingTies(all, rule, drawContext(all, () => ranking, []))).toEqual([{ stage: 1, entities: ['C', 'D'], from: 3, to: 4 }]);
+    const order: TieResolution = { scope: 'placing', stage: 1, pool: null, order: ['D', 'C'], reason: 'committee', by: null, at: '2026-10-30' };
+    const ctx = drawContext(all, () => ranking, [order]);
+    const pts = Object.fromEntries(runScheme(all, rule, true, ctx).map((r) => [r.entity_id, r.points]));
+    expect([pts.D, pts.C]).toEqual([4, 1]);
+    expect(pendingPlacingTies(all, rule, ctx)).toEqual([]);
   });
 });

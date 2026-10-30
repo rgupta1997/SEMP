@@ -123,7 +123,8 @@ function leagueTally(fixtures: SchemeFixture[], win: number, draw: number, loss:
       const homeWon = f.winner_team_id === f.home_team_id;
       if (home) { if (homeWon) { home.won++; home.points += win; } else { home.lost++; home.points += loss; } }
       if (away) { if (!homeWon) { away.won++; away.points += win; } else { away.lost++; away.points += loss; } }
-      if (!played) { const loser = homeWon ? away : home; if (loser) loser.wo++; }
+      // Every walkover loss counts toward a no-show, whether or not its score counts in the table.
+      if (f.status === 'walkover') { const loser = homeWon ? away : home; if (loser) loser.wo++; }
     }
   }
   return table;
@@ -352,7 +353,6 @@ export function tablePlacings(fixtures: SchemeFixture[], rule: Extract<Standings
   const pools = [...new Set(stageFx.map((f) => f.pool_number ?? null))];
 
   const poolRank = new Map<string, number>();
-  const poolTies: string[][] = [];
   const ranked = pools.map((pool) => {
     const g = rankGroup(stageFx.filter((f) => (f.pool_number ?? null) === pool), ranking, resolverFor(ctx.resolutions, 'pool', stage, pool));
     g.rows.forEach((r) => { poolRank.set(r.entity_id, r.rank!); out.records.set(r.entity_id, r); out.poolOf.set(r.entity_id, pool); });
@@ -362,7 +362,6 @@ export function tablePlacings(fixtures: SchemeFixture[], rule: Extract<Standings
       const best = Math.min(...tie.map((id) => poolRank.get(id) ?? Infinity));
       tie.forEach((id) => poolRank.set(id, best));
     }
-    poolTies.push(...g.ties);
     return g;
   });
   if (!rule.table_placings) return out;
@@ -374,8 +373,9 @@ export function tablePlacings(fixtures: SchemeFixture[], rule: Extract<Standings
   let pos = koEntities.size + 1;
   if (pos > POSITION_PLACEMENT.length) return out;
 
-  const inPoolTie = (id: string) => poolTies.some((t) => t.includes(id));
   const remaining = (ids: string[]) => ids.filter((id) => !koEntities.has(id));
+  // The organiser's saved order for a placing tie ("Set order"), matched by the set of tied teams.
+  const resolve = resolverFor(ctx.resolutions, 'placing', stage, null);
   // Ordered blocks of contingents still to place; `tied` = level with no saved order.
   const blocks: Array<{ ids: string[]; tied: boolean }> = [];
   const tiers: Array<Pick<CrossComparison, 'order' | 'decidedBy'>> = [];
@@ -384,22 +384,20 @@ export function tablePlacings(fixtures: SchemeFixture[], rule: Extract<Standings
     for (let i = 0; i < rows.length;) {
       const tie = ranked[0].ties.find((t) => t.includes(rows[i].entity_id));
       const ids = remaining(tie ?? [rows[i].entity_id]);
-      if (ids.length) blocks.push({ ids, tied: !!tie && ids.length > 1 });
+      const picked = ids.length > 1 ? resolve(ids) : undefined;
+      if (picked) picked.forEach((id) => blocks.push({ ids: [id], tied: false }));
+      else if (ids.length) blocks.push({ ids, tied: !!tie && ids.length > 1 });
       i += tie ? tie.length : 1;
     }
   } else {
     const cross = ranking.tiebreakers.filter((t) => t !== 'head_to_head');
     const crossOrder: StandingsTiebreaker[] = cross.length ? cross : ['points'];
-    const resolve = resolverFor(ctx.resolutions, 'placing', stage, null);
     const maxRank = Math.max(...poolRank.values());
     for (let rank = 1; rank <= maxRank; rank++) {
+      // Teams still tied in their group share this tier and, level on every group tie-breaker,
+      // stay level on the cross ones too - so they form one block, and others are compared to it.
       const tier = remaining([...poolRank].filter(([, r]) => r === rank).map(([id]) => id));
       if (tier.length === 0) continue;
-      if (tier.some(inPoolTie)) {
-        blocks.push({ ids: tier, tied: tier.length > 1 });
-        if (tier.length > 1) tiers.push({ order: tier, decidedBy: tier.slice(1).map(() => null) });
-        continue;
-      }
       // Kept for the "ranking across groups" view: the order and what split each pair.
       const order: string[] = [];
       const decidedBy: CrossComparison['decidedBy'] = [];

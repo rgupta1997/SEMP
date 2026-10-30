@@ -371,3 +371,13 @@ describe('kho-kho ADT tie-breaker', () => {
     expect(ties.length).toBe(1);
   });
 });
+
+// A no-show is a team whose every match was a walkover loss - even where the walkover score counts.
+describe('no-show with counted walkovers', () => {
+  it('a team that lost every match by a counted walkover is still a no-show', () => {
+    const wo = (h: string, a: string): SchemeFixture => ({ ...fx(h, a, 2, 0), status: 'walkover', walkover_counts: true });
+    const { rows } = rankGroup([wo('A', 'C'), wo('B', 'C'), fx('A', 'B', 1, 0)], { win: 3, draw: 1, loss: 0, tiebreakers: ['points'] });
+    const c = rows.find((r) => r.entity_id === 'C')!;
+    expect(c).toMatchObject({ played: 2, lost: 2, wo: 2, ga: 4 });
+  });
+});

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cricketPresetByKey, type CricketFormat } from './cricket-rules.js';
-import { cricketHeadline, foldCricket, type CricketEvent, type CricketLog } from './cricket-engine.js';
+import { chaseLine, cricketHeadline, cricketSideTotals, foldCricket, type CricketEvent, type CricketLog } from './cricket-engine.js';
 import { cricketScorecard } from './cricket-stats.js';
 
 // Inter-IIM cricket: the toss decides who bats first; a tie goes to a Super Over (the side
@@ -98,5 +98,30 @@ describe('the Super Over', () => {
   it('a format without a Super Over still ends a tie as a tie', () => {
     const f = { ...T20(), superOverOnTie: false };
     expect(play(tied, f)).toMatchObject({ ended: true, outcome: 'tie', winner: null, margin: 'tied' });
+  });
+});
+
+// Penalty runs to the fielding side during the chase add to the total being chased.
+describe('penalty runs in the chase', () => {
+  it('raise the target, so the chasing side must pass the new total', () => {
+    const chase: CricketLog = [...open('a1', 'a2', 'b9'), run(6), declare, ...open('b1', 'b2', 'a9'), { t: 'penalty', side: 'A', runs: 5 }];
+    let s = play(chase);
+    expect(s.innings[1].target).toBe(12);
+    expect(chaseLine(s)).toContain('12');
+    // 7 used to win against the old target of 7; now it doesn't.
+    s = play([...chase, run(6), run(1)]);
+    expect(s.ended).toBe(false);
+    s = play([...chase, run(6), run(6)]);
+    expect(s).toMatchObject({ ended: true, winner: 'B' });
+    expect(cricketHeadline(s)).toEqual([11, 12]);
+  });
+});
+
+// The Manual form starts from the ball-by-ball totals (Super Overs left out).
+describe('cricketSideTotals', () => {
+  it('runs, wickets and balls per side; the Super Over does not change them', () => {
+    const s = play([...tied, ...open('b1', 'b2', 'a9'), run(6), ...dots(5), ...open('a1', 'a2', 'b9'), run(6), run(1)]);
+    expect(cricketSideTotals(s)).toEqual({ A: { runs: 4, wickets: 0, balls: 1 }, B: { runs: 4, wickets: 0, balls: 1 } });
+    expect(s.winner).toBe('A');
   });
 });
