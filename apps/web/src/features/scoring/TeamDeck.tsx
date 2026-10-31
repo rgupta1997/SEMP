@@ -460,6 +460,13 @@ export function TeamDeck(p: TeamDeckProps) {
   const periodName = inExtra ? (extraSpec?.label ?? 'Extra time') : lv.label;
   const periodNo = inExtra ? progress.extraPlayed + 1 : Math.min(played + 1, totalPeriods);
   const periodOf = repeatingExtra ? periodNo : inExtra ? progress.extraTotal : totalPeriods;
+  // Short name for an extra period on the strip: OT1 for basketball, ET1 otherwise.
+  const extraAbbr = /^overtime$/i.test(extraSpec?.label ?? '') ? 'OT' : 'ET';
+  // Periods past regulation get their own boxes, so the strip adds up to the total.
+  const stripUnits = aggregate ? Math.max(maxUnits, env.unitScores.length + (inExtra ? 1 : 0)) : maxUnits;
+  const finalLabel = progress.extraPlayed > 0
+    ? `Final · ${extraAbbr === 'OT' ? `${progress.extraPlayed} OT` : 'after extra time'}`
+    : 'Final';
 
   const shoot = useMemo(
     () => shootoutState(log, format.tieBreak?.penalties?.kicks ?? 5),
@@ -473,7 +480,10 @@ export function TeamDeck(p: TeamDeckProps) {
       title: `End ${periodName.toLowerCase()} ${periodNo}?`,
       confirmLabel: `End ${periodName.toLowerCase()}`,
       message: !last
-        ? `The score so far is banked and the next ${periodName.toLowerCase()} starts level.`
+        // Aggregate sports keep one running total; only the period's own count restarts.
+        ? aggregate
+          ? `The match total (${shown[0]}–${shown[1]}) carries on into ${periodName.toLowerCase()} ${periodNo + 1}.`
+          : `The score so far is banked and the next ${periodName.toLowerCase()} starts level.`
         // What happens after the LAST period depends entirely on whether the scores
         // are level, and an official about to blow the final whistle should be told
         // which it is before they do it, not after.
@@ -528,6 +538,7 @@ export function TeamDeck(p: TeamDeckProps) {
                 : progress.phase === 'minimumChase' ? 'Minimum chase'
                 : progress.phase === 'universalPoint' ? 'Universal point'
                 : progress.phase === 'goldenRaid' ? 'Golden raid'
+                : aggregate && state.ended ? finalLabel
                 : aggregate ? (repeatingExtra ? `${periodName} ${periodNo}` : `${periodName} ${periodNo} of ${periodOf}`) : lv.label}
             </div>
 
@@ -587,7 +598,7 @@ export function TeamDeck(p: TeamDeckProps) {
         <div className="mt-1.5 grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-t border-white/15 pt-1.5">
           <Discipline counts={cards.A} />
           <div className="flex min-w-0 items-center justify-center gap-1 overflow-x-auto">
-            {Array.from({ length: maxUnits }, (_, i) => {
+            {Array.from({ length: stripUnits }, (_, i) => {
               const u = env.unitScores[i];
               const current = i === played && !state.ended;
               return (
@@ -596,7 +607,7 @@ export function TeamDeck(p: TeamDeckProps) {
                   current ? 'bg-white/15 ring-1 ring-white/30' : 'bg-white/5',
                 )}>
                   <div className="text-[8px] font-bold uppercase tracking-wide text-on-brand">
-                    {lv.label[0]}{i + 1}
+                    {aggregate && i >= totalPeriods ? `${extraAbbr}${i - totalPeriods + 1}` : `${lv.label[0]}${i + 1}`}
                   </div>
                   <div className="font-mono text-[10px] font-semibold tabular-nums text-white">
                     {u ? `${u[0]}–${u[1]}` : '–'}
