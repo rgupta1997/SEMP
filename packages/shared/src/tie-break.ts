@@ -1,5 +1,6 @@
 import type { RallyEvent, RallyLog, KernelState } from './rally-kernel.js';
 import type { ScoringFormat, Side, TieBreakSpec } from './scoring-rules.js';
+import { extraTimeRepeats } from './scoring-rules.js';
 import { canonicalTeamSport } from './team-presets.js';
 
 /** How a sport names its shoot-out: hockey's 1 v 1 shoot-out, football's penalties. */
@@ -81,7 +82,7 @@ export function tieProgress(
 
   // Regulation done and level. Extra time first, if the format declares any AND
   // there is any left to play - or, for basketball overtime, for as long as it is level.
-  if (extraTotal > 0 && (extraPlayed < extraTotal || tb?.extraTime?.repeat)) {
+  if (extraTotal > 0 && (extraPlayed < extraTotal || extraTimeRepeats(tb))) {
     return { phase: 'extraTime', extraPlayed, extraTotal, periodMs: extraMs, levelAfterRegulation };
   }
 

@@ -313,6 +313,14 @@ export interface TieBreakSpec {
   goldenRaid?: boolean | null;
 }
 
+/**
+ * Extra time repeats only when nothing has to follow it: a repeating overtime never
+ * runs out, so a stored repeat beside a shoot-out etc. falls back to fixed periods.
+ */
+export function extraTimeRepeats(tb: TieBreakSpec | null | undefined): boolean {
+  return !!tb?.extraTime?.repeat && !tb.penalties && !tb.minimumChase && !tb.universalPoint && !tb.goldenRaid;
+}
+
 export interface ScoringFormat {
   /** Lowercased sport name, matching the sports catalogue. */
   sport: string;

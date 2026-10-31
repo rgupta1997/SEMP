@@ -6,7 +6,7 @@ import {
   isKhoKhoFormat, khoStatus, khoTurnLines, minChaseState, minChaseEnd, inningsEnd, formatChaseTime, parseChaseTime, KHO_END_LABEL, MIN_CHASE_GRACE_MS,
   isKabaddiFormat, kabaddiStatus, canonicalTeamSport, goldenTossEnd, GOLDEN_RAIDS, isHockeySport, penaltyCorners,
   activeSuspensions, cardRulesFor, escalatedCard, sentOffPlayers, isPeriodShaped, timeoutRules, timeoutsLeft, timeoutsAllowedNow,
-  type ClockReading, type ShootoutState, type MinChaseState,
+  extraTimeRepeats, type ClockReading, type ShootoutState, type MinChaseState,
   statSpecFor, type EventTone, type KernelState, type RallyEvent, type RallyLog, type ScoringFormat,
   type Side, type StatEventSpec,
 } from '@semp/shared';
@@ -455,7 +455,8 @@ export function TeamDeck(p: TeamDeckProps) {
   const inExtra = progress.phase === 'extraTime';
   const extraSpec = format.tieBreak?.extraTime;
   // Basketball overtime repeats while level, so it has no "of N" - each one may be the last.
-  const repeatingExtra = inExtra && !!extraSpec?.repeat;
+  const repeats = extraTimeRepeats(format.tieBreak);
+  const repeatingExtra = inExtra && repeats;
   const periodName = inExtra ? (extraSpec?.label ?? 'Extra time') : lv.label;
   const periodNo = inExtra ? progress.extraPlayed + 1 : Math.min(played + 1, totalPeriods);
   const periodOf = repeatingExtra ? periodNo : inExtra ? progress.extraTotal : totalPeriods;
@@ -479,7 +480,7 @@ export function TeamDeck(p: TeamDeckProps) {
         : level && repeatingExtra
           ? `Still ${shown[0]}–${shown[1]}. Another ${periodName.toLowerCase()} of ${extraSpec!.minutes} minutes is played.`
           : level && !inExtra && format.tieBreak?.extraTime
-            ? `Level at ${shown[0]}–${shown[1]}. This goes to ${(extraSpec?.label ?? 'extra time').toLowerCase()}${extraSpec?.repeat ? ` (${extraSpec.minutes} min, repeated until someone leads)` : ''}.`
+            ? `Level at ${shown[0]}–${shown[1]}. This goes to ${(extraSpec?.label ?? 'extra time').toLowerCase()}${repeats ? ` (${extraSpec!.minutes} min, repeated until someone leads)` : ''}.`
             // Straight to kicks (no extra time), or after it.
             : level && format.tieBreak?.penalties
             ? `${inExtra ? 'Still' : 'Level at'} ${shown[0]}–${shown[1]}${inExtra ? ' after extra time' : ''}. This goes to a ${shootoutTerms(format.sport).title === 'Shoot-out' ? 'shoot-out' : 'penalty shoot-out'}.`

@@ -1,6 +1,7 @@
 import type {
   EndReason, LevelSpec, Outcome, ScoringFormat, ServeSpec, Side,
 } from './scoring-rules.js';
+import { extraTimeRepeats } from './scoring-rules.js';
 
 // ============================================================================
 // The rally kernel.
@@ -1198,7 +1199,7 @@ function endPeriod(format: ScoringFormat, state: KernelState): FinishedUnit[] {
   // Extra time is played out in full - a lead after its first half is not a win yet
   // (TieBreakSpec.extraTime). A repeating overtime (basketball) decides every period.
   const extra = format.tieBreak?.extraTime;
-  if (extra && !extra.repeat && played > topSpec.target && played < topSpec.target + extra.periods) return [unit];
+  if (extra && !extraTimeRepeats(format.tieBreak) && played > topSpec.target && played < topSpec.target + extra.periods) return [unit];
 
   // Last period done: decide on the total.
   const total = aggregateScore(state);
