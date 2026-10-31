@@ -6,7 +6,7 @@ import type { ScoringFormat } from './scoring-rules.js';
 import { deriveTeamStats } from './team-stats.js';
 import { foldCareerStats, statSpecFor } from './stat-registry.js';
 import { COLUMN_MAP } from './category-lines.js';
-import { applyKnobs, readKnobs } from './format-knobs.js';
+import { applyKnobs, describeKnobs, knobsFor, readKnobs } from './format-knobs.js';
 import { applyOverrides } from './format-overrides.js';
 
 const basket = (side: 'A' | 'B', pts: number): RallyEvent => ({ t: 'point', side, pts });
@@ -71,6 +71,21 @@ describe('repeating overtime survives edits', () => {
     expect(play(edited, []).progress.periodMs).toBe(8 * 60_000);
     stillOvertime(edited);
     expect(applyKnobs(fiba, { ...readKnobs(fiba), extraTimeMinutes: 3 }).tieBreak?.extraTime).toMatchObject({ repeat: true, minutes: 3 });
+  });
+
+  it('repeat is a visible checkbox: ticked on the IIM presets, and it can be switched off and on', () => {
+    const iim = presetByKey('iim_4x10')!;
+    const k = readKnobs(iim);
+    expect(k.extraTimeRepeat).toBe(true);
+    const keys = knobsFor(k).map((x) => x.key);
+    expect(keys).toContain('extraTimeRepeat');
+    expect(keys).not.toContain('extraTimePeriods');
+    expect(describeKnobs(k)).toContain('repeated until someone leads');
+
+    const off = applyKnobs(iim, { ...k, extraTimeRepeat: false });
+    expect(off.tieBreak?.extraTime?.repeat).toBeUndefined();
+    expect(knobsFor(readKnobs(off)).map((x) => x.key)).toContain('extraTimePeriods');
+    stillOvertime(applyKnobs(off, { ...readKnobs(off), extraTimeRepeat: true }));
   });
 
   it('a per-match override keeps repeat, for quarter and overtime length', () => {

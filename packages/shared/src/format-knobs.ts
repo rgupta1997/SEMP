@@ -92,6 +92,8 @@ export interface FormatKnobs {
   // Only ever consulted when draws are off: a level match that IS allowed to be a
   // draw is closed as one and never reaches any of this.
   extraTimeEnabled: boolean;
+  /** Still level after an extra period: play another, until someone leads (basketball overtime). */
+  extraTimeRepeat: boolean;
   /** How many periods of extra time. Both are played out; there is no golden goal. */
   extraTimePeriods: number;
   /** Minutes in EACH period of extra time, not the total. */
@@ -422,9 +424,13 @@ export const KNOB_SPECS: KnobSpec[] = [
   { key: 'extraTimeEnabled', label: 'Play extra time', group: 'tieBreak', type: 'bool',
     hint: 'Extra periods when the scores are level at full time.',
     applies: (k) => k.periodShaped && !k.drawsAllowed && !k.khoKho },
+  { key: 'extraTimeRepeat', label: 'Repeat until someone leads', group: 'tieBreak', type: 'bool',
+    hint: 'Still level after an extra period: another one is played, as many times as needed (basketball overtime).',
+    applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled && !k.khoKho },
+  // A repeating overtime decides after every period, so a period count means nothing.
   { key: 'extraTimePeriods', label: 'Periods of extra time', group: 'tieBreak', type: 'int', min: 1, max: 4,
     hint: 'Both are always played out - a side that goes ahead in the first still has to survive the second.',
-    applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled && !k.khoKho },
+    applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled && !k.extraTimeRepeat && !k.khoKho },
   { key: 'extraTimeMinutes', label: 'Minutes per extra period', group: 'tieBreak', type: 'int', min: 1, max: 60,
     hint: 'Each period, not the total. Two periods of 5 adds ten minutes.',
     applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled && !k.khoKho },
@@ -595,6 +601,7 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
     // They are what the knob shows before anyone touches it, so turning extra time
     // on does not also require deciding how long it is.
     extraTimeEnabled: !!f.tieBreak?.extraTime,
+    extraTimeRepeat: !!f.tieBreak?.extraTime?.repeat,
     extraTimePeriods: f.tieBreak?.extraTime?.periods ?? 2,
     extraTimeMinutes: f.tieBreak?.extraTime?.minutes ?? 5,
     extraTimeFirstTo: !f.tieBreak?.extraTime?.fullTime,
@@ -825,8 +832,8 @@ function buildFormat(f: ScoringFormat, k: FormatKnobs, name?: string): ScoringFo
         ...(k.universalPointEnabled && !k.khoKho ? { universalPoint: true } : {}),
         extraTime: k.extraTimeEnabled
           ? {
-            // Keep basketball's repeat-while-level and its "Overtime" name; the editor has no knob for them.
-            ...(f.tieBreak?.extraTime?.repeat ? { repeat: true } : {}),
+            // Repeat is a knob; the "Overtime" name has none, so it is carried through.
+            ...(k.extraTimeRepeat && !k.khoKho ? { repeat: true } : {}),
             ...(f.tieBreak?.extraTime?.label ? { label: f.tieBreak.extraTime.label } : k.khoKho ? { label: 'Extra turn' } : {}),
             ...(k.firstTo > 0 && !k.extraTimeFirstTo ? { fullTime: true } : {}),
             periods: Math.max(1, k.extraTimePeriods),
@@ -940,6 +947,7 @@ export function describeKnobs(k: FormatKnobs): string {
     const chain: string[] = [];
     if (k.extraTimeEnabled) {
       chain.push(k.khoKho ? `extra inning (${k.extraTimePeriods} x ${k.extraTimeMinutes} min turns)`
+        : k.extraTimeRepeat ? `ET ${k.extraTimeMinutes} min, repeated until someone leads`
         : `ET ${k.extraTimePeriods}x${k.extraTimeMinutes} min${k.firstTo > 0 && !k.extraTimeFirstTo ? ' played in full' : ''}`);
     }
     if (kicks) chain.push(k.hockey ? `shoot-out (${k.shootoutKicks} each)` : `${k.shootoutKicks} kicks`);
