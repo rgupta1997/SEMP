@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
-  CheckCircle2, ChevronRight, Clock, Eye, Flag, Lock, LockOpen, MapPin, Pencil, Radio, ShieldCheck, Users,
+  Check, CheckCircle2, ChevronRight, Clock, Eye, Flag, Lock, LockOpen, MapPin, Pencil, Radio, ShieldCheck, Users,
 } from 'lucide-react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -776,11 +776,17 @@ export function ResultsPage() {
                 // "Ranking event" badge and two empty slots - the bracket had an opponent
                 // and a winner the whole time; only THIS page refused to show either.
                 const rankingEvent = f.round === 'Event' && !f.home && !f.away;
-                const completed = f.status === 'completed' || f.status === 'confirmed';
+                // A walkover is decided too, so it gets Edit, not Record.
+                const walkover = f.status === 'walkover';
+                const completed = f.status === 'completed' || f.status === 'confirmed' || walkover;
                 const isLocked = locked(f);
                 const scored = !rankingEvent && f.home_score != null && f.away_score != null;
                 const homeWon = f.winner_team_id != null && f.winner_team_id === f.home?.id;
                 const awayWon = f.winner_team_id != null && f.winner_team_id === f.away?.id;
+                // A walkover has no play to read the winner from, so it gets a tick by the name.
+                const woTick = (won: boolean) => walkover && won && (
+                  <Check size={15} strokeWidth={3} className="shrink-0 text-emerald-600 dark:text-emerald-400" aria-label="Won by walkover" />
+                );
                 // Stopped early (retired / disqualified / conceded): marked beside the side
                 // that stopped, so an unfinished score never reads as a match played out.
                 const early = earlyEndOf(f.live_state);
@@ -908,13 +914,16 @@ export function ResultsPage() {
                                     squad that has no full name to show. */}
                                 {side ? (teamLabel(side) || teamShort(side)) : TBD_LABEL}
                               </span>
+                              {woTick(won)}
                               <span
                                 className={cn(
                                   't-num shrink-0 text-[17px] leading-6 tabular-nums',
                                   won ? 'font-extrabold text-slate-900 dark:text-slate-50' : 'font-bold text-slate-700 dark:text-slate-300',
                                 )}
                               >
-                                {scored ? formatPoints(score) : <span className="text-slate-300 dark:text-slate-600">·</span>}
+                                {scored ? formatPoints(score)
+                                  : walkover && won ? <span className="text-[12px] font-bold text-slate-500 dark:text-slate-400">W/O</span>
+                                  : <span className="text-slate-300 dark:text-slate-600">·</span>}
                                 {earlyNote(won)}
                                 {pens && pensNote(i === 0 ? pens.home : pens.away)}
                               </span>
@@ -981,11 +990,18 @@ export function ResultsPage() {
                         <>
                           {/* Full names, wrapping to a second line - "…" only past two lines. */}
                           <div className="flex min-w-0 items-center justify-end gap-2">
+                            {woTick(homeWon)}
                             {f.home && <span className={cn(DESKTOP_NAME, 'text-right')} title={teamLabel(f.home)}>{teamLabel(f.home)}</span>}
                             <TeamChip team={f.home} winner={f.winner_team_id != null && f.winner_team_id === f.home?.id} />
                           </div>
                           <span className="flex w-16 shrink-0 flex-col items-center whitespace-nowrap text-center text-lg font-bold tabular-nums text-slate-800 dark:text-slate-100">
-                            {scored ? `${formatPoints(f.home_score)}–${formatPoints(f.away_score)}` : <span className="text-slate-300 dark:text-slate-600">··</span>}
+                            {scored ? `${formatPoints(f.home_score)}–${formatPoints(f.away_score)}`
+                              : walkover ? <span className="text-base text-slate-500 dark:text-slate-400" title="Walkover">W/O</span>
+                              : <span className="text-slate-300 dark:text-slate-600">··</span>}
+                            {/* A walkover with a rulebook score (football 2-0): the score above, W/O under it. */}
+                            {walkover && scored && (
+                              <span className="text-[10px] font-semibold leading-3 text-slate-500 dark:text-slate-400">W/O</span>
+                            )}
                             {early && scored && (
                               <span className="text-[10px] font-semibold leading-3 text-amber-600 dark:text-amber-400"
                                 title={`${teamLabel(homeWon ? f.away : f.home)} ${early === 'retired' ? 'retired' : early}`}>
@@ -1008,6 +1024,7 @@ export function ResultsPage() {
                           <div className="flex min-w-0 items-center gap-2">
                             <TeamChip team={f.away} winner={f.winner_team_id != null && f.winner_team_id === f.away?.id} />
                             {f.away && <span className={DESKTOP_NAME} title={teamLabel(f.away)}>{teamLabel(f.away)}</span>}
+                            {woTick(awayWon)}
                           </div>
                         </>
                       )}

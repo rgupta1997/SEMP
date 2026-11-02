@@ -247,6 +247,9 @@ export function MatchConsolePage() {
             <div className="pt-1"><Button variant="outline" onClick={done}>Back to {backLabel.toLowerCase()}</Button></div>
           </CardBody>
         </Card>
+      ) : fixture.status === 'walkover' ? (
+        // Nothing was played, so there is nothing to score: show the result, not a console.
+        <WalkoverResultCard fixture={fixture} onBack={done} backLabel={backLabel} />
       ) : (
         <div className={scoringFocus ? 'flex min-h-0 flex-1 flex-col' : undefined}>
           <ScoringTabs fixture={fixture} fixtureId={fixtureId!} live={live} invalidate={invalidate} onDone={done}
@@ -624,6 +627,17 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     modeSeeded.current = true;
     setMode(formatEntryMode);
   }, [formatEntryMode, storedMode]);
+
+  // A finished single match with a saved score but no play log was entered by hand:
+  // reopen it in Manual so a correction starts from that score, not a blank console.
+  const manualSeeded = useRef(false);
+  useEffect(() => {
+    if (manualSeeded.current || touched.current || !live || structure !== 'single') return;
+    manualSeeded.current = true;
+    const finished = fixture.status === 'completed' || fixture.status === 'confirmed';
+    const typedIn = fixture.home_score != null && fixture.away_score != null && (live.live_log?.length ?? 0) === 0;
+    if (finished && typedIn) setMode('manual');
+  }, [live, structure, fixture.status, fixture.home_score, fixture.away_score]);
   // Multi-competitor events default to a simple team ranking (which team did well); the
   // detailed per-athlete console is kept available behind this toggle.
 
@@ -1322,6 +1336,11 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
         onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
         onSuspend={(nextLog, state) => save(nextLog, state, false, onDone, undefined, true)}
       />
+      {/* A no-show, before any point. Once play starts, "retires" or "Award to" covers it. */}
+      {log.length === 0 && (
+        <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone}
+          defaultScore={formatWalkoverScore(format)} countsInDifference={format.endStates?.countWalkoverInDifference} />
+      )}
     </div>
   );
 }
@@ -3807,6 +3826,31 @@ function formatWalkoverScore(format: ScoringFormat | null | undefined): [number,
   return lv ? [lv.target, 0] : null;
 }
 
+/** A recorded walkover: who it went to, any rulebook score, and the reason. */
+function WalkoverResultCard({ fixture, onBack, backLabel }: { fixture: any; onBack: () => void; backLabel: string }) {
+  const winnerSide = fixture.winner_team_id === fixture.home_team_id ? homeTeam(fixture)
+    : fixture.winner_team_id === fixture.away_team_id ? awayTeam(fixture) : null;
+  const scored = fixture.home_score != null && fixture.away_score != null;
+  return (
+    <Card>
+      <CardBody className="space-y-3 py-8 text-center">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Walkover</div>
+        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+          {winnerSide ? `${teamLabel(winnerSide)} wins by walkover` : 'Walkover - no winner recorded'}
+        </h2>
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          {teamLabel(homeTeam(fixture))} {scored ? `${fixture.home_score}–${fixture.away_score}` : 'vs'} {teamLabel(awayTeam(fixture))}
+        </p>
+        {fixture.notes && <p className="text-sm text-slate-500 dark:text-slate-400">Reason: {fixture.notes}</p>}
+        <p className="mx-auto max-w-md text-xs text-slate-400 dark:text-slate-500">
+          No play was recorded. To change it, edit this match from <b>Schedule → Fixtures</b>.
+        </p>
+        <div className="pt-1"><Button variant="outline" onClick={onBack}>Back to {backLabel.toLowerCase()}</Button></div>
+      </CardBody>
+    </Card>
+  );
+}
+
 /** "No-show?" row under a console that has no walkover control of its own. */
 function WalkoverRow({ fixture, fixtureId, invalidate, onDone, defaultScore, countsInDifference }:
   { fixture: any; fixtureId: string; invalidate: (string | null)[]; onDone: () => void; defaultScore?: [number, number] | null; countsInDifference?: boolean }) {
@@ -3880,15 +3924,20 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
   const homeOrg = orgLabel(homeTeam(fixture));
   const awayOrg = orgLabel(awayTeam(fixture));
   // Seed from the live detailed tally when one exists (so switching Detailed → Manual
-  // keeps the score instead of resetting), else from the saved headline.
+  // keeps the score instead of resetting), else from the saved headline. An empty
+  // tally (a team sheet but no play) must not hide a saved, typed-in result.
   const liveH = live?.live_state && Object.keys(live.live_state).length > 0 ? headline(def, hydrate(live.live_state)) : null;
-  const seedHome = liveH ? liveH.a : fixture.home_score;
-  const seedAway = liveH ? liveH.b : fixture.away_score;
+  const useLive = !!liveH && (liveH.a !== 0 || liveH.b !== 0 || fixture.home_score == null);
+  const seedHome = useLive ? liveH!.a : fixture.home_score;
+  const seedAway = useLive ? liveH!.b : fixture.away_score;
   const [home, setHome] = useState(seedHome != null ? String(seedHome) : '');
   const [away, setAway] = useState(seedAway != null ? String(seedAway) : '');
   // Winner is chosen explicitly, not derived: for time events the fastest (lowest)
   // wins, so "higher score" can't be assumed. 'auto' falls back to higher-score.
-  const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>('auto');
+  // A correction starts from the winner already on record.
+  const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>(() =>
+    fixture.winner_team_id && fixture.winner_team_id === fixture.home_team_id ? 'home'
+    : fixture.winner_team_id && fixture.winner_team_id === fixture.away_team_id ? 'away' : 'auto');
   const [notes, setNotes] = useState(fixture.notes ?? '');
   const saveResult = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/result`, body), invalidate);
 

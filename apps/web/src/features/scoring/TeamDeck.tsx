@@ -816,7 +816,10 @@ export function TeamDeck(p: TeamDeckProps) {
           <Card className={cn(SURFACE, 'min-h-0 items-center gap-3 overflow-y-auto p-4',
             p.recorded ? 'justify-start' : 'justify-center')}>
             <p className="text-center text-lg font-semibold">
-              {state.outcome === 'draw' ? 'Drawn' : `${nameOf(state.winner ?? 'A')} wins`}
+              {/* An abandoned match has no winner; never fall back to naming the home side. */}
+              {state.outcome === 'draw' ? 'Drawn'
+                : state.outcome === 'void' || !state.winner ? 'No result'
+                : `${nameOf(state.winner)} wins`}
             </p>
             {state.reason === 'penalties' ? (
               // Two labelled lines, so the match score and the kicks can't be mixed up.

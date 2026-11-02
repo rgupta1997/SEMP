@@ -647,9 +647,10 @@ export function RacquetDeck(p: RacquetDeckProps) {
         <div className="grid gap-2 rounded-lg bg-slate-50 p-3 text-center text-sm dark:bg-slate-800/60">
           <div>
             <div className="font-semibold text-slate-800 dark:text-slate-100">
-              {state.outcome === 'draw'
-                ? 'Drawn'
-                : `${nameOf(state.winner ?? 'A')} wins`}
+              {/* An abandoned match has no winner; never fall back to naming the home side. */}
+              {state.outcome === 'draw' ? 'Drawn'
+                : state.outcome === 'void' || !state.winner ? 'No result'
+                : `${nameOf(state.winner)} wins`}
             </div>
             <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
               {env.unitScores.map((u) => `${u[0]}–${u[1]}`).join('  ·  ') || `${env.headline[0]}–${env.headline[1]}`}
