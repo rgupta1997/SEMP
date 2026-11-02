@@ -60,6 +60,8 @@ export type RallyEvent =
     value?: number;
     /** Circumstances a metric can key on - kabaddi's 'dod' (a do-or-die raid). */
     flags?: string[];
+    /** A card or foul the official took back: kept on the record, counted nowhere. */
+    rescinded?: { reason: string; at?: string };
   }
   /** Replayed rally: no score, no serve movement. */
   | { t: 'let'; at?: string }
@@ -75,6 +77,8 @@ export type RallyEvent =
   | { t: 'card'; card: 'yellow'; against: Side; reason?: string; by?: string; at?: string }
   /** A timeout called by a side. Changes nothing on the scoreboard; counted against its allowance. */
   | { t: 'timeout'; side: Side; by?: string; at?: string }
+  /** A substitution: `offId` leaves the field, `onId` comes on. Changes nothing on the scoreboard. */
+  | { t: 'sub'; side: Side; onId: string; onName?: string; offId: string; offName?: string; clockMs?: number; at?: string }
   /** Award the serve without a rally (badminton red card). */
   | { t: 'awardServe'; side: Side; reason?: string; by?: string; at?: string }
   /** Force the current unit to a side regardless of the tally. */
@@ -916,6 +920,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       // A let replays the serve it interrupted - a let on a second serve is a second serve.
     case 'card':
     case 'timeout':
+    case 'sub':
       // Neither scores nor moves the serve. Recorded for the timeline and the stats.
       return { state, effect: base };
 
@@ -1323,12 +1328,19 @@ export function foldRally(format: ScoringFormat, log: RallyLog, firstServer: Sid
   let state = initKernel(format, firstServer);
   const trace: StepEffect[] = [];
   for (const ev of log) {
-    const r = step(format, state, ev);
+    // A rescinded card or foul scores nothing, even where the original awarded points.
+    const r = step(format, state, ev.t === 'point' && ev.rescinded ? { ...ev, pts: 0 } : ev);
     state = r.state;
     trace.push(r.effect);
   }
   return { state, trace };
 }
+
+/** A card or foul the official took back. */
+export const isRescinded = (ev: RallyEvent): boolean => ev.t === 'point' && !!ev.rescinded;
+
+/** The log without rescinded cards and fouls, for anything that counts discipline. */
+export const withoutRescinded = (log: RallyLog): RallyLog => log.filter((ev) => !isRescinded(ev));
 
 /** Undo is truncate-and-refold. Nothing else restores the serve as well as this. */
 export function undo(format: ScoringFormat, log: RallyLog, firstServer: Side = 'A'): { log: RallyLog; state: KernelState } {

@@ -14,7 +14,7 @@ import { titleCase, whenLabel } from '../../lib/format';
 import {
   Badge, Button, Card, EmptyState, FilterChips, Modal, Segmented, Select, Spinner, StatusBadge, Textarea, cn, confirmDialog, toast,
 } from '../../components/ui';
-import { GroupTables } from '../../components/GroupTables';
+import { GroupTables, TallyTabLabel } from '../../components/GroupTables';
 import { EventTallyTable, TitleTallyCard, hasTally as sportHasTally, titleTallyPath, type TitleTallyResponse } from '../../components/TitleTally';
 import { useUrlState, usePreserveScroll } from '../../components/primitives';
 
@@ -753,7 +753,12 @@ export function ResultsPage() {
                 {hasTally(g.drawId) && (
                   <Segmented size="sm" value={tallyOpen.has(g.drawId!) ? 'tally' : 'matches'}
                     onChange={(v) => setTally(g.drawId!, v === 'tally')}
-                    options={[{ value: 'matches', label: 'Matches' }, { value: 'tally', label: 'Point tally' }]} />
+                    options={[{ value: 'matches', label: 'Matches' }, {
+                      value: 'tally',
+                      // Event tallies have no group ties, so only table draws can carry the dot.
+                      label: eventTallyOf(g.drawId!) ? 'Point tally'
+                        : <TallyTabLabel drawId={g.drawId!} canManage={canManageSport(g.sportId) && !archived} />,
+                    }]} />
                 )}
               </div>
 

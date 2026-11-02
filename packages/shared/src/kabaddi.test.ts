@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { kabaddiStatus } from './kabaddi.js';
+import { doOrDieAfterOf, kabaddiStatus } from './kabaddi.js';
+import { applyKnobs, describeKnobs, knobsFor, readKnobs } from './format-knobs.js';
 import { goldenTossEnd, khoSettlementOf } from './kho-kho.js';
 import { tieProgress } from './tie-break.js';
 import { aggregateScore, foldRally, type RallyEvent } from './rally-kernel.js';
@@ -261,5 +262,38 @@ describe('golden raid decided at the end of the raid', () => {
   it('a single bonus raid or a single raid point still wins at once', () => {
     expect(play(golden({ t: 'point', side: 'A', pts: 1, kind: 'bonus_raid' }))).toMatchObject({ ended: true, winner: 'A' });
     expect(play(golden(raid('A', 1)))).toMatchObject({ ended: true, winner: 'A' });
+  });
+});
+
+// The do-or-die rule is a format setting: on by default after 2 empty raids.
+describe('do-or-die setting', () => {
+  const twoEmpty: RallyEvent[] = [{ t: 'raidFirst', side: 'A' }, empty('A'), raid('B', 1), empty('A'), raid('B', 1)];
+  const withSheet = (sheet: Record<string, unknown>) => ({ ...f, rulesSheet: { ...(f.rulesSheet ?? {}), ...sheet } });
+  const at = (sheet: Record<string, unknown>, log: RallyEvent[]) => kabaddiStatus(log, foldRally(f, log).state, doOrDieAfterOf(withSheet(sheet)));
+
+  it('defaults to two empty raids for every kabaddi format', () => {
+    expect(doOrDieAfterOf(f)).toBe(2);
+    expect(at({}, twoEmpty).doOrDie).toBe(true);
+  });
+
+  it('switched off, empty raids never make a do-or-die', () => {
+    expect(doOrDieAfterOf(withSheet({ doOrDie: false }))).toBeNull();
+    expect(at({ doOrDie: false }, twoEmpty).doOrDie).toBe(false);
+  });
+
+  it('set to three, the fourth raid is the do-or-die', () => {
+    expect(at({ doOrDieAfter: 3 }, twoEmpty).doOrDie).toBe(false);
+    expect(at({ doOrDieAfter: 3 }, [...twoEmpty, empty('A'), raid('B', 1)]).doOrDie).toBe(true);
+  });
+
+  it('the format editor shows, saves and reads it back', () => {
+    const k = readKnobs(f);
+    expect(k).toMatchObject({ doOrDieEnabled: true, doOrDieAfter: 2 });
+    expect(knobsFor(k).map((x) => x.key)).toEqual(expect.arrayContaining(['doOrDieEnabled', 'doOrDieAfter']));
+    const off = applyKnobs(f, { ...k, doOrDieEnabled: false });
+    expect(doOrDieAfterOf(off)).toBeNull();
+    expect(knobsFor(readKnobs(off)).map((x) => x.key)).not.toContain('doOrDieAfter');
+    expect(describeKnobs(readKnobs(off))).toContain('no do-or-die raid');
+    expect(doOrDieAfterOf(applyKnobs(f, { ...k, doOrDieAfter: 3 }))).toBe(3);
   });
 });

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { Calendar, Flag, MapPin } from 'lucide-react';
-import { EARLY_END_LABEL, earlyEndOf, formatPoints, isKnockoutRound, KHO_END_LABEL, KHO_END_SHORT, khoSettlementOf, shootoutLabel, shootoutOf, shootoutTerms, TBD_LABEL } from '@semp/shared';
+import { EARLY_END_LABEL, earlyEndOf, formatPoints, isGroupBye, isKnockoutRound, KHO_END_LABEL, KHO_END_SHORT, khoSettlementOf, shootoutLabel, shootoutOf, shootoutTerms, TBD_LABEL } from '@semp/shared';
 import { useApi, fmtDateTime } from '../../lib/hooks';
 import { Badge, Button, Card, EmptyState, ListToolbar, Modal, Segmented, Select, Spinner, StatusBadge, StatusLegend, cn } from '../../components/ui';
 import { GroupTables } from '../GroupTables';
@@ -120,7 +120,8 @@ export function ChampionshipFixtures({ championshipId, mode, apiBase, tally }: {
   // Schedule shows every fixture (the championship calendar); Results only those
   // that have concluded.
   const inMode = useMemo(
-    () => (mode === 'schedule' ? all : all.filter((f) => RESULT_STATUSES.has(f.status))),
+    // A group's rest slots are never played, so they are not listed.
+    () => (mode === 'schedule' ? all : all.filter((f) => RESULT_STATUSES.has(f.status))).filter((f) => !isGroupBye(f)),
     [all, mode],
   );
   const sportOptions = useMemo(

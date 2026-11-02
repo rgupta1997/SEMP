@@ -4,7 +4,7 @@ import {
   aggregateScore, capLeader, changesEndsAfterUnit, effectiveLevel, foldRally, isDecider, isAggregate, periodsPlayed, resultEnvelope,
   clockReading, formatClock, eventMinuteLabels, tieProgress, shootoutState, shootoutLine, shootoutEnd, shootoutTerms, type ShootoutTerms,
   isKhoKhoFormat, khoStatus, khoTurnLines, minChaseState, minChaseEnd, inningsEnd, formatChaseTime, parseChaseTime, KHO_END_LABEL, MIN_CHASE_GRACE_MS,
-  isKabaddiFormat, kabaddiStatus, canonicalTeamSport, goldenTossEnd, GOLDEN_RAIDS, isHockeySport, penaltyCorners,
+  isKabaddiFormat, kabaddiStatus, doOrDieAfterOf, canonicalTeamSport, goldenTossEnd, GOLDEN_RAIDS, isHockeySport, penaltyCorners,
   activeSuspensions, cardRulesFor, escalatedCard, sentOffPlayers, isPeriodShaped, timeoutRules, timeoutsLeft, timeoutsAllowedNow,
   extraTimeRepeats, type ClockReading, type ShootoutState, type MinChaseState,
   statSpecFor, type EventTone, type KernelState, type RallyEvent, type RallyLog, type ScoringFormat,
@@ -83,7 +83,7 @@ export interface TeamDeckProps {
   afterResult?: React.ReactNode;
 }
 
-type Surface = 'act' | 'log' | 'more' | 'clock' | 'shootout';
+type Surface = 'act' | 'log' | 'more' | 'clock' | 'shootout' | 'sub';
 
 /** The element that actually scrolls above this one - the app shell's `<main>`. */
 function scrollHost(el: HTMLElement): HTMLElement | null {
@@ -211,7 +211,23 @@ export function TeamDeck(p: TeamDeckProps) {
   };
   const undo = () => {
     if (!log.length) return;
+    const last = log[log.length - 1];
     const next = log.slice(0, -1);
+    p.onChange(next, foldRally(format, next, 'A').state);
+    // Undoing a substitution puts the two players back where they were.
+    if (last.t === 'sub') p.onSubstitute?.(last.side, last.offId, last.onId);
+  };
+  // A substitution: logged at its minute, and the team sheet swaps the two players.
+  const substitute = (s: Side, offId: string, onId: string) => {
+    if (p.disabled || !p.onSubstitute) return;
+    push({ t: 'sub', side: s, offId, onId, offName: nameFor(offId), onName: nameFor(onId) });
+    p.onSubstitute(s, onId, offId);
+  };
+  // Take back one card or foul anywhere in the log, keeping it on the record with a reason.
+  const rescind = (i: number, reason: string) => {
+    const ev = log[i];
+    if (p.disabled || !ev || ev.t !== 'point' || ev.rescinded) return;
+    const next = log.map((x, j) => (j === i ? { ...ev, rescinded: { reason, at: new Date().toISOString() } } : x));
     p.onChange(next, foldRally(format, next, 'A').state);
   };
 
@@ -285,7 +301,7 @@ export function TeamDeck(p: TeamDeckProps) {
   const chasing = khoNow?.chaser ?? null;
   // Kabaddi works the same way: the raiding side records the raid, the other side its tackles.
   const kab = isKabaddiFormat(format);
-  const kabNow = kab ? kabaddiStatus(log, state) : null;
+  const kabNow = kab ? kabaddiStatus(log, state, doOrDieAfterOf(format)) : null;
   const attacking = chasing ?? kabNow?.raider ?? null;
   const roleOf = (s: Side) => (attacking ? (s === attacking ? 'attack' : 'defend') : null);
   const attackWord = kab ? 'raiding' : 'chasing';
@@ -326,12 +342,15 @@ export function TeamDeck(p: TeamDeckProps) {
     const toneByKind = new Map(events.map((e) => [e.key, e.tone]));
     const tally = { A: { warning: 0, caution: 0, dismissal: 0 }, B: { warning: 0, caution: 0, dismissal: 0 } };
     for (const ev of log) {
-      if (ev.t !== 'point' || !ev.kind) continue;
+      if (ev.t !== 'point' || !ev.kind || ev.rescinded) continue;
       const tone = toneByKind.get(ev.kind);
       if (tone === 'warning' || tone === 'caution' || tone === 'dismissal') tally[ev.side][tone] += 1;
     }
     return tally;
   }, [log, events]);
+  // Cards and fouls: the actions an official can take back from the log.
+  const disciplineKinds = useMemo(() => new Set(events
+    .filter((e) => e.tone === 'warning' || e.tone === 'caution' || e.tone === 'dismissal').map((e) => e.key)), [events]);
 
   /**
    * WHAT HAS BEEN BOOKED, per PERSON.
@@ -351,7 +370,7 @@ export function TeamDeck(p: TeamDeckProps) {
     const toneByKind = new Map(events.map((e) => [e.key, e.tone]));
     const tally = new Map<string, CardCounts>();
     for (const ev of log) {
-      if (ev.t !== 'point' || !ev.kind || !ev.playerId) continue;
+      if (ev.t !== 'point' || !ev.kind || !ev.playerId || ev.rescinded) continue;
       const tone = toneByKind.get(ev.kind);
       if (tone !== 'warning' && tone !== 'caution' && tone !== 'dismissal') continue;
       const cur = tally.get(ev.playerId) ?? { warning: 0, caution: 0, dismissal: 0 };
@@ -385,6 +404,11 @@ export function TeamDeck(p: TeamDeckProps) {
   const suspended = cardRules && !state.ended ? activeSuspensions(log, cardRules, nowMs) : [];
   // Sent off for the match: not picked for an action, and not replaced by a substitute.
   const sentOff = useMemo(() => sentOffPlayers(log, cardRules), [log, cardRules]);
+  // Serving a timed suspension (futsal red, hockey green / yellow): off until the timer ends.
+  const sittingOut = new Set(suspended.filter((s) => Number.isFinite(s.remainingMs)).map((s) => s.playerId));
+  // The player just carded must not stay selected for the next action.
+  const actorUnavailable = !!actor && (sentOff.has(actor) || sittingOut.has(actor));
+  useEffect(() => { if (actorUnavailable) setActor(''); }, [actorUnavailable]);
   const cardName = (key: string) => events.find((e) => e.key === key)?.label ?? key;
 
   /** A tap, with the escalation question first when a repeat card should become the next one up. */
@@ -439,7 +463,7 @@ export function TeamDeck(p: TeamDeckProps) {
   /** Answer "who went off for them?" - or nobody, for a card shown on the bench. */
   const settleSub = (offId: string | null) => {
     const [next, ...rest] = cameOn;
-    if (next && offId) p.onSubstitute?.(next.side, next.id, offId);
+    if (next && offId) substitute(next.side, offId, next.id);
     setCameOn(rest);
     setSubsOpen(false);
     setSecondSubsOpen(false);
@@ -806,6 +830,7 @@ export function TeamDeck(p: TeamDeckProps) {
             confirming. With the result card first, Log did nothing once a match ended. */
         surface === 'log' ? (
           <Timeline log={log} nameOf={nameOf} nameFor={nameFor} format={format}
+            disciplineKinds={disciplineKinds} onRescind={p.disabled ? undefined : rescind}
             onClose={() => setSurface('act')} />
         ) : state.ended ? (
           // TWO STAGES, NOT ONE. Confirming writes the score; it does not make the
@@ -826,7 +851,7 @@ export function TeamDeck(p: TeamDeckProps) {
               <div className="grid grid-cols-[auto_auto] items-baseline gap-x-3 gap-y-0.5 text-sm">
                 <span className="text-right text-muted">Match</span>
                 <span className="font-semibold tabular-nums">{env.headline[0]}–{env.headline[1]}</span>
-                <span className="text-right text-muted">Penalties</span>
+                <span className="text-right text-muted">{shootoutTerms(format.sport).title}</span>
                 <span className="font-semibold tabular-nums">{shoot.scored[0]}–{shoot.scored[1]}</span>
               </div>
             ) : (
@@ -928,6 +953,10 @@ export function TeamDeck(p: TeamDeckProps) {
               p.onSignOff(next, foldRally(format, next, 'A').state);
             }}
           />
+        ) : surface === 'sub' ? (
+          <SubPanel nameOf={nameOf} roster={p.roster} bench={p.bench} sentOff={sentOff}
+            onSub={(s, offId, onId) => { substitute(s, offId, onId); setSurface('act'); }}
+            onClose={() => setSurface('act')} />
         ) : surface === 'clock' ? (
           <ClockPanel
             clock={clock} periodLabel={lv.label} period={played + 1}
@@ -985,7 +1014,7 @@ export function TeamDeck(p: TeamDeckProps) {
                   <PeopleGrid
                     value={actor} qa={`actor-${side}`}
                     options={players.map((x) => [x.id, x.name] as [string, string])}
-                    cards={playerCards} foulLimit={foulLimit} blocked={sentOff}
+                    cards={playerCards} foulLimit={foulLimit} blocked={sentOff} sittingOut={sittingOut}
                     onChange={(v) => { setActor(v); if (v === second) setSecond(''); setAssistOpen(false); }}
                   />
                   {subs.length > 0 && (
@@ -1001,7 +1030,7 @@ export function TeamDeck(p: TeamDeckProps) {
                           <PeopleGrid
                             value={actor} qa={`actor-sub-${side}`}
                             options={subs.map((x) => [x.id, x.name] as [string, string])}
-                            cards={playerCards} foulLimit={foulLimit} blocked={sentOff}
+                            cards={playerCards} foulLimit={foulLimit} blocked={sentOff} sittingOut={sittingOut}
                             onChange={(v) => { setActor(v); if (v === second) setSecond(''); setAssistOpen(false); }}
                           />
                         </div>
@@ -1212,6 +1241,14 @@ export function TeamDeck(p: TeamDeckProps) {
             disabled={!log.length || p.disabled || p.busy} onClick={undo}>
             Undo
           </Button>
+          {/* Only with a team sheet: that is where on-field and bench come from. */}
+          {p.onSubstitute && p.bench && !state.ended && (
+            <Button size="sm" variant="outline" disabled={p.disabled || p.busy}
+              className={cn('h-9 shrink-0', surface === 'sub' && PANEL_OPEN)}
+              onClick={() => setSurface(surface === 'sub' ? 'act' : 'sub')}>
+              Sub
+            </Button>
+          )}
           <Button size="sm" variant="outline"
             className={cn('h-9 shrink-0', surface === 'log' && PANEL_OPEN)}
             onClick={() => setSurface(surface === 'log' ? 'act' : 'log')}>
@@ -1288,6 +1325,58 @@ function toneOf(ev: StatEventSpec): string {
  * minute they were stamped with: a goal entered at what the console said was 23' is
  * a 23rd-minute goal, and the fix applies from now on.
  */
+type Person = { id: string; name: string };
+
+/** Make a substitution: one player off, one from the bench on. A sent-off player is in neither list. */
+function SubPanel({ nameOf, roster, bench, sentOff, onSub, onClose }: {
+  nameOf: (s: Side) => string;
+  roster?: { A: Person[]; B: Person[] };
+  bench?: { A: Person[]; B: Person[] };
+  sentOff: Set<string>;
+  onSub: (side: Side, offId: string, onId: string) => void;
+  onClose: () => void;
+}) {
+  const [side, setSide] = useState<Side>('A');
+  const [offId, setOffId] = useState('');
+  const [onId, setOnId] = useState('');
+  const field = (roster?.[side] ?? []).filter((x) => !sentOff.has(x.id));
+  const subs = (bench?.[side] ?? []).filter((x) => !sentOff.has(x.id));
+  const pick = (list: Person[], value: string, set: (id: string) => void) => (
+    <div className="flex flex-wrap gap-1.5">
+      {list.length === 0 ? <span className="text-xs text-muted">Nobody.</span> : list.map((x) => (
+        <Button key={x.id} size="sm" variant={value === x.id ? 'primary' : 'outline'} onClick={() => set(x.id)}>{x.name}</Button>
+      ))}
+    </div>
+  );
+  return (
+    <Card className={cn(SURFACE, 'gap-3 overflow-y-auto p-3')}>
+      <div className="flex shrink-0 items-center justify-between">
+        <h3 className="text-sm font-semibold">Substitution</h3>
+        <Button size="sm" variant="subtle" onClick={onClose}>Close</Button>
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        {(['A', 'B'] as const).map((s) => (
+          <Button key={s} size="sm" variant={side === s ? 'primary' : 'outline'}
+            onClick={() => { setSide(s); setOffId(''); setOnId(''); }}>{nameOf(s)}</Button>
+        ))}
+      </div>
+      <div className="grid gap-1">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Coming off</div>
+        {pick(field, offId, setOffId)}
+      </div>
+      <div className="grid gap-1">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Coming on</div>
+        {pick(subs, onId, setOnId)}
+      </div>
+      <Button disabled={!offId || !onId} onClick={() => onSub(side, offId, onId)}>
+        {offId && onId
+          ? `${subs.find((x) => x.id === onId)?.name} on for ${field.find((x) => x.id === offId)?.name}`
+          : 'Pick who comes off and who comes on'}
+      </Button>
+    </Card>
+  );
+}
+
 function ClockPanel({ clock, periodLabel, period, busy, onAdjust, onToggle, onClose }: {
   clock: ClockReading;
   periodLabel: string;
@@ -1957,10 +2046,12 @@ function CardPips({ counts, on }: { counts: CardCounts; on: boolean }) {
   );
 }
 
-function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0, blocked }: {
+function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0, blocked, sittingOut }: {
   value: string; options: Array<[string, string]>; onChange: (v: string) => void; qa?: string;
   /** Sent off: shown, but can't be picked. */
   blocked?: Set<string>;
+  /** Serving a timed suspension: can't be picked until it ends. */
+  sittingOut?: Set<string>;
   /** Cards booked per player id, so a chip can say who is already on a yellow. */
   cards?: Map<string, CardCounts>;
   /** Fouls that put a player out (basketball); 0 when the sport has no foul-out. */
@@ -1989,10 +2080,11 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0, blocke
         return (
           <button key={v || '_none'} type="button" data-qa-value={v}
             data-fouled-out={fouledOut || undefined}
-            disabled={!!v && !!blocked?.has(v) && !on}
+            disabled={!!v && (!!blocked?.has(v) || !!sittingOut?.has(v)) && !on}
             // The tooltip is the only place the name is guaranteed whole, so it now
             // carries the booking too rather than just repeating the label.
             title={v && blocked?.has(v) ? `${label} - sent off, can't be picked or replaced`
+              : v && sittingOut?.has(v) ? `${label} - sitting out a suspension, can't be picked until it ends`
               : fouledOut ? `${label} - fouled out (${marks!.caution} fouls)`
               : marks
               ? `${label} - ${[marks.warning && `${marks.warning} green card${marks.warning > 1 ? 's' : ''}`,
@@ -2028,14 +2120,20 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0, blocke
  * this the only way to know whether a goal went in with the right scorer was to
  * undo it and do it again.
  */
-function Timeline({ log, nameOf, nameFor, format, onClose }: {
+function Timeline({ log, nameOf, nameFor, format, onClose, disciplineKinds, onRescind }: {
   log: RallyLog;
   nameOf: (s: Side) => string;
   nameFor: (id: string) => string | undefined;
   /** The format, so minutes run on across halves and stoppage prints as 45+2'. */
   format: ScoringFormat;
   onClose: () => void;
+  /** Card and foul kinds, which can be taken back from here. */
+  disciplineKinds?: Set<string>;
+  /** Absent when the match can no longer be changed. */
+  onRescind?: (index: number, reason: string) => void;
 }) {
+  const [taking, setTaking] = useState<number | null>(null);
+  const [reason, setReason] = useState('');
   const rows = [...log.entries()].reverse();
   const minutes = useMemo(() => eventMinuteLabels(format, log), [format, log]);
   // Shoot-out kicks scored up to and including each entry.
@@ -2067,6 +2165,30 @@ function Timeline({ log, nameOf, nameFor, format, onClose }: {
               <span className="min-w-0 flex-1">
                 {ev.t === 'endPeriod' ? (
                   <span className="font-semibold">- end of the period -</span>
+                ) : ev.t === 'point' && ev.rescinded ? (
+                  <>
+                    <span className="font-medium text-muted line-through">{ev.label ?? 'Card'}</span>
+                    {ev.playerId && <span className="text-muted line-through"> · {ev.playerName ?? nameFor(ev.playerId) ?? 'unknown'}</span>}
+                    <span className="ml-1 text-xs text-amber-700 dark:text-amber-300">taken back - {ev.rescinded.reason}</span>
+                  </>
+                ) : ev.t === 'point' && ev.kind && disciplineKinds?.has(ev.kind) && onRescind ? (
+                  <>
+                    <span className="font-medium">{ev.label ?? 'Card'}</span>
+                    {ev.playerId && <span> · {ev.playerName ?? nameFor(ev.playerId) ?? 'unknown'}</span>}
+                    <span className="text-muted"> · {nameOf(ev.side)}</span>
+                    {taking === i ? (
+                      <span className="mt-1 flex flex-wrap items-center gap-2">
+                        <Input className="h-8 w-56 text-xs" value={reason} autoFocus
+                          onChange={(e) => setReason(e.target.value)} placeholder="Why it is taken back" />
+                        <Button size="sm" disabled={!reason.trim()}
+                          onClick={() => { onRescind(i, reason.trim()); setTaking(null); setReason(''); }}>Take back</Button>
+                        <Button size="sm" variant="subtle" onClick={() => { setTaking(null); setReason(''); }}>Cancel</Button>
+                      </span>
+                    ) : (
+                      <button type="button" className="ml-2 text-xs font-semibold text-brand-600 underline underline-offset-2 dark:text-brand-400"
+                        onClick={() => { setTaking(i); setReason(''); }}>Take back</button>
+                    )}
+                  </>
                 ) : ev.t === 'point' ? (
                   <>
                     <span className="font-medium">{ev.label ?? 'Point'}</span>
@@ -2084,6 +2206,12 @@ function Timeline({ log, nameOf, nameFor, format, onClose }: {
                   <span className="text-muted">{nameOf(ev.side)} to serve</span>
                 ) : ev.t === 'timeout' ? (
                   <span className="text-muted">Timeout - {nameOf(ev.side)}</span>
+                ) : ev.t === 'sub' ? (
+                  <span>
+                    <span className="font-medium">Substitution</span>
+                    <span> · {ev.onName ?? nameFor(ev.onId) ?? 'unknown'} on, {ev.offName ?? nameFor(ev.offId) ?? 'unknown'} off</span>
+                    <span className="text-muted"> · {nameOf(ev.side)}</span>
+                  </span>
                 ) : ev.t === 'clockStart' ? (
                   <span className="text-muted">Clock started</span>
                 ) : ev.t === 'clockPause' ? (

@@ -2048,7 +2048,9 @@ function teamTimeline(log: RallyLog, homeName: string, awayName: string, format?
     const any = ev as any;
     const who = any.playerName ? ` · ${any.playerName}` : '';
     if (ev.t === 'penaltyKick' && ev.scored) kicks[ev.side === 'A' ? 0 : 1] += 1;
-    const txt = ev.t === 'point'
+    const txt = ev.t === 'point' && any.rescinded
+      ? `${any.label ?? 'Card'} rescinded${who} - ${any.rescinded.reason}`
+      : ev.t === 'point'
       ? `${any.label ?? 'Point'}${any.pts > 1 ? ` (+${any.pts})` : ''}${who}`
       : ev.t === 'endPeriod' ? 'Period ended'
         : ev.t === 'clockStart' ? 'Clock started'
@@ -2057,6 +2059,7 @@ function teamTimeline(log: RallyLog, homeName: string, awayName: string, format?
               : ev.t === 'penaltyKick' ? `Shoot-out kick ${ev.scored ? 'scored' : 'missed'} (${kicks[0]}–${kicks[1]})${who}`
                 : ev.t === 'end' && ev.reason === 'penalties' && ev.winner
                   ? `${nameOf(ev.winner)} won ${ev.winner === 'A' ? kicks[0] : kicks[1]}–${ev.winner === 'A' ? kicks[1] : kicks[0]} on penalties`
+                  : ev.t === 'sub' ? `Substitution: ${ev.onName ?? 'player'} on, ${ev.offName ?? 'player'} off`
                   : ev.t === 'end' ? 'Match ended'
                     : ev.t;
     out.unshift({
@@ -2070,7 +2073,8 @@ function teamTimeline(log: RallyLog, homeName: string, awayName: string, format?
       ...(any.playerId ? { playerId: any.playerId } : {}),
       ...(any.secondId ? { secondId: any.secondId, secondName: any.secondName } : {}),
       ...(any.value !== undefined ? { value: any.value } : {}),
-      kind: any.kind ?? ev.t,
+      // Not the card's own kind, so nothing reading the timeline counts it as a card.
+      kind: any.rescinded ? 'rescinded' : any.kind ?? ev.t,
     });
   });
   return out.slice(0, 120);

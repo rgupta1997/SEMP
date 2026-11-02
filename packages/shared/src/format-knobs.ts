@@ -4,7 +4,7 @@ import { canonicalRacquetSport } from './racquet-presets.js';
 import { isChessSport } from './chess.js';
 import { carromRulesOf, isCarromSport } from './carrom.js';
 import { followOnCompulsoryAbove, followOnLead, isKhoKhoFormat } from './kho-kho.js';
-import { isKabaddiFormat } from './kabaddi.js';
+import { DEFAULT_DO_OR_DIE_AFTER, doOrDieAfterOf, isKabaddiFormat } from './kabaddi.js';
 import { canonicalTeamSport } from './team-presets.js';
 import { cardMinutesFor, cardSportOf, escalationOn, type CardSport } from './suspensions.js';
 import type {
@@ -133,6 +133,9 @@ export interface FormatKnobs {
   cardEscalationEnabled: boolean;
   /** Kabaddi: still level after extra time, a golden raid each, then a toss. */
   goldenRaidEnabled: boolean;
+  /** Kabaddi: after enough empty raids in a row, the next raid must score or the raider is out. */
+  doOrDieEnabled: boolean;
+  doOrDieAfter: number;
 
   // ---- how it is run
   officiatingMode: OfficiatingMode;
@@ -390,6 +393,12 @@ export const KNOB_SPECS: KnobSpec[] = [
   { key: 'timeoutsExtraTime', label: 'Timeouts in each extra-time period', group: 'ends', type: 'int', min: 0, max: 10,
     hint: 'For example, 1 per overtime.',
     applies: (k) => k.countsTimeouts && k.timeoutsEnabled && k.timeoutsPer === 'game' && k.periodShaped && k.extraTimeEnabled },
+  { key: 'doOrDieEnabled', label: 'Do-or-die raid', group: 'ends', type: 'bool',
+    hint: 'After enough empty raids in a row, the next raid must score or the raider is out. Off: empty raids carry no penalty.',
+    applies: (k) => k.kabaddi },
+  { key: 'doOrDieAfter', label: 'Empty raids before a do-or-die', group: 'ends', type: 'int', min: 1, max: 10,
+    hint: 'Standard kabaddi: 2 - the third raid is do-or-die.',
+    applies: (k) => k.kabaddi && k.doOrDieEnabled },
 
   // ---- clock
   { key: 'clockEnabled', label: 'Time cap', group: 'clock', type: 'bool',
@@ -628,6 +637,8 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
     hockey: canonicalTeamSport(f.sport) === 'hockey',
     ...cardKnobs(f),
     goldenRaidEnabled: !!f.tieBreak?.goldenRaid,
+    doOrDieEnabled: doOrDieAfterOf(f) != null,
+    doOrDieAfter: doOrDieAfterOf(f) ?? DEFAULT_DO_OR_DIE_AFTER,
 
     officiatingMode: f.officiatingMode,
     drawsAllowed: f.endStates.drawsAllowed,
@@ -870,6 +881,10 @@ function buildFormat(f: ScoringFormat, k: FormatKnobs, name?: string): ScoringFo
         },
       }
       : {}),
+    // Kabaddi's do-or-die lives on the rules sheet, which kabaddi.ts reads.
+    ...(k.kabaddi
+      ? { rulesSheet: { ...(f.rulesSheet ?? {}), doOrDie: k.doOrDieEnabled, doOrDieAfter: Math.max(1, k.doOrDieAfter) } }
+      : {}),
     // Card suspensions live on the rules sheet, which suspensions.ts reads.
     ...(k.cardSport
       ? {
@@ -942,6 +957,9 @@ export function describeKnobs(k: FormatKnobs): string {
   }
   if (k.cardSport === 'futsal') bits.push(k.cardSuspensionsEnabled ? `red card ${k.redSuspensionMinutes} min off` : 'red card not timed');
   if ((k.cardSport === 'football' || k.cardSport === 'futsal') && !k.cardEscalationEnabled) bits.push('second yellow not a red');
+  // Only when it differs from standard kabaddi, so the usual rule stays out of the way.
+  if (k.kabaddi && !k.doOrDieEnabled) bits.push('no do-or-die raid');
+  else if (k.kabaddi && k.doOrDieAfter !== DEFAULT_DO_OR_DIE_AFTER) bits.push(`do-or-die after ${k.doOrDieAfter} empty raids`);
   if (k.clockEnabled) {
     bits.push(k.periodShaped
       ? `${k.clockMinutes} min cap (${Math.round(k.clockMinutes / Math.max(1, k.unitsToWin))}/period)`

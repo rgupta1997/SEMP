@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ClipboardList, ClipboardPen, Eye, Pencil, Trash2, Users } from 'lucide-react';
-import { FIXTURE_STATUS, inheritedOverrides, isKnockoutRound, KNOCKOUT_ROUND, knockoutRoundLabel, knockoutRoundSize, resolveFormat, TBD_LABEL } from '@semp/shared';
+import { DEFAULT_MATCH_LABEL, FIXTURE_STATUS, inheritedOverrides, isGroupBye, isKnockoutRound, isReservedRoundLabel, KNOCKOUT_ROUND, knockoutRoundLabel, knockoutRoundSize, resolveFormat, TBD_LABEL } from '@semp/shared';
 import { useEvent } from './EventLayout';
 import { api } from '../../lib/api';
 import { ARCHIVED_READ_ONLY_MESSAGE, isRankingSport, isScoredSport } from '@semp/shared';
@@ -338,7 +338,10 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
   const { data: teams = [] } = useApi<any[]>(`/teams?tournament_discipline_id=${tdId}`);
   const [homeId, setHomeId] = useState(fixture?.home_team_id ?? '');
   const [awayId, setAwayId] = useState(fixture?.away_team_id ?? '');
-  const [round, setRound] = useState(fixture?.round ?? '');
+  // The picker and the typed label are kept apart, so typing can never turn a pool match into a knockout one.
+  const [roundKind, setRoundKind] = useState<string>(isKnockoutRound(fixture?.round) ? fixture.round : TABLE_ROUND);
+  const [label, setLabel] = useState<string>(isKnockoutRound(fixture?.round) ? '' : fixture?.round ?? '');
+  const round = roundKind === TABLE_ROUND ? (label.trim() || DEFAULT_MATCH_LABEL) : roundKind;
   const [groundId, setGroundId] = useState(fixture?.venue_ground_id ?? '');
   // Venue is a grouping for grounds (fixtures only store the ground). Seed it from the
   // edited fixture's current ground so the right venue is pre-selected.
@@ -379,6 +382,10 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
   const submit = () => {
     setError(null);
     if (status === 'walkover' && !walkoverWinner) { setError('Pick who was awarded the walkover.'); return; }
+    if (roundKind === TABLE_ROUND && isReservedRoundLabel(label)) {
+      setError(`"${label.trim()}" is a knockout round name. Pick it from Round, or use a label like "Round 2".`);
+      return;
+    }
     const body: any = {
       home_team_id: homeId || null,
       away_team_id: awayId || null,
@@ -562,18 +569,19 @@ function FixtureModal({ fixture, tdId, drawPath, sportName, grounds, venues, off
           <SectionLabel>Stage & officiating</SectionLabel>
           <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
             <Field compact label="Round" hint="Knockout rounds decide placings and medals.">
-              <Select className="w-full" value={isKnockoutRound(round) ? round : TABLE_ROUND}
-                onChange={(e) => setRound(e.target.value === TABLE_ROUND ? '' : e.target.value)}>
+              <Select className="w-full" value={roundKind} onChange={(e) => setRoundKind(e.target.value)}>
                 <option value={TABLE_ROUND}>League / pool match</option>
-                {[...KNOCKOUT_CHOICES, ...(isKnockoutRound(round) && !KNOCKOUT_CHOICES.includes(round) ? [round] : [])].map((r) => (
+                {[...KNOCKOUT_CHOICES, ...(roundKind !== TABLE_ROUND && !KNOCKOUT_CHOICES.includes(roundKind) ? [roundKind] : [])].map((r) => (
                   <option key={r} value={r}>{knockoutChoiceLabel(r)}</option>
                 ))}
               </Select>
             </Field>
-            {!isKnockoutRound(round) && (
+            {roundKind === TABLE_ROUND && (
               <Field compact label="Match label"
-                hint={looksKnockout(round) ? 'This reads like a knockout round. Pick it from Round instead, or it counts as a league match.' : 'e.g. Group A, Round 2. Counts as a league / pool match.'}>
-                <Input value={round} onChange={(e) => setRound(e.target.value)} placeholder="Match" />
+                hint={isReservedRoundLabel(label) ? 'This is a knockout round name. Pick it from Round instead - it cannot be used as a label.'
+                  : looksKnockout(label) ? 'This reads like a knockout round. Pick it from Round instead, or it counts as a league match.'
+                  : 'e.g. Group A, Round 2. Counts as a league / pool match.'}>
+                <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={DEFAULT_MATCH_LABEL} />
               </Field>
             )}
             <Field compact label="Status">
@@ -674,7 +682,9 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
     const ta = a.scheduled_at ? new Date(a.scheduled_at).getTime() : Infinity;
     const tb = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Infinity;
     return ta - tb || (a.pool_number ?? 0) - (b.pool_number ?? 0) || (a.bracket_position ?? 0) - (b.bracket_position ?? 0);
-  }).filter((f) => !teamFilter || involves(f, teamFilter));
+  }).filter((f) => !isGroupBye(f) && (!teamFilter || involves(f, teamFilter)));
+  // Matches actually played: a group's rest slots are not one.
+  const matchCount = fixtures.filter((f) => !isGroupBye(f)).length;
   // Team NAMES come from a separate, championship-wide query (teamsPath) - generating
   // a draw only invalidates the fixtures themselves, and a fixture's home/away team_id
   // is real the instant it's created. Rendering it before that other query has ever
@@ -820,7 +830,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
             <span className="font-semibold text-slate-900 dark:text-slate-100">{td.disciplines?.name ?? sportName}</span>
             {formatLabel && <Badge tone="violet">{formatLabel}</Badge>}
           </div>
-          <div className="text-xs text-slate-500 dark:text-slate-400">{titleCase(td.entry_type)} Draw · {fixtures.length} fixture{fixtures.length === 1 ? '' : 's'}</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">{titleCase(td.entry_type)} Draw · {matchCount} fixture{matchCount === 1 ? '' : 's'}</div>
         </div>
         {/* Wraps: five controls do not fit one line on a narrow phone (Regenerate ran off
             the card). Under 427px every button is also tightened so they fit one line. */}

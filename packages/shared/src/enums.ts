@@ -69,6 +69,20 @@ export function knockoutRoundSize(round?: string | null): number {
 export const isKnockoutRound = (round?: string | null): boolean =>
   round === THIRD_PLACE_ROUND || knockoutRoundSize(round) > 0;
 
+/** A group's rest slot (odd team count): never played, never counted. A knockout bye advances a team, so it is not one. */
+export const isGroupBye = (f: { status?: string | null; bracket_position?: number | null; round?: string | null }): boolean =>
+  f.status === 'bye' && !isKnockoutFixture(f) && !isKnockoutRound(f.round);
+
+/** A typed label that names a knockout round in any case or spacing ("final", " R2"). Only the Round picker may set these. */
+export function isReservedRoundLabel(label?: string | null): boolean {
+  const t = label?.trim().toLowerCase();
+  if (!t) return false;
+  return Object.values(KNOCKOUT_ROUND).some((r) => r.toLowerCase() === t) || new RegExp(ROUND_OF.source, 'i').test(t);
+}
+
+/** What a league or pool match is called when its label is left blank. */
+export const DEFAULT_MATCH_LABEL = 'Match';
+
 /** A bracket match (final and 3rd place included): someone must win, so a level result needs a tie-break. */
 export const isKnockoutFixture = (f: { bracket_position?: number | null; round?: string | null }): boolean =>
   f.bracket_position != null || f.round === THIRD_PLACE_ROUND;

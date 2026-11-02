@@ -45,6 +45,22 @@ export const openTieCount = (t?: DrawTables) =>
 
 const ordinal = (n: number) => (n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`);
 
+/** "Point tally" with a yellow dot while a group tie waits for the organiser. Shares the tables' cache. */
+export function TallyTabLabel({ drawId, canManage }: { drawId: string; canManage: boolean }) {
+  const { data } = useApi<DrawTables>(canManage ? tablesPath(drawId) : null, true, { refetchInterval: TABLES_REFRESH_MS });
+  const open = canManage ? openTieCount(data) : 0;
+  return (
+    <span className="relative inline-flex items-center">
+      Point tally
+      {/* Pinned to the corner like a notification badge. */}
+      {open > 0 && (
+        <span className="absolute -right-2.5 -top-1.5 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-slate-100 dark:ring-slate-800" role="status"
+          aria-label={`${open} tie${open === 1 ? '' : 's'} to resolve`} title={`${open} tie${open === 1 ? '' : 's'} to resolve`} />
+      )}
+    </span>
+  );
+}
+
 interface TieTarget { scope: 'pool' | 'placing'; stage: number; pool: number | null; entities: string[]; title: string }
 
 function ResolveModal({ drawId, target, names, onClose }: { drawId: string; target: TieTarget; names: Record<string, string>; onClose: () => void }) {

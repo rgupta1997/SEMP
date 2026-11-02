@@ -44,7 +44,18 @@ export interface KabaddiStatus {
 /** Each team's golden raid; level after both, a toss decides. */
 export const GOLDEN_RAIDS = 2;
 
-export function kabaddiStatus(log: RallyLog, state: KernelState): KabaddiStatus {
+/** Standard kabaddi: two empty raids in a row make the next one do-or-die. */
+export const DEFAULT_DO_OR_DIE_AFTER = 2;
+
+/** Empty raids in a row that make the next raid do-or-die, from the rules sheet; null when the rule is off. */
+export function doOrDieAfterOf(format?: Pick<ScoringFormat, 'rulesSheet'> | null): number | null {
+  const sheet = format?.rulesSheet ?? {};
+  if (sheet.doOrDie === false) return null;
+  const n = Number(sheet.doOrDieAfter);
+  return Number.isInteger(n) && n > 0 ? n : DEFAULT_DO_OR_DIE_AFTER;
+}
+
+export function kabaddiStatus(log: RallyLog, state: KernelState, doOrDieAfter: number | null = DEFAULT_DO_OR_DIE_AFTER): KabaddiStatus {
   let first: Side | null = null;
   let raider: Side | null = null;
   let half = 0;
@@ -76,7 +87,7 @@ export function kabaddiStatus(log: RallyLog, state: KernelState): KabaddiStatus 
   const live = state.ended ? null : raider;
   const emptyStreak = live ? empty[live] : 0;
   return {
-    firstRaider: first, raider: live, doOrDie: !goldenStarted && emptyStreak >= 2, emptyStreak, beforeFirstRaid: raidsEnded === 0,
+    firstRaider: first, raider: live, doOrDie: doOrDieAfter != null && !goldenStarted && emptyStreak >= doOrDieAfter, emptyStreak, beforeFirstRaid: raidsEnded === 0,
     goldenStarted, goldenRaids, goldenTossDue: goldenStarted && !state.ended && goldenRaids >= GOLDEN_RAIDS,
   };
 }

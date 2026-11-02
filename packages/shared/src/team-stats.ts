@@ -131,6 +131,8 @@ export function deriveTeamStats(
     }
     if (raw.t !== 'point') continue;
     const ev = raw as Extract<RallyEvent, { t: 'point' }>;
+    // Taken back by the official: on the record, in nobody's stats.
+    if (ev.rescinded) continue;
 
     // Side totals always. `pts` is the scoreboard magnitude - a 3-pointer is 3 -
     // and it is the one number a scoreline can be checked against.
