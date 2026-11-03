@@ -69,6 +69,26 @@ export function knockoutRoundSize(round?: string | null): number {
 export const isKnockoutRound = (round?: string | null): boolean =>
   round === THIRD_PLACE_ROUND || knockoutRoundSize(round) > 0;
 
+/**
+ * Play order for a list of matches: stage, then group matches (by pool and match number),
+ * then knockouts from the earliest round to the Final, the 3rd-place play-off just before it.
+ */
+export function comparePlayOrder(
+  a: { round?: string | null; pool_number?: number | null; stage_sequence?: number | null },
+  b: { round?: string | null; pool_number?: number | null; stage_sequence?: number | null },
+): number {
+  const key = (f: typeof a): [number, number, number, number] => {
+    const ko = isKnockoutRound(f.round);
+    // Bigger rounds come first (R16 before QF); 3rd place sits between the SF (4) and the Final (2).
+    const size = f.round === THIRD_PLACE_ROUND ? 3 : knockoutRoundSize(f.round);
+    const matchNo = Number(f.round?.match(/match\s*(\d+)/i)?.[1]) || 0;
+    return [f.stage_sequence ?? 1, ko ? 1 : 0, ko ? -size : (f.pool_number ?? 0), matchNo];
+  };
+  const ka = key(a); const kb = key(b);
+  for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i] - kb[i];
+  return (a.round ?? '').localeCompare(b.round ?? '');
+}
+
 /** A group's rest slot (odd team count): never played, never counted. A knockout bye advances a team, so it is not one. */
 export const isGroupBye = (f: { status?: string | null; bracket_position?: number | null; round?: string | null }): boolean =>
   f.status === 'bye' && !isKnockoutFixture(f) && !isKnockoutRound(f.round);

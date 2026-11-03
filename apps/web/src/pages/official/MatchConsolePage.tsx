@@ -2428,9 +2428,12 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
   const [editingLayout, setEditingLayout] = useState(false);
   const [layoutDraft, setLayoutDraft] = useState<TieLayoutValue | null>(null);
   const [savingLayout, setSavingLayout] = useState(false);
+  // Named players are not play (naming them marks the rubber live): editable until something is scored.
   const untouched = state.rubbers.every((r) =>
-    r.status === 'pending' && !r.winner && !r.drawn && !r.rally?.length && !r.lineup && !r.lineupSkipped && !r.state.ended
+    r.status !== 'completed' && !r.winner && !r.drawn && !r.rally?.length && !r.state.ended
+    && !r.pool?.frames?.length && !r.carrom?.boards?.length && !r.carrom?.retirements?.length
     && r.state.a === 0 && r.state.b === 0);
+  const namedRubbers = state.rubbers.filter((r) => r.lineup).map((r) => r.label);
   const saveLayout = async (scope: 'match' | 'draw') => {
     if (!layoutDraft) { setEditingLayout(false); return; }
     const sport = sportNameOf(fixture);
@@ -2608,14 +2611,46 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
   const active = state.rubbers[state.activeRubber];
   const rdef = rubberDef(spec, state.activeRubber);
 
-  // Games won in a rubber scored on the kernel - "2–1".
-  const rubberGames = (r: RubberInstance): string | null => {
+  // The result of a rubber scored on the kernel, or null when it was not.
+  const rubberEnvelope = (r: RubberInstance) => {
     const frozen = r.format ?? baseFormat?.format;
     if (!racquet || !frozen || !r.rally?.length) return null;
     // Singles rubbers serve as singles: fold under the lineup's rules, as the deck scored it.
     const fmt = formatForPairing(frozen, r.lineup);
-    const h = resultEnvelope(fmt, foldRally(fmt, r.rally, r.firstServer ?? 'A').state).headline;
-    return `${h[0]}–${h[1]}`;
+    return resultEnvelope(fmt, foldRally(fmt, r.rally, r.firstServer ?? 'A').state);
+  };
+  // Games won in a rubber scored on the kernel - "2–1".
+  const rubberGames = (r: RubberInstance): string | null => {
+    const h = rubberEnvelope(r)?.headline;
+    return h ? `${h[0]}–${h[1]}` : null;
+  };
+
+  // The signed-off card: who won each rubber and how, winner's score first as a scoresheet reads.
+  const sideCode = (t: any, fallback: string) => t?.short_name?.trim() || orgLabel(t) || fallback;
+  const homeCode = sideCode(homeTeam(fixture), homeName);
+  const awayCode = sideCode(awayTeam(fixture), awayName);
+  const rubberDetail = (r: RubberInstance, i: number): { result: string; games: string | null } => {
+    const pair = (p: readonly [number, number]) => {
+      const [x, y] = r.winner === 'B' ? [p[1], p[0]] : [p[0], p[1]];
+      return `${formatPoints(x)}–${formatPoints(y)}`;
+    };
+    if (r.status === 'dead') return { result: 'Not played', games: null };
+    if (r.drawn) return { result: spec.boardPoints ? 'Drawn ½–½' : 'Drawn', games: null };
+    const won = r.winner ? `${r.winner === 'A' ? homeCode : awayCode} won` : '';
+    if (carromTie && r.carrom?.boards.length) {
+      const rules = carromRulesFor(r);
+      return { result: `${won} ${pair(carromHeadline(carromMatchOf(r.carrom, rules), rules))}`.trim(), games: null };
+    }
+    const bestOf = poolFramesOf(i);
+    if (bestOf && r.pool?.frames.length) {
+      return { result: `${won} ${pair(poolRubber(r.pool, bestOf).framesWon)}`.trim(), games: null };
+    }
+    const env = rubberEnvelope(r);
+    if (env) {
+      const games = env.unitScores.map(pair).join(' · ') + (env.reason === 'retired' ? ' · retired' : '');
+      return { result: `${won} ${pair(env.headline)}`.trim(), games: games || null };
+    }
+    return { result: won || rubberScore(r, i), games: null };
   };
 
   const rubberScore = (r: RubberInstance, i: number): string => {
@@ -2667,7 +2702,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
         <>
         {/* The rubbers and the tie's controls side by side; the rubber being scored goes
             underneath at the full width - the console needs the room. */}
-        <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-5">
             <Card>
               <CardHeader title={spec.boardPoints ? 'Boards' : 'Rubbers'} subtitle={spec.boardPoints
@@ -2684,6 +2719,11 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                     <p className="text-xs text-slate-600 dark:text-slate-300">
                       Change the {spec.boardPoints ? 'boards' : 'rubbers'} before play starts. Nothing has been scored yet, so nothing is lost.
                     </p>
+                    {namedRubbers.length > 0 && (
+                      <p className="rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+                        Players named on {namedRubbers.join(', ')} will be cleared when you save.
+                      </p>
+                    )}
                     <TieLayoutEditor sport={sportNameOf(fixture) ?? ''} stored={layoutOverride ?? layout ?? spec} onChange={setLayoutDraft} />
                     <div className="flex flex-wrap justify-end gap-2">
                       <Button variant="outline" disabled={savingLayout} onClick={() => setEditingLayout(false)}>Cancel</Button>
@@ -2763,7 +2803,10 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                 )}
                 <Button className="w-full justify-start" disabled={submitting} onClick={signOff}>✍ End tie &amp; sign off</Button>
                 {!decided && <p className="px-1 text-xs text-slate-400 dark:text-slate-500">Record {unit} results until one side reaches {formatPoints(target)}.</p>}
-                <WalkoverButton fixtureId={fixtureId} homeName={homeName} awayName={awayName} homeOrg={homeOrg} awayOrg={awayOrg} homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id} invalidate={invalidate} onDone={onDone} />
+                {/* A whole-tie walkover: a clean sweep by default, counted in the table as the rubbers' format says. */}
+                <WalkoverButton fixtureId={fixtureId} homeName={homeName} awayName={awayName} homeOrg={homeOrg} awayOrg={awayOrg} homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id} invalidate={invalidate} onDone={onDone}
+                  defaultScore={[spec.boardPoints ? spec.rubbers.length : target, 0]}
+                  countsInDifference={!!baseFormat?.format?.endStates?.countWalkoverInDifference} />
                 {SECONDARY.map((s) => (
                   <SecondaryStatus key={s.status} fixtureId={fixtureId} status={s.status} label={s.label} variant={s.variant} invalidate={invalidate} onDone={onDone} />
                 ))}
@@ -2965,11 +3008,25 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
       )}
 
       {completed && !editing && (
-        <Card><CardBody className="py-8 text-center">
-          <div className="text-sm text-slate-500 dark:text-slate-400">Tie recorded.</div>
-          <div className="mt-1 text-2xl font-black tabular-nums text-slate-900 dark:text-slate-100">{homeName} {formatPoints(a)} – {formatPoints(b)} {awayName}</div>
-          <div className="mx-auto mt-3 max-w-md space-y-1 text-sm text-slate-500 dark:text-slate-400">
-            {state.rubbers.map((r, i) => <div key={r.key} className="flex justify-between gap-4"><span>{r.label}</span><span>{rubberScore(r, i)}</span></div>)}
+        <Card><CardBody className="py-6 sm:py-8">
+          <div className="text-center text-sm text-slate-500 dark:text-slate-400">Tie recorded.</div>
+          {/* Short codes in the headline: the full names are on the board above. */}
+          <div className="mt-1 text-center text-2xl font-black tabular-nums text-slate-900 dark:text-slate-100">{homeCode} {formatPoints(a)} – {formatPoints(b)} {awayCode}</div>
+          <div className="mx-auto mt-4 max-w-md divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
+            {state.rubbers.map((r, i) => {
+              const d = rubberDetail(r, i);
+              const players = r.lineup ? `${namesOf(r.lineup.A)!.join(' / ')} v ${namesOf(r.lineup.B)!.join(' / ')}` : null;
+              return (
+                <div key={r.key} className={cn('px-3 py-2.5', r.status === 'dead' && 'opacity-60')}>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{r.label}</span>
+                    <span className={cn('shrink-0 text-sm font-semibold tabular-nums', r.winner ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400')}>{d.result}</span>
+                  </div>
+                  {players && <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{players}</div>}
+                  {d.games && <div className="mt-0.5 text-xs tabular-nums text-slate-600 dark:text-slate-300">{d.games}</div>}
+                </div>
+              );
+            })}
           </div>
           <div className="mt-4 flex justify-center gap-2">
             <Button variant="outline" onClick={() => setEditing(true)}>Edit result</Button>

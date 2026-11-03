@@ -15,7 +15,7 @@ function shortCode(name: string): string {
 // ("A1") - never dropped from the grid. `tieBlocked` swaps the name for a warning.
 function resolveEntrant(
   key: string, teamName: (id: string | null) => string, teamOrg?: (id: string | null) => string,
-  tieBlocked?: { pool: number; rank: number } | null,
+  tieBlocked?: { pool: number; rank: number } | null, teamShort?: (id: string | null) => string | null,
 ) {
   const slot = describeSlot(key);
   if (slot) {
@@ -23,7 +23,10 @@ function resolveEntrant(
     return { name: tieMsg ?? slot, org: '', code: key, warning: !!tieMsg };
   }
   const name = teamName(key);
-  return { name, org: teamOrg?.(key) ?? '', code: shortCode(name), warning: false };
+  const org = teamOrg?.(key) ?? '';
+  // The squad's own abbreviation, else its organisation's (IIMC), so headers match the rows and tables.
+  const code = teamShort?.(key) || (org && org.length <= 8 ? org : shortCode(name));
+  return { name, org, code, warning: false };
 }
 
 // Cell at (row team vs column team). The same match appears in both mirrored
@@ -69,8 +72,8 @@ function ResultCell({ fixture, teamId, opponentId, onSelect }:
   );
 }
 
-function Crosstable({ fixtures, teamName, teamOrg, onSelect, caption }:
-  { fixtures: BracketFixture[]; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; onSelect?: (f: BracketFixture) => void; caption?: string }) {
+function Crosstable({ fixtures, teamName, teamOrg, teamShort, onSelect, caption }:
+  { fixtures: BracketFixture[]; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; teamShort?: (id: string | null) => string | null; onSelect?: (f: BracketFixture) => void; caption?: string }) {
   const { teamIds, lookup } = useMemo(() => {
     const ids: string[] = [];
     const seen = new Set<string>();
@@ -111,11 +114,11 @@ function Crosstable({ fixtures, teamName, teamOrg, onSelect, caption }:
       <table className="border-collapse text-sm">
         <thead>
           <tr>
-            <th className="sticky left-0 z-10 min-w-[10rem] border border-slate-100 bg-slate-50 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-400">
+            <th className="sticky left-0 z-10 min-w-[4.5rem] border border-slate-100 bg-slate-50 px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:min-w-[10rem] sm:px-3 sm:text-xs dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-400">
               Home ╲ Away
             </th>
             {teamIds.map((id) => {
-              const entrant = resolveEntrant(id, teamName, teamOrg, tieBlockedByLabel.get(id));
+              const entrant = resolveEntrant(id, teamName, teamOrg, tieBlockedByLabel.get(id), teamShort);
               return (
                 <th key={id} title={entrant.name} className={cn('h-11 w-14 border border-slate-100 bg-slate-50 px-1 text-center text-[10px] font-bold uppercase dark:border-slate-800 dark:bg-slate-800/60', entrant.warning ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400')}>
                   {entrant.warning && '⚠'}{entrant.code}
@@ -126,12 +129,14 @@ function Crosstable({ fixtures, teamName, teamOrg, onSelect, caption }:
         </thead>
         <tbody>
           {teamIds.map((rowId) => {
-            const entrant = resolveEntrant(rowId, teamName, teamOrg, tieBlockedByLabel.get(rowId));
+            const entrant = resolveEntrant(rowId, teamName, teamOrg, tieBlockedByLabel.get(rowId), teamShort);
             return (
             <tr key={rowId}>
-              <th className={cn('sticky left-0 z-10 min-w-[10rem] border border-slate-100 bg-white px-3 py-2 text-left font-medium dark:border-slate-800 dark:bg-slate-900', entrant.warning ? 'text-amber-600 dark:text-amber-400' : 'text-slate-700 dark:text-slate-200')}>
-                <span className="block truncate leading-tight" title={entrant.name}>{entrant.warning && '⚠ '}{entrant.name}</span>
-                {entrant.org && <span className="block truncate text-[11px] font-normal leading-tight text-slate-400 dark:text-slate-500">{entrant.org}</span>}
+              {/* Phone: the short code only, so the result cells get the width. */}
+              <th className={cn('sticky left-0 z-10 min-w-[4.5rem] border border-slate-100 bg-white px-2 py-2 text-left font-medium sm:min-w-[10rem] sm:max-w-[20rem] sm:px-3 dark:border-slate-800 dark:bg-slate-900', entrant.warning ? 'text-amber-600 dark:text-amber-400' : 'text-slate-700 dark:text-slate-200')}>
+                <span className="block text-xs font-bold leading-tight sm:hidden" title={entrant.name}>{entrant.warning && '⚠ '}{entrant.code}</span>
+                <span className="hidden truncate leading-tight sm:block" title={entrant.name}>{entrant.warning && '⚠ '}{entrant.name}</span>
+                {entrant.org && <span className="hidden truncate text-[11px] font-normal leading-tight text-slate-400 sm:block dark:text-slate-500">{entrant.org}</span>}
               </th>
               {teamIds.map((colId) =>
                 rowId === colId ? (
@@ -159,8 +164,8 @@ function Crosstable({ fixtures, teamName, teamOrg, onSelect, caption }:
 
 // Results crosstable for round-robin / league / group draws (row = home, column = away);
 // group draws render one table per pool.
-export function RoundRobinGrid({ fixtures, teamName, teamOrg, onSelect }:
-  { fixtures: BracketFixture[]; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; onSelect?: (f: BracketFixture) => void }) {
+export function RoundRobinGrid({ fixtures, teamName, teamOrg, teamShort, onSelect }:
+  { fixtures: BracketFixture[]; teamName: (id: string | null) => string; teamOrg?: (id: string | null) => string; teamShort?: (id: string | null) => string | null; onSelect?: (f: BracketFixture) => void }) {
   const pools = useMemo(() => {
     const byPool = new Map<number | null, BracketFixture[]>();
     for (const f of fixtures) {
@@ -182,6 +187,7 @@ export function RoundRobinGrid({ fixtures, teamName, teamOrg, onSelect }:
           fixtures={fx}
           teamName={teamName}
           teamOrg={teamOrg}
+          teamShort={teamShort}
           onSelect={onSelect}
           caption={multiPool ? `Pool ${pool != null ? String.fromCharCode(64 + pool) : '-'}` : undefined}
         />

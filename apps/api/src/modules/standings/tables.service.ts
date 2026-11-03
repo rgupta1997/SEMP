@@ -19,7 +19,11 @@ export interface TableRow {
   /** Some turn's clock was not run, so its full length was used. */
   adt_estimated?: boolean;
 }
-export interface PoolTable { pool: number | null; label: string; complete: boolean; rows: TableRow[]; ties: string[][] }
+export interface PoolTable {
+  pool: number | null; label: string; complete: boolean; rows: TableRow[]; ties: string[][];
+  /** The ties that hold something up (a slot waiting on them, or placings read from the table). */
+  open_ties: string[][];
+}
 export interface DrawTables {
   draw_id: string;
   championship_id: string;
@@ -83,6 +87,17 @@ export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTa
   const resolutions = readTieResolutions(td.format_config);
 
   const tableAll = all.filter((f) => !isKnockoutRound(f.round));
+  // A pool tie matters only when a later slot is stuck on it (flagged by the stage resolver),
+  // the placings read pool positions, or there is no knockout to settle the order.
+  const blocked = td.fixtures
+    .map((f) => (f.live_state as { tie_blocked?: { pool?: number; rank?: number } } | null)?.tie_blocked)
+    .filter((b): b is { pool: number; rank: number } => typeof b?.pool === 'number' && typeof b?.rank === 'number');
+  const tablesDecide = tableAll.length === all.length || (rule.scheme === 'placement' && !!rule.table_placings);
+  const tieMatters = (pool: number | null, tie: string[], rows: TableRow[]) => {
+    if (tablesDecide) return true;
+    const lo = Math.min(...tie.map((id) => rows.find((r) => r.entity_id === id)?.rank ?? Infinity));
+    return blocked.some((b) => b.pool === pool && b.rank >= lo && b.rank < lo + tie.length);
+  };
   // Kho kho: each team's ADT inputs over a pool's finished matches, read off the turn logs.
   const kho = isKhoKhoFormat({ sport: sport ?? '' });
   const rawOf = new Map(all.map((f, i) => [f, td.fixtures[i]] as const));
@@ -121,7 +136,8 @@ export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTa
           rows.push({ entity_id: id, name: names[id]?.name ?? 'Unknown', short_name: names[id]?.short ?? null, rank: rows.length + 1, played: 0, won: 0, drawn: 0, lost: 0, points: 0, score_for: 0, score_against: 0 });
         }
       }
-      return { pool, label: poolLabel(pool), complete, rows, ties: complete ? g.ties : [] };
+      const ties = complete ? g.ties : [];
+      return { pool, label: poolLabel(pool), complete, rows, ties, open_ties: ties.filter((t) => tieMatters(pool, t, rows)) };
     });
     return { stage, ranking: { ...ranking, labels: ranking.tiebreakers.map((t) => tiebreakerLabel(t, sport, entryType)) }, pools };
   });

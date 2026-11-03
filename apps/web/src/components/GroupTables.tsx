@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp } from 'lucide-react';
 import { formatPoints, type GroupRanking, type TieResolution } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
-import { Badge, Button, Modal, Spinner, Textarea, toast } from './ui';
+import { Badge, Button, Modal, Spinner, Textarea, cn, toast } from './ui';
 
 // Group / league tables of one draw, ranked exactly as advancement and the overall
 // table rank them. Teams the tie-breakers can't separate are ordered here by hand,
@@ -16,7 +16,12 @@ interface TableRow {
   adt?: number | null;
   adt_estimated?: boolean;
 }
-interface PoolTable { pool: number | null; label: string; complete: boolean; rows: TableRow[]; ties: string[][] }
+interface PoolTable {
+  pool: number | null; label: string; complete: boolean; rows: TableRow[]; ties: string[][];
+  /** Ties that hold something up. Absent from an older API: every tie counts. */
+  open_ties?: string[][];
+}
+const openTiesOf = (p: PoolTable) => p.open_ties ?? p.ties;
 export interface DrawTables {
   sport: string | null;
   stages: Array<{ stage: number; ranking: GroupRanking & { labels: string[] }; pools: PoolTable[] }>;
@@ -39,9 +44,9 @@ export const tablesPath = (drawId: string) => `/tournament-disciplines/${drawId}
 export const TABLES_REFRESH_MS = 15_000;
 
 /** How many group ties on this draw are waiting for a hand-picked order. */
-// Only group ties can hold something up (who advances); a shared placing never waits.
+// Only a tie that decides who advances (or a placing read from the table) waits; a shared placing never does.
 export const openTieCount = (t?: DrawTables) =>
-  t?.stages.reduce((n, s) => n + s.pools.reduce((m, p) => m + p.ties.length, 0), 0) ?? 0;
+  t?.stages.reduce((n, s) => n + s.pools.reduce((m, p) => m + openTiesOf(p).length, 0), 0) ?? 0;
 
 const ordinal = (n: number) => (n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`);
 
@@ -171,7 +176,7 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
   pool: PoolTable; ranking: DrawTables['stages'][number]['ranking']; canManage: boolean; names: Record<string, string>;
   onResolve: (entities: string[]) => void;
 }) {
-  const tiedIds = new Set(pool.ties.flat());
+  const tiedIds = new Set(openTiesOf(pool).flat());
   // Kho kho tables carry ADT (the server sends it only for kho kho).
   const showAdt = pool.rows.some((r) => r.adt !== undefined);
   // Teams level on every tie-breaker share a position (2, 2, 4) until an order is set.
@@ -224,12 +229,21 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
       {showAdt && pool.rows.some((r) => r.adt_estimated) && (
         <p className="border-t border-slate-100 px-3 py-1.5 text-[11px] text-slate-400 dark:border-slate-800">* A turn's clock was not run, so its full length was used.</p>
       )}
-      {pool.ties.map((t) => (
-        <div key={t.join()} className="flex flex-wrap items-center justify-between gap-2 border-t border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-          <span>Tied: {t.map((id) => names[id] ?? id).join(', ')}. Level on {ranking.labels.join(', ').toLowerCase()}.</span>
-          {canManage && <Button size="sm" variant="outline" onClick={() => onResolve(t)}>Resolve</Button>}
-        </div>
-      ))}
+      {pool.ties.map((t) => {
+        // A tie nothing depends on is a grey note, not a warning; it can still be ordered.
+        const open = openTiesOf(pool).some((o) => o.join() === t.join());
+        return (
+          <div key={t.join()} className={cn('flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs',
+            open ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300'
+              : 'border-slate-100 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-400')}>
+            <span>
+              Tied: {t.map((id) => names[id] ?? id).join(', ')}. Level on {ranking.labels.join(', ').toLowerCase()}.
+              {!open && ' This does not change who goes through or anyone\'s points.'}
+            </span>
+            {canManage && <Button size="sm" variant="outline" onClick={() => onResolve(t)}>{open ? 'Resolve' : 'Set order'}</Button>}
+          </div>
+        );
+      })}
     </div>
   );
 }

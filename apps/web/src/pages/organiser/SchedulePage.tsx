@@ -926,7 +926,7 @@ function DrawCard({ td, fixtures: drawFixtures, fixturesLoading, teamsLoading, f
                 ? <Bracket fixtures={group} teamName={teamName} teamOrg={teamOrg}
                     onSelect={canManage && !archived ? setEditing : () => {}}
                     onScore={canManage ? (f: any) => goScore(f) : undefined} />
-                : <RoundRobinGrid fixtures={group} teamName={teamName} teamOrg={teamOrg} onSelect={canManage && !archived ? setEditing : () => {}} />;
+                : <RoundRobinGrid fixtures={group} teamName={teamName} teamOrg={teamOrg} teamShort={teamShort} onSelect={canManage && !archived ? setEditing : () => {}} />;
               if (!multiStage) return <div key={seq}>{content}</div>;
               // Every stage numbers its OWN pools fresh (Pool A, B, C...), so a later
               // stage's "Pool B" is a completely different pool from an earlier

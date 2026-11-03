@@ -4,7 +4,7 @@ import {
   resolveServer, resultEnvelope, serveCall, serveEveryNow, serveSpecFor, setChoiceDue, step, misconductTerms, timeoutRules, timeoutsLeft, unitClock,
   type KernelState, type LevelSpec, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
-import { ArrowLeftRight, CheckCircle2, Flag, RotateCcw, SlidersHorizontal, Timer, Undo2 } from 'lucide-react';
+import { ArrowLeftRight, CheckCircle2, ChevronDown, Flag, RotateCcw, SlidersHorizontal, Timer, Undo2 } from 'lucide-react';
 import { Button, Card, cn, confirmDialog, Select, toast } from '../../components/ui';
 
 // ============================================================================
@@ -322,7 +322,8 @@ export function RacquetDeck(p: RacquetDeckProps) {
     <ScoreSide
       key={side}
       name={nameOf(side)} org={subOf(side)}
-      points={pointPair(lv, state.score[state.pointLevel])[side === 'A' ? 0 : 1]}
+      // Finished: the live points have reset to 0, so the big number shows the result (2-1 in games).
+      points={state.ended ? String(env.headline[side === 'A' ? 0 : 1]) : pointPair(lv, state.score[state.pointLevel])[side === 'A' ? 0 : 1]}
       serving={serve.movement !== 'none' && !state.ended && state.serve.side === side}
       cue={pointCue(side)}
       units={multiUnit ? { label: `${unitLabel}s`, won: state.score[top][side === 'A' ? 0 : 1], needed: format.levels[top].target } : null}
@@ -1460,6 +1461,8 @@ function Timeline({ format, log, firstServer, homeName, awayName }:
       return { t: r.effect, score: `${a}–${b}` };
     });
   }, [format, log, firstServer]);
+  // Closed on a phone, where it pushes the controls off screen; open on wider screens.
+  const [open, setOpen] = useState(() => typeof window === 'undefined' || window.matchMedia('(min-width: 640px)').matches);
   if (!log.length) return null;
   const rows = steps.map((x, i) => ({ ...x, i })).reverse().slice(0, 40);
   const nameOf = (s: Side) => (s === 'A' ? homeName : awayName);
@@ -1467,13 +1470,21 @@ function Timeline({ format, log, firstServer, homeName, awayName }:
   // narrow muted column, the event in medium weight, the detail muted beside it.
   return (
     <Card className="grid gap-2 p-3">
-      <h3 className="text-sm font-semibold">What has been recorded</h3>
+      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)}
+        className="flex items-center justify-between gap-2 text-left">
+        <h3 className="text-sm font-semibold">What has been recorded <span className="font-normal text-slate-400 dark:text-slate-500">· {log.length}</span></h3>
+        <span className="flex items-center gap-1 text-xs font-semibold text-brand-600 dark:text-brand-400">
+          {open ? 'Hide' : 'Show'}
+          <ChevronDown className={cn('h-3.5 w-3.5 transition', open && 'rotate-180')} />
+        </span>
+      </button>
+      {open && (
       <ol className="max-h-64 divide-y divide-slate-100 overflow-y-auto text-sm dark:divide-slate-800">
         {rows.map(({ t, i, score }) => (
           <li key={i} className="flex items-baseline gap-2 py-1.5">
             <span className="w-8 shrink-0 text-right font-mono text-[10px] tabular-nums text-slate-400 dark:text-slate-500">{i + 1}</span>
             <span className="min-w-0 flex-1">
-              <span className="font-medium text-slate-800 dark:text-slate-100">{describe(t, nameOf, format.sport)}</span>
+              <span className="font-medium text-slate-800 dark:text-slate-100">{describeTrace(t, nameOf, format.sport)}</span>
               {t.event.t === 'point' && t.serverSide && (
                 <span className="text-slate-400 dark:text-slate-500"> · {nameOf(t.serverSide)} served</span>
               )}
@@ -1497,11 +1508,12 @@ function Timeline({ format, log, firstServer, homeName, awayName }:
           </li>
         ))}
       </ol>
+      )}
     </Card>
   );
 }
 
-function describe(t: ReturnType<typeof foldRally>['trace'][number], nameOf: (s: Side) => string, sport?: string): string {
+export function describeTrace(t: ReturnType<typeof foldRally>['trace'][number], nameOf: (s: Side) => string, sport?: string): string {
   const ev = t.event;
   switch (ev.t) {
     case 'point':
@@ -1534,10 +1546,17 @@ function describe(t: ReturnType<typeof foldRally>['trace'][number], nameOf: (s: 
     case 'adjust': return `${ev.delta > 0 ? '+' : ''}${ev.delta} ${nameOf(ev.side)}${ev.reason ? ` · ${ev.reason}` : ''}`;
     case 'setServe': return `Serve corrected to ${nameOf(ev.side)}${ev.serverNo ? ` (server ${ev.serverNo})` : ''}`;
     case 'capFired': return 'Time up';
-    case 'end':
-      return ev.reason === 'disqualified' && ev.winner
-        ? `${nameOf(ev.winner === 'A' ? 'B' : 'A')} disqualified - match to ${nameOf(ev.winner)}`
-        : `${ev.reason}${ev.winner ? ` - ${nameOf(ev.winner)}` : ''}`;
+    case 'end': {
+      // Name who did what: "retired - <winner>" read as if the winner had retired.
+      const to = ev.winner ? ` - match to ${nameOf(ev.winner)}` : '';
+      const loser = ev.winner ? nameOf(ev.winner === 'A' ? 'B' : 'A') : '';
+      if (ev.winner && (ev.reason === 'retired' || ev.reason === 'disqualified')) return `${loser} ${ev.reason}${to}`;
+      if (ev.reason === 'walkover') return `Walkover${to}`;
+      if (ev.reason === 'conceded') return ev.winner ? `Match awarded to ${nameOf(ev.winner)}` : 'Match awarded';
+      if (ev.reason === 'cap') return `Time up${to || ' - level'}`;
+      if (ev.reason === 'abandoned') return 'Abandoned - no result';
+      return `${ev.reason}${to}`;
+    }
     default: return '';
   }
 }

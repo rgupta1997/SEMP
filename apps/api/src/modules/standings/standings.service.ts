@@ -1,5 +1,5 @@
 import {
-  KNOCKOUT_ROUND, DEFAULT_RANKING_RULE, DEFAULT_STANDINGS_RULE, EVENT_TITLE_GROUP, TITLE_GROUP_LABEL, chessStandingsRule, formatPoints, groupRankingFor, inheritRanking,
+  KNOCKOUT_ROUND, comparePlayOrder, DEFAULT_RANKING_RULE, DEFAULT_STANDINGS_RULE, EVENT_TITLE_GROUP, TITLE_GROUP_LABEL, chessStandingsRule, formatPoints, groupRankingFor, inheritRanking,
   isCalledDraw, isChessSport, isNoPointsDraw, isNoResult, walkoverCountsOf, isRankingFormatName, isRankingSport, readTieResolutions, SPORT_TITLES_SCOPE, eventTitleIn, groupsForTitle, sportTitlesSchema, stageConfigSchema, standingsRuleSchema, titlePlacingFor,
   type SportTitlesConfig, type StandingsRule,
   type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker,
@@ -615,7 +615,7 @@ export async function readStandingsBreakdown(
 
     // This contingent's own matches in the draw, oriented to it (its score first).
     const matches: BreakdownMatch[] = [];
-    for (const f of d.fixtures) {
+    for (const f of [...d.fixtures].sort(comparePlayOrder)) {
       if (!SCORED_STATUSES.includes(f.status)) continue;
       const isHome = sideKey(f.teams_fixtures_home_team_idToteams) === entityId;
       const isAway = sideKey(f.teams_fixtures_away_team_idToteams) === entityId;
