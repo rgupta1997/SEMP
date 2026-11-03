@@ -635,6 +635,23 @@ const footballWalkovers = (f: ScoringFormat): ScoringFormat =>
 
 export const TEAM_PRESETS: ScoringFormat[] = [...NET, ...INVASION.map(footballWalkovers), ...RAID, ...BOARD, ...COMBAT];
 
+/** Each sport's standard knockout decider, borrowed from its knockout preset. */
+const KNOCKOUT_DECIDER_PRESET: Record<string, string> = {
+  kabaddi: 'kabaddi_ko_2x20_et',
+  football: 'football9_ko_2x20',
+  futsal: 'futsal_ko_2x10',
+  hockey: 'fih_4x15_ko',
+  frisbee: 'ultimate_final_2x20',
+  'kho-kho': 'kho_4turns',
+  basketball: 'fiba_4x10',
+};
+
+/** How a level knockout match of this sport is settled; null when the sport has no standard decider. */
+export function knockoutDeciderFor(sport?: string | null): TieBreakSpec | null {
+  const key = KNOCKOUT_DECIDER_PRESET[canonicalTeamSport(sport) ?? ''];
+  return (key && TEAM_PRESETS.find((f) => f.presetKey === key)?.tieBreak) || null;
+}
+
 /** Sport-name aliases, so a lookup by the catalogue's spelling works either way. */
 const ALIASES: Record<string, string> = {
   volleyball: 'volleyball',

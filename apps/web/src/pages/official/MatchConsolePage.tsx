@@ -21,7 +21,7 @@ import { CarromResult, hydrateCarrom, type CarromState } from '../../features/sc
 import { PoolResult, hydratePool } from '../../features/scoring/PoolResult';
 import { isFrameContest, isPoolSport, poolRubber } from '@semp/shared';
 import { TieLayoutEditor, type TieLayoutValue } from '../../features/scoring/TieLayoutEditor';
-import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, groupTiebreakAllowed, isChessSport, isKnockoutFixture, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
+import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, groupTiebreakAllowed, isChessSport, isKnockoutFixture, isKnockoutRound, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
 import { unitWinner, type TieSpec, type EventSpec, type EventScoringOpts, type ScoringMode, type ScoringFormat, type KernelState, type Pairing, type RallyLog, type RubberLineup, type Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer, hydratePairSwap } from '../../features/scoring/RacquetDeck';
 import { LineupPanel } from '../../features/scoring/LineupPanel';
@@ -1412,6 +1412,7 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
       frozen_format: (live?.live_state as any)?.format ?? null,
       // The organiser's per-match rules, patched on top of whatever rung wins.
       format_overrides: fixture?.format_overrides ?? null,
+      bracket_position: fixture?.bracket_position ?? null,
     },
     { scoring_format_id: td.scoring_format_id ?? null, scoring_preset_key: td.scoring_preset_key ?? null, round_formats: td.round_formats, sport },
     (fixture?.scoring_formats ?? []) as any[],
@@ -1782,6 +1783,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       frozen_format: (live?.live_state as any)?.format ?? null,
       // The organiser's per-match rules, patched on top of whatever rung wins.
       format_overrides: fixture?.format_overrides ?? null,
+      bracket_position: fixture?.bracket_position ?? null,
     },
     { scoring_format_id: td.scoring_format_id ?? null, scoring_preset_key: td.scoring_preset_key ?? null, round_formats: td.round_formats, sport },
     (fixture?.scoring_formats ?? []) as any[],
@@ -4020,7 +4022,15 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
     winnerId === fixture.away_team_id ? awayName :
     winner === 'draw' || (hs != null && as != null) ? 'Draw' : '-';
 
+  // A knockout needs a winner: level is allowed (won on penalties), a draw is not.
+  const knockout = isKnockoutFixture(fixture) || isKnockoutRound(fixture.round);
+  const knockoutNeedsWinner = knockout && !winnerId && hs != null && as != null;
+
   const submit = (status: 'live' | 'completed') => {
+    if (status === 'completed' && knockoutNeedsWinner) {
+      toast.error('A knockout match must have a winner. Level score? Pick who won (e.g. on penalties) under Winner.');
+      return;
+    }
     saveResult.mutate({ home_score: hs, away_score: as, winner_team_id: winnerId, draw: winner === 'draw' || undefined, status, notes: notes || undefined },
       { onSuccess: status === 'completed' ? onDone : undefined, onError: (e: any) => toast.error(e.message) });
   };
@@ -4054,8 +4064,11 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
             <option value="auto">Auto (higher score) - {winnerLabel}</option>
             <option value="home">{homeName}</option>
             <option value="away">{awayName}</option>
-            <option value="draw">Tie / draw</option>
+            {!knockout && <option value="draw">Tie / draw</option>}
           </Select>
+          {knockoutNeedsWinner && (
+            <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">Knockout match: the scores are level, so pick who won (e.g. on penalties or a golden raid).</p>
+          )}
         </div>
         <div className="mt-4">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Result note</span>

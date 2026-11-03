@@ -11,6 +11,20 @@ export function shootoutTerms(sport?: string | null): ShootoutTerms {
     : { title: 'Penalties', each: 'kicks each', taker: 'Kicker', attempt: 'kick', phrase: 'on penalties', short: 'pens' };
 }
 
+/** A knockout decider in words: "extra time 3 + 3 min, then golden raids". */
+export function describeTieBreak(tb: TieBreakSpec, sport?: string | null): string {
+  const et = tb.extraTime;
+  const parts = [
+    et && (extraTimeRepeats(tb) ? `${et.minutes}-min overtime until someone leads`
+      : `extra time ${Array.from({ length: et.periods }, () => et.minutes).join(' + ')} min`),
+    tb.penalties && `${tb.penalties.kicks}-${shootoutTerms(sport).attempt} ${shootoutTerms(sport).title.toLowerCase()}`,
+    tb.goldenRaid && 'golden raids',
+    tb.universalPoint && 'universal point',
+    tb.minimumChase && 'minimum chase',
+  ].filter(Boolean);
+  return parts.join(', then ');
+}
+
 /**
  * SETTLING A LEVEL KNOCKOUT.
  *

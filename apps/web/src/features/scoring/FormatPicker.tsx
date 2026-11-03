@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   KNOCKOUT_ROUND, boardsOnly, carromRulesOf, describeCricketFormat, describeTimeControl, formatLength,
   isCarromSport, isChessSport, isCricketFormat, isPeriodShaped, knobModelFor, parseRoundFormats,
-  pluralizePeriodLabel, resolveRounds, whyNotEditable, type AnyKnobSpec, type AnyKnobs, type MatchFormat,
+  describeTieBreak, knockoutDeciderFor, pluralizePeriodLabel, resolveRounds, whyNotEditable, type AnyKnobSpec, type AnyKnobs, type MatchFormat,
   type RoundFormatRule,
 } from '@semp/shared';
 import { api } from '../../lib/api';
@@ -380,6 +380,13 @@ export function FormatPicker(p: FormatPickerProps) {
                 ))}
               </ul>
             </div>
+          )}
+          {/* This format allows draws, so say what a knockout round without its own format does. */}
+          {effective && 'endStates' in effective && effective.endStates.drawsAllowed && knockoutDeciderFor(effective.sport) && (
+            <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
+              Knockout rounds without their own format above can't end level: a level SF, final or 3rd-place match goes to{' '}
+              {describeTieBreak(knockoutDeciderFor(effective.sport)!, effective.sport)}.
+            </p>
           )}
         </div>
       ) : view === 'shelf' ? (
