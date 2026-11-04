@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
 import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge, Textarea, BackButton, cn, confirmDialog, toast } from '../../components/ui';
-import { awayTeam, championshipIdOf, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, orgTitle, sportIdOf, sportName as sportNameOf, teamLabel, teamShort, venueLabel } from './fixtureHelpers';
+import { awayTeam, championshipIdOf, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, orgTitle, sideCodes, sportIdOf, sportName as sportNameOf, teamLabel, teamShort, venueLabel } from './fixtureHelpers';
 import {
   cricketScore, headline, hydrate, oversStr, oversToBalls, reduce, sportDef, subLine,
   type Action, type LogEntry, type MatchState, type SportDef,
@@ -1966,6 +1966,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
     </div>
   );
 
+  const [homeCode, awayCode] = sideCodes(homeTeam(fixture), awayTeam(fixture));
   return (
     <>
     {sheetBar}
@@ -1975,8 +1976,8 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       sportName={sport}
       homeName={teamLabel(homeTeam(fixture))}
       awayName={teamLabel(awayTeam(fixture))}
-      homeShort={teamShort(homeTeam(fixture))}
-      awayShort={teamShort(awayTeam(fixture))}
+      homeShort={homeCode}
+      awayShort={awayCode}
       homeOrg={orgLabel(homeTeam(fixture))}
       awayOrg={orgLabel(awayTeam(fixture))}
       roster={roster}
@@ -2630,9 +2631,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
   };
 
   // The signed-off card: who won each rubber and how, winner's score first as a scoresheet reads.
-  const sideCode = (t: any, fallback: string) => t?.short_name?.trim() || orgLabel(t) || fallback;
-  const homeCode = sideCode(homeTeam(fixture), homeName);
-  const awayCode = sideCode(awayTeam(fixture), awayName);
+  const [homeCode, awayCode] = sideCodes(homeTeam(fixture), awayTeam(fixture));
   const rubberDetail = (r: RubberInstance, i: number): { result: string; games: string | null } => {
     const pair = (p: readonly [number, number]) => {
       const [x, y] = r.winner === 'B' ? [p[1], p[0]] : [p[0], p[1]];

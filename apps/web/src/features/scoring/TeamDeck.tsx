@@ -669,7 +669,7 @@ export function TeamDeck(p: TeamDeckProps) {
             <Button key={s} size="sm" variant={serving === s ? 'primary' : 'outline'} className="h-6 max-w-[40%] truncate px-2 text-[11px]"
               disabled={p.disabled || p.busy}
               onClick={() => { if (serving !== s) push({ t: 'setServe', side: s, reason: 'toss' }); }}>
-              {nameOf(s)}
+              <SideChip full={nameOf(s)} short={shortOf(s)} />
             </Button>
           ))}
         </div>
@@ -678,10 +678,12 @@ export function TeamDeck(p: TeamDeckProps) {
       {activeTimeout && toRules && (
         <div data-qa="timeout-banner" role="status"
           className="flex shrink-0 items-center gap-2 rounded-lg bg-violet-100 px-3 py-1 text-[12px] font-semibold text-violet-900 dark:bg-violet-500/15 dark:text-violet-200">
-          <span className="mr-auto truncate">
-            Timeout - {nameOf(activeTimeout.side)} <Countdown from={activeTimeout.at} seconds={toRules.seconds} />
+          {/* Only the name may shorten: the countdown is the point of the banner. */}
+          <span className="flex min-w-0 flex-1 items-baseline gap-1">
+            <span className="min-w-0 truncate">Timeout - <SideChip full={nameOf(activeTimeout.side)} short={shortOf(activeTimeout.side)} /></span>
+            <span className="shrink-0 tabular-nums"><Countdown from={activeTimeout.at} seconds={toRules.seconds} /></span>
           </span>
-          <Button size="sm" variant="subtle" className="h-6 px-2 text-[11px]" onClick={endTimeout}>End timeout</Button>
+          <Button size="sm" variant="subtle" className="h-6 shrink-0 px-2 text-[11px]" onClick={endTimeout}>End timeout</Button>
         </div>
       )}
 
@@ -694,7 +696,8 @@ export function TeamDeck(p: TeamDeckProps) {
             const left = toLeft[s];
             return (
               <div key={s} className={cn('flex min-w-0 items-center gap-1.5 rounded-lg border border-line px-2 py-0.5 text-[11px]', s === 'B' && 'flex-row-reverse')}>
-                <span className="min-w-0 truncate font-semibold text-muted">{nameOf(s)}</span>
+                {/* The code is short enough to show whole on a phone; only the full name may cut. */}
+                <span className="shrink-0 font-semibold text-muted sm:min-w-0 sm:shrink sm:truncate"><SideChip full={nameOf(s)} short={shortOf(s)} /></span>
                 <span className={cn('flex shrink-0 items-center gap-1', s === 'B' ? 'mr-auto' : 'ml-auto')}
                   aria-label={`${left} of ${allowed} timeouts left this ${per}`} title={`${left} of ${allowed} left this ${per}`}>
                   {Array.from({ length: allowed }, (_, i) => (
@@ -702,7 +705,7 @@ export function TeamDeck(p: TeamDeckProps) {
                       i < left ? 'border-violet-500 bg-violet-500' : 'border-slate-300 bg-transparent dark:border-slate-600')} />
                   ))}
                 </span>
-                <Button size="sm" variant={left === 0 ? 'subtle' : 'outline'} className={cn('h-6 shrink-0 px-2 text-[11px]', left === 0 && 'opacity-50')}
+                <Button size="sm" variant={left === 0 ? 'subtle' : 'outline'} className={cn('h-6 shrink-0 px-2 text-[11px] max-[359px]:px-1.5', left === 0 && 'opacity-50')}
                   disabled={p.disabled || p.busy} onClick={() => callTimeout(s)}>
                   Timeout
                 </Button>
@@ -720,7 +723,7 @@ export function TeamDeck(p: TeamDeckProps) {
             <Button key={s} size="sm" variant={khoNow?.firstChaser === s ? 'primary' : 'outline'} className="h-6 max-w-[40%] truncate px-2 text-[11px]"
               disabled={p.disabled || p.busy}
               onClick={() => { if (khoNow?.firstChaser !== s) push({ t: 'chaseFirst', side: s }); }}>
-              {nameOf(s)}
+              <SideChip full={nameOf(s)} short={shortOf(s)} />
             </Button>
           ))}
         </div>
@@ -734,7 +737,7 @@ export function TeamDeck(p: TeamDeckProps) {
             <Button key={s} size="sm" variant={kabNow?.firstRaider === s ? 'primary' : 'outline'} className="h-6 max-w-[40%] truncate px-2 text-[11px]"
               disabled={p.disabled || p.busy}
               onClick={() => { if (kabNow?.firstRaider !== s) push({ t: 'raidFirst', side: s }); }}>
-              {nameOf(s)}
+              <SideChip full={nameOf(s)} short={shortOf(s)} />
             </Button>
           ))}
         </div>
@@ -783,12 +786,12 @@ export function TeamDeck(p: TeamDeckProps) {
         <div data-qa="kho-follow-on" role="status"
           className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg bg-amber-100 px-3 py-1.5 text-sm font-semibold text-amber-900 dark:bg-amber-500/15 dark:text-amber-300">
           <span className="mr-auto">
-            {nameOf(khoNow.followOnOffer.leader)} lead by {khoNow.followOnOffer.lead} after the first innings
+            <SideChip full={nameOf(khoNow.followOnOffer.leader)} short={shortOf(khoNow.followOnOffer.leader)} /> lead by {khoNow.followOnOffer.lead} after the first innings
             {khoNow.followOnOffer.compulsory ? ' - the follow-on is compulsory' : ' - follow-on?'}
           </span>
-          <Button size="sm" className="h-7" disabled={p.disabled || p.busy}
+          <Button size="sm" className="!h-auto min-h-7 min-w-0 py-1 !whitespace-normal" disabled={p.disabled || p.busy}
             onClick={() => push({ t: 'followOn', side: khoNow.followOnOffer!.leader })}>
-            {nameOf(otherOf(khoNow.followOnOffer.leader))} chase again
+            <SideChip full={nameOf(otherOf(khoNow.followOnOffer.leader))} short={shortOf(otherOf(khoNow.followOnOffer.leader))} /> chase again
           </Button>
           {/* Past the format's compulsory lead there is no choice to decline. */}
           {!khoNow.followOnOffer.compulsory && (
@@ -862,7 +865,7 @@ export function TeamDeck(p: TeamDeckProps) {
               </p>
             )}
             {/* Kho kho's record per turn - what organisers work time-based rankings out from. */}
-            {kho && <KhoTurns lines={khoTurnLines(format, log, state)} nameOf={nameOf} minChase={minChase} />}
+            {kho && <KhoTurns lines={khoTurnLines(format, log, state)} nameOf={nameOf} shortOf={shortOf} minChase={minChase} />}
             {p.recorded ? (
               <>
                 <p data-qa="team-recorded"
@@ -925,7 +928,7 @@ export function TeamDeck(p: TeamDeckProps) {
           />
         ) : progress.phase === 'minimumChase' && minChase ? (
           <MinimumChase
-            mc={minChase} nameOf={nameOf} busy={!!p.disabled || !!p.busy} score={shown}
+            mc={minChase} nameOf={nameOf} shortOf={shortOf} busy={!!p.disabled || !!p.busy} score={shown}
             onRecord={(s, ms) => push({ t: 'minChase', side: s, ms })}
             onUndo={undo}
             onSettle={(winner) => {
@@ -935,7 +938,7 @@ export function TeamDeck(p: TeamDeckProps) {
           />
         ) : progress.phase === 'penalties' ? (
           <Shootout
-            shoot={shoot} nameOf={nameOf} kicksEach={format.tieBreak?.penalties?.kicks ?? 5} terms={shootoutTerms(format.sport)}
+            shoot={shoot} nameOf={nameOf} shortOf={shortOf} kicksEach={format.tieBreak?.penalties?.kicks ?? 5} terms={shootoutTerms(format.sport)}
             busy={!!p.disabled || !!p.busy} score={shown} roster={p.roster}
             onFirst={(side) => push({ t: 'shootoutFirst', side })}
             onKick={(side, scored, kicker) => push({
@@ -954,7 +957,7 @@ export function TeamDeck(p: TeamDeckProps) {
             }}
           />
         ) : surface === 'sub' ? (
-          <SubPanel nameOf={nameOf} roster={p.roster} bench={p.bench} sentOff={sentOff}
+          <SubPanel nameOf={nameOf} shortOf={shortOf} roster={p.roster} bench={p.bench} sentOff={sentOff}
             onSub={(s, offId, onId) => { substitute(s, offId, onId); setSurface('act'); }}
             onClose={() => setSurface('act')} />
         ) : surface === 'clock' ? (
@@ -1218,7 +1221,7 @@ export function TeamDeck(p: TeamDeckProps) {
 
       {/* ── The footer: never moves ──────────────────────────────────────── */}
       <Card className="shrink-0 px-2 py-1.5">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 min-[360px]:gap-1.5">
           {/* THE WHISTLE IS THE ONLY FILLED BUTTON DOWN HERE.
               It was one small button in a row of four identically sized ones, and
               two of the others turned brand-filled whenever their panel was open -
@@ -1226,9 +1229,10 @@ export function TeamDeck(p: TeamDeckProps) {
               official's eye. It now takes the width it deserves and stands alone in
               solid brand; the panel toggles say they are open with a tint and a
               ring instead of stealing the fill. */}
-          {clockPeriods && !state.ended && progress.phase !== 'penalties' && (
+          {/* No period left to end once a shoot-out, minimum chase or innings win decides it. */}
+          {clockPeriods && !state.ended && progress.phase !== 'penalties' && progress.phase !== 'minimumChase' && !khoNow?.wonByInnings && (
             <Button size="sm" variant="primary" data-qa="end-period"
-              className={cn('h-9 flex-1 text-sm font-bold',
+              className={cn('h-9 min-w-0 flex-1 text-sm font-bold max-[359px]:px-2',
                 // Past full time the whistle is OVERDUE, and the button says so. It
                 // still does not blow itself - stoppage time is the official's call,
                 // and a clock that ended halves would end them mid-added-time.
@@ -1237,20 +1241,20 @@ export function TeamDeck(p: TeamDeckProps) {
               End {periodName.toLowerCase()} {periodNo}
             </Button>
           )}
-          <Button size="sm" variant="outline" className="h-9 shrink-0"
+          <Button size="sm" variant="outline" className={FOOT_BTN}
             disabled={!log.length || p.disabled || p.busy} onClick={undo}>
             Undo
           </Button>
           {/* Only with a team sheet: that is where on-field and bench come from. */}
           {p.onSubstitute && p.bench && !state.ended && (
             <Button size="sm" variant="outline" disabled={p.disabled || p.busy}
-              className={cn('h-9 shrink-0', surface === 'sub' && PANEL_OPEN)}
+              className={cn(FOOT_BTN, surface === 'sub' && PANEL_OPEN)}
               onClick={() => setSurface(surface === 'sub' ? 'act' : 'sub')}>
               Sub
             </Button>
           )}
           <Button size="sm" variant="outline"
-            className={cn('h-9 shrink-0', surface === 'log' && PANEL_OPEN)}
+            className={cn(FOOT_BTN, surface === 'log' && PANEL_OPEN)}
             onClick={() => setSurface(surface === 'log' ? 'act' : 'log')}>
             Log{log.length ? ` · ${log.length}` : ''}
           </Button>
@@ -1258,7 +1262,7 @@ export function TeamDeck(p: TeamDeckProps) {
               in a shoot-out too: that panel always shows, so More could never open. */}
           {!state.ended && progress.phase !== 'penalties' && (
             <Button size="sm" variant="outline"
-              className={cn('h-9 shrink-0', surface === 'more' && PANEL_OPEN)}
+              className={cn(FOOT_BTN, surface === 'more' && PANEL_OPEN)}
               onClick={() => setSurface(surface === 'more' ? 'act' : 'more')}>
               More
             </Button>
@@ -1272,6 +1276,8 @@ export function TeamDeck(p: TeamDeckProps) {
 /* ------------------------------- pieces -------------------------------- */
 
 const SURFACE = 'absolute inset-0 flex flex-col overflow-hidden';
+/** Footer buttons: a little tighter below 360px, so five of them fit a small phone. */
+const FOOT_BTN = 'h-9 shrink-0 max-[359px]:px-2';
 
 /** Events that are not play, so a change-ends prompt reads past them. */
 /** The "Not sure" choice for a required second person: records the action, credits nobody. */
@@ -1328,8 +1334,9 @@ function toneOf(ev: StatEventSpec): string {
 type Person = { id: string; name: string };
 
 /** Make a substitution: one player off, one from the bench on. A sent-off player is in neither list. */
-function SubPanel({ nameOf, roster, bench, sentOff, onSub, onClose }: {
+function SubPanel({ nameOf, shortOf, roster, bench, sentOff, onSub, onClose }: {
   nameOf: (s: Side) => string;
+  shortOf: (s: Side) => string;
   roster?: { A: Person[]; B: Person[] };
   bench?: { A: Person[]; B: Person[] };
   sentOff: Set<string>;
@@ -1356,8 +1363,8 @@ function SubPanel({ nameOf, roster, bench, sentOff, onSub, onClose }: {
       </div>
       <div className="grid grid-cols-2 gap-1.5">
         {(['A', 'B'] as const).map((s) => (
-          <Button key={s} size="sm" variant={side === s ? 'primary' : 'outline'}
-            onClick={() => { setSide(s); setOffId(''); setOnId(''); }}>{nameOf(s)}</Button>
+          <Button key={s} size="sm" variant={side === s ? 'primary' : 'outline'} className="min-w-0"
+            onClick={() => { setSide(s); setOffId(''); setOnId(''); }}><SideChip full={nameOf(s)} short={shortOf(s)} /></Button>
         ))}
       </div>
       <div className="grid gap-1">
@@ -1473,13 +1480,14 @@ function ClockPanel({ clock, periodLabel, period, busy, onAdjust, onToggle, onCl
  * penalties, and the terminal `end` event carries that reason so a record can say
  * so rather than presenting it as a win in normal time.
  */
-function Shootout({ shoot, nameOf, kicksEach, terms, busy, score, roster, onFirst, onKick, onUndo, onSettle }: {
+function Shootout({ shoot, nameOf, shortOf, kicksEach, terms, busy, score, roster, onFirst, onKick, onUndo, onSettle }: {
   /** The toss: who kicks first, changeable until the first kick. */
   onFirst: (side: Side) => void;
   /** Hockey says shoot-out and shooter; football penalties and kicker. */
   terms: ShootoutTerms;
   shoot: ShootoutState;
   nameOf: (s: Side) => string;
+  shortOf: (s: Side) => string;
   kicksEach: number;
   busy: boolean;
   score: readonly [number, number];
@@ -1521,7 +1529,7 @@ function Shootout({ shoot, nameOf, kicksEach, terms, busy, score, roster, onFirs
           {(['A', 'B'] as Side[]).map((s) => (
             <Button key={s} size="sm" variant={shoot.first === s ? 'primary' : 'outline'} className="h-6 max-w-[40%] truncate px-2 text-[11px]"
               disabled={busy} onClick={() => { if (shoot.first !== s) onFirst(s); }}>
-              {nameOf(s)}
+              <SideChip full={nameOf(s)} short={shortOf(s)} />
             </Button>
           ))}
         </div>
@@ -1653,9 +1661,10 @@ function GoldenRaidToss({ nameOf, busy, score, final, onToss, onUndo, onSettle }
   );
 }
 
-function MinimumChase({ mc, nameOf, busy, score, onRecord, onUndo, onSettle }: {
+function MinimumChase({ mc, nameOf, shortOf, busy, score, onRecord, onUndo, onSettle }: {
   mc: MinChaseState;
   nameOf: (s: Side) => string;
+  shortOf: (s: Side) => string;
   busy: boolean;
   score: readonly [number, number];
   onRecord: (side: Side, ms: number | null) => void;
@@ -1677,27 +1686,35 @@ function MinimumChase({ mc, nameOf, busy, score, onRecord, onUndo, onSettle }: {
   const elapsed = startedAt == null ? 0 : Math.max(0, now - startedAt);
   const overLimit = mc.limitMs != null && elapsed >= mc.limitMs;
 
-  const record = (value: number | null) => { onRecord(mc.next, value); setText(''); setStartedAt(null); };
   const timeOf = (v: number | null | undefined) => (v === undefined ? '-' : formatChaseTime(v));
+  // In a sentence: the short code on a phone, the full name from sm up.
+  const who = (s: Side) => <><span className="sm:hidden">{shortOf(s)}</span><span className="hidden sm:inline">{nameOf(s)}</span></>;
 
   const round = mc.rounds[mc.rounds.length - 1];
   // The round on show: the open one, or a fresh one when the last round was tied.
   const current = round && !(mc.winner == null && round.A !== undefined && round.B !== undefined) ? round : {};
+  // Before a round's first chase the scorer may tap either team; after it the other side must chase.
+  const [pick, setPick] = useState<Side | null>(null);
+  const canPick = !mc.winner && current.A === undefined && current.B === undefined && startedAt == null && !busy;
+  const chaser: Side = current.A === undefined && current.B === undefined ? (pick ?? mc.next) : mc.next;
+  const record = (value: number | null) => { onRecord(chaser, value); setText(''); setStartedAt(null); setPick(null); };
   const roundNo = mc.rounds.length + (round && current !== round ? 1 : 0) || 1;
   const earlier = mc.rounds.slice(0, current === round ? -1 : undefined);
   const beat = mc.limitMs != null ? mc.limitMs - MIN_CHASE_GRACE_MS : null;
 
   const tile = (s: Side) => {
     const t = current[s];
-    const chasing = !mc.winner && mc.next === s;
+    const chasing = !mc.winner && chaser === s;
     const won = mc.winner === s;
     return (
-      <div key={s} data-qa={`kho-min-chase-tile-${s}`}
-        className={cn('rounded-xl border p-3 text-center transition',
+      <button type="button" key={s} data-qa={`kho-min-chase-tile-${s}`} disabled={!canPick} aria-pressed={chasing}
+        onClick={() => setPick(s)}
+        className={cn('min-w-0 rounded-xl border p-3 text-center transition disabled:cursor-default',
+          canPick && !chasing && 'hover:border-brand-400',
           won ? 'border-emerald-500 bg-emerald-50 dark:border-emerald-400/60 dark:bg-emerald-500/10'
             : chasing ? 'border-brand-500 bg-brand-50 dark:border-brand-400/60 dark:bg-brand-500/10'
             : 'border-line')}>
-        <div className="truncate text-sm font-semibold">{nameOf(s)}</div>
+        <FitName full={nameOf(s)} short={shortOf(s)} className="text-sm font-semibold" />
         <div className={cn('mt-1 font-mono text-2xl font-bold tabular-nums',
           t === undefined && 'text-muted', t === null && 'text-base text-red-600 dark:text-red-400')}>
           {t === undefined ? '-:--.-' : formatChaseTime(t)}
@@ -1705,10 +1722,10 @@ function MinimumChase({ mc, nameOf, busy, score, onRecord, onUndo, onSettle }: {
         <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide">
           {won ? <span className="text-emerald-600 dark:text-emerald-400">Winner</span>
             : chasing ? <span className="text-brand-600 dark:text-brand-300">Chasing now</span>
-            : t === undefined ? <span className="text-muted">Waiting</span>
+            : t === undefined ? <span className="text-muted">{canPick ? 'Tap to chase first' : 'Waiting'}</span>
             : <span className="text-muted">Done</span>}
         </div>
-      </div>
+      </button>
     );
   };
 
@@ -1732,7 +1749,7 @@ function MinimumChase({ mc, nameOf, busy, score, onRecord, onUndo, onSettle }: {
       {mc.winner ? (
         <div className="shrink-0 space-y-2">
           <p className="text-center text-sm">
-            <span className="font-semibold">{nameOf(mc.winner)}</span> win on minimum chase
+            <span className="font-semibold">{who(mc.winner)}</span> win on minimum chase
           </p>
           <Button className="h-11 w-full font-bold" data-qa="kho-min-chase-settle" disabled={busy} onClick={() => onSettle(mc.winner as Side)}>
             Record the result
@@ -1744,7 +1761,7 @@ function MinimumChase({ mc, nameOf, busy, score, onRecord, onUndo, onSettle }: {
       ) : (
         <div className="shrink-0 space-y-3">
           <div className="text-center text-sm">
-            <span className="font-semibold">{nameOf(mc.next)}</span> chasing
+            <span className="font-semibold">{who(chaser)}</span> chasing
             {beat != null && (
               <span className="block text-xs text-muted">
                 Time to beat <span className="font-mono font-semibold text-slate-700 dark:text-slate-200">{formatChaseTime(beat)}</span>
@@ -1811,31 +1828,41 @@ function MinimumChase({ mc, nameOf, busy, score, onRecord, onUndo, onSettle }: {
 }
 
 /** Each kho kho turn as the score sheet lists it: who chased, points, time used. */
-function KhoTurns({ lines, nameOf, minChase }: {
+function KhoTurns({ lines, nameOf, shortOf, minChase }: {
   lines: ReturnType<typeof khoTurnLines>;
   nameOf: (s: Side) => string;
+  shortOf: (s: Side) => string;
   minChase: MinChaseState | null;
 }) {
   if (!lines.length) return null;
+  const who = (s: Side) => <><span className="sm:hidden">{shortOf(s)}</span><span className="hidden sm:inline">{nameOf(s)}</span></>;
   return (
     <div className="w-full max-w-sm text-xs" data-qa="kho-turns">
       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted">Turns</div>
       {lines.map((l) => (
         <div key={l.turn} className="flex items-baseline justify-between gap-2 border-b border-line py-0.5 last:border-0">
           <span className="text-muted">Turn {l.turn}</span>
-          <span className="min-w-0 flex-1 truncate">{l.chaser ? `${nameOf(l.chaser)} chased` : 'Turn'}</span>
-          <span className="font-mono tabular-nums">{l.points} pts</span>
+          <span className="min-w-0 flex-1 truncate">{l.chaser ? <>{who(l.chaser)} chased</> : 'Turn'}</span>
+          <span className="font-mono tabular-nums">{l.points} {l.points === 1 ? 'pt' : 'pts'}</span>
           <span className="w-12 text-right font-mono tabular-nums text-muted">{l.ms != null ? formatClock(l.ms) : '-'}</span>
         </div>
       ))}
       {minChase && minChase.rounds.length > 0 && minChase.rounds.map((r, i) => (
         <div key={`mc${i}`} className="flex items-baseline justify-between gap-2 py-0.5 text-muted">
           <span>Min. chase {i + 1}</span>
-          <span className="font-mono tabular-nums">{formatChaseTime(r.A)} / {formatChaseTime(r.B)}</span>
+          <span className="min-w-0 text-right">
+            {who('A')} <span className="font-mono tabular-nums">{formatChaseTime(r.A)}</span>
+            {' · '}{who('B')} <span className="font-mono tabular-nums">{formatChaseTime(r.B)}</span>
+          </span>
         </div>
       ))}
     </div>
   );
+}
+
+/** A team on a small toss or order button: the short code on a phone, the full name from sm up. */
+function SideChip({ full, short }: { full: string; short: string }) {
+  return <><span className="sm:hidden">{short}</span><span className="hidden truncate sm:inline">{full}</span></>;
 }
 
 /** One side of the board: who they are, and their number. */

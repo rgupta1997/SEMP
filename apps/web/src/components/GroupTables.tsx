@@ -292,7 +292,7 @@ export function GroupTables({ drawId, canManage }: { drawId: string; canManage: 
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{multi ? `Stage ${s.stage} tables` : 'Tables'}</span>
             <span className="text-xs text-slate-400 dark:text-slate-500">
-              Win {s.ranking.win} · Draw {s.ranking.draw} · Loss {s.ranking.loss} · ranked by {s.ranking.labels.join(', ').toLowerCase()}
+              Win {s.ranking.win} · Draw {s.ranking.draw} · Loss {s.ranking.loss} · ranked by {inSentence(s.ranking.labels.join(', '))}
             </span>
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
@@ -363,4 +363,9 @@ function FrameCells({ r }: { r: { frames_won?: number; ball_diff?: number } }) {
       <td className="px-2 py-1.5 text-right tabular-nums">{d > 0 ? `+${d}` : d}</td>
     </>
   );
+}
+
+/** Tie-breaker names mid-sentence: lower case, but an acronym such as ADT stays as it is. */
+function inSentence(text: string): string {
+  return text.split(' ').map((w) => (/^[A-Z]{2,}/.test(w) ? w : w.toLowerCase())).join(' ');
 }
