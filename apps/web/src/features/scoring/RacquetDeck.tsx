@@ -348,14 +348,16 @@ export function RacquetDeck(p: RacquetDeckProps) {
   );
 
   return (
-    <div className="grid gap-4">
+    // minmax(0, 1fr): a long name shortens instead of widening the console past the screen.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
       {/* ── Header: what rules are in force, and where they came from ─────── */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0 text-sm text-slate-500 dark:text-slate-400">
+      {/* One line on a phone: the playing-time chip arriving with the first point used to wrap it. */}
+      <div className="flex min-h-7 flex-nowrap items-center justify-between gap-2 sm:flex-wrap">
+        <div className="min-w-0 truncate text-sm text-slate-500 sm:whitespace-normal dark:text-slate-400">
           <span className="font-semibold text-slate-800 dark:text-slate-100">{format.name}</span>
           {p.provenance && <span className="ml-2 text-xs">· {p.provenance}</span>}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 flex-nowrap items-center gap-2 sm:flex-wrap">
           {!state.ended && timing.matchMs !== null && (
             <span title="Playing time: first point to the latest"
               className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 font-mono text-xs font-semibold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-200">
@@ -402,7 +404,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
       <div className="overflow-hidden rounded-2xl bg-gradient-to-b from-slate-50 to-slate-100 p-3 text-slate-900 ring-1 ring-slate-200 sm:p-4 dark:from-slate-900 dark:to-slate-950 dark:text-white dark:ring-white/10">
         {/* Phones: the heading and call run across the top and the two sides share the
             row below, so neither side is squeezed by the middle column. */}
-        <div className="grid grid-cols-2 items-stretch gap-2 sm:grid-cols-[1fr_auto_1fr] sm:gap-4">
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-stretch gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:gap-4">
           {panel(leftSide)}
           <div className="order-first col-span-2 flex flex-col items-center justify-center gap-2 text-center sm:order-none sm:col-span-1 sm:min-w-[6.5rem]">
             <div className="rounded-full bg-slate-200 px-3 py-1 font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-slate-700 dark:bg-white/10 dark:text-slate-200">
@@ -428,8 +430,9 @@ export function RacquetDeck(p: RacquetDeckProps) {
 
         {/* Who serves, to whom, from where - the line an umpire reads before every rally. */}
         {serve.movement !== 'none' && !state.ended && (
-          <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-xl bg-white px-3 py-2.5 text-sm text-slate-600 ring-1 ring-slate-200 sm:text-base dark:bg-white/5 dark:text-slate-300 dark:ring-0">
-            <span>
+          // One line on a phone, always: a wrap that came and went with "left"/"right" moved every button below.
+          <div className="mt-3 flex flex-nowrap items-center justify-center gap-x-3 gap-y-1.5 rounded-xl bg-white px-3 py-2.5 text-sm text-slate-600 ring-1 ring-slate-200 sm:flex-wrap sm:text-base dark:bg-white/5 dark:text-slate-300 dark:ring-0">
+            <span className="min-w-0 truncate">
               <span className="font-bold text-slate-900 dark:text-white">{resolved?.server ?? nameOf(state.serve.side)}</span> to serve
               {(pairCycle || bwfPairs || twoServes || squashPairs) && doubles && resolved?.receiver && (
                 <> to <span className="font-bold text-slate-900 dark:text-white">{resolved.receiver}</span></>
@@ -438,7 +441,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
             {/* Squash: the server picks the box at the start of each hand, then alternates -
                 so at a hand's first serve the box is a two-way switch, otherwise a label. */}
             {resolved?.courtHalf && !pairCycle && (squashPairs && state.serve.turnCount === 0 && !needsSetup ? (
-              <span className="inline-flex overflow-hidden rounded-lg border border-slate-300 dark:border-slate-700" role="group" aria-label="Service box">
+              <span className="inline-flex shrink-0 overflow-hidden rounded-lg border border-slate-300 dark:border-slate-700" role="group" aria-label="Service box">
                 {(['left', 'right'] as const).map((b) => (
                   <button key={b} type="button" disabled={p.disabled}
                     aria-pressed={resolved.courtHalf === b}
@@ -454,18 +457,23 @@ export function RacquetDeck(p: RacquetDeckProps) {
                 ))}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                <CourtHalf half={resolved.courtHalf} /> {resolved.courtHalf} {squashPairs ? 'box' : 'court'}
+              <span className="inline-flex shrink-0 items-center gap-1.5 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                <CourtHalf half={resolved.courtHalf} />
+                {/* Sized to "right ...", the longer word, so left and right take the same room. */}
+                <span className="inline-grid">
+                  <span className="invisible col-start-1 row-start-1 whitespace-nowrap" aria-hidden>right {squashPairs ? 'box' : 'court'}</span>
+                  <span className="col-start-1 row-start-1 whitespace-nowrap">{resolved.courtHalf} {squashPairs ? 'box' : 'court'}</span>
+                </span>
               </span>
             ))}
             {serve.movement === 'handOut' && doubles && (
-              <span className="rounded-md bg-slate-200 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-slate-800 dark:bg-white/10 dark:text-white">Server {state.serve.serverNo}</span>
+              <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-200 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-slate-800 dark:bg-white/10 dark:text-white">Server {state.serve.serverNo}</span>
             )}
             {serveTurn && (
-              <span className="rounded-md bg-amber-400 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-slate-950">{serveTurn}</span>
+              <span className="shrink-0 whitespace-nowrap rounded-md bg-amber-400 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-slate-950">{serveTurn}</span>
             )}
             {secondServe && (
-              <span className="rounded-md bg-amber-400 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-slate-950">2nd serve</span>
+              <span className="shrink-0 whitespace-nowrap rounded-md bg-amber-400 px-2 py-0.5 text-xs font-black uppercase tracking-wider text-slate-950">2nd serve</span>
             )}
           </div>
         )}
@@ -772,7 +780,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
             </Button>
           </div>
         )}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
           {[leftSide, rightSide].map((side) => (
             <RallyButton
               key={side}
@@ -930,7 +938,9 @@ function ScoreSide({ name, org, points, serving, cue, units, cards, align, accen
       </div>
       {org && <div className="line-clamp-2 break-words text-xs text-slate-500 sm:line-clamp-1 sm:text-sm dark:text-slate-400">{org}</div>}
 
-      <div className={cn('mt-2 flex flex-wrap items-end gap-x-3 gap-y-1', right && 'flex-row-reverse')}>
+      {/* The card keeps one shape every point: on a phone the badges always sit under the number,
+          and the serving badge and point cue keep their room when hidden, so nothing below moves. */}
+      <div className={cn('mt-2 flex flex-col gap-y-1 sm:flex-row sm:flex-wrap sm:items-end sm:gap-x-3', right ? 'items-end sm:flex-row-reverse' : 'items-start')}>
         <div className={cn(
           'font-mono text-6xl font-black leading-none tabular-nums sm:text-7xl',
           cue ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-900 dark:text-white',
@@ -938,11 +948,9 @@ function ScoreSide({ name, org, points, serving, cue, units, cards, align, accen
           {points}
         </div>
         <div className={cn('mb-1 flex flex-col gap-1.5', right ? 'items-end' : 'items-start')}>
-          {serving && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-slate-950">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-slate-950" /> Serving
-            </span>
-          )}
+          <span aria-hidden={!serving} className={cn('inline-flex items-center gap-1 rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-slate-950', !serving && 'invisible')}>
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-slate-950" /> Serving
+          </span>
           {units && (
             <div className={cn('flex items-center gap-1', right && 'flex-row-reverse')} aria-label={`${units.won} ${units.label} won`}>
               {/* One pip per game needed to win: filled as they are won. */}
@@ -955,12 +963,13 @@ function ScoreSide({ name, org, points, serving, cue, units, cards, align, accen
         </div>
       </div>
 
-      {cue && (
-        <div className={cn(
+      {/* Always takes its line; invisible when there is no cue. */}
+      {(
+        <div aria-hidden={!cue} className={cn(
           'mt-2 inline-block rounded-md px-2 py-0.5 text-xs font-black uppercase tracking-wider',
-          cue === 'Match point' ? 'animate-pulse bg-rose-500 text-white' : 'bg-emerald-400 text-slate-950',
+          !cue ? 'invisible' : cue === 'Match point' ? 'animate-pulse bg-rose-500 text-white' : 'bg-emerald-400 text-slate-950',
         )}>
-          {cue}
+          {cue ?? 'Game point'}
         </div>
       )}
     </div>

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { ChevronDown, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
 import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge, Textarea, BackButton, cn, confirmDialog, toast } from '../../components/ui';
-import { awayTeam, championshipIdOf, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, orgTitle, sideCodes, sportIdOf, sportName as sportNameOf, teamLabel, teamShort, venueLabel } from './fixtureHelpers';
+import { awayTeam, championshipIdOf, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, orgTitle, isSwimmingFixture, sideCodes, sportIdOf, sportName as sportNameOf, teamLabel, teamShort, venueLabel } from './fixtureHelpers';
 import {
   cricketScore, headline, hydrate, oversStr, oversToBalls, reduce, sportDef, subLine,
   type Action, type LogEntry, type MatchState, type SportDef,
@@ -642,7 +642,8 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
   // detailed per-athlete console is kept available behind this toggle.
 
   const structureLabel = (s: Structure) =>
-    s === 'tie' ? `Team tie · ${tieSpec?.rubbers.length ?? 0} rubbers`
+    // Chess calls its rubbers boards.
+    s === 'tie' ? `Team tie · ${tieSpec?.rubbers.length ?? 0} ${consoleTieSpec?.boardPoints ? 'boards' : 'rubbers'}`
     : s === 'event' ? `Event · ${eventSpec?.subEvents.length ?? 0} sub-events`
     : 'Single match';
 
@@ -2245,7 +2246,7 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
       </Card>
 
       {(!completed || editing) && (
-        <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
           <Card>
             <CardHeader title="Scoring" subtitle={`${def.segLabel} ${def.archetype === 'cricket' ? state.inn : state.seg}${def.archetype !== 'cricket' ? ` of ${def.segMax}` : ''}${state.ended ? ' · frozen' : ''}`} />
             <CardBody className="space-y-4">
@@ -2980,8 +2981,9 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                       <div className={cn('grid gap-2', spec.boardPoints ? 'grid-cols-3' : 'grid-cols-2')}>
                         <Button variant={active.winner === 'A' ? 'primary' : 'outline'} onClick={() => decide(state.activeRubber, 'A')}>
                           <span className="flex w-full min-w-0 flex-col items-center whitespace-normal break-words text-center leading-tight">
-                            <span>{homeName} won</span>
-                            {homeOrg && <span className="text-[11px] font-normal opacity-75">{homeOrg}</span>}
+                            <span className="sm:hidden">{homeCode} won</span>
+                            <span className="hidden sm:inline">{homeName} won</span>
+                            {homeOrg && <span className="hidden text-[11px] font-normal opacity-75 sm:inline">{homeOrg}</span>}
                           </span>
                         </Button>
                         {/* A drawn board - the commonest chess result - is ½ each. */}
@@ -2995,8 +2997,9 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                         )}
                         <Button variant={active.winner === 'B' ? 'primary' : 'outline'} onClick={() => decide(state.activeRubber, 'B')}>
                           <span className="flex w-full min-w-0 flex-col items-center whitespace-normal break-words text-center leading-tight">
-                            <span>{awayName} won</span>
-                            {awayOrg && <span className="text-[11px] font-normal opacity-75">{awayOrg}</span>}
+                            <span className="sm:hidden">{awayCode} won</span>
+                            <span className="hidden sm:inline">{awayName} won</span>
+                            {awayOrg && <span className="hidden text-[11px] font-normal opacity-75 sm:inline">{awayOrg}</span>}
                           </span>
                         </Button>
                       </div>
@@ -3021,6 +3024,27 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
               </Card>
             )}
         </>
+      )}
+
+      {/* Sign-off where the official is looking: under the last result, not only in Tie control above it. */}
+      {!completed && decided && playable === 0 && (
+        <Card><CardBody className="space-y-2 py-4">
+          <p className="text-center text-sm text-slate-600 dark:text-slate-300">
+            Every {unit} is recorded: {homeCode} {formatPoints(tieScore(spec, state).a)} – {formatPoints(tieScore(spec, state).b)} {awayCode}.
+            {drawn && knockout ? ' A knockout tie needs a winner: who won the tie-break?' : ' Check the results, then sign off to finish the match.'}
+          </p>
+          {drawn && knockout && (
+            <div className="grid grid-cols-2 gap-2">
+              {(['A', 'B'] as Side[]).map((s) => (
+                <Button key={s} variant={state.tiebreakWinner === s ? 'primary' : 'outline'} disabled={submitting}
+                  onClick={() => { if (state.tiebreakWinner !== s) setTiebreak(s); }}>
+                  {s === 'A' ? homeCode : awayCode} won the tie-break
+                </Button>
+              ))}
+            </div>
+          )}
+          <Button className="w-full" disabled={submitting || (drawn && knockout && !state.tiebreakWinner)} onClick={signOff}>✍ End tie &amp; sign off</Button>
+        </CardBody></Card>
       )}
 
       {completed && !editing && (
@@ -3160,7 +3184,7 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
     .sort((a, b) => b.points - a.points || (a.place! - b.place!) || a.name.localeCompare(b.name));
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
       <Card>
         <CardHeader title="Team ranking" subtitle={`Set each team's finishing place - points are awarded by placement (${medalPoints.join(' / ')}).`} />
         <CardBody className="space-y-2">
@@ -3453,7 +3477,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const singleMark = pickOne || isNamedDiscipline;
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
       <Card>
         <CardHeader title="Participants & results" subtitle={subtitle} />
         <CardBody className="space-y-3">
@@ -3477,9 +3501,9 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
           {state.participants.length > 0 && (singleMark ? (
             <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
               {state.participants.map((p) => (
-                <div key={p.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                <div key={p.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2.5 sm:flex-nowrap">
                   {/* The institute too: two swimmers can share a name, and a relay row is the institute's. */}
-                  <span className="min-w-0 flex-1">
+                  <span className="min-w-0 basis-full sm:flex-1 sm:basis-auto">
                     <span className="block truncate text-sm font-medium text-slate-700 dark:text-slate-200" title={p.name}>{p.name || 'Unnamed'}</span>
                     {p.org && <span className="block truncate text-[11px] text-slate-400 dark:text-slate-500">{p.org}</span>}
                   </span>
@@ -3496,8 +3520,8 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
                         ?? `${p.marks[p.category]}${spec.result.unit ? ` ${spec.result.unit}` : ''}`}
                     </span>
                   ) : category ? (
-                    <div className="flex shrink-0 items-start gap-1.5">
-                      <div className="w-32">
+                    <div className="flex w-full items-start gap-1.5 sm:w-auto sm:shrink-0">
+                      <div className="min-w-0 flex-1 sm:w-32 sm:flex-none">
                         <MarkInput
                           value={p.marks[category] ?? null} isTime={activeMeta.isTime} disabled={!!resultStatusOf(p, category)}
                           placeholder={activeMeta.isTime ? undefined : placeholderFor(activeMeta.unit)}
@@ -3512,6 +3536,67 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
                   )}
                 </div>
               ))}
+            </div>
+          ) : isSwimmingFixture(fixture) ? (
+            // Swimming: swimmers grouped under their institute, each a dropdown, so a
+            // dozen swimmers a college no longer means a dozen full cards to scroll past.
+            <div className="space-y-2">
+              {[...state.participants.reduce((m, p) => {
+                const key = p.orgId ?? p.org ?? '';
+                m.set(key, [...(m.get(key) ?? []), p]);
+                return m;
+              }, new Map<string, ParticipantResult[]>()).entries()]
+                .sort(([, a], [, b]) => (a[0]?.org ?? '').localeCompare(b[0]?.org ?? ''))
+                .map(([key, people]) => {
+                  const resultsOf = (p: ParticipantResult) => spec.subEvents.filter((se) => hasResultIn(p, se.key)).length;
+                  const total = people.reduce((n, p) => n + resultsOf(p), 0);
+                  return (
+                    <details key={key || 'none'} className="group rounded-xl border border-slate-200 dark:border-slate-800">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+                        <span className="min-w-0 truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{people[0]?.org || 'No institute'}</span>
+                        <span className="flex shrink-0 items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                          {people.length} swimmer{people.length === 1 ? '' : 's'} · {total} result{total === 1 ? '' : 's'}
+                          <ChevronDown className="h-4 w-4 transition group-open:rotate-180" />
+                        </span>
+                      </summary>
+                      <div className="divide-y divide-slate-100 border-t border-slate-100 dark:divide-slate-800 dark:border-slate-800">
+                        {people.map((p) => {
+                          const n = resultsOf(p);
+                          return (
+                            <details key={p.id} className="group/swimmer">
+                              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
+                                <span className="min-w-0 truncate text-sm text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</span>
+                                <span className={cn('flex shrink-0 items-center gap-2 text-xs', n ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500')}>
+                                  {n ? `${n} race${n === 1 ? '' : 's'}` : 'No results'}
+                                  <ChevronDown className="h-4 w-4 transition group-open/swimmer:rotate-180" />
+                                </span>
+                              </summary>
+                              <div className="px-3 pb-3">
+                                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                  {spec.subEvents.map((se) => {
+                                    const seMeta = markMetaFor(spec, se);
+                                    return (
+                                      <label key={se.key} className="block min-w-0">
+                                        <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
+                                        <MarkInput
+                                          value={p.marks[se.key] ?? null} isTime={seMeta.isTime} disabled={!!resultStatusOf(p, se.key)}
+                                          placeholder={seMeta.isTime ? undefined : placeholderFor(seMeta.unit)}
+                                          onChange={(v) => setMark(p.id, se.key, v)} ariaLabel={`${p.name || 'competitor'} ${se.label}`}
+                                        />
+                                        <StatusSelect value={resultStatusOf(p, se.key)} onChange={(st) => setStatus(p.id, se.key, st)}
+                                          ariaLabel={`${p.name || 'competitor'} ${se.label} status`} className="mt-1 w-full" />
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </details>
+                          );
+                        })}
+                      </div>
+                    </details>
+                  );
+                })}
             </div>
           ) : (
             state.participants.map((p) => (
@@ -3611,7 +3696,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
 function StatusSelect({ value, onChange, ariaLabel, className }: { value: ResultStatus | null; onChange: (s: ResultStatus | null) => void; ariaLabel: string; className?: string }) {
   return (
     <Select value={value ?? ''} aria-label={ariaLabel} title={value ? RESULT_STATUS_LABEL[value] : 'Has a result'}
-      className={cn('w-20 shrink-0 text-xs', value && 'text-rose-600 dark:text-rose-400', className)}
+      className={cn('w-20 !min-w-0 shrink-0 text-xs', value && 'text-rose-600 dark:text-rose-400', className)}
       onChange={(e) => onChange((e.target.value || null) as ResultStatus | null)}>
       <option value="">-</option>
       {RESULT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}

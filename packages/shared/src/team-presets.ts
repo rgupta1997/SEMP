@@ -169,22 +169,23 @@ const NET: ScoringFormat[] = [
 
   fmt({
     sport: 'throwball', key: 'tb_bo3_15', name: 'Best of 3 sets to 15',
-    levels: [vSet(15, 15), unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'never',
+    levels: [vSet(15, 15), unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'atDeciderMidpoint',
   }),
   fmt({
     sport: 'throwball', key: 'tb_bo3_21', name: 'Best of 3 sets to 21',
-    levels: [vSet(21, 21), unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'never',
+    levels: [{ ...vSet(21, 21), deciderOverride: { target: 21, switchEndsAt: 11 } }, unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'atDeciderMidpoint',
   }),
-  // Every set to 25 by 2, the third included (Inter-IIM).
+  // Every set to 25 by 2, the third included (Inter-IIM). Courts change after each set
+  // and at 13 in the third, as in every throwball rulebook.
   fmt({
     sport: 'throwball', key: 'tb_bo3_25_all', name: 'Best of 3 sets to 25',
-    levels: [{ key: 'set', label: 'Set', target: 25, winBy: 2, cap: null, switchEndsAt: null }, unitsMatch(2)],
-    serve: THROW_SERVE, changeEnds: 'never',
+    levels: [{ key: 'set', label: 'Set', target: 25, winBy: 2, cap: null, switchEndsAt: 13 }, unitsMatch(2)],
+    serve: THROW_SERVE, changeEnds: 'atDeciderMidpoint',
   }),
   // The international (ITF / USA) shape: sets to 25 by 2, a deciding third to 15.
   fmt({
     sport: 'throwball', key: 'tb_bo3_25', name: 'Best of 3 sets to 25 (decider 15)',
-    levels: [vSet(25, 15), unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'never',
+    levels: [vSet(25, 15), unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'atDeciderMidpoint',
   }),
   fmt({
     sport: 'throwball', key: 'tb_single_15', name: 'Single set to 15',

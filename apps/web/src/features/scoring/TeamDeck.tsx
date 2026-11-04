@@ -165,8 +165,12 @@ export function TeamDeck(p: TeamDeckProps) {
    */
   // The number on the board, and what every tie-break decision is taken against.
   const shown = aggregate ? aggregateScore(state) : state.score[state.pointLevel];
-  // Once a set sport is over the next set's 0-0 means nothing: the board shows the sets won.
-  const boardScore = !aggregate && state.ended ? env.unitsFor : shown;
+  // Once a set sport is over the next set's 0-0 means nothing: the board shows the sets won,
+  // or for a single game (frisbee to 13) that game's score.
+  const singleGame = (format.levels[format.levels.length - 1]?.target ?? 1) <= 1;
+  const boardScore = !aggregate && state.ended
+    ? (singleGame ? env.unitScores[env.unitScores.length - 1] ?? shown : env.unitsFor)
+    : shown;
 
   /**
    * HOW LONG THE PERIOD IN PROGRESS RUNS.
@@ -1842,9 +1846,16 @@ function KhoTurns({ lines, nameOf, shortOf, minChase }: {
   return (
     <div className="w-full max-w-sm text-xs" data-qa="kho-turns">
       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted">Turns</div>
+      {/* Column headings: points are the chasing side's, the time is how long that chase ran. */}
+      <div className="flex items-baseline justify-between gap-2 border-b border-line pb-0.5 text-[10px] uppercase tracking-wide text-muted">
+        <span className="w-12">Turn</span>
+        <span className="min-w-0 flex-1">Chasing</span>
+        <span>Points</span>
+        <span className="w-12 text-right">Time</span>
+      </div>
       {lines.map((l) => (
         <div key={l.turn} className="flex items-baseline justify-between gap-2 border-b border-line py-0.5 last:border-0">
-          <span className="text-muted">Turn {l.turn}</span>
+          <span className="w-12 text-muted">Turn {l.turn}</span>
           <span className="min-w-0 flex-1 truncate">{l.chaser ? <>{who(l.chaser)} chased</> : 'Turn'}</span>
           <span className="font-mono tabular-nums">{l.points} {l.points === 1 ? 'pt' : 'pts'}</span>
           <span className="w-12 text-right font-mono tabular-nums text-muted">{l.ms != null ? formatClock(l.ms) : '-'}</span>

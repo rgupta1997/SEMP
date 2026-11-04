@@ -34,6 +34,8 @@ export function orgTitle(t: any): string {
 export function sportName(f: any): string | null {
   return f.tournament_disciplines?.tournament_sports?.sports?.name ?? null;
 }
+/** Swimming's whole-sport console groups its swimmers by institute. */
+export function isSwimmingFixture(f: any): boolean { return /swim/i.test(sportName(f) ?? ''); }
 export function sportIdOf(f: any): string | null {
   const ts = f.tournament_disciplines?.tournament_sports;
   return ts?.sport_id ?? ts?.sports?.id ?? null;

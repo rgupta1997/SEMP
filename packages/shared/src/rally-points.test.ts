@@ -31,3 +31,11 @@ describe('rally points for the points quotient', () => {
     expect(quotient(0, 3)).toBe(0);
   });
 });
+
+describe('throwball presets change ends like the rulebooks', () => {
+  it('every multi-set throwball preset changes ends; the decider at its midpoint', () => {
+    const tb = TEAM_PRESETS.filter((f) => f.sport === 'throwball' && f.levels[1]?.target > 1);
+    expect(tb.length).toBeGreaterThan(0);
+    for (const f of tb) expect(f.changeEnds).toBe('atDeciderMidpoint');
+  });
+});
