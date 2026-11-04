@@ -15,6 +15,8 @@ interface TableRow {
   /** Kho kho's average difference time, seconds. */
   adt?: number | null;
   adt_estimated?: boolean;
+  frames_won?: number;
+  ball_diff?: number;
 }
 interface PoolTable {
   pool: number | null; label: string; complete: boolean; rows: TableRow[]; ties: string[][];
@@ -111,7 +113,7 @@ function ResolveModal({ drawId, target, names, onClose }: { drawId: string; targ
       </ol>
       <label className="block">
         <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Reason</span>
-        <Textarea rows={2} value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Tie-breaker match, coin toss, fair play points" />
+        <Textarea rows={2} className="w-full" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Tie-breaker match, coin toss, fair play points" />
       </label>
     </Modal>
   );
@@ -142,6 +144,7 @@ function CrossGroupView({ c, multiStage }: { c: CrossGroup; multiStage: boolean 
               <th className="px-3 py-1.5 text-left">Team</th>
               <th className="px-2 py-1.5 text-left">Group</th>
               {['P', 'W', 'D', 'L', 'Diff', 'For', 'Pts'].map((h) => <th key={h} className="px-2 py-1.5 text-right">{h}</th>)}
+              {c.rows.some((r) => r.frames_won !== undefined) && <FrameHeads />}
               <th className="px-3 py-1.5 text-right">Place</th>
             </tr>
           </thead>
@@ -157,6 +160,7 @@ function CrossGroupView({ c, multiStage }: { c: CrossGroup; multiStage: boolean 
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_for - r.score_against)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_for)}</td>
                 <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{formatPoints(r.points)}</td>
+                {c.rows.some((x) => x.frames_won !== undefined) && <FrameCells r={r} />}
                 <td className="px-3 py-1.5 text-right">{r.place != null ? <Badge tone="brand">{ordinal(r.place)}</Badge> : <span className="text-slate-400">-</span>}</td>
               </tr>
             ))}
@@ -187,6 +191,7 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
   const tiedIds = new Set(openTiesOf(pool).flat());
   // Kho kho tables carry ADT (the server sends it only for kho kho).
   const showAdt = pool.rows.some((r) => r.adt !== undefined);
+  const showFrames = pool.rows.some((r) => r.frames_won !== undefined);
   // Teams level on every tie-breaker share a position (2, 2, 4) until an order is set.
   const shownRank = (r: PoolTable['rows'][number]) => {
     const tie = pool.ties.find((t) => t.includes(r.entity_id));
@@ -205,6 +210,7 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
               <th className="px-3 py-1.5 text-left">#</th>
               <th className="px-2 py-1.5 text-left">Team</th>
               {['P', 'W', 'D', 'L', 'For', 'Ag', 'Diff', 'Pts'].map((h) => <th key={h} className="px-2 py-1.5 text-right">{h}</th>)}
+              {showFrames && <FrameHeads />}
               {showAdt && (
                 <th className="px-2 py-1.5 text-right normal-case" title="Average difference time, seconds: time defended per player out, minus time chased per opponent out. Group matches, regulation turns only.">ADT</th>
               )}
@@ -223,6 +229,7 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_against)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_for - r.score_against)}</td>
                 <td className="px-2 py-1.5 text-right font-semibold tabular-nums text-slate-900 dark:text-white">{formatPoints(r.points)}</td>
+                {showFrames && <FrameCells r={r} />}
                 {showAdt && (
                   <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums"
                     title={r.adt_estimated ? 'A turn clock was not run: its full length was used.' : undefined}>
@@ -336,5 +343,24 @@ export function GroupTables({ drawId, canManage }: { drawId: string; canManage: 
 
       {target && <ResolveModal drawId={drawId} target={target} names={data.names} onClose={() => setTarget(null)} />}
     </div>
+  );
+}
+
+// Pool: frames won and net ball difference break level points, so the table shows them.
+function FrameHeads() {
+  return (
+    <>
+      <th className="px-2 py-1.5 text-right normal-case" title="Frames won across all rubbers">Frames</th>
+      <th className="whitespace-nowrap px-2 py-1.5 text-right normal-case" title="Net ball difference: balls won frames by, minus balls lost frames by">Ball diff</th>
+    </>
+  );
+}
+function FrameCells({ r }: { r: { frames_won?: number; ball_diff?: number } }) {
+  const d = r.ball_diff ?? 0;
+  return (
+    <>
+      <td className="px-2 py-1.5 text-right tabular-nums">{r.frames_won ?? 0}</td>
+      <td className="px-2 py-1.5 text-right tabular-nums">{d > 0 ? `+${d}` : d}</td>
+    </>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPoolSport, poolRubber, poolTieTotals, poolTieTotalsOf, readPoolState } from './pool.js';
+import { isPoolSport, nextBreaker, poolRubber, poolTieTotals, poolTieTotalsOf, readPoolState } from './pool.js';
 import { playedContests } from './played-contests.js';
 import { buildTieSpec, isFrameContest, tieLayoutsFor, tieTemplateFor } from './tie-templates.js';
 import { hydrateTie, initTie, reopenRubber } from './tie.js';
@@ -7,6 +7,28 @@ import { tiebreakerLabel, tiebreakerOptions } from './standings-ranking.js';
 import { resolveFormat } from './format-ladder.js';
 
 const f = (winner: 'A' | 'B', ballsLeft?: number) => ({ winner, ...(ballsLeft != null ? { ballsLeft } : {}) });
+
+describe('pool breaks and frame ends', () => {
+  it('alternate break: the frames take turns from the lag winner', () => {
+    expect(nextBreaker({ frames: [] })).toBeNull();
+    expect(nextBreaker({ frames: [{ winner: 'A', breaker: 'A' }] })).toBe('B');
+    expect(nextBreaker({ frames: [{ winner: 'A', breaker: 'A' }, { winner: 'A', breaker: 'B' }] })).toBe('A');
+    // A later frame without a breaker still counts on from the last known one.
+    expect(nextBreaker({ frames: [{ winner: 'B', breaker: 'B' }, { winner: 'A' }] })).toBe('B');
+    expect(nextBreaker({ frames: [{ winner: 'B' }] })).toBeNull();
+  });
+
+  it('winner breaks: the last frame winner breaks next', () => {
+    expect(nextBreaker({ breakRule: 'winner', frames: [{ winner: 'B', breaker: 'A' }] })).toBe('B');
+    expect(nextBreaker({ breakRule: 'winner', frames: [] })).toBeNull();
+  });
+
+  it('keeps breaker, frame end and break rule when read back, dropping junk', () => {
+    expect(readPoolState({ breakRule: 'winner', frames: [{ winner: 'A', breaker: 'B', end: 'foul8' }, { winner: 'B', breaker: 'X', end: 'nope' }] }))
+      .toEqual({ breakRule: 'winner', frames: [{ winner: 'A', breaker: 'B', end: 'foul8' }, { winner: 'B' }] });
+    expect(readPoolState({ breakRule: 'sometimes', frames: [] })).toEqual({ frames: [] });
+  });
+});
 
 describe('pool rubbers, frame by frame', () => {
   it('knows the sport', () => {

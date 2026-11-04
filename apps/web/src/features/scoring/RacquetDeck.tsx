@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   atAdvantage, capLeader, changesEndsAfterUnit, effectiveLevel, expediteAllowed, expediteConfig, foldRally, formatForPairing, initKernel, isDecider, rallyTiming,
-  resolveServer, resultEnvelope, serveCall, serveEveryNow, serveSpecFor, setChoiceDue, step, misconductTerms, timeoutRules, timeoutsLeft, unitClock,
+  formatResultUnit, resolveServer, resultEnvelope, serveCall, setResultUnits, serveEveryNow, serveSpecFor, setChoiceDue, step, misconductTerms, timeoutRules, timeoutsLeft, unitClock,
   type KernelState, type LevelSpec, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
 import { ArrowLeftRight, CheckCircle2, ChevronDown, Flag, RotateCcw, SlidersHorizontal, Timer, Undo2 } from 'lucide-react';
@@ -278,10 +278,13 @@ export function RacquetDeck(p: RacquetDeckProps) {
   while (playIdx >= 0 && PASSIVE_EVENTS.has(fold.trace[playIdx].event.t)) playIdx -= 1;
   const lastEffect = playIdx >= 0 ? fold.trace[playIdx] : undefined;
   const afterUnit = !!lastEffect && changesEndsAfterUnit(format, state, lastEffect.unitsWon);
-  const showSwitch = (!!lastEffect?.switchEnds || afterUnit) && dismissed.current !== playIdx;
+  // Nothing to change once the match is over (a tie-break's last point can land on a 6).
+  const showSwitch = (!!lastEffect?.switchEnds || afterUnit) && dismissed.current !== playIdx && !state.ended;
   const switchText = afterUnit
     ? `Change ends before the next ${lastEffect!.unitsWon[0].label.toLowerCase()}`
-    : `Change ends · midpoint of the deciding ${lv.label.toLowerCase()}`
+    : lv.key === 'tiebreak' || state.pointLevel > 0
+      ? 'Change ends · every 6 points of the tie-break'
+      : `Change ends · midpoint of the deciding ${lv.label.toLowerCase()}`
       // ITTF 2.13.6: the receiving pair also switches order here.
       + (pairCycle && doubles && resolved?.receiver ? ` · receivers switch: ${resolved.receiver} now receives` : '');
 
@@ -666,7 +669,8 @@ export function RacquetDeck(p: RacquetDeckProps) {
                 : `${nameOf(state.winner)} wins`}
             </div>
             <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              {env.unitScores.map((u) => `${u[0]}–${u[1]}`).join('  ·  ') || `${env.headline[0]}–${env.headline[1]}`}
+              {(setResultUnits(format, state)?.map((u) => formatResultUnit(u, '–')).join('  ·  ')
+                ?? env.unitScores.map((u) => `${u[0]}–${u[1]}`).join('  ·  ')) || `${env.headline[0]}–${env.headline[1]}`}
               {state.reason && state.reason !== 'normal' ? ` · ${state.reason}` : ''}
             </div>
             {timing.matchMs !== null && (
@@ -1514,7 +1518,8 @@ function Timeline({ format, log, firstServer, homeName, awayName }:
             )}
             {t.unitsWon.length > 0 && (
               <span className="shrink-0 font-mono text-xs font-semibold tabular-nums text-brand-600 dark:text-brand-400">
-                {t.unitsWon.map((u) => `${u.label} ${u.score[0]}–${u.score[1]}`).join(' · ')}
+                {/* A tennis game is won on 15/30/40, so its raw point count ("Game 8–6") means nothing. */}
+                {t.unitsWon.map((u) => (format.levels[u.level]?.pointLabels ? `${u.label} won` : `${u.label} ${u.score[0]}–${u.score[1]}`)).join(' · ')}
               </span>
             )}
           </li>
@@ -1622,9 +1627,10 @@ function FinishPanel({ format, state, homeName, awayName, onEvent, onSuspend, on
         <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
           Not finished yet - {lv.label.toLowerCase()} at{' '}
           <span className="font-mono tabular-nums">{pts[0]}–{pts[1]}</span>
-          {env.unitScores.length > 0 && (
-            <> · {env.unitScores.map((u) => `${u[0]}–${u[1]}`).join(', ')}</>
-          )}
+          {(() => {
+            const told = setResultUnits(format, state)?.map((u) => formatResultUnit(u, '–')) ?? env.unitScores.map((u) => `${u[0]}–${u[1]}`);
+            return told.length > 0 ? <> · {told.join(', ')}</> : null;
+          })()}
           . Pick how it ended and it is recorded with that reason.
         </div>
       </div>

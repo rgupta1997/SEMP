@@ -13,3 +13,15 @@ describe('play order', () => {
     expect(sorted.map((f) => f.stage_sequence)).toEqual([1, 2]);
   });
 });
+
+describe('play order in a league', () => {
+  it('sorts by round, then match, with the round\'s bye last', () => {
+    const rounds = ['Round 2 - Match 1', 'Round 1 - Bye', 'Round 1 - Match 2', 'Round 10 - Match 1', 'Round 1 - Match 1'];
+    expect(rounds.map((round) => ({ round })).sort(comparePlayOrder).map((f) => f.round))
+      .toEqual(['Round 1 - Match 1', 'Round 1 - Match 2', 'Round 1 - Bye', 'Round 2 - Match 1', 'Round 10 - Match 1']);
+  });
+  it('older single-number labels still sort by their number', () => {
+    expect(['Round 12', 'Round 3', 'Round 7'].map((round) => ({ round })).sort(comparePlayOrder).map((f) => f.round))
+      .toEqual(['Round 3', 'Round 7', 'Round 12']);
+  });
+});

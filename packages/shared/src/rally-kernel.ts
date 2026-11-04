@@ -1550,6 +1550,56 @@ function awardedUnits(format: ScoringFormat, state: KernelState, played: Pair[])
   return out;
 }
 
+/** One unit of a told result: a set's games, the tie-break's points when one decided it. */
+export interface ResultUnit { score: Pair; tieBreak?: Pair; matchTieBreak?: boolean }
+
+/**
+ * A set-based result told the way tennis writes it - each set's games, "6-5 (7-5)" -
+ * rather than the points of every game. Null for formats without a set level.
+ */
+export function setResultUnits(format: ScoringFormat, state: KernelState): ResultUnit[] | null {
+  const top = format.levels.length - 1;
+  const setLevel = format.levels.findIndex((l) => l.key === 'set');
+  if (!(setLevel > 0 && setLevel < top)) return null;
+  const out: ResultUnit[] = [];
+  let lastGame: FinishedUnit | null = null;
+  for (const u of state.finished) {
+    if (u.level === setLevel - 1) lastGame = u;
+    else if (u.level === setLevel) {
+      // A match tie-break played in place of a set is its own unit: "[10-8]".
+      if (u.key === 'tiebreak') out.push({ score: [...u.score] as Pair, matchTieBreak: true });
+      else out.push({ score: [...u.score] as Pair, ...(lastGame?.key === 'tiebreak' ? { tieBreak: [...lastGame.score] as Pair } : {}) });
+      lastGame = null;
+    }
+  }
+  const open = state.score[setLevel];
+  const w = state.winner === 'A' ? 0 : 1;
+  const awarded = state.ended && !!state.winner && (state.reason === 'retired' || state.reason === 'disqualified')
+    && format.endStates.retirementScore === 'freezeThenAwardRemaining';
+  if (awarded) {
+    // Retired under "award the rest": the open set finished for the winner, then any unplayed sets 6-0 - as the headline counts it.
+    const spec = format.levels[setLevel];
+    const s: Pair = [open[0], open[1]];
+    const level = s[1 - w] >= spec.target && !!spec.substitute;
+    s[w] = level ? s[1 - w] + 1 : Math.max(s[w], spec.target, s[1 - w] + spec.winBy);
+    if (open[0] || open[1] || out.length === 0) out.push({ score: s });
+    const needed = format.levels[top].target;
+    while (out.filter((u) => u.score[w] > u.score[1 - w]).length < needed) {
+      const blank: Pair = [0, 0]; blank[w] = spec.target; out.push({ score: blank });
+    }
+  } else if (state.ended && (open[0] || open[1])) {
+    // Ended mid-set (abandoned, or retired with the score as played): the set as it stood.
+    out.push({ score: [open[0], open[1]] });
+  }
+  return out;
+}
+
+/** "6-5 (7-5)", "[10-8]" or "21-15": one unit, in the order given (flip it first for winner-first). */
+export function formatResultUnit(u: ResultUnit, dash = '-'): string {
+  if (u.matchTieBreak) return `[${u.score[0]}${dash}${u.score[1]}]`;
+  return `${u.score[0]}${dash}${u.score[1]}${u.tieBreak ? ` (${u.tieBreak[0]}${dash}${u.tieBreak[1]})` : ''}`;
+}
+
 export function resultEnvelope(format: ScoringFormat, state: KernelState): ResultEnvelope {
   const inner = state.finished.filter((u) => u.level === 0);
   const awarded = awardedUnits(format, state, inner.map((u) => u.score));

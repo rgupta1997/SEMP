@@ -10,25 +10,63 @@ export const isPoolSport = (name?: string | null): boolean => canonicalTeamSport
 /** Object balls a side has in 8-ball (seven plus the 8) - the most a frame can be won by. */
 export const POOL_MAX_BALLS = 8;
 
+/** Who breaks after frame 1: the frames take turns, or the last frame's winner breaks. */
+export type PoolBreakRule = 'alternate' | 'winner';
+export const POOL_BREAK_RULES: Record<PoolBreakRule, string> = { alternate: 'Alternate break', winner: 'Winner breaks' };
+export const DEFAULT_POOL_BREAK_RULE: PoolBreakRule = 'alternate';
+
+/** How a frame ended. The 8-ball fouls are the loser's; recorded for the scoresheet only. */
+export type PoolFrameEnd = 'potted8' | 'break8' | 'early8' | 'foul8' | 'conceded';
+export const POOL_FRAME_ENDS: Record<PoolFrameEnd, { label: string; short: string; loserFault: boolean }> = {
+  potted8: { label: 'Potted the 8', short: 'potted the 8', loserFault: false },
+  break8: { label: '8 on the break', short: '8 on the break', loserFault: false },
+  early8: { label: 'potted the 8 early', short: 'early 8', loserFault: true },
+  foul8: { label: 'fouled on the 8 (incl. scratch)', short: 'foul on the 8', loserFault: true },
+  conceded: { label: 'conceded', short: 'conceded', loserFault: true },
+};
+const isFrameEnd = (v: unknown): v is PoolFrameEnd => typeof v === 'string' && v in POOL_FRAME_ENDS;
+const isSide = (v: unknown): v is Side => v === 'A' || v === 'B';
+
 export interface PoolFrame {
   winner: Side;
   /** The loser's balls still on the table when the frame ended; null when not recorded. */
   ballsLeft?: number | null;
+  /** Who broke this frame, when recorded. */
+  breaker?: Side;
+  end?: PoolFrameEnd;
 }
 
-export interface PoolRubberState { frames: PoolFrame[] }
+export interface PoolRubberState { frames: PoolFrame[]; breakRule?: PoolBreakRule }
 
 /** A stored pool rubber, tolerating anything malformed; null when there is none. */
 export function readPoolState(raw: unknown): PoolRubberState | null {
   const r = raw as { frames?: unknown } | null;
   if (!r || typeof r !== 'object' || !Array.isArray(r.frames)) return null;
   const frames = r.frames
-    .filter((f): f is PoolFrame => !!f && typeof f === 'object' && ((f as PoolFrame).winner === 'A' || (f as PoolFrame).winner === 'B'))
+    .filter((f): f is PoolFrame => !!f && typeof f === 'object' && isSide((f as PoolFrame).winner))
     .map((f) => {
       const b = f.ballsLeft;
-      return { winner: f.winner, ...(typeof b === 'number' && b >= 0 ? { ballsLeft: Math.min(POOL_MAX_BALLS, Math.round(b)) } : {}) };
+      return {
+        winner: f.winner,
+        ...(typeof b === 'number' && b >= 0 ? { ballsLeft: Math.min(POOL_MAX_BALLS, Math.round(b)) } : {}),
+        ...(isSide(f.breaker) ? { breaker: f.breaker } : {}),
+        ...(isFrameEnd(f.end) ? { end: f.end } : {}),
+      };
     });
-  return { frames };
+  const rule = (raw as { breakRule?: unknown }).breakRule;
+  return { frames, ...(rule === 'alternate' || rule === 'winner' ? { breakRule: rule } : {}) };
+}
+
+/** Who breaks the next frame; null until a frame's breaker is known (frame 1 is decided by the lag). */
+export function nextBreaker(state: PoolRubberState): Side | null {
+  const { frames } = state;
+  if ((state.breakRule ?? DEFAULT_POOL_BREAK_RULE) === 'winner') return frames.at(-1)?.winner ?? null;
+  // Alternate: count on from the last frame whose breaker was recorded.
+  for (let j = frames.length - 1; j >= 0; j--) {
+    const b = frames[j].breaker;
+    if (b) return (frames.length - j) % 2 === 1 ? (b === 'A' ? 'B' : 'A') : b;
+  }
+  return null;
 }
 
 export interface PoolRubberResult {

@@ -3,7 +3,7 @@ import { Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
-import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Select, Spinner, StatusBadge, Textarea, BackButton, cn, confirmDialog, toast } from '../../components/ui';
+import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge, Textarea, BackButton, cn, confirmDialog, toast } from '../../components/ui';
 import { awayTeam, championshipIdOf, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, orgTitle, sportIdOf, sportName as sportNameOf, teamLabel, teamShort, venueLabel } from './fixtureHelpers';
 import {
   cricketScore, headline, hydrate, oversStr, oversToBalls, reduce, sportDef, subLine,
@@ -15,7 +15,7 @@ import {
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, hasResultIn, moveUnplacedTo, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
+import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, setResultUnits, formatResultUnit, type ResultUnit, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
 import { carromHeadline, carromMatchOf, carromRulesOf, drawSettlement, isCarromSport } from '@semp/shared';
 import { CarromResult, carromDecider, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
 import { PoolResult, hydratePool } from '../../features/scoring/PoolResult';
@@ -2346,11 +2346,14 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
         </CardBody></Card>
       )}
 
+      {/* The shared Modal sits on the page body: an overlay inside the console moved with its scroll. */}
       {confirming && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4" onClick={() => setConfirming(false)}>
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-2xl dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Confirm final result</h3>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">This completes the match and updates standings.</p>
+        <Modal title="Confirm final result" onClose={() => setConfirming(false)}
+          footer={<div className="flex gap-2">
+            <Button variant="outline" className="flex-1" disabled={submitting} onClick={() => setConfirming(false)}>Cancel</Button>
+            <Button className="flex-1" disabled={submitting} onClick={signOff}>{submitting ? 'Signing off…' : 'Sign off'}</Button>
+          </div>}>
+            <p className="text-sm text-slate-500 dark:text-slate-400">This completes the match and updates standings.</p>
             <div className="my-4 space-y-1">
               <div className="flex items-center justify-between gap-4 text-base font-semibold text-slate-800 dark:text-slate-200">
                 <span className="min-w-0 truncate text-left">{homeName}</span>
@@ -2361,12 +2364,7 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
                 <span className="tabular-nums text-2xl font-black text-slate-900 dark:text-slate-100">{h.b}</span>
               </div>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" disabled={submitting} onClick={() => setConfirming(false)}>Cancel</Button>
-              <Button className="flex-1" disabled={submitting} onClick={signOff}>{submitting ? 'Signing off…' : 'Sign off'}</Button>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </>
   );
@@ -2614,12 +2612,16 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
   const rdef = rubberDef(spec, state.activeRubber);
 
   // The result of a rubber scored on the kernel, or null when it was not.
-  const rubberEnvelope = (r: RubberInstance) => {
+  const rubberFold = (r: RubberInstance) => {
     const frozen = r.format ?? baseFormat?.format;
     if (!racquet || !frozen || !r.rally?.length) return null;
     // Singles rubbers serve as singles: fold under the lineup's rules, as the deck scored it.
     const fmt = formatForPairing(frozen, r.lineup);
-    return resultEnvelope(fmt, foldRally(fmt, r.rally, r.firstServer ?? 'A').state);
+    return { fmt, state: foldRally(fmt, r.rally, r.firstServer ?? 'A').state };
+  };
+  const rubberEnvelope = (r: RubberInstance) => {
+    const f = rubberFold(r);
+    return f ? resultEnvelope(f.fmt, f.state) : null;
   };
   // Games won in a rubber scored on the kernel - "2–1".
   const rubberGames = (r: RubberInstance): string | null => {
@@ -2652,7 +2654,13 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
     }
     const env = rubberEnvelope(r);
     if (env) {
-      const games = env.unitScores.map(pair).join(' · ') + (env.reason === 'retired' ? ' · retired' : '');
+      // Tennis is told in sets ("6–5 (7–5)"); everything else game by game.
+      const f = rubberFold(r)!;
+      const flip = (u: ResultUnit): ResultUnit => (r.winner === 'B'
+        ? { ...u, score: [u.score[1], u.score[0]], ...(u.tieBreak ? { tieBreak: [u.tieBreak[1], u.tieBreak[0]] } : {}) } : u);
+      const sets = setResultUnits(f.fmt, f.state);
+      const games = (sets ? sets.map((u) => formatResultUnit(flip(u), '–')).join(' · ') : env.unitScores.map(pair).join(' · '))
+        + (env.reason === 'retired' ? ' · retired' : '');
       return { result: `${won} ${pair(env.headline)}`.trim(), games: games || null };
     }
     return { result: won || rubberScore(r, i), games: null };
@@ -2887,7 +2895,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                         <PoolResult
                           key={`pool-${active.key}`}
                           homeName={homeName}
-                          awayName={awayName}
+                          awayName={awayName} homeShort={homeCode} awayShort={awayCode}
                           bestOf={poolFramesOf(state.activeRubber)!}
                           initial={hydratePool(active.pool)}
                           busy={submitting}
@@ -3850,10 +3858,12 @@ function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeT
     <>
       <Button variant="outline" className={className ?? 'w-full justify-start'} onClick={() => setOpen(true)}>Walkover</Button>
       {open && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4" onClick={() => setOpen(false)}>
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Record walkover</h3>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">A walkover awards the match to one side. Pick the winner and add a reason.</p>
+        <Modal title="Record walkover" onClose={() => setOpen(false)}
+          footer={<div className="flex gap-2">
+            <Button variant="outline" className="flex-1" disabled={mut.isPending} onClick={() => setOpen(false)}>Cancel</Button>
+            <Button className="flex-1" disabled={mut.isPending} onClick={submit}>{mut.isPending ? 'Saving…' : 'Record walkover'}</Button>
+          </div>}>
+            <p className="text-sm text-slate-500 dark:text-slate-400">A walkover awards the match to one side. Pick the winner and add a reason.</p>
             <div className="mt-4">
               <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Winner</span>
               <Select value={winner} onChange={(e) => setWinner(e.target.value as 'home' | 'away')}>
@@ -3874,14 +3884,9 @@ function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeT
             </div>
             <div className="mt-3">
               <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Reason</span>
-              <Textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. opponent didn't show / withdrew" />
+              <Textarea rows={2} className="w-full" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. opponent didn't show / withdrew" />
             </div>
-            <div className="mt-4 flex gap-2">
-              <Button variant="outline" className="flex-1" disabled={mut.isPending} onClick={() => setOpen(false)}>Cancel</Button>
-              <Button className="flex-1" disabled={mut.isPending} onClick={submit}>{mut.isPending ? 'Saving…' : 'Record walkover'}</Button>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </>
   );
