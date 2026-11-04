@@ -22,21 +22,25 @@ export function generateRoundRobin(
 
   const fixtures: GeneratedFixture[] = [];
   let order = arr.slice();
-  // Numbers every emitted fixture individually - NOT the round it plays in. A
-  // round-robin round can have several matches happening simultaneously (e.g. 4
-  // teams -> 2 matches per round), so numbering by round would stamp two different
-  // matches with the same "Match N" label, which read as duplicated/confusing.
+  // Every fixture needs its own label: a round can hold several matches at once. A pool
+  // ("Pool A - Match") numbers them straight through; a league names the round and the
+  // match within it ("Round 4 - Match 2", "Round 4 - Bye") - a bare running number read
+  // as 15 rounds for a 5-team league that plays 5.
+  const byRound = labelPrefix === 'Round';
   let matchNo = 0;
+  let roundNo = 0;
 
   const emitRound = (slots: (TeamRef | null)[], swap: boolean) => {
+    roundNo += 1;
+    let inRound = 0;
     for (let i = 0; i < half; i++) {
       let home = slots[i];
       let away = slots[n - 1 - i];
       if (swap) [home, away] = [away, home];
       if (home && away) {
-        matchNo += 1;
+        matchNo += 1; inRound += 1;
         fixtures.push({
-          round: `${labelPrefix} ${matchNo}`, poolNumber: null, bracketPosition: null,
+          round: byRound ? `${labelPrefix} ${roundNo} - Match ${inRound}` : `${labelPrefix} ${matchNo}`, poolNumber: null, bracketPosition: null,
           homeTeamId: home.teamId, awayTeamId: away.teamId, status: 'scheduled',
         });
       } else {
@@ -44,7 +48,7 @@ export function generateRoundRobin(
         if (real) {
           matchNo += 1;
           fixtures.push({
-            round: `${labelPrefix} ${matchNo}`, poolNumber: null, bracketPosition: null,
+            round: byRound ? `${labelPrefix} ${roundNo} - Bye` : `${labelPrefix} ${matchNo}`, poolNumber: null, bracketPosition: null,
             homeTeamId: real.teamId, awayTeamId: null, status: 'bye',
           });
         }

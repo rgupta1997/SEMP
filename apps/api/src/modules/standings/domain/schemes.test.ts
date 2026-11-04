@@ -381,3 +381,64 @@ describe('no-show with counted walkovers', () => {
     expect(c).toMatchObject({ played: 2, lost: 2, wo: 2, ga: 4 });
   });
 });
+
+// The table says what separated teams level on points, so identical-looking rows are explained.
+describe('what separated each pair in a group table', () => {
+  const ranking = { win: 2, draw: 1, loss: 0, tiebreakers: ['points', 'score_diff', 'head_to_head'] as const };
+  // TT Pool A shape: K wins all; C, L, U one win each. C and L level on points and net; C beat L.
+  const pool = [
+    fx('K', 'C', 3, 2), fx('K', 'L', 3, 2), fx('K', 'U', 4, 1),
+    fx('C', 'L', 3, 2), fx('L', 'U', 3, 2), fx('U', 'C', 3, 2),
+  ];
+
+  it('names the tie-breaker between each pair, head-to-head included', () => {
+    const g = rankGroup(pool, { ...ranking, tiebreakers: [...ranking.tiebreakers] });
+    expect(g.rows.map((r) => r.entity_id)).toEqual(['K', 'C', 'L', 'U']);
+    expect(g.decidedBy).toEqual(['points', 'head_to_head', 'score_diff']);
+    expect(g.ties).toEqual([]);
+  });
+
+  it('a pair still level is null, a hand-picked one is "resolution"', () => {
+    const level = [fx('A', 'B', 3, 2), fx('B', 'A', 3, 2)];
+    const r = { ...ranking, tiebreakers: ['points', 'score_diff'] as Array<'points' | 'score_diff'> };
+    expect(rankGroup(level, r).decidedBy).toEqual([null]);
+    expect(rankGroup(level, r, () => ['B', 'A']).decidedBy).toEqual(['resolution']);
+  });
+});
+
+// IIMK volleyball / throwball: matches won, then sets quotient, then points quotient.
+describe('volleyball quotients', () => {
+  const vb = { win: 2, draw: 1, loss: 0 };
+  // X 5-4 in sets (diff +1, quotient 1.25), Y 4-3 (diff +1, quotient 1.333): level on difference, not on quotient.
+  const sets = [
+    fx('X', 'P', 2, 1), fx('X', 'Q', 2, 1), fx('X', 'R', 1, 2),
+    fx('Y', 'P', 2, 0), fx('Y', 'Q', 2, 1), fx('Y', 'R', 0, 2),
+  ];
+  const order = (tbs: Parameters<typeof rankGroup>[1]['tiebreakers']) => rankGroup(sets, { ...vb, tiebreakers: tbs });
+
+  it('set difference leaves X and Y level; the sets quotient puts Y above X', () => {
+    expect(order(['points', 'score_diff']).ties.map((t) => [...t].sort())).toContainEqual(['X', 'Y']);
+    const g = order(['points', 'set_quotient']);
+    const ids = g.rows.map((r) => r.entity_id);
+    expect(ids.indexOf('Y')).toBeLessThan(ids.indexOf('X'));
+    expect(g.ties.flat()).not.toContain('X');
+  });
+
+  const rally = (f: SchemeFixture, h: number, a: number): SchemeFixture => ({ ...f, home_rally: h, away_rally: a });
+  it('two teams that lost no sets are level on MAX, and the points quotient splits them', () => {
+    const fixtures = [rally(fx('A', 'C', 2, 0), 50, 30), rally(fx('B', 'D', 2, 0), 50, 40)];
+    const g = rankGroup(fixtures, { ...vb, tiebreakers: ['points', 'set_quotient', 'point_quotient'] });
+    expect(g.rows.slice(0, 2).map((r) => r.entity_id)).toEqual(['A', 'B']);
+    expect(g.decidedBy[0]).toBe('point_quotient');
+  });
+
+  it('counts a final-score-only result as missing from the points quotient', () => {
+    const g = rankGroup([rally(fx('A', 'B', 2, 1), 70, 60), fx('A', 'C', 2, 0)], { ...vb, tiebreakers: ['points'] });
+    expect(byId(g.rows).A).toMatchObject({ rally_for: 70, rally_against: 60, rally_missing: 1 });
+  });
+
+  it('a walkover is not counted as missing rally points', () => {
+    const wo: SchemeFixture = { ...fx('A', 'B', 2, 0), status: 'walkover' };
+    expect(byId(rankGroup([wo], { ...vb, tiebreakers: ['points'] }).rows).A.rally_missing ?? 0).toBe(0);
+  });
+});

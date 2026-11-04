@@ -643,11 +643,11 @@ const NET_METRICS: StatMetric[] = [
 
 // Throwball: a point is a throw the other side fails to catch, or the other side's
 // fault. There is no blocking. Faults score for the opponent and stay on the player.
+// No "dropped catch" button: it is the same rally as the thrower's throw point.
 const THROW_EVENTS: StatEventSpec[] = [
   ev('ace', 'Ace', { aces: 1, points_scored: 1 }, { points: 1 }),
   ev('throw_point', 'Throw point', { throw_points: 1, points_scored: 1 }, { points: 1 }),
   ev('service_fault', 'Service fault', { service_faults: 1 }, { points: 1, forOpponent: true, tone: 'error' }),
-  ev('dropped_catch', 'Dropped catch', { dropped_catches: 1 }, { points: 1, forOpponent: true, tone: 'error' }),
   // Held over 3 seconds, a foot fault, touching the net, two players on one catch.
   ev('throw_fault', 'Throw fault', { throw_faults: 1 }, { points: 1, forOpponent: true, tone: 'error' }),
   ev('catch', 'Catch', { catches: 1 }, { tone: 'good' }),
@@ -661,7 +661,8 @@ const THROW_METRICS: StatMetric[] = [
   count('throw_points', 'Throw points', 'TP', { fromEvents: ['throw_point'], headline: true }),
   count('catches', 'Catches', 'C', { fromEvents: ['catch'] }),
   count('service_faults', 'Service faults', 'SF', { fromEvents: ['service_fault'], higherIsBetter: false }),
-  count('dropped_catches', 'Dropped catches', 'DC', { fromEvents: ['dropped_catch'], higherIsBetter: false }),
+  // Kept hidden so matches scored before the button went still read back.
+  count('dropped_catches', 'Dropped catches', 'DC', { fromEvents: ['dropped_catch'], higherIsBetter: false, hidden: true }),
   count('throw_faults', 'Throw faults', 'TF', { fromEvents: ['throw_fault'], higherIsBetter: false }),
 ];
 

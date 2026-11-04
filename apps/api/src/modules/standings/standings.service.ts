@@ -1,11 +1,11 @@
 import {
-  KNOCKOUT_ROUND, DEFAULT_RANKING_RULE, DEFAULT_STANDINGS_RULE, EVENT_TITLE_GROUP, TITLE_GROUP_LABEL, chessStandingsRule, formatPoints, groupRankingFor, inheritRanking,
+  KNOCKOUT_ROUND, comparePlayOrder, DEFAULT_RANKING_RULE, DEFAULT_STANDINGS_RULE, EVENT_TITLE_GROUP, TITLE_GROUP_LABEL, chessStandingsRule, formatPoints, groupRankingFor, inheritRanking,
   isCalledDraw, isChessSport, isNoPointsDraw, isNoResult, walkoverCountsOf, isRankingFormatName, isRankingSport, readTieResolutions, SPORT_TITLES_SCOPE, eventTitleIn, groupsForTitle, sportTitlesSchema, stageConfigSchema, standingsRuleSchema, titlePlacingFor,
   type SportTitlesConfig, type StandingsRule,
   type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker,
 } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
-import { contingentKey, isKhoKhoFormat, khoMatchAdt, parseStoredFormat, poolTieTotalsOf, readRallyLog, type ContingentRef } from '@semp/shared';
+import { contingentKey, isKhoKhoFormat, khoMatchAdt, parseStoredFormat, poolTieTotalsOf, rallyPointsOf, readRallyLog, type ContingentRef } from '@semp/shared';
 import { assignStageSequence, inPlacingStage, placingStageSequences } from '../fixtures/domain/stage-tree.js';
 import { SCORED_STATUSES, accumulate, drawContext, levelOn, rankBy, runScheme, shareRanks, type EntityTally, type SchemeContext, type SchemeFixture } from './domain/schemes.js';
 import { convertEventTotals, type EventTotal } from './domain/event-conversion.js';
@@ -150,7 +150,14 @@ export function toSchemeFixture(f: DrawFixtureRow, homeKey: string | null, awayK
     pool_number: f.pool_number, stage_sequence: f.stage_sequence,
     ...poolTieFields(f.live_state),
     ...khoAdtFields(f.live_state),
+    ...rallyFields(f.live_state),
   };
+}
+
+/** Set sports: each side's rally points, for the points-quotient tie-breaker. */
+export function rallyFields(liveState: unknown): Pick<SchemeFixture, 'home_rally' | 'away_rally'> {
+  const p = rallyPointsOf(liveState);
+  return p ? { home_rally: p[0], away_rally: p[1] } : {};
 }
 
 /** Kho-kho: each side's ADT inputs from a match's turn log, for the ADT tie-breaker. */
@@ -615,7 +622,7 @@ export async function readStandingsBreakdown(
 
     // This contingent's own matches in the draw, oriented to it (its score first).
     const matches: BreakdownMatch[] = [];
-    for (const f of d.fixtures) {
+    for (const f of [...d.fixtures].sort(comparePlayOrder)) {
       if (!SCORED_STATUSES.includes(f.status)) continue;
       const isHome = sideKey(f.teams_fixtures_home_team_idToteams) === entityId;
       const isAway = sideKey(f.teams_fixtures_away_team_idToteams) === entityId;

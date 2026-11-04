@@ -1,11 +1,11 @@
 import {
-  addAdt, adtOf, contingentKey, emptyAdt, findTieResolution, isKhoKhoFormat, isKnockoutRound, khoMatchAdt, parseStoredFormat,
+  addAdt, adtOf, contingentKey, emptyAdt, findTieResolution, formatPoints, isKhoKhoFormat, isKnockoutRound, isPoolSport, quotient, khoMatchAdt, parseStoredFormat,
   readRallyLog, readTieResolutions, tiebreakerLabel, type AdtTally,
   type GroupRanking, type StandingsScheme, type TieResolution,
 } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
 import { NotFoundError } from '../../shared/errors.js';
-import { rankGroup, resolverFor, tableAnalysis } from './domain/schemes.js';
+import { rankGroup, resolverFor, tableAnalysis, type SchemeFixture } from './domain/schemes.js';
 import { DRAW_FIXTURE_FIELDS, loadRuleIndex, ruleFromIndex, schemeInput, toSchemeFixture } from './standings.service.js';
 
 // The group / league tables of one draw, ranked exactly as advancement and the tally
@@ -18,8 +18,24 @@ export interface TableRow {
   adt?: number | null;
   /** Some turn's clock was not run, so its full length was used. */
   adt_estimated?: boolean;
+  /** Pool: frames won and net ball difference, the tie-breakers after points. */
+  frames_won?: number;
+  ball_diff?: number;
+  /** Set sports ranked by quotients: won / lost to 3 decimals, 'max' when nothing was lost. */
+  set_quotient?: Quotient;
+  point_quotient?: Quotient;
+  /** Results entered as a final score only, so missing from the points quotient. */
+  point_quotient_missing?: number;
 }
-export interface PoolTable { pool: number | null; label: string; complete: boolean; rows: TableRow[]; ties: string[][] }
+export type Quotient = number | 'max' | null;
+export interface PoolTable {
+  pool: number | null; label: string; complete: boolean; rows: TableRow[]; ties: string[][];
+  /** The ties that hold something up (a slot waiting on them, or placings read from the table). */
+  open_ties: string[][];
+  /** Teams level on points and what put one above the other: "IIMC above IIML: head-to-head (IIMC won 3-2)". */
+  separations: PoolSeparation[];
+}
+export interface PoolSeparation { above: string; below: string; by: string; detail: string | null }
 export interface DrawTables {
   draw_id: string;
   championship_id: string;
@@ -83,8 +99,32 @@ export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTa
   const resolutions = readTieResolutions(td.format_config);
 
   const tableAll = all.filter((f) => !isKnockoutRound(f.round));
+  // A pool tie matters only when a later slot is stuck on it (flagged by the stage resolver),
+  // the placings read pool positions, or there is no knockout to settle the order.
+  const blocked = td.fixtures
+    .map((f) => (f.live_state as { tie_blocked?: { pool?: number; rank?: number } } | null)?.tie_blocked)
+    .filter((b): b is { pool: number; rank: number } => typeof b?.pool === 'number' && typeof b?.rank === 'number');
+  const tablesDecide = tableAll.length === all.length || (rule.scheme === 'placement' && !!rule.table_placings);
+  const tieMatters = (pool: number | null, tie: string[], rows: TableRow[]) => {
+    if (tablesDecide) return true;
+    const lo = Math.min(...tie.map((id) => rows.find((r) => r.entity_id === id)?.rank ?? Infinity));
+    return blocked.some((b) => b.pool === pool && b.rank >= lo && b.rank < lo + tie.length);
+  };
   // Kho kho: each team's ADT inputs over a pool's finished matches, read off the turn logs.
   const kho = isKhoKhoFormat({ sport: sport ?? '' });
+  // Infinity does not survive JSON, so "nothing lost" travels as 'max'.
+  const asQuotient = (won: number, lost: number): Quotient => {
+    const q = quotient(won, lost);
+    return q == null ? null : Number.isFinite(q) ? Math.round(q * 1000) / 1000 : 'max';
+  };
+  const quotientCols = (tbs: readonly string[], r?: { gf?: number; ga?: number; rally_for?: number; rally_against?: number; rally_missing?: number }) => ({
+    ...(tbs.includes('set_quotient') ? { set_quotient: asQuotient(r?.gf ?? 0, r?.ga ?? 0) } : {}),
+    ...(tbs.includes('point_quotient') ? { point_quotient: asQuotient(r?.rally_for ?? 0, r?.rally_against ?? 0), point_quotient_missing: r?.rally_missing ?? 0 } : {}),
+  });
+  const fmtQ = (q: Quotient) => (q === 'max' ? 'MAX' : q == null ? '-' : q.toFixed(3));
+  // Pool ranks level teams on frames and balls, so the table shows them.
+  const frameCols = (r?: { frames?: number; balls_for?: number; balls_against?: number }) =>
+    isPoolSport(sport) ? { frames_won: r?.frames ?? 0, ball_diff: (r?.balls_for ?? 0) - (r?.balls_against ?? 0) } : {};
   const rawOf = new Map(all.map((f, i) => [f, td.fixtures[i]] as const));
   const adtFor = (poolAll: typeof all): Map<string, AdtTally> => {
     const sums = new Map<string, AdtTally>();
@@ -111,6 +151,8 @@ export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTa
         entity_id: r.entity_id, name: names[r.entity_id]?.name ?? 'Unknown', short_name: names[r.entity_id]?.short ?? null, rank: r.rank!,
         played: r.played, won: r.won, drawn: r.drawn, lost: r.lost, points: r.points, score_for: r.gf, score_against: r.ga,
         ...(adt ? { adt: adt.has(r.entity_id) ? adtOf(adt.get(r.entity_id)!) : null, adt_estimated: !!adt.get(r.entity_id)?.estimated } : {}),
+        ...frameCols(r),
+        ...quotientCols(ranking.tiebreakers, r),
       }));
       // Teams yet to finish a match still belong on the table.
       const seen = new Set(rows.map((r) => r.entity_id));
@@ -118,10 +160,25 @@ export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTa
         for (const id of [f.home_entity_id, f.away_entity_id]) {
           if (!id || seen.has(id)) continue;
           seen.add(id);
-          rows.push({ entity_id: id, name: names[id]?.name ?? 'Unknown', short_name: names[id]?.short ?? null, rank: rows.length + 1, played: 0, won: 0, drawn: 0, lost: 0, points: 0, score_for: 0, score_against: 0 });
+          rows.push({ entity_id: id, name: names[id]?.name ?? 'Unknown', short_name: names[id]?.short ?? null, rank: rows.length + 1, played: 0, won: 0, drawn: 0, lost: 0, points: 0, score_for: 0, score_against: 0, ...frameCols(), ...quotientCols(ranking.tiebreakers) });
         }
       }
-      return { pool, label: poolLabel(pool), complete, rows, ties: complete ? g.ties : [] };
+      const ties = complete ? g.ties : [];
+      // Only for a finished pool, and only where points were level: otherwise the table speaks for itself.
+      const poolFx = fixtures.filter((f) => !isKnockoutRound(f.round) && (f.stage_sequence ?? 1) === stage && (f.pool_number ?? null) === pool);
+      const short = (id: string) => names[id]?.short ?? names[id]?.name ?? 'Unknown';
+      // "IIMC 1.000 v IIMU 0.600": the two numbers that put one team above the other.
+      const quotientDetail = (by: 'set_quotient' | 'point_quotient', a: { entity_id: string; gf: number; ga: number; rally_for?: number; rally_against?: number }, b: typeof a) => {
+        const q = (r: typeof a) => fmtQ(by === 'set_quotient' ? asQuotient(r.gf, r.ga) : asQuotient(r.rally_for ?? 0, r.rally_against ?? 0));
+        return `${short(a.entity_id)} ${q(a)} v ${short(b.entity_id)} ${q(b)}`;
+      };
+      const separations: PoolSeparation[] = !complete ? [] : g.decidedBy.flatMap((by, i) => {
+        const [a, b] = [g.rows[i], g.rows[i + 1]];
+        if (!by || by === 'points' || by === 'resolution' || !a || !b || a.points !== b.points) return [];
+        return [{ above: a.entity_id, below: b.entity_id, by: tiebreakerLabel(by, sport, entryType), detail: by === 'head_to_head' ? directResult(poolFx, a.entity_id, b.entity_id, short)
+          : by === 'set_quotient' || by === 'point_quotient' ? quotientDetail(by, a, b) : null }];
+      });
+      return { pool, label: poolLabel(pool), complete, rows, ties, open_ties: ties.filter((t) => tieMatters(pool, t, rows)), separations };
     });
     return { stage, ranking: { ...ranking, labels: ranking.tiebreakers.map((t) => tiebreakerLabel(t, sport, entryType)) }, pools };
   });
@@ -145,7 +202,7 @@ export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTa
           entity_id: id, name: names[id]?.name ?? 'Unknown', short_name: names[id]?.short ?? null,
           pool: poolLabel(analysis!.poolOf.get(id) ?? null), place: c.places[i],
           played: r?.played ?? 0, won: r?.won ?? 0, drawn: r?.drawn ?? 0, lost: r?.lost ?? 0,
-          points: r?.points ?? 0, score_for: r?.gf ?? 0, score_against: r?.ga ?? 0,
+          points: r?.points ?? 0, score_for: r?.gf ?? 0, score_against: r?.ga ?? 0, ...frameCols(r),
         };
       }),
       decided_by: c.decidedBy.map((d) => (d === 'resolution' ? 'Hand-picked order' : d ? tiebreakerLabel(d, sport, entryType) : null)),
@@ -153,6 +210,18 @@ export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTa
     resolutions,
     names: Object.fromEntries(Object.entries(names).map(([k, v]) => [k, v.name])),
   };
+}
+
+/** The one finished match between two teams, winner first ("IIMC won 3-2"); null when there is not exactly one. */
+function directResult(fixtures: SchemeFixture[], a: string, b: string, short: (id: string) => string): string | null {
+  const games = fixtures.filter((f) => SETTLED.has(f.status) && f.status !== 'bye' && f.home_score != null && f.away_score != null
+    && ((f.home_entity_id === a && f.away_entity_id === b) || (f.home_entity_id === b && f.away_entity_id === a)));
+  if (games.length !== 1) return null;
+  const f = games[0];
+  const [aScore, bScore] = f.home_entity_id === a ? [f.home_score!, f.away_score!] : [f.away_score!, f.home_score!];
+  if (aScore === bScore) return null;
+  const [w, hi, lo] = aScore > bScore ? [a, aScore, bScore] : [b, bScore, aScore];
+  return `${short(w)} won ${formatPoints(hi)}-${formatPoints(lo)}`;
 }
 
 /** Is this exact set of teams tied right now (a pool tie or a placing tie)? */

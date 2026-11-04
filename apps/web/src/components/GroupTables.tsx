@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp } from 'lucide-react';
 import { formatPoints, type GroupRanking, type TieResolution } from '@semp/shared';
 import { api } from '../lib/api';
 import { useApi, useApiMutation } from '../lib/hooks';
-import { Badge, Button, Modal, Spinner, Textarea, toast } from './ui';
+import { Badge, Button, Modal, Spinner, Textarea, cn, toast } from './ui';
 
 // Group / league tables of one draw, ranked exactly as advancement and the overall
 // table rank them. Teams the tie-breakers can't separate are ordered here by hand,
@@ -15,8 +15,23 @@ interface TableRow {
   /** Kho kho's average difference time, seconds. */
   adt?: number | null;
   adt_estimated?: boolean;
+  frames_won?: number;
+  ball_diff?: number;
+  /** Volleyball / throwball: won / lost, 'max' when nothing was lost, null when nothing played. */
+  set_quotient?: Quotient;
+  point_quotient?: Quotient;
+  /** Results entered as a final score only, so left out of the points quotient. */
+  point_quotient_missing?: number;
 }
-interface PoolTable { pool: number | null; label: string; complete: boolean; rows: TableRow[]; ties: string[][] }
+type Quotient = number | 'max' | null;
+interface PoolTable {
+  pool: number | null; label: string; complete: boolean; rows: TableRow[]; ties: string[][];
+  /** Ties that hold something up. Absent from an older API: every tie counts. */
+  open_ties?: string[][];
+  /** Teams level on points and what put one above the other. Absent from an older API. */
+  separations?: Array<{ above: string; below: string; by: string; detail: string | null }>;
+}
+const openTiesOf = (p: PoolTable) => p.open_ties ?? p.ties;
 export interface DrawTables {
   sport: string | null;
   stages: Array<{ stage: number; ranking: GroupRanking & { labels: string[] }; pools: PoolTable[] }>;
@@ -39,11 +54,27 @@ export const tablesPath = (drawId: string) => `/tournament-disciplines/${drawId}
 export const TABLES_REFRESH_MS = 15_000;
 
 /** How many group ties on this draw are waiting for a hand-picked order. */
-// Only group ties can hold something up (who advances); a shared placing never waits.
+// Only a tie that decides who advances (or a placing read from the table) waits; a shared placing never does.
 export const openTieCount = (t?: DrawTables) =>
-  t?.stages.reduce((n, s) => n + s.pools.reduce((m, p) => m + p.ties.length, 0), 0) ?? 0;
+  t?.stages.reduce((n, s) => n + s.pools.reduce((m, p) => m + openTiesOf(p).length, 0), 0) ?? 0;
 
 const ordinal = (n: number) => (n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`);
+
+/** "Point tally" with a yellow dot while a group tie waits for the organiser. Shares the tables' cache. */
+export function TallyTabLabel({ drawId, canManage }: { drawId: string; canManage: boolean }) {
+  const { data } = useApi<DrawTables>(canManage ? tablesPath(drawId) : null, true, { refetchInterval: TABLES_REFRESH_MS });
+  const open = canManage ? openTieCount(data) : 0;
+  return (
+    <span className="relative inline-flex items-center">
+      Point tally
+      {/* Pinned to the corner like a notification badge. */}
+      {open > 0 && (
+        <span className="absolute -right-2.5 -top-1.5 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-slate-100 dark:ring-slate-800" role="status"
+          aria-label={`${open} tie${open === 1 ? '' : 's'} to resolve`} title={`${open} tie${open === 1 ? '' : 's'} to resolve`} />
+      )}
+    </span>
+  );
+}
 
 interface TieTarget { scope: 'pool' | 'placing'; stage: number; pool: number | null; entities: string[]; title: string }
 
@@ -88,7 +119,7 @@ function ResolveModal({ drawId, target, names, onClose }: { drawId: string; targ
       </ol>
       <label className="block">
         <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Reason</span>
-        <Textarea rows={2} value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Tie-breaker match, coin toss, fair play points" />
+        <Textarea rows={2} className="w-full" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Tie-breaker match, coin toss, fair play points" />
       </label>
     </Modal>
   );
@@ -98,11 +129,15 @@ function ResolveModal({ drawId, target, names, onClose }: { drawId: string; targ
 // the place each got, and which tie-breaker (or hand-picked order) settled each pair.
 function CrossGroupView({ c, multiStage }: { c: CrossGroup; multiStage: boolean }) {
   const placed = c.rows.map((r) => r.place).filter((p): p is number => p != null);
+  // The places at stake, not the places given: two teams sharing 3rd are still playing for 3rd and 4th.
+  const from = placed.length ? Math.min(...placed) : null;
+  const to = from != null ? from + placed.length - 1 : null;
+  const span = from == null ? '' : from === to ? `${ordinal(from)} place`
+    : to === from + 1 ? `${ordinal(from)} and ${ordinal(to!)} place` : `${ordinal(from)} to ${ordinal(to!)} place`;
   const title = c.kind === 'semi_losers'
     ? 'Semi-final losers, ranked by group record'
-    : placed.length
-      ? `Ranking across groups: ${placed.length > 1 ? `places ${ordinal(Math.min(...placed))}-${ordinal(Math.max(...placed))}` : `${ordinal(placed[0])} place`}`
-      : 'Ranking across groups';
+    : span ? `Ranking across groups: ${span}` : 'Ranking across groups';
+  const nameOf = (r: CrossGroup['rows'][number]) => <span className="font-medium text-slate-700 dark:text-slate-200">{r.short_name || r.name}</span>;
   return (
     <div className="min-w-0 rounded-xl border border-slate-200 dark:border-slate-800">
       <div className="border-b border-slate-100 px-3 py-2 text-sm font-semibold text-slate-800 dark:border-slate-800 dark:text-slate-100">
@@ -115,6 +150,7 @@ function CrossGroupView({ c, multiStage }: { c: CrossGroup; multiStage: boolean 
               <th className="px-3 py-1.5 text-left">Team</th>
               <th className="px-2 py-1.5 text-left">Group</th>
               {['P', 'W', 'D', 'L', 'Diff', 'For', 'Pts'].map((h) => <th key={h} className="px-2 py-1.5 text-right">{h}</th>)}
+              {c.rows.some((r) => r.frames_won !== undefined) && <FrameHeads />}
               <th className="px-3 py-1.5 text-right">Place</th>
             </tr>
           </thead>
@@ -130,6 +166,7 @@ function CrossGroupView({ c, multiStage }: { c: CrossGroup; multiStage: boolean 
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_for - r.score_against)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_for)}</td>
                 <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{formatPoints(r.points)}</td>
+                {c.rows.some((x) => x.frames_won !== undefined) && <FrameCells r={r} />}
                 <td className="px-3 py-1.5 text-right">{r.place != null ? <Badge tone="brand">{ordinal(r.place)}</Badge> : <span className="text-slate-400">-</span>}</td>
               </tr>
             ))}
@@ -138,12 +175,14 @@ function CrossGroupView({ c, multiStage }: { c: CrossGroup; multiStage: boolean 
       </div>
       <ul className="space-y-0.5 border-t border-slate-100 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
         {c.decided_by.map((d, i) => (
+          // Level pairs are not "above" each other: say they share, and which place.
           <li key={i}>
-            <span className="font-medium text-slate-700 dark:text-slate-200">{c.rows[i].short_name || c.rows[i].name}</span>
-            {' above '}
-            <span className="font-medium text-slate-700 dark:text-slate-200">{c.rows[i + 1].short_name || c.rows[i + 1].name}</span>
-            {': '}
-            {d ? <>decided by <span className="font-semibold">{d.toLowerCase()}</span></> : <span className="text-slate-600 dark:text-slate-300">level, so they share the place</span>}
+            {d ? (
+              <>{nameOf(c.rows[i])} above {nameOf(c.rows[i + 1])}: decided by <span className="font-semibold">{d.toLowerCase()}</span></>
+            ) : (
+              <>{nameOf(c.rows[i])} and {nameOf(c.rows[i + 1])} are level on every tie-breaker, so they share{' '}
+                <span className="font-semibold text-slate-700 dark:text-slate-200">{c.rows[i].place != null ? `${ordinal(c.rows[i].place!)} place` : 'the place'}</span>.</>
+            )}
           </li>
         ))}
       </ul>
@@ -155,9 +194,13 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
   pool: PoolTable; ranking: DrawTables['stages'][number]['ranking']; canManage: boolean; names: Record<string, string>;
   onResolve: (entities: string[]) => void;
 }) {
-  const tiedIds = new Set(pool.ties.flat());
+  const tiedIds = new Set(openTiesOf(pool).flat());
   // Kho kho tables carry ADT (the server sends it only for kho kho).
   const showAdt = pool.rows.some((r) => r.adt !== undefined);
+  const showFrames = pool.rows.some((r) => r.frames_won !== undefined);
+  const showSetQ = pool.rows.some((r) => r.set_quotient !== undefined);
+  const showPointQ = pool.rows.some((r) => r.point_quotient !== undefined);
+  const partialPointQ = pool.rows.filter((r) => (r.point_quotient_missing ?? 0) > 0);
   // Teams level on every tie-breaker share a position (2, 2, 4) until an order is set.
   const shownRank = (r: PoolTable['rows'][number]) => {
     const tie = pool.ties.find((t) => t.includes(r.entity_id));
@@ -176,6 +219,9 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
               <th className="px-3 py-1.5 text-left">#</th>
               <th className="px-2 py-1.5 text-left">Team</th>
               {['P', 'W', 'D', 'L', 'For', 'Ag', 'Diff', 'Pts'].map((h) => <th key={h} className="px-2 py-1.5 text-right">{h}</th>)}
+              {showFrames && <FrameHeads />}
+              {showSetQ && <th className="whitespace-nowrap px-2 py-1.5 text-right normal-case" title="Sets quotient: sets won divided by sets lost">Set Q</th>}
+              {showPointQ && <th className="whitespace-nowrap px-2 py-1.5 text-right normal-case" title="Points quotient: rally points won divided by rally points lost">Pt Q</th>}
               {showAdt && (
                 <th className="px-2 py-1.5 text-right normal-case" title="Average difference time, seconds: time defended per player out, minus time chased per opponent out. Group matches, regulation turns only.">ADT</th>
               )}
@@ -194,6 +240,9 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_against)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_for - r.score_against)}</td>
                 <td className="px-2 py-1.5 text-right font-semibold tabular-nums text-slate-900 dark:text-white">{formatPoints(r.points)}</td>
+                {showFrames && <FrameCells r={r} />}
+                {showSetQ && <td className="px-2 py-1.5 text-right tabular-nums">{fmtQuotient(r.set_quotient)}</td>}
+                {showPointQ && <td className="px-2 py-1.5 text-right tabular-nums">{fmtQuotient(r.point_quotient)}{(r.point_quotient_missing ?? 0) > 0 ? '*' : ''}</td>}
                 {showAdt && (
                   <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums"
                     title={r.adt_estimated ? 'A turn clock was not run: its full length was used.' : undefined}>
@@ -205,15 +254,44 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
           </tbody>
         </table>
       </div>
+      {/* Level on points but not tied: say what decided it, or identical rows read as a random order. */}
+      {!!pool.separations?.length && (
+        <ul className="space-y-0.5 border-t border-slate-100 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+          {pool.separations.map((s) => {
+            const label = (id: string) => { const r = pool.rows.find((x) => x.entity_id === id); return r?.short_name || r?.name || id; };
+            return (
+              <li key={s.above + s.below}>
+                <span className="font-medium text-slate-700 dark:text-slate-200">{label(s.above)}</span> above{' '}
+                <span className="font-medium text-slate-700 dark:text-slate-200">{label(s.below)}</span>: decided by{' '}
+                <span className="font-semibold">{s.by.toLowerCase()}</span>{s.detail ? ` (${s.detail})` : ''}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {showPointQ && partialPointQ.length > 0 && (
+        <p className="border-t border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+          * Points quotient is incomplete for {partialPointQ.map((r) => r.short_name || r.name).join(', ')}: {partialPointQ.length === 1 ? 'a match was' : 'matches were'} entered as a final score only, with no rally points.
+        </p>
+      )}
       {showAdt && pool.rows.some((r) => r.adt_estimated) && (
         <p className="border-t border-slate-100 px-3 py-1.5 text-[11px] text-slate-400 dark:border-slate-800">* A turn's clock was not run, so its full length was used.</p>
       )}
-      {pool.ties.map((t) => (
-        <div key={t.join()} className="flex flex-wrap items-center justify-between gap-2 border-t border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-          <span>Tied: {t.map((id) => names[id] ?? id).join(', ')}. Level on {ranking.labels.join(', ').toLowerCase()}.</span>
-          {canManage && <Button size="sm" variant="outline" onClick={() => onResolve(t)}>Resolve</Button>}
-        </div>
-      ))}
+      {pool.ties.map((t) => {
+        // A tie nothing depends on is a grey note, not a warning; it can still be ordered.
+        const open = openTiesOf(pool).some((o) => o.join() === t.join());
+        return (
+          <div key={t.join()} className={cn('flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs',
+            open ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300'
+              : 'border-slate-100 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-400')}>
+            <span>
+              Tied: {t.map((id) => names[id] ?? id).join(', ')}. Level on {inSentence(ranking.labels.join(', '))}.
+              {!open && ' This does not change who goes through or anyone\'s points.'}
+            </span>
+            {canManage && <Button size="sm" variant="outline" onClick={() => onResolve(t)}>{open ? 'Resolve' : 'Set order'}</Button>}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -232,7 +310,7 @@ export function GroupTables({ drawId, canManage }: { drawId: string; canManage: 
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{multi ? `Stage ${s.stage} tables` : 'Tables'}</span>
             <span className="text-xs text-slate-400 dark:text-slate-500">
-              Win {s.ranking.win} · Draw {s.ranking.draw} · Loss {s.ranking.loss} · ranked by {s.ranking.labels.join(', ').toLowerCase()}
+              Win {s.ranking.win} · Draw {s.ranking.draw} · Loss {s.ranking.loss} · ranked by {inSentence(s.ranking.labels.join(', '))}
             </span>
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
@@ -284,4 +362,33 @@ export function GroupTables({ drawId, canManage }: { drawId: string; canManage: 
       {target && <ResolveModal drawId={drawId} target={target} names={data.names} onClose={() => setTarget(null)} />}
     </div>
   );
+}
+
+// Pool: frames won and net ball difference break level points, so the table shows them.
+function FrameHeads() {
+  return (
+    <>
+      <th className="px-2 py-1.5 text-right normal-case" title="Frames won across all rubbers">Frames</th>
+      <th className="whitespace-nowrap px-2 py-1.5 text-right normal-case" title="Net ball difference: balls won frames by, minus balls lost frames by">Ball diff</th>
+    </>
+  );
+}
+function FrameCells({ r }: { r: { frames_won?: number; ball_diff?: number } }) {
+  const d = r.ball_diff ?? 0;
+  return (
+    <>
+      <td className="px-2 py-1.5 text-right tabular-nums">{r.frames_won ?? 0}</td>
+      <td className="px-2 py-1.5 text-right tabular-nums">{d > 0 ? `+${d}` : d}</td>
+    </>
+  );
+}
+
+/** Tie-breaker names mid-sentence: lower case, but an acronym such as ADT stays as it is. */
+function inSentence(text: string): string {
+  return text.split(' ').map((w) => (/^[A-Z]{2,}/.test(w) ? w : w.toLowerCase())).join(' ');
+}
+
+/** A quotient to 3 decimals, as FIVB prints it; MAX when nothing was lost. */
+function fmtQuotient(q: Quotient | undefined): string {
+  return q === 'max' ? 'MAX' : q == null ? '-' : q.toFixed(3);
 }

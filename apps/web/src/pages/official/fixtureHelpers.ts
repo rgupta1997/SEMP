@@ -14,6 +14,14 @@ export function isRankingEvent(f: any): boolean { return f?.round === 'Event' &&
 // Organization sub-heading for a team (short name preferred), '' when unaffiliated.
 export function orgLabel(t: any): string { return t?.organizations?.short_name || t?.organizations?.name || ''; }
 
+/** A side's code on a phone: the team's short name, else its organisation's (IIMK), else the name. */
+export function teamCode(t: any): string { return t?.short_name?.trim() || orgLabel(t) || teamLabel(t); }
+/** Both sides' codes; when two teams of one organisation would share a code, their own names instead. */
+export function sideCodes(home: any, away: any): [string, string] {
+  const [h, a] = [teamCode(home), teamCode(away)];
+  return h === a ? [teamShort(home), teamShort(away)] : [h, a];
+}
+
 /** Longest organisation name a scoreboard header shows in full; longer ones use the short name. */
 const ORG_TITLE_MAX = 28;
 // Organization as a headline: the full name where it fits, the short name otherwise.
@@ -26,6 +34,8 @@ export function orgTitle(t: any): string {
 export function sportName(f: any): string | null {
   return f.tournament_disciplines?.tournament_sports?.sports?.name ?? null;
 }
+/** Swimming's whole-sport console groups its swimmers by institute. */
+export function isSwimmingFixture(f: any): boolean { return /swim/i.test(sportName(f) ?? ''); }
 export function sportIdOf(f: any): string | null {
   const ts = f.tournament_disciplines?.tournament_sports;
   return ts?.sport_id ?? ts?.sports?.id ?? null;

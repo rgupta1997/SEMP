@@ -1,4 +1,4 @@
-import type { RallyLog } from './rally-kernel.js';
+import { withoutRescinded, type RallyLog } from './rally-kernel.js';
 import type { ScoringFormat, Side } from './scoring-rules.js';
 import { canonicalTeamSport } from './team-presets.js';
 
@@ -105,8 +105,9 @@ export interface Suspension {
 }
 
 /** Who is off right now: timed suspensions still running, and players sent off. */
-export function activeSuspensions(log: RallyLog, rules: CardRules, now: number): Suspension[] {
+export function activeSuspensions(all: RallyLog, rules: CardRules, now: number): Suspension[] {
   if (!rules.timed) return [];
+  const log = withoutRescinded(all);
   const played = matchTimeAt(log, log.length, now);
   const out = new Map<string, Suspension>();
   log.forEach((ev, i) => {
@@ -130,8 +131,9 @@ export function activeSuspensions(log: RallyLog, rules: CardRules, now: number):
 }
 
 /** The card a player should get under escalation: a second green is a yellow, a second yellow a red. */
-export function escalatedCard(log: RallyLog, rules: CardRules, playerId: string, card: string): string {
+export function escalatedCard(all: RallyLog, rules: CardRules, playerId: string, card: string): string {
   if (!rules.escalate || !rules.steps[card]) return card;
+  const log = withoutRescinded(all);
   const held = (k: string) => log.filter((ev) => ev.t === 'point' && ev.kind === k && ev.playerId === playerId).length;
   let next = card;
   // A repeat moves up one step, and keeps moving while that card is also a repeat.
@@ -142,7 +144,7 @@ export function escalatedCard(log: RallyLog, rules: CardRules, playerId: string,
 /** Sent off for the rest of the match: a red the format does not time (football, hockey). */
 export function sentOffPlayers(log: RallyLog, rules: CardRules | null): Set<string> {
   const out = new Set<string>();
-  for (const ev of log) {
+  for (const ev of withoutRescinded(log)) {
     if (ev.t !== 'point' || !ev.kind || !ev.playerId || !DISMISSAL_CARDS.includes(ev.kind)) continue;
     if (rules?.timed && rules.minutes[ev.kind]) continue;
     out.add(ev.playerId);

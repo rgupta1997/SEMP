@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { knockoutRoundLabel } from './enums.js';
+import { isKnockoutRound, knockoutRoundLabel } from './enums.js';
+import { knockoutDeciderFor } from './team-presets.js';
 import {
   RALLY_FAMILY, familyForSport, type FormatFamily, type MatchFormat,
 } from './match-format.js';
@@ -86,6 +87,8 @@ export interface LadderFixture {
    * column - `parseOverrides` decides what is usable.
    */
   format_overrides?: unknown;
+  /** Set on bracket matches: a knockout, so it cannot end level. */
+  bracket_position?: number | null;
 }
 
 export interface LadderDraw {
@@ -247,7 +250,21 @@ export function resolveFormat(
   formats: Map<string, LadderFormatRow> | LadderFormatRow[] = [],
 ): ResolvedFormat {
   const resolved = walkLadder(fixture, draw, formats, RALLY_FAMILY);
-  return withOverrides(resolved, fixture);
+  return withKnockoutDecider(withOverrides(resolved, fixture), fixture);
+}
+
+/**
+ * A knockout match must produce a winner. Where its format still allows a draw (a
+ * pool format reused for a final), the sport's standard decider is added; a format
+ * that already has its own decider keeps it. Applied last, so even a frozen format gets it.
+ */
+function withKnockoutDecider<T extends { format: ScoringFormat | null }>(resolved: T, fixture: LadderFixture): T {
+  const f = resolved.format;
+  const knockout = fixture.bracket_position != null || isKnockoutRound(fixture.round);
+  if (!f || !knockout || !f.endStates.drawsAllowed) return resolved;
+  const tieBreak = f.tieBreak ?? knockoutDeciderFor(f.sport);
+  if (!tieBreak) return resolved;
+  return { ...resolved, format: { ...f, endStates: { ...f.endStates, drawsAllowed: false }, tieBreak } };
 }
 
 /**
@@ -292,7 +309,7 @@ export function resolveMatchFormat(
   // Cricket has its own engine and its own shape; these overrides describe periods,
   // extra time and draws, none of which a cricket innings has.
   return resolved.family === 'rally'
-    ? withOverrides(resolved as typeof resolved & { format: ScoringFormat | null }, fixture)
+    ? withKnockoutDecider(withOverrides(resolved as typeof resolved & { format: ScoringFormat | null }, fixture), fixture)
     : resolved;
 }
 

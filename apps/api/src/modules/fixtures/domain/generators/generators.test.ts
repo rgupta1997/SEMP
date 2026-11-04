@@ -62,12 +62,29 @@ describe('round robin', () => {
     // 4 teams play 2 simultaneous matches per round (3 rounds total) - every match
     // must still get its own label, not share one with the match playing alongside it.
     expect(new Set(f.map((x) => x.round)).size).toBe(6);
-    expect(f.map((x) => x.round)).toEqual(['Round 1', 'Round 2', 'Round 3', 'Round 4', 'Round 5', 'Round 6']);
+    // Named by round and match within it: 3 rounds of 2, not "Round 1-6".
+    expect(f.map((x) => x.round)).toEqual([
+      'Round 1 - Match 1', 'Round 1 - Match 2', 'Round 2 - Match 1', 'Round 2 - Match 2', 'Round 3 - Match 1', 'Round 3 - Match 2',
+    ]);
   });
 
   it('3 teams (odd) -> 3 real matches', () => {
     const f = generateRoundRobin(teams(3));
     expect(f.filter((x) => x.status === 'scheduled')).toHaveLength(3);
+  });
+
+  it('5 teams -> 5 rounds of two matches and a bye, labelled by round', () => {
+    const f = generateRoundRobin(teams(5));
+    expect(f).toHaveLength(15);
+    expect(new Set(f.map((x) => x.round)).size).toBe(15);
+    const rounds = new Set(f.map((x) => x.round.split(' - ')[0]));
+    expect([...rounds]).toEqual(['Round 1', 'Round 2', 'Round 3', 'Round 4', 'Round 5']);
+    expect(f.filter((x) => x.status === 'bye').map((x) => x.round)).toEqual(['Round 1 - Bye', 'Round 2 - Bye', 'Round 3 - Bye', 'Round 4 - Bye', 'Round 5 - Bye']);
+  });
+
+  it('a pool keeps numbering its matches straight through', () => {
+    expect(generateRoundRobin(teams(4), {}, 'Pool A - Match').map((x) => x.round)).toEqual(
+      ['Pool A - Match 1', 'Pool A - Match 2', 'Pool A - Match 3', 'Pool A - Match 4', 'Pool A - Match 5', 'Pool A - Match 6']);
   });
 
   it('double round doubles the matches, continuing the match numbering into the second leg', () => {

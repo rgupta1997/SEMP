@@ -179,3 +179,26 @@ describe('football cards', () => {
     expect(describeKnobs(readKnobs(off))).toContain('second yellow not a red');
   });
 });
+
+// An official can take back one card; it stays in the log but counts for nothing.
+describe('rescinded cards', () => {
+  const fb = cardRulesFor({ sport: 'football', rulesSheet: {} })!;
+  const takeBack = (ev: RallyEvent): RallyEvent => ({ ...(ev as Extract<RallyEvent, { t: 'point' }>), rescinded: { reason: 'referee changed the call' } });
+
+  it('a rescinded second-yellow red no longer sends the player off', () => {
+    const log: RallyLog = [start(0), card('yellow', 2), card('red2y', 5)];
+    expect(sentOffPlayers(log, fb).has('p1')).toBe(true);
+    expect(sentOffPlayers([log[0], log[1], takeBack(log[2])], fb).has('p1')).toBe(false);
+  });
+
+  it('a rescinded yellow does not make the next yellow a second one', () => {
+    const log: RallyLog = [start(0), takeBack(card('yellow', 2))];
+    expect(escalatedCard(log, fb, 'p1', 'yellow')).toBe('yellow');
+  });
+
+  it('a rescinded hockey card ends its suspension', () => {
+    const hk = cardRulesFor(presetByKey('hockey5_4x8')!)!;
+    const log: RallyLog = [start(0), takeBack(card('yellow', 1))];
+    expect(activeSuspensions(log, hk, now(2))).toEqual([]);
+  });
+});

@@ -4,12 +4,12 @@ import { canonicalRacquetSport } from './racquet-presets.js';
 import { isChessSport } from './chess.js';
 import { carromRulesOf, isCarromSport } from './carrom.js';
 import { followOnCompulsoryAbove, followOnLead, isKhoKhoFormat } from './kho-kho.js';
-import { isKabaddiFormat } from './kabaddi.js';
+import { DEFAULT_DO_OR_DIE_AFTER, doOrDieAfterOf, isKabaddiFormat } from './kabaddi.js';
 import { canonicalTeamSport } from './team-presets.js';
 import { cardMinutesFor, cardSportOf, escalationOn, type CardSport } from './suspensions.js';
 import type {
   CapAction, CapTieRule, ChangeEndsRule, LevelSpec, OfficiatingMode,
-  ScoringFormat, ServeMovement, PointScoring,
+  ScoringFormat, ServeMovement, PointScoring, RetirementPolicy,
 } from './scoring-rules.js';
 
 // ============================================================================
@@ -92,6 +92,8 @@ export interface FormatKnobs {
   // Only ever consulted when draws are off: a level match that IS allowed to be a
   // draw is closed as one and never reaches any of this.
   extraTimeEnabled: boolean;
+  /** Still level after an extra period: play another, until someone leads (basketball overtime). */
+  extraTimeRepeat: boolean;
   /** How many periods of extra time. Both are played out; there is no golden goal. */
   extraTimePeriods: number;
   /** Minutes in EACH period of extra time, not the total. */
@@ -131,6 +133,9 @@ export interface FormatKnobs {
   cardEscalationEnabled: boolean;
   /** Kabaddi: still level after extra time, a golden raid each, then a toss. */
   goldenRaidEnabled: boolean;
+  /** Kabaddi: after enough empty raids in a row, the next raid must score or the raider is out. */
+  doOrDieEnabled: boolean;
+  doOrDieAfter: number;
 
   // ---- how it is run
   officiatingMode: OfficiatingMode;
@@ -178,6 +183,8 @@ export interface FormatKnobs {
   carromBoardsWonDecides: boolean;
   /** Carrom: tie-break boards totalled on their own. 1 = the next board decides (ICF). */
   carromTieBreakBoards: number;
+  /** What a retired or conceded game is recorded as (endStates.retirementScore). */
+  retirementScore: RetirementPolicy;
 }
 
 /** The only knobs a chess format has; everything else describes a game it does not play. */
@@ -186,7 +193,7 @@ const CHESS_KNOBS = new Set<keyof FormatKnobs>(['unitsToWin', 'timeBaseMinutes',
 const CARROM_KNOBS = new Set<keyof FormatKnobs>([
   'unitsToWin', 'target', 'carromMaxBoardsEnabled', 'carromMaxBoards', 'carromQueenPoints',
   'carromQueenCutoffEnabled', 'carromQueenCutoff', 'carromQueenMustBeCovered', 'carromBoardsWonDecides',
-  'carromTieBreakBoards', 'officiatingMode',
+  'carromTieBreakBoards', 'officiatingMode', 'retirementScore',
 ]);
 
 /** UI metadata for one knob. Rendering is generic; this is what makes it legible. */
@@ -211,6 +218,16 @@ export interface KnobSpec {
    */
   toDisplay?: (raw: number, k: FormatKnobs) => number;
   fromDisplay?: (display: number, k: FormatKnobs) => number;
+}
+
+/** A shoot-out, golden raid or universal point settles it after extra time. */
+function settledAfterExtraTime(k: FormatKnobs): boolean {
+  return !k.khoKho && (k.shootoutEnabled || k.universalPointEnabled || (k.kabaddi && k.goldenRaidEnabled));
+}
+
+/** Repeating extra time never runs out, so it is off whenever something has to follow it. */
+function repeatsExtraTime(k: FormatKnobs): boolean {
+  return k.extraTimeRepeat && !k.khoKho && !settledAfterExtraTime(k);
 }
 
 const MOVEMENTS: Array<{ value: ServeMovement; label: string }> = [
@@ -290,6 +307,14 @@ export const KNOB_SPECS: KnobSpec[] = [
   { key: 'carromTieBreakBoards', label: 'Tie-break boards', group: 'tieBreak', type: 'int', min: 1, max: 5,
     hint: '1 = the next board decides (ICF). 2 or more = play them all and the higher total over them wins.',
     applies: (k) => k.carrom && k.target > 1 && k.carromMaxBoardsEnabled },
+  { key: 'retirementScore', label: 'A retired or conceded game', group: 'ends', type: 'enum',
+    hint: 'The game goes to the opponent either way; this sets the score it is recorded at.',
+    options: [
+      { value: 'freezeThenAwardRemaining', label: 'Winner gets the target (16-5)' },
+      { value: 'targetToZero', label: 'Target to zero (16-0)' },
+      { value: 'freezeAsPlayed', label: 'Score as played (2-5)' },
+    ],
+    applies: (k) => k.carrom && k.target > 1 },
   { key: 'handicapEnabled', label: 'Handicap start', group: 'shape', type: 'bool',
     hint: 'One side begins every game on a head start.',
     applies: (k) => !k.periodShaped },
@@ -378,6 +403,12 @@ export const KNOB_SPECS: KnobSpec[] = [
   { key: 'timeoutsExtraTime', label: 'Timeouts in each extra-time period', group: 'ends', type: 'int', min: 0, max: 10,
     hint: 'For example, 1 per overtime.',
     applies: (k) => k.countsTimeouts && k.timeoutsEnabled && k.timeoutsPer === 'game' && k.periodShaped && k.extraTimeEnabled },
+  { key: 'doOrDieEnabled', label: 'Do-or-die raid', group: 'ends', type: 'bool',
+    hint: 'After enough empty raids in a row, the next raid must score or the raider is out. Off: empty raids carry no penalty.',
+    applies: (k) => k.kabaddi },
+  { key: 'doOrDieAfter', label: 'Empty raids before a do-or-die', group: 'ends', type: 'int', min: 1, max: 10,
+    hint: 'Standard kabaddi: 2 - the third raid is do-or-die.',
+    applies: (k) => k.kabaddi && k.doOrDieEnabled },
 
   // ---- clock
   { key: 'clockEnabled', label: 'Time cap', group: 'clock', type: 'bool',
@@ -422,9 +453,13 @@ export const KNOB_SPECS: KnobSpec[] = [
   { key: 'extraTimeEnabled', label: 'Play extra time', group: 'tieBreak', type: 'bool',
     hint: 'Extra periods when the scores are level at full time.',
     applies: (k) => k.periodShaped && !k.drawsAllowed && !k.khoKho },
+  { key: 'extraTimeRepeat', label: 'Repeat until someone leads', group: 'tieBreak', type: 'bool',
+    hint: 'Still level after an extra period: another one is played, as many times as needed (basketball overtime). Not offered with a shoot-out, golden raid or universal point - those settle it after extra time instead.',
+    applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled && !k.khoKho && !settledAfterExtraTime(k) },
+  // A repeating overtime decides after every period, so a period count means nothing.
   { key: 'extraTimePeriods', label: 'Periods of extra time', group: 'tieBreak', type: 'int', min: 1, max: 4,
     hint: 'Both are always played out - a side that goes ahead in the first still has to survive the second.',
-    applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled && !k.khoKho },
+    applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled && !repeatsExtraTime(k) && !k.khoKho },
   { key: 'extraTimeMinutes', label: 'Minutes per extra period', group: 'tieBreak', type: 'int', min: 1, max: 60,
     hint: 'Each period, not the total. Two periods of 5 adds ten minutes.',
     applies: (k) => k.periodShaped && !k.drawsAllowed && k.extraTimeEnabled && !k.khoKho },
@@ -595,6 +630,7 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
     // They are what the knob shows before anyone touches it, so turning extra time
     // on does not also require deciding how long it is.
     extraTimeEnabled: !!f.tieBreak?.extraTime,
+    extraTimeRepeat: !!f.tieBreak?.extraTime?.repeat,
     extraTimePeriods: f.tieBreak?.extraTime?.periods ?? 2,
     extraTimeMinutes: f.tieBreak?.extraTime?.minutes ?? 5,
     extraTimeFirstTo: !f.tieBreak?.extraTime?.fullTime,
@@ -611,10 +647,13 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
     hockey: canonicalTeamSport(f.sport) === 'hockey',
     ...cardKnobs(f),
     goldenRaidEnabled: !!f.tieBreak?.goldenRaid,
+    doOrDieEnabled: doOrDieAfterOf(f) != null,
+    doOrDieAfter: doOrDieAfterOf(f) ?? DEFAULT_DO_OR_DIE_AFTER,
 
     officiatingMode: f.officiatingMode,
     drawsAllowed: f.endStates.drawsAllowed,
     walkoverCountsInDifference: !!f.endStates.countWalkoverInDifference,
+    retirementScore: f.endStates.retirementScore,
 
     periodShaped: isPeriodShaped(f),
     periodLabel: inner.label || 'period',
@@ -825,8 +864,8 @@ function buildFormat(f: ScoringFormat, k: FormatKnobs, name?: string): ScoringFo
         ...(k.universalPointEnabled && !k.khoKho ? { universalPoint: true } : {}),
         extraTime: k.extraTimeEnabled
           ? {
-            // Keep basketball's repeat-while-level and its "Overtime" name; the editor has no knob for them.
-            ...(f.tieBreak?.extraTime?.repeat ? { repeat: true } : {}),
+            // Repeat is a knob; the "Overtime" name has none, so it is carried through.
+            ...(repeatsExtraTime(k) ? { repeat: true } : {}),
             ...(f.tieBreak?.extraTime?.label ? { label: f.tieBreak.extraTime.label } : k.khoKho ? { label: 'Extra turn' } : {}),
             ...(k.firstTo > 0 && !k.extraTimeFirstTo ? { fullTime: true } : {}),
             periods: Math.max(1, k.extraTimePeriods),
@@ -838,7 +877,7 @@ function buildFormat(f: ScoringFormat, k: FormatKnobs, name?: string): ScoringFo
         ...(k.minimumChaseEnabled && k.khoKho ? { minimumChase: true } : {}),
       }
       : null,
-    endStates: { ...f.endStates, drawsAllowed: k.drawsAllowed, countWalkoverInDifference: k.walkoverCountsInDifference },
+    endStates: { ...f.endStates, drawsAllowed: k.drawsAllowed, countWalkoverInDifference: k.walkoverCountsInDifference, retirementScore: k.retirementScore },
     // Chess keeps its time control on the rules sheet - shown to the arbiter, not enforced.
     ...(k.chess
       ? { rulesSheet: { ...(f.rulesSheet ?? {}), timeControl: `${Math.max(1, k.timeBaseMinutes)}+${Math.max(0, k.timeIncrementSeconds)}` } }
@@ -852,6 +891,10 @@ function buildFormat(f: ScoringFormat, k: FormatKnobs, name?: string): ScoringFo
           followOnCompulsoryAbove: k.followOnCompulsoryEnabled ? Math.max(0, k.followOnCompulsoryAbove) : null,
         },
       }
+      : {}),
+    // Kabaddi's do-or-die lives on the rules sheet, which kabaddi.ts reads.
+    ...(k.kabaddi
+      ? { rulesSheet: { ...(f.rulesSheet ?? {}), doOrDie: k.doOrDieEnabled, doOrDieAfter: Math.max(1, k.doOrDieAfter) } }
       : {}),
     // Card suspensions live on the rules sheet, which suspensions.ts reads.
     ...(k.cardSport
@@ -925,6 +968,9 @@ export function describeKnobs(k: FormatKnobs): string {
   }
   if (k.cardSport === 'futsal') bits.push(k.cardSuspensionsEnabled ? `red card ${k.redSuspensionMinutes} min off` : 'red card not timed');
   if ((k.cardSport === 'football' || k.cardSport === 'futsal') && !k.cardEscalationEnabled) bits.push('second yellow not a red');
+  // Only when it differs from standard kabaddi, so the usual rule stays out of the way.
+  if (k.kabaddi && !k.doOrDieEnabled) bits.push('no do-or-die raid');
+  else if (k.kabaddi && k.doOrDieAfter !== DEFAULT_DO_OR_DIE_AFTER) bits.push(`do-or-die after ${k.doOrDieAfter} empty raids`);
   if (k.clockEnabled) {
     bits.push(k.periodShaped
       ? `${k.clockMinutes} min cap (${Math.round(k.clockMinutes / Math.max(1, k.unitsToWin))}/period)`
@@ -940,6 +986,7 @@ export function describeKnobs(k: FormatKnobs): string {
     const chain: string[] = [];
     if (k.extraTimeEnabled) {
       chain.push(k.khoKho ? `extra inning (${k.extraTimePeriods} x ${k.extraTimeMinutes} min turns)`
+        : repeatsExtraTime(k) ? `ET ${k.extraTimeMinutes} min, repeated until someone leads`
         : `ET ${k.extraTimePeriods}x${k.extraTimeMinutes} min${k.firstTo > 0 && !k.extraTimeFirstTo ? ' played in full' : ''}`);
     }
     if (kicks) chain.push(k.hockey ? `shoot-out (${k.shootoutKicks} each)` : `${k.shootoutKicks} kicks`);

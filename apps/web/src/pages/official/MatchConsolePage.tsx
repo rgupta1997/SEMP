@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { ChevronDown, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
-import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Select, Spinner, StatusBadge, Textarea, BackButton, cn, confirmDialog, toast } from '../../components/ui';
-import { awayTeam, championshipIdOf, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, orgTitle, sportIdOf, sportName as sportNameOf, teamLabel, teamShort, venueLabel } from './fixtureHelpers';
+import { Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Modal, Select, Spinner, StatusBadge, Textarea, BackButton, cn, confirmDialog, toast } from '../../components/ui';
+import { awayTeam, championshipIdOf, disciplineLabel, eventInfo, eventLabel, homeTeam, orgLabel, orgTitle, isSwimmingFixture, sideCodes, sportIdOf, sportName as sportNameOf, teamLabel, teamShort, venueLabel } from './fixtureHelpers';
 import {
   cricketScore, headline, hydrate, oversStr, oversToBalls, reduce, sportDef, subLine,
   type Action, type LogEntry, type MatchState, type SportDef,
@@ -15,13 +15,13 @@ import {
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, hasResultIn, moveUnplacedTo, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
+import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, setResultUnits, formatResultUnit, type ResultUnit, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
 import { carromHeadline, carromMatchOf, carromRulesOf, drawSettlement, isCarromSport } from '@semp/shared';
-import { CarromResult, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
+import { CarromResult, carromDecider, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
 import { PoolResult, hydratePool } from '../../features/scoring/PoolResult';
 import { isFrameContest, isPoolSport, poolRubber } from '@semp/shared';
 import { TieLayoutEditor, type TieLayoutValue } from '../../features/scoring/TieLayoutEditor';
-import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, groupTiebreakAllowed, isChessSport, isKnockoutFixture, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
+import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, groupTiebreakAllowed, isChessSport, isKnockoutFixture, isKnockoutRound, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
 import { unitWinner, type TieSpec, type EventSpec, type EventScoringOpts, type ScoringMode, type ScoringFormat, type KernelState, type Pairing, type RallyLog, type RubberLineup, type Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer, hydratePairSwap } from '../../features/scoring/RacquetDeck';
 import { LineupPanel } from '../../features/scoring/LineupPanel';
@@ -247,6 +247,9 @@ export function MatchConsolePage() {
             <div className="pt-1"><Button variant="outline" onClick={done}>Back to {backLabel.toLowerCase()}</Button></div>
           </CardBody>
         </Card>
+      ) : fixture.status === 'walkover' ? (
+        // Nothing was played, so there is nothing to score: show the result, not a console.
+        <WalkoverResultCard fixture={fixture} onBack={done} backLabel={backLabel} />
       ) : (
         <div className={scoringFocus ? 'flex min-h-0 flex-1 flex-col' : undefined}>
           <ScoringTabs fixture={fixture} fixtureId={fixtureId!} live={live} invalidate={invalidate} onDone={done}
@@ -624,11 +627,23 @@ function ScoringTabs({ fixture, fixtureId, live, invalidate, onDone, focus, onFo
     modeSeeded.current = true;
     setMode(formatEntryMode);
   }, [formatEntryMode, storedMode]);
+
+  // A finished single match with a saved score but no play log was entered by hand:
+  // reopen it in Manual so a correction starts from that score, not a blank console.
+  const manualSeeded = useRef(false);
+  useEffect(() => {
+    if (manualSeeded.current || touched.current || !live || structure !== 'single') return;
+    manualSeeded.current = true;
+    const finished = fixture.status === 'completed' || fixture.status === 'confirmed';
+    const typedIn = fixture.home_score != null && fixture.away_score != null && (live.live_log?.length ?? 0) === 0;
+    if (finished && typedIn) setMode('manual');
+  }, [live, structure, fixture.status, fixture.home_score, fixture.away_score]);
   // Multi-competitor events default to a simple team ranking (which team did well); the
   // detailed per-athlete console is kept available behind this toggle.
 
   const structureLabel = (s: Structure) =>
-    s === 'tie' ? `Team tie · ${tieSpec?.rubbers.length ?? 0} rubbers`
+    // Chess calls its rubbers boards.
+    s === 'tie' ? `Team tie · ${tieSpec?.rubbers.length ?? 0} ${consoleTieSpec?.boardPoints ? 'boards' : 'rubbers'}`
     : s === 'event' ? `Event · ${eventSpec?.subEvents.length ?? 0} sub-events`
     : 'Single match';
 
@@ -1303,6 +1318,8 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
         provenance={resolved.source}
         homeName={teamLabel(homeTeam(fixture))}
         awayName={teamLabel(awayTeam(fixture))}
+        homeShort={homeTeam(fixture)?.short_name || orgLabel(homeTeam(fixture))}
+        awayShort={awayTeam(fixture)?.short_name || orgLabel(awayTeam(fixture))}
         homeOrg={orgTitle(homeTeam(fixture))}
         awayOrg={orgTitle(awayTeam(fixture))}
         pairing={pairing}
@@ -1322,6 +1339,11 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
         onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
         onSuspend={(nextLog, state) => save(nextLog, state, false, onDone, undefined, true)}
       />
+      {/* A no-show, before any point. Once play starts, "retires" or "Award to" covers it. */}
+      {log.length === 0 && (
+        <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone}
+          defaultScore={formatWalkoverScore(format)} countsInDifference={format.endStates?.countWalkoverInDifference} />
+      )}
     </div>
   );
 }
@@ -1393,6 +1415,7 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
       frozen_format: (live?.live_state as any)?.format ?? null,
       // The organiser's per-match rules, patched on top of whatever rung wins.
       format_overrides: fixture?.format_overrides ?? null,
+      bracket_position: fixture?.bracket_position ?? null,
     },
     { scoring_format_id: td.scoring_format_id ?? null, scoring_preset_key: td.scoring_preset_key ?? null, round_formats: td.round_formats, sport },
     (fixture?.scoring_formats ?? []) as any[],
@@ -1743,7 +1766,7 @@ function CarromConsole({ fixture, fixtureId, live, invalidate, onDone }:
 
   return (
     <>
-      <CarromResult homeName={homeName} awayName={awayName} rules={rules} formatName={format?.name} provenance={resolved.source}
+      <CarromResult homeName={homeName} awayName={awayName} homeShort={homeTeam(fixture)?.short_name || orgLabel(homeTeam(fixture))} awayShort={awayTeam(fixture)?.short_name || orgLabel(awayTeam(fixture))} rules={rules} formatName={format?.name} provenance={resolved.source}
         initial={initial} busy={persist.isPending} onSave={save} />
       <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} />
     </>
@@ -1763,6 +1786,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       frozen_format: (live?.live_state as any)?.format ?? null,
       // The organiser's per-match rules, patched on top of whatever rung wins.
       format_overrides: fixture?.format_overrides ?? null,
+      bracket_position: fixture?.bracket_position ?? null,
     },
     { scoring_format_id: td.scoring_format_id ?? null, scoring_preset_key: td.scoring_preset_key ?? null, round_formats: td.round_formats, sport },
     (fixture?.scoring_formats ?? []) as any[],
@@ -1943,6 +1967,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
     </div>
   );
 
+  const [homeCode, awayCode] = sideCodes(homeTeam(fixture), awayTeam(fixture));
   return (
     <>
     {sheetBar}
@@ -1952,8 +1977,8 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       sportName={sport}
       homeName={teamLabel(homeTeam(fixture))}
       awayName={teamLabel(awayTeam(fixture))}
-      homeShort={teamShort(homeTeam(fixture))}
-      awayShort={teamShort(awayTeam(fixture))}
+      homeShort={homeCode}
+      awayShort={awayCode}
       homeOrg={orgLabel(homeTeam(fixture))}
       awayOrg={orgLabel(awayTeam(fixture))}
       roster={roster}
@@ -2029,7 +2054,9 @@ function teamTimeline(log: RallyLog, homeName: string, awayName: string, format?
     const any = ev as any;
     const who = any.playerName ? ` · ${any.playerName}` : '';
     if (ev.t === 'penaltyKick' && ev.scored) kicks[ev.side === 'A' ? 0 : 1] += 1;
-    const txt = ev.t === 'point'
+    const txt = ev.t === 'point' && any.rescinded
+      ? `${any.label ?? 'Card'} rescinded${who} - ${any.rescinded.reason}`
+      : ev.t === 'point'
       ? `${any.label ?? 'Point'}${any.pts > 1 ? ` (+${any.pts})` : ''}${who}`
       : ev.t === 'endPeriod' ? 'Period ended'
         : ev.t === 'clockStart' ? 'Clock started'
@@ -2038,6 +2065,7 @@ function teamTimeline(log: RallyLog, homeName: string, awayName: string, format?
               : ev.t === 'penaltyKick' ? `Shoot-out kick ${ev.scored ? 'scored' : 'missed'} (${kicks[0]}–${kicks[1]})${who}`
                 : ev.t === 'end' && ev.reason === 'penalties' && ev.winner
                   ? `${nameOf(ev.winner)} won ${ev.winner === 'A' ? kicks[0] : kicks[1]}–${ev.winner === 'A' ? kicks[1] : kicks[0]} on penalties`
+                  : ev.t === 'sub' ? `Substitution: ${ev.onName ?? 'player'} on, ${ev.offName ?? 'player'} off`
                   : ev.t === 'end' ? 'Match ended'
                     : ev.t;
     out.unshift({
@@ -2051,7 +2079,8 @@ function teamTimeline(log: RallyLog, homeName: string, awayName: string, format?
       ...(any.playerId ? { playerId: any.playerId } : {}),
       ...(any.secondId ? { secondId: any.secondId, secondName: any.secondName } : {}),
       ...(any.value !== undefined ? { value: any.value } : {}),
-      kind: any.kind ?? ev.t,
+      // Not the card's own kind, so nothing reading the timeline counts it as a card.
+      kind: any.rescinded ? 'rescinded' : any.kind ?? ev.t,
     });
   });
   return out.slice(0, 120);
@@ -2217,7 +2246,7 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
       </Card>
 
       {(!completed || editing) && (
-        <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
           <Card>
             <CardHeader title="Scoring" subtitle={`${def.segLabel} ${def.archetype === 'cricket' ? state.inn : state.seg}${def.archetype !== 'cricket' ? ` of ${def.segMax}` : ''}${state.ended ? ' · frozen' : ''}`} />
             <CardBody className="space-y-4">
@@ -2319,11 +2348,14 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
         </CardBody></Card>
       )}
 
+      {/* The shared Modal sits on the page body: an overlay inside the console moved with its scroll. */}
       {confirming && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4" onClick={() => setConfirming(false)}>
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-2xl dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Confirm final result</h3>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">This completes the match and updates standings.</p>
+        <Modal title="Confirm final result" onClose={() => setConfirming(false)}
+          footer={<div className="flex gap-2">
+            <Button variant="outline" className="flex-1" disabled={submitting} onClick={() => setConfirming(false)}>Cancel</Button>
+            <Button className="flex-1" disabled={submitting} onClick={signOff}>{submitting ? 'Signing off…' : 'Sign off'}</Button>
+          </div>}>
+            <p className="text-sm text-slate-500 dark:text-slate-400">This completes the match and updates standings.</p>
             <div className="my-4 space-y-1">
               <div className="flex items-center justify-between gap-4 text-base font-semibold text-slate-800 dark:text-slate-200">
                 <span className="min-w-0 truncate text-left">{homeName}</span>
@@ -2334,12 +2366,7 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
                 <span className="tabular-nums text-2xl font-black text-slate-900 dark:text-slate-100">{h.b}</span>
               </div>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" disabled={submitting} onClick={() => setConfirming(false)}>Cancel</Button>
-              <Button className="flex-1" disabled={submitting} onClick={signOff}>{submitting ? 'Signing off…' : 'Sign off'}</Button>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </>
   );
@@ -2403,9 +2430,12 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
   const [editingLayout, setEditingLayout] = useState(false);
   const [layoutDraft, setLayoutDraft] = useState<TieLayoutValue | null>(null);
   const [savingLayout, setSavingLayout] = useState(false);
+  // Named players are not play (naming them marks the rubber live): editable until something is scored.
   const untouched = state.rubbers.every((r) =>
-    r.status === 'pending' && !r.winner && !r.drawn && !r.rally?.length && !r.lineup && !r.lineupSkipped && !r.state.ended
+    r.status !== 'completed' && !r.winner && !r.drawn && !r.rally?.length && !r.state.ended
+    && !r.pool?.frames?.length && !r.carrom?.boards?.length && !r.carrom?.retirements?.length
     && r.state.a === 0 && r.state.b === 0);
+  const namedRubbers = state.rubbers.filter((r) => r.lineup).map((r) => r.label);
   const saveLayout = async (scope: 'match' | 'draw') => {
     if (!layoutDraft) { setEditingLayout(false); return; }
     const sport = sportNameOf(fixture);
@@ -2583,14 +2613,57 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
   const active = state.rubbers[state.activeRubber];
   const rdef = rubberDef(spec, state.activeRubber);
 
-  // Games won in a rubber scored on the kernel - "2–1".
-  const rubberGames = (r: RubberInstance): string | null => {
+  // The result of a rubber scored on the kernel, or null when it was not.
+  const rubberFold = (r: RubberInstance) => {
     const frozen = r.format ?? baseFormat?.format;
     if (!racquet || !frozen || !r.rally?.length) return null;
     // Singles rubbers serve as singles: fold under the lineup's rules, as the deck scored it.
     const fmt = formatForPairing(frozen, r.lineup);
-    const h = resultEnvelope(fmt, foldRally(fmt, r.rally, r.firstServer ?? 'A').state).headline;
-    return `${h[0]}–${h[1]}`;
+    return { fmt, state: foldRally(fmt, r.rally, r.firstServer ?? 'A').state };
+  };
+  const rubberEnvelope = (r: RubberInstance) => {
+    const f = rubberFold(r);
+    return f ? resultEnvelope(f.fmt, f.state) : null;
+  };
+  // Games won in a rubber scored on the kernel - "2–1".
+  const rubberGames = (r: RubberInstance): string | null => {
+    const h = rubberEnvelope(r)?.headline;
+    return h ? `${h[0]}–${h[1]}` : null;
+  };
+
+  // The signed-off card: who won each rubber and how, winner's score first as a scoresheet reads.
+  const [homeCode, awayCode] = sideCodes(homeTeam(fixture), awayTeam(fixture));
+  const rubberDetail = (r: RubberInstance, i: number): { result: string; games: string | null } => {
+    const pair = (p: readonly [number, number]) => {
+      const [x, y] = r.winner === 'B' ? [p[1], p[0]] : [p[0], p[1]];
+      return `${formatPoints(x)}–${formatPoints(y)}`;
+    };
+    if (r.status === 'dead') return { result: 'Not played', games: null };
+    if (r.drawn) return { result: spec.boardPoints ? 'Drawn ½–½' : 'Drawn', games: null };
+    const won = r.winner ? `${r.winner === 'A' ? homeCode : awayCode} won` : '';
+    if (carromTie && r.carrom?.boards.length) {
+      const rules = carromRulesFor(r);
+      const m = carromMatchOf(r.carrom, rules);
+      // A one-game rubber won level on points says how: "tie-break 8-5".
+      const how = rules.gamesToWin <= 1 ? carromDecider(m.games[0], (s) => (s === 'A' ? homeCode : awayCode)) : '';
+      return { result: `${won} ${pair(carromHeadline(m, rules))}`.trim(), games: how || null };
+    }
+    const bestOf = poolFramesOf(i);
+    if (bestOf && r.pool?.frames.length) {
+      return { result: `${won} ${pair(poolRubber(r.pool, bestOf).framesWon)}`.trim(), games: null };
+    }
+    const env = rubberEnvelope(r);
+    if (env) {
+      // Tennis is told in sets ("6–5 (7–5)"); everything else game by game.
+      const f = rubberFold(r)!;
+      const flip = (u: ResultUnit): ResultUnit => (r.winner === 'B'
+        ? { ...u, score: [u.score[1], u.score[0]], ...(u.tieBreak ? { tieBreak: [u.tieBreak[1], u.tieBreak[0]] } : {}) } : u);
+      const sets = setResultUnits(f.fmt, f.state);
+      const games = (sets ? sets.map((u) => formatResultUnit(flip(u), '–')).join(' · ') : env.unitScores.map(pair).join(' · '))
+        + (env.reason === 'retired' ? ' · retired' : '');
+      return { result: `${won} ${pair(env.headline)}`.trim(), games: games || null };
+    }
+    return { result: won || rubberScore(r, i), games: null };
   };
 
   const rubberScore = (r: RubberInstance, i: number): string => {
@@ -2598,8 +2671,10 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
     if (r.drawn) return spec.boardPoints ? 'Drawn ½–½' : 'Drawn';
     if (carromTie && r.carrom?.boards.length) {
       const rules = carromRulesFor(r);
-      const h = carromHeadline(carromMatchOf(r.carrom, rules), rules);
-      return r.winner ? `${r.winner === 'A' ? homeName : awayName} won ${h[0]}–${h[1]}` : `${h[0]}–${h[1]}`;
+      const m = carromMatchOf(r.carrom, rules);
+      const h = carromHeadline(m, rules);
+      const how = rules.gamesToWin <= 1 ? carromDecider(m.games[0], (s) => (s === 'A' ? homeCode : awayCode)) : '';
+      return r.winner ? `${r.winner === 'A' ? homeName : awayName} won ${h[0]}–${h[1]}${how ? `, ${how}` : ''}` : `${h[0]}–${h[1]}`;
     }
     const bestOf = poolFramesOf(i);
     if (bestOf && r.pool?.frames.length) {
@@ -2618,19 +2693,19 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
   return (
     <>
       <Card className="mb-5 overflow-hidden">
-        <div className="bg-slate-900 px-6 py-6 text-white">
+        <div className="bg-slate-900 px-4 py-6 text-white sm:px-6">
           <div className="flex items-center justify-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
             {live_ && <span className="inline-flex items-center gap-1.5 text-[var(--live)]"><span className="h-2 w-2 animate-pulse rounded-full bg-[var(--live)]" />LIVE</span>}
             <span>Tie · first to {formatPoints(target)} {spec.boardPoints ? 'board points' : 'rubbers'}</span>
           </div>
-          <div className="mt-2 flex items-center justify-center gap-5">
-            <div className="flex-1 text-right">
-              <div className="text-lg font-bold">{homeName}</div>
+          <div className="mt-2 flex items-center justify-center gap-3 sm:gap-5">
+            <div className="min-w-0 flex-1 break-words text-right">
+              <div className="text-sm font-bold min-[360px]:text-base sm:text-lg">{homeName}</div>
               {orgLabel(homeTeam(fixture)) && <div className="text-xs font-normal text-slate-400">{orgLabel(homeTeam(fixture))}</div>}
             </div>
-            <div className="flex items-center gap-3 text-5xl font-black tabular-nums"><span>{formatPoints(a)}</span><span className="text-slate-600">:</span><span>{formatPoints(b)}</span></div>
-            <div className="flex-1 text-left">
-              <div className="text-lg font-bold">{awayName}</div>
+            <div className="flex items-center gap-2 text-4xl font-black tabular-nums sm:gap-3 sm:text-5xl"><span>{formatPoints(a)}</span><span className="text-slate-600">:</span><span>{formatPoints(b)}</span></div>
+            <div className="min-w-0 flex-1 break-words text-left">
+              <div className="text-sm font-bold min-[360px]:text-base sm:text-lg">{awayName}</div>
               {orgLabel(awayTeam(fixture)) && <div className="text-xs font-normal text-slate-400">{orgLabel(awayTeam(fixture))}</div>}
             </div>
           </div>
@@ -2642,7 +2717,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
         <>
         {/* The rubbers and the tie's controls side by side; the rubber being scored goes
             underneath at the full width - the console needs the room. */}
-        <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-5">
             <Card>
               <CardHeader title={spec.boardPoints ? 'Boards' : 'Rubbers'} subtitle={spec.boardPoints
@@ -2659,6 +2734,11 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                     <p className="text-xs text-slate-600 dark:text-slate-300">
                       Change the {spec.boardPoints ? 'boards' : 'rubbers'} before play starts. Nothing has been scored yet, so nothing is lost.
                     </p>
+                    {namedRubbers.length > 0 && (
+                      <p className="rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+                        Players named on {namedRubbers.join(', ')} will be cleared when you save.
+                      </p>
+                    )}
                     <TieLayoutEditor sport={sportNameOf(fixture) ?? ''} stored={layoutOverride ?? layout ?? spec} onChange={setLayoutDraft} />
                     <div className="flex flex-wrap justify-end gap-2">
                       <Button variant="outline" disabled={savingLayout} onClick={() => setEditingLayout(false)}>Cancel</Button>
@@ -2676,7 +2756,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                         isActive ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10'
                           : dead ? 'border-slate-200 opacity-60 hover:opacity-100 dark:border-slate-800'
                             : 'border-slate-200 hover:border-brand-300 dark:border-slate-800')}>
-                      <span className="min-w-0">
+                      <span className="min-w-0 flex-1">
                         <span className="block font-medium text-slate-700 dark:text-slate-200">{r.label}</span>
                         {r.lineup ? (
                           <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">
@@ -2686,7 +2766,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                           <span className="block text-[11px] text-amber-600 dark:text-amber-400">Players not named</span>
                         ) : null}
                       </span>
-                      <span className={cn('shrink-0 pl-2 text-xs font-semibold', r.winner ? 'text-brand-600 dark:text-brand-300' : 'text-slate-400 dark:text-slate-500')}>{rubberScore(r, i)}</span>
+                      <span className={cn('min-w-0 max-w-[60%] shrink-0 pl-2 text-right text-xs font-semibold', r.winner ? 'text-brand-600 dark:text-brand-300' : 'text-slate-400 dark:text-slate-500')}>{rubberScore(r, i)}</span>
                     </button>
                   );
                 })}
@@ -2738,7 +2818,10 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                 )}
                 <Button className="w-full justify-start" disabled={submitting} onClick={signOff}>✍ End tie &amp; sign off</Button>
                 {!decided && <p className="px-1 text-xs text-slate-400 dark:text-slate-500">Record {unit} results until one side reaches {formatPoints(target)}.</p>}
-                <WalkoverButton fixtureId={fixtureId} homeName={homeName} awayName={awayName} homeOrg={homeOrg} awayOrg={awayOrg} homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id} invalidate={invalidate} onDone={onDone} />
+                {/* A whole-tie walkover: a clean sweep by default, counted in the table as the rubbers' format says. */}
+                <WalkoverButton fixtureId={fixtureId} homeName={homeName} awayName={awayName} homeOrg={homeOrg} awayOrg={awayOrg} homeTeamId={fixture.home_team_id} awayTeamId={fixture.away_team_id} invalidate={invalidate} onDone={onDone}
+                  defaultScore={[spec.boardPoints ? spec.rubbers.length : target, 0]}
+                  countsInDifference={!!baseFormat?.format?.endStates?.countWalkoverInDifference} />
                 {SECONDARY.map((s) => (
                   <SecondaryStatus key={s.status} fixtureId={fixtureId} status={s.status} label={s.label} variant={s.variant} invalidate={invalidate} onDone={onDone} />
                 ))}
@@ -2749,7 +2832,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
 
             {active && (
               <Card className="mt-5">
-                <CardHeader title={active.label} subtitle={active.status === 'dead' ? 'Skipped (dead rubber)' : active.drawn ? 'Drawn - ½ each' : active.winner ? `${active.winner === 'A' ? homeName : awayName} won this ${unit}` : spec.boardPoints ? 'Record this board: a win, or a draw for ½ each.' : carromTie ? 'Board by board' : poolFramesOf(state.activeRubber) ? `Frame by frame · best of ${poolFramesOf(state.activeRubber)}` : racquet && mode === 'detailed' ? 'Point by point' : rdef.archetype === 'time' ? 'Pick the winner of this rubber.' : `${rdef.segLabel} ${Math.min(active.state.seg, rdef.segMax)} of ${rdef.segMax}`} />
+                <CardHeader title={active.label} subtitle={active.status === 'dead' ? 'Skipped (dead rubber)' : active.drawn ? 'Drawn - ½ each' : active.winner ? `${active.winner === 'A' ? homeName : awayName} won this ${unit}` : spec.boardPoints ? 'Record this board: a win, or a draw for ½ each.' : carromTie ? 'Board by board' : poolFramesOf(state.activeRubber) ? `Frame by frame · best of ${poolFramesOf(state.activeRubber)}` : racquet && mode === 'detailed' ? 'Point by point' : racquet ? `Final score only · tap who won this ${unit}` : rdef.archetype === 'time' ? 'Pick the winner of this rubber.' : `${rdef.segLabel} ${Math.min(active.state.seg, rdef.segMax)} of ${rdef.segMax}`} />
                 <CardBody className="space-y-4">
                   {active.status === 'dead' ? (
                     <div className="space-y-3 text-center">
@@ -2787,7 +2870,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                         <CarromResult
                           key={`carrom-${active.key}`}
                           rubber
-                          homeName={homeName}
+                          homeName={homeName} homeShort={homeCode} awayShort={awayCode}
                           awayName={awayName}
                           rules={carromRulesFor(active)}
                           formatName={(active.format ?? carromBase)?.name}
@@ -2812,7 +2895,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                         <PoolResult
                           key={`pool-${active.key}`}
                           homeName={homeName}
-                          awayName={awayName}
+                          awayName={awayName} homeShort={homeCode} awayShort={awayCode}
                           bestOf={poolFramesOf(state.activeRubber)!}
                           initial={hydratePool(active.pool)}
                           busy={submitting}
@@ -2831,6 +2914,8 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                           provenance={baseFormat.source}
                           homeName={homeName}
                           awayName={awayName}
+                          homeShort={homeCode}
+                          awayShort={awayCode}
                           homeOrg={orgTitle(homeTeam(fixture))}
                           awayOrg={orgTitle(awayTeam(fixture))}
                           // A singles rubber with nobody named still serves as singles.
@@ -2896,8 +2981,9 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                       <div className={cn('grid gap-2', spec.boardPoints ? 'grid-cols-3' : 'grid-cols-2')}>
                         <Button variant={active.winner === 'A' ? 'primary' : 'outline'} onClick={() => decide(state.activeRubber, 'A')}>
                           <span className="flex w-full min-w-0 flex-col items-center whitespace-normal break-words text-center leading-tight">
-                            <span>{homeName} won</span>
-                            {homeOrg && <span className="text-[11px] font-normal opacity-75">{homeOrg}</span>}
+                            <span className="sm:hidden">{homeCode} won</span>
+                            <span className="hidden sm:inline">{homeName} won</span>
+                            {homeOrg && <span className="hidden text-[11px] font-normal opacity-75 sm:inline">{homeOrg}</span>}
                           </span>
                         </Button>
                         {/* A drawn board - the commonest chess result - is ½ each. */}
@@ -2911,8 +2997,9 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                         )}
                         <Button variant={active.winner === 'B' ? 'primary' : 'outline'} onClick={() => decide(state.activeRubber, 'B')}>
                           <span className="flex w-full min-w-0 flex-col items-center whitespace-normal break-words text-center leading-tight">
-                            <span>{awayName} won</span>
-                            {awayOrg && <span className="text-[11px] font-normal opacity-75">{awayOrg}</span>}
+                            <span className="sm:hidden">{awayCode} won</span>
+                            <span className="hidden sm:inline">{awayName} won</span>
+                            {awayOrg && <span className="hidden text-[11px] font-normal opacity-75 sm:inline">{awayOrg}</span>}
                           </span>
                         </Button>
                       </div>
@@ -2939,12 +3026,47 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
         </>
       )}
 
+      {/* Sign-off where the official is looking: under the last result, not only in Tie control above it. */}
+      {!completed && decided && playable === 0 && (
+        <Card><CardBody className="space-y-2 py-4">
+          <p className="text-center text-sm text-slate-600 dark:text-slate-300">
+            Every {unit} is recorded: {homeCode} {formatPoints(tieScore(spec, state).a)} – {formatPoints(tieScore(spec, state).b)} {awayCode}.
+            {drawn && knockout ? ' A knockout tie needs a winner: who won the tie-break?' : ' Check the results, then sign off to finish the match.'}
+          </p>
+          {drawn && knockout && (
+            <div className="grid grid-cols-2 gap-2">
+              {(['A', 'B'] as Side[]).map((s) => (
+                <Button key={s} variant={state.tiebreakWinner === s ? 'primary' : 'outline'} disabled={submitting}
+                  onClick={() => { if (state.tiebreakWinner !== s) setTiebreak(s); }}>
+                  {s === 'A' ? homeCode : awayCode} won the tie-break
+                </Button>
+              ))}
+            </div>
+          )}
+          <Button className="w-full" disabled={submitting || (drawn && knockout && !state.tiebreakWinner)} onClick={signOff}>✍ End tie &amp; sign off</Button>
+        </CardBody></Card>
+      )}
+
       {completed && !editing && (
-        <Card><CardBody className="py-8 text-center">
-          <div className="text-sm text-slate-500 dark:text-slate-400">Tie recorded.</div>
-          <div className="mt-1 text-2xl font-black tabular-nums text-slate-900 dark:text-slate-100">{homeName} {formatPoints(a)} – {formatPoints(b)} {awayName}</div>
-          <div className="mx-auto mt-3 max-w-md space-y-1 text-sm text-slate-500 dark:text-slate-400">
-            {state.rubbers.map((r, i) => <div key={r.key} className="flex justify-between gap-4"><span>{r.label}</span><span>{rubberScore(r, i)}</span></div>)}
+        <Card><CardBody className="py-6 sm:py-8">
+          <div className="text-center text-sm text-slate-500 dark:text-slate-400">Tie recorded.</div>
+          {/* Short codes in the headline: the full names are on the board above. */}
+          <div className="mt-1 text-center text-2xl font-black tabular-nums text-slate-900 dark:text-slate-100">{homeCode} {formatPoints(a)} – {formatPoints(b)} {awayCode}</div>
+          <div className="mx-auto mt-4 max-w-md divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
+            {state.rubbers.map((r, i) => {
+              const d = rubberDetail(r, i);
+              const players = r.lineup ? `${namesOf(r.lineup.A)!.join(' / ')} v ${namesOf(r.lineup.B)!.join(' / ')}` : null;
+              return (
+                <div key={r.key} className={cn('px-3 py-2.5', r.status === 'dead' && 'opacity-60')}>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{r.label}</span>
+                    <span className={cn('shrink-0 text-sm font-semibold tabular-nums', r.winner ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400')}>{d.result}</span>
+                  </div>
+                  {players && <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{players}</div>}
+                  {d.games && <div className="mt-0.5 text-xs tabular-nums text-slate-600 dark:text-slate-300">{d.games}</div>}
+                </div>
+              );
+            })}
           </div>
           <div className="mt-4 flex justify-center gap-2">
             <Button variant="outline" onClick={() => setEditing(true)}>Edit result</Button>
@@ -3062,7 +3184,7 @@ function EventRankingConsole({ fixture, fixtureId, spec, live, invalidate }:
     .sort((a, b) => b.points - a.points || (a.place! - b.place!) || a.name.localeCompare(b.name));
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
       <Card>
         <CardHeader title="Team ranking" subtitle={`Set each team's finishing place - points are awarded by placement (${medalPoints.join(' / ')}).`} />
         <CardBody className="space-y-2">
@@ -3355,7 +3477,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const singleMark = pickOne || isNamedDiscipline;
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
       <Card>
         <CardHeader title="Participants & results" subtitle={subtitle} />
         <CardBody className="space-y-3">
@@ -3379,9 +3501,9 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
           {state.participants.length > 0 && (singleMark ? (
             <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
               {state.participants.map((p) => (
-                <div key={p.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                <div key={p.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2.5 sm:flex-nowrap">
                   {/* The institute too: two swimmers can share a name, and a relay row is the institute's. */}
-                  <span className="min-w-0 flex-1">
+                  <span className="min-w-0 basis-full sm:flex-1 sm:basis-auto">
                     <span className="block truncate text-sm font-medium text-slate-700 dark:text-slate-200" title={p.name}>{p.name || 'Unnamed'}</span>
                     {p.org && <span className="block truncate text-[11px] text-slate-400 dark:text-slate-500">{p.org}</span>}
                   </span>
@@ -3398,8 +3520,8 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
                         ?? `${p.marks[p.category]}${spec.result.unit ? ` ${spec.result.unit}` : ''}`}
                     </span>
                   ) : category ? (
-                    <div className="flex shrink-0 items-start gap-1.5">
-                      <div className="w-32">
+                    <div className="flex w-full items-start gap-1.5 sm:w-auto sm:shrink-0">
+                      <div className="min-w-0 flex-1 sm:w-32 sm:flex-none">
                         <MarkInput
                           value={p.marks[category] ?? null} isTime={activeMeta.isTime} disabled={!!resultStatusOf(p, category)}
                           placeholder={activeMeta.isTime ? undefined : placeholderFor(activeMeta.unit)}
@@ -3414,6 +3536,67 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
                   )}
                 </div>
               ))}
+            </div>
+          ) : isSwimmingFixture(fixture) ? (
+            // Swimming: swimmers grouped under their institute, each a dropdown, so a
+            // dozen swimmers a college no longer means a dozen full cards to scroll past.
+            <div className="space-y-2">
+              {[...state.participants.reduce((m, p) => {
+                const key = p.orgId ?? p.org ?? '';
+                m.set(key, [...(m.get(key) ?? []), p]);
+                return m;
+              }, new Map<string, ParticipantResult[]>()).entries()]
+                .sort(([, a], [, b]) => (a[0]?.org ?? '').localeCompare(b[0]?.org ?? ''))
+                .map(([key, people]) => {
+                  const resultsOf = (p: ParticipantResult) => spec.subEvents.filter((se) => hasResultIn(p, se.key)).length;
+                  const total = people.reduce((n, p) => n + resultsOf(p), 0);
+                  return (
+                    <details key={key || 'none'} className="group rounded-xl border border-slate-200 dark:border-slate-800">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+                        <span className="min-w-0 truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{people[0]?.org || 'No institute'}</span>
+                        <span className="flex shrink-0 items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                          {people.length} swimmer{people.length === 1 ? '' : 's'} · {total} result{total === 1 ? '' : 's'}
+                          <ChevronDown className="h-4 w-4 transition group-open:rotate-180" />
+                        </span>
+                      </summary>
+                      <div className="divide-y divide-slate-100 border-t border-slate-100 dark:divide-slate-800 dark:border-slate-800">
+                        {people.map((p) => {
+                          const n = resultsOf(p);
+                          return (
+                            <details key={p.id} className="group/swimmer">
+                              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
+                                <span className="min-w-0 truncate text-sm text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</span>
+                                <span className={cn('flex shrink-0 items-center gap-2 text-xs', n ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500')}>
+                                  {n ? `${n} race${n === 1 ? '' : 's'}` : 'No results'}
+                                  <ChevronDown className="h-4 w-4 transition group-open/swimmer:rotate-180" />
+                                </span>
+                              </summary>
+                              <div className="px-3 pb-3">
+                                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                  {spec.subEvents.map((se) => {
+                                    const seMeta = markMetaFor(spec, se);
+                                    return (
+                                      <label key={se.key} className="block min-w-0">
+                                        <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
+                                        <MarkInput
+                                          value={p.marks[se.key] ?? null} isTime={seMeta.isTime} disabled={!!resultStatusOf(p, se.key)}
+                                          placeholder={seMeta.isTime ? undefined : placeholderFor(seMeta.unit)}
+                                          onChange={(v) => setMark(p.id, se.key, v)} ariaLabel={`${p.name || 'competitor'} ${se.label}`}
+                                        />
+                                        <StatusSelect value={resultStatusOf(p, se.key)} onChange={(st) => setStatus(p.id, se.key, st)}
+                                          ariaLabel={`${p.name || 'competitor'} ${se.label} status`} className="mt-1 w-full" />
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </details>
+                          );
+                        })}
+                      </div>
+                    </details>
+                  );
+                })}
             </div>
           ) : (
             state.participants.map((p) => (
@@ -3513,7 +3696,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
 function StatusSelect({ value, onChange, ariaLabel, className }: { value: ResultStatus | null; onChange: (s: ResultStatus | null) => void; ariaLabel: string; className?: string }) {
   return (
     <Select value={value ?? ''} aria-label={ariaLabel} title={value ? RESULT_STATUS_LABEL[value] : 'Has a result'}
-      className={cn('w-20 shrink-0 text-xs', value && 'text-rose-600 dark:text-rose-400', className)}
+      className={cn('w-20 !min-w-0 shrink-0 text-xs', value && 'text-rose-600 dark:text-rose-400', className)}
       onChange={(e) => onChange((e.target.value || null) as ResultStatus | null)}>
       <option value="">-</option>
       {RESULT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -3759,10 +3942,12 @@ function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeT
     <>
       <Button variant="outline" className={className ?? 'w-full justify-start'} onClick={() => setOpen(true)}>Walkover</Button>
       {open && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4" onClick={() => setOpen(false)}>
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Record walkover</h3>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">A walkover awards the match to one side. Pick the winner and add a reason.</p>
+        <Modal title="Record walkover" onClose={() => setOpen(false)}
+          footer={<div className="flex gap-2">
+            <Button variant="outline" className="flex-1" disabled={mut.isPending} onClick={() => setOpen(false)}>Cancel</Button>
+            <Button className="flex-1" disabled={mut.isPending} onClick={submit}>{mut.isPending ? 'Saving…' : 'Record walkover'}</Button>
+          </div>}>
+            <p className="text-sm text-slate-500 dark:text-slate-400">A walkover awards the match to one side. Pick the winner and add a reason.</p>
             <div className="mt-4">
               <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Winner</span>
               <Select value={winner} onChange={(e) => setWinner(e.target.value as 'home' | 'away')}>
@@ -3783,14 +3968,9 @@ function WalkoverButton({ fixtureId, homeName, awayName, homeOrg, awayOrg, homeT
             </div>
             <div className="mt-3">
               <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Reason</span>
-              <Textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. opponent didn't show / withdrew" />
+              <Textarea rows={2} className="w-full" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. opponent didn't show / withdrew" />
             </div>
-            <div className="mt-4 flex gap-2">
-              <Button variant="outline" className="flex-1" disabled={mut.isPending} onClick={() => setOpen(false)}>Cancel</Button>
-              <Button className="flex-1" disabled={mut.isPending} onClick={submit}>{mut.isPending ? 'Saving…' : 'Record walkover'}</Button>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </>
   );
@@ -3805,6 +3985,31 @@ function formatWalkoverScore(format: ScoringFormat | null | undefined): [number,
   if (format.levels[top]?.decide === 'aggregate') return null;
   const lv = top > 0 && format.levels[top].target <= 1 ? format.levels[top - 1] : format.levels[top];
   return lv ? [lv.target, 0] : null;
+}
+
+/** A recorded walkover: who it went to, any rulebook score, and the reason. */
+function WalkoverResultCard({ fixture, onBack, backLabel }: { fixture: any; onBack: () => void; backLabel: string }) {
+  const winnerSide = fixture.winner_team_id === fixture.home_team_id ? homeTeam(fixture)
+    : fixture.winner_team_id === fixture.away_team_id ? awayTeam(fixture) : null;
+  const scored = fixture.home_score != null && fixture.away_score != null;
+  return (
+    <Card>
+      <CardBody className="space-y-3 py-8 text-center">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Walkover</div>
+        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+          {winnerSide ? `${teamLabel(winnerSide)} wins by walkover` : 'Walkover - no winner recorded'}
+        </h2>
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          {teamLabel(homeTeam(fixture))} {scored ? `${fixture.home_score}–${fixture.away_score}` : 'vs'} {teamLabel(awayTeam(fixture))}
+        </p>
+        {fixture.notes && <p className="text-sm text-slate-500 dark:text-slate-400">Reason: {fixture.notes}</p>}
+        <p className="mx-auto max-w-md text-xs text-slate-400 dark:text-slate-500">
+          No play was recorded. To change it, edit this match from <b>Schedule → Fixtures</b>.
+        </p>
+        <div className="pt-1"><Button variant="outline" onClick={onBack}>Back to {backLabel.toLowerCase()}</Button></div>
+      </CardBody>
+    </Card>
+  );
 }
 
 /** "No-show?" row under a console that has no walkover control of its own. */
@@ -3880,15 +4085,20 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
   const homeOrg = orgLabel(homeTeam(fixture));
   const awayOrg = orgLabel(awayTeam(fixture));
   // Seed from the live detailed tally when one exists (so switching Detailed → Manual
-  // keeps the score instead of resetting), else from the saved headline.
+  // keeps the score instead of resetting), else from the saved headline. An empty
+  // tally (a team sheet but no play) must not hide a saved, typed-in result.
   const liveH = live?.live_state && Object.keys(live.live_state).length > 0 ? headline(def, hydrate(live.live_state)) : null;
-  const seedHome = liveH ? liveH.a : fixture.home_score;
-  const seedAway = liveH ? liveH.b : fixture.away_score;
+  const useLive = !!liveH && (liveH.a !== 0 || liveH.b !== 0 || fixture.home_score == null);
+  const seedHome = useLive ? liveH!.a : fixture.home_score;
+  const seedAway = useLive ? liveH!.b : fixture.away_score;
   const [home, setHome] = useState(seedHome != null ? String(seedHome) : '');
   const [away, setAway] = useState(seedAway != null ? String(seedAway) : '');
   // Winner is chosen explicitly, not derived: for time events the fastest (lowest)
   // wins, so "higher score" can't be assumed. 'auto' falls back to higher-score.
-  const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>('auto');
+  // A correction starts from the winner already on record.
+  const [winner, setWinner] = useState<'auto' | 'home' | 'away' | 'draw'>(() =>
+    fixture.winner_team_id && fixture.winner_team_id === fixture.home_team_id ? 'home'
+    : fixture.winner_team_id && fixture.winner_team_id === fixture.away_team_id ? 'away' : 'auto');
   const [notes, setNotes] = useState(fixture.notes ?? '');
   const saveResult = useApiMutation((body: any) => api('PATCH', `/fixtures/${fixtureId}/result`, body), invalidate);
 
@@ -3967,7 +4177,15 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
     winnerId === fixture.away_team_id ? awayName :
     winner === 'draw' || (hs != null && as != null) ? 'Draw' : '-';
 
+  // A knockout needs a winner: level is allowed (won on penalties), a draw is not.
+  const knockout = isKnockoutFixture(fixture) || isKnockoutRound(fixture.round);
+  const knockoutNeedsWinner = knockout && !winnerId && hs != null && as != null;
+
   const submit = (status: 'live' | 'completed') => {
+    if (status === 'completed' && knockoutNeedsWinner) {
+      toast.error('A knockout match must have a winner. Level score? Pick who won (e.g. on penalties) under Winner.');
+      return;
+    }
     saveResult.mutate({ home_score: hs, away_score: as, winner_team_id: winnerId, draw: winner === 'draw' || undefined, status, notes: notes || undefined },
       { onSuccess: status === 'completed' ? onDone : undefined, onError: (e: any) => toast.error(e.message) });
   };
@@ -4001,8 +4219,11 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
             <option value="auto">Auto (higher score) - {winnerLabel}</option>
             <option value="home">{homeName}</option>
             <option value="away">{awayName}</option>
-            <option value="draw">Tie / draw</option>
+            {!knockout && <option value="draw">Tie / draw</option>}
           </Select>
+          {knockoutNeedsWinner && (
+            <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">Knockout match: the scores are level, so pick who won (e.g. on penalties or a golden raid).</p>
+          )}
         </div>
         <div className="mt-4">
           <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Result note</span>

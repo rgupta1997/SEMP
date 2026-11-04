@@ -17,8 +17,10 @@ export function hydrateCarrom(raw: unknown): CarromState {
  * Carrom records each BOARD's result - who won it, the loser's coins left and who
  * covered the queen - and the points follow (carrom.ts). Nobody taps points one by one.
  */
-export function CarromResult({ homeName, awayName, rules, initial, disabled, busy, onSave, rubber, formatName, provenance }: {
+export function CarromResult({ homeName, awayName, homeShort, awayShort, rules, initial, disabled, busy, onSave, rubber, formatName, provenance }: {
   homeName: string; awayName: string;
+  /** Short codes (IIMK) shown on a phone, where both full names cut to the same "Mock IIM …". */
+  homeShort?: string | null; awayShort?: string | null;
   rules: CarromRules;
   /** The format being scored ("ICF - best of 3 games to 25"), and where it came from. */
   formatName?: string;
@@ -41,6 +43,12 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
   }, [initial]);
 
   const nameOf = (s: Side) => (s === 'A' ? homeName : awayName);
+  // On screen: the short code on a phone, the full name from sm up. Dialogs keep nameOf.
+  const who = (s: Side): ReactNode => {
+    const short = (s === 'A' ? homeShort : awayShort)?.trim();
+    if (!short || short === nameOf(s)) return nameOf(s);
+    return <><span className="sm:hidden">{short}</span><span className="hidden sm:inline">{nameOf(s)}</span></>;
+  };
   const match = useMemo(() => carromMatchOf(state, rules), [state, rules]);
   const onlyBoards = boardsOnly(rules);
   const queenCovers = queenCoversFor(rules);
@@ -117,14 +125,19 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
   };
 
   const retiredSides = match.games.flatMap((g) => (g.retired ? [g.retired] : []));
+  // A one-game match won level on points: how it was settled, so 11-11 never reads as a draw.
+  const decider = rules.gamesToWin <= 1 ? carromDecider(match.games[0], nameOf) : '';
+  // On screen the short code ("IIMB retired") fits under the score; the dialog keeps full names.
+  const shortOf = (s: Side) => (s === 'A' ? homeShort : awayShort)?.trim() || nameOf(s);
+  const deciderShort = rules.gamesToWin <= 1 ? carromDecider(match.games[0], shortOf) : '';
   const confirm = async () => {
     if (!match.decided || !match.winner) { toast.error('The match is not decided yet.'); return; }
     const ok = await confirmDialog({
       title: rubber ? 'Confirm this rubber' : 'Confirm final result',
       confirmLabel: rubber ? 'Record rubber' : 'Sign off',
       message: `${nameOf(match.winner)} win ${headline[match.winner === 'A' ? 0 : 1]}-${headline[match.winner === 'A' ? 1 : 0]}`
-        + ` in ${headlineUnit}`
-        + (retiredSides.length ? ` (${retiredSides.map(nameOf).join(', ')} retired)` : '') + '. '
+        + ` in ${headlineUnit}` + (decider ? `, ${decider}` : '')
+        + (retiredSides.length && !decider ? ` (${retiredSides.map(nameOf).join(', ')} retired)` : '') + '. '
         + (rubber ? 'The rubber goes to them in the tie.' : 'This completes the match and updates standings.'),
     });
     if (ok) onSave(state, true);
@@ -162,17 +175,18 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
         {/* Scoreboard: the match score with its unit, and the game in progress as points to the target. */}
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/60">
           <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
-            <Name name={homeName} colour={match.decided ? null : match.nextBreaker === 'A' ? 'white' : 'black'} winner={match.winner === 'A'} />
+            <Name name={who('A')} colour={match.decided ? null : match.nextBreaker === 'A' ? 'white' : 'black'} winner={match.winner === 'A'} />
             <div className="text-center">
               <div className="font-mono text-4xl font-black tabular-nums text-slate-900 dark:text-white">
                 {headline[0]}<span className="px-2 text-slate-300 dark:text-slate-600">–</span>{headline[1]}
               </div>
               <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{headlineUnit}</div>
+              {match.decided && deciderShort && <div className="mt-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">{deciderShort}</div>}
             </div>
-            <Name name={awayName} colour={match.decided ? null : match.nextBreaker === 'B' ? 'white' : 'black'} winner={match.winner === 'B'} align="right" />
+            <Name name={who('B')} colour={match.decided ? null : match.nextBreaker === 'B' ? 'white' : 'black'} winner={match.winner === 'B'} align="right" />
           </div>
           {multiGame && !match.decided && (
-            <div className="mt-4 grid gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+            <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
               <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-300">
                 <span>Game {match.current.game}</span>
                 <span className="font-normal text-slate-500 dark:text-slate-400">
@@ -182,14 +196,14 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
                 </span>
               </div>
               {(['A', 'B'] as Side[]).map((s) => (
-                <Progress key={s} label={nameOf(s)} value={gameScore[s === 'A' ? 0 : 1]} max={rules.gameTarget} />
+                <Progress key={s} label={who(s)} value={gameScore[s === 'A' ? 0 : 1]} max={rules.gameTarget} />
               ))}
             </div>
           )}
           {!multiGame && !onlyBoards && !match.decided && (
-            <div className="mt-4 grid gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+            <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
               {(['A', 'B'] as Side[]).map((s) => (
-                <Progress key={s} label={nameOf(s)} value={gameScore[s === 'A' ? 0 : 1]} max={rules.gameTarget} />
+                <Progress key={s} label={who(s)} value={gameScore[s === 'A' ? 0 : 1]} max={rules.gameTarget} />
               ))}
             </div>
           )}
@@ -202,7 +216,7 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
               {(['A', 'B'] as Side[]).map((s) => (
                 <button key={s} type="button" disabled={disabled} className={choiceCls(state.firstBreak === s)}
                   onClick={() => { if (state.firstBreak !== s) update({ ...state, firstBreak: s }); }}>
-                  <span className="block truncate">{nameOf(s)}</span>
+                  <span className="block truncate">{who(s)}</span>
                 </button>
               ))}
             </div>
@@ -210,14 +224,15 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
         )}
 
         {!match.decided && (
-          <div className="grid gap-4 rounded-xl border border-brand-300 bg-brand-50/40 p-4 dark:border-brand-500/40 dark:bg-brand-500/5">
+          // minmax(0,1fr): long team names wrap or truncate instead of widening the box past a phone screen.
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-4 rounded-xl border border-brand-300 bg-brand-50/40 p-3 sm:p-4 dark:border-brand-500/40 dark:bg-brand-500/5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-base font-bold text-slate-900 dark:text-slate-100">
                 {multiGame && <span className="text-slate-500 dark:text-slate-400">Game {match.current.game} · </span>}
                 {match.current.tieBreak ? (match.current.tieBreakBoard ? `Tie-break board ${match.current.tieBreakBoard}` : 'Tie-breaker board') : `Board ${match.current.board}`}
               </div>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-700">
-                <Disc white /> {nameOf(match.nextBreaker)} breaks · plays white
+              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-700">
+                <Disc white /> <span>{who(match.nextBreaker)} breaks · plays white</span>
               </span>
             </div>
 
@@ -225,14 +240,14 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
               <div className="grid grid-cols-2 gap-2">
                 {(['A', 'B'] as Side[]).map((s) => (
                   <button key={s} type="button" disabled={disabled} className={choiceCls(winner === s)} onClick={() => setWinner(s)}>
-                    <span className="block truncate">{nameOf(s)}</span>
+                    <span className="block truncate">{who(s)}</span>
                   </button>
                 ))}
               </div>
             </Row>
             {!onlyBoards && (
               <>
-                <Row label={winner ? `Coins ${nameOf(winner === 'A' ? 'B' : 'A')} had left` : "Loser's coins left"}>
+                <Row label={winner ? <>Coins {who(winner === 'A' ? 'B' : 'A')} had left</> : "Loser's coins left"}>
                   <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-9">
                     {Array.from({ length: CARROM_COINS }, (_, i) => i + 1).map((n) => (
                       <button key={n} type="button" disabled={disabled} aria-pressed={coins === n}
@@ -249,9 +264,9 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
                       <button key={q} type="button" disabled={disabled} className={choiceCls(queen === q)} onClick={() => pickQueen(q)}>
                         <span className="block truncate">
                           {q === 'winner'
-                            ? `${winner ? nameOf(winner) : 'Board winner'} (+${rules.queenPoints})`
+                            ? <>{winner ? who(winner) : 'Winner'} (+{rules.queenPoints})</>
                             : q === 'loser'
-                              ? winner ? nameOf(winner === 'A' ? 'B' : 'A') : 'The other side'
+                              ? winner ? who(winner === 'A' ? 'B' : 'A') : 'Other side'
                               : 'Nobody (uncovered)'}
                         </span>
                       </button>
@@ -262,7 +277,7 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
             )}
 
             {extras ? (
-              <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Optional · for stats only</span>
                   <button type="button" className="text-xs text-slate-500 underline underline-offset-2 dark:text-slate-400" onClick={() => { if (slam) toggleSlam(); setExtras(false); setFouls({ A: 0, B: 0 }); }}>
@@ -321,7 +336,7 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                 <span>Retired hurt or conceded:</span>
                 {(['A', 'B'] as Side[]).map((s) => (
-                  <Button key={s} size="sm" variant="ghost" disabled={disabled || busy} onClick={() => retire(s)}>
+                  <Button key={s} size="sm" variant="ghost" className="!h-auto max-w-full !whitespace-normal text-left" disabled={disabled || busy} onClick={() => retire(s)}>
                     {nameOf(s)} retire
                   </Button>
                 ))}
@@ -331,7 +346,7 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
             {/* What recording this board will do, before it is recorded. */}
             <div className="flex flex-wrap items-center gap-3 border-t border-brand-200 pt-3 dark:border-brand-500/20">
               {ready && winner ? (
-                <span className="inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-1.5 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">
+                <span className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-lg bg-emerald-50 px-3 py-1.5 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">
                   <b className="font-mono text-base tabular-nums">+{onlyBoards ? 1 : preview}</b>
                   <span className="min-w-0 truncate">
                     {slam && <b>Slam · </b>}
@@ -351,9 +366,9 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
         )}
 
         {/* The scoresheet: the game in progress open, finished games folded, newest first. */}
-        {game && <GameSheet title={`Game ${match.current.game} · in progress`} game={game} nameOf={nameOf} onlyBoards={onlyBoards} open />}
+        {game && <GameSheet title={`Game ${match.current.game} · in progress`} game={game} nameOf={nameOf} who={who} target={rules.gameTarget} onlyBoards={onlyBoards} open />}
         {finishedGames.map(({ g, i }) => (
-          <GameSheet key={i} title={onlyBoards ? `Board ${i + 1}` : `Game ${i + 1}`} game={g} nameOf={nameOf} onlyBoards={onlyBoards}
+          <GameSheet key={i} title={onlyBoards ? `Board ${i + 1}` : `Game ${i + 1}`} game={g} nameOf={nameOf} who={who} target={rules.gameTarget} onlyBoards={onlyBoards}
             open={match.decided && finishedGames.length === 1} />
         ))}
 
@@ -361,7 +376,7 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
           <span className={cn('text-sm', busy ? 'text-amber-600 dark:text-amber-300' : match.decided ? 'font-semibold text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400')}>
             {status}
           </span>
-          <div className="ml-auto flex gap-2">
+          <div className="ml-auto flex flex-wrap justify-end gap-2">
             {(state.boards.length > 0 || lastIsRetirement) && (
               <Button variant="outline" disabled={disabled || busy} onClick={undo}>{lastIsRetirement ? 'Undo retirement' : 'Undo last board'}</Button>
             )}
@@ -373,51 +388,86 @@ export function CarromResult({ homeName, awayName, rules, initial, disabled, bus
   );
 }
 
-/** One game's boards as a table, with the running score after each board. */
-function GameSheet({ title, game, nameOf, onlyBoards, open }: {
-  title: string; game: CarromGame; nameOf: (s: Side) => string; onlyBoards: boolean; open?: boolean;
+/**
+ * How a game was settled when the points alone don't say: "IIMB retired" (with names),
+ * "tie-break 8-5" (winner first), "on the tie-break board" or "more boards won 3-1".
+ */
+export function carromDecider(g: CarromGame | undefined, nameOf?: (s: Side) => string): string {
+  if (g?.retired) return nameOf ? `${nameOf(g.retired)} retired` : '';
+  if (!g?.winner || g.score[0] !== g.score[1]) return '';
+  const flip = (p: [number, number]) => (g.winner === 'A' ? p : [p[1], p[0]]);
+  if (g.tieBreakScore) { const [w, l] = flip(g.tieBreakScore); return `tie-break ${w}-${l}`; }
+  if (g.boards.some((x) => x.tieBreak)) return 'on the tie-break board';
+  const wonA = g.boards.filter((x) => x.winner === 'A').length;
+  const [w, l] = flip([wonA, g.boards.length - wonA]);
+  return `more boards won ${w}-${l}`;
+}
+
+/**
+ * One game's boards as a table, with the running score after each board. It follows the
+ * game score: capped at the target, and tie-break boards totalled on their own.
+ */
+function GameSheet({ title, game, nameOf, who, target, onlyBoards, open }: {
+  title: string; game: CarromGame; nameOf: (s: Side) => string; who: (s: Side) => ReactNode;
+  target: number; onlyBoards: boolean; open?: boolean;
 }) {
   const running: [number, number] = [0, 0];
+  const tb: [number, number] = [0, 0];
+  let capped = false;
   const rows = game.boards.map((b) => {
-    running[b.winner === 'A' ? 0 : 1] += onlyBoards ? 1 : b.points;
-    return { b, after: [running[0], running[1]] as [number, number] };
+    const i = b.winner === 'A' ? 0 : 1;
+    if (b.tieBreak) { tb[i] += b.points; return { b, after: `TB ${tb[0]}–${tb[1]}` }; }
+    const raw = running[i] + (onlyBoards ? 1 : b.points);
+    if (!onlyBoards && raw > target) capped = true;
+    running[i] = onlyBoards ? raw : Math.min(target, raw);
+    return { b, after: `${running[0]}–${running[1]}` };
   });
+  const decider = carromDecider(game);
   return (
     <details open={open} className="group rounded-xl border border-slate-200 dark:border-slate-800">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm">
-        <span className="font-semibold text-slate-900 dark:text-slate-100">{title}</span>
+        <span className="shrink-0 whitespace-nowrap font-semibold text-slate-900 dark:text-slate-100">{title}</span>
         <span className="flex min-w-0 items-center gap-2">
-          {!onlyBoards && <span className="font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">{game.score[0]}–{game.score[1]}</span>}
-          {game.winner && <span className="truncate text-xs text-emerald-700 dark:text-emerald-300">{nameOf(game.winner)} won{game.retired ? ` · ${nameOf(game.retired)} retired` : ''}</span>}
+          {!onlyBoards && <span className="shrink-0 whitespace-nowrap font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">{game.score[0]}–{game.score[1]}</span>}
+          {game.winner && <span className="truncate text-xs text-emerald-700 dark:text-emerald-300">{who(game.winner)} won{decider ? ` · ${decider}` : ''}{game.retired ? <> · {who(game.retired)} retired</> : ''}</span>}
           <span className="text-slate-400 transition group-open:rotate-180" aria-hidden>▾</span>
         </span>
       </summary>
       {!onlyBoards && rows.length > 0 && (
-        <table className="w-full border-t border-slate-200 text-xs dark:border-slate-800">
+        // Fixed columns: a long team name truncates instead of pushing the table past a phone screen.
+        <table className="w-full table-fixed border-t border-slate-200 text-xs dark:border-slate-800">
           <thead className="text-left text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
             <tr>
-              <th className="px-3 py-1.5 font-semibold">Board</th>
-              <th className="px-3 py-1.5 font-semibold">Won by</th>
-              <th className="px-3 py-1.5 text-right font-semibold">Points</th>
+              <th className="w-9 px-2 py-1.5 font-semibold sm:w-14 sm:px-3">#</th>
+              <th className="px-2 py-1.5 font-semibold sm:px-3">Won by</th>
+              <th className="w-14 px-2 py-1.5 text-right font-semibold sm:w-20 sm:px-3">Points</th>
               <th className="hidden px-3 py-1.5 font-semibold sm:table-cell">White (broke)</th>
-              <th className="px-3 py-1.5 text-right font-semibold">Score</th>
+              <th className="w-[4.5rem] px-2 py-1.5 text-right font-semibold sm:w-24 sm:px-3">Score</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-slate-700 dark:divide-slate-800 dark:text-slate-300">
             {rows.map(({ b, after }, i) => (
-              <tr key={i}>
-                <td className="px-3 py-1.5 tabular-nums">{i + 1}</td>
-                <td className="max-w-[10rem] truncate px-3 py-1.5">{nameOf(b.winner)}{b.slam ? ' · slam' : ''}</td>
-                <td className="px-3 py-1.5 text-right">
+              <tr key={i} className={b.tieBreak ? 'bg-amber-50/60 dark:bg-amber-500/5' : undefined}>
+                <td className="px-2 py-1.5 tabular-nums sm:px-3">{b.tieBreak ? 'TB' : i + 1}</td>
+                <td className="truncate px-2 py-1.5 sm:px-3" title={nameOf(b.winner)}>{who(b.winner)}{b.slam ? ' · slam' : ''}</td>
+                <td className="whitespace-nowrap px-2 py-1.5 text-right sm:px-3">
                   <b className="font-mono tabular-nums">{b.points}</b>
                   {b.points > b.coinsLeft && <span className="ml-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400" title="Includes the queen">+Q</span>}
                 </td>
-                <td className="hidden max-w-[10rem] truncate px-3 py-1.5 text-slate-500 sm:table-cell dark:text-slate-400"><span className="inline-flex items-center gap-1.5"><Disc white /> {nameOf(b.breaker)}</span></td>
-                <td className="px-3 py-1.5 text-right font-mono tabular-nums">{after[0]}–{after[1]}</td>
+                <td className="hidden truncate px-3 py-1.5 text-slate-500 sm:table-cell dark:text-slate-400"><span className="inline-flex items-center gap-1.5"><Disc white /> {nameOf(b.breaker)}</span></td>
+                <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono tabular-nums sm:px-3">{after}</td>
               </tr>
             ))}
           </tbody>
         </table>
+      )}
+      {!onlyBoards && (capped || game.retired || rows.some((r) => r.b.tieBreak)) && (
+        <p className="border-t border-slate-100 px-3 py-1.5 text-[11px] text-slate-500 dark:border-slate-800 dark:text-slate-400">
+          {/* The table stops at the last board played; the game score is what the retirement rule made of it. */}
+          {game.retired && <>{who(game.retired)} retired after board {game.boards.length}; the game is recorded at {game.score[0]}–{game.score[1]}. </>}
+          {capped && `A game score stops at ${target}. `}
+          {rows.some((r) => r.b.tieBreak) && 'TB rows are tie-break boards: their points count only in the tie-break, not in the game score.'}
+        </p>
       )}
     </details>
   );
@@ -435,7 +485,7 @@ function Disc({ white }: { white: boolean }) {
   );
 }
 
-function Progress({ label, value, max }: { label: string; value: number; max: number }) {
+function Progress({ label, value, max }: { label: ReactNode; value: number; max: number }) {
   return (
     <div className="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)_2.5rem] items-center gap-2 text-xs">
       <span className="truncate text-slate-600 dark:text-slate-300">{label}</span>
@@ -447,9 +497,9 @@ function Progress({ label, value, max }: { label: string; value: number; max: nu
   );
 }
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+function Row({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
-    <div className="grid gap-1.5 sm:grid-cols-[11rem_minmax(0,1fr)] sm:items-center sm:gap-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5 sm:grid-cols-[11rem_minmax(0,1fr)] sm:items-center sm:gap-4">
       <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">{label}</div>
       {children}
     </div>
@@ -458,7 +508,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 
 /** A side's name, with the colour it plays on the next board (white breaks). */
 function Name({ name, colour, winner, align = 'left' }: {
-  name: string; colour: 'white' | 'black' | null; winner: boolean; align?: 'left' | 'right';
+  name: ReactNode; colour: 'white' | 'black' | null; winner: boolean; align?: 'left' | 'right';
 }) {
   return (
     <div className={cn('min-w-0', align === 'right' && 'text-right')}>

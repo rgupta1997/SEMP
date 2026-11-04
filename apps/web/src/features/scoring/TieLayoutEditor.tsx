@@ -91,7 +91,8 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
   const chessTarget = boardPointsTarget(rubbers.length);
 
   return (
-    <div className="mb-3 grid gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+    // minmax(0,1fr): a long layout name must not widen the panel past a phone screen.
+    <div className="mb-3 grid grid-cols-[minmax(0,1fr)] gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
       <div>
         <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Team tie layout</div>
         <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -99,7 +100,7 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
         </p>
       </div>
 
-      <Select value={preset} onChange={(e) => pickPreset(e.target.value)}>
+      <Select className="w-full truncate" value={preset} onChange={(e) => pickPreset(e.target.value)}>
         <option value="standard">Sport standard{layouts[0] ? ` - ${layouts[0].rubbers.length} rubbers` : ''}</option>
         {layouts.filter((l) => l.key !== 'default').map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
         <option value="custom">Custom</option>
@@ -107,15 +108,20 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
 
       <div className="grid gap-2">
         {rubbers.map((r, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <span className="w-5 shrink-0 text-right text-xs tabular-nums text-slate-400">{i + 1}</span>
-            <Input
-              value={r.label}
-              aria-label={`Rubber ${i + 1} name`}
-              onChange={(e) => edit(rubbers.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
-            />
+          // Phone: the name gets its own line, the pickers and Remove wrap under it.
+          <div key={i} className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+            <div className="flex min-w-0 basis-full items-center gap-2 sm:flex-1 sm:basis-auto">
+              <span className="w-5 shrink-0 text-right text-xs tabular-nums text-slate-400">{i + 1}</span>
+              <Input
+                className="min-w-0"
+                value={r.label}
+                aria-label={`Rubber ${i + 1} name`}
+                onChange={(e) => edit(rubbers.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+              />
+            </div>
+            <div className="flex min-w-0 items-center gap-2 pl-7 sm:contents">
             <Select
-              className="w-32 shrink-0"
+              className="w-28 !min-w-0 sm:w-32"
               value={String(r.size)}
               aria-label={`Rubber ${i + 1} players`}
               onChange={(e) => edit(rubbers.map((x, j) => (j === i ? { ...x, size: Number(e.target.value) } : x)))}
@@ -125,7 +131,7 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
             </Select>
             {pool && (
               <Select
-                className="w-36 shrink-0"
+                className="w-32 !min-w-0 sm:w-36"
                 value={String(r.frames ?? 5)}
                 aria-label={`Rubber ${i + 1} frames`}
                 onChange={(e) => edit(rubbers.map((x, j) => (j === i ? { ...x, frames: Number(e.target.value) } : x)))}
@@ -143,6 +149,7 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
             >
               Remove
             </button>
+            </div>
           </div>
         ))}
         <div>
@@ -161,7 +168,7 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
               First to {formatPoints(chessTarget)} board points
             </span>
           ) : (
-            <Select value={String(target)} onChange={(e) => { const t = Number(e.target.value); setTarget(t); own(); emit({ target: t, standard: false }); }}>
+            <Select className="w-full" value={String(target)} onChange={(e) => { const t = Number(e.target.value); setTarget(t); own(); emit({ target: t, standard: false }); }}>
               <option value="0">First to {majority} (majority)</option>
               {Array.from({ length: rubbers.length }, (_, i) => i + 1).filter((n) => n !== majority).map((n) => (
                 <option key={n} value={n}>First to {n}</option>
@@ -174,7 +181,7 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="grid gap-1 text-xs text-slate-500 dark:text-slate-400">
           League &amp; group matches
-          <Select value={skipGroups ? 'stop' : 'all'}
+          <Select className="w-full" value={skipGroups ? 'stop' : 'all'}
             onChange={(e) => { const v = e.target.value === 'stop'; setSkipGroups(v); own(); emit({ skipGroups: v, standard: false }); }}>
             <option value="all">Play every rubber</option>
             <option value="stop">Stop once the tie is decided</option>
@@ -182,7 +189,7 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
         </label>
         <label className="grid gap-1 text-xs text-slate-500 dark:text-slate-400">
           Knockout matches
-          <Select value={skipKnockout ? 'stop' : 'all'}
+          <Select className="w-full" value={skipKnockout ? 'stop' : 'all'}
             onChange={(e) => { const v = e.target.value === 'stop'; setSkipKnockout(v); own(); emit({ skipKnockout: v, standard: false }); }}>
             <option value="stop">Stop once the tie is decided</option>
             <option value="all">Play every rubber</option>
@@ -191,7 +198,7 @@ export function TieLayoutEditor({ sport, stored, onChange }: {
       </div>
       <label className="grid gap-1 text-xs text-slate-500 dark:text-slate-400">
         A level league or group match
-        <Select value={groupTb ? 'tiebreak' : 'draw'}
+        <Select className="w-full" value={groupTb ? 'tiebreak' : 'draw'}
           onChange={(e) => { const v = e.target.value === 'tiebreak'; setGroupTb(v); own(); emit({ groupTb: v, standard: false }); }}>
           <option value="draw">Stays a draw</option>
           <option value="tiebreak">Can be won on a tie-break</option>

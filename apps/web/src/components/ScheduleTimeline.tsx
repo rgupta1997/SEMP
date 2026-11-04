@@ -94,7 +94,8 @@ function timeRange(f: GridFixture): string {
 // Knockout-stage matches carry a bracket position (QF/SF/final/round-of-N) or a
 // 3rd-place label; everything else (round-robin "Round N", group "Pool A - Match N",
 // incrementally-added league fixtures) is a league/group match.
-const KNOCKOUT_ROUND = /^(final|sf|qf|r\d+|3rd place|bronze)\b/i;
+// Whole names only, so a pool label like "Final group game" or "R1 Pool A" is not drawn as knockout.
+const KNOCKOUT_ROUND = /^(final|sf|qf|r\d+|3rd place|bronze)$/i;
 function isKnockout(f: GridFixture): boolean {
   return f.bracket_position != null || (!!f.round && KNOCKOUT_ROUND.test(f.round.trim()));
 }

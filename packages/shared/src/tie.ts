@@ -307,5 +307,7 @@ export function reopenRubber(spec: TieSpec, state: TieState, index: number, rese
     return r.winner === null && r.status === 'dead' ? { ...r, status: 'pending' as RubberStatus } : r;
   });
   const { tiebreakWinner: _drop, ...rest } = state;
-  return applyDead(spec, { ...rest, activeRubber: index, rubbers });
+  const settled = applyDead(spec, { ...rest, activeRubber: index, rubbers });
+  // The rubber asked for stays open even in a decided tie: re-killing it made "Reopen" a no-op.
+  return { ...settled, rubbers: settled.rubbers.map((r, i) => (i === index ? rubbers[index] : r)) };
 }

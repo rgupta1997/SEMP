@@ -69,6 +69,42 @@ export function knockoutRoundSize(round?: string | null): number {
 export const isKnockoutRound = (round?: string | null): boolean =>
   round === THIRD_PLACE_ROUND || knockoutRoundSize(round) > 0;
 
+/**
+ * Play order for a list of matches: stage, then group matches (by pool and match number),
+ * then knockouts from the earliest round to the Final, the 3rd-place play-off just before it.
+ */
+export function comparePlayOrder(
+  a: { round?: string | null; pool_number?: number | null; stage_sequence?: number | null },
+  b: { round?: string | null; pool_number?: number | null; stage_sequence?: number | null },
+): number {
+  const key = (f: typeof a): [number, number, number, number, number] => {
+    const ko = isKnockoutRound(f.round);
+    // Bigger rounds come first (R16 before QF); 3rd place sits between the SF (4) and the Final (2).
+    const size = f.round === THIRD_PLACE_ROUND ? 3 : knockoutRoundSize(f.round);
+    // A league names the round too ("Round 4 - Match 2"); its bye sorts after the round's matches.
+    const roundNo = ko ? 0 : Number(f.round?.match(/^round\s*(\d+)/i)?.[1]) || 0;
+    const matchNo = /bye$/i.test(f.round ?? '') ? 99 : Number(f.round?.match(/match\s*(\d+)/i)?.[1]) || 0;
+    return [f.stage_sequence ?? 1, ko ? 1 : 0, ko ? -size : (f.pool_number ?? 0), roundNo, matchNo];
+  };
+  const ka = key(a); const kb = key(b);
+  for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i] - kb[i];
+  return (a.round ?? '').localeCompare(b.round ?? '');
+}
+
+/** A group's rest slot (odd team count): never played, never counted. A knockout bye advances a team, so it is not one. */
+export const isGroupBye = (f: { status?: string | null; bracket_position?: number | null; round?: string | null }): boolean =>
+  f.status === 'bye' && !isKnockoutFixture(f) && !isKnockoutRound(f.round);
+
+/** A typed label that names a knockout round in any case or spacing ("final", " R2"). Only the Round picker may set these. */
+export function isReservedRoundLabel(label?: string | null): boolean {
+  const t = label?.trim().toLowerCase();
+  if (!t) return false;
+  return Object.values(KNOCKOUT_ROUND).some((r) => r.toLowerCase() === t) || new RegExp(ROUND_OF.source, 'i').test(t);
+}
+
+/** What a league or pool match is called when its label is left blank. */
+export const DEFAULT_MATCH_LABEL = 'Match';
+
 /** A bracket match (final and 3rd place included): someone must win, so a level result needs a tie-break. */
 export const isKnockoutFixture = (f: { bracket_position?: number | null; round?: string | null }): boolean =>
   f.bracket_position != null || f.round === THIRD_PLACE_ROUND;
@@ -170,7 +206,8 @@ export type StandingsScheme = (typeof STANDINGS_SCHEME)[number];
 // score_for read each match's headline score, so they mean goals, sets or rubbers by sport.
 // frames_won / ball_diff: pool team ties only (frames and balls summed over the rubbers).
 // adt: kho-kho's average difference time over the group matches.
-export const STANDINGS_TIEBREAKER = ['points', 'wins', 'lost', 'head_to_head', 'score_diff', 'score_for', 'frames_won', 'ball_diff', 'adt'] as const;
+// set_quotient / point_quotient: volleyball and throwball, sets (rally points) won divided by lost.
+export const STANDINGS_TIEBREAKER = ['points', 'wins', 'lost', 'head_to_head', 'score_diff', 'score_for', 'frames_won', 'ball_diff', 'adt', 'set_quotient', 'point_quotient'] as const;
 // The order a stage gets when nobody set one (older saved stages carry it explicitly).
 export const STAGE_DEFAULT_TIEBREAKERS: StandingsTiebreaker[] = ['points', 'wins', 'lost'];
 export type StandingsTiebreaker = (typeof STANDINGS_TIEBREAKER)[number];

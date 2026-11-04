@@ -1,6 +1,7 @@
 import type {
   EndReason, LevelSpec, Outcome, ScoringFormat, ServeSpec, Side,
 } from './scoring-rules.js';
+import { extraTimeRepeats } from './scoring-rules.js';
 
 // ============================================================================
 // The rally kernel.
@@ -59,6 +60,8 @@ export type RallyEvent =
     value?: number;
     /** Circumstances a metric can key on - kabaddi's 'dod' (a do-or-die raid). */
     flags?: string[];
+    /** A card or foul the official took back: kept on the record, counted nowhere. */
+    rescinded?: { reason: string; at?: string };
   }
   /** Replayed rally: no score, no serve movement. */
   | { t: 'let'; at?: string }
@@ -74,6 +77,8 @@ export type RallyEvent =
   | { t: 'card'; card: 'yellow'; against: Side; reason?: string; by?: string; at?: string }
   /** A timeout called by a side. Changes nothing on the scoreboard; counted against its allowance. */
   | { t: 'timeout'; side: Side; by?: string; at?: string }
+  /** A substitution: `offId` leaves the field, `onId` comes on. Changes nothing on the scoreboard. */
+  | { t: 'sub'; side: Side; onId: string; onName?: string; offId: string; offName?: string; clockMs?: number; at?: string }
   /** Award the serve without a rally (badminton red card). */
   | { t: 'awardServe'; side: Side; reason?: string; by?: string; at?: string }
   /** Force the current unit to a side regardless of the tally. */
@@ -915,6 +920,7 @@ export function step(format: ScoringFormat, prev: KernelState, ev: RallyEvent): 
       // A let replays the serve it interrupted - a let on a second serve is a second serve.
     case 'card':
     case 'timeout':
+    case 'sub':
       // Neither scores nor moves the serve. Recorded for the timeline and the stats.
       return { state, effect: base };
 
@@ -1198,7 +1204,7 @@ function endPeriod(format: ScoringFormat, state: KernelState): FinishedUnit[] {
   // Extra time is played out in full - a lead after its first half is not a win yet
   // (TieBreakSpec.extraTime). A repeating overtime (basketball) decides every period.
   const extra = format.tieBreak?.extraTime;
-  if (extra && !extra.repeat && played > topSpec.target && played < topSpec.target + extra.periods) return [unit];
+  if (extra && !extraTimeRepeats(format.tieBreak) && played > topSpec.target && played < topSpec.target + extra.periods) return [unit];
 
   // Last period done: decide on the total.
   const total = aggregateScore(state);
@@ -1322,12 +1328,19 @@ export function foldRally(format: ScoringFormat, log: RallyLog, firstServer: Sid
   let state = initKernel(format, firstServer);
   const trace: StepEffect[] = [];
   for (const ev of log) {
-    const r = step(format, state, ev);
+    // A rescinded card or foul scores nothing, even where the original awarded points.
+    const r = step(format, state, ev.t === 'point' && ev.rescinded ? { ...ev, pts: 0 } : ev);
     state = r.state;
     trace.push(r.effect);
   }
   return { state, trace };
 }
+
+/** A card or foul the official took back. */
+export const isRescinded = (ev: RallyEvent): boolean => ev.t === 'point' && !!ev.rescinded;
+
+/** The log without rescinded cards and fouls, for anything that counts discipline. */
+export const withoutRescinded = (log: RallyLog): RallyLog => log.filter((ev) => !isRescinded(ev));
 
 /** Undo is truncate-and-refold. Nothing else restores the serve as well as this. */
 export function undo(format: ScoringFormat, log: RallyLog, firstServer: Side = 'A'): { log: RallyLog; state: KernelState } {
@@ -1535,6 +1548,56 @@ function awardedUnits(format: ScoringFormat, state: KernelState, played: Pair[])
     current = null;
   }
   return out;
+}
+
+/** One unit of a told result: a set's games, the tie-break's points when one decided it. */
+export interface ResultUnit { score: Pair; tieBreak?: Pair; matchTieBreak?: boolean }
+
+/**
+ * A set-based result told the way tennis writes it - each set's games, "6-5 (7-5)" -
+ * rather than the points of every game. Null for formats without a set level.
+ */
+export function setResultUnits(format: ScoringFormat, state: KernelState): ResultUnit[] | null {
+  const top = format.levels.length - 1;
+  const setLevel = format.levels.findIndex((l) => l.key === 'set');
+  if (!(setLevel > 0 && setLevel < top)) return null;
+  const out: ResultUnit[] = [];
+  let lastGame: FinishedUnit | null = null;
+  for (const u of state.finished) {
+    if (u.level === setLevel - 1) lastGame = u;
+    else if (u.level === setLevel) {
+      // A match tie-break played in place of a set is its own unit: "[10-8]".
+      if (u.key === 'tiebreak') out.push({ score: [...u.score] as Pair, matchTieBreak: true });
+      else out.push({ score: [...u.score] as Pair, ...(lastGame?.key === 'tiebreak' ? { tieBreak: [...lastGame.score] as Pair } : {}) });
+      lastGame = null;
+    }
+  }
+  const open = state.score[setLevel];
+  const w = state.winner === 'A' ? 0 : 1;
+  const awarded = state.ended && !!state.winner && (state.reason === 'retired' || state.reason === 'disqualified')
+    && format.endStates.retirementScore === 'freezeThenAwardRemaining';
+  if (awarded) {
+    // Retired under "award the rest": the open set finished for the winner, then any unplayed sets 6-0 - as the headline counts it.
+    const spec = format.levels[setLevel];
+    const s: Pair = [open[0], open[1]];
+    const level = s[1 - w] >= spec.target && !!spec.substitute;
+    s[w] = level ? s[1 - w] + 1 : Math.max(s[w], spec.target, s[1 - w] + spec.winBy);
+    if (open[0] || open[1] || out.length === 0) out.push({ score: s });
+    const needed = format.levels[top].target;
+    while (out.filter((u) => u.score[w] > u.score[1 - w]).length < needed) {
+      const blank: Pair = [0, 0]; blank[w] = spec.target; out.push({ score: blank });
+    }
+  } else if (state.ended && (open[0] || open[1])) {
+    // Ended mid-set (abandoned, or retired with the score as played): the set as it stood.
+    out.push({ score: [open[0], open[1]] });
+  }
+  return out;
+}
+
+/** "6-5 (7-5)", "[10-8]" or "21-15": one unit, in the order given (flip it first for winner-first). */
+export function formatResultUnit(u: ResultUnit, dash = '-'): string {
+  if (u.matchTieBreak) return `[${u.score[0]}${dash}${u.score[1]}]`;
+  return `${u.score[0]}${dash}${u.score[1]}${u.tieBreak ? ` (${u.tieBreak[0]}${dash}${u.tieBreak[1]})` : ''}`;
 }
 
 export function resultEnvelope(format: ScoringFormat, state: KernelState): ResultEnvelope {

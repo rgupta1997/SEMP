@@ -1,5 +1,6 @@
 import type { RallyEvent, RallyLog, KernelState } from './rally-kernel.js';
 import type { ScoringFormat, Side, TieBreakSpec } from './scoring-rules.js';
+import { extraTimeRepeats } from './scoring-rules.js';
 import { canonicalTeamSport } from './team-presets.js';
 
 /** How a sport names its shoot-out: hockey's 1 v 1 shoot-out, football's penalties. */
@@ -8,6 +9,20 @@ export function shootoutTerms(sport?: string | null): ShootoutTerms {
   return canonicalTeamSport(sport) === 'hockey'
     ? { title: 'Shoot-out', each: 'shooters each', taker: 'Shooter', attempt: 'shot', phrase: 'in the shoot-out', short: 'SO' }
     : { title: 'Penalties', each: 'kicks each', taker: 'Kicker', attempt: 'kick', phrase: 'on penalties', short: 'pens' };
+}
+
+/** A knockout decider in words: "extra time 3 + 3 min, then golden raids". */
+export function describeTieBreak(tb: TieBreakSpec, sport?: string | null): string {
+  const et = tb.extraTime;
+  const parts = [
+    et && (extraTimeRepeats(tb) ? `${et.minutes}-min overtime until someone leads`
+      : `extra time ${Array.from({ length: et.periods }, () => et.minutes).join(' + ')} min`),
+    tb.penalties && `${tb.penalties.kicks}-${shootoutTerms(sport).attempt} ${shootoutTerms(sport).title.toLowerCase()}`,
+    tb.goldenRaid && 'golden raids',
+    tb.universalPoint && 'universal point',
+    tb.minimumChase && 'minimum chase',
+  ].filter(Boolean);
+  return parts.join(', then ');
 }
 
 /**
@@ -81,7 +96,7 @@ export function tieProgress(
 
   // Regulation done and level. Extra time first, if the format declares any AND
   // there is any left to play - or, for basketball overtime, for as long as it is level.
-  if (extraTotal > 0 && (extraPlayed < extraTotal || tb?.extraTime?.repeat)) {
+  if (extraTotal > 0 && (extraPlayed < extraTotal || extraTimeRepeats(tb))) {
     return { phase: 'extraTime', extraPlayed, extraTotal, periodMs: extraMs, levelAfterRegulation };
   }
 

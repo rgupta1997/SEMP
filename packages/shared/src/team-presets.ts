@@ -32,6 +32,9 @@ const STRICT: EndStatePolicy = {
   countWalkoverInDifference: false,
 };
 
+/** Carrom: a retired or conceded game goes to the opponent at the target, the loser keeping its points. */
+const CARROM_END: EndStatePolicy = { ...STRICT, retirementScore: 'freezeThenAwardRemaining' };
+
 /** League play wants a draw to stand; a knockout must produce somebody. */
 const LEAGUE: EndStatePolicy = { ...STRICT, drawsAllowed: true, noShowGraceMinutes: 10 };
 
@@ -166,22 +169,23 @@ const NET: ScoringFormat[] = [
 
   fmt({
     sport: 'throwball', key: 'tb_bo3_15', name: 'Best of 3 sets to 15',
-    levels: [vSet(15, 15), unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'never',
+    levels: [vSet(15, 15), unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'atDeciderMidpoint',
   }),
   fmt({
     sport: 'throwball', key: 'tb_bo3_21', name: 'Best of 3 sets to 21',
-    levels: [vSet(21, 21), unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'never',
+    levels: [{ ...vSet(21, 21), deciderOverride: { target: 21, switchEndsAt: 11 } }, unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'atDeciderMidpoint',
   }),
-  // Every set to 25 by 2, the third included (Inter-IIM).
+  // Every set to 25 by 2, the third included (Inter-IIM). Courts change after each set
+  // and at 13 in the third, as in every throwball rulebook.
   fmt({
     sport: 'throwball', key: 'tb_bo3_25_all', name: 'Best of 3 sets to 25',
-    levels: [{ key: 'set', label: 'Set', target: 25, winBy: 2, cap: null, switchEndsAt: null }, unitsMatch(2)],
-    serve: THROW_SERVE, changeEnds: 'never',
+    levels: [{ key: 'set', label: 'Set', target: 25, winBy: 2, cap: null, switchEndsAt: 13 }, unitsMatch(2)],
+    serve: THROW_SERVE, changeEnds: 'atDeciderMidpoint',
   }),
   // The international (ITF / USA) shape: sets to 25 by 2, a deciding third to 15.
   fmt({
     sport: 'throwball', key: 'tb_bo3_25', name: 'Best of 3 sets to 25 (decider 15)',
-    levels: [vSet(25, 15), unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'never',
+    levels: [vSet(25, 15), unitsMatch(2)], serve: THROW_SERVE, changeEnds: 'atDeciderMidpoint',
   }),
   fmt({
     sport: 'throwball', key: 'tb_single_15', name: 'Single set to 15',
@@ -473,7 +477,7 @@ const BOARD: ScoringFormat[] = [
     sport: 'carrom', key: 'icf_bo3_boards', name: 'ICF - best of 3 games to 25 (8 boards a game)',
     levels: [{ key: 'game', label: 'Game', target: 25, winBy: 1, cap: null }, unitsMatch(2)],
     serve: PER_UNIT_SERVE, changeEnds: 'betweenUnits',
-    rulesSheet: { maxBoards: 8, queenPoints: 3, queenCutoff: 22, queenMustBeCovered: true },
+    rulesSheet: { maxBoards: 8, queenPoints: 3, queenCutoff: 22, queenMustBeCovered: true }, endStates: CARROM_END,
   }),
   // Inter-IIM rulebook: one game is 4 boards or 16 points, queen 3 up to and including 13.
   // Level on points: more boards won, then 2 tie-break boards totalled. The best of 3
@@ -482,19 +486,19 @@ const BOARD: ScoringFormat[] = [
     sport: 'carrom', key: 'iim_4boards_16', name: 'Inter-IIM - one game, 4 boards or 16 points',
     levels: [{ key: 'game', label: 'Game', target: 16, winBy: 1, cap: null }, unitsMatch(1)],
     serve: PER_UNIT_SERVE, changeEnds: 'betweenUnits',
-    rulesSheet: { maxBoards: 4, queenPoints: 3, queenCutoff: 14, queenMustBeCovered: true, boardsWonDecides: true, tieBreakBoards: 2 },
+    rulesSheet: { maxBoards: 4, queenPoints: 3, queenCutoff: 14, queenMustBeCovered: true, boardsWonDecides: true, tieBreakBoards: 2 }, endStates: CARROM_END,
   }),
   fmt({
     sport: 'carrom', key: 'corp_bo3_21', name: 'Corporate - best of 3 games to 21',
     levels: [{ key: 'game', label: 'Game', target: 21, winBy: 1, cap: null }, unitsMatch(2)],
     serve: PER_UNIT_SERVE, mode: 'selfScored',
-    rulesSheet: { queenPoints: 3 },
+    rulesSheet: { queenPoints: 3 }, endStates: { ...CARROM_END, drawsAllowed: true, noShowGraceMinutes: 10 },
   }),
   fmt({
     sport: 'carrom', key: 'corp_single_29', name: 'Corporate - single game to 29',
     levels: [{ key: 'game', label: 'Game', target: 29, winBy: 1, cap: null }, unitsMatch(1)],
     serve: PER_UNIT_SERVE, mode: 'selfScored',
-    rulesSheet: { queenPoints: 3 },
+    rulesSheet: { queenPoints: 3 }, endStates: { ...CARROM_END, drawsAllowed: true, noShowGraceMinutes: 10 },
   }),
   fmt({
     sport: 'carrom', key: 'boards_bo5', name: 'Best of 5 boards (board winner only)',
@@ -634,6 +638,23 @@ const footballWalkovers = (f: ScoringFormat): ScoringFormat =>
   (f.sport === 'football' ? { ...f, endStates: { ...f.endStates, countWalkoverInDifference: true } } : f);
 
 export const TEAM_PRESETS: ScoringFormat[] = [...NET, ...INVASION.map(footballWalkovers), ...RAID, ...BOARD, ...COMBAT];
+
+/** Each sport's standard knockout decider, borrowed from its knockout preset. */
+const KNOCKOUT_DECIDER_PRESET: Record<string, string> = {
+  kabaddi: 'kabaddi_ko_2x20_et',
+  football: 'football9_ko_2x20',
+  futsal: 'futsal_ko_2x10',
+  hockey: 'fih_4x15_ko',
+  frisbee: 'ultimate_final_2x20',
+  'kho-kho': 'kho_4turns',
+  basketball: 'fiba_4x10',
+};
+
+/** How a level knockout match of this sport is settled; null when the sport has no standard decider. */
+export function knockoutDeciderFor(sport?: string | null): TieBreakSpec | null {
+  const key = KNOCKOUT_DECIDER_PRESET[canonicalTeamSport(sport) ?? ''];
+  return (key && TEAM_PRESETS.find((f) => f.presetKey === key)?.tieBreak) || null;
+}
 
 /** Sport-name aliases, so a lookup by the catalogue's spelling works either way. */
 const ALIASES: Record<string, string> = {

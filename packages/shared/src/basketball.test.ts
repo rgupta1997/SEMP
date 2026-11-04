@@ -6,7 +6,7 @@ import type { ScoringFormat } from './scoring-rules.js';
 import { deriveTeamStats } from './team-stats.js';
 import { foldCareerStats, statSpecFor } from './stat-registry.js';
 import { COLUMN_MAP } from './category-lines.js';
-import { applyKnobs, readKnobs } from './format-knobs.js';
+import { applyKnobs, describeKnobs, knobsFor, readKnobs } from './format-knobs.js';
 import { applyOverrides } from './format-overrides.js';
 
 const basket = (side: 'A' | 'B', pts: number): RallyEvent => ({ t: 'point', side, pts });
@@ -71,6 +71,50 @@ describe('repeating overtime survives edits', () => {
     expect(play(edited, []).progress.periodMs).toBe(8 * 60_000);
     stillOvertime(edited);
     expect(applyKnobs(fiba, { ...readKnobs(fiba), extraTimeMinutes: 3 }).tieBreak?.extraTime).toMatchObject({ repeat: true, minutes: 3 });
+  });
+
+  it('repeat is a visible checkbox: ticked on the IIM presets, and it can be switched off and on', () => {
+    const iim = presetByKey('iim_4x10')!;
+    const k = readKnobs(iim);
+    expect(k.extraTimeRepeat).toBe(true);
+    const keys = knobsFor(k).map((x) => x.key);
+    expect(keys).toContain('extraTimeRepeat');
+    expect(keys).not.toContain('extraTimePeriods');
+    expect(describeKnobs(k)).toContain('repeated until someone leads');
+
+    const off = applyKnobs(iim, { ...k, extraTimeRepeat: false });
+    expect(off.tieBreak?.extraTime?.repeat).toBeUndefined();
+    expect(knobsFor(readKnobs(off)).map((x) => x.key)).toContain('extraTimePeriods');
+    stillOvertime(applyKnobs(off, { ...readKnobs(off), extraTimeRepeat: true }));
+  });
+
+  // A repeating overtime never runs out, so whatever follows extra time would never be reached.
+  it.each([
+    ['football shoot-out', 'football9_final_2x30', 'penalties'],
+    ['kabaddi golden raid', 'kabaddi_ko_2x20_et', 'goldenRaid'],
+    ['frisbee universal point', 'ultimate_final_2x20', 'universalPoint'],
+  ])('repeat is never offered or saved with a %s', (_name, key, after) => {
+    const f = presetByKey(key)!;
+    const k = { ...readKnobs(f), extraTimeRepeat: true };
+    expect(knobsFor(k).map((x) => x.key)).not.toContain('extraTimeRepeat');
+    expect(knobsFor(k).map((x) => x.key)).toContain('extraTimePeriods');
+    const saved = applyKnobs(f, k);
+    expect(saved.tieBreak?.extraTime?.repeat).toBeUndefined();
+    expect(saved.tieBreak).toHaveProperty(after);
+    expect(describeKnobs(k)).not.toContain('repeated');
+  });
+
+  it('a stored repeat beside a shoot-out still reaches the shoot-out (engine guard)', () => {
+    const f = presetByKey('football9_final_2x30')!;
+    const bad: ScoringFormat = { ...f, tieBreak: { ...f.tieBreak, extraTime: { ...f.tieBreak!.extraTime!, repeat: true } } };
+    // Two level halves, then two level extra-time periods.
+    expect(play(bad, levelQuarters(4)).progress.phase).toBe('penalties');
+  });
+
+  it('switching on a shoot-out drops repeat from a basketball format', () => {
+    const iim = presetByKey('iim_4x10')!;
+    const k = { ...readKnobs(iim), shootoutEnabled: true };
+    expect(applyKnobs(iim, k).tieBreak?.extraTime?.repeat).toBeUndefined();
   });
 
   it('a per-match override keeps repeat, for quarter and overtime length', () => {
