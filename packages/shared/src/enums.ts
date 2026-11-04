@@ -206,7 +206,8 @@ export type StandingsScheme = (typeof STANDINGS_SCHEME)[number];
 // score_for read each match's headline score, so they mean goals, sets or rubbers by sport.
 // frames_won / ball_diff: pool team ties only (frames and balls summed over the rubbers).
 // adt: kho-kho's average difference time over the group matches.
-export const STANDINGS_TIEBREAKER = ['points', 'wins', 'lost', 'head_to_head', 'score_diff', 'score_for', 'frames_won', 'ball_diff', 'adt'] as const;
+// set_quotient / point_quotient: volleyball and throwball, sets (rally points) won divided by lost.
+export const STANDINGS_TIEBREAKER = ['points', 'wins', 'lost', 'head_to_head', 'score_diff', 'score_for', 'frames_won', 'ball_diff', 'adt', 'set_quotient', 'point_quotient'] as const;
 // The order a stage gets when nobody set one (older saved stages carry it explicitly).
 export const STAGE_DEFAULT_TIEBREAKERS: StandingsTiebreaker[] = ['points', 'wins', 'lost'];
 export type StandingsTiebreaker = (typeof STANDINGS_TIEBREAKER)[number];

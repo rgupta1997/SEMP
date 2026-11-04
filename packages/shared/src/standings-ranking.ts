@@ -124,6 +124,7 @@ const COMMON_LABELS: Record<StandingsTiebreaker, string> = {
   score_diff: 'Score difference', score_for: 'Score for',
   frames_won: 'Frames won', ball_diff: 'Net ball difference',
   adt: 'ADT (average difference time)',
+  set_quotient: 'Sets quotient', point_quotient: 'Points quotient',
 };
 
 // A carrom tie's rubbers are "games" in the rulebook, not matches.
@@ -139,6 +140,8 @@ export function tiebreakerLabel(tb: StandingsTiebreaker, sport?: string | null, 
 export const TIEBREAKER_OPTIONS: StandingsTiebreaker[] = ['points', 'score_diff', 'score_for', 'head_to_head', 'wins', 'lost'];
 /** Read from the frames recorded in a pool team tie, so offered there only. */
 export const POOL_TIE_TIEBREAKERS: StandingsTiebreaker[] = ['frames_won', 'ball_diff'];
+/** Set sports (volleyball, throwball): FIVB-style quotients, sets then rally points. */
+export const QUOTIENT_TIEBREAKERS: StandingsTiebreaker[] = ['set_quotient', 'point_quotient'];
 
 /** The options that make sense for a sport. No sport (a default / format row) = all general ones. */
 export function tiebreakerOptions(sport?: string | null, entryType?: string | null): StandingsTiebreaker[] {
@@ -146,6 +149,7 @@ export function tiebreakerOptions(sport?: string | null, entryType?: string | nu
   // Carrom ranks on games won (Inter-IIM), so it keeps "score for" even as a team tie.
   const own = canonicalTeamSport(sport) === 'carrom' ? TIEBREAKER_OPTIONS : withoutScoreFor(TIEBREAKER_OPTIONS, rankingFamily(sport, entryType));
   if (canonicalTeamSport(sport) === 'kho-kho') return ['points', 'adt', ...own.filter((t) => t !== 'points')];
+  if (rankingFamily(sport, entryType) === 'sets') return [...own, ...QUOTIENT_TIEBREAKERS];
   return canonicalTeamSport(sport) === 'pool/snooker' && entryType === 'team' ? [...own, ...POOL_TIE_TIEBREAKERS] : own;
 }
 

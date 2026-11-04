@@ -165,6 +165,8 @@ export function TeamDeck(p: TeamDeckProps) {
    */
   // The number on the board, and what every tie-break decision is taken against.
   const shown = aggregate ? aggregateScore(state) : state.score[state.pointLevel];
+  // Once a set sport is over the next set's 0-0 means nothing: the board shows the sets won.
+  const boardScore = !aggregate && state.ended ? env.unitsFor : shown;
 
   /**
    * HOW LONG THE PERIOD IN PROGRESS RUNS.
@@ -553,7 +555,7 @@ export function TeamDeck(p: TeamDeckProps) {
       <div data-qa="team-scoreboard"
         className="shrink-0 overflow-hidden rounded-xl bg-brand-900 px-3 py-2 text-white shadow-sm">
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-          <ScoreSide name={p.homeName} org={p.homeOrg} score={shown[0]} side="home" serving={serving === 'A'} />
+          <ScoreSide name={p.homeName} org={p.homeOrg} score={boardScore[0]} side="home" serving={serving === 'A'} />
 
           <div className="flex flex-col items-center gap-1">
             <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-on-brand">
@@ -563,7 +565,8 @@ export function TeamDeck(p: TeamDeckProps) {
                 : progress.phase === 'universalPoint' ? 'Universal point'
                 : progress.phase === 'goldenRaid' ? 'Golden raid'
                 : aggregate && state.ended ? finalLabel
-                : aggregate ? (repeatingExtra ? `${periodName} ${periodNo}` : `${periodName} ${periodNo} of ${periodOf}`) : lv.label}
+                : aggregate ? (repeatingExtra ? `${periodName} ${periodNo}` : `${periodName} ${periodNo} of ${periodOf}`)
+                : state.ended ? 'Final' : `${lv.label} ${played + 1}`}
             </div>
 
             {/* THE CLOCK. Tapping the reading opens the correction panel - an
@@ -603,7 +606,7 @@ export function TeamDeck(p: TeamDeckProps) {
               <div className="font-mono text-[10px] uppercase tracking-wider text-on-brand">
                 {progress.phase === 'universalPoint' ? 'Next goal wins'
                   : progress.phase === 'goldenRaid' ? 'Ahead after the raid wins'
-                  : progress.phase === 'penalties' || progress.phase === 'minimumChase' ? 'Level' : aggregate ? 'Total' : lv.label}
+                  : progress.phase === 'penalties' || progress.phase === 'minimumChase' ? 'Level' : aggregate ? 'Total' : null}
               </div>
             )}
             {!aggregate && maxUnits > 1 && (
@@ -613,7 +616,7 @@ export function TeamDeck(p: TeamDeckProps) {
             )}
           </div>
 
-          <ScoreSide name={p.awayName} org={p.awayOrg} score={shown[1]} side="away" align="right" serving={serving === 'B'} />
+          <ScoreSide name={p.awayName} org={p.awayOrg} score={boardScore[1]} side="away" align="right" serving={serving === 'B'} />
         </div>
 
         {/* The strip: what has been booked, and how each period finished. */}
@@ -968,7 +971,7 @@ export function TeamDeck(p: TeamDeckProps) {
           />
         ) : surface === 'more' ? (
           <MorePanel
-            format={format} state={state} nameOf={nameOf} shown={shown} played={played}
+            format={format} state={state} nameOf={nameOf} shortOf={shortOf} shown={shown} played={played}
             totalPeriods={totalPeriods} bestOf={maxUnits !== totalPeriods ? maxUnits : undefined}
             periodLabel={lv.label} finishing={finishing} knockout={p.knockout}
             onSuspend={p.onSuspend && (() => { setFinishing(false); p.onSuspend!(log, state); })}
@@ -988,7 +991,7 @@ export function TeamDeck(p: TeamDeckProps) {
                       ? 'bg-brand-600 text-white'
                       : 'border border-line bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
                   )}>
-                  {nameOf(s)}
+                  <SideChip full={nameOf(s)} short={shortOf(s)} />
                   {roleOf(s) && (
                     <span className="block text-[10px] font-normal uppercase tracking-wide opacity-80">
                       {roleOf(s) === 'attack' ? attackWord : 'defending'}
@@ -2292,7 +2295,7 @@ function Timeline({ log, nameOf, nameFor, format, onClose, disciplineKinds, onRe
 
 /** Corrections and the ways a match ends that the rules did not produce. */
 function MorePanel({
-  format, state, nameOf, shown, played, totalPeriods, bestOf, periodLabel, finishing, onFinishing, onEvent, onClose, knockout, onSuspend,
+  format, state, nameOf, shortOf, shown, played, totalPeriods, bestOf, periodLabel, finishing, onFinishing, onEvent, onClose, knockout, onSuspend,
 }: {
   format: ScoringFormat;
   knockout?: boolean;
@@ -2301,6 +2304,7 @@ function MorePanel({
   /** Set for a sets match ("best of 5"); absent when every period is played. */
   bestOf?: number;
   nameOf: (s: Side) => string;
+  shortOf: (s: Side) => string;
   shown: readonly [number, number] | number[];
   played: number;
   totalPeriods: number;
@@ -2357,13 +2361,13 @@ function MorePanel({
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
         <div>
           <div className="mb-1 text-[10px] uppercase tracking-wide text-muted">
-            The pitch outranks the engine
+            Correct the score
           </div>
           <div className="flex flex-wrap gap-1.5">
             {(['A', 'B'] as Side[]).map((side) => (
               <Button key={side} size="sm" variant="outline"
                 onClick={() => onEvent({ t: 'adjust', side, delta: -1, reason: 'minus one' })}>
-                −1 {nameOf(side)}
+                −1 <SideChip full={nameOf(side)} short={shortOf(side)} />
               </Button>
             ))}
           </div>
@@ -2378,7 +2382,7 @@ function MorePanel({
               {(['A', 'B'] as Side[]).map((side) => (
                 <Button key={side} size="sm" variant="subtle"
                   onClick={() => onEvent({ t: 'penalty', side, reason: 'conduct' })}>
-                  {nameOf(side)}
+                  <SideChip full={nameOf(side)} short={shortOf(side)} />
                 </Button>
               ))}
             </div>
@@ -2410,7 +2414,7 @@ function MorePanel({
                     });
                     if (ok) { onFinishing(false); onEvent({ t: 'end', outcome: 'win', reason: 'conceded', winner: side }); }
                   }}>
-                  Award to {nameOf(side)}
+                  Award to <SideChip full={nameOf(side)} short={shortOf(side)} />
                 </Button>
               ))}
               {/* Time-capped (volleyball's 15-minute set): the side ahead at the buzzer takes it. */}
@@ -2457,7 +2461,7 @@ function MorePanel({
                   placeholder="Note, optional - e.g. led by 2, or pull contest 52m-47m" aria-label="Rain note" />
                 <div className="flex flex-wrap gap-1.5">
                   {(['A', 'B'] as Side[]).map((side) => (
-                    <Button key={side} size="sm" variant="outline" onClick={() => void rain(side)}>{nameOf(side)} win</Button>
+                    <Button key={side} size="sm" variant="outline" onClick={() => void rain(side)}><SideChip full={nameOf(side)} short={shortOf(side)} /> win</Button>
                   ))}
                   {!knockout && <Button size="sm" variant={rainDrawAsk ? 'primary' : 'outline'} onClick={() => setRainDrawAsk(!rainDrawAsk)}>Draw</Button>}
                 </div>

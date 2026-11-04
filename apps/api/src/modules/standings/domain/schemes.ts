@@ -1,4 +1,4 @@
-import { addAdt, adtOf, emptyAdt, type AdtTally,
+import { addAdt, adtOf, emptyAdt, quotient, type AdtTally,
   knockoutRoundSize, KNOCKOUT_ROUND, FINALIST_DETAIL_KEY, THIRD_PLACE_ROUND, findTieResolution,
   groupRankingFor, isKnockoutRound, type GroupRanking, type StandingsRule, type StandingsPlacement,
   type StandingsTiebreaker, type TieResolution,
@@ -51,6 +51,9 @@ export interface SchemeFixture {
   away_frames?: number;
   home_balls?: number;
   away_balls?: number;
+  /** Set sports: rally points summed over the sets; absent when only a final score was entered. */
+  home_rally?: number;
+  away_rally?: number;
 }
 
 export interface EntityTally {
@@ -69,6 +72,10 @@ export interface EntityTally {
   frames?: number;
   balls_for?: number;
   balls_against?: number;
+  // Set sports: rally points for / against, and how many results had none (final score only).
+  rally_for?: number;
+  rally_against?: number;
+  rally_missing?: number;
   // Walkovers lost - a side whose every result is one is a no-show (no participation).
   wo: number;
   // Scheme-specific counts surfaced to the UI (e.g. { gold: 2 }, { semi_finalist: 1 }).
@@ -78,7 +85,7 @@ export interface EntityTally {
 }
 
 function emptyTally(entity_id: string): EntityTally {
-  return { entity_id, played: 0, won: 0, drawn: 0, lost: 0, points: 0, gf: 0, ga: 0, frames: 0, balls_for: 0, balls_against: 0, wo: 0, detail: {} };
+  return { entity_id, played: 0, won: 0, drawn: 0, lost: 0, points: 0, gf: 0, ga: 0, frames: 0, balls_for: 0, balls_against: 0, rally_for: 0, rally_against: 0, rally_missing: 0, wo: 0, detail: {} };
 }
 
 // A result that counts: a played match, or a walkover with its winner (a forfeit is a
@@ -112,6 +119,8 @@ function leagueTally(fixtures: SchemeFixture[], win: number, draw: number, loss:
     if (played && away && f.away_adt) away.adt = addAdt(away.adt ?? emptyAdt(), f.away_adt);
     if (played && home) addFrames(home, f.home_frames, f.home_balls, f.away_balls);
     if (played && away) addFrames(away, f.away_frames, f.away_balls, f.home_balls);
+    if (played && home) addRally(home, f, f.home_rally, f.away_rally);
+    if (played && away) addRally(away, f, f.away_rally, f.home_rally);
 
     const isDraw = f.winner_team_id == null
       && (f.no_result === true || f.draw_no_points === true || (f.home_score != null && f.away_score != null && f.home_score === f.away_score));
@@ -136,6 +145,13 @@ function addFrames(row: EntityTally, frames = 0, ballsFor = 0, ballsAgainst = 0)
   row.balls_against = (row.balls_against ?? 0) + ballsAgainst;
 }
 
+// A played match with no rally points was entered as a final score: say so, don't guess.
+function addRally(row: EntityTally, f: SchemeFixture, won?: number, lost?: number) {
+  if (won == null || lost == null) { if (f.status === 'completed') row.rally_missing = (row.rally_missing ?? 0) + 1; return; }
+  row.rally_for = (row.rally_for ?? 0) + won;
+  row.rally_against = (row.rally_against ?? 0) + lost;
+}
+
 const isNoShow = (t: EntityTally) => t.played > 0 && t.wo === t.played;
 
 // ---------- Group / league table ranking ----------
@@ -151,13 +167,17 @@ function metric(r: EntityTally, t: StandingsTiebreaker): number {
     case 'ball_diff': return (r.balls_for ?? 0) - (r.balls_against ?? 0);
     // No timed match yet: below every team that has one, and level with each other.
     case 'adt': return r.adt ? adtOf(r.adt) : Number.NEGATIVE_INFINITY;
+    // Nothing lost ranks top (Infinity); nothing played, below everyone.
+    case 'set_quotient': return quotient(r.gf, r.ga) ?? Number.NEGATIVE_INFINITY;
+    case 'point_quotient': return quotient(r.rally_for ?? 0, r.rally_against ?? 0) ?? Number.NEGATIVE_INFINITY;
     case 'head_to_head': return 0; // needs the fixtures - handled by rankGroup
   }
 }
 
 // Stable split of a block into runs of equal value, best first.
 function splitBy(block: EntityTally[], value: (r: EntityTally) => number): EntityTally[][] {
-  const sorted = [...block].sort((a, b) => value(b) - value(a));
+  // Infinity - Infinity is NaN, which breaks a sort: equal infinities are level.
+  const sorted = [...block].sort((a, b) => { const d = value(b) - value(a); return Number.isNaN(d) ? 0 : d; });
   const out: EntityTally[][] = [];
   for (const r of sorted) {
     const last = out[out.length - 1];

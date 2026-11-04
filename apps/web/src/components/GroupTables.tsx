@@ -17,7 +17,13 @@ interface TableRow {
   adt_estimated?: boolean;
   frames_won?: number;
   ball_diff?: number;
+  /** Volleyball / throwball: won / lost, 'max' when nothing was lost, null when nothing played. */
+  set_quotient?: Quotient;
+  point_quotient?: Quotient;
+  /** Results entered as a final score only, so left out of the points quotient. */
+  point_quotient_missing?: number;
 }
+type Quotient = number | 'max' | null;
 interface PoolTable {
   pool: number | null; label: string; complete: boolean; rows: TableRow[]; ties: string[][];
   /** Ties that hold something up. Absent from an older API: every tie counts. */
@@ -192,6 +198,9 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
   // Kho kho tables carry ADT (the server sends it only for kho kho).
   const showAdt = pool.rows.some((r) => r.adt !== undefined);
   const showFrames = pool.rows.some((r) => r.frames_won !== undefined);
+  const showSetQ = pool.rows.some((r) => r.set_quotient !== undefined);
+  const showPointQ = pool.rows.some((r) => r.point_quotient !== undefined);
+  const partialPointQ = pool.rows.filter((r) => (r.point_quotient_missing ?? 0) > 0);
   // Teams level on every tie-breaker share a position (2, 2, 4) until an order is set.
   const shownRank = (r: PoolTable['rows'][number]) => {
     const tie = pool.ties.find((t) => t.includes(r.entity_id));
@@ -211,6 +220,8 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
               <th className="px-2 py-1.5 text-left">Team</th>
               {['P', 'W', 'D', 'L', 'For', 'Ag', 'Diff', 'Pts'].map((h) => <th key={h} className="px-2 py-1.5 text-right">{h}</th>)}
               {showFrames && <FrameHeads />}
+              {showSetQ && <th className="whitespace-nowrap px-2 py-1.5 text-right normal-case" title="Sets quotient: sets won divided by sets lost">Set Q</th>}
+              {showPointQ && <th className="whitespace-nowrap px-2 py-1.5 text-right normal-case" title="Points quotient: rally points won divided by rally points lost">Pt Q</th>}
               {showAdt && (
                 <th className="px-2 py-1.5 text-right normal-case" title="Average difference time, seconds: time defended per player out, minus time chased per opponent out. Group matches, regulation turns only.">ADT</th>
               )}
@@ -230,6 +241,8 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
                 <td className="px-2 py-1.5 text-right tabular-nums">{formatPoints(r.score_for - r.score_against)}</td>
                 <td className="px-2 py-1.5 text-right font-semibold tabular-nums text-slate-900 dark:text-white">{formatPoints(r.points)}</td>
                 {showFrames && <FrameCells r={r} />}
+                {showSetQ && <td className="px-2 py-1.5 text-right tabular-nums">{fmtQuotient(r.set_quotient)}</td>}
+                {showPointQ && <td className="px-2 py-1.5 text-right tabular-nums">{fmtQuotient(r.point_quotient)}{(r.point_quotient_missing ?? 0) > 0 ? '*' : ''}</td>}
                 {showAdt && (
                   <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums"
                     title={r.adt_estimated ? 'A turn clock was not run: its full length was used.' : undefined}>
@@ -256,6 +269,11 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
           })}
         </ul>
       )}
+      {showPointQ && partialPointQ.length > 0 && (
+        <p className="border-t border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+          * Points quotient is incomplete for {partialPointQ.map((r) => r.short_name || r.name).join(', ')}: {partialPointQ.length === 1 ? 'a match was' : 'matches were'} entered as a final score only, with no rally points.
+        </p>
+      )}
       {showAdt && pool.rows.some((r) => r.adt_estimated) && (
         <p className="border-t border-slate-100 px-3 py-1.5 text-[11px] text-slate-400 dark:border-slate-800">* A turn's clock was not run, so its full length was used.</p>
       )}
@@ -267,7 +285,7 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
             open ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300'
               : 'border-slate-100 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-400')}>
             <span>
-              Tied: {t.map((id) => names[id] ?? id).join(', ')}. Level on {ranking.labels.join(', ').toLowerCase()}.
+              Tied: {t.map((id) => names[id] ?? id).join(', ')}. Level on {inSentence(ranking.labels.join(', '))}.
               {!open && ' This does not change who goes through or anyone\'s points.'}
             </span>
             {canManage && <Button size="sm" variant="outline" onClick={() => onResolve(t)}>{open ? 'Resolve' : 'Set order'}</Button>}
@@ -368,4 +386,9 @@ function FrameCells({ r }: { r: { frames_won?: number; ball_diff?: number } }) {
 /** Tie-breaker names mid-sentence: lower case, but an acronym such as ADT stays as it is. */
 function inSentence(text: string): string {
   return text.split(' ').map((w) => (/^[A-Z]{2,}/.test(w) ? w : w.toLowerCase())).join(' ');
+}
+
+/** A quotient to 3 decimals, as FIVB prints it; MAX when nothing was lost. */
+function fmtQuotient(q: Quotient | undefined): string {
+  return q === 'max' ? 'MAX' : q == null ? '-' : q.toFixed(3);
 }

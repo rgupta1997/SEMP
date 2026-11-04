@@ -5,7 +5,7 @@ import {
   type StandingsAggScope, type StandingsScheme, type StandingsTiebreaker,
 } from '@semp/shared';
 import type { Db, Prisma } from '../../infra/prisma.js';
-import { contingentKey, isKhoKhoFormat, khoMatchAdt, parseStoredFormat, poolTieTotalsOf, readRallyLog, type ContingentRef } from '@semp/shared';
+import { contingentKey, isKhoKhoFormat, khoMatchAdt, parseStoredFormat, poolTieTotalsOf, rallyPointsOf, readRallyLog, type ContingentRef } from '@semp/shared';
 import { assignStageSequence, inPlacingStage, placingStageSequences } from '../fixtures/domain/stage-tree.js';
 import { SCORED_STATUSES, accumulate, drawContext, levelOn, rankBy, runScheme, shareRanks, type EntityTally, type SchemeContext, type SchemeFixture } from './domain/schemes.js';
 import { convertEventTotals, type EventTotal } from './domain/event-conversion.js';
@@ -150,7 +150,14 @@ export function toSchemeFixture(f: DrawFixtureRow, homeKey: string | null, awayK
     pool_number: f.pool_number, stage_sequence: f.stage_sequence,
     ...poolTieFields(f.live_state),
     ...khoAdtFields(f.live_state),
+    ...rallyFields(f.live_state),
   };
+}
+
+/** Set sports: each side's rally points, for the points-quotient tie-breaker. */
+export function rallyFields(liveState: unknown): Pick<SchemeFixture, 'home_rally' | 'away_rally'> {
+  const p = rallyPointsOf(liveState);
+  return p ? { home_rally: p[0], away_rally: p[1] } : {};
 }
 
 /** Kho-kho: each side's ADT inputs from a match's turn log, for the ADT tie-breaker. */
