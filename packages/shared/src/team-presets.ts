@@ -32,6 +32,9 @@ const STRICT: EndStatePolicy = {
   countWalkoverInDifference: false,
 };
 
+/** Carrom: a retired or conceded game goes to the opponent at the target, the loser keeping its points. */
+const CARROM_END: EndStatePolicy = { ...STRICT, retirementScore: 'freezeThenAwardRemaining' };
+
 /** League play wants a draw to stand; a knockout must produce somebody. */
 const LEAGUE: EndStatePolicy = { ...STRICT, drawsAllowed: true, noShowGraceMinutes: 10 };
 
@@ -473,7 +476,7 @@ const BOARD: ScoringFormat[] = [
     sport: 'carrom', key: 'icf_bo3_boards', name: 'ICF - best of 3 games to 25 (8 boards a game)',
     levels: [{ key: 'game', label: 'Game', target: 25, winBy: 1, cap: null }, unitsMatch(2)],
     serve: PER_UNIT_SERVE, changeEnds: 'betweenUnits',
-    rulesSheet: { maxBoards: 8, queenPoints: 3, queenCutoff: 22, queenMustBeCovered: true },
+    rulesSheet: { maxBoards: 8, queenPoints: 3, queenCutoff: 22, queenMustBeCovered: true }, endStates: CARROM_END,
   }),
   // Inter-IIM rulebook: one game is 4 boards or 16 points, queen 3 up to and including 13.
   // Level on points: more boards won, then 2 tie-break boards totalled. The best of 3
@@ -482,19 +485,19 @@ const BOARD: ScoringFormat[] = [
     sport: 'carrom', key: 'iim_4boards_16', name: 'Inter-IIM - one game, 4 boards or 16 points',
     levels: [{ key: 'game', label: 'Game', target: 16, winBy: 1, cap: null }, unitsMatch(1)],
     serve: PER_UNIT_SERVE, changeEnds: 'betweenUnits',
-    rulesSheet: { maxBoards: 4, queenPoints: 3, queenCutoff: 14, queenMustBeCovered: true, boardsWonDecides: true, tieBreakBoards: 2 },
+    rulesSheet: { maxBoards: 4, queenPoints: 3, queenCutoff: 14, queenMustBeCovered: true, boardsWonDecides: true, tieBreakBoards: 2 }, endStates: CARROM_END,
   }),
   fmt({
     sport: 'carrom', key: 'corp_bo3_21', name: 'Corporate - best of 3 games to 21',
     levels: [{ key: 'game', label: 'Game', target: 21, winBy: 1, cap: null }, unitsMatch(2)],
     serve: PER_UNIT_SERVE, mode: 'selfScored',
-    rulesSheet: { queenPoints: 3 },
+    rulesSheet: { queenPoints: 3 }, endStates: { ...CARROM_END, drawsAllowed: true, noShowGraceMinutes: 10 },
   }),
   fmt({
     sport: 'carrom', key: 'corp_single_29', name: 'Corporate - single game to 29',
     levels: [{ key: 'game', label: 'Game', target: 29, winBy: 1, cap: null }, unitsMatch(1)],
     serve: PER_UNIT_SERVE, mode: 'selfScored',
-    rulesSheet: { queenPoints: 3 },
+    rulesSheet: { queenPoints: 3 }, endStates: { ...CARROM_END, drawsAllowed: true, noShowGraceMinutes: 10 },
   }),
   fmt({
     sport: 'carrom', key: 'boards_bo5', name: 'Best of 5 boards (board winner only)',

@@ -176,14 +176,26 @@ function headToHead(block: EntityTally[], fixtures: SchemeFixture[], pts: GroupR
   return parts.flatMap((p) => (p.length > 1 ? headToHead(p, fixtures, pts) : [p]));
 }
 
-/** Orders rows into blocks; a block of 2+ is still level on every tie-breaker. */
-export function tieBlocks(rows: EntityTally[], tiebreakers: StandingsTiebreaker[], fixtures: SchemeFixture[] = [], pts?: GroupRanking): EntityTally[][] {
-  let blocks = [rows];
+/** A block of rows and the tie-breaker that split it from the block above (null for the first). */
+interface ReasonedBlock { rows: EntityTally[]; by: StandingsTiebreaker | null }
+
+function reasonedBlocks(rows: EntityTally[], tiebreakers: StandingsTiebreaker[], fixtures: SchemeFixture[], pts?: GroupRanking): ReasonedBlock[] {
+  let blocks: ReasonedBlock[] = [{ rows, by: null }];
   for (const tb of tiebreakers) {
     if (tb === 'head_to_head' && (!pts || fixtures.length === 0)) continue;
-    blocks = blocks.flatMap((b) => (b.length < 2 ? [b] : tb === 'head_to_head' ? headToHead(b, fixtures, pts!) : splitBy(b, (r) => metric(r, tb))));
+    blocks = blocks.flatMap((b) => {
+      if (b.rows.length < 2) return [b];
+      const parts = tb === 'head_to_head' ? headToHead(b.rows, fixtures, pts!) : splitBy(b.rows, (r) => metric(r, tb));
+      // The first part keeps the block's own boundary; every later part was split off by this tie-breaker.
+      return parts.map((p, i) => ({ rows: p, by: i === 0 ? b.by : tb }));
+    });
   }
   return blocks;
+}
+
+/** Orders rows into blocks; a block of 2+ is still level on every tie-breaker. */
+export function tieBlocks(rows: EntityTally[], tiebreakers: StandingsTiebreaker[], fixtures: SchemeFixture[] = [], pts?: GroupRanking): EntityTally[][] {
+  return reasonedBlocks(rows, tiebreakers, fixtures, pts).map((b) => b.rows);
 }
 
 export interface RankedGroup {
@@ -191,6 +203,8 @@ export interface RankedGroup {
   rows: EntityTally[];
   /** Blocks still level after tie-breakers and with no hand-picked order. */
   ties: string[][];
+  /** Between rows[i] and rows[i + 1]: the tie-breaker that separated them, 'resolution' for a hand-picked order, null when still level. */
+  decidedBy: Array<StandingsTiebreaker | 'resolution' | null>;
 }
 
 /** A hand-picked order for a tied set, or undefined when none is saved. */
@@ -201,15 +215,18 @@ export function rankGroup(fixtures: SchemeFixture[], ranking: GroupRanking, reso
   const table = leagueTally(fixtures, ranking.win, ranking.draw, ranking.loss);
   const rows: EntityTally[] = [];
   const ties: string[][] = [];
-  for (const block of tieBlocks([...table.values()], ranking.tiebreakers, fixtures, ranking)) {
+  // Boundary reason before each row (index 0 unused): what put it below the row above.
+  const before: RankedGroup['decidedBy'] = [];
+  for (const { rows: block, by } of reasonedBlocks([...table.values()], ranking.tiebreakers, fixtures, ranking)) {
+    if (rows.length) before.push(by);
     if (block.length === 1) { rows.push(block[0]); continue; }
     const ids = block.map((r) => r.entity_id);
     const order = resolve?.(ids);
-    if (order) rows.push(...order.map((id) => block.find((r) => r.entity_id === id)!));
-    else { ties.push(ids); rows.push(...block); }
+    if (order) { rows.push(...order.map((id) => block.find((r) => r.entity_id === id)!)); before.push(...ids.slice(1).map(() => 'resolution' as const)); }
+    else { ties.push(ids); rows.push(...block); before.push(...ids.slice(1).map(() => null)); }
   }
   rows.forEach((r, i) => { r.rank = i + 1; });
-  return { rows, ties };
+  return { rows, ties, decidedBy: before };
 }
 
 export const resolverFor = (resolutions: TieResolution[] | undefined, scope: 'pool' | 'placing', stage: number, pool: number | null): TieResolver =>

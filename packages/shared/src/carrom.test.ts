@@ -269,6 +269,13 @@ describe('the Inter-IIM level game', () => {
     const big = carromMatch([...evenBoards, b('A', 9, 'winner')], rules);
     expect(big.decided).toBe(false);
   });
+
+  it('a game won on the tie-break keeps the score the board limit left, the tie-break apart', () => {
+    const m = carromMatch([...evenBoards, b('B', 2), b('A', 5)], rules);
+    expect(m.games[0]).toMatchObject({ score: [6, 6], tieBreakScore: [5, 2], winner: 'A' });
+    expect(m.games[0].boards.map((x) => !!x.tieBreak)).toEqual([false, false, false, false, true, true]);
+    expect(carromHeadline(m, rules)).toEqual([6, 6]);
+  });
 });
 
 describe('ICF level game is unchanged', () => {
@@ -298,8 +305,31 @@ describe('a side retiring from a carrom game', () => {
   it('gives the game in progress to the other side, boards played stay', () => {
     const m = carromMatch([b('B', 5), b('A', 2)], iim, 'A', [{ afterBoards: 2, side: 'B' }]);
     expect(m).toMatchObject({ decided: true, winner: 'A' });
-    expect(m.games[0]).toMatchObject({ retired: 'B', winner: 'A', score: [2, 5] });
+    // Carrom presets: the winner is taken to the target, the loser keeps its points.
+    expect(m.games[0]).toMatchObject({ retired: 'B', winner: 'A', score: [16, 5] });
     expect(m.games[0].boards).toHaveLength(2);
+  });
+
+  it('scores the retirement as the format says', () => {
+    const boards = [b('B', 5), b('A', 2)];
+    const at = (retirementScore: typeof iim.retirementScore) =>
+      carromMatch(boards, { ...iim, retirementScore }, 'A', [{ afterBoards: 2, side: 'B' }]).games[0].score;
+    expect(at('freezeAsPlayed')).toEqual([2, 5]);
+    expect(at('freezeThenAwardRemaining')).toEqual([16, 5]);
+    expect(at('targetToZero')).toEqual([16, 0]);
+  });
+
+  it('a format saved before the setting existed keeps scoring as played', () => {
+    expect(carromRulesOf({ levels: [{ target: 16 }, { target: 1 }], rulesSheet: { maxBoards: 4 } }).retirementScore).toBe('freezeAsPlayed');
+    expect(iim.retirementScore).toBe('freezeThenAwardRemaining');
+  });
+
+  it('the rules editor offers the setting for carrom and writes it back', () => {
+    const k = readKnobs(presetByKey('iim_4boards_16')!);
+    expect(k.retirementScore).toBe('freezeThenAwardRemaining');
+    expect(knobsFor(k).map((s) => s.key)).toContain('retirementScore');
+    const asPlayed = applyKnobs(presetByKey('iim_4boards_16')!, { ...k, retirementScore: 'freezeAsPlayed' });
+    expect(carromRulesOf(asPlayed).retirementScore).toBe('freezeAsPlayed');
   });
 
   it('can concede before a board is played', () => {

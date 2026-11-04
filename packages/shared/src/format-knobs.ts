@@ -9,7 +9,7 @@ import { canonicalTeamSport } from './team-presets.js';
 import { cardMinutesFor, cardSportOf, escalationOn, type CardSport } from './suspensions.js';
 import type {
   CapAction, CapTieRule, ChangeEndsRule, LevelSpec, OfficiatingMode,
-  ScoringFormat, ServeMovement, PointScoring,
+  ScoringFormat, ServeMovement, PointScoring, RetirementPolicy,
 } from './scoring-rules.js';
 
 // ============================================================================
@@ -183,6 +183,8 @@ export interface FormatKnobs {
   carromBoardsWonDecides: boolean;
   /** Carrom: tie-break boards totalled on their own. 1 = the next board decides (ICF). */
   carromTieBreakBoards: number;
+  /** What a retired or conceded game is recorded as (endStates.retirementScore). */
+  retirementScore: RetirementPolicy;
 }
 
 /** The only knobs a chess format has; everything else describes a game it does not play. */
@@ -191,7 +193,7 @@ const CHESS_KNOBS = new Set<keyof FormatKnobs>(['unitsToWin', 'timeBaseMinutes',
 const CARROM_KNOBS = new Set<keyof FormatKnobs>([
   'unitsToWin', 'target', 'carromMaxBoardsEnabled', 'carromMaxBoards', 'carromQueenPoints',
   'carromQueenCutoffEnabled', 'carromQueenCutoff', 'carromQueenMustBeCovered', 'carromBoardsWonDecides',
-  'carromTieBreakBoards', 'officiatingMode',
+  'carromTieBreakBoards', 'officiatingMode', 'retirementScore',
 ]);
 
 /** UI metadata for one knob. Rendering is generic; this is what makes it legible. */
@@ -305,6 +307,14 @@ export const KNOB_SPECS: KnobSpec[] = [
   { key: 'carromTieBreakBoards', label: 'Tie-break boards', group: 'tieBreak', type: 'int', min: 1, max: 5,
     hint: '1 = the next board decides (ICF). 2 or more = play them all and the higher total over them wins.',
     applies: (k) => k.carrom && k.target > 1 && k.carromMaxBoardsEnabled },
+  { key: 'retirementScore', label: 'A retired or conceded game', group: 'ends', type: 'enum',
+    hint: 'The game goes to the opponent either way; this sets the score it is recorded at.',
+    options: [
+      { value: 'freezeThenAwardRemaining', label: 'Winner gets the target (16-5)' },
+      { value: 'targetToZero', label: 'Target to zero (16-0)' },
+      { value: 'freezeAsPlayed', label: 'Score as played (2-5)' },
+    ],
+    applies: (k) => k.carrom && k.target > 1 },
   { key: 'handicapEnabled', label: 'Handicap start', group: 'shape', type: 'bool',
     hint: 'One side begins every game on a head start.',
     applies: (k) => !k.periodShaped },
@@ -643,6 +653,7 @@ export function readKnobs(f: ScoringFormat): FormatKnobs {
     officiatingMode: f.officiatingMode,
     drawsAllowed: f.endStates.drawsAllowed,
     walkoverCountsInDifference: !!f.endStates.countWalkoverInDifference,
+    retirementScore: f.endStates.retirementScore,
 
     periodShaped: isPeriodShaped(f),
     periodLabel: inner.label || 'period',
@@ -866,7 +877,7 @@ function buildFormat(f: ScoringFormat, k: FormatKnobs, name?: string): ScoringFo
         ...(k.minimumChaseEnabled && k.khoKho ? { minimumChase: true } : {}),
       }
       : null,
-    endStates: { ...f.endStates, drawsAllowed: k.drawsAllowed, countWalkoverInDifference: k.walkoverCountsInDifference },
+    endStates: { ...f.endStates, drawsAllowed: k.drawsAllowed, countWalkoverInDifference: k.walkoverCountsInDifference, retirementScore: k.retirementScore },
     // Chess keeps its time control on the rules sheet - shown to the arbiter, not enforced.
     ...(k.chess
       ? { rulesSheet: { ...(f.rulesSheet ?? {}), timeControl: `${Math.max(1, k.timeBaseMinutes)}+${Math.max(0, k.timeIncrementSeconds)}` } }

@@ -17,7 +17,7 @@ import {
 import { hydrateEvent, hasResultIn, moveUnplacedTo, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
 import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
 import { carromHeadline, carromMatchOf, carromRulesOf, drawSettlement, isCarromSport } from '@semp/shared';
-import { CarromResult, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
+import { CarromResult, carromDecider, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
 import { PoolResult, hydratePool } from '../../features/scoring/PoolResult';
 import { isFrameContest, isPoolSport, poolRubber } from '@semp/shared';
 import { TieLayoutEditor, type TieLayoutValue } from '../../features/scoring/TieLayoutEditor';
@@ -1317,6 +1317,8 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
         provenance={resolved.source}
         homeName={teamLabel(homeTeam(fixture))}
         awayName={teamLabel(awayTeam(fixture))}
+        homeShort={homeTeam(fixture)?.short_name || orgLabel(homeTeam(fixture))}
+        awayShort={awayTeam(fixture)?.short_name || orgLabel(awayTeam(fixture))}
         homeOrg={orgTitle(homeTeam(fixture))}
         awayOrg={orgTitle(awayTeam(fixture))}
         pairing={pairing}
@@ -1763,7 +1765,7 @@ function CarromConsole({ fixture, fixtureId, live, invalidate, onDone }:
 
   return (
     <>
-      <CarromResult homeName={homeName} awayName={awayName} rules={rules} formatName={format?.name} provenance={resolved.source}
+      <CarromResult homeName={homeName} awayName={awayName} homeShort={homeTeam(fixture)?.short_name || orgLabel(homeTeam(fixture))} awayShort={awayTeam(fixture)?.short_name || orgLabel(awayTeam(fixture))} rules={rules} formatName={format?.name} provenance={resolved.source}
         initial={initial} busy={persist.isPending} onSave={save} />
       <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} />
     </>
@@ -2639,7 +2641,10 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
     const won = r.winner ? `${r.winner === 'A' ? homeCode : awayCode} won` : '';
     if (carromTie && r.carrom?.boards.length) {
       const rules = carromRulesFor(r);
-      return { result: `${won} ${pair(carromHeadline(carromMatchOf(r.carrom, rules), rules))}`.trim(), games: null };
+      const m = carromMatchOf(r.carrom, rules);
+      // A one-game rubber won level on points says how: "tie-break 8-5".
+      const how = rules.gamesToWin <= 1 ? carromDecider(m.games[0], (s) => (s === 'A' ? homeCode : awayCode)) : '';
+      return { result: `${won} ${pair(carromHeadline(m, rules))}`.trim(), games: how || null };
     }
     const bestOf = poolFramesOf(i);
     if (bestOf && r.pool?.frames.length) {
@@ -2658,8 +2663,10 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
     if (r.drawn) return spec.boardPoints ? 'Drawn ½–½' : 'Drawn';
     if (carromTie && r.carrom?.boards.length) {
       const rules = carromRulesFor(r);
-      const h = carromHeadline(carromMatchOf(r.carrom, rules), rules);
-      return r.winner ? `${r.winner === 'A' ? homeName : awayName} won ${h[0]}–${h[1]}` : `${h[0]}–${h[1]}`;
+      const m = carromMatchOf(r.carrom, rules);
+      const h = carromHeadline(m, rules);
+      const how = rules.gamesToWin <= 1 ? carromDecider(m.games[0], (s) => (s === 'A' ? homeCode : awayCode)) : '';
+      return r.winner ? `${r.winner === 'A' ? homeName : awayName} won ${h[0]}–${h[1]}${how ? `, ${how}` : ''}` : `${h[0]}–${h[1]}`;
     }
     const bestOf = poolFramesOf(i);
     if (bestOf && r.pool?.frames.length) {
@@ -2678,19 +2685,19 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
   return (
     <>
       <Card className="mb-5 overflow-hidden">
-        <div className="bg-slate-900 px-6 py-6 text-white">
+        <div className="bg-slate-900 px-4 py-6 text-white sm:px-6">
           <div className="flex items-center justify-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
             {live_ && <span className="inline-flex items-center gap-1.5 text-[var(--live)]"><span className="h-2 w-2 animate-pulse rounded-full bg-[var(--live)]" />LIVE</span>}
             <span>Tie · first to {formatPoints(target)} {spec.boardPoints ? 'board points' : 'rubbers'}</span>
           </div>
-          <div className="mt-2 flex items-center justify-center gap-5">
-            <div className="flex-1 text-right">
-              <div className="text-lg font-bold">{homeName}</div>
+          <div className="mt-2 flex items-center justify-center gap-3 sm:gap-5">
+            <div className="min-w-0 flex-1 break-words text-right">
+              <div className="text-sm font-bold min-[360px]:text-base sm:text-lg">{homeName}</div>
               {orgLabel(homeTeam(fixture)) && <div className="text-xs font-normal text-slate-400">{orgLabel(homeTeam(fixture))}</div>}
             </div>
-            <div className="flex items-center gap-3 text-5xl font-black tabular-nums"><span>{formatPoints(a)}</span><span className="text-slate-600">:</span><span>{formatPoints(b)}</span></div>
-            <div className="flex-1 text-left">
-              <div className="text-lg font-bold">{awayName}</div>
+            <div className="flex items-center gap-2 text-4xl font-black tabular-nums sm:gap-3 sm:text-5xl"><span>{formatPoints(a)}</span><span className="text-slate-600">:</span><span>{formatPoints(b)}</span></div>
+            <div className="min-w-0 flex-1 break-words text-left">
+              <div className="text-sm font-bold min-[360px]:text-base sm:text-lg">{awayName}</div>
               {orgLabel(awayTeam(fixture)) && <div className="text-xs font-normal text-slate-400">{orgLabel(awayTeam(fixture))}</div>}
             </div>
           </div>
@@ -2741,7 +2748,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                         isActive ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10'
                           : dead ? 'border-slate-200 opacity-60 hover:opacity-100 dark:border-slate-800'
                             : 'border-slate-200 hover:border-brand-300 dark:border-slate-800')}>
-                      <span className="min-w-0">
+                      <span className="min-w-0 flex-1">
                         <span className="block font-medium text-slate-700 dark:text-slate-200">{r.label}</span>
                         {r.lineup ? (
                           <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">
@@ -2751,7 +2758,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                           <span className="block text-[11px] text-amber-600 dark:text-amber-400">Players not named</span>
                         ) : null}
                       </span>
-                      <span className={cn('shrink-0 pl-2 text-xs font-semibold', r.winner ? 'text-brand-600 dark:text-brand-300' : 'text-slate-400 dark:text-slate-500')}>{rubberScore(r, i)}</span>
+                      <span className={cn('min-w-0 max-w-[60%] shrink-0 pl-2 text-right text-xs font-semibold', r.winner ? 'text-brand-600 dark:text-brand-300' : 'text-slate-400 dark:text-slate-500')}>{rubberScore(r, i)}</span>
                     </button>
                   );
                 })}
@@ -2817,7 +2824,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
 
             {active && (
               <Card className="mt-5">
-                <CardHeader title={active.label} subtitle={active.status === 'dead' ? 'Skipped (dead rubber)' : active.drawn ? 'Drawn - ½ each' : active.winner ? `${active.winner === 'A' ? homeName : awayName} won this ${unit}` : spec.boardPoints ? 'Record this board: a win, or a draw for ½ each.' : carromTie ? 'Board by board' : poolFramesOf(state.activeRubber) ? `Frame by frame · best of ${poolFramesOf(state.activeRubber)}` : racquet && mode === 'detailed' ? 'Point by point' : rdef.archetype === 'time' ? 'Pick the winner of this rubber.' : `${rdef.segLabel} ${Math.min(active.state.seg, rdef.segMax)} of ${rdef.segMax}`} />
+                <CardHeader title={active.label} subtitle={active.status === 'dead' ? 'Skipped (dead rubber)' : active.drawn ? 'Drawn - ½ each' : active.winner ? `${active.winner === 'A' ? homeName : awayName} won this ${unit}` : spec.boardPoints ? 'Record this board: a win, or a draw for ½ each.' : carromTie ? 'Board by board' : poolFramesOf(state.activeRubber) ? `Frame by frame · best of ${poolFramesOf(state.activeRubber)}` : racquet && mode === 'detailed' ? 'Point by point' : racquet ? `Final score only · tap who won this ${unit}` : rdef.archetype === 'time' ? 'Pick the winner of this rubber.' : `${rdef.segLabel} ${Math.min(active.state.seg, rdef.segMax)} of ${rdef.segMax}`} />
                 <CardBody className="space-y-4">
                   {active.status === 'dead' ? (
                     <div className="space-y-3 text-center">
@@ -2855,7 +2862,7 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                         <CarromResult
                           key={`carrom-${active.key}`}
                           rubber
-                          homeName={homeName}
+                          homeName={homeName} homeShort={homeCode} awayShort={awayCode}
                           awayName={awayName}
                           rules={carromRulesFor(active)}
                           formatName={(active.format ?? carromBase)?.name}
@@ -2899,6 +2906,8 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                           provenance={baseFormat.source}
                           homeName={homeName}
                           awayName={awayName}
+                          homeShort={homeCode}
+                          awayShort={awayCode}
                           homeOrg={orgTitle(homeTeam(fixture))}
                           awayOrg={orgTitle(awayTeam(fixture))}
                           // A singles rubber with nobody named still serves as singles.

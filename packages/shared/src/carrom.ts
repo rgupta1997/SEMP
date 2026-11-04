@@ -1,4 +1,4 @@
-import type { Side } from './scoring-rules.js';
+import type { RetirementPolicy, Side } from './scoring-rules.js';
 
 // ============================================================================
 // Carrom, scored the way it is played (ICF / AICF laws).
@@ -87,11 +87,13 @@ export interface CarromRules {
   boardsWonDecides: boolean;
   /** Tie-break boards played and totalled on their own. 1 = ICF, the next board decides. */
   tieBreakBoards: number;
+  /** The format's retirement score: as played, the winner taken to the target, or target-0. */
+  retirementScore: RetirementPolicy;
 }
 
 export const ICF_CARROM_RULES: CarromRules = {
   gameTarget: 25, gamesToWin: 2, maxBoards: 8, queenPoints: 3, queenCutoff: 22, queenMustBeCovered: true,
-  boardsWonDecides: false, tieBreakBoards: 1,
+  boardsWonDecides: false, tieBreakBoards: 1, retirementScore: 'freezeThenAwardRemaining',
 };
 
 /** The queen choices a format offers. */
@@ -99,7 +101,7 @@ export const queenCoversFor = (rules: CarromRules): readonly QueenCover[] =>
   rules.queenMustBeCovered ? ['winner', 'loser'] : QUEEN_COVER;
 
 /** The rules a carrom format describes: target and best-of from its levels, the rest from its rules sheet. */
-export function carromRulesOf(format: { levels: Array<{ target: number }>; rulesSheet?: Record<string, unknown> } | null | undefined): CarromRules {
+export function carromRulesOf(format: { levels: Array<{ target: number }>; rulesSheet?: Record<string, unknown>; endStates?: { retirementScore?: RetirementPolicy } } | null | undefined): CarromRules {
   if (!format?.levels?.length) return ICF_CARROM_RULES;
   const sheet = format.rulesSheet ?? {};
   const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -113,6 +115,8 @@ export function carromRulesOf(format: { levels: Array<{ target: number }>; rules
     queenMustBeCovered: sheet.queenMustBeCovered === true,
     boardsWonDecides: sheet.boardsWonDecides === true,
     tieBreakBoards: Math.max(1, Math.round(num(sheet.tieBreakBoards) ?? 1)),
+    // A format saved before the setting existed scored retirements as played.
+    retirementScore: format.endStates?.retirementScore ?? 'freezeAsPlayed',
   };
 }
 
@@ -133,7 +137,8 @@ export function carromBoardPoints(board: CarromBoard, winnerScoreBefore: number,
 }
 
 export interface CarromGame {
-  boards: Array<CarromBoard & { points: number; breaker: Side }>;
+  /** `tieBreak`: played after the board limit; its points count only in the tie-break. */
+  boards: Array<CarromBoard & { points: number; breaker: Side; tieBreak?: boolean }>;
   score: [number, number];
   winner: Side | null;
   /** Level after the board limit: the next board is a tie-breaker. */
@@ -182,6 +187,12 @@ export function carromMatch(boards: CarromBoard[], rules: CarromRules, firstBrea
       if (decided || r.afterBoards !== count) continue;
       game.winner = other(r.side);
       game.retired = r.side;
+      // The format decides what a retirement is worth: the score as played, or the winner taken to the target.
+      if (!boardsOnly(rules) && rules.retirementScore !== 'freezeAsPlayed') {
+        const wi = game.winner === 'A' ? 0 : 1;
+        game.score[wi] = Math.max(game.score[wi], rules.gameTarget);
+        if (rules.retirementScore === 'targetToZero') game.score[1 - wi] = 0;
+      }
       closeGame();
     }
   };
@@ -192,8 +203,11 @@ export function carromMatch(boards: CarromBoard[], rules: CarromRules, firstBrea
     const breaker = game.boards.length % 2 === 0 ? opener : other(opener);
     const wi = b.winner === 'A' ? 0 : 1;
     const points = carromBoardPoints(b, game.score[wi], rules);
-    game.boards.push({ ...b, points, breaker });
-    game.score[wi] = boardsOnly(rules) ? game.score[wi] + 1 : Math.min(rules.gameTarget, game.score[wi] + points);
+    // A tie-break board leaves the game score where the board limit left it (11-11), so a
+    // game won on the tie-break never reads as a level 16-16.
+    const inTieBreak = game.tieBreak;
+    game.boards.push({ ...b, points, breaker, ...(inTieBreak ? { tieBreak: true } : {}) });
+    if (!inTieBreak) game.score[wi] = boardsOnly(rules) ? game.score[wi] + 1 : Math.min(rules.gameTarget, game.score[wi] + points);
 
     const played = game.boards.length;
     const reached = game.score[0] >= rules.gameTarget || game.score[1] >= rules.gameTarget;

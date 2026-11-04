@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   atAdvantage, capLeader, changesEndsAfterUnit, effectiveLevel, expediteAllowed, expediteConfig, foldRally, formatForPairing, initKernel, isDecider, rallyTiming,
   resolveServer, resultEnvelope, serveCall, serveEveryNow, serveSpecFor, setChoiceDue, step, misconductTerms, timeoutRules, timeoutsLeft, unitClock,
@@ -33,6 +33,9 @@ export interface RacquetDeckProps {
   awayName: string;
   homeOrg?: string | null;
   awayOrg?: string | null;
+  /** Short codes (IIMK) shown on a phone, where full names cut to the same "Mock IIM …". */
+  homeShort?: string | null;
+  awayShort?: string | null;
   /** Named players per side, in nominated order. Drives the next-server name. */
   pairing?: Pairing;
   /** Who is actually on court, when known. Shown instead of the entry's team name. */
@@ -92,6 +95,14 @@ export function RacquetDeck(p: RacquetDeckProps) {
   const orgOf = (s: Side) => (sameOrg ? null : (s === 'A' ? p.homeOrg : p.awayOrg) || null);
   const entryOf = (s: Side) => (s === 'A' ? p.homeName : p.awayName);
   const nameOf = (s: Side) => orgOf(s) ?? entryOf(s);
+  // On screen: the short code on a phone, the full name from sm up. Not when both sides share
+  // an organisation - two players from one college would both read "IIMK".
+  const shortOf = (s: Side) => (sameOrg ? null : (s === 'A' ? p.homeShort : p.awayShort)?.trim() || null);
+  const who = (s: Side): ReactNode => {
+    const short = shortOf(s);
+    if (!short || short === nameOf(s)) return nameOf(s);
+    return <><span className="sm:hidden">{short}</span><span className="hidden sm:inline">{nameOf(s)}</span></>;
+  };
   const subOf = (s: Side) => {
     const players = playersOf(s);
     if (players?.length) return players.join(' / ');
@@ -321,7 +332,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
   const panel = (side: Side) => (
     <ScoreSide
       key={side}
-      name={nameOf(side)} org={subOf(side)}
+      name={who(side)} org={subOf(side)}
       // Finished: the live points have reset to 0, so the big number shows the result (2-1 in games).
       points={state.ended ? String(env.headline[side === 'A' ? 0 : 1]) : pointPair(lv, state.score[state.pointLevel])[side === 'A' ? 0 : 1]}
       serving={serve.movement !== 'none' && !state.ended && state.serve.side === side}
@@ -607,13 +618,14 @@ export function RacquetDeck(p: RacquetDeckProps) {
             {([leftSide, rightSide] as Side[]).map((side) => {
               const left = toLeft[side];
               return (
+                // Phone: stacked, team name and "this match" dropped - the card sits under that side's score.
                 <div key={side} className={cn(
-                  'flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-800',
-                  side === rightSide && 'flex-row-reverse text-right',
+                  'flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2 sm:flex-row sm:items-center sm:gap-3 dark:border-slate-800',
+                  side === rightSide && 'text-right sm:flex-row-reverse',
                 )}>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                      Timeouts · {nameOf(side)}
+                      Timeouts<span className="hidden sm:inline"> · {nameOf(side)}</span>
                     </div>
                     <div className={cn('mt-1 flex items-center gap-1.5', side === rightSide && 'justify-end')}
                       aria-label={`${left} of ${allowed} timeouts left this ${per}`}>
@@ -625,14 +637,14 @@ export function RacquetDeck(p: RacquetDeckProps) {
                             : 'border-slate-300 bg-transparent dark:border-slate-600',
                         )} />
                       ))}
-                      <span className="ml-1 text-xs text-slate-500 dark:text-slate-400">
-                        {left} left{left === 0 ? '' : ` this ${per}`}
+                      <span className="ml-1 whitespace-nowrap text-xs text-slate-500 dark:text-slate-400">
+                        {left} left{left === 0 ? '' : <span className="hidden sm:inline"> this {per}</span>}
                       </span>
                     </div>
                   </div>
                   <Button size="sm" variant={left === 0 ? 'subtle' : 'outline'} disabled={p.disabled}
                     title={left === 0 ? 'None left - another would be a technical warning' : undefined}
-                    className={cn('shrink-0', left === 0 && 'opacity-50')}
+                    className={cn('w-full shrink-0 sm:w-auto', left === 0 && 'opacity-50')}
                     onClick={() => callTimeout(side)}>
                     Timeout
                   </Button>
@@ -761,7 +773,7 @@ export function RacquetDeck(p: RacquetDeckProps) {
             <RallyButton
               key={side}
               qa={`rally-${side}`}
-              label={nameOf(side)}
+              label={who(side)}
               players={playersOf(side)?.join(' / ')}
               hint={state.ended ? 'undo a point first' : serve.pointScoring === 'serverOnly' && state.serve.side !== side ? 'wins the serve' : 'won the rally'}
               accent={accentOf(side)}
@@ -894,7 +906,7 @@ type Accent = (typeof ACCENT)[keyof typeof ACCENT];
 
 /** One half of the scoreboard: who, how many points, how many games, and what is at stake. */
 function ScoreSide({ name, org, points, serving, cue, units, cards, align, accent }: {
-  name: string; org?: string | null; points: string; serving: boolean; cue: string | null;
+  name: ReactNode; org?: string | null; points: string; serving: boolean; cue: string | null;
   units: { label: string; won: number; needed: number } | null; cards?: CardTally;
   align: 'left' | 'right'; accent: Accent;
 }) {
@@ -912,7 +924,7 @@ function ScoreSide({ name, org, points, serving, cue, units, cards, align, accen
         <span className="truncate text-base font-bold text-slate-900 sm:text-lg dark:text-white">{name}</span>
         {cards && <CardBadges cards={cards} />}
       </div>
-      {org && <div className="truncate text-xs text-slate-500 sm:text-sm dark:text-slate-400">{org}</div>}
+      {org && <div className="line-clamp-2 break-words text-xs text-slate-500 sm:line-clamp-1 sm:text-sm dark:text-slate-400">{org}</div>}
 
       <div className={cn('mt-2 flex flex-wrap items-end gap-x-3 gap-y-1', right && 'flex-row-reverse')}>
         <div className={cn(
@@ -998,7 +1010,7 @@ function CardBadges({ cards }: { cards: CardTally }) {
  * serverOnly scoring a receiver's rally win is a side-out and scores nothing.
  */
 function RallyButton({ label, players, hint, big, accent, serving, disabled, onClick, qa }:
-  { label: string; players?: string; hint: string; big: string; accent: Accent; serving: boolean; disabled?: boolean; onClick: () => void; qa?: string }) {
+  { label: ReactNode; players?: string; hint: string; big: string; accent: Accent; serving: boolean; disabled?: boolean; onClick: () => void; qa?: string }) {
   return (
     <button
       type="button"
@@ -1020,7 +1032,7 @@ function RallyButton({ label, players, hint, big, accent, serving, disabled, onC
       {/* Under side-out scoring the receiver's rally wins the serve, not a point. */}
       <span className="text-3xl font-black leading-none">{hint === 'wins the serve' ? 'Side-out' : big}</span>
       <span className="line-clamp-2 text-center text-base font-bold sm:text-lg">{label}</span>
-      {players && <span className="line-clamp-1 text-center text-xs text-white/80 sm:text-sm">{players}</span>}
+      {players && <span className="line-clamp-2 text-center text-xs text-white/80 sm:line-clamp-1 sm:text-sm">{players}</span>}
       <span className="text-[11px] font-semibold uppercase tracking-wider text-white/70">{hint}</span>
     </button>
   );

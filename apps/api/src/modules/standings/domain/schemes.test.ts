@@ -381,3 +381,27 @@ describe('no-show with counted walkovers', () => {
     expect(c).toMatchObject({ played: 2, lost: 2, wo: 2, ga: 4 });
   });
 });
+
+// The table says what separated teams level on points, so identical-looking rows are explained.
+describe('what separated each pair in a group table', () => {
+  const ranking = { win: 2, draw: 1, loss: 0, tiebreakers: ['points', 'score_diff', 'head_to_head'] as const };
+  // TT Pool A shape: K wins all; C, L, U one win each. C and L level on points and net; C beat L.
+  const pool = [
+    fx('K', 'C', 3, 2), fx('K', 'L', 3, 2), fx('K', 'U', 4, 1),
+    fx('C', 'L', 3, 2), fx('L', 'U', 3, 2), fx('U', 'C', 3, 2),
+  ];
+
+  it('names the tie-breaker between each pair, head-to-head included', () => {
+    const g = rankGroup(pool, { ...ranking, tiebreakers: [...ranking.tiebreakers] });
+    expect(g.rows.map((r) => r.entity_id)).toEqual(['K', 'C', 'L', 'U']);
+    expect(g.decidedBy).toEqual(['points', 'head_to_head', 'score_diff']);
+    expect(g.ties).toEqual([]);
+  });
+
+  it('a pair still level is null, a hand-picked one is "resolution"', () => {
+    const level = [fx('A', 'B', 3, 2), fx('B', 'A', 3, 2)];
+    const r = { ...ranking, tiebreakers: ['points', 'score_diff'] as Array<'points' | 'score_diff'> };
+    expect(rankGroup(level, r).decidedBy).toEqual([null]);
+    expect(rankGroup(level, r, () => ['B', 'A']).decidedBy).toEqual(['resolution']);
+  });
+});

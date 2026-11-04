@@ -20,6 +20,8 @@ interface PoolTable {
   pool: number | null; label: string; complete: boolean; rows: TableRow[]; ties: string[][];
   /** Ties that hold something up. Absent from an older API: every tie counts. */
   open_ties?: string[][];
+  /** Teams level on points and what put one above the other. Absent from an older API. */
+  separations?: Array<{ above: string; below: string; by: string; detail: string | null }>;
 }
 const openTiesOf = (p: PoolTable) => p.open_ties ?? p.ties;
 export interface DrawTables {
@@ -119,11 +121,15 @@ function ResolveModal({ drawId, target, names, onClose }: { drawId: string; targ
 // the place each got, and which tie-breaker (or hand-picked order) settled each pair.
 function CrossGroupView({ c, multiStage }: { c: CrossGroup; multiStage: boolean }) {
   const placed = c.rows.map((r) => r.place).filter((p): p is number => p != null);
+  // The places at stake, not the places given: two teams sharing 3rd are still playing for 3rd and 4th.
+  const from = placed.length ? Math.min(...placed) : null;
+  const to = from != null ? from + placed.length - 1 : null;
+  const span = from == null ? '' : from === to ? `${ordinal(from)} place`
+    : to === from + 1 ? `${ordinal(from)} and ${ordinal(to!)} place` : `${ordinal(from)} to ${ordinal(to!)} place`;
   const title = c.kind === 'semi_losers'
     ? 'Semi-final losers, ranked by group record'
-    : placed.length
-      ? `Ranking across groups: ${placed.length > 1 ? `places ${ordinal(Math.min(...placed))}-${ordinal(Math.max(...placed))}` : `${ordinal(placed[0])} place`}`
-      : 'Ranking across groups';
+    : span ? `Ranking across groups: ${span}` : 'Ranking across groups';
+  const nameOf = (r: CrossGroup['rows'][number]) => <span className="font-medium text-slate-700 dark:text-slate-200">{r.short_name || r.name}</span>;
   return (
     <div className="min-w-0 rounded-xl border border-slate-200 dark:border-slate-800">
       <div className="border-b border-slate-100 px-3 py-2 text-sm font-semibold text-slate-800 dark:border-slate-800 dark:text-slate-100">
@@ -159,12 +165,14 @@ function CrossGroupView({ c, multiStage }: { c: CrossGroup; multiStage: boolean 
       </div>
       <ul className="space-y-0.5 border-t border-slate-100 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
         {c.decided_by.map((d, i) => (
+          // Level pairs are not "above" each other: say they share, and which place.
           <li key={i}>
-            <span className="font-medium text-slate-700 dark:text-slate-200">{c.rows[i].short_name || c.rows[i].name}</span>
-            {' above '}
-            <span className="font-medium text-slate-700 dark:text-slate-200">{c.rows[i + 1].short_name || c.rows[i + 1].name}</span>
-            {': '}
-            {d ? <>decided by <span className="font-semibold">{d.toLowerCase()}</span></> : <span className="text-slate-600 dark:text-slate-300">level, so they share the place</span>}
+            {d ? (
+              <>{nameOf(c.rows[i])} above {nameOf(c.rows[i + 1])}: decided by <span className="font-semibold">{d.toLowerCase()}</span></>
+            ) : (
+              <>{nameOf(c.rows[i])} and {nameOf(c.rows[i + 1])} are level on every tie-breaker, so they share{' '}
+                <span className="font-semibold text-slate-700 dark:text-slate-200">{c.rows[i].place != null ? `${ordinal(c.rows[i].place!)} place` : 'the place'}</span>.</>
+            )}
           </li>
         ))}
       </ul>
@@ -226,6 +234,21 @@ function PoolTableView({ pool, ranking, canManage, onResolve, names }: {
           </tbody>
         </table>
       </div>
+      {/* Level on points but not tied: say what decided it, or identical rows read as a random order. */}
+      {!!pool.separations?.length && (
+        <ul className="space-y-0.5 border-t border-slate-100 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+          {pool.separations.map((s) => {
+            const label = (id: string) => { const r = pool.rows.find((x) => x.entity_id === id); return r?.short_name || r?.name || id; };
+            return (
+              <li key={s.above + s.below}>
+                <span className="font-medium text-slate-700 dark:text-slate-200">{label(s.above)}</span> above{' '}
+                <span className="font-medium text-slate-700 dark:text-slate-200">{label(s.below)}</span>: decided by{' '}
+                <span className="font-semibold">{s.by.toLowerCase()}</span>{s.detail ? ` (${s.detail})` : ''}
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {showAdt && pool.rows.some((r) => r.adt_estimated) && (
         <p className="border-t border-slate-100 px-3 py-1.5 text-[11px] text-slate-400 dark:border-slate-800">* A turn's clock was not run, so its full length was used.</p>
       )}

@@ -434,6 +434,18 @@ describe('5. reopening a rubber', () => {
     expect(wiped.rubbers[0].state, 'the points survived a reset').toEqual(initState());
   });
 
+  it('5.7 a skipped (dead) rubber can be reopened and played in a decided tie', () => {
+    let s = playTie(spec, () => 'A');   // A 3-0, rubbers 3 and 4 dead
+    s = reopenRubber(spec, s, 3);
+    expect(s.rubbers[3].status, 'the reopened rubber went straight back to dead').toBe('live');
+    expect(s.activeRubber).toBe(3);
+    expect(s.rubbers[4].status, 'the other skipped rubber should stay skipped').toBe('dead');
+    s = decideRubber(spec, s, 3, 'B');
+    expect(s.rubbers[3]).toMatchObject({ status: 'completed', winner: 'B' });
+    expect(tieWinner(spec, s)).toBe('A');
+    expect(rubbersWon(s)).toEqual({ a: 3, b: 1 });
+  });
+
   it('5.6 reopening never disturbs another rubber\'s result', () => {
     let s = initTie(spec);
     s = decideRubber(spec, s, 0, 'A');

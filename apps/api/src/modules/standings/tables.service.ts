@@ -1,11 +1,11 @@
 import {
-  addAdt, adtOf, contingentKey, emptyAdt, findTieResolution, isKhoKhoFormat, isKnockoutRound, khoMatchAdt, parseStoredFormat,
+  addAdt, adtOf, contingentKey, emptyAdt, findTieResolution, formatPoints, isKhoKhoFormat, isKnockoutRound, khoMatchAdt, parseStoredFormat,
   readRallyLog, readTieResolutions, tiebreakerLabel, type AdtTally,
   type GroupRanking, type StandingsScheme, type TieResolution,
 } from '@semp/shared';
 import type { Db } from '../../infra/prisma.js';
 import { NotFoundError } from '../../shared/errors.js';
-import { rankGroup, resolverFor, tableAnalysis } from './domain/schemes.js';
+import { rankGroup, resolverFor, tableAnalysis, type SchemeFixture } from './domain/schemes.js';
 import { DRAW_FIXTURE_FIELDS, loadRuleIndex, ruleFromIndex, schemeInput, toSchemeFixture } from './standings.service.js';
 
 // The group / league tables of one draw, ranked exactly as advancement and the tally
@@ -23,7 +23,10 @@ export interface PoolTable {
   pool: number | null; label: string; complete: boolean; rows: TableRow[]; ties: string[][];
   /** The ties that hold something up (a slot waiting on them, or placings read from the table). */
   open_ties: string[][];
+  /** Teams level on points and what put one above the other: "IIMC above IIML: head-to-head (IIMC won 3-2)". */
+  separations: PoolSeparation[];
 }
+export interface PoolSeparation { above: string; below: string; by: string; detail: string | null }
 export interface DrawTables {
   draw_id: string;
   championship_id: string;
@@ -137,7 +140,15 @@ export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTa
         }
       }
       const ties = complete ? g.ties : [];
-      return { pool, label: poolLabel(pool), complete, rows, ties, open_ties: ties.filter((t) => tieMatters(pool, t, rows)) };
+      // Only for a finished pool, and only where points were level: otherwise the table speaks for itself.
+      const poolFx = fixtures.filter((f) => !isKnockoutRound(f.round) && (f.stage_sequence ?? 1) === stage && (f.pool_number ?? null) === pool);
+      const short = (id: string) => names[id]?.short ?? names[id]?.name ?? 'Unknown';
+      const separations: PoolSeparation[] = !complete ? [] : g.decidedBy.flatMap((by, i) => {
+        const [a, b] = [g.rows[i], g.rows[i + 1]];
+        if (!by || by === 'points' || by === 'resolution' || !a || !b || a.points !== b.points) return [];
+        return [{ above: a.entity_id, below: b.entity_id, by: tiebreakerLabel(by, sport, entryType), detail: by === 'head_to_head' ? directResult(poolFx, a.entity_id, b.entity_id, short) : null }];
+      });
+      return { pool, label: poolLabel(pool), complete, rows, ties, open_ties: ties.filter((t) => tieMatters(pool, t, rows)), separations };
     });
     return { stage, ranking: { ...ranking, labels: ranking.tiebreakers.map((t) => tiebreakerLabel(t, sport, entryType)) }, pools };
   });
@@ -169,6 +180,18 @@ export async function readDrawTables(prisma: Db, drawId: string): Promise<DrawTa
     resolutions,
     names: Object.fromEntries(Object.entries(names).map(([k, v]) => [k, v.name])),
   };
+}
+
+/** The one finished match between two teams, winner first ("IIMC won 3-2"); null when there is not exactly one. */
+function directResult(fixtures: SchemeFixture[], a: string, b: string, short: (id: string) => string): string | null {
+  const games = fixtures.filter((f) => SETTLED.has(f.status) && f.status !== 'bye' && f.home_score != null && f.away_score != null
+    && ((f.home_entity_id === a && f.away_entity_id === b) || (f.home_entity_id === b && f.away_entity_id === a)));
+  if (games.length !== 1) return null;
+  const f = games[0];
+  const [aScore, bScore] = f.home_entity_id === a ? [f.home_score!, f.away_score!] : [f.away_score!, f.home_score!];
+  if (aScore === bScore) return null;
+  const [w, hi, lo] = aScore > bScore ? [a, aScore, bScore] : [b, bScore, aScore];
+  return `${short(w)} won ${formatPoints(hi)}-${formatPoints(lo)}`;
 }
 
 /** Is this exact set of teams tied right now (a pool tie or a placing tie)? */
