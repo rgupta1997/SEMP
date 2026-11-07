@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CHESS_ENDINGS, chessMatchOutcome, endingsFor, formatPoints, whiteInGame,
   type ChessEnding, type ChessGame, type ChessResult as Result, type Side,
+  readUndoTrail, redoTarget, sealUndoTrail, takeRedo, undoLast, type UndoEntry,
 } from '@semp/shared';
 import { Button, Card, CardBody, CardHeader, cn, confirmDialog, toast } from '../../components/ui';
 
@@ -12,6 +13,8 @@ export interface ChessState {
   firstWhite: Side;
   /** A drawn match settled by the organiser's tie-break (Armageddon, blitz play-off). */
   tiebreakWinner?: Side;
+  /** Every "Undo last game", with the game it took off. */
+  undoTrail?: UndoEntry<ChessGame>[];
 }
 
 export function hydrateChess(raw: unknown): ChessState {
@@ -20,7 +23,8 @@ export function hydrateChess(raw: unknown): ChessState {
   const games = Array.isArray(r.games)
     ? r.games.filter((g): g is ChessGame => !!g && (g.result === 'A' || g.result === 'B' || g.result === 'draw'))
     : [];
-  return { games, firstWhite: side(r.firstWhite) ?? 'A', ...(side(r.tiebreakWinner) ? { tiebreakWinner: side(r.tiebreakWinner) } : {}) };
+  const undoTrail = readUndoTrail<ChessGame>(r.undoTrail);
+  return { games, firstWhite: side(r.firstWhite) ?? 'A', ...(side(r.tiebreakWinner) ? { tiebreakWinner: side(r.tiebreakWinner) } : {}), ...(undoTrail.length ? { undoTrail } : {}) };
 }
 
 /** The match as it stands: points, and the winner - on the board, or on tie-break. */
@@ -78,7 +82,7 @@ export function ChessResult({ homeName, awayName, gamesInMatch, needsWinner, tim
     games[i] = { white: whiteInGame(state.firstWhite, i), result, ...(keepEnding ? { ending: prev!.ending } : {}) };
     // A correction that now decides the match drops any games recorded after it.
     const decidedHere = chessMatchOutcome(games.slice(0, i + 1), gamesInMatch).decided;
-    update({ ...state, games: decidedHere ? games.slice(0, i + 1) : games, tiebreakWinner: undefined });
+    update({ ...state, games: decidedHere ? games.slice(0, i + 1) : games, tiebreakWinner: undefined, undoTrail: sealUndoTrail(state.undoTrail ?? []) });
   };
 
   const setEnding = (i: number, ending: ChessEnding | '') => {
@@ -95,7 +99,18 @@ export function ChessResult({ homeName, awayName, gamesInMatch, needsWinner, tim
     update({ ...state, firstWhite: s, games: state.games.map((g, i) => ({ ...g, white: whiteInGame(s, i) })) });
   };
 
-  const removeLast = () => update({ ...state, games: state.games.slice(0, -1), tiebreakWinner: undefined });
+  // Undo keeps a record of the game it took off; Redo puts it back.
+  const trail = state.undoTrail ?? [];
+  const removeLast = () => {
+    const last = state.games[state.games.length - 1];
+    const r = last && undoLast(state.games, trail, `Game ${state.games.length} · ${last.result === 'draw' ? 'Draw' : `${nameOf(last.result)} won`}`);
+    if (r) update({ ...state, games: r.log, tiebreakWinner: undefined, undoTrail: r.trail });
+  };
+  const redoNext = redoTarget(trail);
+  const redo = () => {
+    const r = takeRedo(trail);
+    if (r) update({ ...state, games: [...state.games, { ...r.event, white: whiteInGame(state.firstWhite, state.games.length) }], undoTrail: r.trail });
+  };
 
   // Rows: every recorded game, plus the next one while the match is undecided.
   const rows = outcome.decided || state.games.length >= gamesInMatch ? state.games.length : state.games.length + 1;
@@ -241,6 +256,15 @@ export function ChessResult({ homeName, awayName, gamesInMatch, needsWinner, tim
           </div>
         )}
 
+        {/* The undo record: what came off, newest first. */}
+        {trail.length > 0 && (
+          <ul className="space-y-0.5 px-1 text-xs italic text-slate-500 dark:text-slate-400" data-qa="chess-undo-trail">
+            {[...trail].reverse().flatMap((u, k) => [
+              ...(u.redoneAt ? [<li key={`r${k}`}>↷ Redone: {u.label}</li>] : []),
+              <li key={`u${k}`}>↶ Undone: {u.label}</li>,
+            ])}
+          </ul>
+        )}
         <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
           <span className={cn('text-sm', busy ? 'text-amber-600 dark:text-amber-300' : outcome.decided ? 'font-semibold text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400')}>
             {status}
@@ -249,6 +273,7 @@ export function ChessResult({ homeName, awayName, gamesInMatch, needsWinner, tim
             {state.games.length > 0 && (
               <Button variant="outline" disabled={disabled || busy} onClick={removeLast}>{gamesInMatch > 1 ? 'Undo last game' : 'Clear result'}</Button>
             )}
+            {redoNext && <Button variant="outline" disabled={disabled || busy} onClick={redo} title={`Redo: ${redoNext.label}`}>Redo</Button>}
             <Button disabled={disabled || busy || !outcome.decided} onClick={confirm}>Confirm result</Button>
           </div>
         </div>

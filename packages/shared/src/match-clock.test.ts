@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clockReading, currentPeriodEvents, formatClock, matchMinute, minuteLabel } from './match-clock.js';
+import { afterUndoingWhistle, clockReading, currentPeriodEvents, formatClock, matchMinute, minuteLabel, whistleEvents } from './match-clock.js';
 import type { RallyLog } from './rally-kernel.js';
 
 const T0 = Date.parse('2026-09-25T10:00:00.000Z');
@@ -163,5 +163,34 @@ describe('how a time is written down', () => {
     expect(minuteLabel(23 * 60_000, FULL)).toBe("24'");
     expect(minuteLabel(FULL, FULL)).toBe("45+1'");
     expect(minuteLabel(FULL + 90_000, FULL)).toBe("45+2'");
+  });
+});
+
+describe('the whistle stops the clock, so reopening a half days later reads 90:00', () => {
+  const DAYS = 3 * 24 * 3600;
+  it('a whistle on a running clock records the stop with the period end', () => {
+    const log: RallyLog = [{ t: 'clockStart', at: at(0) }];
+    expect(whistleEvents(log, T0 + 2_700_000)).toEqual([{ t: 'clockPause' }, { t: 'endPeriod' }]);
+    expect(whistleEvents([{ t: 'clockStart', at: at(0) }, { t: 'clockPause', at: at(60) }], T0)).toEqual([{ t: 'endPeriod' }]);
+  });
+
+  it('undoing a new-style whistle leaves the clock stopped where it was', () => {
+    const log: RallyLog = [{ t: 'clockStart', at: at(0) }, { t: 'clockPause', at: at(2700) }];
+    expect(clockReading(log, FULL, T0 + DAYS * 1000)).toMatchObject({ elapsedMs: 2_700_000, running: false });
+  });
+
+  it('an old whistle with no stop gets one at its own time when undone', () => {
+    const whistle = { t: 'endPeriod', at: at(2700) } as const;
+    const fixed = afterUndoingWhistle([{ t: 'clockStart', at: at(0) }], whistle);
+    expect(fixed).toEqual([{ t: 'clockStart', at: at(0) }, { t: 'clockPause', at: at(2700) }]);
+    expect(clockReading(fixed, FULL, T0 + DAYS * 1000)).toMatchObject({ elapsedMs: 2_700_000, running: false });
+    // Without the fix the half would read three days.
+    expect(clockReading([{ t: 'clockStart', at: at(0) }], FULL, T0 + DAYS * 1000).elapsedMs).toBe(DAYS * 1000);
+  });
+
+  it('leaves a stopped clock, or anything that is not a whistle, alone', () => {
+    const stopped: RallyLog = [{ t: 'clockStart', at: at(0) }, { t: 'clockPause', at: at(100) }];
+    expect(afterUndoingWhistle(stopped, { t: 'endPeriod', at: at(200) })).toBe(stopped);
+    expect(afterUndoingWhistle([{ t: 'clockStart', at: at(0) }], { t: 'clockPause', at: at(5) })).toEqual([{ t: 'clockStart', at: at(0) }]);
   });
 });

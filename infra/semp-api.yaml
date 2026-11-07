@@ -277,6 +277,17 @@ Resources:
               - Effect: Allow
                 Action: lambda:InvokeFunction
                 Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${FunctionName}'
+        # Event photo carousel: the super-admin routes upload and delete under events/
+        # only. No GetObject or ListBucket - the files are read through public links.
+        - PolicyName: write-event-photos
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub '${EventPhotosBucket.Arn}/events/*'
 
   # ---------------------------------------------------------------------------
   # The function
@@ -372,6 +383,11 @@ Resources:
           APPSYNC_EVENTS_REGION: !Ref 'AWS::Region'
           REALTIME_CHANNEL_NAMESPACE: !Ref RealtimeChannelNamespace
           REALTIME_TOKEN_TTL_SECONDS: !Ref RealtimeTokenTtlSeconds
+          # Event photos (apps/api/src/infra/file-storage.ts). Beta uses 'supabase';
+          # 'off' would make every upload fail with a plain "not set up" message.
+          STORAGE_TRANSPORT: s3
+          STORAGE_BUCKET: !Ref EventPhotosBucket
+          STORAGE_S3_REGION: !Ref 'AWS::Region'
           OTP_TTL_MIN: '10'
           OTP_MAX_ATTEMPTS: '5'
           MAX_ACCOUNTS_PER_PHONE: '3'
@@ -387,6 +403,47 @@ Resources:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
+
+  # ---------------------------------------------------------------------------
+  # Event photos: the carousel on an event's public Overview page
+  # ---------------------------------------------------------------------------
+  # Public-read on purpose: these are marketing photos shown to signed-out visitors,
+  # and a public link never expires the way a signed one does. Only events/ is
+  # readable and only the API can write. No BucketName, so CloudFormation picks a
+  # globally unique one and the function learns it from STORAGE_BUCKET.
+  EventPhotosBucket:
+    Type: AWS::S3::Bucket
+    # Photos are content, not cache: deleting or replacing the stack keeps them.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      # ACLs stay blocked; only the bucket policy below grants public read. If the
+      # ACCOUNT-level Block Public Access is on, that policy is refused at deploy.
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  EventPhotosBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref EventPhotosBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadEventPhotos
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub '${EventPhotosBucket.Arn}/events/*'
 
   # ---------------------------------------------------------------------------
   # Realtime notifications: AppSync Events
@@ -823,6 +880,10 @@ Outputs:
 
   FunctionArn:
     Value: !GetAtt SempApiFunction.Arn
+
+  EventPhotosBucketName:
+    Description: Where event carousel photos are stored; the function gets it as STORAGE_BUCKET.
+    Value: !Ref EventPhotosBucket
 
   # ---------------------------------------------------------------------------
   # Realtime

@@ -15,14 +15,14 @@ import {
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, hasResultIn, moveUnplacedTo, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, setResultUnits, formatResultUnit, type ResultUnit, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
+import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, setResultUnits, formatResultUnit, type ResultUnit, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState, type CricketEvent } from '@semp/shared';
 import { carromHeadline, carromMatchOf, carromRulesOf, drawSettlement, isCarromSport } from '@semp/shared';
 import { CarromResult, carromDecider, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
 import { PoolResult, hydratePool } from '../../features/scoring/PoolResult';
 import { isFrameContest, isPoolSport, poolRubber } from '@semp/shared';
 import { TieLayoutEditor, type TieLayoutValue } from '../../features/scoring/TieLayoutEditor';
 import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, groupTiebreakAllowed, isChessSport, isKnockoutFixture, isKnockoutRound, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
-import { unitWinner, type TieSpec, type EventSpec, type EventScoringOpts, type ScoringMode, type ScoringFormat, type KernelState, type Pairing, type RallyLog, type RubberLineup, type Side } from '@semp/shared';
+import { unitWinner, readUndoTrail, type UndoEntry, type RallyEvent, type TieSpec, type EventSpec, type EventScoringOpts, type ScoringMode, type ScoringFormat, type KernelState, type Pairing, type RallyLog, type RubberLineup, type Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer, hydratePairSwap } from '../../features/scoring/RacquetDeck';
 import { LineupPanel } from '../../features/scoring/LineupPanel';
 import { ChessResult, EndingChips, chessGamesIn, chessSummary, hydrateChess, type ChessState } from '../../features/scoring/ChessResult';
@@ -1175,10 +1175,15 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
   const [status, setStatus] = useState<string>(fixture.status);
   const [busy, setBusy] = useState(false);
   const seeded = useRef(false);
+  // Every Undo on this match, saved beside the log; a ref so each save carries the latest.
+  const [undoTrail, setUndoTrail] = useState<UndoEntry<RallyEvent>[]>(() => readUndoTrail<RallyEvent>(live?.live_state?.undoTrail));
+  const undoTrailRef = useRef(undoTrail);
 
   useEffect(() => {
     if (!seeded.current && live) {
       setLog(hydrateRally(live.live_state));
+      const t = readUndoTrail<RallyEvent>(live.live_state?.undoTrail);
+      setUndoTrail(t); undoTrailRef.current = t;
       setFirstServer(hydrateFirstServer(live.live_state));
       setPairSwap(hydratePairSwap(live.live_state));
       setNamed(readLineup(live.live_state?.lineup));
@@ -1249,6 +1254,7 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
         live_state: {
           ...(live?.live_state ?? {}),
           rally: nextLog,
+          undoTrail: undoTrailRef.current,
           firstServer,
           pairSwap,
           lineup: lineupOver ? lineupOver.lineup : named,
@@ -1335,7 +1341,11 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
           if (named) storeLineup({ ...named, [s]: [...named[s]].reverse() }, false);
           else setPairSwap((cur) => ({ ...cur, [s]: !cur[s] }));
         }}
-        onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
+        undoTrail={undoTrail}
+        onChange={(nextLog, state, trail) => {
+          if (trail) { undoTrailRef.current = trail; setUndoTrail(trail); }
+          setLog(nextLog); save(nextLog, state, false);
+        }}
         onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
         onSuspend={(nextLog, state) => save(nextLog, state, false, onDone, undefined, true)}
       />
@@ -1428,10 +1438,15 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
   const [sheet, setSheet] = useState<TeamSheet | null>(() => readTeamSheet(live?.live_state));
   const [editingSheet, setEditingSheet] = useState(false);
   const seeded = useRef(false);
+  // Every Undo on this match, saved beside the log.
+  const [undoTrail, setUndoTrail] = useState<UndoEntry<CricketEvent>[]>(() => readUndoTrail<CricketEvent>(live?.live_state?.undoTrail));
+  const undoTrailRef = useRef(undoTrail);
 
   useEffect(() => {
     if (!seeded.current && live) {
       setLog(hydrateCricket(live.live_state));
+      const t = readUndoTrail<CricketEvent>(live.live_state?.undoTrail);
+      setUndoTrail(t); undoTrailRef.current = t;
       setSheet(readTeamSheet(live.live_state));
       seeded.current = true;
     }
@@ -1474,6 +1489,7 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
         live_state: {
           ...(live?.live_state ?? {}),
           cricket: nextLog,
+          undoTrail: undoTrailRef.current,
           // Snapshot on first write, then leave alone - a played match stays
           // reproducible under the rules it was played under.
           format: (live?.live_state as any)?.format ?? format,
@@ -1509,7 +1525,7 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
     setEditingSheet(false);
     persist.mutate(
       {
-        live_state: { ...(live?.live_state ?? {}), cricket: log, teamSheet: next },
+        live_state: { ...(live?.live_state ?? {}), cricket: log, undoTrail: undoTrailRef.current, teamSheet: next },
         live_log: cricketTimeline(foldCricket(format, log).state, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
       },
       { onError: (e: any) => toast.error(e.message) },
@@ -1569,7 +1585,11 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
       log={log}
       busy={busy}
       onOpenAdmin={onOpenAdmin}
-      onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
+      undoTrail={undoTrail}
+      onChange={(nextLog, state, trail) => {
+        if (trail) { undoTrailRef.current = trail; setUndoTrail(trail); }
+        setLog(nextLog); save(nextLog, state, false);
+      }}
       onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
     />
     <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} />
@@ -1799,10 +1819,15 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
   // whole live state and the fetched copy can be a step behind.
   const [sheet, setSheet] = useState<TeamSheet | null>(() => readTeamSheet(live?.live_state));
   const [editingSheet, setEditingSheet] = useState(false);
+  // Every Undo on this match, saved beside the log; a ref so every save (autosave too) carries the latest.
+  const [undoTrail, setUndoTrail] = useState<UndoEntry<RallyEvent>[]>(() => readUndoTrail<RallyEvent>(live?.live_state?.undoTrail));
+  const undoTrailRef = useRef(undoTrail);
   const seeded = useRef(false);
   useEffect(() => {
     if (!seeded.current && live) {
       setLog(hydrateRally(live.live_state));
+      const t = readUndoTrail<RallyEvent>(live.live_state?.undoTrail);
+      setUndoTrail(t); undoTrailRef.current = t;
       setSheet(readTeamSheet(live.live_state));
       seeded.current = true;
     }
@@ -1891,6 +1916,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
         live_state: {
           ...(live?.live_state ?? {}),
           rally: nextLog,
+          undoTrail: undoTrailRef.current,
           // The clock, written down as a field rather than left to be folded out of
           // the log. See clockSnapshot - the log stays authoritative, this is for
           // the readers that have no log to fold.
@@ -1927,7 +1953,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
     setEditingSheet(false);
     persist.mutate(
       {
-        live_state: { ...(live?.live_state ?? {}), rally: log, clock: clockSnapshot(log), teamSheet: next },
+        live_state: { ...(live?.live_state ?? {}), rally: log, undoTrail: undoTrailRef.current, clock: clockSnapshot(log), teamSheet: next },
         live_log: teamTimeline(log, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture)), format),
       },
       { onError: (e: any) => toast.error(e.message) },
@@ -1996,7 +2022,11 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       recorded={status === 'completed'}
       knockout={isKnockoutFixture(fixture ?? {})}
       afterResult={<PostMatchActions fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} />}
-      onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
+      undoTrail={undoTrail}
+      onChange={(nextLog, state, trail) => {
+        if (trail) { undoTrailRef.current = trail; setUndoTrail(trail); }
+        setLog(nextLog); save(nextLog, state, false);
+      }}
       // NO onDone HERE. Confirming used to navigate straight back to the results
       // list, which is what made the award and the lock unreachable from the match
       // that had just finished: the console was gone before either was offered.
@@ -2131,25 +2161,39 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
     persist.mutate(body, { onSuccess, onError: (e: any) => { onError?.(); toast.error(e.message); } });
   };
 
+  // What Undo took back, so Redo can restore it; a new action clears it.
+  const [redoStack, setRedoStack] = useState<{ state: MatchState; log: LogEntry[]; txt: string }[]>([]);
   const dispatch = (action: Action) => {
     // Scoring is frozen once the final period is ended - ignore point taps until reopened.
     if (state.ended && action.type === 'POINT') return;
     const { state: ns, entry } = reduce(def, state, action);
     setHistory((hh) => [...hh, { state, log }].slice(-50));
+    setRedoStack([]);
     const nlog = entry ? [entry, ...log].slice(0, 80) : log;
     const st = status === 'scheduled' || status === 'completed' || status === 'confirmed' ? 'live' : status;
     setState(ns); setLog(nlog); setStatus(st);
     save(ns, nlog, st);
   };
 
+  // Undo restores the last snapshot, and the log keeps a line saying what was undone.
   const undo = () => {
-    setHistory((hh) => {
-      if (hh.length === 0) return hh;
-      const prev = hh[hh.length - 1];
-      setState(prev.state); setLog(prev.log);
-      save(prev.state, prev.log, status);
-      return hh.slice(0, -1);
-    });
+    const prev = history[history.length - 1];
+    if (!prev) return;
+    const txt = log[0] && log[0] !== prev.log[0] ? log[0].txt : 'last action';
+    setRedoStack((r) => [...r, { state, log, txt }]);
+    const nlog = [{ t: 'undo', txt: `↶ Undone: ${txt}` } as LogEntry, ...prev.log].slice(0, 80);
+    setHistory((hh) => hh.slice(0, -1));
+    setState(prev.state); setLog(nlog);
+    save(prev.state, nlog, status);
+  };
+  const redo = () => {
+    const next = redoStack[redoStack.length - 1];
+    if (!next) return;
+    setRedoStack((r) => r.slice(0, -1));
+    setHistory((hh) => [...hh, { state, log }].slice(-50));
+    const nlog = [{ t: 'redo', txt: `↷ Redone: ${next.txt}` } as LogEntry, ...next.log].slice(0, 80);
+    setState(next.state); setLog(nlog);
+    save(next.state, nlog, status);
   };
 
   const goLive = () => {
@@ -2294,7 +2338,10 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
 
           <div className="space-y-5">
             <Card>
-              <CardHeader title="Scoring log" action={<Button size="sm" variant="ghost" disabled={history.length === 0} onClick={undo}>↶ Undo</Button>} />
+              <CardHeader title="Scoring log" action={<span className="flex gap-1">
+                <Button size="sm" variant="ghost" disabled={history.length === 0} onClick={undo}>↶ Undo</Button>
+                {redoStack.length > 0 && <Button size="sm" variant="ghost" onClick={redo}>↷ Redo</Button>}
+              </span>} />
               <CardBody>
                 {log.length === 0 ? (
                   <p className="text-sm text-slate-400 dark:text-slate-500">No logs yet - start scoring.</p>
@@ -2935,10 +2982,12 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                           }}
                           // Each point is saved with the rubber; the rules freeze at its first point.
                           // Walking a finished rubber back with Undo reopens it.
-                          onChange={(log, ks) => updateRubber(
+                          undoTrail={active.undoTrail as UndoEntry<RallyEvent>[] | undefined}
+                          onChange={(log, ks, trail) => updateRubber(
                             state.activeRubber,
                             {
                               rally: log,
+                              ...(trail ? { undoTrail: trail } : {}),
                               format: active.format ?? baseFormat.format!,
                               firstServer: active.firstServer ?? 'A',
                               status: active.status === 'pending' ? 'live' : active.status,

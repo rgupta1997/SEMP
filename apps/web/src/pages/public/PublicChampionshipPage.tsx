@@ -3,10 +3,15 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useApi, fmtDate } from '../../lib/hooks';
 import { useAuth } from '../../lib/auth';
 import { BrandMark } from '../../components/BrandMark';
-import { Card, CardBody, EmptyState, Spinner, StatCard, StatusBadge, Tabs, cn } from '../../components/ui';
+import { Button, Card, CardBody, EmptyState, Spinner, StatCard, StatusBadge, Tabs, cn } from '../../components/ui';
 import { ChampionshipStandings } from '../../components/participant/ChampionshipStandings';
 import { ChampionshipFixtures } from '../../components/participant/ChampionshipFixtures';
 import { FeedbackWidget } from '../../components/FeedbackWidget';
+import { ThemeToggle } from '../../components/ThemeToggle';
+import { EventPhotoCarousel } from '../../components/public/EventPhotoCarousel';
+import { EventPhotoManager } from '../../components/public/EventPhotoManager';
+import type { EventPhoto } from '@semp/shared';
+import { ImagePlus } from 'lucide-react';
 
 interface PublicOverview {
   championship: {
@@ -15,6 +20,8 @@ interface PublicOverview {
   };
   sports: { name: string; icon?: string | null }[];
   stats: { organizations: number; fixtures: number; completed_matches: number };
+  /** Absent from an API older than the carousel. */
+  photos?: EventPhoto[];
 }
 
 // Unauthenticated, view-only championship page reached via a share token (/c/:token).
@@ -25,7 +32,10 @@ export function PublicChampionshipPage({ token }: { token: string }) {
   const [tab, setTab] = useState(() => (['schedule', 'results', 'standings'].includes(searchParams.get('tab') ?? '') ? searchParams.get('tab')! : 'overview'));
   const { ctx, loading: authLoading } = useAuth();
   const signedOut = !authLoading && !ctx;
-  const { data, isLoading } = useApi<PublicOverview>(token ? `/public/championships/${token}/overview` : null);
+  const overviewKey = `/public/championships/${token}/overview`;
+  const { data, isLoading } = useApi<PublicOverview>(token ? overviewKey : null);
+  const [managingPhotos, setManagingPhotos] = useState(false);
+  const superAdmin = !!ctx?.user.is_super_admin;
 
   if (isLoading) return <div className="grid h-screen place-items-center"><Spinner /></div>;
   if (!data) {
@@ -44,6 +54,7 @@ export function PublicChampionshipPage({ token }: { token: string }) {
           <BrandMark variant="white" />
           <div className="flex items-center gap-2 sm:gap-3">
             <span className={cn('text-xs font-medium uppercase tracking-wide text-slate-400', signedOut && 'hidden sm:inline')}>Public view</span>
+            <ThemeToggle onDark />
             {/* Signed-out visitors can join from here; signed-in ones already have an account. */}
             {signedOut && (
               <>
@@ -108,12 +119,23 @@ export function PublicChampionshipPage({ token }: { token: string }) {
                 </div>
               </CardBody></Card>
             )}
+            <EventPhotoCarousel photos={data.photos ?? []} />
+            {superAdmin && (
+              <div className="flex justify-end">
+                <Button variant="outline" size="sm" onClick={() => setManagingPhotos(true)} data-qa="manage-event-photos">
+                  <ImagePlus className="mr-1.5 h-4 w-4" /> {data.photos?.length ? 'Manage photos' : 'Add photos'}
+                </Button>
+              </div>
+            )}
           </div>
         ) : (
           <ChampionshipStandings championshipId="" apiBase={`/public/championships/${token}`} />
         )}
       </main>
 
+      {managingPhotos && superAdmin && (
+        <EventPhotoManager championshipId={c.id} overviewKey={overviewKey} onClose={() => setManagingPhotos(false)} />
+      )}
       <FeedbackWidget championshipId={c.id} context={`public:${token}`} />
     </div>
   );

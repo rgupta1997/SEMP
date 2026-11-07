@@ -106,6 +106,26 @@ export function clockReading(log: RallyLog, fullMs: number, now: number): ClockR
   };
 }
 
+/**
+ * What the whistle records: the clock stops with the period. Without the stop, undoing
+ * the whistle later read the half as still running since kick-off - days of it.
+ */
+export function whistleEvents(log: RallyLog, now: number): RallyEvent[] {
+  return clockReading(log, 0, now).running ? [{ t: 'clockPause' }, { t: 'endPeriod' }] : [{ t: 'endPeriod' }];
+}
+
+/**
+ * After a whistle is undone: a period whose clock still reads as running gets the stop
+ * the whistle should have carried, at the whistle's own time (matches scored before
+ * whistleEvents). Otherwise the log is returned unchanged.
+ */
+export function afterUndoingWhistle(log: RallyLog, whistle: RallyEvent): RallyLog {
+  if (whistle.t !== 'endPeriod') return log;
+  const when = ms(whistle.at);
+  if (when === null || !clockReading(log, 0, when).running) return log;
+  return [...log, { t: 'clockPause', at: whistle.at }];
+}
+
 /** mm:ss, zero padded, for the scoreboard. */
 export function formatClock(msElapsed: number): string {
   const total = Math.max(0, Math.floor(msElapsed / 1000));
