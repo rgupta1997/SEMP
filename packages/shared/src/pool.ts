@@ -1,5 +1,6 @@
 import type { Side } from './scoring-rules.js';
 import { canonicalTeamSport } from './team-presets.js';
+import { readUndoTrail, type UndoEntry } from './undo-trail.js';
 
 // Pool (8-ball) rubbers in a team tie, frame by frame: who won each frame and, when
 // recorded, how many object balls the loser still had on the table. A rubber is best of
@@ -36,7 +37,12 @@ export interface PoolFrame {
   end?: PoolFrameEnd;
 }
 
-export interface PoolRubberState { frames: PoolFrame[]; breakRule?: PoolBreakRule }
+export interface PoolRubberState {
+  frames: PoolFrame[];
+  breakRule?: PoolBreakRule;
+  /** Every "Undo last frame", with the frame it took off. */
+  undoTrail?: UndoEntry<PoolFrame>[];
+}
 
 /** A stored pool rubber, tolerating anything malformed; null when there is none. */
 export function readPoolState(raw: unknown): PoolRubberState | null {
@@ -54,7 +60,8 @@ export function readPoolState(raw: unknown): PoolRubberState | null {
       };
     });
   const rule = (raw as { breakRule?: unknown }).breakRule;
-  return { frames, ...(rule === 'alternate' || rule === 'winner' ? { breakRule: rule } : {}) };
+  const undoTrail = readUndoTrail<PoolFrame>((raw as { undoTrail?: unknown }).undoTrail);
+  return { frames, ...(rule === 'alternate' || rule === 'winner' ? { breakRule: rule } : {}), ...(undoTrail.length ? { undoTrail } : {}) };
 }
 
 /** Who breaks the next frame; null until a frame's breaker is known (frame 1 is decided by the lag). */

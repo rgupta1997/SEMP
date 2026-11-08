@@ -1,4 +1,4 @@
-import { ChevronDown, Undo2 } from 'lucide-react';
+import { ChevronDown, Redo2, Undo2 } from 'lucide-react';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   aggregateScore, capLeader, changesEndsAfterUnit, effectiveLevel, foldRally, isDecider, isAggregate, periodsPlayed, resultEnvelope,
@@ -8,9 +8,10 @@ import {
   activeSuspensions, cardRulesFor, escalatedCard, sentOffPlayers, isPeriodShaped, timeoutRules, timeoutsLeft, timeoutsAllowedNow,
   extraTimeRepeats, type ClockReading, type ShootoutState, type MinChaseState,
   statSpecFor, type EventTone, type KernelState, type RallyEvent, type RallyLog, type ScoringFormat,
-  type Side, type StatEventSpec,
+  type Side, type StatEventSpec, undoLast, redoLast, redoTarget, sealUndoTrail, type UndoEntry, whistleEvents, afterUndoingWhistle,
 } from '@semp/shared';
 import { Button, Card, Input, cn, confirmDialog, toast } from '../../components/ui';
+import { JerseyBadge, splitJersey } from './Jersey';
 import { FitName } from '../../components/FitName';
 import { Countdown } from './RacquetDeck';
 
@@ -64,7 +65,10 @@ export interface TeamDeckProps {
   /** A substitute was credited and came on for `offId`. */
   onSubstitute?: (side: Side, onId: string, offId: string) => void;
   log: RallyLog;
-  onChange: (log: RallyLog, state: KernelState) => void;
+  /** The new trail rides along: Undo and Redo change it, a new action closes any pending Redo. */
+  onChange: (log: RallyLog, state: KernelState, undoTrail?: UndoEntry<RallyEvent>[]) => void;
+  /** Every Undo so far, with what it took off the log. */
+  undoTrail?: UndoEntry<RallyEvent>[];
   onSignOff: (log: RallyLog, state: KernelState) => void;
   disabled?: boolean;
   busy?: boolean;
@@ -191,6 +195,10 @@ export function TeamDeck(p: TeamDeckProps) {
     return () => window.clearInterval(id);
   }, [clock.running]);
 
+  const trail = p.undoTrail ?? [];
+  const redoNext = redoTarget(trail);
+  const emit = (next: RallyLog, nextTrail: UndoEntry<RallyEvent>[] = sealUndoTrail(trail)) =>
+    p.onChange(next, foldRally(format, next, 'A').state, nextTrail);
   const push = (ev: RallyEvent) => pushAll([ev]);
   const pushAll = (evs: RallyEvent[]) => {
     if (p.disabled) return;
@@ -202,7 +210,7 @@ export function TeamDeck(p: TeamDeckProps) {
       ? ev
       : { ...ev, ...(clock.started ? { clockMs: clock.elapsedMs } : {}) }));
     const next = [...log, ...stamped.map((ev) => ({ ...ev, at }))];
-    p.onChange(next, foldRally(format, next, 'A').state);
+    emit(next);
   };
 
   // Starting and stopping is a log entry like any other, so it survives a reload and
@@ -215,13 +223,23 @@ export function TeamDeck(p: TeamDeckProps) {
     setNowMs(Date.now());
     push({ t: 'clockAdjust', toMs: Math.max(0, Math.round(toMs)), fromMs: clock.elapsedMs });
   };
+  // Undo keeps a record of what it took off the log, so the log can show it and Redo can bring it back.
   const undo = () => {
-    if (!log.length) return;
     const last = log[log.length - 1];
-    const next = log.slice(0, -1);
-    p.onChange(next, foldRally(format, next, 'A').state);
+    const r = last && undoLast(log, trail, describeTeamEvent(last, nameOf, nameFor));
+    if (!r) return;
+    // An older whistle carried no clock stop: add it, or the reopened half reads as running since kick-off.
+    emit(afterUndoingWhistle(r.log, last), r.trail);
     // Undoing a substitution puts the two players back where they were.
     if (last.t === 'sub') p.onSubstitute?.(last.side, last.offId, last.onId);
+  };
+  const redo = () => {
+    const back = redoNext?.event;
+    const r = redoLast(log, trail);
+    if (!r || !back) return;
+    emit(r.log, r.trail);
+    // Redoing a substitution swaps the two players again.
+    if (back.t === 'sub') p.onSubstitute?.(back.side, back.onId, back.offId);
   };
   // A substitution: logged at its minute, and the team sheet swaps the two players.
   const substitute = (s: Side, offId: string, onId: string) => {
@@ -234,7 +252,7 @@ export function TeamDeck(p: TeamDeckProps) {
     const ev = log[i];
     if (p.disabled || !ev || ev.t !== 'point' || ev.rescinded) return;
     const next = log.map((x, j) => (j === i ? { ...ev, rescinded: { reason, at: new Date().toISOString() } } : x));
-    p.onChange(next, foldRally(format, next, 'A').state);
+    emit(next);
   };
 
   const nameOf = (s: Side) => (s === 'A' ? p.homeName : p.awayName);
@@ -530,7 +548,8 @@ export function TeamDeck(p: TeamDeckProps) {
               ? `Level at ${shown[0]}-${shown[1]}. Universal point: the next goal wins the match.`
               : `This is the last ${periodName.toLowerCase()}. The match is decided on the total, currently ${shown[0]}–${shown[1]}.`,
     });
-    if (ok) push({ t: 'endPeriod' });
+    // The clock stops with the whistle, so undoing it later brings back 90:00, not days.
+    if (ok) pushAll(whistleEvents(log, Date.now()));
   };
 
   return (
@@ -839,7 +858,7 @@ export function TeamDeck(p: TeamDeckProps) {
         ) : /* The log first: after full time it is how the result gets checked before
             confirming. With the result card first, Log did nothing once a match ended. */
         surface === 'log' ? (
-          <Timeline log={log} nameOf={nameOf} nameFor={nameFor} format={format}
+          <Timeline log={log} undoTrail={trail} nameOf={nameOf} nameFor={nameFor} format={format}
             disciplineKinds={disciplineKinds} onRescind={p.disabled ? undefined : rescind}
             onClose={() => setSurface('act')} />
         ) : state.ended ? (
@@ -1190,13 +1209,14 @@ export function TeamDeck(p: TeamDeckProps) {
                     </button>
                   ))}
                 </div>
-                <div className="grid grid-cols-4 gap-1.5">
+                {/* Three across under 420px, where four squeeze "Red card (second yellow)" to three lines. */}
+                <div className="grid grid-cols-4 gap-1.5 max-[419px]:grid-cols-3">
                   {tapEvents.filter((e) => !(e.points ?? 0)).map((ev) => (
                     <button key={ev.key} type="button" data-qa={`act-${side}-${ev.key}`}
                       disabled={p.disabled || p.busy || (!actor && ev.perPlayer !== false) || (needsSecond(ev) && !second)}
                       onClick={() => fire(ev)}
                       className={cn(
-                        'flex h-9 items-center justify-center rounded-lg px-1 text-center text-[11px] font-semibold leading-tight transition',
+                        'flex min-h-9 items-center justify-center rounded-lg px-1 py-1 text-center text-[11px] font-semibold leading-tight transition',
                         'active:scale-[0.97] disabled:opacity-40',
                         toneOf(ev),
                       )}>
@@ -1252,6 +1272,13 @@ export function TeamDeck(p: TeamDeckProps) {
             disabled={!log.length || p.disabled || p.busy} onClick={undo}>
             Undo
           </Button>
+          {/* Only right after an undo, so the footer keeps its five buttons the rest of the time. */}
+          {redoNext && (
+            <Button size="sm" variant="outline" className={FOOT_BTN} title={`Redo: ${redoNext.label}`}
+              disabled={p.disabled || p.busy} onClick={redo}>
+              <Redo2 className="mr-1 h-3.5 w-3.5" /> Redo
+            </Button>
+          )}
           {/* Only with a team sheet: that is where on-field and bench come from. */}
           {p.onSubstitute && p.bench && !state.ended && (
             <Button size="sm" variant="outline" disabled={p.disabled || p.busy}
@@ -1358,7 +1385,9 @@ function SubPanel({ nameOf, shortOf, roster, bench, sentOff, onSub, onClose }: {
   const pick = (list: Person[], value: string, set: (id: string) => void) => (
     <div className="flex flex-wrap gap-1.5">
       {list.length === 0 ? <span className="text-xs text-muted">Nobody.</span> : list.map((x) => (
-        <Button key={x.id} size="sm" variant={value === x.id ? 'primary' : 'outline'} onClick={() => set(x.id)}>{x.name}</Button>
+        <Button key={x.id} size="sm" variant={value === x.id ? 'primary' : 'outline'} onClick={() => set(x.id)} title={x.name}>
+          <span className="flex items-center gap-1"><PersonLabel label={x.name} on={value === x.id} /></span>
+        </Button>
       ))}
     </div>
   );
@@ -2001,11 +2030,13 @@ const NAME_BUDGET = 14;
  * The chip truncates and carries the full name as its tooltip either way, so
  * printing too much costs a hover and printing too little costs a wrong scorer.
  */
-function shortNames(names: string[]): string[] {
+export function shortNames(names: string[]): string[] {
   // A trailing tag like "(sub)" is not a surname: set it aside, shorten, put it back.
   const tagOf = (n: string) => / \([^)]*\)$/.exec(n)?.[0] ?? '';
   const tags = names.map((n) => tagOf(n.trim()));
-  const full = names.map((n, i) => n.trim().slice(0, n.trim().length - tags[i].length));
+  // A leading shirt number ("#10 ") is not a first name either: kept whole, put back in front.
+  const nums = names.map((n) => /^#\d+\s+/.exec(n.trim())?.[0] ?? '');
+  const full = names.map((n, i) => n.trim().slice(nums[i].length, n.trim().length - tags[i].length));
 
   /** Two letters or more - enough to read as a name rather than as a marker. */
   const isWord = (t: string) => t.replace(/[^\p{L}]/gu, '').length >= 2;
@@ -2026,11 +2057,11 @@ function shortNames(names: string[]): string[] {
   }
 
   return full.map((n, i) => {
-    if (n.length + tags[i].length <= NAME_BUDGET) return n + tags[i];
+    if (nums[i].length + n.length + tags[i].length <= NAME_BUDGET) return nums[i] + n + tags[i];
     const sn = surname(n);
-    if ((seen.get(sn.toLowerCase()) ?? 0) < 2) return sn + tags[i];
+    if ((seen.get(sn.toLowerCase()) ?? 0) < 2) return nums[i] + sn + tags[i];
     const first = n.split(/\s+/)[0] ?? '';
-    return (first ? `${first[0]}. ${sn}` : sn) + tags[i];
+    return nums[i] + (first ? `${first[0]}. ${sn}` : sn) + tags[i];
   });
 }
 
@@ -2051,6 +2082,18 @@ function shortNames(names: string[]): string[] {
  * `extra` is the room the card pips take when a player has been booked - counted in
  * characters, because it comes out of the same line the name is on.
  */
+/** A person's chip label: the jersey badge (when numbered), then the name. */
+function PersonLabel({ label, on }: { label: string; on: boolean }) {
+  const { num, name } = splitJersey(label);
+  return (
+    <>
+      {num != null && <JerseyBadge num={num} on={on} size="chip" />}
+      {/* On a phone a numbered player is just the jersey; the name stays for screen readers and the log. */}
+      <span className={cn('truncate', num != null && 'max-sm:sr-only')}>{name}</span>
+    </>
+  );
+}
+
 function chipFont(label: string, extra: number): string {
   const n = label.length + extra;
   if (n <= 9) return 'text-xs';
@@ -2099,12 +2142,14 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0, blocke
   foulLimit?: number;
 }) {
   const labels = shortNames(options.map(([, label]) => label));
+  // Jerseys only on a phone, so more fit across when every player has a number.
+  const allNumbered = options.every(([v, label]) => v === '' || splitJersey(label).num != null);
   return (
     // Three across on the narrowest phone, and more as there is room - a squad that
     // is four rows on a handset is one row on a laptop, rather than four columns of
     // mostly whitespace. The harness reads these positionally, so the order stays
     // the roster order it was given.
-    <div data-qa={qa} className="grid grid-cols-3 gap-1 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
+    <div data-qa={qa} className={cn('grid gap-1 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8', allNumbered ? 'grid-cols-5' : 'grid-cols-3')}>
       {options.map(([v, label], i) => {
         const on = value === v;
         const shown = v === '' ? label : labels[i];
@@ -2116,6 +2161,8 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0, blocke
             + (marks.caution ? 2 + (marks.caution > 1 ? 1 : 0) : 0)
             + (marks.dismissal ? 2 + (marks.dismissal > 1 ? 1 : 0) : 0)
           : 0;
+        // The badge takes about three characters of the line, the "#10 " it replaces leaves.
+        const parts = splitJersey(shown);
         const fouledOut = foulLimit > 0 && (marks?.caution ?? 0) >= foulLimit;
         const onLastFoul = foulLimit > 0 && !fouledOut && (marks?.caution ?? 0) === foulLimit - 1;
         return (
@@ -2136,7 +2183,7 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0, blocke
             onClick={() => onChange(v)}
             className={cn(
               'flex h-8 items-center justify-center gap-1 overflow-hidden rounded-full px-2 text-center font-semibold transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50',
-              chipFont(shown, extra),
+              chipFont(parts.name, extra + (parts.num != null ? 3 : 0)),
               on
                 ? 'bg-brand-600 text-white shadow-sm'
                 : 'border border-line bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
@@ -2145,7 +2192,7 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0, blocke
               (!!marks?.dismissal || fouledOut) && !on && 'border-red-300 bg-red-50 dark:border-red-500/40 dark:bg-red-500/10',
               onLastFoul && !on && 'border-amber-300 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10',
             )}>
-            <span className="truncate">{shown}</span>
+            <PersonLabel label={shown} on={on} />
             {marks && <CardPips counts={marks} on={on} />}
           </button>
         );
@@ -2161,8 +2208,10 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0, blocke
  * this the only way to know whether a goal went in with the right scorer was to
  * undo it and do it again.
  */
-function Timeline({ log, nameOf, nameFor, format, onClose, disciplineKinds, onRescind }: {
+function Timeline({ log, undoTrail = [], nameOf, nameFor, format, onClose, disciplineKinds, onRescind }: {
   log: RallyLog;
+  /** Undo and redo, shown among the actions they touched. */
+  undoTrail?: UndoEntry<RallyEvent>[];
   nameOf: (s: Side) => string;
   nameFor: (id: string) => string | undefined;
   /** The format, so minutes run on across halves and stoppage prints as 45+2'. */
@@ -2176,6 +2225,15 @@ function Timeline({ log, nameOf, nameFor, format, onClose, disciplineKinds, onRe
   const [taking, setTaking] = useState<number | null>(null);
   const [reason, setReason] = useState('');
   const rows = [...log.entries()].reverse();
+  const marks = undoTrail.flatMap((u) => [
+    { kind: 'undo' as const, at: u.undoneAt, label: u.label },
+    ...(u.redoneAt ? [{ kind: 'redo' as const, at: u.redoneAt, label: u.label }] : []),
+  ]);
+  // Newest first: an undo sits above the actions recorded before it.
+  const merged = [
+    ...rows.map(([i, ev]) => ({ type: 'row' as const, at: (ev as { at?: string }).at ?? '', i, ev })),
+    ...marks.map((m) => ({ type: 'mark' as const, at: m.at, m })),
+  ].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
   const minutes = useMemo(() => eventMinuteLabels(format, log), [format, log]);
   // Shoot-out kicks scored up to and including each entry.
   const tally: Array<[number, number]> = [];
@@ -2188,14 +2246,19 @@ function Timeline({ log, nameOf, nameFor, format, onClose, disciplineKinds, onRe
   return (
     <Card className={cn(SURFACE, 'gap-2 p-3')}>
       <div className="flex shrink-0 items-center justify-between">
-        <h3 className="text-sm font-semibold">What has been recorded</h3>
+        <h3 className="text-sm font-semibold">What has been recorded{undoTrail.length ? <span className="font-normal text-muted"> · {undoTrail.length} undone</span> : null}</h3>
         <Button size="sm" variant="subtle" onClick={onClose}>Close</Button>
       </div>
-      {rows.length === 0 ? (
+      {merged.length === 0 ? (
         <p className="text-sm text-muted">Nothing yet.</p>
       ) : (
         <ol className="min-h-0 flex-1 divide-y divide-line overflow-y-auto text-sm">
-          {rows.map(([i, ev]) => (
+          {merged.map((item, k) => item.type === 'mark' ? (
+            <li key={`m${k}`} className="flex items-baseline gap-2 py-1.5 text-muted">
+              <span className="w-10 shrink-0 text-right text-xs">{item.m.kind === 'undo' ? '↶' : '↷'}</span>
+              <span className="min-w-0 flex-1 italic">{item.m.kind === 'undo' ? 'Undone' : 'Redone'}: {item.m.label}</span>
+            </li>
+          ) : (({ i, ev }) => (
             <li key={i} className="flex items-baseline gap-2 py-1.5">
               {/* THE MINUTE, where the event carries one. This is the column an
                   official scans for - "when was the second goal?" - so it leads the
@@ -2297,7 +2360,7 @@ function Timeline({ log, nameOf, nameFor, format, onClose, disciplineKinds, onRe
                 )}
               </span>
             </li>
-          ))}
+          ))(item))}
         </ol>
       )}
     </Card>
@@ -2520,4 +2583,28 @@ function MorePanel({
       </div>
     </Card>
   );
+}
+
+/** One logged action as plain words, for the undo record ("Goal · Rahul Joshi · IIMK"). */
+function describeTeamEvent(ev: RallyEvent, nameOf: (s: Side) => string, nameFor: (id: string) => string | undefined): string {
+  const who = (id?: string, name?: string) => (id ? name ?? nameFor(id) ?? 'unknown' : null);
+  switch (ev.t) {
+    case 'point': {
+      const player = who(ev.playerId, ev.playerName);
+      return [ev.label ?? 'Point', player, nameOf(ev.side)].filter(Boolean).join(' · ');
+    }
+    case 'sub': return `Substitution · ${who(ev.onId, ev.onName)} on, ${who(ev.offId, ev.offName)} off · ${nameOf(ev.side)}`;
+    case 'timeout': return `Timeout · ${nameOf(ev.side)}`;
+    case 'endPeriod': return 'End of the period';
+    case 'clockStart': return 'Clock started';
+    case 'clockPause': return 'Clock paused';
+    case 'clockAdjust': return `Clock corrected to ${formatClock(ev.toMs)}`;
+    case 'penaltyKick': return `Shoot-out kick ${ev.scored ? 'scored' : 'missed'} · ${nameOf(ev.side)}`;
+    case 'setServe': return `${nameOf(ev.side)} to serve`;
+    case 'chaseFirst': return `${nameOf(ev.side)} chase first (toss)`;
+    case 'raidFirst': return `${nameOf(ev.side)} raid first (toss)`;
+    case 'minChase': return `Minimum chase time · ${nameOf(ev.side)}`;
+    case 'end': return 'Match ended';
+    default: return ev.t;
+  }
 }

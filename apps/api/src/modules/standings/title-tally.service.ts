@@ -20,6 +20,8 @@ export interface SportTally { sport_id: string; sport: string; titles_on: boolea
 /** One event's own standing (its Point tally tab on Results). */
 export interface EventTally { draw_id: string; sport_id: string; name: string; state: EventState; rows: Array<{ entity_id: string; name: string; short_name: string | null; place: number | null; points: number; medal: 'gold' | 'silver' | 'bronze' | null }> }
 
+const PLACE_MEDAL: Record<number, 'gold' | 'silver' | 'bronze'> = { 1: 'gold', 2: 'silver', 3: 'bronze' };
+
 const titleLabel = (key: string) => (key === EVENT_TITLE_GROUP.sport.toLowerCase() ? TITLE_GROUP_LABEL[key] : `${TITLE_GROUP_LABEL[key] ?? key} title`);
 
 interface EventResult { place: number | null; points: number; gold: number; silver: number; bronze: number; name: string; orgId: string }
@@ -81,7 +83,8 @@ export async function readTitleTally(prisma: Db, championshipId: string): Promis
     draw_id: d.id, sport_id: d.tournament_sports.sport_id, name: d.disciplines?.name ?? 'Event', state: stateOf(d.fixtures),
     rows: [...results.get(d.id)!].map(([key, r]) => ({
       entity_id: key, name: nameOf(r), short_name: shortOf(r), place: r.place, points: r.points,
-      medal: r.gold ? 'gold' as const : r.silver ? 'silver' as const : r.bronze ? 'bronze' as const : null,
+      // The medal for this finishing place (ties share it: 1,1,3 = gold, gold, bronze), not the best race medal.
+      medal: r.place != null ? PLACE_MEDAL[r.place] ?? null : null,
     })).sort((a, b) => (a.place ?? Infinity) - (b.place ?? Infinity) || b.points - a.points || a.name.localeCompare(b.name)),
   }));
 

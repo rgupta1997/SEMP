@@ -7,7 +7,7 @@ import {
   type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
   type FormatTemplate, type MatchOutcome, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
-import { isCalledDraw } from '@semp/shared';
+import { isCalledDraw, matchJerseys, relayCredits, withExtraSubEvents, type ParticipantResult } from '@semp/shared';
 import { Prisma } from '@prisma/client';
 import type { Db } from '../../infra/prisma.js';
 import { writeCategoryLines, type CategoryLineInput } from './category-lines.service.js';
@@ -121,20 +121,31 @@ export async function buildPlayerStatRows(
       (fx.live_state as { event?: { participants?: unknown } } | null)?.event?.participants
       ?? (fx.live_state as { participants?: unknown } | null)?.participants
       ?? []
-    ) as Array<{ id: string; marks?: Record<string, number | null> }>;
+    ) as Array<{ id: string; orgId?: string | null; org?: string | null; marks?: Record<string, number | null>; statuses?: ParticipantResult['statuses'] }>;
     const marksOf = new Map(eventParticipants.map((c) => [c.id, c.marks ?? {}]));
-    const state: EventState = { participants: eventParticipants.map((c) => ({ id: c.id, name: '', marks: c.marks ?? {} })) };
+    // Statuses and institute kept, so a DQ is never ranked here when the medals skip it.
+    const storedEvent = (fx.live_state as { event?: Pick<EventState, 'relayMembers' | 'extraEvents'> } | null)?.event;
+    const relayMembers = storedEvent?.relayMembers;
+    const state: EventState = {
+      participants: eventParticipants.map((c) => ({
+        id: c.id, name: '', orgId: c.orgId ?? null, org: c.org ?? null, marks: c.marks ?? {},
+        ...(c.statuses ? { statuses: c.statuses } : {}),
+      })),
+      ...(relayMembers ? { relayMembers } : {}),
+    };
 
     // Same resolution as derive.ts's eventMedals(): stored template wins,
     // else the sport's seeded one, narrowed to the discipline's own category.
     const storedSpec = (fx.tournament_disciplines?.format_config as { scoring?: FormatTemplate } | null)?.scoring?.event;
     const rawSpec: EventSpec | null = storedSpec ?? eventTemplateFor(sportName)?.event ?? null;
-    const spec = rawSpec
+    const namedSpec = rawSpec
       ? effectiveEventSpec(rawSpec, {
         id: fx.tournament_disciplines?.discipline_id ?? null,
         name: fx.tournament_disciplines?.disciplines?.name ?? null,
       })
       : null;
+    // Classes added from the event's own disciplines rank like the template's.
+    const spec = namedSpec && !fx.tournament_disciplines?.discipline_id ? withExtraSubEvents(namedSpec, storedEvent) : namedSpec;
     const rankCache = new Map<string, Map<string, number>>();
     const rankOf = (competitorId: string | null, category: string | null): number | null => {
       if (!spec || !competitorId || !category) return null;
@@ -160,12 +171,17 @@ export async function buildPlayerStatRows(
       return winnerIsOf(a.category) === 'min' ? (b.mark < a.mark ? b : a) : (b.mark > a.mark ? b : a);
     };
 
+    // A relay swum counts as one of the swimmer's results, at the team's time and place.
+    const relays = spec ? relayCredits(spec, state) : [];
     return participants.resolved.map((p) => {
       const marks = p.competitor_id ? marksOf.get(p.competitor_id) ?? {} : {};
       const entries = Object.entries(marks).filter((e): e is [string, number] => typeof e[1] === 'number');
+      const relayEntries = relays
+        .filter((r) => r.competitorId === p.competitor_id && r.mark != null)
+        .map((r) => ({ category: r.subKey, mark: r.mark!, rank: r.rank as number | null }));
       let stats: Record<string, number> = {};
-      if (entries.length) {
-        const ranked = entries.map(([category, mark]) => ({ category, mark, rank: rankOf(p.competitor_id, category) }));
+      if (entries.length || relayEntries.length) {
+        const ranked = [...entries.map(([category, mark]) => ({ category, mark, rank: rankOf(p.competitor_id, category) })), ...relayEntries];
         const best = ranked.reduce(betterOf);
         // `measured`/`podium` are unit-free counts, so unlike `mark` they stay
         // meaningful summed across categories that don't share a unit.
@@ -480,6 +496,10 @@ export async function writePlayerMatchStats(
   await db.$executeRaw`delete from player_match_stats where fixture_id = ${fixtureId}::uuid`;
 
   const sportName = rows.length ? await sportNameOf(db, fixtureId) : null;
+  // The shirt each player wore here, from the match's team sheet - kept with their line.
+  const jerseys = rows.length
+    ? matchJerseys((await db.fixtures.findUnique({ where: { id: fixtureId }, select: { live_state: true } }))?.live_state)
+    : new Map<string, number>();
   const details: CategoryLineInput[] = [];
 
   for (const r of rows) {
@@ -490,13 +510,13 @@ export async function writePlayerMatchStats(
       insert into player_match_stats
         (fixture_id, user_id, team_id, organization_id, sport_id, rubber_key,
          partner_user_id, opponent_user_ids, position, role, played, outcome, stats, occurred_on,
-         source, lock_version)
+         source, lock_version, jersey_number)
       values
         (${r.fixture_id}::uuid, ${r.user_id}::uuid, ${r.team_id}::uuid,
          ${r.organization_id}::uuid, ${r.sport_id}::uuid, ${r.rubber_key},
          ${r.partner_user_id}::uuid, ${r.opponent_user_ids}::uuid[], ${r.position}, ${r.role}, ${r.played},
          ${r.outcome}, ${JSON.stringify(r.stats)}::jsonb, ${r.occurred_on}::date,
-         'locked_result', ${r.lock_version})
+         'locked_result', ${r.lock_version}, ${jerseys.get(r.user_id) ?? null}::smallint)
       returning id`;
     // Only somebody who actually played gets a detail row. A row of zeroes for a
     // substitute who never came on is indistinguishable from a bad one.

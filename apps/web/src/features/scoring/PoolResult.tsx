@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   DEFAULT_POOL_BREAK_RULE, POOL_BREAK_RULES, POOL_FRAME_ENDS, POOL_MAX_BALLS, nextBreaker, poolRubber, readPoolState,
+  undoLast, redoLast, redoTarget, sealUndoTrail,
   type PoolBreakRule, type PoolFrame, type PoolFrameEnd, type PoolRubberState, type Side,
 } from '@semp/shared';
 import { Button, Card, CardBody, CardHeader, cn, confirmDialog, toast } from '../../components/ui';
@@ -67,10 +68,27 @@ export function PoolResult({ homeName, awayName, homeShort, awayShort, bestOf, i
       ...(breaker ? { breaker } : {}),
       ...(end ? { end } : {}),
     };
-    update({ ...state, frames: [...state.frames, frame] });
+    update({ ...state, frames: [...state.frames, frame], undoTrail: sealUndoTrail(state.undoTrail ?? []) });
     reset();
   };
-  const undo = () => { update({ ...state, frames: state.frames.slice(0, -1) }); reset(); };
+  // Undo and redo keep a record: what came off, and when.
+  const frameLabel = (f: PoolFrame, n: number) => [
+    `Frame ${n} · ${nameOf(f.winner)} won`,
+    f.ballsLeft != null ? `by ${f.ballsLeft} ball${f.ballsLeft === 1 ? '' : 's'}` : null,
+    f.end ? POOL_FRAME_ENDS[f.end].short : null,
+  ].filter(Boolean).join(' · ');
+  const undo = () => {
+    const last = state.frames[state.frames.length - 1];
+    const r = last && undoLast(state.frames, state.undoTrail ?? [], frameLabel(last, state.frames.length));
+    if (r) update({ ...state, frames: r.log, undoTrail: r.trail });
+    reset();
+  };
+  const redoNext = redoTarget(state.undoTrail ?? []);
+  const redo = () => {
+    const r = redoLast(state.frames, state.undoTrail ?? []);
+    if (r) update({ ...state, frames: r.log, undoTrail: r.trail });
+    reset();
+  };
   // Kept on screen until the first frame saves it with the rubber.
   const setRule = (r: PoolBreakRule) => { edited.current = true; setState({ ...state, breakRule: r }); setBreakPick(undefined); };
 
@@ -203,6 +221,15 @@ export function PoolResult({ homeName, awayName, homeShort, awayShort, bestOf, i
             })}
           </ol>
         )}
+        {/* The undo record: what came off the sheet, newest first. */}
+        {(state.undoTrail?.length ?? 0) > 0 && (
+          <ul className="space-y-0.5 px-1 text-xs italic text-slate-500 dark:text-slate-400" data-qa="pool-undo-trail">
+            {[...(state.undoTrail ?? [])].reverse().flatMap((u, k) => [
+              ...(u.redoneAt ? [<li key={`r${k}`}>↷ Redone: {u.label}</li>] : []),
+              <li key={`u${k}`}>↶ Undone: {u.label}</li>,
+            ])}
+          </ul>
+        )}
 
         <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
           <span className={cn('text-sm', busy ? 'text-amber-600 dark:text-amber-300' : res.decided ? 'font-semibold text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400')}>
@@ -210,6 +237,7 @@ export function PoolResult({ homeName, awayName, homeShort, awayShort, bestOf, i
           </span>
           <div className="ml-auto flex flex-wrap justify-end gap-2">
             {state.frames.length > 0 && <Button variant="outline" disabled={disabled || busy} onClick={undo}>Undo last frame</Button>}
+            {redoNext && <Button variant="outline" disabled={disabled || busy} onClick={redo} title={`Redo: ${redoNext.label}`}>Redo</Button>}
             <Button disabled={disabled || busy || !res.decided} onClick={confirm}>Confirm rubber</Button>
           </div>
         </div>

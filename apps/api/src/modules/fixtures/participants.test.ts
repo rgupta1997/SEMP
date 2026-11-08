@@ -169,4 +169,21 @@ describe('resolveFixtureParticipants', () => {
     const db = fakeDb({ fixture: null });
     await expect(resolveFixtureParticipants(db, 'gone')).resolves.toEqual({ resolved: [], unmatched: [] });
   });
+
+  it('never treats an institute relay row as an unlinked person', async () => {
+    const db = fakeDb({
+      fixture: {
+        home_team_id: null, away_team_id: null, tournament_discipline_id: 'td1',
+        live_state: { event: { participants: [
+          { id: 'e1', name: 'Asha', phone: '9000000001', orgId: 'o1' },
+          { id: 'relay:o1', name: 'NFC relay', phone: null, orgId: 'o1' },
+        ] } },
+      },
+      users: [{ id: 'u1', name: 'Asha', phone: '9000000001' }],
+      soloTeams: [{ user_id: 'u1', team_id: 't1', org: 'o1' }],
+    });
+    const out = await resolveFixtureParticipants(db, 'fx1');
+    expect(out.resolved.map((r) => r.user_id)).toEqual(['u1']);
+    expect(out.unmatched).toEqual([]);
+  });
 });

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   CARROM_COINS, boardsOnly, carromBoardPoints, carromHeadline, carromMatchOf, carromTieBreakNote, queenCoversFor, readCarromState,
   type CarromBoard, type CarromBoardsState, type CarromGame, type CarromRules, type QueenCover, type Side,
+  recordUndo, redoTarget, sealUndoTrail, takeRedo,
 } from '@semp/shared';
 import { Button, Card, CardBody, CardHeader, cn, confirmDialog, toast } from '../../components/ui';
 
@@ -102,16 +103,35 @@ export function CarromResult({ homeName, awayName, homeShort, awayShort, rules, 
       ...(slam ? { slam: true } : {}),
       ...(fouls.A || fouls.B ? { fouls } : {}),
     };
-    update({ ...state, boards: [...state.boards, board] });
+    update({ ...state, boards: [...state.boards, board], undoTrail: sealUndoTrail(state.undoTrail ?? []) });
     resetEntry();
   };
 
   // Undo takes back the last thing recorded: a retirement after the last board, else the board.
   const retirements = state.retirements ?? [];
   const lastIsRetirement = retirements.length > 0 && retirements[retirements.length - 1].afterBoards === state.boards.length;
-  const undo = () => update(lastIsRetirement
-    ? { ...state, retirements: retirements.slice(0, -1) }
-    : { ...state, boards: state.boards.slice(0, -1) });
+  // The undo record says what came off; Redo puts it back where it was.
+  const trail = state.undoTrail ?? [];
+  const undo = () => {
+    if (lastIsRetirement) {
+      const last = retirements[retirements.length - 1];
+      update({ ...state, retirements: retirements.slice(0, -1), undoTrail: recordUndo(trail, { retirement: last }, `${nameOf(last.side)} retired`) });
+      return;
+    }
+    const last = state.boards[state.boards.length - 1];
+    if (!last) return;
+    const n = state.boards.length;
+    const label = `Board ${n} · ${nameOf(last.winner)} won${onlyBoards ? '' : ` · ${last.coinsLeft} coins left${last.queen === 'winner' ? ' · queen' : ''}`}`;
+    update({ ...state, boards: state.boards.slice(0, -1), undoTrail: recordUndo(trail, { board: last }, label) });
+  };
+  const redoNext = redoTarget(trail);
+  const redo = () => {
+    const r = takeRedo(trail);
+    if (!r) return;
+    update('board' in r.event
+      ? { ...state, boards: [...state.boards, r.event.board], undoTrail: r.trail }
+      : { ...state, retirements: [...retirements, r.event.retirement], undoTrail: r.trail });
+  };
 
   // Retired hurt or conceded (Inter-IIM: no replacement): the game in progress goes to the other side.
   const retire = async (side: Side) => {
@@ -121,7 +141,7 @@ export function CarromResult({ homeName, awayName, homeShort, awayShort, rules, 
       message: `Game ${match.current.game} goes to ${nameOf(side === 'A' ? 'B' : 'A')}. Boards already played stay on the sheet`
         + (multiGame ? ', and the next game starts.' : '.') + ' Undo takes it back.',
     });
-    if (ok) { update({ ...state, retirements: [...retirements, { afterBoards: state.boards.length, side }] }); resetEntry(); }
+    if (ok) { update({ ...state, retirements: [...retirements, { afterBoards: state.boards.length, side }], undoTrail: sealUndoTrail(state.undoTrail ?? []) }); resetEntry(); }
   };
 
   const retiredSides = match.games.flatMap((g) => (g.retired ? [g.retired] : []));
@@ -371,6 +391,15 @@ export function CarromResult({ homeName, awayName, homeShort, awayShort, rules, 
           <GameSheet key={i} title={onlyBoards ? `Board ${i + 1}` : `Game ${i + 1}`} game={g} nameOf={nameOf} who={who} target={rules.gameTarget} onlyBoards={onlyBoards}
             open={match.decided && finishedGames.length === 1} />
         ))}
+        {/* The undo record: what came off the sheet, newest first. */}
+        {trail.length > 0 && (
+          <ul className="space-y-0.5 px-1 text-xs italic text-slate-500 dark:text-slate-400" data-qa="carrom-undo-trail">
+            {[...trail].reverse().flatMap((u, k) => [
+              ...(u.redoneAt ? [<li key={`r${k}`}>↷ Redone: {u.label}</li>] : []),
+              <li key={`u${k}`}>↶ Undone: {u.label}</li>,
+            ])}
+          </ul>
+        )}
 
         <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
           <span className={cn('text-sm', busy ? 'text-amber-600 dark:text-amber-300' : match.decided ? 'font-semibold text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400')}>
@@ -380,6 +409,7 @@ export function CarromResult({ homeName, awayName, homeShort, awayShort, rules, 
             {(state.boards.length > 0 || lastIsRetirement) && (
               <Button variant="outline" disabled={disabled || busy} onClick={undo}>{lastIsRetirement ? 'Undo retirement' : 'Undo last board'}</Button>
             )}
+            {redoNext && <Button variant="outline" disabled={disabled || busy} onClick={redo} title={`Redo: ${redoNext.label}`}>Redo</Button>}
             <Button disabled={disabled || busy || !match.decided} onClick={confirm}>{rubber ? 'Confirm rubber' : 'Confirm result'}</Button>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Trash2 } from 'lucide-react';
+import { ChevronDown, Plus, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
@@ -14,22 +14,22 @@ import {
   hydrateTie, initTie, rubbersWon, tieScore, tieOutcome, tieTarget, rubberDef, decideRubber as decideRubberFn, reopenRubber as reopenRubberFn,
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
-import { hydrateEvent, hasResultIn, moveUnplacedTo, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, setResultUnits, formatResultUnit, type ResultUnit, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState } from '@semp/shared';
+import { hydrateEvent, hasResultIn, moveUnplacedTo, chosenEvents, toggleRace as toggleRaceState, withRelayRows, lineupOf, raceField, setInLineup, setRelayMembers, relayLegs, rankSubEvent, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
+import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, withExtraSubEvents, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, setResultUnits, formatResultUnit, type ResultUnit, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState, type CricketEvent } from '@semp/shared';
 import { carromHeadline, carromMatchOf, carromRulesOf, drawSettlement, isCarromSport } from '@semp/shared';
 import { CarromResult, carromDecider, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
 import { PoolResult, hydratePool } from '../../features/scoring/PoolResult';
 import { isFrameContest, isPoolSport, poolRubber } from '@semp/shared';
 import { TieLayoutEditor, type TieLayoutValue } from '../../features/scoring/TieLayoutEditor';
 import { CHESS_ENDINGS, chessPresetForDiscipline, describeTimeControl, formatPoints, groupTiebreakAllowed, isChessSport, isKnockoutFixture, isKnockoutRound, whiteOnBoard, formatForPairing, misconductTerms, playersPerSide, readLineup, resolveMatchLineup, rubberSize, tieForRound, tieSpecSchema } from '@semp/shared';
-import { unitWinner, type TieSpec, type EventSpec, type EventScoringOpts, type ScoringMode, type ScoringFormat, type KernelState, type Pairing, type RallyLog, type RubberLineup, type Side } from '@semp/shared';
+import { unitWinner, readUndoTrail, type UndoEntry, type RallyEvent, type TieSpec, type EventSpec, type EventScoringOpts, type ScoringMode, type ScoringFormat, type KernelState, type Pairing, type RallyLog, type RubberLineup, type Side } from '@semp/shared';
 import { RacquetDeck, hydrateRally, hydrateFirstServer, hydratePairSwap } from '../../features/scoring/RacquetDeck';
 import { LineupPanel } from '../../features/scoring/LineupPanel';
 import { ChessResult, EndingChips, chessGamesIn, chessSummary, hydrateChess, type ChessState } from '../../features/scoring/ChessResult';
 import { CricketDeck } from '../../features/scoring/CricketDeck';
 import { TeamDeck } from '../../features/scoring/TeamDeck';
 import { TeamSheetPanel } from '../../features/scoring/TeamSheetPanel';
-import { matchdaySquad, readTeamSheet, substitute, usualSide, type SheetPerson, type TeamSheet } from '@semp/shared';
+import { matchdaySquad, readTeamSheet, substitute, usualSide, type SheetPerson, type SideSheet, type TeamSheet } from '@semp/shared';
 import { AUTOSAVE_MS, useLiveSave, useSaveStatus, useUnloadGuard, useDraftAutosave } from '../../features/scoring/useLiveSave';
 import { flushFixture, getStatus, readOutbox, type OutboxEntry } from '../../features/scoring/liveOutbox';
 
@@ -893,11 +893,17 @@ function rosterPeople(team: any): { id: string; name: string; team: string }[] {
     .filter((p: { id?: string }) => !!p.id);
 }
 
-/** A squad as the team sheet reads it - with shirt number and role, for its order. */
+/** A squad as the team sheet reads it - with role and the player's PROFILE shirt number. */
 function sheetSquad(team: any): SheetPerson[] {
   return (team?.team_members ?? [])
-    .map((tm: any) => ({ id: tm.users?.id as string, name: tm.users?.name ?? '-', role: tm.role ?? null, jersey: tm.jersey_number ?? null }))
+    .map((tm: any) => ({ id: tm.users?.id as string, name: tm.users?.name ?? '-', role: tm.role ?? null, jersey: tm.users?.jersey_number ?? null }))
     .filter((p: { id?: string }) => !!p.id);
+}
+
+/** "#10 Aarav": the number worn this match (team sheet), else the profile number. */
+function withJersey(p: SheetPerson, side: SideSheet | null | undefined): { id: string; name: string } {
+  const n = side?.jerseys ? side.jerseys[p.id] : p.jersey;
+  return { id: p.id, name: n != null ? `#${n} ${p.name}` : p.name };
 }
 
 function matchSides(fixture: any) {
@@ -1175,10 +1181,15 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
   const [status, setStatus] = useState<string>(fixture.status);
   const [busy, setBusy] = useState(false);
   const seeded = useRef(false);
+  // Every Undo on this match, saved beside the log; a ref so each save carries the latest.
+  const [undoTrail, setUndoTrail] = useState<UndoEntry<RallyEvent>[]>(() => readUndoTrail<RallyEvent>(live?.live_state?.undoTrail));
+  const undoTrailRef = useRef(undoTrail);
 
   useEffect(() => {
     if (!seeded.current && live) {
       setLog(hydrateRally(live.live_state));
+      const t = readUndoTrail<RallyEvent>(live.live_state?.undoTrail);
+      setUndoTrail(t); undoTrailRef.current = t;
       setFirstServer(hydrateFirstServer(live.live_state));
       setPairSwap(hydratePairSwap(live.live_state));
       setNamed(readLineup(live.live_state?.lineup));
@@ -1249,6 +1260,7 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
         live_state: {
           ...(live?.live_state ?? {}),
           rally: nextLog,
+          undoTrail: undoTrailRef.current,
           firstServer,
           pairSwap,
           lineup: lineupOver ? lineupOver.lineup : named,
@@ -1335,7 +1347,11 @@ function RacquetConsole({ fixture, fixtureId, live, invalidate, onDone }:
           if (named) storeLineup({ ...named, [s]: [...named[s]].reverse() }, false);
           else setPairSwap((cur) => ({ ...cur, [s]: !cur[s] }));
         }}
-        onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
+        undoTrail={undoTrail}
+        onChange={(nextLog, state, trail) => {
+          if (trail) { undoTrailRef.current = trail; setUndoTrail(trail); }
+          setLog(nextLog); save(nextLog, state, false);
+        }}
         onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
         onSuspend={(nextLog, state) => save(nextLog, state, false, onDone, undefined, true)}
       />
@@ -1428,10 +1444,15 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
   const [sheet, setSheet] = useState<TeamSheet | null>(() => readTeamSheet(live?.live_state));
   const [editingSheet, setEditingSheet] = useState(false);
   const seeded = useRef(false);
+  // Every Undo on this match, saved beside the log.
+  const [undoTrail, setUndoTrail] = useState<UndoEntry<CricketEvent>[]>(() => readUndoTrail<CricketEvent>(live?.live_state?.undoTrail));
+  const undoTrailRef = useRef(undoTrail);
 
   useEffect(() => {
     if (!seeded.current && live) {
       setLog(hydrateCricket(live.live_state));
+      const t = readUndoTrail<CricketEvent>(live.live_state?.undoTrail);
+      setUndoTrail(t); undoTrailRef.current = t;
       setSheet(readTeamSheet(live.live_state));
       seeded.current = true;
     }
@@ -1474,6 +1495,7 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
         live_state: {
           ...(live?.live_state ?? {}),
           cricket: nextLog,
+          undoTrail: undoTrailRef.current,
           // Snapshot on first write, then leave alone - a played match stays
           // reproducible under the rules it was played under.
           format: (live?.live_state as any)?.format ?? format,
@@ -1509,7 +1531,7 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
     setEditingSheet(false);
     persist.mutate(
       {
-        live_state: { ...(live?.live_state ?? {}), cricket: log, teamSheet: next },
+        live_state: { ...(live?.live_state ?? {}), cricket: log, undoTrail: undoTrailRef.current, teamSheet: next },
         live_log: cricketTimeline(foldCricket(format, log).state, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture))),
       },
       { onError: (e: any) => toast.error(e.message) },
@@ -1535,10 +1557,10 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
   }
 
   // Batters and bowlers come from the playing XI; substitutes only field. No sheet: the whole squad, as before.
-  const named = (s: SheetPerson[], ids: string[]) => ids.map((id) => s.find((p) => p.id === id)).filter((p): p is SheetPerson => !!p)
-    .map((p) => ({ id: p.id, name: p.name }));
-  const xi = (side: 'A' | 'B') => (sheet ? named(squads[side], sheet[side].playing) : squads[side].map((p) => ({ id: p.id, name: p.name })));
-  const subs = (side: 'A' | 'B') => (sheet ? named(squads[side], sheet[side].bench) : []);
+  const named = (side: 'A' | 'B', ids: string[]) => ids.map((id) => squads[side].find((p) => p.id === id)).filter((p): p is SheetPerson => !!p)
+    .map((p) => withJersey(p, sheet?.[side]));
+  const xi = (side: 'A' | 'B') => (sheet ? named(side, sheet[side].playing) : squads[side].map((p) => withJersey(p, null)));
+  const subs = (side: 'A' | 'B') => (sheet ? named(side, sheet[side].bench) : []);
 
   return (
     <>
@@ -1569,7 +1591,11 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
       log={log}
       busy={busy}
       onOpenAdmin={onOpenAdmin}
-      onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
+      undoTrail={undoTrail}
+      onChange={(nextLog, state, trail) => {
+        if (trail) { undoTrailRef.current = trail; setUndoTrail(trail); }
+        setLog(nextLog); save(nextLog, state, false);
+      }}
       onSignOff={(nextLog, state) => save(nextLog, state, true, onDone)}
     />
     <WalkoverRow fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} onDone={onDone} />
@@ -1799,10 +1825,15 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
   // whole live state and the fetched copy can be a step behind.
   const [sheet, setSheet] = useState<TeamSheet | null>(() => readTeamSheet(live?.live_state));
   const [editingSheet, setEditingSheet] = useState(false);
+  // Every Undo on this match, saved beside the log; a ref so every save (autosave too) carries the latest.
+  const [undoTrail, setUndoTrail] = useState<UndoEntry<RallyEvent>[]>(() => readUndoTrail<RallyEvent>(live?.live_state?.undoTrail));
+  const undoTrailRef = useRef(undoTrail);
   const seeded = useRef(false);
   useEffect(() => {
     if (!seeded.current && live) {
       setLog(hydrateRally(live.live_state));
+      const t = readUndoTrail<RallyEvent>(live.live_state?.undoTrail);
+      setUndoTrail(t); undoTrailRef.current = t;
       setSheet(readTeamSheet(live.live_state));
       seeded.current = true;
     }
@@ -1822,12 +1853,12 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
   const roster = useMemo(() => {
     const pick = (side: 'A' | 'B') => (sheet
       ? matchdaySquad(squads[side], { playing: sheet[side].playing, bench: [] })
-      : squads[side]).map((x) => ({ id: x.id, name: x.name }));
+      : squads[side]).map((x) => withJersey(x, sheet?.[side]));
     return { A: pick('A'), B: pick('B') };
   }, [squads, sheet]);
   const bench = useMemo(() => {
     const pick = (side: 'A' | 'B') => (sheet ? matchdaySquad(squads[side], { playing: [], bench: sheet[side].bench }) : [])
-      .map((x) => ({ id: x.id, name: x.name }));
+      .map((x) => withJersey(x, sheet?.[side]));
     return { A: pick('A'), B: pick('B') };
   }, [squads, sheet]);
 
@@ -1891,6 +1922,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
         live_state: {
           ...(live?.live_state ?? {}),
           rally: nextLog,
+          undoTrail: undoTrailRef.current,
           // The clock, written down as a field rather than left to be folded out of
           // the log. See clockSnapshot - the log stays authoritative, this is for
           // the readers that have no log to fold.
@@ -1927,7 +1959,7 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
     setEditingSheet(false);
     persist.mutate(
       {
-        live_state: { ...(live?.live_state ?? {}), rally: log, clock: clockSnapshot(log), teamSheet: next },
+        live_state: { ...(live?.live_state ?? {}), rally: log, undoTrail: undoTrailRef.current, clock: clockSnapshot(log), teamSheet: next },
         live_log: teamTimeline(log, teamLabel(homeTeam(fixture)), teamLabel(awayTeam(fixture)), format),
       },
       { onError: (e: any) => toast.error(e.message) },
@@ -1996,7 +2028,11 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
       recorded={status === 'completed'}
       knockout={isKnockoutFixture(fixture ?? {})}
       afterResult={<PostMatchActions fixture={fixture} fixtureId={fixtureId} invalidate={invalidate} />}
-      onChange={(nextLog, state) => { setLog(nextLog); save(nextLog, state, false); }}
+      undoTrail={undoTrail}
+      onChange={(nextLog, state, trail) => {
+        if (trail) { undoTrailRef.current = trail; setUndoTrail(trail); }
+        setLog(nextLog); save(nextLog, state, false);
+      }}
       // NO onDone HERE. Confirming used to navigate straight back to the results
       // list, which is what made the award and the lock unreachable from the match
       // that had just finished: the console was gone before either was offered.
@@ -2131,25 +2167,39 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
     persist.mutate(body, { onSuccess, onError: (e: any) => { onError?.(); toast.error(e.message); } });
   };
 
+  // What Undo took back, so Redo can restore it; a new action clears it.
+  const [redoStack, setRedoStack] = useState<{ state: MatchState; log: LogEntry[]; txt: string }[]>([]);
   const dispatch = (action: Action) => {
     // Scoring is frozen once the final period is ended - ignore point taps until reopened.
     if (state.ended && action.type === 'POINT') return;
     const { state: ns, entry } = reduce(def, state, action);
     setHistory((hh) => [...hh, { state, log }].slice(-50));
+    setRedoStack([]);
     const nlog = entry ? [entry, ...log].slice(0, 80) : log;
     const st = status === 'scheduled' || status === 'completed' || status === 'confirmed' ? 'live' : status;
     setState(ns); setLog(nlog); setStatus(st);
     save(ns, nlog, st);
   };
 
+  // Undo restores the last snapshot, and the log keeps a line saying what was undone.
   const undo = () => {
-    setHistory((hh) => {
-      if (hh.length === 0) return hh;
-      const prev = hh[hh.length - 1];
-      setState(prev.state); setLog(prev.log);
-      save(prev.state, prev.log, status);
-      return hh.slice(0, -1);
-    });
+    const prev = history[history.length - 1];
+    if (!prev) return;
+    const txt = log[0] && log[0] !== prev.log[0] ? log[0].txt : 'last action';
+    setRedoStack((r) => [...r, { state, log, txt }]);
+    const nlog = [{ t: 'undo', txt: `↶ Undone: ${txt}` } as LogEntry, ...prev.log].slice(0, 80);
+    setHistory((hh) => hh.slice(0, -1));
+    setState(prev.state); setLog(nlog);
+    save(prev.state, nlog, status);
+  };
+  const redo = () => {
+    const next = redoStack[redoStack.length - 1];
+    if (!next) return;
+    setRedoStack((r) => r.slice(0, -1));
+    setHistory((hh) => [...hh, { state, log }].slice(-50));
+    const nlog = [{ t: 'redo', txt: `↷ Redone: ${next.txt}` } as LogEntry, ...next.log].slice(0, 80);
+    setState(next.state); setLog(nlog);
+    save(next.state, nlog, status);
   };
 
   const goLive = () => {
@@ -2294,7 +2344,10 @@ function LiveConsole({ fixture, fixtureId, def, live, invalidate, onDone }:
 
           <div className="space-y-5">
             <Card>
-              <CardHeader title="Scoring log" action={<Button size="sm" variant="ghost" disabled={history.length === 0} onClick={undo}>↶ Undo</Button>} />
+              <CardHeader title="Scoring log" action={<span className="flex gap-1">
+                <Button size="sm" variant="ghost" disabled={history.length === 0} onClick={undo}>↶ Undo</Button>
+                {redoStack.length > 0 && <Button size="sm" variant="ghost" onClick={redo}>↷ Redo</Button>}
+              </span>} />
               <CardBody>
                 {log.length === 0 ? (
                   <p className="text-sm text-slate-400 dark:text-slate-500">No logs yet - start scoring.</p>
@@ -2935,10 +2988,12 @@ function TieConsole({ fixture, fixtureId, spec: specProp, layout, mode, live, in
                           }}
                           // Each point is saved with the rubber; the rules freeze at its first point.
                           // Walking a finished rubber back with Undo reopens it.
-                          onChange={(log, ks) => updateRubber(
+                          undoTrail={active.undoTrail as UndoEntry<RallyEvent>[] | undefined}
+                          onChange={(log, ks, trail) => updateRubber(
                             state.activeRubber,
                             {
                               rally: log,
+                              ...(trail ? { undoTrail: trail } : {}),
                               format: active.format ?? baseFormat.format!,
                               firstServer: active.firstServer ?? 'A',
                               status: active.status === 'pending' ? 'live' : active.status,
@@ -3251,16 +3306,16 @@ const markMetaFor = (spec: EventSpec, se?: { resultType?: string; unit?: string 
 // Spelled out in full so "40" reads as an actual unit, not a guess.
 const placeholderFor = (unit?: string) => (unit ? EVENT_UNIT_LABEL[unit as keyof typeof EVENT_UNIT_LABEL] ?? unit : 'value');
 
-function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
+function EventConsole({ fixture, fixtureId, spec: baseSpec, live, invalidate }:
   { fixture: any; fixtureId: string; spec: EventSpec; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[] }) {
-  const pickOne = !!spec.pickOne;
-  const noun = spec.subEventNoun ?? 'sub-event';
+  const pickOne = !!baseSpec.pickOne;
+  const noun = baseSpec.subEventNoun ?? 'sub-event';
   const nounLower = noun.toLowerCase();
   // A named discipline ("66kg") already fixes the one category every entrant is
   // in (effectiveEventSpec narrowed spec.subEvents to just it) - nothing left to
   // pick. Only "Whole sport" still mixes more than one category.
   const isNamedDiscipline = !!fixture?.tournament_disciplines?.discipline_id;
-  const fixedCategory = isNamedDiscipline ? spec.subEvents[0]?.key ?? null : null;
+  const fixedCategory = isNamedDiscipline ? baseSpec.subEvents[0]?.key ?? null : null;
 
   // Whoever's org has a team_entries row for this discipline has one registered
   // entrant on it (squad_max is 1) - shown up front instead of a phone lookup.
@@ -3271,7 +3326,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const entrantRow = (e: (typeof entrants)[number]): ParticipantResult =>
     ({ id: e.org_id ? `e${e.user_id}-${e.org_id}` : `e${e.user_id}`, name: e.name, phone: e.phone, org: e.org, orgId: e.org_id, category: pickOne ? fixedCategory : null, marks: {} });
   // A relay is one entry per institute, with one time - its swimmers listed on the row.
-  const relay = isNamedDiscipline && isRelaySubEvent(spec.subEvents[0]);
+  const relay = isNamedDiscipline && isRelaySubEvent(baseSpec.subEvents[0]);
   const relayRows = (list: typeof entrants): ParticipantResult[] => {
     const byOrg = new Map<string, typeof entrants>();
     for (const e of list) {
@@ -3302,6 +3357,14 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
       ? { participants: seedRows(entrants) }
       : hydrated);
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
+  // The template's classes/races plus any this match added from the event's own disciplines.
+  const spec = useMemo(() => withExtraSubEvents(baseSpec, state), [baseSpec, state.extraEvents]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Named disciplines set up under this sport (Setup > Sports & disciplines), not already built in.
+  const extraChoices: Array<{ key: string; label: string }> = useMemo(() => {
+    const builtIn = new Set(baseSpec.subEvents.map((se) => se.label.trim().toLowerCase()));
+    return ((fixture as any)?.event_disciplines ?? [])
+      .filter((d: { key?: unknown; label?: unknown }) => typeof d?.key === 'string' && typeof d?.label === 'string' && !builtIn.has((d.label as string).trim().toLowerCase()));
+  }, [fixture, baseSpec]);
   // Armed by the first mark an official types, never by the seeding above - see the
   // matching comment in EventRankingConsole.
   const [touched, setTouched] = useState(false);
@@ -3317,11 +3380,11 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
       if (relay) {
         const knownOrgs = new Set(s.participants.map((p) => p.orgId ?? p.org));
         const missing = entrants.filter((e) => !knownOrgs.has(e.org_id ?? e.org));
-        return missing.length ? { participants: [...s.participants, ...relayRows(missing)] } : s;
+        return missing.length ? { ...s, participants: [...s.participants, ...relayRows(missing)] } : s;
       }
       const known = new Set(s.participants.map((p) => (p.phone ?? '').replace(/\D/g, '')));
       const missing = entrants.filter((e) => !known.has((e.phone ?? '').replace(/\D/g, '')));
-      return missing.length ? { participants: [...s.participants, ...missing.map(entrantRow)] } : s;
+      return missing.length ? { ...s, participants: [...s.participants, ...missing.map(entrantRow)] } : s;
     });
   }, [entrants]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -3371,7 +3434,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const patchP = (id: string, patch: Partial<ParticipantResult>) => {
     setTouched(true);
     signedOff.current = false;
-    setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+    setState((s) => ({ ...s, participants: s.participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
   };
   const setOrg = (id: string, orgId: string) => patchP(id, { orgId: orgId || null, org: orgs.find((o) => o.id === orgId)?.name ?? null });
   void setOrg; // dead code - see comment above
@@ -3394,6 +3457,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     signedOff.current = false;
     if (key === globalCategory) setEnteredHere(true);
     setState((s) => ({
+      ...s,
       participants: s.participants.map((p) => {
         if (p.id !== id) return p;
         const { [key]: _old, ...rest } = p.statuses ?? {};
@@ -3408,7 +3472,40 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     setTouched(true);
     signedOff.current = false;
     if (key === globalCategory) setEnteredHere(true);
-    setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, marks: { ...p.marks, [key]: n } } : p)) }));
+    setState((s) => ({ ...s, participants: s.participants.map((p) => (p.id === id ? { ...p, marks: { ...p.marks, [key]: n } } : p)) }));
+  };
+  // Race-first scoring: put a race on screen, or take it off (asking first if it has results).
+  const raceKeys = spec.subEvents.map((se) => se.key);
+  // A relay chosen before relay rows existed gets them on open; not a change worth saving by itself.
+  useEffect(() => {
+    if (chosenEvents(state, raceKeys).some((k) => isRelaySubEvent(spec.subEvents.find((se) => se.key === k)))) {
+      setState((s) => withRelayRows(s));
+    }
+  }, [state.participants.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleRace = async (key: string) => {
+    const label = spec.subEvents.find((se) => se.key === key)?.label ?? nounLower;
+    const filled = chosenEvents(state, raceKeys).includes(key) ? state.participants.filter((p) => hasResultIn(p, key)).length : 0;
+    if (filled && !(await confirmDialog({
+      title: `Remove ${label}?`, tone: 'danger', confirmLabel: 'Remove',
+      message: `${filled} result${filled === 1 ? '' : 's'} in ${label} will be cleared.`,
+    }))) return;
+    setTouched(true);
+    signedOff.current = false;
+    setState((s) => toggleRaceState(s, raceKeys, key, isRelaySubEvent(spec.subEvents.find((se) => se.key === key)), pickOne));
+  };
+  const addExtraRace = (choice: { key: string; label: string }) => {
+    setTouched(true);
+    signedOff.current = false;
+    setState((s) => {
+      const withIt = s.extraEvents?.some((e) => e.key === choice.key) ? s : { ...s, extraEvents: [...(s.extraEvents ?? []), choice] };
+      return toggleRaceState(withIt, [...raceKeys, choice.key], choice.key, /\brelay\b/i.test(choice.label), pickOne);
+    });
+  };
+  // Lineup and relay-swimmer edits from the race tabs: saved like any other change.
+  const updateEvent = (fn: (s: EventState) => EventState) => {
+    setTouched(true);
+    signedOff.current = false;
+    setState(fn);
   };
 
   // `eventStandings` is the per-org contribution (points + medals from each sub-event's
@@ -3464,14 +3561,15 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const subtitle = pickOne
     ? isNamedDiscipline
       ? `Enter each competitor's total${unit} for ${spec.subEvents[0]?.label ?? noun}.`
-      : `Pick a ${nounLower}, then enter its competitors' totals${unit}. Each keeps the ${nounLower} their total was entered in.`
+      : `Add the ${pluralOf(nounLower)} being contested, put each competitor in theirs, then enter their totals${unit}.`
     : isNamedDiscipline
       ? `Enter each competitor's mark${unit} for ${spec.subEvents[0]?.label ?? noun}.`
-      : `Enter each competitor's mark per ${nounLower}${unit}.`;
+      : `Pick the ${nounLower}s being run, then enter each competitor's result in them.`;
   const markLabel = `Total${unit}`;
   // Whole sport, nothing chosen: no default any more, blocks scoring until an
   // explicit choice is made (was the "silently defaults to first category" bug).
-  const blockedOnCategory = pickOne && !isNamedDiscipline && !category;
+  // Whole sport now scores in per-class tabs, so nothing blocks on a single picked class.
+  const blockedOnCategory = false;
   // Exactly one mark per row for pickOne or a named discipline; only a
   // genuinely multi-category whole-sport grid sport needs per-race columns.
   const singleMark = pickOne || isNamedDiscipline;
@@ -3482,14 +3580,6 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
         <CardHeader title="Participants & results" subtitle={subtitle} />
         <CardBody className="space-y-3">
           <p className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-slate-600 dark:bg-brand-500/10 dark:text-slate-300">{scoringText}</p>
-          {pickOne && !isNamedDiscipline && (
-            <Field label={noun} hint={!category ? `Choose a ${nounLower} before scoring anyone in this session.` : undefined}>
-              <Select value={category ?? ''} onChange={(e) => setGlobalCategory(e.target.value)}>
-                <option value="" disabled>- Choose {nounLower} -</option>
-                {spec.subEvents.map((se) => <option key={se.key} value={se.key}>{se.label}</option>)}
-              </Select>
-            </Field>
-          )}
           {state.participants.length === 0 && (
             <p className="text-sm text-slate-400 dark:text-slate-500">No registered entrants for this discipline yet.</p>
           )}
@@ -3498,7 +3588,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
               subtitle above, not repeated on every single row. A genuinely
               multi-category "Whole sport" grid sport is the only shape that still
               needs its own column per race. */}
-          {state.participants.length > 0 && (singleMark ? (
+          {state.participants.length > 0 && (isNamedDiscipline || spec.subEvents.length < 2 ? (
             <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
               {state.participants.map((p) => (
                 <div key={p.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2.5 sm:flex-nowrap">
@@ -3537,92 +3627,11 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
                 </div>
               ))}
             </div>
-          ) : isSwimmingFixture(fixture) ? (
-            // Swimming: swimmers grouped under their institute, each a dropdown, so a
-            // dozen swimmers a college no longer means a dozen full cards to scroll past.
-            <div className="space-y-2">
-              {[...state.participants.reduce((m, p) => {
-                const key = p.orgId ?? p.org ?? '';
-                m.set(key, [...(m.get(key) ?? []), p]);
-                return m;
-              }, new Map<string, ParticipantResult[]>()).entries()]
-                .sort(([, a], [, b]) => (a[0]?.org ?? '').localeCompare(b[0]?.org ?? ''))
-                .map(([key, people]) => {
-                  const resultsOf = (p: ParticipantResult) => spec.subEvents.filter((se) => hasResultIn(p, se.key)).length;
-                  const total = people.reduce((n, p) => n + resultsOf(p), 0);
-                  return (
-                    <details key={key || 'none'} className="group rounded-xl border border-slate-200 dark:border-slate-800">
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
-                        <span className="min-w-0 truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{people[0]?.org || 'No institute'}</span>
-                        <span className="flex shrink-0 items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                          {people.length} swimmer{people.length === 1 ? '' : 's'} · {total} result{total === 1 ? '' : 's'}
-                          <ChevronDown className="h-4 w-4 transition group-open:rotate-180" />
-                        </span>
-                      </summary>
-                      <div className="divide-y divide-slate-100 border-t border-slate-100 dark:divide-slate-800 dark:border-slate-800">
-                        {people.map((p) => {
-                          const n = resultsOf(p);
-                          return (
-                            <details key={p.id} className="group/swimmer">
-                              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
-                                <span className="min-w-0 truncate text-sm text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</span>
-                                <span className={cn('flex shrink-0 items-center gap-2 text-xs', n ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500')}>
-                                  {n ? `${n} race${n === 1 ? '' : 's'}` : 'No results'}
-                                  <ChevronDown className="h-4 w-4 transition group-open/swimmer:rotate-180" />
-                                </span>
-                              </summary>
-                              <div className="px-3 pb-3">
-                                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                                  {spec.subEvents.map((se) => {
-                                    const seMeta = markMetaFor(spec, se);
-                                    return (
-                                      <label key={se.key} className="block min-w-0">
-                                        <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
-                                        <MarkInput
-                                          value={p.marks[se.key] ?? null} isTime={seMeta.isTime} disabled={!!resultStatusOf(p, se.key)}
-                                          placeholder={seMeta.isTime ? undefined : placeholderFor(seMeta.unit)}
-                                          onChange={(v) => setMark(p.id, se.key, v)} ariaLabel={`${p.name || 'competitor'} ${se.label}`}
-                                        />
-                                        <StatusSelect value={resultStatusOf(p, se.key)} onChange={(st) => setStatus(p.id, se.key, st)}
-                                          ariaLabel={`${p.name || 'competitor'} ${se.label} status`} className="mt-1 w-full" />
-                                      </label>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            </details>
-                          );
-                        })}
-                      </div>
-                    </details>
-                  );
-                })}
-            </div>
           ) : (
-            state.participants.map((p) => (
-              <div key={p.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
-                <Field label="Competitor" compact>
-                  <p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}{p.org ? <span className="font-normal text-slate-400 dark:text-slate-500"> · {p.org}</span> : null}</p>
-                </Field>
-                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {spec.subEvents.map((se) => {
-                    const seMeta = markMetaFor(spec, se);
-                    return (
-                      <label key={se.key} className="block">
-                        <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
-                        <MarkInput
-                          value={p.marks[se.key] ?? null} isTime={seMeta.isTime} disabled={!!resultStatusOf(p, se.key)}
-                          placeholder={seMeta.isTime ? undefined : placeholderFor(seMeta.unit)}
-                          onChange={(n) => setMark(p.id, se.key, n)} ariaLabel={`${p.name || 'competitor'} ${se.label}`}
-                        />
-                        <StatusSelect value={resultStatusOf(p, se.key)} onChange={(st) => setStatus(p.id, se.key, st)}
-                          ariaLabel={`${p.name || 'competitor'} ${se.label} status`} className="mt-1 w-full" />
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            ))
+            <RaceFirstScoring spec={spec} scoreSpec={scoreSpec} scoringOpts={scoringOpts} state={state} noun={noun} exclusive={pickOne}
+              who={isSwimmingFixture(fixture) ? 'swimmer' : pickOne ? 'lifter' : 'competitor'}
+              extraChoices={extraChoices} onAddExtra={addExtraRace}
+              onToggle={toggleRace} onMark={setMark} onStatus={setStatus} onUpdate={updateEvent} />
           ))}
           {blockedOnCategory && (
             <p className="text-sm text-rose-600 dark:text-rose-400">Choose a {nounLower} above before saving.</p>
@@ -3688,6 +3697,313 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     </div>
   );
 }
+
+
+/**
+ * Race-first scoring for a "whole sport" multi-race event (swimming): one tab per race the
+ * scorer chose; each race lists only the swimmers picked for it (a relay: one row per
+ * institute, with who swam it). "+ Add race" opens a tile picker.
+ */
+function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, exclusive = false, extraChoices = [], onAddExtra, onToggle, onMark, onStatus, onUpdate }: {
+  spec: EventSpec; scoreSpec: EventSpec; scoringOpts: EventScoringOpts; state: EventState; noun: string; who: string;
+  /** One sub-event per competitor (powerlifting classes): picking someone moves them. */
+  exclusive?: boolean;
+  /** The event's own named disciplines for this sport, offered beside the built-in list. */
+  extraChoices?: Array<{ key: string; label: string }>;
+  onAddExtra?: (choice: { key: string; label: string }) => void;
+  onToggle: (key: string) => void;
+  onMark: (id: string, key: string, n: number | null) => void;
+  onStatus: (id: string, key: string, st: ResultStatus | null) => void;
+  onUpdate: (fn: (s: EventState) => EventState) => void;
+}) {
+  const nounLower = noun.toLowerCase();
+  const keys = spec.subEvents.map((se) => se.key);
+  const on = chosenEvents(state, keys);
+  const [active, setActive] = useState<string | null>(on[0] ?? null);
+  const [picking, setPicking] = useState(on.length === 0);
+  // Which race has its "choose swimmers" panel open, and which relay row its swimmer list.
+  const [choosingFor, setChoosingFor] = useState<string | null>(null);
+  const [membersFor, setMembersFor] = useState<string | null>(null);
+  // Row order held while a box in the tab has focus, so a row never jumps away mid-typing.
+  const [frozenOrder, setFrozenOrder] = useState<string[] | null>(null);
+  // The open tab follows the chosen list: a removed race hands over to its neighbour.
+  const current = active && on.includes(active) ? active : on[0] ?? null;
+  // Keep the open tab in view when the row scrolls sideways (many races, or a phone).
+  const tabRow = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = tabRow.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    const row = tabRow.current;
+    if (el && row) row.scrollTo({ left: el.offsetLeft - row.clientWidth / 2 + el.clientWidth / 2, behavior: 'smooth' });
+  }, [current, picking]);
+
+  // "Men's 25m Freestyle" and "Men ≤63kg" both group under Men's.
+  const groupOf = (label: string) => /^men('s)?\s/i.test(label) ? "Men's" : /^women('s)?\s/i.test(label) ? "Women's" : /^mixed\s/i.test(label) ? 'Mixed' : 'Other';
+  const short = (label: string) => label.replace(/^(men's|women's|men|women|mixed)\s+/i, '');
+  // "4x25m Freestyle Relay" -> distance "4x25m", stroke "Freestyle Relay".
+  const parts = (label: string) => {
+    const rest = short(label);
+    const m = /^(\d+(?:x\d+)?\s?m)\s+(.*)$/i.exec(rest);
+    return m ? { distance: m[1].replace(/\s/g, ''), stroke: m[2] } : { distance: rest, stroke: '' };
+  };
+  const fromSetup = new Set(extraChoices.map((c) => c.key));
+  const groups = [
+    ...["Men's", "Women's", 'Mixed', 'Other']
+      .map((g) => ({ g, items: spec.subEvents.filter((se) => !fromSetup.has(se.key) && groupOf(se.label) === g) }))
+      .filter((x) => x.items.length),
+    ...(extraChoices.length ? [{ g: 'From your event setup', items: extraChoices }] : []),
+  ];
+  const byOrgName = (a: ParticipantResult, b: ParticipantResult) => (a.org ?? '').localeCompare(b.org ?? '') || a.name.localeCompare(b.name);
+  const isRelayKey = (key: string) => isRelaySubEvent(spec.subEvents.find((x) => x.key === key));
+  const inRace = (key: string) => {
+    const ids = new Set(lineupOf(state, key, isRelayKey(key), exclusive));
+    return raceField(state, isRelayKey(key)).filter((p) => ids.has(p.id)).sort(byOrgName);
+  };
+  const doneIn = (key: string) => inRace(key).filter((p) => hasResultIn(p, key)).length;
+
+  const pick = (key: string) => {
+    const adding = !on.includes(key);
+    // A Setup class not on this match yet is added to it; everything else toggles as usual.
+    const choice = extraChoices.find((c) => c.key === key);
+    if (adding && choice && !spec.subEvents.some((se) => se.key === key)) onAddExtra?.(choice);
+    else onToggle(key);
+    if (adding) setActive(key);
+  };
+
+  const picker = (
+    <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-900/40" data-qa="race-picker">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Add {pluralOf(nounLower)}</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">Tap every {nounLower} being {exclusive ? 'contested' : 'run'}. Each gets its own tab.</div>
+        </div>
+        {on.length > 0 && <Button size="sm" onClick={() => setPicking(false)} data-qa="race-picker-done">Done</Button>}
+      </div>
+      {groups.map(({ g, items }) => (
+        <div key={g}>
+          {(groups.length > 1 || g === 'From your event setup') && <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{g}</div>}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+            {items.map((se) => {
+              const picked = on.includes(se.key);
+              const { distance, stroke } = parts(se.label);
+              return (
+                <button key={se.key} type="button" onClick={() => pick(se.key)} aria-pressed={picked} data-qa="race-tile"
+                  title={picked ? `Remove ${se.label}` : `Add ${se.label}`}
+                  className={cn('relative flex min-h-[64px] flex-col items-start justify-center rounded-xl border px-3 py-2 pr-8 text-left transition active:scale-[0.98]',
+                    picked
+                      ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500 dark:border-brand-400 dark:bg-brand-500/15 dark:ring-brand-400'
+                      : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-slate-600 dark:hover:bg-slate-700/70')}>
+                  <span className={cn('font-mono text-base font-bold leading-tight', picked ? 'text-brand-700 dark:text-brand-200' : 'text-slate-800 dark:text-slate-100')}>{distance}</span>
+                  {stroke && <span className="mt-0.5 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{stroke}</span>}
+                  <span className={cn('absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full text-[11px] font-bold',
+                    picked ? 'bg-brand-600 text-white' : 'border border-slate-300 text-transparent dark:border-slate-600')}>✓</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  if (!current) return <div data-qa="race-first">{picker}</div>;
+
+  const se = spec.subEvents.find((x) => x.key === current)!;
+  const relay = isRelaySubEvent(se);
+  const legs = relayLegs(se.label);
+  const meta = markMetaFor(spec, se);
+  const rows = inRace(current);
+  const field = raceField(state, relay).sort(byOrgName);
+  const done = doneIn(current);
+  const ranks = rankSubEvent(scoreSpec, state, current, scoringOpts);
+  // Placing order: 1st first, then no result yet, then DNS / DNF / DQ; names break ties.
+  const bucket = (p: ParticipantResult) => (ranks.has(p.id) ? 0 : resultStatusOf(p, current) ? 2 : 1);
+  const placed = [...rows].sort((a, b) => bucket(a) - bucket(b) || (ranks.get(a.id) ?? 0) - (ranks.get(b.id) ?? 0) || byOrgName(a, b));
+  const ordered = frozenOrder
+    ? [...placed].sort((a, b) => (frozenOrder.indexOf(a.id) + 1 || 1e9) - (frozenOrder.indexOf(b.id) + 1 || 1e9))
+    : placed;
+  const medal = (r: number) => r === 1 ? 'bg-amber-400 text-amber-950' : r === 2 ? 'bg-slate-300 text-slate-900' : r === 3 ? 'bg-orange-400 text-orange-950' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200';
+  const choosing = choosingFor === current || rows.length === 0;
+  const pickWord = relay ? 'teams' : `${who}s`;
+
+  // Taking someone out clears their result in this race, so ask first when there is one.
+  const setIn = async (p: ParticipantResult, inIt: boolean) => {
+    if (!inIt && hasResultIn(p, current) && !(await confirmDialog({
+      title: `Take ${p.name} out of ${se.label}?`, tone: 'danger', confirmLabel: 'Take out',
+      message: `Their result in this ${nounLower} will be cleared.`,
+    }))) return;
+    const from = exclusive && inIt && p.category && p.category !== current ? spec.subEvents.find((x) => x.key === p.category) : undefined;
+    if (from && hasResultIn(p, from.key) && !(await confirmDialog({
+      title: `Move ${p.name} to ${se.label}?`, tone: 'danger', confirmLabel: 'Move',
+      message: `${p.name} already has a result in ${from.label}. It will be cleared.`,
+    }))) return;
+    // Stay open until Done, even when this pick is what made the race non-empty.
+    setChoosingFor(current);
+    onUpdate((s) => setInLineup(s, current, relay, p.id, inIt, exclusive));
+  };
+  const swimmersOf = (row: ParticipantResult) => raceField(state, false).filter((p) => (p.orgId ?? p.org) === (row.orgId ?? row.org)).sort(byOrgName);
+  const membersOf = (row: ParticipantResult) => state.relayMembers?.[current]?.[row.id] ?? [];
+  const toggleMember = (row: ParticipantResult, id: string) => {
+    const now = membersOf(row);
+    const next = now.includes(id) ? now.filter((x) => x !== id) : [...now, id];
+    if (next.length > legs) { toast.warning(`A ${short(se.label)} has ${legs} swimmers`); return; }
+    onUpdate((s) => setRelayMembers(s, current, row.id, next, legs));
+  };
+  const nameOf = (id: string) => state.participants.find((p) => p.id === id)?.name ?? '?';
+
+  const chooser = (
+    <div className="space-y-3 border-b border-slate-100 bg-slate-50/50 px-3 py-3 dark:border-slate-800 dark:bg-slate-900/30" data-qa="lineup-chooser">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+          {relay ? 'Which institutes swim this relay?' : `Who is ${who === 'swimmer' ? 'swimming' : who === 'lifter' ? 'lifting in' : 'competing in'} ${se.label}?`}
+        </span>
+        {rows.length > 0 && <Button size="sm" onClick={() => setChoosingFor(null)} data-qa="lineup-done">Done</Button>}
+      </div>
+      {[...new Set(field.map((p) => p.org ?? ''))].map((org) => (
+        <div key={org || 'none'}>
+          {!relay && <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{org || 'No institute'}</div>}
+          <div className="flex flex-wrap gap-1.5">
+            {field.filter((p) => (p.org ?? '') === org).map((p) => {
+              const inIt = rows.some((r) => r.id === p.id);
+              return (
+                <button key={p.id} type="button" onClick={() => setIn(p, !inIt)} aria-pressed={inIt} data-qa="lineup-pill"
+                  className={cn('rounded-full border px-3 py-1.5 text-sm font-medium transition',
+                    inIt ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300')}>
+                  {inIt ? '✓ ' : ''}{relay ? (p.org ?? p.name) : p.name}
+                  {/* Already in another class: picking them here moves them. */}
+                  {exclusive && !inIt && p.category && p.category !== current && (
+                    <span className="ml-1 text-[11px] opacity-70">· {short(spec.subEvents.find((x) => x.key === p.category)?.label ?? '')}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="space-y-3" data-qa="race-first">
+      {/* One tab per race; scrolls sideways on a phone. */}
+      <div ref={tabRow} className="relative -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1" role="tablist" aria-label={pluralOf(noun)}>
+        {on.map((key) => {
+          const x = spec.subEvents.find((s2) => s2.key === key)!;
+          const n = doneIn(key);
+          const total = inRace(key).length;
+          const isOn = key === current && !picking;
+          return (
+            <button key={key} type="button" role="tab" aria-selected={isOn} data-qa="race-tab"
+              onClick={() => { setActive(key); setPicking(false); }}
+              className={cn('flex shrink-0 flex-col items-start rounded-xl border px-3 py-2 text-left transition',
+                isOn ? 'border-brand-600 bg-brand-600 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700')}>
+              <span className="whitespace-nowrap text-sm font-semibold">{x.label}</span>
+              <span className={cn('text-[11px] tabular-nums', isOn ? 'text-white/80' : total > 0 && n === total ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500')}>
+                {total === 0 ? `pick ${isRelaySubEvent(x) ? 'teams' : `${who}s`}` : `${n}/${total} entered`}
+              </span>
+            </button>
+          );
+        })}
+        <button type="button" role="tab" aria-selected={picking} onClick={() => setPicking((v) => !v)} data-qa="race-add-tab"
+          className={cn('flex shrink-0 items-center gap-1.5 rounded-xl border border-dashed px-3 py-2 text-sm font-semibold transition',
+            picking ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-200' : 'border-slate-300 text-slate-500 hover:border-brand-400 hover:text-brand-600 dark:border-slate-600 dark:text-slate-400')}>
+          <Plus className="h-4 w-4" /> Add {nounLower}
+        </button>
+      </div>
+
+      {picking ? picker : (
+        <section className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800" data-qa="race-card" role="tabpanel">
+          <header className="space-y-2 bg-slate-50 px-3 py-2.5 dark:bg-slate-800/50">
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-0">
+                <span className="block truncate text-base font-semibold text-slate-800 dark:text-slate-100">{se.label}</span>
+                {relay && <span className="block text-[11px] text-slate-500 dark:text-slate-400">One time per institute · {legs} swimmers each</span>}
+              </span>
+              <span className="flex shrink-0 items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                {done}/{rows.length} entered
+                <button type="button" onClick={() => setChoosingFor(choosing ? null : current)} data-qa="lineup-toggle"
+                  className="ml-1 rounded-md px-2 py-1 font-semibold text-brand-600 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-500/10">
+                  {relay ? 'Teams' : `Choose ${who}s`}
+                </button>
+                <button type="button" onClick={() => onToggle(current)} aria-label={`Remove ${se.label}`} title={`Remove ${se.label}`}
+                  className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10">
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+              <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${rows.length ? (done / rows.length) * 100 : 0}%` }} />
+            </div>
+          </header>
+          {choosing && chooser}
+          {field.length === 0 ? (
+            <p className="px-3 py-4 text-sm text-slate-400 dark:text-slate-500">No registered entrants yet.</p>
+          ) : rows.length === 0 ? (
+            <p className="px-3 py-4 text-sm text-slate-500 dark:text-slate-400">Pick the {pickWord} in this {nounLower} above - only they get a time box.</p>
+          ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800" data-qa="race-rows"
+              onFocus={() => setFrozenOrder((f) => f ?? ordered.map((p) => p.id))}
+              onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFrozenOrder(null); }}>
+              {ordered.map((p) => {
+                const rank = ranks.get(p.id);
+                const members = relay ? membersOf(p) : [];
+                return (
+                  <div key={p.id} className="px-3 py-2.5" data-qa="race-row">
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 sm:flex-nowrap">
+                      <span className="flex min-w-0 basis-full items-center gap-2.5 sm:flex-1 sm:basis-auto">
+                        <span className={cn('grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-bold tabular-nums',
+                          rank ? medal(rank) : 'border border-dashed border-slate-300 text-slate-300 dark:border-slate-600 dark:text-slate-600')}
+                          title={rank ? `Placed ${ordinal(rank)}` : 'No time yet'} data-qa="race-rank">
+                          {rank ?? '-'}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium text-slate-700 dark:text-slate-200" title={p.name}>{relay ? (p.org ?? p.name) : (p.name || 'Unnamed')}</span>
+                          {relay ? (
+                            <button type="button" onClick={() => setMembersFor(membersFor === p.id ? null : p.id)} data-qa="relay-members"
+                              className="block max-w-full truncate text-left text-[11px] text-brand-600 hover:underline dark:text-brand-300">
+                              {members.length ? members.map(nameOf).join(', ') : `Add who swam (up to ${legs})`}
+                            </button>
+                          ) : p.org && <span className="block truncate text-[11px] text-slate-400 dark:text-slate-500">{p.org}</span>}
+                        </span>
+                      </span>
+                      <div className="flex w-full items-start gap-1.5 sm:w-auto sm:shrink-0">
+                        <div className="min-w-0 flex-1 sm:w-32 sm:flex-none">
+                          <MarkInput
+                            value={p.marks[current] ?? null} isTime={meta.isTime} disabled={!!resultStatusOf(p, current)}
+                            placeholder={meta.isTime ? undefined : placeholderFor(meta.unit)}
+                            onChange={(n) => onMark(p.id, current, n)} ariaLabel={`${p.name || who} ${se.label}`}
+                          />
+                        </div>
+                        <StatusSelect value={resultStatusOf(p, current)} onChange={(st) => onStatus(p.id, current, st)}
+                          ariaLabel={`${p.name || who} ${se.label} status`} />
+                      </div>
+                    </div>
+                    {relay && membersFor === p.id && (
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-50 p-2 dark:bg-slate-800/60" data-qa="relay-member-picker">
+                        <span className="w-full text-[11px] text-slate-500 dark:text-slate-400">Who swam for {p.org} ({members.length}/{legs})</span>
+                        {swimmersOf(p).length === 0 ? <span className="text-xs text-slate-400">No swimmers on this institute's squad.</span> : swimmersOf(p).map((m) => {
+                          const inIt = members.includes(m.id);
+                          return (
+                            <button key={m.id} type="button" onClick={() => toggleMember(p, m.id)} aria-pressed={inIt} data-qa="relay-member-pill"
+                              className={cn('rounded-full border px-2.5 py-1 text-xs font-medium transition',
+                                inIt ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300')}>
+                              {inIt ? '✓ ' : ''}{m.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
+const pluralOf = (w: string) => (/[^aeiou]y$/i.test(w) ? `${w.slice(0, -1)}ies` : /s$/i.test(w) ? w : `${w}s`);
 
 // Numeric/time mark cell. Keeps the raw string the official typed (so mid-entry values
 // like "1:0" aren't reformatted under the cursor) and emits the parsed number upward;
@@ -4084,11 +4400,11 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
   const awayName = teamLabel(awayTeam(fixture));
   const homeOrg = orgLabel(homeTeam(fixture));
   const awayOrg = orgLabel(awayTeam(fixture));
-  // Seed from the live detailed tally when one exists (so switching Detailed → Manual
-  // keeps the score instead of resetting), else from the saved headline. An empty
-  // tally (a team sheet but no play) must not hide a saved, typed-in result.
+  // Seed from the saved score: Detailed saves it with every tap, so it is never older than
+  // the tally, and a score typed here later must not be replaced by the old tally on reopen.
+  // The tally is only the fallback when nothing is saved yet.
   const liveH = live?.live_state && Object.keys(live.live_state).length > 0 ? headline(def, hydrate(live.live_state)) : null;
-  const useLive = !!liveH && (liveH.a !== 0 || liveH.b !== 0 || fixture.home_score == null);
+  const useLive = !!liveH && (fixture.home_score == null || fixture.away_score == null);
   const seedHome = useLive ? liveH!.a : fixture.home_score;
   const seedAway = useLive ? liveH!.b : fixture.away_score;
   const [home, setHome] = useState(seedHome != null ? String(seedHome) : '');
@@ -4134,10 +4450,12 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
   const racquetShape = def.archetype === 'sets' || def.archetype === 'rally' || !!format;
   const winsNeeded = racquetShape && !singleUnit ? (top && format ? top.target : Math.ceil(def.segMax / 2)) : null;
   const playAll = !!unitLevel?.playAll;
+  // Level after the board limit can still be a result where boards won or tie-break totals decide.
+  const carromLevelOk = !!carrom && carrom.maxBoards != null && (carrom.boardsWonDecides || carrom.tieBreakBoards > 1);
   const carromGameValid = (a: number, b: number) => {
     const hi = Math.max(a, b);
     // With a board limit a game can end short of the target on the higher score.
-    return a !== b && hi <= carrom!.gameTarget && (carrom!.maxBoards != null || hi === carrom!.gameTarget);
+    return (a !== b || carromLevelOk) && hi <= carrom!.gameTarget && (carrom!.maxBoards != null || hi === carrom!.gameTarget);
   };
   // A time cap can stop play short of the target, so any score inside the limits stands.
   // Multi-unit stays lenient on level: time up can go to the side ahead in the set in play.
@@ -4154,7 +4472,7 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
   const gamesError = !gamesValid && hs != null && as != null
     ? carrom && singleUnit
       ? carrom.maxBoards != null
-        ? `A carrom game ends on ${carrom.gameTarget}, or on the higher score after ${carrom.maxBoards} boards - nobody passes ${carrom.gameTarget} and it can't be level.`
+        ? `A carrom game ends on ${carrom.gameTarget}, or on the higher score after ${carrom.maxBoards} boards - nobody passes ${carrom.gameTarget}${carromLevelOk ? '' : " and it can't be level"}.`
         : `A carrom game ends when one side reaches ${carrom.gameTarget}: the winner is on ${carrom.gameTarget} and the other side on fewer - e.g. ${carrom.gameTarget}-14.`
       : timed
       ? singleUnit && unitLevel
@@ -4180,8 +4498,16 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
   // A knockout needs a winner: level is allowed (won on penalties), a draw is not.
   const knockout = isKnockoutFixture(fixture) || isKnockoutRound(fixture.round);
   const knockoutNeedsWinner = knockout && !winnerId && hs != null && as != null;
+  // A level carrom game was won on boards or tie-break totals: the winner can't be read off the score.
+  const carromLevelNeedsWinner = carromLevelOk && singleUnit && hs != null && hs === as && winner !== 'home' && winner !== 'away';
+  // An unfinished score saved as a draw is how a called-off match is recorded: say so, don't block it.
+  const calledOffDraw = racquetShape && !gamesValid && winner === 'draw' && hs != null && as != null;
 
   const submit = (status: 'live' | 'completed') => {
+    if (carromLevelNeedsWinner) {
+      toast.error('Level on points: pick who won the game on boards under Winner.');
+      return;
+    }
     if (status === 'completed' && knockoutNeedsWinner) {
       toast.error('A knockout match must have a winner. Level score? Pick who won (e.g. on penalties) under Winner.');
       return;
@@ -4221,8 +4547,14 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
             <option value="away">{awayName}</option>
             {!knockout && <option value="draw">Tie / draw</option>}
           </Select>
-          {knockoutNeedsWinner && (
+          {knockoutNeedsWinner && !carromLevelNeedsWinner && (
             <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">Knockout match: the scores are level, so pick who won (e.g. on penalties or a golden raid).</p>
+          )}
+          {carromLevelNeedsWinner && (
+            <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300" data-qa="carrom-level-winner">Level on points after {carrom!.maxBoards} boards: pick who won the game on boards.</p>
+          )}
+          {calledOffDraw && (
+            <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300" data-qa="called-off-draw">This isn't a finished score, so it will be saved as a match called off at {hs}-{as}. If the match was finished, fix the score instead.</p>
           )}
         </div>
         <div className="mt-4">

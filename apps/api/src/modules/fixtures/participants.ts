@@ -1,4 +1,5 @@
 import type { Db } from '../../infra/prisma.js';
+import { RELAY_ROW_PREFIX } from '@semp/shared';
 import { phoneLast10 } from '../iam/users.helpers.js';
 
 // Who a result belongs to (J4-E1-S3).
@@ -110,9 +111,13 @@ export async function resolveFixtureParticipants(db: Db, fixtureId: string): Pro
   }
 
   // ---- ranking events: competitors held as JSON ---------------------------
-  const competitors = (fixture.live_state as any)?.event?.participants
+  // An institute's relay row is a team, not a person - never matched, never "unlinked".
+  const rawCompetitors = (fixture.live_state as any)?.event?.participants
     ?? (fixture.live_state as any)?.participants
     ?? [];
+  const competitors = Array.isArray(rawCompetitors)
+    ? rawCompetitors.filter((c: any) => !(typeof c?.id === 'string' && c.id.startsWith(RELAY_ROW_PREFIX)))
+    : rawCompetitors;
 
   if (Array.isArray(competitors) && competitors.length) {
     // One query for all of them rather than one per competitor: a heat can hold

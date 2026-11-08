@@ -8,6 +8,7 @@ import { listChampionshipFixtures } from '../championships/fixtures-list.js';
 import { verifyShareToken } from './share-token.js';
 import { verifySignature, type CertificateFacts } from '../certificates/certificates.service.js';
 import { equalsIgnoreCase } from '../../shared/exact-ci.js';
+import { listPublicPhotosSafe } from '../event-photos/event-photos.service.js';
 
 // Unauthenticated, view-only championship pages reachable via a share token. Mounted
 // BEFORE the global requireAuth. Only the read-only Overview + Standings are exposed,
@@ -26,11 +27,11 @@ export function makePublicRouter(prisma: Prisma): Router {
     return id;
   };
 
-  // Overview: championship header + sports + headline counts.
+  // Overview: championship header + sports + headline counts + carousel photos.
   router.get('/championships/:token/overview', asyncHandler(async (req, res) => {
     const id = await resolve(req.params.token);
     const draw = { tournament_disciplines: { tournament_sports: { tournaments: { championship_id: id } } } };
-    const [champ, organizations, fixtures, completed_matches, sports] = await Promise.all([
+    const [champ, organizations, fixtures, completed_matches, sports, photos] = await Promise.all([
       prisma.championships.findUnique({
         where: { id },
         select: { id: true, name: true, slug: true, description: true, venue: true, start_date: true, end_date: true, status: true },
@@ -43,11 +44,12 @@ export function makePublicRouter(prisma: Prisma): Router {
         select: { sports: { select: { name: true, icon: true } } },
         orderBy: { display_order: 'asc' },
       }),
+      listPublicPhotosSafe(prisma, id),
     ]);
     if (!champ) throw new NotFoundError('Shared championship');
     // Distinct sports in declared order.
     const sportList = [...new Map(sports.filter((s) => s.sports).map((s) => [s.sports!.name, s.sports])).values()];
-    res.json({ championship: champ, sports: sportList, stats: { organizations, fixtures, completed_matches } });
+    res.json({ championship: champ, sports: sportList, stats: { organizations, fixtures, completed_matches }, photos });
   }));
 
   // Standings for a scope (same shape + ranking the spectator view uses).

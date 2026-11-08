@@ -116,6 +116,7 @@ model championships {
 
   award_types         award_types[]
   championship_awards championship_awards[]
+  championship_photos championship_photos[]
 
   @@index([entry_level], map: "idx_championships_entry_level")
 }
@@ -549,6 +550,8 @@ model users {
   phone_verified_at                                                        DateTime?                    @db.Timestamptz(6)
   tagline                                                                  String?                      @db.VarChar(160)
   preferred_sports                                                         String[]                     @default([])
+  /// The player's own shirt number (one for every sport); 0-999.
+  jersey_number                                                            Int?                         @db.SmallInt
   achievement_claims_achievement_claims_decided_byTousers                  achievement_claims[]         @relation("achievement_claims_decided_byTousers")
   achievement_claims_achievement_claims_user_idTousers                     achievement_claims[]         @relation("achievement_claims_user_idTousers")
   achievements                                                             achievements[]
@@ -624,6 +627,7 @@ model users {
   @@index([organization_id, account_type], map: "idx_users_institution_account_type")
   @@index([personal_plan], map: "idx_users_personal_plan")
   standings_adjustments standings_adjustments[]
+  championship_photos                   championship_photos[]
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -860,6 +864,23 @@ model standings_adjustments {
   users                    users?                  @relation(fields: [created_by], references: [id], onUpdate: NoAction)
 
   @@index([championship_id], map: "idx_standings_adjustments_championship")
+}
+
+/// Event photo carousel (20261107000000 / RDS 032): the file is in storage, this row says where.
+model championship_photos {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Null = shown on every event's public page.
+  championship_id String?       @db.Uuid
+  storage_key     String
+  url             String
+  caption         String?
+  sort_order      Int           @default(0)
+  created_by      String?       @db.Uuid
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  championships   championships? @relation(fields: [championship_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users?        @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+
+  @@index([championship_id, sort_order], map: "idx_championship_photos_championship")
 }
 
 model standings_rules {
@@ -1581,6 +1602,8 @@ model player_match_stats {
   occurred_on                                     DateTime                 @db.Date
   source                                          String                   @default("locked_result") @db.VarChar(24)
   lock_version                                    Int?
+  /// Shirt number worn in this match, from its team sheet at lock.
+  jersey_number                                   Int?                     @db.SmallInt
   superseded_at                                   DateTime?                @db.Timestamptz(6)
   computed_at                                     DateTime                 @default(now()) @db.Timestamptz(6)
   board_match_lines                               board_match_lines?

@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Medal, Moon, ShieldCheck, Sun, Swords, Trophy } from 'lucide-react';
+import { Medal, ShieldCheck, Swords, Trophy } from 'lucide-react';
 import { api } from '../../lib/api';
 import { BrandMark } from '../../components/BrandMark';
 import { Badge, Card, CardBody, CardHeader, Spinner, StatCard } from '../../components/ui';
-import { useTheme } from '../../lib/theme';
+import { ThemeToggle } from '../../components/ThemeToggle';
 
 // Public sports profile (F-026 extension) - outside the app shell and outside auth,
 // same reasoning as VerifyCertificatePage: a profile someone chose to make public is
@@ -44,21 +44,6 @@ const MEDAL_RING = {
 } as const;
 
 const initials = (s: string) => s.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
-
-function ThemeToggle() {
-  const { theme, toggle } = useTheme();
-  const dark = theme === 'dark';
-  return (
-    <button
-      onClick={toggle}
-      aria-label={dark ? 'Switch to light view' : 'Switch to dark view'}
-      title={dark ? 'Light view' : 'Dark view'}
-      className="grid h-8 w-8 place-items-center rounded-lg border border-[var(--line)] text-[var(--muted)] transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
-    >
-      {dark ? <Sun size={15} aria-hidden /> : <Moon size={15} aria-hidden />}
-    </button>
-  );
-}
 
 // The handle arrives as a PROP, not from useParams: this page renders outside the
 // <Route> tree (ahead of every auth check), so there is no route context to read

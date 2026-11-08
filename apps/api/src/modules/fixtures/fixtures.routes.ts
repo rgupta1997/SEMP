@@ -585,8 +585,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     const fixture = await prisma.fixtures.findUnique({
       where: { id: req.params.id },
       include: {
-        teams_fixtures_home_team_idToteams: { include: { organizations: true, team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true } } } } } },
-        teams_fixtures_away_team_idToteams: { include: { organizations: true, team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true } } } } } },
+        // users.jersey_number: the profile number the team sheet starts each player from.
+        teams_fixtures_home_team_idToteams: { include: { organizations: true, team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true, jersey_number: true } } } } } },
+        teams_fixtures_away_team_idToteams: { include: { organizations: true, team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true, jersey_number: true } } } } } },
         tournament_disciplines: {
           include: {
             disciplines: true,
@@ -638,6 +639,17 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     // though: whoever's org placed a team_entries row for this discipline has one
     // entrant on it (squad_max 1) - resolved the same way as lock time.
     let event_entrants: unknown[] = [];
+    // Whole-sport event: the sport's named disciplines in this event, offered as extra classes/races.
+    let event_disciplines: Array<{ key: string; label: string }> = [];
+    if (!fixture.home_team_id && !fixture.away_team_id && fixture.tournament_disciplines && !fixture.tournament_disciplines.discipline_id) {
+      const named = await prisma.tournament_disciplines.findMany({
+        where: { tournament_sport_id: fixture.tournament_disciplines.tournament_sport_id, discipline_id: { not: null } },
+        select: { discipline_id: true, disciplines: { select: { name: true } } },
+        orderBy: { display_order: 'asc' },
+      });
+      event_disciplines = named.filter((d) => d.discipline_id && d.disciplines?.name)
+        .map((d) => ({ key: d.discipline_id!, label: d.disciplines!.name }));
+    }
     if (!fixture.home_team_id && !fixture.away_team_id) {
       const entries = await prisma.team_entries.findMany({
         where: { tournament_discipline_id: fixture.tournament_discipline_id },
@@ -656,7 +668,7 @@ export function makeFixturesRouter(prisma: Prisma): Router {
 
     res.json({
       ...fixture, point_scheme: rule?.scheme ?? null, ranking_points, ranking_participation, ranking_best_only,
-      scoring_formats, event_entrants,
+      scoring_formats, event_entrants, event_disciplines,
     });
   }));
 

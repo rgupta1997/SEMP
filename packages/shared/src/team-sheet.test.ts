@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { defaultSideSheet, matchdaySquad, readTeamSheet, sheetOrder, substitute, usualSide } from './team-sheet.js';
+import { defaultSideSheet, duplicateJerseys, matchJerseys, matchdaySquad, readTeamSheet, sheetOrder, substitute, usualSide } from './team-sheet.js';
 
 const squad = Array.from({ length: 20 }, (_, i) => ({ id: `p${i + 1}`, name: `Player ${i + 1}`, jersey: i + 1, role: 'player' }));
 
@@ -51,5 +51,43 @@ describe('team sheet', () => {
     expect(readTeamSheet({})).toBeNull();
     expect(readTeamSheet({ teamSheet: { A: { playing: ['x', 3], bench: null }, B: {} } }))
       .toEqual({ A: { playing: ['x'], bench: [] }, B: { playing: [], bench: [] } });
+  });
+});
+
+describe('match shirt numbers', () => {
+  const squad = [
+    { id: 'a', name: 'Aarav', jersey: 10 },
+    { id: 'b', name: 'Bilal', jersey: 7 },
+    { id: 'c', name: 'Chirag', jersey: null },
+  ];
+
+  it('starts each match from the profile numbers', () => {
+    expect(defaultSideSheet(squad, { onField: 2, bench: 1 }).jerseys).toEqual({ a: 10, b: 7 });
+  });
+
+  it('reads stored numbers, drops bad ones, and leaves old sheets without the field', () => {
+    const sheet = readTeamSheet({ teamSheet: {
+      A: { playing: ['a'], bench: [], jerseys: { a: 99, b: -1, c: 1000, d: 2.5, e: '4' } },
+      B: { playing: ['x'], bench: [] },
+    } });
+    expect(sheet?.A.jerseys).toEqual({ a: 99 });
+    expect(sheet?.B.jerseys).toBeUndefined();
+  });
+
+  it('keeps the numbers through a substitution', () => {
+    const side = { playing: ['a'], bench: ['b'], jerseys: { a: 10, b: 7 } };
+    expect(substitute(side, 'b', 'a').jerseys).toEqual({ a: 10, b: 7 });
+  });
+
+  it('collects every match number by player across both sides', () => {
+    const live = { teamSheet: { A: { playing: ['a'], bench: [], jerseys: { a: 9 } }, B: { playing: ['x'], bench: [], jerseys: { x: 4 } } } };
+    expect([...matchJerseys(live)]).toEqual([['a', 9], ['x', 4]]);
+    expect(matchJerseys({}).size).toBe(0);
+  });
+
+  it('flags a number worn twice on the named players only', () => {
+    expect(duplicateJerseys({ playing: ['a', 'b'], bench: [], jerseys: { a: 5, b: 5 } })).toEqual([5]);
+    // Left out of the sheet: their number cannot clash.
+    expect(duplicateJerseys({ playing: ['a'], bench: [], jerseys: { a: 5, b: 5 } })).toEqual([]);
   });
 });

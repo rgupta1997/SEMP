@@ -81,3 +81,136 @@ describe('switching weight class on one screen', () => {
     ]);
   });
 });
+
+describe('choosing which races to run', async () => {
+  const { chosenEvents, toggleEvent, hydrateEvent } = await import('./event');
+  const keys = ['m25free', 'm50free', 'm25back'];
+  const swimmer = (marks: Record<string, number | null>, statuses?: Record<string, 'DNS' | 'DNF' | 'DQ'>) =>
+    ({ id: 'a', name: 'Aarav', marks, ...(statuses ? { statuses } : {}) });
+
+  it('shows the picked races in the order picked, then any race that already has a result', () => {
+    const state = { participants: [swimmer({ m25back: 20.1 })], events: ['m50free'] };
+    expect(chosenEvents(state, keys)).toEqual(['m50free', 'm25back']);
+  });
+
+  it('drops unknown and repeated keys', () => {
+    expect(chosenEvents({ participants: [], events: ['gone', 'm25free', 'm25free'] }, keys)).toEqual(['m25free']);
+  });
+
+  it('adds a race, and removing it clears its times and statuses only', () => {
+    let state = toggleEvent({ participants: [swimmer({ m50free: 31 }, { m50free: 'DQ' })] }, keys, 'm25free');
+    expect(chosenEvents(state, keys)).toEqual(['m50free', 'm25free']);
+    state = { ...state, participants: [{ ...state.participants[0], marks: { ...state.participants[0].marks, m25free: 15.2 } }] };
+    state = toggleEvent(state, keys, 'm50free');
+    expect(state.participants[0].marks).toEqual({ m25free: 15.2 });
+    expect(state.participants[0].statuses).toEqual({});
+    expect(chosenEvents(state, keys)).toEqual(['m25free']);
+  });
+
+  it('keeps the picked races through saving and reloading', () => {
+    expect(hydrateEvent({ participants: [], events: ['m25free', 7] }).events).toEqual(['m25free']);
+    expect(hydrateEvent({ participants: [] }).events).toBeUndefined();
+  });
+});
+
+describe('who is in each race, and relays', async () => {
+  const ev = await import('./event');
+  const { rankSubEvent, aggregateEvent } = await import('@semp/shared');
+  const sw = (id: string, org: string) => ({ id, name: id, phone: null, org, orgId: org, category: null, marks: {} as Record<string, number | null> });
+  const squad = () => ({ participants: [sw('a1', 'NFC'), sw('a2', 'NFC'), sw('b1', 'RVI')] });
+  const keys = ['m25f', 'relay4'];
+
+  it('starts a race empty when an institute has several swimmers, full when each has one', () => {
+    expect(ev.toggleRace(squad(), keys, 'm25f', false).lineups).toEqual({ m25f: [] });
+    const solo = { participants: [sw('a1', 'NFC'), sw('b1', 'RVI')] };
+    expect(ev.toggleRace(solo, keys, 'm25f', false).lineups).toBeUndefined();
+    expect(ev.lineupOf(ev.toggleRace(solo, keys, 'm25f', false), 'm25f', false)).toEqual(['a1', 'b1']);
+  });
+
+  it('adds and removes swimmers, clearing a removed swimmer\'s time there', () => {
+    let s = ev.toggleRace(squad(), keys, 'm25f', false);
+    s = ev.setInLineup(s, 'm25f', false, 'a2', true);
+    s = { ...s, participants: s.participants.map((p) => (p.id === 'a2' ? { ...p, marks: { m25f: 15.1 } } : p)) };
+    expect(ev.lineupOf(s, 'm25f', false)).toEqual(['a2']);
+    s = ev.setInLineup(s, 'm25f', false, 'a2', false);
+    expect(ev.lineupOf(s, 'm25f', false)).toEqual([]);
+    expect(s.participants.find((p) => p.id === 'a2')!.marks).toEqual({});
+  });
+
+  it('keeps anyone with a result in the race even if the stored list misses them', () => {
+    const s = { ...squad(), lineups: { m25f: [] }, participants: [{ ...sw('a1', 'NFC'), marks: { m25f: 14 } }, sw('b1', 'RVI')] };
+    expect(ev.lineupOf(s, 'm25f', false)).toEqual(['a1']);
+  });
+
+  it('gives a relay one row per institute, ranked and scored per institute', () => {
+    let s = ev.toggleRace(squad(), keys, 'relay4', true);
+    const rows = ev.raceField(s, true);
+    expect(rows.map((r) => r.id)).toEqual(['relay:NFC', 'relay:RVI']);
+    expect(ev.raceField(s, false).map((r) => r.id)).toEqual(['a1', 'a2', 'b1']);
+    s = { ...s, participants: s.participants.map((p) => (p.id === 'relay:RVI' ? { ...p, marks: { relay4: 60 } } : p.id === 'relay:NFC' ? { ...p, marks: { relay4: 62 } } : p)) };
+    const spec = { result: { resultType: 'time', winnerIs: 'min', aggregate: 'medals', medalPoints: [10, 7, 4] }, subEvents: [{ key: 'relay4', label: '4x25m Freestyle Relay', kind: 'relay' }] } as any;
+    expect([...rankSubEvent(spec, s, 'relay4')]).toEqual([['relay:RVI', 1], ['relay:NFC', 2]]);
+    expect(aggregateEvent(spec, s).map((r) => [r.key, r.points])).toEqual([['RVI', 10], ['NFC', 7]]);
+  });
+
+  it('caps the relay swimmers at its legs and reads legs from the label', () => {
+    expect(ev.relayLegs("Men's 4x25m Medley Relay")).toBe(4);
+    expect(ev.relayLegs('Relay')).toBe(4);
+    const s = ev.setRelayMembers({ participants: [] }, 'relay4', 'relay:NFC', ['a', 'b', 'b', 'c', 'd', 'e'], 4);
+    expect(s.relayMembers).toEqual({ relay4: { 'relay:NFC': ['a', 'b', 'c', 'd'] } });
+  });
+
+  it('removing a race clears its lineup and relay swimmers, and both survive saving', () => {
+    let s = ev.toggleRace(squad(), keys, 'relay4', true);
+    s = ev.setRelayMembers(s, 'relay4', 'relay:NFC', ['a1'], 4);
+    const back = ev.hydrateEvent(JSON.parse(JSON.stringify({ ...s, lineups: { m25f: ['a1'] } })));
+    expect(back.relayMembers).toEqual({ relay4: { 'relay:NFC': ['a1'] } });
+    expect(back.lineups).toEqual({ m25f: ['a1'] });
+    s = ev.toggleRace(s, keys, 'relay4', true);
+    expect(s.relayMembers).toEqual({});
+  });
+});
+
+describe('races picked before lineups existed', async () => {
+  const ev = await import('./event');
+  const sw = (id: string, org: string, marks: Record<string, number | null> = {}) => ({ id, name: id, phone: null, org, orgId: org, category: null, marks });
+  it('shows only swimmers with a result when an institute has several, everyone when each has one', () => {
+    const big = { events: ['m100f'], participants: [sw('a1', 'NFC', { m100f: 40 }), sw('a2', 'NFC'), sw('b1', 'RVI')] };
+    expect(ev.lineupOf(big, 'm100f', false)).toEqual(['a1']);
+    const solo = { events: ['m100f'], participants: [sw('a1', 'NFC'), sw('b1', 'RVI')] };
+    expect(ev.lineupOf(solo, 'm100f', false)).toEqual(['a1', 'b1']);
+  });
+  it('adds relay rows once, for every institute', () => {
+    const s = ev.withRelayRows(ev.withRelayRows({ participants: [sw('a1', 'NFC'), sw('a2', 'NFC'), sw('b1', 'RVI')] }));
+    expect(ev.raceField(s, true).map((r) => r.id)).toEqual(['relay:NFC', 'relay:RVI']);
+  });
+});
+
+describe('one weight class per lifter', async () => {
+  const ev = await import('./event');
+  const l = (id: string, org: string, category: string | null = null, marks: Record<string, number | null> = {}) =>
+    ({ id, name: id, phone: null, org, orgId: org, category, marks });
+  const keys = ['m63', 'm74'];
+
+  it('reads a class from each lifter, and adding a class starts it empty', () => {
+    let s = ev.toggleRace({ participants: [l('a', 'NFC'), l('b', 'RVI')] }, keys, 'm63', false, true);
+    expect(ev.lineupOf(s, 'm63', false, true)).toEqual([]);
+    expect(s.lineups).toBeUndefined();
+    s = ev.setInLineup(s, 'm63', false, 'a', true, true);
+    expect(ev.lineupOf(s, 'm63', false, true)).toEqual(['a']);
+  });
+
+  it('moving a lifter to another class takes them out of the first and clears that total', () => {
+    let s: EventState = { events: ['m63', 'm74'], participants: [l('a', 'NFC', 'm63', { m63: 410 }), l('b', 'RVI')] };
+    s = ev.setInLineup(s, 'm74', false, 'a', true, true);
+    expect(s.participants[0].category).toBe('m74');
+    expect(s.participants[0].marks).toEqual({});
+    expect(ev.lineupOf(s, 'm63', false, true)).toEqual([]);
+    expect(ev.lineupOf(s, 'm74', false, true)).toEqual(['a']);
+  });
+
+  it('removing a class frees its lifters', () => {
+    const s = ev.toggleRace({ events: ['m63'], participants: [l('a', 'NFC', 'm63', { m63: 400 })] }, keys, 'm63', false, true);
+    expect(s.participants[0]).toMatchObject({ category: null, marks: {} });
+  });
+});

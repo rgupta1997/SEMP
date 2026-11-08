@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { canonicalTeamSport, khoSettlementOf, shootoutOf, type Shootout, type Settlement as KhoSettlement } from '@semp/shared';
+import { canonicalTeamSport, khoSettlementOf, matchJerseys, shootoutOf, type Shootout, type Settlement as KhoSettlement } from '@semp/shared';
 import { myMatchStats } from '../records/my-match-stats.service.js';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
@@ -85,7 +85,7 @@ function resultFor(f: FixtureRow, myTeamIds: Set<string>): Result {
 }
 
 // Compact match shape used by the dashboard, championship detail and the matches list.
-function toMatchSummary(f: FixtureRow, myTeamIds: Set<string>) {
+function toMatchSummary(f: FixtureRow, myTeamIds: Set<string>, userId: string) {
   const isHome = f.home_team_id != null && myTeamIds.has(f.home_team_id);
   const mine = isHome ? f.teams_fixtures_home_team_idToteams : f.teams_fixtures_away_team_idToteams;
   const opp = isHome ? f.teams_fixtures_away_team_idToteams : f.teams_fixtures_home_team_idToteams;
@@ -110,6 +110,8 @@ function toMatchSummary(f: FixtureRow, myTeamIds: Set<string>) {
     pens: pensFor(shootoutOf(f.live_state), isHome),
     settled: khoSettlementOf(f.live_state)?.reason ?? null,
     result: resultFor(f, myTeamIds),
+    // The shirt worn in this match (its team sheet), or null with no sheet.
+    my_jersey: matchJerseys(f.live_state).get(userId) ?? null,
   };
 }
 
@@ -285,6 +287,18 @@ export function makeMeRouter(prisma: Prisma): Router {
       const pens = shootoutOf(l.live_state);
       const settled = khoSettlementOf(l.live_state)?.reason ?? null;
       if (pens || settled) out.set(l.id, { pens, settled });
+    }
+    return out;
+  }
+
+  // The shirt this person wore in each match (its team sheet), for the few rows a card shows.
+  async function loadMyJerseys(rows: FixtureRow[], userId: string): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (rows.length === 0) return out;
+    const logs = await prisma.fixtures.findMany({ where: { id: { in: rows.map((f) => f.id as string) } }, select: { id: true, live_state: true } });
+    for (const l of logs) {
+      const n = matchJerseys(l.live_state).get(userId);
+      if (n != null) out.set(l.id, n);
     }
     return out;
   }
@@ -597,8 +611,8 @@ export function makeMeRouter(prisma: Prisma): Router {
 
     const { wins, losses, draws } = tally(fixtures, teamIds);
     const recentRows = fixtures.slice(0, 5);
-    const recentPens = await loadShootouts(recentRows);
-    const recent_matches = recentRows.map((f) => summariseLean(f, teamIds, recentPens));
+    const [recentPens, recentJerseys] = await Promise.all([loadShootouts(recentRows), loadMyJerseys(recentRows, req.user!.id)]);
+    const recent_matches = recentRows.map((f) => ({ ...summariseLean(f, teamIds, recentPens), my_jersey: recentJerseys.get(f.id) ?? null }));
 
     // Achievements - awards this user has received, newest first, with match context.
     const achievements = await loadMyAwards(req.user!.id, teamIds);
@@ -772,7 +786,7 @@ export function makeMeRouter(prisma: Prisma): Router {
       orderBy: [{ scheduled_at: 'desc' }, { created_at: 'desc' }],
     });
 
-    const matches = fixtures.map((f) => toMatchSummary(f, teamIds));
+    const matches = fixtures.map((f) => toMatchSummary(f, teamIds, req.user!.id));
     res.json({ matches, total: matches.length, ...(org !== undefined ? { organization: org } : {}) });
   }));
 
@@ -854,6 +868,8 @@ export function makeMeRouter(prisma: Prisma): Router {
         my_role: myMember?.role ?? null,
         former_member: formerMember,
         jersey_number: myMember?.jersey_number ?? null,
+        // The number worn in THIS match, from its team sheet (the scorer may have changed it).
+        match_jersey_number: matchJerseys(f.live_state).get(req.user!.id) ?? null,
         // The squad as it is today; someone who has left it is not shown its people.
         teammates: (formerMember ? [] : mine.team_members ?? [])
           .map((tm: any) => ({ name: tm.users?.name ?? '-', phone: tm.users?.phone ?? null, role: tm.role, jersey_number: tm.jersey_number }))

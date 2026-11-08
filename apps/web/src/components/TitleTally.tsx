@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { formatPoints } from '@semp/shared';
-import { Badge, Segmented } from './ui';
+import { Badge, Segmented, cn } from './ui';
 
 // Ranking sports (swimming, powerlifting) on the Results page: a master tally per title
 // (each club's place in every event, the total, and what the title pays), and each
@@ -56,16 +56,16 @@ export function TitleTallyCard({ tally }: { tally: SportTally }) {
               <th className="px-3 py-1.5 text-left">#</th>
               <th className="px-2 py-1.5 text-left">Club</th>
               {title.events.map((e) => (
-                <th key={e.draw_id} className="whitespace-nowrap px-2 py-1.5 text-center normal-case" title={e.share < 1 ? 'Counts half toward this title' : undefined}>
+                <th key={e.draw_id} className="w-[11%] whitespace-nowrap px-2 py-1.5 text-center normal-case" title={e.share < 1 ? 'Counts half toward this title' : undefined}>
                   <span className="font-semibold">{e.name}{e.share < 1 ? ' ½' : ''}</span>
                   {STATE_LABEL[e.state] && <span className="block text-[10px] font-normal text-slate-400">{STATE_LABEL[e.state]}</span>}
                 </th>
               ))}
-              <th className="px-2 py-1.5 text-right">Total</th>
-              <th className="px-2 py-1.5 text-right" title="1st places">1sts</th>
-              <th className="px-2 py-1.5 text-right" title="2nd places">2nds</th>
-              <th className="px-2 py-1.5 text-right" title="3rd places (shown for the full medal count; not a tie-breaker)">3rds</th>
-              {tally.titles_on && <th className="px-3 py-1.5 text-right">Title pts</th>}
+              <th className="w-[11%] px-2 py-1.5 text-center">Total</th>
+              <th className="w-[11%] px-2 py-1.5 text-center text-base leading-none" title="Golds (1st places)" aria-label="Golds">{MEDAL.gold}</th>
+              <th className="w-[11%] px-2 py-1.5 text-center text-base leading-none" title="Silvers (2nd places)" aria-label="Silvers">{MEDAL.silver}</th>
+              <th className={cn('w-[11%] py-1.5 pl-2 text-center text-base leading-none', tally.titles_on ? 'pr-2' : 'pr-6')} title="Bronzes (3rd places, shown for the full medal count; not a tie-breaker)" aria-label="Bronzes">{MEDAL.bronze}</th>
+              {tally.titles_on && <th className="py-1.5 pl-3 pr-6 text-right">Title pts</th>}
             </tr>
           </thead>
           <tbody>
@@ -82,12 +82,12 @@ export function TitleTallyCard({ tally }: { tally: SportTally }) {
                     </td>
                   );
                 })}
-                <td className="px-2 py-1.5 text-right font-semibold tabular-nums text-slate-900 dark:text-white">{formatPoints(r.total)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{r.gold}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{r.silver}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{r.bronze}</td>
+                <td className="px-2 py-1.5 text-center font-semibold tabular-nums text-slate-900 dark:text-white">{formatPoints(r.total)}</td>
+                <td className="px-2 py-1.5 text-center tabular-nums">{r.gold}</td>
+                <td className="px-2 py-1.5 text-center tabular-nums">{r.silver}</td>
+                <td className={cn('py-1.5 pl-2 text-center tabular-nums', tally.titles_on ? 'pr-2' : 'pr-6')}>{r.bronze}</td>
                 {tally.titles_on && (
-                  <td className="px-3 py-1.5 text-right">
+                  <td className="py-1.5 pl-3 pr-6 text-right">
                     {r.title_points ? <Badge tone="brand">{formatPoints(r.title_points)}</Badge> : <span className="text-slate-400">0</span>}
                   </td>
                 )}
@@ -98,7 +98,7 @@ export function TitleTallyCard({ tally }: { tally: SportTally }) {
       </div>
       <p className="border-t border-slate-100 px-3 py-2 text-xs text-slate-400 dark:border-slate-800 dark:text-slate-500">
         Each event column is the club's finishing place. Total adds up the event points{title.events.some((e) => e.share < 1) ? ' (½ events count half)' : ''};
-        level totals go by more 1sts, then more 2nds (3rds are shown for the full count only).{tally.titles_on ? ' Title pts is what this title pays to the overall table.' : ' Titles are off for this sport, so event points go straight to the overall table.'}
+        level totals go by more golds, then more silvers (bronzes are shown for the full count only).{tally.titles_on ? ' Title pts is what this title pays to the overall table.' : ' Titles are off for this sport, so event points go straight to the overall table.'}
       </p>
     </div>
   );
@@ -122,7 +122,7 @@ export function EventTallyTable({ event }: { event: EventTally }) {
                 <th className="px-3 py-1.5 text-left">Place</th>
                 <th className="px-2 py-1.5 text-left">Club</th>
                 <th className="px-2 py-1.5 text-right">Event pts</th>
-                <th className="px-3 py-1.5 text-right">Medal</th>
+                <th className="py-1.5 pl-3 pr-6 text-right">Medal</th>
               </tr>
             </thead>
             <tbody>
@@ -131,7 +131,7 @@ export function EventTallyTable({ event }: { event: EventTally }) {
                   <td className="px-3 py-1.5 text-slate-500">{r.place != null ? ordinal(r.place) : '-'}</td>
                   <td className="max-w-[12rem] truncate px-2 py-1.5 font-medium text-slate-800 dark:text-slate-100" title={r.name}>{r.name}</td>
                   <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{formatPoints(r.points)}</td>
-                  <td className="px-3 py-1.5 text-right">{r.medal ? MEDAL[r.medal] : ''}</td>
+                  <td className="py-1.5 pl-3 pr-6 text-right">{r.medal ? MEDAL[r.medal] : ''}</td>
                 </tr>
               ))}
             </tbody>

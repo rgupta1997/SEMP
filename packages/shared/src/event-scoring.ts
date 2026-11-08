@@ -36,7 +36,17 @@ export function resultStatusOf(p: Pick<ParticipantResult, 'statuses'>, subKey: s
   return s && (RESULT_STATUSES as readonly string[]).includes(s) ? s : null;
 }
 
-export interface EventState { participants: ParticipantResult[] }
+export interface EventState {
+  participants: ParticipantResult[];
+  /** Sub-events the scorer chose to run, in the order picked. Display only - scoring reads the marks. */
+  events?: string[];
+  /** Per sub-event, the row ids in it (absent = everyone). Display only. */
+  lineups?: Record<string, string[]>;
+  /** Per relay sub-event, per institute relay row, the swimmers who swam it. */
+  relayMembers?: Record<string, Record<string, string[]>>;
+  /** Sub-events added from the event's own disciplines (key = discipline id), beyond the template. */
+  extraEvents?: Array<{ key: string; label: string }>;
+}
 
 export interface DisciplineRef { id: string | null; name: string | null }
 
@@ -240,5 +250,43 @@ export function detailedContributions(spec: EventSpec, state: EventState, opts: 
   return [...byOrg.values()];
 }
 
+/** Id prefix of an institute's relay row in a whole-sport event: a team, never a person. */
+export const RELAY_ROW_PREFIX = 'relay:';
+
 /** A relay sub-event: one entry (and one time) per institute. */
 export const isRelaySubEvent = (se?: { kind?: string } | null): boolean => se?.kind === 'relay';
+
+/**
+ * Every swimmer ticked as swimming an institute's relay, credited with that relay's place and
+ * time - in swimming each relay swimmer shares the team's medal. Relay rows are not people.
+ */
+export function relayCredits(
+  spec: EventSpec, state: EventState, opts: EventScoringOpts = {},
+): Array<{ competitorId: string; subKey: string; rank: number; mark: number | null }> {
+  const out: Array<{ competitorId: string; subKey: string; rank: number; mark: number | null }> = [];
+  for (const se of spec.subEvents) {
+    if (!isRelaySubEvent(se)) continue;
+    for (const [rowId, rank] of rankSubEvent(spec, state, se.key, opts)) {
+      if (!rowId.startsWith(RELAY_ROW_PREFIX)) continue;
+      const mark = state.participants.find((p) => p.id === rowId)?.marks[se.key];
+      const members = state.relayMembers?.[se.key]?.[rowId] ?? [];
+      for (const m of members.filter((x, i) => members.indexOf(x) === i)) {
+        out.push({ competitorId: m, subKey: se.key, rank, mark: typeof mark === 'number' ? mark : null });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The spec plus any sub-events this match added from the event's own disciplines (a "Men ≤105kg"
+ * set up in Setup). They take the spec-level result; "relay" in the name makes a relay. The
+ * console, lock and stats all read them off the match, so a custom class ranks everywhere.
+ */
+export function withExtraSubEvents(spec: EventSpec, state: Pick<EventState, 'extraEvents'> | null | undefined): EventSpec {
+  const have = new Set(spec.subEvents.map((se) => se.key));
+  const extra = (state?.extraEvents ?? [])
+    .filter((e) => e && typeof e.key === 'string' && typeof e.label === 'string' && !have.has(e.key) && (have.add(e.key), true))
+    .map((e) => ({ key: e.key, label: e.label, ...(/\brelay\b/i.test(e.label) ? { kind: 'relay' as const } : {}) }));
+  return extra.length ? { ...spec, subEvents: [...spec.subEvents, ...extra] } : spec;
+}

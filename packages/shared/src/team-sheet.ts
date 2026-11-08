@@ -10,7 +10,12 @@ import { canonicalTeamSport } from './team-presets.js';
 // at lock - that is still the whole squad (a decision, not an oversight).
 // ============================================================================
 
-export interface SideSheet { playing: string[]; bench: string[] }
+export interface SideSheet {
+  playing: string[];
+  bench: string[];
+  /** Shirt numbers worn THIS match, by player id. Starts from each profile; the profile is never changed. */
+  jerseys?: Record<string, number>;
+}
 export interface TeamSheet { A: SideSheet; B: SideSheet }
 
 /**
@@ -47,6 +52,25 @@ export function usualSide(sport?: string | null, rulesSheet?: Record<string, unk
 
 export interface SheetPerson { id: string; name: string; role?: string | null; jersey?: number | null }
 
+/** A shirt number: 0-999, the same range the profile and the team sheet accept. */
+export const JERSEY_NUMBER_MIN = 0;
+export const JERSEY_NUMBER_MAX = 999;
+export const isJerseyNumber = (v: unknown): v is number =>
+  typeof v === 'number' && Number.isInteger(v) && v >= JERSEY_NUMBER_MIN && v <= JERSEY_NUMBER_MAX;
+
+/** Each player's profile number, as the starting point for one match. */
+export function defaultJerseys(squad: SheetPerson[]): Record<string, number> {
+  return Object.fromEntries(squad.filter((p) => isJerseyNumber(p.jersey)).map((p) => [p.id, p.jersey as number]));
+}
+
+/** Numbers worn by more than one player on this side - a warning, never a block. */
+export function duplicateJerseys(side: SideSheet): number[] {
+  const named = new Set([...side.playing, ...side.bench]);
+  const seen = new Map<number, number>();
+  for (const [id, n] of Object.entries(side.jerseys ?? {})) if (named.has(id)) seen.set(n, (seen.get(n) ?? 0) + 1);
+  return [...seen].filter(([, c]) => c > 1).map(([n]) => n).sort((a, b) => a - b);
+}
+
 // Captain and vice first, then by shirt number, then by name - the order a team sheet is read in.
 const ROLE_RANK: Record<string, number> = { captain: 0, vice_captain: 1 };
 export function sheetOrder<P extends SheetPerson>(squad: P[]): P[] {
@@ -59,7 +83,11 @@ export function sheetOrder<P extends SheetPerson>(squad: P[]): P[] {
 /** The pre-filled sheet: the usual number playing, the usual bench after them, the rest out. */
 export function defaultSideSheet(squad: SheetPerson[], usual: { onField: number; bench: number }): SideSheet {
   const ids = sheetOrder(squad).map((p) => p.id);
-  return { playing: ids.slice(0, usual.onField), bench: ids.slice(usual.onField, usual.onField + usual.bench) };
+  return {
+    playing: ids.slice(0, usual.onField),
+    bench: ids.slice(usual.onField, usual.onField + usual.bench),
+    jerseys: defaultJerseys(squad),
+  };
 }
 
 const ids = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
@@ -68,8 +96,21 @@ const ids = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is str
 export function readTeamSheet(liveState: unknown): TeamSheet | null {
   const raw = (liveState as { teamSheet?: any } | null)?.teamSheet;
   if (!raw || typeof raw !== 'object') return null;
-  const side = (s: any): SideSheet => ({ playing: ids(s?.playing), bench: ids(s?.bench) });
+  const side = (s: any): SideSheet => {
+    const out: SideSheet = { playing: ids(s?.playing), bench: ids(s?.bench) };
+    // Absent on sheets confirmed before shirt numbers existed - left absent, not emptied.
+    if (s?.jerseys && typeof s.jerseys === 'object') {
+      out.jerseys = Object.fromEntries(Object.entries(s.jerseys).filter((e): e is [string, number] => isJerseyNumber(e[1])));
+    }
+    return out;
+  };
   return { A: side(raw.A), B: side(raw.B) };
+}
+
+/** The number each player wore in this match, from its team sheet. Empty with no sheet. */
+export function matchJerseys(liveState: unknown): Map<string, number> {
+  const sheet = readTeamSheet(liveState);
+  return new Map(sheet ? [...Object.entries(sheet.A.jerseys ?? {}), ...Object.entries(sheet.B.jerseys ?? {})] : []);
 }
 
 /**
@@ -82,7 +123,7 @@ export function substitute(sheet: SideSheet, onId: string, offId: string): SideS
     ? sheet.playing.map((id) => (id === offId ? onId : id))
     : [...sheet.playing.filter((id) => id !== onId), onId];
   const bench = [...sheet.bench.filter((id) => id !== onId && id !== offId), offId];
-  return { playing: playing.filter((id, i) => playing.indexOf(id) === i), bench };
+  return { ...sheet, playing: playing.filter((id, i) => playing.indexOf(id) === i), bench };
 }
 
 /**

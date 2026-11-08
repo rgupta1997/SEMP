@@ -62,3 +62,27 @@ the same build as UAT; only this setting differs - see `REALTIME_TRANSPORT` in
 - Netlify needs no new variable: the browser is told which transport to use at runtime.
 - `REALTIME_TRANSPORT=off` still works if Supabase Realtime is not set up - the bell
   then falls back to its 2-minute poll.
+
+## Event photos on beta: Supabase Storage
+
+The photo carousel on an event's public Overview stores files in Supabase Storage on beta
+(S3 elsewhere) - see `STORAGE_TRANSPORT` in `apps/api/src/config/env.schema.ts`.
+
+- Apply migrations `20261107000000_championship_photos.sql` and
+  `20261108000000_championship_photos_all_events.sql` with `npx supabase db push`. The first
+  creates the `championship_photos` table AND the public `event-photos` bucket; the second lets
+  a photo belong to no event, which is how "all events" photos are stored.
+- Set on the `semp-api` function (Configuration > Environment variables):
+
+  ```
+  STORAGE_TRANSPORT=supabase
+  STORAGE_BUCKET=event-photos
+  SUPABASE_SERVICE_ROLE_KEY=<the project's service_role key>
+  ```
+
+  The key is under Project Settings > API. It is a server secret: it never reaches the
+  browser, and it is what lets the API write to the bucket. `SUPABASE_URL` is already set
+  for realtime.
+- Without these, `STORAGE_TRANSPORT` defaults to `off`: the site works and uploads fail
+  with a plain "photo storage is not set up" message.
+
