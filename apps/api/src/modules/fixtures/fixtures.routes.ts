@@ -585,8 +585,9 @@ export function makeFixturesRouter(prisma: Prisma): Router {
     const fixture = await prisma.fixtures.findUnique({
       where: { id: req.params.id },
       include: {
-        teams_fixtures_home_team_idToteams: { include: { organizations: true, team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true } } } } } },
-        teams_fixtures_away_team_idToteams: { include: { organizations: true, team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true } } } } } },
+        // users.jersey_number: the profile number the team sheet starts each player from.
+        teams_fixtures_home_team_idToteams: { include: { organizations: true, team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true, jersey_number: true } } } } } },
+        teams_fixtures_away_team_idToteams: { include: { organizations: true, team_members: { where: { is_active: true }, include: { users: { select: { id: true, name: true, jersey_number: true } } } } } },
         tournament_disciplines: {
           include: {
             disciplines: true,

@@ -29,7 +29,7 @@ import { ChessResult, EndingChips, chessGamesIn, chessSummary, hydrateChess, typ
 import { CricketDeck } from '../../features/scoring/CricketDeck';
 import { TeamDeck } from '../../features/scoring/TeamDeck';
 import { TeamSheetPanel } from '../../features/scoring/TeamSheetPanel';
-import { matchdaySquad, readTeamSheet, substitute, usualSide, type SheetPerson, type TeamSheet } from '@semp/shared';
+import { matchdaySquad, readTeamSheet, substitute, usualSide, type SheetPerson, type SideSheet, type TeamSheet } from '@semp/shared';
 import { AUTOSAVE_MS, useLiveSave, useSaveStatus, useUnloadGuard, useDraftAutosave } from '../../features/scoring/useLiveSave';
 import { flushFixture, getStatus, readOutbox, type OutboxEntry } from '../../features/scoring/liveOutbox';
 
@@ -893,11 +893,17 @@ function rosterPeople(team: any): { id: string; name: string; team: string }[] {
     .filter((p: { id?: string }) => !!p.id);
 }
 
-/** A squad as the team sheet reads it - with shirt number and role, for its order. */
+/** A squad as the team sheet reads it - with role and the player's PROFILE shirt number. */
 function sheetSquad(team: any): SheetPerson[] {
   return (team?.team_members ?? [])
-    .map((tm: any) => ({ id: tm.users?.id as string, name: tm.users?.name ?? '-', role: tm.role ?? null, jersey: tm.jersey_number ?? null }))
+    .map((tm: any) => ({ id: tm.users?.id as string, name: tm.users?.name ?? '-', role: tm.role ?? null, jersey: tm.users?.jersey_number ?? null }))
     .filter((p: { id?: string }) => !!p.id);
+}
+
+/** "#10 Aarav": the number worn this match (team sheet), else the profile number. */
+function withJersey(p: SheetPerson, side: SideSheet | null | undefined): { id: string; name: string } {
+  const n = side?.jerseys ? side.jerseys[p.id] : p.jersey;
+  return { id: p.id, name: n != null ? `#${n} ${p.name}` : p.name };
 }
 
 function matchSides(fixture: any) {
@@ -1551,10 +1557,10 @@ function CricketConsole({ fixture, fixtureId, live, invalidate, onDone, onOpenAd
   }
 
   // Batters and bowlers come from the playing XI; substitutes only field. No sheet: the whole squad, as before.
-  const named = (s: SheetPerson[], ids: string[]) => ids.map((id) => s.find((p) => p.id === id)).filter((p): p is SheetPerson => !!p)
-    .map((p) => ({ id: p.id, name: p.name }));
-  const xi = (side: 'A' | 'B') => (sheet ? named(squads[side], sheet[side].playing) : squads[side].map((p) => ({ id: p.id, name: p.name })));
-  const subs = (side: 'A' | 'B') => (sheet ? named(squads[side], sheet[side].bench) : []);
+  const named = (side: 'A' | 'B', ids: string[]) => ids.map((id) => squads[side].find((p) => p.id === id)).filter((p): p is SheetPerson => !!p)
+    .map((p) => withJersey(p, sheet?.[side]));
+  const xi = (side: 'A' | 'B') => (sheet ? named(side, sheet[side].playing) : squads[side].map((p) => withJersey(p, null)));
+  const subs = (side: 'A' | 'B') => (sheet ? named(side, sheet[side].bench) : []);
 
   return (
     <>
@@ -1847,12 +1853,12 @@ function TeamConsole({ fixture, fixtureId, live, invalidate, onDone }:
   const roster = useMemo(() => {
     const pick = (side: 'A' | 'B') => (sheet
       ? matchdaySquad(squads[side], { playing: sheet[side].playing, bench: [] })
-      : squads[side]).map((x) => ({ id: x.id, name: x.name }));
+      : squads[side]).map((x) => withJersey(x, sheet?.[side]));
     return { A: pick('A'), B: pick('B') };
   }, [squads, sheet]);
   const bench = useMemo(() => {
     const pick = (side: 'A' | 'B') => (sheet ? matchdaySquad(squads[side], { playing: [], bench: sheet[side].bench }) : [])
-      .map((x) => ({ id: x.id, name: x.name }));
+      .map((x) => withJersey(x, sheet?.[side]));
     return { A: pick('A'), B: pick('B') };
   }, [squads, sheet]);
 

@@ -11,6 +11,7 @@ import {
   type Side, type StatEventSpec, undoLast, redoLast, redoTarget, sealUndoTrail, type UndoEntry, whistleEvents, afterUndoingWhistle,
 } from '@semp/shared';
 import { Button, Card, Input, cn, confirmDialog, toast } from '../../components/ui';
+import { JerseyBadge, splitJersey } from './Jersey';
 import { FitName } from '../../components/FitName';
 import { Countdown } from './RacquetDeck';
 
@@ -1383,7 +1384,9 @@ function SubPanel({ nameOf, shortOf, roster, bench, sentOff, onSub, onClose }: {
   const pick = (list: Person[], value: string, set: (id: string) => void) => (
     <div className="flex flex-wrap gap-1.5">
       {list.length === 0 ? <span className="text-xs text-muted">Nobody.</span> : list.map((x) => (
-        <Button key={x.id} size="sm" variant={value === x.id ? 'primary' : 'outline'} onClick={() => set(x.id)}>{x.name}</Button>
+        <Button key={x.id} size="sm" variant={value === x.id ? 'primary' : 'outline'} onClick={() => set(x.id)} title={x.name}>
+          <span className="flex items-center gap-1"><PersonLabel label={x.name} on={value === x.id} /></span>
+        </Button>
       ))}
     </div>
   );
@@ -2026,11 +2029,13 @@ const NAME_BUDGET = 14;
  * The chip truncates and carries the full name as its tooltip either way, so
  * printing too much costs a hover and printing too little costs a wrong scorer.
  */
-function shortNames(names: string[]): string[] {
+export function shortNames(names: string[]): string[] {
   // A trailing tag like "(sub)" is not a surname: set it aside, shorten, put it back.
   const tagOf = (n: string) => / \([^)]*\)$/.exec(n)?.[0] ?? '';
   const tags = names.map((n) => tagOf(n.trim()));
-  const full = names.map((n, i) => n.trim().slice(0, n.trim().length - tags[i].length));
+  // A leading shirt number ("#10 ") is not a first name either: kept whole, put back in front.
+  const nums = names.map((n) => /^#\d+\s+/.exec(n.trim())?.[0] ?? '');
+  const full = names.map((n, i) => n.trim().slice(nums[i].length, n.trim().length - tags[i].length));
 
   /** Two letters or more - enough to read as a name rather than as a marker. */
   const isWord = (t: string) => t.replace(/[^\p{L}]/gu, '').length >= 2;
@@ -2051,11 +2056,11 @@ function shortNames(names: string[]): string[] {
   }
 
   return full.map((n, i) => {
-    if (n.length + tags[i].length <= NAME_BUDGET) return n + tags[i];
+    if (nums[i].length + n.length + tags[i].length <= NAME_BUDGET) return nums[i] + n + tags[i];
     const sn = surname(n);
-    if ((seen.get(sn.toLowerCase()) ?? 0) < 2) return sn + tags[i];
+    if ((seen.get(sn.toLowerCase()) ?? 0) < 2) return nums[i] + sn + tags[i];
     const first = n.split(/\s+/)[0] ?? '';
-    return (first ? `${first[0]}. ${sn}` : sn) + tags[i];
+    return nums[i] + (first ? `${first[0]}. ${sn}` : sn) + tags[i];
   });
 }
 
@@ -2076,6 +2081,17 @@ function shortNames(names: string[]): string[] {
  * `extra` is the room the card pips take when a player has been booked - counted in
  * characters, because it comes out of the same line the name is on.
  */
+/** A person's chip label: the jersey badge (when numbered), then the name. */
+function PersonLabel({ label, on }: { label: string; on: boolean }) {
+  const { num, name } = splitJersey(label);
+  return (
+    <>
+      {num != null && <JerseyBadge num={num} on={on} />}
+      <span className="truncate">{name}</span>
+    </>
+  );
+}
+
 function chipFont(label: string, extra: number): string {
   const n = label.length + extra;
   if (n <= 9) return 'text-xs';
@@ -2141,6 +2157,8 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0, blocke
             + (marks.caution ? 2 + (marks.caution > 1 ? 1 : 0) : 0)
             + (marks.dismissal ? 2 + (marks.dismissal > 1 ? 1 : 0) : 0)
           : 0;
+        // The badge takes about three characters of the line, the "#10 " it replaces leaves.
+        const parts = splitJersey(shown);
         const fouledOut = foulLimit > 0 && (marks?.caution ?? 0) >= foulLimit;
         const onLastFoul = foulLimit > 0 && !fouledOut && (marks?.caution ?? 0) === foulLimit - 1;
         return (
@@ -2161,7 +2179,7 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0, blocke
             onClick={() => onChange(v)}
             className={cn(
               'flex h-8 items-center justify-center gap-1 overflow-hidden rounded-full px-2 text-center font-semibold transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50',
-              chipFont(shown, extra),
+              chipFont(parts.name, extra + (parts.num != null ? 3 : 0)),
               on
                 ? 'bg-brand-600 text-white shadow-sm'
                 : 'border border-line bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
@@ -2170,7 +2188,7 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0, blocke
               (!!marks?.dismissal || fouledOut) && !on && 'border-red-300 bg-red-50 dark:border-red-500/40 dark:bg-red-500/10',
               onLastFoul && !on && 'border-amber-300 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10',
             )}>
-            <span className="truncate">{shown}</span>
+            <PersonLabel label={shown} on={on} />
             {marks && <CardPips counts={marks} on={on} />}
           </button>
         );

@@ -7,7 +7,7 @@ import {
   type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
   type FormatTemplate, type MatchOutcome, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
-import { isCalledDraw } from '@semp/shared';
+import { isCalledDraw, matchJerseys } from '@semp/shared';
 import { Prisma } from '@prisma/client';
 import type { Db } from '../../infra/prisma.js';
 import { writeCategoryLines, type CategoryLineInput } from './category-lines.service.js';
@@ -480,6 +480,10 @@ export async function writePlayerMatchStats(
   await db.$executeRaw`delete from player_match_stats where fixture_id = ${fixtureId}::uuid`;
 
   const sportName = rows.length ? await sportNameOf(db, fixtureId) : null;
+  // The shirt each player wore here, from the match's team sheet - kept with their line.
+  const jerseys = rows.length
+    ? matchJerseys((await db.fixtures.findUnique({ where: { id: fixtureId }, select: { live_state: true } }))?.live_state)
+    : new Map<string, number>();
   const details: CategoryLineInput[] = [];
 
   for (const r of rows) {
@@ -490,13 +494,13 @@ export async function writePlayerMatchStats(
       insert into player_match_stats
         (fixture_id, user_id, team_id, organization_id, sport_id, rubber_key,
          partner_user_id, opponent_user_ids, position, role, played, outcome, stats, occurred_on,
-         source, lock_version)
+         source, lock_version, jersey_number)
       values
         (${r.fixture_id}::uuid, ${r.user_id}::uuid, ${r.team_id}::uuid,
          ${r.organization_id}::uuid, ${r.sport_id}::uuid, ${r.rubber_key},
          ${r.partner_user_id}::uuid, ${r.opponent_user_ids}::uuid[], ${r.position}, ${r.role}, ${r.played},
          ${r.outcome}, ${JSON.stringify(r.stats)}::jsonb, ${r.occurred_on}::date,
-         'locked_result', ${r.lock_version})
+         'locked_result', ${r.lock_version}, ${jerseys.get(r.user_id) ?? null}::smallint)
       returning id`;
     // Only somebody who actually played gets a detail row. A row of zeroes for a
     // substitute who never came on is indistinguishable from a bad one.

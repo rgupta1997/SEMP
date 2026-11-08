@@ -550,6 +550,8 @@ model users {
   phone_verified_at                                                        DateTime?                    @db.Timestamptz(6)
   tagline                                                                  String?                      @db.VarChar(160)
   preferred_sports                                                         String[]                     @default([])
+  /// The player's own shirt number (one for every sport); 0-999.
+  jersey_number                                                            Int?                         @db.SmallInt
   achievement_claims_achievement_claims_decided_byTousers                  achievement_claims[]         @relation("achievement_claims_decided_byTousers")
   achievement_claims_achievement_claims_user_idTousers                     achievement_claims[]         @relation("achievement_claims_user_idTousers")
   achievements                                                             achievements[]
@@ -1599,6 +1601,8 @@ model player_match_stats {
   occurred_on                                     DateTime                 @db.Date
   source                                          String                   @default("locked_result") @db.VarChar(24)
   lock_version                                    Int?
+  /// Shirt number worn in this match, from its team sheet at lock.
+  jersey_number                                   Int?                     @db.SmallInt
   superseded_at                                   DateTime?                @db.Timestamptz(6)
   computed_at                                     DateTime                 @default(now()) @db.Timestamptz(6)
   board_match_lines                               board_match_lines?

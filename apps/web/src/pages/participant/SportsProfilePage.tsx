@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { SportStatsPanel } from '../../features/stats/SportStatsPanel';
 import { Check, ChevronDown, ChevronUp, Copy, Download, ExternalLink, Eye, Lock, Pencil, ShieldCheck, X } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
+import { JERSEY_NUMBER_MAX, JERSEY_NUMBER_MIN, isJerseyNumber } from '@semp/shared';
+import { JerseyBadge } from '../../features/scoring/Jersey';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
 import { titleCase } from '../../lib/format';
@@ -40,7 +42,7 @@ interface Identity {
   officiates: boolean;
   email_verified: boolean;
   phone_verified: boolean;
-  controlled: { handle: string | null; tagline: string | null; preferred_sports: string[]; avatar_url: string | null };
+  controlled: { handle: string | null; tagline: string | null; preferred_sports: string[]; jersey_number: number | null; avatar_url: string | null };
   privacy: { public_profile: boolean; public_stats: boolean; discoverable: boolean; verified_records_visible: boolean };
   public_url: string | null;
 }
@@ -330,6 +332,7 @@ function EditProfileModal({ id, onClose, onSaved }: { id: Identity; onClose: () 
   const [sports, setSports] = useState<string[]>(id.controlled.preferred_sports);
   const [handleValue, setHandleValue] = useState(id.controlled.handle ?? '');
   const [handleError, setHandleError] = useState<string | null>(null);
+  const [jersey, setJersey] = useState(id.controlled.jersey_number?.toString() ?? '');
   const [busy, setBusy] = useState(false);
   const { data: sportsList } = useApi<Array<{ id: string; name: string }>>('/sports');
 
@@ -374,12 +377,18 @@ function EditProfileModal({ id, onClose, onSaved }: { id: Identity; onClose: () 
       setHandleError('That handle is already taken');
       return;
     }
+    const jerseyNumber = jersey.trim() === '' ? null : Number(jersey);
+    if (jerseyNumber != null && !isJerseyNumber(jerseyNumber)) {
+      setHandleError(`Shirt number must be a whole number from ${JERSEY_NUMBER_MIN} to ${JERSEY_NUMBER_MAX}`);
+      return;
+    }
     setHandleError(null);
     setBusy(true);
     try {
       await api('PATCH', '/me/identity', {
         tagline: tagline.trim() || null,
         preferred_sports: sports,
+        jersey_number: jerseyNumber,
         ...(trimmedHandle ? { handle: trimmedHandle } : {}),
       });
       onSaved();
@@ -443,6 +452,18 @@ function EditProfileModal({ id, onClose, onSaved }: { id: Identity; onClose: () 
             {sports.length}/12 - sports you play, shown on your public profile.
           </span>
         </div>
+
+        <Field label="Shirt number" hint="Your usual jersey number. Scorers see it on the team sheet and can change it for a single match.">
+          <Input
+            type="number" inputMode="numeric" min={JERSEY_NUMBER_MIN} max={JERSEY_NUMBER_MAX}
+            value={jersey}
+            onChange={(e) => { setJersey(e.target.value); setHandleError(null); }}
+            placeholder="e.g. 10"
+            className="w-28"
+            style={{ fontFamily: MONO }}
+            data-qa="profile-jersey"
+          />
+        </Field>
 
         <Field label="Handle" hint="Becomes your public profile address: /p/your-handle - needed before your profile can go public.">
           <Input
@@ -524,6 +545,7 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
           <div className="min-w-0 flex-1">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <h2 className="min-w-0 break-words text-xl sm:text-2xl" style={{ fontFamily: POP, fontWeight: 900, margin: 0, letterSpacing: '-.02em' }}>{id.name}</h2>
+              {id.controlled.jersey_number != null && <JerseyBadge num={id.controlled.jersey_number} size="md" title="Shirt number" />}
               <button onClick={() => setEditOpen(true)} title="Edit profile" aria-label="Edit profile" style={{
                 display: 'grid', placeItems: 'center', width: 26, height: 26, flexShrink: 0, cursor: 'pointer',
                 borderRadius: 7, border: '1px solid var(--line)', background: 'var(--surface-1)', color: 'var(--muted)',

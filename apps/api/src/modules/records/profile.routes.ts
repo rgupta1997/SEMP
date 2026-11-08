@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { JERSEY_NUMBER_MAX, JERSEY_NUMBER_MIN } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
 import { asyncHandler } from '../../http/middleware/error.js';
 import { validateBody } from '../../http/middleware/validate.js';
@@ -22,6 +23,8 @@ const updateProfileSchema = z.object({
   // Lowercase, hyphenated, no leading or trailing hyphen. It becomes a public URL,
   // so it is validated on the way in rather than sanitised on the way out.
   handle: z.string().regex(HANDLE, 'Use 4-40 lowercase letters, numbers or hyphens').nullable().optional(),
+  // One shirt number for every sport. The team sheet starts from it; scorers change it per match.
+  jersey_number: z.number().int().min(JERSEY_NUMBER_MIN).max(JERSEY_NUMBER_MAX).nullable().optional(),
 });
 
 const updatePrivacySchema = z.object({
@@ -48,7 +51,7 @@ export function makeProfileRouter(prisma: Prisma): Router {
         where: { id: userId },
         select: {
           id: true, name: true, email: true, phone: true, avatar_url: true,
-          sportagon_id: true, handle: true, tagline: true, preferred_sports: true,
+          sportagon_id: true, handle: true, tagline: true, preferred_sports: true, jersey_number: true,
           officiates: true, email_verified_at: true, phone_verified_at: true,
         },
       }),
@@ -72,6 +75,7 @@ export function makeProfileRouter(prisma: Prisma): Router {
         handle: user.handle,
         tagline: user.tagline,
         preferred_sports: user.preferred_sports,
+        jersey_number: user.jersey_number,
         avatar_url: user.avatar_url,
       },
 
@@ -127,6 +131,7 @@ export function makeProfileRouter(prisma: Prisma): Router {
         ...(body.tagline !== undefined ? { tagline: body.tagline } : {}),
         ...(body.preferred_sports !== undefined ? { preferred_sports: body.preferred_sports } : {}),
         ...(body.handle !== undefined ? { handle: body.handle } : {}),
+        ...(body.jersey_number !== undefined ? { jersey_number: body.jersey_number } : {}),
       },
     });
     res.json(await identity(req.user!.id));
