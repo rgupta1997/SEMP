@@ -2,12 +2,12 @@ import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, ImagePlus, Trash2 } from 'lucide-react';
 import {
-  EVENT_PHOTO_CAPTION_MAX, EVENT_PHOTO_MAX_BYTES, EVENT_PHOTO_MAX_COUNT, EVENT_PHOTO_MAX_EDGE,
+  EVENT_PHOTO_ALL_SCOPE, EVENT_PHOTO_CAPTION_MAX, EVENT_PHOTO_MAX_BYTES, EVENT_PHOTO_MAX_COUNT, EVENT_PHOTO_MAX_EDGE,
   EVENT_PHOTO_MAX_SOURCE_BYTES, EVENT_PHOTO_TYPES, type EventPhoto,
 } from '@semp/shared';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
-import { Button, Modal, Spinner, confirmDialog, toast } from '../ui';
+import { Button, Modal, Segmented, Spinner, confirmDialog, toast } from '../ui';
 
 const MB = 1024 * 1024;
 
@@ -32,9 +32,12 @@ async function shrinkToJpeg(file: File): Promise<string> {
   throw new Error(`Couldn't get it under ${EVENT_PHOTO_MAX_BYTES / MB} MB`);
 }
 
-// Super-admin screen for an event's carousel: upload, caption, reorder, remove.
+// Super-admin screen for the carousel: upload, caption, reorder, remove - for this event only,
+// or for the set shown on every event's public page.
 export function EventPhotoManager({ championshipId, overviewKey, onClose }: { championshipId: string; overviewKey: string; onClose: () => void }) {
-  const listKey = `/platform/event-photos/${championshipId}`;
+  const [scope, setScope] = useState<'event' | 'all'>('event');
+  const forAll = scope === 'all';
+  const listKey = `/platform/event-photos/${forAll ? EVENT_PHOTO_ALL_SCOPE : championshipId}`;
   const qc = useQueryClient();
   const { data, isLoading } = useApi<{ photos: EventPhoto[]; storage: string }>(listKey);
   const [busy, setBusy] = useState<string | null>(null);
@@ -52,7 +55,7 @@ export function EventPhotoManager({ championshipId, overviewKey, onClose }: { ch
     if (!files?.length) return;
     const room = EVENT_PHOTO_MAX_COUNT - photos.length;
     const picked = [...files].slice(0, room);
-    if (files.length > room) toast.warning(`Only ${room} more photo${room === 1 ? '' : 's'} fit`, `An event can have up to ${EVENT_PHOTO_MAX_COUNT}.`);
+    if (files.length > room) toast.warning(`Only ${room} more photo${room === 1 ? '' : 's'} fit`, `${forAll ? 'The all-events set' : 'An event'} can have up to ${EVENT_PHOTO_MAX_COUNT}.`);
     setBusy('upload');
     let added = 0;
     for (const [i, file] of picked.entries()) {
@@ -85,7 +88,8 @@ export function EventPhotoManager({ championshipId, overviewKey, onClose }: { ch
   };
   const remove = async (p: EventPhoto) => {
     const ok = await confirmDialog({
-      title: 'Remove this photo?', message: 'It comes off the event page and the file is deleted.',
+      title: 'Remove this photo?',
+      message: forAll ? "It comes off every event's public page and the file is deleted." : 'It comes off this event page and the file is deleted.',
       confirmLabel: 'Remove', tone: 'danger',
     });
     if (ok) await run(`remove ${p.id}`, () => api('DELETE', `${listKey}/${p.id}`));
@@ -95,9 +99,18 @@ export function EventPhotoManager({ championshipId, overviewKey, onClose }: { ch
     <Modal title="Event photos" onClose={onClose} wide
       footer={<Button variant="outline" onClick={onClose}>Done</Button>}>
       <div className="space-y-4" data-qa="event-photo-manager">
+        <div data-qa="photo-scope">
+          <Segmented
+            value={scope}
+            onChange={setScope}
+            options={[{ value: 'event', label: 'Only for this event' }, { value: 'all', label: 'Set content for all events' }]}
+          />
+        </div>
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          These show in a slideshow on the public Overview. Anyone with the event link can see them.
-          Photos are shrunk to {EVENT_PHOTO_MAX_EDGE}px before upload. Up to {EVENT_PHOTO_MAX_COUNT} photos.
+          {forAll
+            ? "These show on every event's public Overview, after each event's own photos. Use them for platform-wide content."
+            : "These show only on this event's public Overview, before any all-events photos."}
+          {' '}Anyone with an event link can see them. Photos are shrunk to {EVENT_PHOTO_MAX_EDGE}px before upload. Up to {EVENT_PHOTO_MAX_COUNT} photos.
         </p>
         {storageOff && (
           <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
@@ -115,7 +128,9 @@ export function EventPhotoManager({ championshipId, overviewKey, onClose }: { ch
         </div>
 
         {isLoading ? <Spinner /> : photos.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500 dark:border-slate-700">No photos yet.</p>
+          <p className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500 dark:border-slate-700">
+            {forAll ? 'No all-events photos yet.' : 'No photos for this event yet.'}
+          </p>
         ) : (
           <ul className="space-y-2">
             {photos.map((p, i) => (

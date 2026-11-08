@@ -136,7 +136,7 @@ export function ParticipantMatchPage() {
             <Detail label="Duration" value={f.duration_minutes ? `${f.duration_minutes} min` : null} />
             <Detail label="Your team" value={f.my_team.name} />
             <Detail label="Your role" value={[titleCase(f.my_role), f.match_jersey_number == null && f.jersey_number != null ? `#${f.jersey_number}` : null].filter(Boolean).join(' · ')} />
-            {f.match_jersey_number != null && <Detail label="Shirt number" value={`#${f.match_jersey_number}`} />}
+            {f.match_jersey_number != null && <Detail label="Jersey number" value={`#${f.match_jersey_number}`} />}
             {f.notes && <Detail label="Notes" value={f.notes} />}
           </CardBody>
         </Card>

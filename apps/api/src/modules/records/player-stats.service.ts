@@ -7,7 +7,7 @@ import {
   type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
   type FormatTemplate, type MatchOutcome, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
-import { isCalledDraw, matchJerseys, relayCredits, type ParticipantResult } from '@semp/shared';
+import { isCalledDraw, matchJerseys, relayCredits, withExtraSubEvents, type ParticipantResult } from '@semp/shared';
 import { Prisma } from '@prisma/client';
 import type { Db } from '../../infra/prisma.js';
 import { writeCategoryLines, type CategoryLineInput } from './category-lines.service.js';
@@ -124,7 +124,8 @@ export async function buildPlayerStatRows(
     ) as Array<{ id: string; orgId?: string | null; org?: string | null; marks?: Record<string, number | null>; statuses?: ParticipantResult['statuses'] }>;
     const marksOf = new Map(eventParticipants.map((c) => [c.id, c.marks ?? {}]));
     // Statuses and institute kept, so a DQ is never ranked here when the medals skip it.
-    const relayMembers = (fx.live_state as { event?: { relayMembers?: EventState['relayMembers'] } } | null)?.event?.relayMembers;
+    const storedEvent = (fx.live_state as { event?: Pick<EventState, 'relayMembers' | 'extraEvents'> } | null)?.event;
+    const relayMembers = storedEvent?.relayMembers;
     const state: EventState = {
       participants: eventParticipants.map((c) => ({
         id: c.id, name: '', orgId: c.orgId ?? null, org: c.org ?? null, marks: c.marks ?? {},
@@ -137,12 +138,14 @@ export async function buildPlayerStatRows(
     // else the sport's seeded one, narrowed to the discipline's own category.
     const storedSpec = (fx.tournament_disciplines?.format_config as { scoring?: FormatTemplate } | null)?.scoring?.event;
     const rawSpec: EventSpec | null = storedSpec ?? eventTemplateFor(sportName)?.event ?? null;
-    const spec = rawSpec
+    const namedSpec = rawSpec
       ? effectiveEventSpec(rawSpec, {
         id: fx.tournament_disciplines?.discipline_id ?? null,
         name: fx.tournament_disciplines?.disciplines?.name ?? null,
       })
       : null;
+    // Classes added from the event's own disciplines rank like the template's.
+    const spec = namedSpec && !fx.tournament_disciplines?.discipline_id ? withExtraSubEvents(namedSpec, storedEvent) : namedSpec;
     const rankCache = new Map<string, Map<string, number>>();
     const rankOf = (competitorId: string | null, category: string | null): number | null => {
       if (!spec || !competitorId || !category) return null;

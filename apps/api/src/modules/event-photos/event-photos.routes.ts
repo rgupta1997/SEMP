@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import {
-  EVENT_PHOTO_EXT, EVENT_PHOTO_MAX_BYTES, EVENT_PHOTO_MAX_COUNT,
+  EVENT_PHOTO_ALL_SCOPE, EVENT_PHOTO_EXT, EVENT_PHOTO_MAX_BYTES, EVENT_PHOTO_MAX_COUNT,
   base64Bytes, eventPhotoOrderSchema, eventPhotoUpdateSchema, eventPhotoUploadSchema,
 } from '@semp/shared';
 import type { Prisma } from '../../infra/prisma.js';
@@ -25,29 +25,34 @@ export function storageFromEnv(): FileStorage {
   });
 }
 
-// Event photo carousel on the public Overview page. Super admins only.
+// Event photo carousel on the public Overview page: one event's photos, or all events'. Super admins only.
 export function makeEventPhotosRouter(prisma: Prisma, storage: FileStorage = storageFromEnv()): Router {
   const router = Router();
   router.use(requireSuperAdmin);
 
-  const loadEvent = async (id: string) => {
-    const champ = await prisma.championships.findUnique({ where: { id }, select: { id: true, name: true } });
+  // A scope is an event id, or EVENT_PHOTO_ALL_SCOPE for photos shown on every event.
+  const loadScope = async (param: string) => {
+    if (param === EVENT_PHOTO_ALL_SCOPE) {
+      return { id: null as string | null, name: 'All events', target: { type: 'platform', id: 'all-events', label: 'All events' } };
+    }
+    const champ = await prisma.championships.findUnique({ where: { id: param }, select: { id: true, name: true } });
     if (!champ) throw new NotFoundError('Event');
-    return champ;
+    return { id: champ.id as string | null, name: champ.name, target: { type: 'championships', id: champ.id, label: champ.name } };
   };
-  const loadPhoto = async (championshipId: string, photoId: string) => {
+  const loadPhoto = async (championshipId: string | null, photoId: string) => {
     const photo = await prisma.championship_photos.findFirst({ where: { id: photoId, championship_id: championshipId } });
     if (!photo) throw new NotFoundError('Photo');
     return photo;
   };
+  const carousel = (scope: { id: string | null; name: string }) => (scope.id ? `"${scope.name}" carousel` : 'all-events carousel');
 
-  router.get('/:championshipId', asyncHandler(async (req, res) => {
-    await loadEvent(req.params.championshipId);
-    res.json({ photos: await listEventPhotos(prisma, req.params.championshipId), storage: env.STORAGE_TRANSPORT });
+  router.get('/:scope', asyncHandler(async (req, res) => {
+    const scope = await loadScope(req.params.scope);
+    res.json({ photos: await listEventPhotos(prisma, scope.id), storage: env.STORAGE_TRANSPORT });
   }));
 
-  router.post('/:championshipId', validateBody(eventPhotoUploadSchema), asyncHandler(async (req, res) => {
-    const champ = await loadEvent(req.params.championshipId);
+  router.post('/:scope', validateBody(eventPhotoUploadSchema), asyncHandler(async (req, res) => {
+    const scope = await loadScope(req.params.scope);
     const body = req.body as ReturnType<typeof eventPhotoUploadSchema.parse>;
     if (base64Bytes(body.data) > EVENT_PHOTO_MAX_BYTES) {
       throw new ValidationError(`Photo is larger than ${EVENT_PHOTO_MAX_BYTES / (1024 * 1024)} MB`);
@@ -56,18 +61,18 @@ export function makeEventPhotosRouter(prisma: Prisma, storage: FileStorage = sto
     if (bytes.length === 0) throw new ValidationError('Photo data is empty or not base64');
 
     const agg = await prisma.championship_photos.aggregate({
-      where: { championship_id: champ.id }, _count: { _all: true }, _max: { sort_order: true },
+      where: { championship_id: scope.id }, _count: { _all: true }, _max: { sort_order: true },
     });
     if (agg._count._all >= EVENT_PHOTO_MAX_COUNT) {
-      throw new BusinessRuleError(`An event can have up to ${EVENT_PHOTO_MAX_COUNT} photos - remove one first`);
+      throw new BusinessRuleError(`${scope.id ? 'An event' : 'The all-events set'} can have up to ${EVENT_PHOTO_MAX_COUNT} photos - remove one first`);
     }
 
     const id = randomUUID();
-    const key = `events/${champ.id}/${id}.${EVENT_PHOTO_EXT[body.contentType]}`;
+    const key = `events/${scope.id ?? EVENT_PHOTO_ALL_SCOPE}/${id}.${EVENT_PHOTO_EXT[body.contentType]}`;
     const url = await storage.put(key, bytes, body.contentType);
     const photo = await prisma.championship_photos.create({
       data: {
-        id, championship_id: champ.id, storage_key: key, url,
+        id, championship_id: scope.id, storage_key: key, url,
         caption: body.caption || null,
         sort_order: (agg._max.sort_order ?? -1) + 1,
         created_by: req.user!.id,
@@ -75,50 +80,47 @@ export function makeEventPhotosRouter(prisma: Prisma, storage: FileStorage = sto
       select: PHOTO_SELECT,
     });
     await audit(prisma, req, {
-      action: AUDIT_ACTIONS.eventPhotoAdded,
-      target: { type: 'championships', id: champ.id, label: champ.name },
-      summary: `Added a photo to the "${champ.name}" carousel`,
+      action: AUDIT_ACTIONS.eventPhotoAdded, target: scope.target,
+      summary: `Added a photo to the ${carousel(scope)}`,
     });
     res.status(201).json(photo);
   }));
 
   // Before /:photoId so "order" isn't read as a photo id.
-  router.put('/:championshipId/order', validateBody(eventPhotoOrderSchema), asyncHandler(async (req, res) => {
-    const champ = await loadEvent(req.params.championshipId);
+  router.put('/:scope/order', validateBody(eventPhotoOrderSchema), asyncHandler(async (req, res) => {
+    const scope = await loadScope(req.params.scope);
     const ids = (req.body as { ids: string[] }).ids;
-    const current = await prisma.championship_photos.findMany({ where: { championship_id: champ.id }, select: { id: true } });
+    const current = await prisma.championship_photos.findMany({ where: { championship_id: scope.id }, select: { id: true } });
     const known = new Set(current.map((p) => p.id));
     if (ids.length !== known.size || new Set(ids).size !== ids.length || ids.some((i) => !known.has(i))) {
-      throw new ValidationError('The order must list every photo of this event exactly once');
+      throw new ValidationError('The order must list every photo in this set exactly once');
     }
     await prisma.$transaction(ids.map((id, i) => prisma.championship_photos.update({ where: { id }, data: { sort_order: i } })));
-    res.json({ photos: await listEventPhotos(prisma, champ.id) });
+    res.json({ photos: await listEventPhotos(prisma, scope.id) });
   }));
 
-  router.patch('/:championshipId/:photoId', validateBody(eventPhotoUpdateSchema), asyncHandler(async (req, res) => {
-    const champ = await loadEvent(req.params.championshipId);
-    const before = await loadPhoto(champ.id, req.params.photoId);
+  router.patch('/:scope/:photoId', validateBody(eventPhotoUpdateSchema), asyncHandler(async (req, res) => {
+    const scope = await loadScope(req.params.scope);
+    const before = await loadPhoto(scope.id, req.params.photoId);
     const caption = (req.body as { caption: string | null }).caption || null;
     const photo = await prisma.championship_photos.update({ where: { id: before.id }, data: { caption }, select: PHOTO_SELECT });
     await audit(prisma, req, {
-      action: AUDIT_ACTIONS.eventPhotoUpdated,
-      target: { type: 'championships', id: champ.id, label: champ.name },
-      summary: `Changed a photo caption on the "${champ.name}" carousel`,
+      action: AUDIT_ACTIONS.eventPhotoUpdated, target: scope.target,
+      summary: `Changed a photo caption on the ${carousel(scope)}`,
       diff: { caption: { from: before.caption, to: caption } },
     });
     res.json(photo);
   }));
 
-  router.delete('/:championshipId/:photoId', asyncHandler(async (req, res) => {
-    const champ = await loadEvent(req.params.championshipId);
-    const photo = await loadPhoto(champ.id, req.params.photoId);
+  router.delete('/:scope/:photoId', asyncHandler(async (req, res) => {
+    const scope = await loadScope(req.params.scope);
+    const photo = await loadPhoto(scope.id, req.params.photoId);
     // File first: if storage fails the row stays, so the photo can be removed again.
     await storage.remove(photo.storage_key);
     await prisma.championship_photos.delete({ where: { id: photo.id } });
     await audit(prisma, req, {
-      action: AUDIT_ACTIONS.eventPhotoRemoved,
-      target: { type: 'championships', id: champ.id, label: champ.name },
-      summary: `Removed a photo from the "${champ.name}" carousel`,
+      action: AUDIT_ACTIONS.eventPhotoRemoved, target: scope.target,
+      summary: `Removed a photo from the ${carousel(scope)}`,
     });
     res.status(204).end();
   }));

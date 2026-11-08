@@ -68,8 +68,10 @@ the same build as UAT; only this setting differs - see `REALTIME_TRANSPORT` in
 The photo carousel on an event's public Overview stores files in Supabase Storage on beta
 (S3 elsewhere) - see `STORAGE_TRANSPORT` in `apps/api/src/config/env.schema.ts`.
 
-- Apply migration `20261107000000_championship_photos.sql` with `npx supabase db push`.
-  It creates the `championship_photos` table AND the public `event-photos` bucket.
+- Apply migrations `20261107000000_championship_photos.sql` and
+  `20261108000000_championship_photos_all_events.sql` with `npx supabase db push`. The first
+  creates the `championship_photos` table AND the public `event-photos` bucket; the second lets
+  a photo belong to no event, which is how "all events" photos are stored.
 - Set on the `semp-api` function (Configuration > Environment variables):
 
   ```

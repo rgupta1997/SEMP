@@ -10,13 +10,24 @@ export function splitJersey(label: string): { num: string | null; name: string }
   return m ? { num: m[1], name: m[2] } : { num: null, name: label };
 }
 
+// Box, chest inset and digits per size. `chip`: md on a phone (jersey only, no name), sm from sm up.
+const SIZES = {
+  sm: { box: ['h-[19px] w-[24px]', 'h-[19px] w-[30px]'], chest: 'bottom-[2px] top-[6px]', text: ['text-[9px]', 'text-[7.5px]'] },
+  md: { box: ['h-[26px] w-[32px]', 'h-[26px] w-[40px]'], chest: 'bottom-[3px] top-[8px]', text: ['text-[11.5px]', 'text-[10px]'] },
+  chip: {
+    box: ['h-[26px] w-[32px] sm:h-[19px] sm:w-[24px]', 'h-[26px] w-[40px] sm:h-[19px] sm:w-[30px]'],
+    chest: 'bottom-[3px] top-[8px] sm:bottom-[2px] sm:top-[6px]',
+    text: ['text-[11.5px] sm:text-[9px]', 'text-[10px] sm:text-[7.5px]'],
+  },
+} as const;
+
 /** The shirt number as a jersey, before a name. `on` = sits on a selected (brand) chip; `md` for headers. */
-export function JerseyBadge({ num, on = false, size = 'sm', title }: { num: string | number; on?: boolean; size?: 'sm' | 'md'; title?: string }) {
+export function JerseyBadge({ num, on = false, size = 'sm', title }: { num: string | number; on?: boolean; size?: 'sm' | 'md' | 'chip'; title?: string }) {
   num = String(num);
-  const wide = num.length > 2;
+  const wide = num.length > 2 ? 1 : 0;
+  const sz = SIZES[size];
   return (
-    <span className={cn('relative inline-block shrink-0',
-      size === 'md' ? (wide ? 'h-[26px] w-[40px]' : 'h-[26px] w-[32px]') : (wide ? 'h-[19px] w-[30px]' : 'h-[19px] w-[24px]'))}
+    <span className={cn('relative inline-block shrink-0', sz.box[wide])}
       aria-hidden={title ? undefined : true} role={title ? 'img' : undefined} aria-label={title ? `${title} ${num}` : undefined} title={title}
       data-qa="jersey-badge">
       <svg viewBox="0 0 24 20" preserveAspectRatio="none" className={cn('absolute inset-0 h-full w-full',
@@ -25,8 +36,7 @@ export function JerseyBadge({ num, on = false, size = 'sm', title }: { num: stri
       </svg>
       {/* On the chest, below the collar - not centred on the whole shirt. */}
       <span className={cn('absolute inset-x-0 grid place-items-center font-mono font-bold leading-none tabular-nums',
-        size === 'md' ? 'bottom-[3px] top-[8px]' : 'bottom-[2px] top-[6px]',
-        size === 'md' ? (wide ? 'text-[10px]' : 'text-[11.5px]') : (wide ? 'text-[7.5px]' : 'text-[9px]'),
+        sz.chest, sz.text[wide],
         on ? 'text-brand-700' : 'text-white dark:text-slate-900')}>{num}</span>
     </span>
   );
@@ -39,7 +49,7 @@ export function JerseyBadge({ num, on = false, size = 'sm', title }: { num: stri
 export function JerseyInput({ value, onChange, label, title, disabled }: {
   value: number | null | undefined;
   onChange: (raw: string) => void;
-  /** Accessible name, e.g. "Shirt number for Aarav in this match". */
+  /** Accessible name, e.g. "Jersey number for Aarav in this match". */
   label: string;
   title?: string;
   disabled?: boolean;

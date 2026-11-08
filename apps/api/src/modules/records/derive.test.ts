@@ -315,6 +315,25 @@ describe('ranking events · medals per competitor (J4-E1-S3 + J4-E4-S1)', () => 
     expect(deriveRecords(input(fx, { participants: COMPETITORS })).achievements).toEqual([]);
   });
 
+  it('ranks a class added from the event setup, naming the medal after it', () => {
+    const fx = {
+      ...EVENT_FIXTURE, sport_name: 'Powerlifting', discipline_id: null, discipline_name: null,
+      format_config: {},
+      live_state: { event: {
+        extraEvents: [{ key: 'disc-105', label: 'Men ≤105kg' }],
+        participants: [
+          { id: 'c1', name: 'Fast Swimmer', orgId: 'o1', category: 'disc-105', marks: { 'disc-105': 610 } },
+          { id: 'c3', name: 'Third Swimmer', orgId: 'o2', category: 'disc-105', marks: { 'disc-105': 640 } },
+        ],
+      } },
+    };
+    const { achievements } = deriveRecords(input(fx, { participants: COMPETITORS }));
+    expect(achievements.map((a) => [a.user_id, a.medal, a.title.split(',')[0]])).toEqual([
+      ['su3', 'gold', 'Gold - Men ≤105kg'],
+      ['su1', 'silver', 'Silver - Men ≤105kg'],
+    ]);
+  });
+
   it('awards a medal only to competitors matched to an account', () => {
     const { achievements } = deriveRecords(input(EVENT_FIXTURE, { participants: COMPETITORS }));
     // c2 took silver but matched no account - no achievement, and nothing invented.

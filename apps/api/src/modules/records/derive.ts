@@ -5,7 +5,7 @@ import {
   type EventState, type FormatTemplate, type LifetimeEntryKind, type MatchOutcome, type Medal,
   type StandingsPlacement,
 } from '@semp/shared';
-import { isCalledDraw, relayCredits } from '@semp/shared';
+import { isCalledDraw, relayCredits, withExtraSubEvents } from '@semp/shared';
 import { inPlacingStage, placingStagesOf } from '../fixtures/domain/stage-tree.js';
 
 // What a locked result MEANS - as pure functions, with no database anywhere in
@@ -194,12 +194,17 @@ function eventSpecOf(formatConfig: unknown, sportName: string | null): EventSpec
 }
 
 function eventStateOf(liveState: unknown): EventState | null {
-  const ls = liveState as { event?: { participants?: unknown; relayMembers?: unknown }; participants?: unknown } | null;
+  const ls = liveState as { event?: { participants?: unknown; relayMembers?: unknown; extraEvents?: unknown }; participants?: unknown } | null;
   const participants = ls?.event?.participants ?? ls?.participants;
-  // relayMembers: who swam each institute's relay, so they share its medal (relayCredits).
+  // relayMembers: who swam each institute's relay (relayCredits); extraEvents: classes from Setup.
   const relayMembers = ls?.event?.relayMembers;
+  const extraEvents = ls?.event?.extraEvents;
   return Array.isArray(participants)
-    ? ({ participants, ...(relayMembers && typeof relayMembers === 'object' ? { relayMembers } : {}) } as EventState)
+    ? ({
+      participants,
+      ...(relayMembers && typeof relayMembers === 'object' ? { relayMembers } : {}),
+      ...(Array.isArray(extraEvents) ? { extraEvents } : {}),
+    } as EventState)
     : null;
 }
 
@@ -214,7 +219,8 @@ function eventRanksOf(
   const raw = eventSpecOf(fx.format_config, fx.sport_name);
   const state = eventStateOf(fx.live_state);
   if (!raw || !state || state.participants.length === 0) return [];
-  const spec = effectiveEventSpec(raw, { id: fx.discipline_id, name: fx.discipline_name });
+  const named = effectiveEventSpec(raw, { id: fx.discipline_id, name: fx.discipline_name });
+  const spec = fx.discipline_id ? named : withExtraSubEvents(named, state);
   // 'sumBest' totals marks into a team score - there is no per-athlete placing to
   // award a medal from. `detailedContributions` skips medals for the same reason.
   if (spec.result.aggregate === 'sumBest') return [];

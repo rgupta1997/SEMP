@@ -869,14 +869,15 @@ model standings_adjustments {
 /// Event photo carousel (20261107000000 / RDS 032): the file is in storage, this row says where.
 model championship_photos {
   id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  championship_id String        @db.Uuid
+  /// Null = shown on every event's public page.
+  championship_id String?       @db.Uuid
   storage_key     String
   url             String
   caption         String?
   sort_order      Int           @default(0)
   created_by      String?       @db.Uuid
   created_at      DateTime      @default(now()) @db.Timestamptz(6)
-  championships   championships @relation(fields: [championship_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  championships   championships? @relation(fields: [championship_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users           users?        @relation(fields: [created_by], references: [id], onUpdate: NoAction)
 
   @@index([championship_id, sort_order], map: "idx_championship_photos_championship")

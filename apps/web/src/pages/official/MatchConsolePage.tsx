@@ -15,7 +15,7 @@ import {
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
 import { hydrateEvent, hasResultIn, moveUnplacedTo, chosenEvents, toggleRace as toggleRaceState, withRelayRows, lineupOf, raceField, setInLineup, setRelayMembers, relayLegs, rankSubEvent, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
-import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, setResultUnits, formatResultUnit, type ResultUnit, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState, type CricketEvent } from '@semp/shared';
+import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, withExtraSubEvents, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, setResultUnits, formatResultUnit, type ResultUnit, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState, type CricketEvent } from '@semp/shared';
 import { carromHeadline, carromMatchOf, carromRulesOf, drawSettlement, isCarromSport } from '@semp/shared';
 import { CarromResult, carromDecider, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
 import { PoolResult, hydratePool } from '../../features/scoring/PoolResult';
@@ -3306,16 +3306,16 @@ const markMetaFor = (spec: EventSpec, se?: { resultType?: string; unit?: string 
 // Spelled out in full so "40" reads as an actual unit, not a guess.
 const placeholderFor = (unit?: string) => (unit ? EVENT_UNIT_LABEL[unit as keyof typeof EVENT_UNIT_LABEL] ?? unit : 'value');
 
-function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
+function EventConsole({ fixture, fixtureId, spec: baseSpec, live, invalidate }:
   { fixture: any; fixtureId: string; spec: EventSpec; live?: { live_state: any; live_log: any[] }; invalidate: (string | null)[] }) {
-  const pickOne = !!spec.pickOne;
-  const noun = spec.subEventNoun ?? 'sub-event';
+  const pickOne = !!baseSpec.pickOne;
+  const noun = baseSpec.subEventNoun ?? 'sub-event';
   const nounLower = noun.toLowerCase();
   // A named discipline ("66kg") already fixes the one category every entrant is
   // in (effectiveEventSpec narrowed spec.subEvents to just it) - nothing left to
   // pick. Only "Whole sport" still mixes more than one category.
   const isNamedDiscipline = !!fixture?.tournament_disciplines?.discipline_id;
-  const fixedCategory = isNamedDiscipline ? spec.subEvents[0]?.key ?? null : null;
+  const fixedCategory = isNamedDiscipline ? baseSpec.subEvents[0]?.key ?? null : null;
 
   // Whoever's org has a team_entries row for this discipline has one registered
   // entrant on it (squad_max is 1) - shown up front instead of a phone lookup.
@@ -3326,7 +3326,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const entrantRow = (e: (typeof entrants)[number]): ParticipantResult =>
     ({ id: e.org_id ? `e${e.user_id}-${e.org_id}` : `e${e.user_id}`, name: e.name, phone: e.phone, org: e.org, orgId: e.org_id, category: pickOne ? fixedCategory : null, marks: {} });
   // A relay is one entry per institute, with one time - its swimmers listed on the row.
-  const relay = isNamedDiscipline && isRelaySubEvent(spec.subEvents[0]);
+  const relay = isNamedDiscipline && isRelaySubEvent(baseSpec.subEvents[0]);
   const relayRows = (list: typeof entrants): ParticipantResult[] => {
     const byOrg = new Map<string, typeof entrants>();
     for (const e of list) {
@@ -3357,6 +3357,14 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
       ? { participants: seedRows(entrants) }
       : hydrated);
   }, [live]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot seed
+  // The template's classes/races plus any this match added from the event's own disciplines.
+  const spec = useMemo(() => withExtraSubEvents(baseSpec, state), [baseSpec, state.extraEvents]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Named disciplines set up under this sport (Setup > Sports & disciplines), not already built in.
+  const extraChoices: Array<{ key: string; label: string }> = useMemo(() => {
+    const builtIn = new Set(baseSpec.subEvents.map((se) => se.label.trim().toLowerCase()));
+    return ((fixture as any)?.event_disciplines ?? [])
+      .filter((d: { key?: unknown; label?: unknown }) => typeof d?.key === 'string' && typeof d?.label === 'string' && !builtIn.has((d.label as string).trim().toLowerCase()));
+  }, [fixture, baseSpec]);
   // Armed by the first mark an official types, never by the seeding above - see the
   // matching comment in EventRankingConsole.
   const [touched, setTouched] = useState(false);
@@ -3484,6 +3492,14 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     setTouched(true);
     signedOff.current = false;
     setState((s) => toggleRaceState(s, raceKeys, key, isRelaySubEvent(spec.subEvents.find((se) => se.key === key)), pickOne));
+  };
+  const addExtraRace = (choice: { key: string; label: string }) => {
+    setTouched(true);
+    signedOff.current = false;
+    setState((s) => {
+      const withIt = s.extraEvents?.some((e) => e.key === choice.key) ? s : { ...s, extraEvents: [...(s.extraEvents ?? []), choice] };
+      return toggleRaceState(withIt, [...raceKeys, choice.key], choice.key, /\brelay\b/i.test(choice.label), pickOne);
+    });
   };
   // Lineup and relay-swimmer edits from the race tabs: saved like any other change.
   const updateEvent = (fn: (s: EventState) => EventState) => {
@@ -3614,6 +3630,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
           ) : (
             <RaceFirstScoring spec={spec} scoreSpec={scoreSpec} scoringOpts={scoringOpts} state={state} noun={noun} exclusive={pickOne}
               who={isSwimmingFixture(fixture) ? 'swimmer' : pickOne ? 'lifter' : 'competitor'}
+              extraChoices={extraChoices} onAddExtra={addExtraRace}
               onToggle={toggleRace} onMark={setMark} onStatus={setStatus} onUpdate={updateEvent} />
           ))}
           {blockedOnCategory && (
@@ -3687,10 +3704,13 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
  * scorer chose; each race lists only the swimmers picked for it (a relay: one row per
  * institute, with who swam it). "+ Add race" opens a tile picker.
  */
-function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, exclusive = false, onToggle, onMark, onStatus, onUpdate }: {
+function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, exclusive = false, extraChoices = [], onAddExtra, onToggle, onMark, onStatus, onUpdate }: {
   spec: EventSpec; scoreSpec: EventSpec; scoringOpts: EventScoringOpts; state: EventState; noun: string; who: string;
   /** One sub-event per competitor (powerlifting classes): picking someone moves them. */
   exclusive?: boolean;
+  /** The event's own named disciplines for this sport, offered beside the built-in list. */
+  extraChoices?: Array<{ key: string; label: string }>;
+  onAddExtra?: (choice: { key: string; label: string }) => void;
   onToggle: (key: string) => void;
   onMark: (id: string, key: string, n: number | null) => void;
   onStatus: (id: string, key: string, st: ResultStatus | null) => void;
@@ -3704,6 +3724,8 @@ function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, excl
   // Which race has its "choose swimmers" panel open, and which relay row its swimmer list.
   const [choosingFor, setChoosingFor] = useState<string | null>(null);
   const [membersFor, setMembersFor] = useState<string | null>(null);
+  // Row order held while a box in the tab has focus, so a row never jumps away mid-typing.
+  const [frozenOrder, setFrozenOrder] = useState<string[] | null>(null);
   // The open tab follows the chosen list: a removed race hands over to its neighbour.
   const current = active && on.includes(active) ? active : on[0] ?? null;
   // Keep the open tab in view when the row scrolls sideways (many races, or a phone).
@@ -3723,9 +3745,13 @@ function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, excl
     const m = /^(\d+(?:x\d+)?\s?m)\s+(.*)$/i.exec(rest);
     return m ? { distance: m[1].replace(/\s/g, ''), stroke: m[2] } : { distance: rest, stroke: '' };
   };
-  const groups = ["Men's", "Women's", 'Mixed', 'Other']
-    .map((g) => ({ g, items: spec.subEvents.filter((se) => groupOf(se.label) === g) }))
-    .filter((x) => x.items.length);
+  const fromSetup = new Set(extraChoices.map((c) => c.key));
+  const groups = [
+    ...["Men's", "Women's", 'Mixed', 'Other']
+      .map((g) => ({ g, items: spec.subEvents.filter((se) => !fromSetup.has(se.key) && groupOf(se.label) === g) }))
+      .filter((x) => x.items.length),
+    ...(extraChoices.length ? [{ g: 'From your event setup', items: extraChoices }] : []),
+  ];
   const byOrgName = (a: ParticipantResult, b: ParticipantResult) => (a.org ?? '').localeCompare(b.org ?? '') || a.name.localeCompare(b.name);
   const isRelayKey = (key: string) => isRelaySubEvent(spec.subEvents.find((x) => x.key === key));
   const inRace = (key: string) => {
@@ -3736,7 +3762,10 @@ function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, excl
 
   const pick = (key: string) => {
     const adding = !on.includes(key);
-    onToggle(key);
+    // A Setup class not on this match yet is added to it; everything else toggles as usual.
+    const choice = extraChoices.find((c) => c.key === key);
+    if (adding && choice && !spec.subEvents.some((se) => se.key === key)) onAddExtra?.(choice);
+    else onToggle(key);
     if (adding) setActive(key);
   };
 
@@ -3751,7 +3780,7 @@ function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, excl
       </div>
       {groups.map(({ g, items }) => (
         <div key={g}>
-          {groups.length > 1 && <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{g}</div>}
+          {(groups.length > 1 || g === 'From your event setup') && <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{g}</div>}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
             {items.map((se) => {
               const picked = on.includes(se.key);
@@ -3786,6 +3815,12 @@ function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, excl
   const field = raceField(state, relay).sort(byOrgName);
   const done = doneIn(current);
   const ranks = rankSubEvent(scoreSpec, state, current, scoringOpts);
+  // Placing order: 1st first, then no result yet, then DNS / DNF / DQ; names break ties.
+  const bucket = (p: ParticipantResult) => (ranks.has(p.id) ? 0 : resultStatusOf(p, current) ? 2 : 1);
+  const placed = [...rows].sort((a, b) => bucket(a) - bucket(b) || (ranks.get(a.id) ?? 0) - (ranks.get(b.id) ?? 0) || byOrgName(a, b));
+  const ordered = frozenOrder
+    ? [...placed].sort((a, b) => (frozenOrder.indexOf(a.id) + 1 || 1e9) - (frozenOrder.indexOf(b.id) + 1 || 1e9))
+    : placed;
   const medal = (r: number) => r === 1 ? 'bg-amber-400 text-amber-950' : r === 2 ? 'bg-slate-300 text-slate-900' : r === 3 ? 'bg-orange-400 text-orange-950' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200';
   const choosing = choosingFor === current || rows.length === 0;
   const pickWord = relay ? 'teams' : `${who}s`;
@@ -3905,8 +3940,10 @@ function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, excl
           ) : rows.length === 0 ? (
             <p className="px-3 py-4 text-sm text-slate-500 dark:text-slate-400">Pick the {pickWord} in this {nounLower} above - only they get a time box.</p>
           ) : (
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {rows.map((p) => {
+            <div className="divide-y divide-slate-100 dark:divide-slate-800" data-qa="race-rows"
+              onFocus={() => setFrozenOrder((f) => f ?? ordered.map((p) => p.id))}
+              onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFrozenOrder(null); }}>
+              {ordered.map((p) => {
                 const rank = ranks.get(p.id);
                 const members = relay ? membersOf(p) : [];
                 return (

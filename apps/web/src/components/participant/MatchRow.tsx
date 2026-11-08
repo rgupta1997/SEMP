@@ -50,7 +50,7 @@ export function MatchRow({ match, showEvent = true }: { match: MatchSummary; sho
         {match.opponent?.organization && <div className="mt-0.5 truncate text-xs text-slate-400 dark:text-slate-500">{match.opponent.organization}</div>}
         <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
           {fmtDateTime(match.scheduled_at)}
-          {match.my_jersey != null && <span className="ml-2 inline-flex align-middle"><JerseyBadge num={match.my_jersey} title="Your shirt number in this match" /></span>}
+          {match.my_jersey != null && <span className="ml-2 inline-flex align-middle"><JerseyBadge num={match.my_jersey} title="Your jersey number in this match" /></span>}
         </div>
       </div>
       <div className="flex flex-none items-center">

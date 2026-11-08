@@ -44,6 +44,8 @@ export interface EventState {
   lineups?: Record<string, string[]>;
   /** Per relay sub-event, per institute relay row, the swimmers who swam it. */
   relayMembers?: Record<string, Record<string, string[]>>;
+  /** Sub-events added from the event's own disciplines (key = discipline id), beyond the template. */
+  extraEvents?: Array<{ key: string; label: string }>;
 }
 
 export interface DisciplineRef { id: string | null; name: string | null }
@@ -274,4 +276,17 @@ export function relayCredits(
     }
   }
   return out;
+}
+
+/**
+ * The spec plus any sub-events this match added from the event's own disciplines (a "Men ≤105kg"
+ * set up in Setup). They take the spec-level result; "relay" in the name makes a relay. The
+ * console, lock and stats all read them off the match, so a custom class ranks everywhere.
+ */
+export function withExtraSubEvents(spec: EventSpec, state: Pick<EventState, 'extraEvents'> | null | undefined): EventSpec {
+  const have = new Set(spec.subEvents.map((se) => se.key));
+  const extra = (state?.extraEvents ?? [])
+    .filter((e) => e && typeof e.key === 'string' && typeof e.label === 'string' && !have.has(e.key) && (have.add(e.key), true))
+    .map((e) => ({ key: e.key, label: e.label, ...(/\brelay\b/i.test(e.label) ? { kind: 'relay' as const } : {}) }));
+  return extra.length ? { ...spec, subEvents: [...spec.subEvents, ...extra] } : spec;
 }

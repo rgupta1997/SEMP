@@ -1209,13 +1209,14 @@ export function TeamDeck(p: TeamDeckProps) {
                     </button>
                   ))}
                 </div>
-                <div className="grid grid-cols-4 gap-1.5">
+                {/* Three across under 420px, where four squeeze "Red card (second yellow)" to three lines. */}
+                <div className="grid grid-cols-4 gap-1.5 max-[419px]:grid-cols-3">
                   {tapEvents.filter((e) => !(e.points ?? 0)).map((ev) => (
                     <button key={ev.key} type="button" data-qa={`act-${side}-${ev.key}`}
                       disabled={p.disabled || p.busy || (!actor && ev.perPlayer !== false) || (needsSecond(ev) && !second)}
                       onClick={() => fire(ev)}
                       className={cn(
-                        'flex h-9 items-center justify-center rounded-lg px-1 text-center text-[11px] font-semibold leading-tight transition',
+                        'flex min-h-9 items-center justify-center rounded-lg px-1 py-1 text-center text-[11px] font-semibold leading-tight transition',
                         'active:scale-[0.97] disabled:opacity-40',
                         toneOf(ev),
                       )}>
@@ -2086,8 +2087,9 @@ function PersonLabel({ label, on }: { label: string; on: boolean }) {
   const { num, name } = splitJersey(label);
   return (
     <>
-      {num != null && <JerseyBadge num={num} on={on} />}
-      <span className="truncate">{name}</span>
+      {num != null && <JerseyBadge num={num} on={on} size="chip" />}
+      {/* On a phone a numbered player is just the jersey; the name stays for screen readers and the log. */}
+      <span className={cn('truncate', num != null && 'max-sm:sr-only')}>{name}</span>
     </>
   );
 }
@@ -2140,12 +2142,14 @@ function PeopleGrid({ value, options, onChange, qa, cards, foulLimit = 0, blocke
   foulLimit?: number;
 }) {
   const labels = shortNames(options.map(([, label]) => label));
+  // Jerseys only on a phone, so more fit across when every player has a number.
+  const allNumbered = options.every(([v, label]) => v === '' || splitJersey(label).num != null);
   return (
     // Three across on the narrowest phone, and more as there is room - a squad that
     // is four rows on a handset is one row on a laptop, rather than four columns of
     // mostly whitespace. The harness reads these positionally, so the order stays
     // the roster order it was given.
-    <div data-qa={qa} className="grid grid-cols-3 gap-1 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
+    <div data-qa={qa} className={cn('grid gap-1 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8', allNumbered ? 'grid-cols-5' : 'grid-cols-3')}>
       {options.map(([v, label], i) => {
         const on = value === v;
         const shown = v === '' ? label : labels[i];

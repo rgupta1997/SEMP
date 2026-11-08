@@ -8,7 +8,7 @@ import { listChampionshipFixtures } from '../championships/fixtures-list.js';
 import { verifyShareToken } from './share-token.js';
 import { verifySignature, type CertificateFacts } from '../certificates/certificates.service.js';
 import { equalsIgnoreCase } from '../../shared/exact-ci.js';
-import { listEventPhotosSafe } from '../event-photos/event-photos.service.js';
+import { listPublicPhotosSafe } from '../event-photos/event-photos.service.js';
 
 // Unauthenticated, view-only championship pages reachable via a share token. Mounted
 // BEFORE the global requireAuth. Only the read-only Overview + Standings are exposed,
@@ -44,7 +44,7 @@ export function makePublicRouter(prisma: Prisma): Router {
         select: { sports: { select: { name: true, icon: true } } },
         orderBy: { display_order: 'asc' },
       }),
-      listEventPhotosSafe(prisma, id),
+      listPublicPhotosSafe(prisma, id),
     ]);
     if (!champ) throw new NotFoundError('Shared championship');
     // Distinct sports in declared order.

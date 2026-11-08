@@ -379,7 +379,7 @@ function EditProfileModal({ id, onClose, onSaved }: { id: Identity; onClose: () 
     }
     const jerseyNumber = jersey.trim() === '' ? null : Number(jersey);
     if (jerseyNumber != null && !isJerseyNumber(jerseyNumber)) {
-      setHandleError(`Shirt number must be a whole number from ${JERSEY_NUMBER_MIN} to ${JERSEY_NUMBER_MAX}`);
+      setHandleError(`Jersey number must be a whole number from ${JERSEY_NUMBER_MIN} to ${JERSEY_NUMBER_MAX}`);
       return;
     }
     setHandleError(null);
@@ -453,7 +453,7 @@ function EditProfileModal({ id, onClose, onSaved }: { id: Identity; onClose: () 
           </span>
         </div>
 
-        <Field label="Shirt number" hint="Your usual jersey number. Scorers see it on the team sheet and can change it for a single match.">
+        <Field label="Jersey number" hint="Your usual number. Scorers see it on the team sheet and can change it for a single match.">
           <Input
             type="number" inputMode="numeric" min={JERSEY_NUMBER_MIN} max={JERSEY_NUMBER_MAX}
             value={jersey}
@@ -545,7 +545,7 @@ function ProfileHeader({ id, onChanged }: { id: Identity; onChanged: () => void 
           <div className="min-w-0 flex-1">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <h2 className="min-w-0 break-words text-xl sm:text-2xl" style={{ fontFamily: POP, fontWeight: 900, margin: 0, letterSpacing: '-.02em' }}>{id.name}</h2>
-              {id.controlled.jersey_number != null && <JerseyBadge num={id.controlled.jersey_number} size="md" title="Shirt number" />}
+              {id.controlled.jersey_number != null && <JerseyBadge num={id.controlled.jersey_number} size="md" title="Jersey number" />}
               <button onClick={() => setEditOpen(true)} title="Edit profile" aria-label="Edit profile" style={{
                 display: 'grid', placeItems: 'center', width: 26, height: 26, flexShrink: 0, cursor: 'pointer',
                 borderRadius: 7, border: '1px solid var(--line)', background: 'var(--surface-1)', color: 'var(--muted)',

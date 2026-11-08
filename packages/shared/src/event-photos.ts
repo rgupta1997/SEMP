@@ -18,7 +18,10 @@ export const EVENT_PHOTO_MAX_EDGE = 1920;
 export const EVENT_PHOTO_MAX_BYTES = 3 * 1024 * 1024;
 /** Largest original a super admin may pick, before shrinking. */
 export const EVENT_PHOTO_MAX_SOURCE_BYTES = 20 * 1024 * 1024;
+/** Per scope: one event's own photos, or the all-events set. */
 export const EVENT_PHOTO_MAX_COUNT = 20;
+/** The scope (in place of an event id) for photos shown on every event's public page. */
+export const EVENT_PHOTO_ALL_SCOPE = 'all';
 export const EVENT_PHOTO_CAPTION_MAX = 140;
 
 const caption = z.string().trim().max(EVENT_PHOTO_CAPTION_MAX);
@@ -43,4 +46,8 @@ export function base64Bytes(data: string): number {
 }
 
 /** A photo as the public page and the manage screen receive it. */
-export interface EventPhoto { id: string; url: string; caption: string | null; sort_order: number }
+export interface EventPhoto {
+  id: string; url: string; caption: string | null; sort_order: number;
+  /** On the public page: this event's own photo, or one shown on every event. */
+  scope?: 'event' | 'all';
+}

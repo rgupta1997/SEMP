@@ -88,7 +88,7 @@ export function TeamSheetPanel({ sportName, usual, sides, initial, onSave, onCan
           {note && <div className="mt-1 text-xs text-amber-700 dark:text-amber-300">{note}</div>}
           {clashes.length > 0 && (
             <div className="mt-1 text-xs text-amber-700 dark:text-amber-300" data-qa="jersey-clash">
-              Same shirt number on more than one player: {clashes.map((n) => `#${n}`).join(', ')}.
+              Same jersey number on more than one player: {clashes.map((n) => `#${n}`).join(', ')}.
             </div>
           )}
         </div>
@@ -98,8 +98,16 @@ export function TeamSheetPanel({ sportName, usual, sides, initial, onSave, onCan
           const people = ordered.filter((p) => slotOf(s, p.id) === slot.key);
           return (
             <div key={slot.key} className="grid gap-1.5">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                {slot.label} ({people.length})
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                  {slot.label} ({people.length})
+                </span>
+                {/* Jerseys don't look editable, so say it once per side, on the first list with people. */}
+                {!disabled && people.length > 0 && slot.key === SLOTS.find((x) => ordered.some((p) => slotOf(s, p.id) === x.key))?.key && (
+                  <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300" data-qa="jersey-hint">
+                    Tap a jersey to change its number
+                  </span>
+                )}
               </div>
               {people.length === 0 ? (
                 <div className="text-xs text-slate-400 dark:text-slate-500">Nobody.</div>
@@ -110,7 +118,7 @@ export function TeamSheetPanel({ sportName, usual, sides, initial, onSave, onCan
                       value={s.jerseys?.[p.id]}
                       onChange={(raw) => setJersey(t.side, p.id, raw)}
                       disabled={disabled}
-                      label={`Shirt number for ${p.name} in this match`}
+                      label={`Jersey number for ${p.name} in this match`}
                       title={p.jersey != null ? `Profile number: #${p.jersey}` : 'No number on their profile'}
                     />
                     <span className="min-w-0 truncate text-sm text-slate-700 dark:text-slate-200">{p.name}</span>
@@ -142,7 +150,7 @@ export function TeamSheetPanel({ sportName, usual, sides, initial, onSave, onCan
         <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Team sheet</div>
         <div className="text-xs text-slate-500 dark:text-slate-400">
           Suggested from each squad - change anyone with Play, Sub or Out. Only players and substitutes appear in the scoring pickers.
-          Shirt numbers come from each player's profile; changing one here is for this match only.
+          Jersey numbers come from each player's profile; changing one here is for this match only.
         </div>
       </div>
 

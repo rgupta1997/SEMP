@@ -8,7 +8,7 @@ import { EVENT_PHOTO_MAX_BYTES, EVENT_PHOTO_MAX_COUNT } from '@semp/shared';
 vi.mock('../../config/env.js', () => ({ env: { NODE_ENV: 'test', JWT_SECRET: 'x'.repeat(48), STORAGE_TRANSPORT: 'supabase' }, isProduction: false }));
 vi.mock('../iam/audit.service.js', async (orig) => ({ ...(await orig<typeof import('../iam/audit.service.js')>()), audit: vi.fn(async () => undefined) }));
 
-type Row = { id: string; championship_id: string; storage_key: string; url: string; caption: string | null; sort_order: number; created_at: Date; created_by: string };
+type Row = { id: string; championship_id: string | null; storage_key: string; url: string; caption: string | null; sort_order: number; created_at: Date; created_by: string };
 let rows: Row[] = [];
 const EVENT = '22222222-2222-4222-8222-222222222222';
 const pick = (r: Row) => ({ id: r.id, url: r.url, caption: r.caption, sort_order: r.sort_order });
@@ -127,5 +127,27 @@ describe('event photos (super admin)', () => {
     storage.remove.mockRejectedValueOnce(new Error('S3 down'));
     expect((await call('DELETE', `/${EVENT}/${p.id}`)).status).toBe(500);
     expect(rows).toHaveLength(1);
+  });
+
+  it("keeps an all-events set apart from each event's own photos", async () => {
+    const own = (await upload('Event only')).body;
+    const all = await call('POST', '/all', { data: IMG, contentType: 'image/jpeg', caption: 'Every event' });
+    expect(all.status).toBe(201);
+    expect(storage.put.mock.calls[1]![0]).toMatch(/^events\/all\/[0-9a-f-]{36}\.jpg$/);
+    expect(rows.find((r) => r.id === all.body.id)!.championship_id).toBeNull();
+    expect((await call('GET', '/all')).body.photos.map((x: { id: string }) => x.id)).toEqual([all.body.id]);
+    expect((await call('GET', `/${EVENT}`)).body.photos.map((x: { id: string }) => x.id)).toEqual([own.id]);
+    // A photo is edited or removed only through its own scope.
+    expect((await call('DELETE', `/${EVENT}/${all.body.id}`)).status).toBe(404);
+    expect((await call('PATCH', `/all/${all.body.id}`, { caption: 'Renamed' })).body.caption).toBe('Renamed');
+    expect((await call('DELETE', `/all/${all.body.id}`)).status).toBe(204);
+  });
+
+  it('shows an event its own photos first, then the all-events ones', async () => {
+    const { listPublicPhotos } = await import('./event-photos.service.js');
+    await call('POST', '/all', { data: IMG, contentType: 'image/jpeg', caption: 'Every event' });
+    await upload('Event only');
+    const shown = await listPublicPhotos(prisma as never, EVENT);
+    expect(shown.map((x) => [x.caption, x.scope])).toEqual([['Event only', 'event'], ['Every event', 'all']]);
   });
 });
