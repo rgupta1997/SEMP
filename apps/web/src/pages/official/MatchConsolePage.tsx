@@ -4400,11 +4400,11 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
   const awayName = teamLabel(awayTeam(fixture));
   const homeOrg = orgLabel(homeTeam(fixture));
   const awayOrg = orgLabel(awayTeam(fixture));
-  // Seed from the live detailed tally when one exists (so switching Detailed → Manual
-  // keeps the score instead of resetting), else from the saved headline. An empty
-  // tally (a team sheet but no play) must not hide a saved, typed-in result.
+  // Seed from the saved score: Detailed saves it with every tap, so it is never older than
+  // the tally, and a score typed here later must not be replaced by the old tally on reopen.
+  // The tally is only the fallback when nothing is saved yet.
   const liveH = live?.live_state && Object.keys(live.live_state).length > 0 ? headline(def, hydrate(live.live_state)) : null;
-  const useLive = !!liveH && (liveH.a !== 0 || liveH.b !== 0 || fixture.home_score == null);
+  const useLive = !!liveH && (fixture.home_score == null || fixture.away_score == null);
   const seedHome = useLive ? liveH!.a : fixture.home_score;
   const seedAway = useLive ? liveH!.b : fixture.away_score;
   const [home, setHome] = useState(seedHome != null ? String(seedHome) : '');
@@ -4450,10 +4450,12 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
   const racquetShape = def.archetype === 'sets' || def.archetype === 'rally' || !!format;
   const winsNeeded = racquetShape && !singleUnit ? (top && format ? top.target : Math.ceil(def.segMax / 2)) : null;
   const playAll = !!unitLevel?.playAll;
+  // Level after the board limit can still be a result where boards won or tie-break totals decide.
+  const carromLevelOk = !!carrom && carrom.maxBoards != null && (carrom.boardsWonDecides || carrom.tieBreakBoards > 1);
   const carromGameValid = (a: number, b: number) => {
     const hi = Math.max(a, b);
     // With a board limit a game can end short of the target on the higher score.
-    return a !== b && hi <= carrom!.gameTarget && (carrom!.maxBoards != null || hi === carrom!.gameTarget);
+    return (a !== b || carromLevelOk) && hi <= carrom!.gameTarget && (carrom!.maxBoards != null || hi === carrom!.gameTarget);
   };
   // A time cap can stop play short of the target, so any score inside the limits stands.
   // Multi-unit stays lenient on level: time up can go to the side ahead in the set in play.
@@ -4470,7 +4472,7 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
   const gamesError = !gamesValid && hs != null && as != null
     ? carrom && singleUnit
       ? carrom.maxBoards != null
-        ? `A carrom game ends on ${carrom.gameTarget}, or on the higher score after ${carrom.maxBoards} boards - nobody passes ${carrom.gameTarget} and it can't be level.`
+        ? `A carrom game ends on ${carrom.gameTarget}, or on the higher score after ${carrom.maxBoards} boards - nobody passes ${carrom.gameTarget}${carromLevelOk ? '' : " and it can't be level"}.`
         : `A carrom game ends when one side reaches ${carrom.gameTarget}: the winner is on ${carrom.gameTarget} and the other side on fewer - e.g. ${carrom.gameTarget}-14.`
       : timed
       ? singleUnit && unitLevel
@@ -4496,8 +4498,16 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
   // A knockout needs a winner: level is allowed (won on penalties), a draw is not.
   const knockout = isKnockoutFixture(fixture) || isKnockoutRound(fixture.round);
   const knockoutNeedsWinner = knockout && !winnerId && hs != null && as != null;
+  // A level carrom game was won on boards or tie-break totals: the winner can't be read off the score.
+  const carromLevelNeedsWinner = carromLevelOk && singleUnit && hs != null && hs === as && winner !== 'home' && winner !== 'away';
+  // An unfinished score saved as a draw is how a called-off match is recorded: say so, don't block it.
+  const calledOffDraw = racquetShape && !gamesValid && winner === 'draw' && hs != null && as != null;
 
   const submit = (status: 'live' | 'completed') => {
+    if (carromLevelNeedsWinner) {
+      toast.error('Level on points: pick who won the game on boards under Winner.');
+      return;
+    }
     if (status === 'completed' && knockoutNeedsWinner) {
       toast.error('A knockout match must have a winner. Level score? Pick who won (e.g. on penalties) under Winner.');
       return;
@@ -4537,8 +4547,14 @@ function ManualResult({ fixture, fixtureId, def, live, invalidate, onDone, forma
             <option value="away">{awayName}</option>
             {!knockout && <option value="draw">Tie / draw</option>}
           </Select>
-          {knockoutNeedsWinner && (
+          {knockoutNeedsWinner && !carromLevelNeedsWinner && (
             <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">Knockout match: the scores are level, so pick who won (e.g. on penalties or a golden raid).</p>
+          )}
+          {carromLevelNeedsWinner && (
+            <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300" data-qa="carrom-level-winner">Level on points after {carrom!.maxBoards} boards: pick who won the game on boards.</p>
+          )}
+          {calledOffDraw && (
+            <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300" data-qa="called-off-draw">This isn't a finished score, so it will be saved as a match called off at {hs}-{as}. If the match was finished, fix the score instead.</p>
           )}
         </div>
         <div className="mt-4">
