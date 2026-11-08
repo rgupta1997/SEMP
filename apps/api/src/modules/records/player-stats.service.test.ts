@@ -256,4 +256,54 @@ describe('buildPlayerStatRows · who actually played', () => {
     ]);
     expect(rows.filter((r) => !r.played).map((r) => r.user_id).sort()).toEqual(['a1', 'a3', 'b1']);
   });
+
+  const SWIM_SPEC = {
+    subEvents: [
+      { key: 'm25f', label: "Men's 25m Freestyle" },
+      { key: 'relay4', label: "Men's 4x25m Freestyle Relay", kind: 'relay' },
+    ],
+    result: { resultType: 'time', winnerIs: 'min', unit: 's', aggregate: 'medals', medalPoints: [5, 3, 1] },
+  };
+  const swimFixture = (event: Record<string, unknown>) => fakeDb({
+    id: 'fx1', round: 'Event', stage_sequence: null, home_team_id: null, away_team_id: null,
+    lock_version: 1, scheduled_at: new Date('2026-11-08'), winner_team_id: null, home_score: null, away_score: null,
+    tournament_disciplines: {
+      format_config: { scoring: { fixtureType: 'event', event: SWIM_SPEC } },
+      discipline_id: null, disciplines: null,
+      tournament_sports: { sport_id: 'sport-swim', sports: { name: 'Swimming' } },
+    },
+    live_state: { event },
+  });
+
+  it('counts a relay swum as one of the swimmer\'s results, at the team time and place', async () => {
+    const db = swimFixture({
+      participants: [
+        { id: 'c1', name: 'A', orgId: 'o1', marks: {} },
+        { id: 'relay:o1', name: 'O1 relay', orgId: 'o1', marks: { relay4: 60.5 } },
+        { id: 'relay:o2', name: 'O2 relay', orgId: 'o2', marks: { relay4: 62 } },
+      ],
+      relayMembers: { relay4: { 'relay:o1': ['c1'] } },
+    });
+    const rows = await buildPlayerStatRows(db, 'fx1', {
+      resolved: [{ user_id: 'u1', team_id: 't1', organization_id: 'o1', competitor_id: 'c1', name: 'A' }], unmatched: [],
+    });
+    expect(rows[0].stats).toEqual({ mark: 60.5, measured: 1, rank: 1, podium: 1 });
+  });
+
+  it('never ranks a disqualified swimmer, even with a time typed beside the DQ', async () => {
+    const db = swimFixture({
+      participants: [
+        { id: 'c1', name: 'A', orgId: 'o1', marks: { m25f: 14 }, statuses: { m25f: 'DQ' } },
+        { id: 'c2', name: 'B', orgId: 'o2', marks: { m25f: 15 } },
+      ],
+    });
+    const rows = await buildPlayerStatRows(db, 'fx1', {
+      resolved: [
+        { user_id: 'u1', team_id: 't1', organization_id: 'o1', competitor_id: 'c1', name: 'A' },
+        { user_id: 'u2', team_id: 't2', organization_id: 'o2', competitor_id: 'c2', name: 'B' },
+      ], unmatched: [],
+    });
+    expect(rows.find((r) => r.user_id === 'u1')!.stats.rank).toBeUndefined();
+    expect(rows.find((r) => r.user_id === 'u2')!.stats.rank).toBe(1);
+  });
 });

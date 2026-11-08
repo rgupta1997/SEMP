@@ -7,7 +7,7 @@ import {
   type BattingRow, type BowlingRow, type EventSpec, type EventState, type FieldingRow,
   type FormatTemplate, type MatchOutcome, type Pairing, type RallyEvent, type RallyLog, type ScoringFormat, type Side,
 } from '@semp/shared';
-import { isCalledDraw, matchJerseys } from '@semp/shared';
+import { isCalledDraw, matchJerseys, relayCredits, type ParticipantResult } from '@semp/shared';
 import { Prisma } from '@prisma/client';
 import type { Db } from '../../infra/prisma.js';
 import { writeCategoryLines, type CategoryLineInput } from './category-lines.service.js';
@@ -121,9 +121,17 @@ export async function buildPlayerStatRows(
       (fx.live_state as { event?: { participants?: unknown } } | null)?.event?.participants
       ?? (fx.live_state as { participants?: unknown } | null)?.participants
       ?? []
-    ) as Array<{ id: string; marks?: Record<string, number | null> }>;
+    ) as Array<{ id: string; orgId?: string | null; org?: string | null; marks?: Record<string, number | null>; statuses?: ParticipantResult['statuses'] }>;
     const marksOf = new Map(eventParticipants.map((c) => [c.id, c.marks ?? {}]));
-    const state: EventState = { participants: eventParticipants.map((c) => ({ id: c.id, name: '', marks: c.marks ?? {} })) };
+    // Statuses and institute kept, so a DQ is never ranked here when the medals skip it.
+    const relayMembers = (fx.live_state as { event?: { relayMembers?: EventState['relayMembers'] } } | null)?.event?.relayMembers;
+    const state: EventState = {
+      participants: eventParticipants.map((c) => ({
+        id: c.id, name: '', orgId: c.orgId ?? null, org: c.org ?? null, marks: c.marks ?? {},
+        ...(c.statuses ? { statuses: c.statuses } : {}),
+      })),
+      ...(relayMembers ? { relayMembers } : {}),
+    };
 
     // Same resolution as derive.ts's eventMedals(): stored template wins,
     // else the sport's seeded one, narrowed to the discipline's own category.
@@ -160,12 +168,17 @@ export async function buildPlayerStatRows(
       return winnerIsOf(a.category) === 'min' ? (b.mark < a.mark ? b : a) : (b.mark > a.mark ? b : a);
     };
 
+    // A relay swum counts as one of the swimmer's results, at the team's time and place.
+    const relays = spec ? relayCredits(spec, state) : [];
     return participants.resolved.map((p) => {
       const marks = p.competitor_id ? marksOf.get(p.competitor_id) ?? {} : {};
       const entries = Object.entries(marks).filter((e): e is [string, number] => typeof e[1] === 'number');
+      const relayEntries = relays
+        .filter((r) => r.competitorId === p.competitor_id && r.mark != null)
+        .map((r) => ({ category: r.subKey, mark: r.mark!, rank: r.rank as number | null }));
       let stats: Record<string, number> = {};
-      if (entries.length) {
-        const ranked = entries.map(([category, mark]) => ({ category, mark, rank: rankOf(p.competitor_id, category) }));
+      if (entries.length || relayEntries.length) {
+        const ranked = [...entries.map(([category, mark]) => ({ category, mark, rank: rankOf(p.competitor_id, category) })), ...relayEntries];
         const best = ranked.reduce(betterOf);
         // `measured`/`podium` are unit-free counts, so unlike `mark` they stay
         // meaningful summed across categories that don't share a unit.

@@ -36,7 +36,15 @@ export function resultStatusOf(p: Pick<ParticipantResult, 'statuses'>, subKey: s
   return s && (RESULT_STATUSES as readonly string[]).includes(s) ? s : null;
 }
 
-export interface EventState { participants: ParticipantResult[] }
+export interface EventState {
+  participants: ParticipantResult[];
+  /** Sub-events the scorer chose to run, in the order picked. Display only - scoring reads the marks. */
+  events?: string[];
+  /** Per sub-event, the row ids in it (absent = everyone). Display only. */
+  lineups?: Record<string, string[]>;
+  /** Per relay sub-event, per institute relay row, the swimmers who swam it. */
+  relayMembers?: Record<string, Record<string, string[]>>;
+}
 
 export interface DisciplineRef { id: string | null; name: string | null }
 
@@ -240,5 +248,30 @@ export function detailedContributions(spec: EventSpec, state: EventState, opts: 
   return [...byOrg.values()];
 }
 
+/** Id prefix of an institute's relay row in a whole-sport event: a team, never a person. */
+export const RELAY_ROW_PREFIX = 'relay:';
+
 /** A relay sub-event: one entry (and one time) per institute. */
 export const isRelaySubEvent = (se?: { kind?: string } | null): boolean => se?.kind === 'relay';
+
+/**
+ * Every swimmer ticked as swimming an institute's relay, credited with that relay's place and
+ * time - in swimming each relay swimmer shares the team's medal. Relay rows are not people.
+ */
+export function relayCredits(
+  spec: EventSpec, state: EventState, opts: EventScoringOpts = {},
+): Array<{ competitorId: string; subKey: string; rank: number; mark: number | null }> {
+  const out: Array<{ competitorId: string; subKey: string; rank: number; mark: number | null }> = [];
+  for (const se of spec.subEvents) {
+    if (!isRelaySubEvent(se)) continue;
+    for (const [rowId, rank] of rankSubEvent(spec, state, se.key, opts)) {
+      if (!rowId.startsWith(RELAY_ROW_PREFIX)) continue;
+      const mark = state.participants.find((p) => p.id === rowId)?.marks[se.key];
+      const members = state.relayMembers?.[se.key]?.[rowId] ?? [];
+      for (const m of members.filter((x, i) => members.indexOf(x) === i)) {
+        out.push({ competitorId: m, subKey: se.key, rank, mark: typeof mark === 'number' ? mark : null });
+      }
+    }
+  }
+  return out;
+}

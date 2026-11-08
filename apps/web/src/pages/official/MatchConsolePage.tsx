@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Trash2 } from 'lucide-react';
+import { ChevronDown, Plus, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useApi, useApiMutation, fmtDateTime } from '../../lib/hooks';
@@ -14,7 +14,7 @@ import {
   hydrateTie, initTie, rubbersWon, tieScore, tieOutcome, tieTarget, rubberDef, decideRubber as decideRubberFn, reopenRubber as reopenRubberFn,
   type TieState, type RubberInstance,
 } from '../../features/scoring/tie';
-import { hydrateEvent, hasResultIn, moveUnplacedTo, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
+import { hydrateEvent, hasResultIn, moveUnplacedTo, chosenEvents, toggleRace as toggleRaceState, withRelayRows, lineupOf, raceField, setInLineup, setRelayMembers, relayLegs, rankSubEvent, aggregateEvent, subEventResults, readTimeInput, formatTime, placementPoints, type EventState, type ParticipantResult } from '../../features/scoring/event';
 import { ARCHIVED_READ_ONLY_MESSAGE, rankingContributions, detailedContributions, effectiveEventSpec, isRelaySubEvent, resultStatusOf, RESULT_STATUSES, RESULT_STATUS_LABEL, type ResultStatus, foldCricket, foldRally, rallyTiming, formatClock, clockReading, isCricketSport, isKernelSport, isRacquetSport, statSpecFor, eventMinuteLabels, resolveFormat, resolveMatchFormat, resultEnvelope, setResultUnits, formatResultUnit, type ResultUnit, isCricketFormat, cricketHeadline, cricketSideTotals, inningsLine, EVENT_UNIT_LABEL, type CricketLog, type CricketState, type CricketEvent } from '@semp/shared';
 import { carromHeadline, carromMatchOf, carromRulesOf, drawSettlement, isCarromSport } from '@semp/shared';
 import { CarromResult, carromDecider, hydrateCarrom, type CarromState } from '../../features/scoring/CarromResult';
@@ -3372,11 +3372,11 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
       if (relay) {
         const knownOrgs = new Set(s.participants.map((p) => p.orgId ?? p.org));
         const missing = entrants.filter((e) => !knownOrgs.has(e.org_id ?? e.org));
-        return missing.length ? { participants: [...s.participants, ...relayRows(missing)] } : s;
+        return missing.length ? { ...s, participants: [...s.participants, ...relayRows(missing)] } : s;
       }
       const known = new Set(s.participants.map((p) => (p.phone ?? '').replace(/\D/g, '')));
       const missing = entrants.filter((e) => !known.has((e.phone ?? '').replace(/\D/g, '')));
-      return missing.length ? { participants: [...s.participants, ...missing.map(entrantRow)] } : s;
+      return missing.length ? { ...s, participants: [...s.participants, ...missing.map(entrantRow)] } : s;
     });
   }, [entrants]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -3426,7 +3426,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const patchP = (id: string, patch: Partial<ParticipantResult>) => {
     setTouched(true);
     signedOff.current = false;
-    setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+    setState((s) => ({ ...s, participants: s.participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
   };
   const setOrg = (id: string, orgId: string) => patchP(id, { orgId: orgId || null, org: orgs.find((o) => o.id === orgId)?.name ?? null });
   void setOrg; // dead code - see comment above
@@ -3449,6 +3449,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     signedOff.current = false;
     if (key === globalCategory) setEnteredHere(true);
     setState((s) => ({
+      ...s,
       participants: s.participants.map((p) => {
         if (p.id !== id) return p;
         const { [key]: _old, ...rest } = p.statuses ?? {};
@@ -3463,7 +3464,32 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     setTouched(true);
     signedOff.current = false;
     if (key === globalCategory) setEnteredHere(true);
-    setState((s) => ({ participants: s.participants.map((p) => (p.id === id ? { ...p, marks: { ...p.marks, [key]: n } } : p)) }));
+    setState((s) => ({ ...s, participants: s.participants.map((p) => (p.id === id ? { ...p, marks: { ...p.marks, [key]: n } } : p)) }));
+  };
+  // Race-first scoring: put a race on screen, or take it off (asking first if it has results).
+  const raceKeys = spec.subEvents.map((se) => se.key);
+  // A relay chosen before relay rows existed gets them on open; not a change worth saving by itself.
+  useEffect(() => {
+    if (chosenEvents(state, raceKeys).some((k) => isRelaySubEvent(spec.subEvents.find((se) => se.key === k)))) {
+      setState((s) => withRelayRows(s));
+    }
+  }, [state.participants.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleRace = async (key: string) => {
+    const label = spec.subEvents.find((se) => se.key === key)?.label ?? nounLower;
+    const filled = chosenEvents(state, raceKeys).includes(key) ? state.participants.filter((p) => hasResultIn(p, key)).length : 0;
+    if (filled && !(await confirmDialog({
+      title: `Remove ${label}?`, tone: 'danger', confirmLabel: 'Remove',
+      message: `${filled} result${filled === 1 ? '' : 's'} in ${label} will be cleared.`,
+    }))) return;
+    setTouched(true);
+    signedOff.current = false;
+    setState((s) => toggleRaceState(s, raceKeys, key, isRelaySubEvent(spec.subEvents.find((se) => se.key === key)), pickOne));
+  };
+  // Lineup and relay-swimmer edits from the race tabs: saved like any other change.
+  const updateEvent = (fn: (s: EventState) => EventState) => {
+    setTouched(true);
+    signedOff.current = false;
+    setState(fn);
   };
 
   // `eventStandings` is the per-org contribution (points + medals from each sub-event's
@@ -3519,14 +3545,15 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
   const subtitle = pickOne
     ? isNamedDiscipline
       ? `Enter each competitor's total${unit} for ${spec.subEvents[0]?.label ?? noun}.`
-      : `Pick a ${nounLower}, then enter its competitors' totals${unit}. Each keeps the ${nounLower} their total was entered in.`
+      : `Add the ${pluralOf(nounLower)} being contested, put each competitor in theirs, then enter their totals${unit}.`
     : isNamedDiscipline
       ? `Enter each competitor's mark${unit} for ${spec.subEvents[0]?.label ?? noun}.`
-      : `Enter each competitor's mark per ${nounLower}${unit}.`;
+      : `Pick the ${nounLower}s being run, then enter each competitor's result in them.`;
   const markLabel = `Total${unit}`;
   // Whole sport, nothing chosen: no default any more, blocks scoring until an
   // explicit choice is made (was the "silently defaults to first category" bug).
-  const blockedOnCategory = pickOne && !isNamedDiscipline && !category;
+  // Whole sport now scores in per-class tabs, so nothing blocks on a single picked class.
+  const blockedOnCategory = false;
   // Exactly one mark per row for pickOne or a named discipline; only a
   // genuinely multi-category whole-sport grid sport needs per-race columns.
   const singleMark = pickOne || isNamedDiscipline;
@@ -3537,14 +3564,6 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
         <CardHeader title="Participants & results" subtitle={subtitle} />
         <CardBody className="space-y-3">
           <p className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-slate-600 dark:bg-brand-500/10 dark:text-slate-300">{scoringText}</p>
-          {pickOne && !isNamedDiscipline && (
-            <Field label={noun} hint={!category ? `Choose a ${nounLower} before scoring anyone in this session.` : undefined}>
-              <Select value={category ?? ''} onChange={(e) => setGlobalCategory(e.target.value)}>
-                <option value="" disabled>- Choose {nounLower} -</option>
-                {spec.subEvents.map((se) => <option key={se.key} value={se.key}>{se.label}</option>)}
-              </Select>
-            </Field>
-          )}
           {state.participants.length === 0 && (
             <p className="text-sm text-slate-400 dark:text-slate-500">No registered entrants for this discipline yet.</p>
           )}
@@ -3553,7 +3572,7 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
               subtitle above, not repeated on every single row. A genuinely
               multi-category "Whole sport" grid sport is the only shape that still
               needs its own column per race. */}
-          {state.participants.length > 0 && (singleMark ? (
+          {state.participants.length > 0 && (isNamedDiscipline || spec.subEvents.length < 2 ? (
             <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
               {state.participants.map((p) => (
                 <div key={p.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2.5 sm:flex-nowrap">
@@ -3592,92 +3611,10 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
                 </div>
               ))}
             </div>
-          ) : isSwimmingFixture(fixture) ? (
-            // Swimming: swimmers grouped under their institute, each a dropdown, so a
-            // dozen swimmers a college no longer means a dozen full cards to scroll past.
-            <div className="space-y-2">
-              {[...state.participants.reduce((m, p) => {
-                const key = p.orgId ?? p.org ?? '';
-                m.set(key, [...(m.get(key) ?? []), p]);
-                return m;
-              }, new Map<string, ParticipantResult[]>()).entries()]
-                .sort(([, a], [, b]) => (a[0]?.org ?? '').localeCompare(b[0]?.org ?? ''))
-                .map(([key, people]) => {
-                  const resultsOf = (p: ParticipantResult) => spec.subEvents.filter((se) => hasResultIn(p, se.key)).length;
-                  const total = people.reduce((n, p) => n + resultsOf(p), 0);
-                  return (
-                    <details key={key || 'none'} className="group rounded-xl border border-slate-200 dark:border-slate-800">
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
-                        <span className="min-w-0 truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{people[0]?.org || 'No institute'}</span>
-                        <span className="flex shrink-0 items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                          {people.length} swimmer{people.length === 1 ? '' : 's'} · {total} result{total === 1 ? '' : 's'}
-                          <ChevronDown className="h-4 w-4 transition group-open:rotate-180" />
-                        </span>
-                      </summary>
-                      <div className="divide-y divide-slate-100 border-t border-slate-100 dark:divide-slate-800 dark:border-slate-800">
-                        {people.map((p) => {
-                          const n = resultsOf(p);
-                          return (
-                            <details key={p.id} className="group/swimmer">
-                              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
-                                <span className="min-w-0 truncate text-sm text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}</span>
-                                <span className={cn('flex shrink-0 items-center gap-2 text-xs', n ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500')}>
-                                  {n ? `${n} race${n === 1 ? '' : 's'}` : 'No results'}
-                                  <ChevronDown className="h-4 w-4 transition group-open/swimmer:rotate-180" />
-                                </span>
-                              </summary>
-                              <div className="px-3 pb-3">
-                                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                                  {spec.subEvents.map((se) => {
-                                    const seMeta = markMetaFor(spec, se);
-                                    return (
-                                      <label key={se.key} className="block min-w-0">
-                                        <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
-                                        <MarkInput
-                                          value={p.marks[se.key] ?? null} isTime={seMeta.isTime} disabled={!!resultStatusOf(p, se.key)}
-                                          placeholder={seMeta.isTime ? undefined : placeholderFor(seMeta.unit)}
-                                          onChange={(v) => setMark(p.id, se.key, v)} ariaLabel={`${p.name || 'competitor'} ${se.label}`}
-                                        />
-                                        <StatusSelect value={resultStatusOf(p, se.key)} onChange={(st) => setStatus(p.id, se.key, st)}
-                                          ariaLabel={`${p.name || 'competitor'} ${se.label} status`} className="mt-1 w-full" />
-                                      </label>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            </details>
-                          );
-                        })}
-                      </div>
-                    </details>
-                  );
-                })}
-            </div>
           ) : (
-            state.participants.map((p) => (
-              <div key={p.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
-                <Field label="Competitor" compact>
-                  <p className="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">{p.name || 'Unnamed'}{p.org ? <span className="font-normal text-slate-400 dark:text-slate-500"> · {p.org}</span> : null}</p>
-                </Field>
-                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {spec.subEvents.map((se) => {
-                    const seMeta = markMetaFor(spec, se);
-                    return (
-                      <label key={se.key} className="block">
-                        <span className="mb-1 block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400" title={se.label}>{se.label}</span>
-                        <MarkInput
-                          value={p.marks[se.key] ?? null} isTime={seMeta.isTime} disabled={!!resultStatusOf(p, se.key)}
-                          placeholder={seMeta.isTime ? undefined : placeholderFor(seMeta.unit)}
-                          onChange={(n) => setMark(p.id, se.key, n)} ariaLabel={`${p.name || 'competitor'} ${se.label}`}
-                        />
-                        <StatusSelect value={resultStatusOf(p, se.key)} onChange={(st) => setStatus(p.id, se.key, st)}
-                          ariaLabel={`${p.name || 'competitor'} ${se.label} status`} className="mt-1 w-full" />
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            ))
+            <RaceFirstScoring spec={spec} scoreSpec={scoreSpec} scoringOpts={scoringOpts} state={state} noun={noun} exclusive={pickOne}
+              who={isSwimmingFixture(fixture) ? 'swimmer' : pickOne ? 'lifter' : 'competitor'}
+              onToggle={toggleRace} onMark={setMark} onStatus={setStatus} onUpdate={updateEvent} />
           ))}
           {blockedOnCategory && (
             <p className="text-sm text-rose-600 dark:text-rose-400">Choose a {nounLower} above before saving.</p>
@@ -3743,6 +3680,293 @@ function EventConsole({ fixture, fixtureId, spec, live, invalidate }:
     </div>
   );
 }
+
+
+/**
+ * Race-first scoring for a "whole sport" multi-race event (swimming): one tab per race the
+ * scorer chose; each race lists only the swimmers picked for it (a relay: one row per
+ * institute, with who swam it). "+ Add race" opens a tile picker.
+ */
+function RaceFirstScoring({ spec, scoreSpec, scoringOpts, state, noun, who, exclusive = false, onToggle, onMark, onStatus, onUpdate }: {
+  spec: EventSpec; scoreSpec: EventSpec; scoringOpts: EventScoringOpts; state: EventState; noun: string; who: string;
+  /** One sub-event per competitor (powerlifting classes): picking someone moves them. */
+  exclusive?: boolean;
+  onToggle: (key: string) => void;
+  onMark: (id: string, key: string, n: number | null) => void;
+  onStatus: (id: string, key: string, st: ResultStatus | null) => void;
+  onUpdate: (fn: (s: EventState) => EventState) => void;
+}) {
+  const nounLower = noun.toLowerCase();
+  const keys = spec.subEvents.map((se) => se.key);
+  const on = chosenEvents(state, keys);
+  const [active, setActive] = useState<string | null>(on[0] ?? null);
+  const [picking, setPicking] = useState(on.length === 0);
+  // Which race has its "choose swimmers" panel open, and which relay row its swimmer list.
+  const [choosingFor, setChoosingFor] = useState<string | null>(null);
+  const [membersFor, setMembersFor] = useState<string | null>(null);
+  // The open tab follows the chosen list: a removed race hands over to its neighbour.
+  const current = active && on.includes(active) ? active : on[0] ?? null;
+  // Keep the open tab in view when the row scrolls sideways (many races, or a phone).
+  const tabRow = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = tabRow.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    const row = tabRow.current;
+    if (el && row) row.scrollTo({ left: el.offsetLeft - row.clientWidth / 2 + el.clientWidth / 2, behavior: 'smooth' });
+  }, [current, picking]);
+
+  // "Men's 25m Freestyle" and "Men ≤63kg" both group under Men's.
+  const groupOf = (label: string) => /^men('s)?\s/i.test(label) ? "Men's" : /^women('s)?\s/i.test(label) ? "Women's" : /^mixed\s/i.test(label) ? 'Mixed' : 'Other';
+  const short = (label: string) => label.replace(/^(men's|women's|men|women|mixed)\s+/i, '');
+  // "4x25m Freestyle Relay" -> distance "4x25m", stroke "Freestyle Relay".
+  const parts = (label: string) => {
+    const rest = short(label);
+    const m = /^(\d+(?:x\d+)?\s?m)\s+(.*)$/i.exec(rest);
+    return m ? { distance: m[1].replace(/\s/g, ''), stroke: m[2] } : { distance: rest, stroke: '' };
+  };
+  const groups = ["Men's", "Women's", 'Mixed', 'Other']
+    .map((g) => ({ g, items: spec.subEvents.filter((se) => groupOf(se.label) === g) }))
+    .filter((x) => x.items.length);
+  const byOrgName = (a: ParticipantResult, b: ParticipantResult) => (a.org ?? '').localeCompare(b.org ?? '') || a.name.localeCompare(b.name);
+  const isRelayKey = (key: string) => isRelaySubEvent(spec.subEvents.find((x) => x.key === key));
+  const inRace = (key: string) => {
+    const ids = new Set(lineupOf(state, key, isRelayKey(key), exclusive));
+    return raceField(state, isRelayKey(key)).filter((p) => ids.has(p.id)).sort(byOrgName);
+  };
+  const doneIn = (key: string) => inRace(key).filter((p) => hasResultIn(p, key)).length;
+
+  const pick = (key: string) => {
+    const adding = !on.includes(key);
+    onToggle(key);
+    if (adding) setActive(key);
+  };
+
+  const picker = (
+    <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-900/40" data-qa="race-picker">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Add {pluralOf(nounLower)}</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">Tap every {nounLower} being {exclusive ? 'contested' : 'run'}. Each gets its own tab.</div>
+        </div>
+        {on.length > 0 && <Button size="sm" onClick={() => setPicking(false)} data-qa="race-picker-done">Done</Button>}
+      </div>
+      {groups.map(({ g, items }) => (
+        <div key={g}>
+          {groups.length > 1 && <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{g}</div>}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+            {items.map((se) => {
+              const picked = on.includes(se.key);
+              const { distance, stroke } = parts(se.label);
+              return (
+                <button key={se.key} type="button" onClick={() => pick(se.key)} aria-pressed={picked} data-qa="race-tile"
+                  title={picked ? `Remove ${se.label}` : `Add ${se.label}`}
+                  className={cn('relative flex min-h-[64px] flex-col items-start justify-center rounded-xl border px-3 py-2 pr-8 text-left transition active:scale-[0.98]',
+                    picked
+                      ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500 dark:border-brand-400 dark:bg-brand-500/15 dark:ring-brand-400'
+                      : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-slate-600 dark:hover:bg-slate-700/70')}>
+                  <span className={cn('font-mono text-base font-bold leading-tight', picked ? 'text-brand-700 dark:text-brand-200' : 'text-slate-800 dark:text-slate-100')}>{distance}</span>
+                  {stroke && <span className="mt-0.5 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{stroke}</span>}
+                  <span className={cn('absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full text-[11px] font-bold',
+                    picked ? 'bg-brand-600 text-white' : 'border border-slate-300 text-transparent dark:border-slate-600')}>✓</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  if (!current) return <div data-qa="race-first">{picker}</div>;
+
+  const se = spec.subEvents.find((x) => x.key === current)!;
+  const relay = isRelaySubEvent(se);
+  const legs = relayLegs(se.label);
+  const meta = markMetaFor(spec, se);
+  const rows = inRace(current);
+  const field = raceField(state, relay).sort(byOrgName);
+  const done = doneIn(current);
+  const ranks = rankSubEvent(scoreSpec, state, current, scoringOpts);
+  const medal = (r: number) => r === 1 ? 'bg-amber-400 text-amber-950' : r === 2 ? 'bg-slate-300 text-slate-900' : r === 3 ? 'bg-orange-400 text-orange-950' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200';
+  const choosing = choosingFor === current || rows.length === 0;
+  const pickWord = relay ? 'teams' : `${who}s`;
+
+  // Taking someone out clears their result in this race, so ask first when there is one.
+  const setIn = async (p: ParticipantResult, inIt: boolean) => {
+    if (!inIt && hasResultIn(p, current) && !(await confirmDialog({
+      title: `Take ${p.name} out of ${se.label}?`, tone: 'danger', confirmLabel: 'Take out',
+      message: `Their result in this ${nounLower} will be cleared.`,
+    }))) return;
+    const from = exclusive && inIt && p.category && p.category !== current ? spec.subEvents.find((x) => x.key === p.category) : undefined;
+    if (from && hasResultIn(p, from.key) && !(await confirmDialog({
+      title: `Move ${p.name} to ${se.label}?`, tone: 'danger', confirmLabel: 'Move',
+      message: `${p.name} already has a result in ${from.label}. It will be cleared.`,
+    }))) return;
+    // Stay open until Done, even when this pick is what made the race non-empty.
+    setChoosingFor(current);
+    onUpdate((s) => setInLineup(s, current, relay, p.id, inIt, exclusive));
+  };
+  const swimmersOf = (row: ParticipantResult) => raceField(state, false).filter((p) => (p.orgId ?? p.org) === (row.orgId ?? row.org)).sort(byOrgName);
+  const membersOf = (row: ParticipantResult) => state.relayMembers?.[current]?.[row.id] ?? [];
+  const toggleMember = (row: ParticipantResult, id: string) => {
+    const now = membersOf(row);
+    const next = now.includes(id) ? now.filter((x) => x !== id) : [...now, id];
+    if (next.length > legs) { toast.warning(`A ${short(se.label)} has ${legs} swimmers`); return; }
+    onUpdate((s) => setRelayMembers(s, current, row.id, next, legs));
+  };
+  const nameOf = (id: string) => state.participants.find((p) => p.id === id)?.name ?? '?';
+
+  const chooser = (
+    <div className="space-y-3 border-b border-slate-100 bg-slate-50/50 px-3 py-3 dark:border-slate-800 dark:bg-slate-900/30" data-qa="lineup-chooser">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+          {relay ? 'Which institutes swim this relay?' : `Who is ${who === 'swimmer' ? 'swimming' : who === 'lifter' ? 'lifting in' : 'competing in'} ${se.label}?`}
+        </span>
+        {rows.length > 0 && <Button size="sm" onClick={() => setChoosingFor(null)} data-qa="lineup-done">Done</Button>}
+      </div>
+      {[...new Set(field.map((p) => p.org ?? ''))].map((org) => (
+        <div key={org || 'none'}>
+          {!relay && <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{org || 'No institute'}</div>}
+          <div className="flex flex-wrap gap-1.5">
+            {field.filter((p) => (p.org ?? '') === org).map((p) => {
+              const inIt = rows.some((r) => r.id === p.id);
+              return (
+                <button key={p.id} type="button" onClick={() => setIn(p, !inIt)} aria-pressed={inIt} data-qa="lineup-pill"
+                  className={cn('rounded-full border px-3 py-1.5 text-sm font-medium transition',
+                    inIt ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300')}>
+                  {inIt ? '✓ ' : ''}{relay ? (p.org ?? p.name) : p.name}
+                  {/* Already in another class: picking them here moves them. */}
+                  {exclusive && !inIt && p.category && p.category !== current && (
+                    <span className="ml-1 text-[11px] opacity-70">· {short(spec.subEvents.find((x) => x.key === p.category)?.label ?? '')}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="space-y-3" data-qa="race-first">
+      {/* One tab per race; scrolls sideways on a phone. */}
+      <div ref={tabRow} className="relative -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1" role="tablist" aria-label={pluralOf(noun)}>
+        {on.map((key) => {
+          const x = spec.subEvents.find((s2) => s2.key === key)!;
+          const n = doneIn(key);
+          const total = inRace(key).length;
+          const isOn = key === current && !picking;
+          return (
+            <button key={key} type="button" role="tab" aria-selected={isOn} data-qa="race-tab"
+              onClick={() => { setActive(key); setPicking(false); }}
+              className={cn('flex shrink-0 flex-col items-start rounded-xl border px-3 py-2 text-left transition',
+                isOn ? 'border-brand-600 bg-brand-600 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700')}>
+              <span className="whitespace-nowrap text-sm font-semibold">{x.label}</span>
+              <span className={cn('text-[11px] tabular-nums', isOn ? 'text-white/80' : total > 0 && n === total ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500')}>
+                {total === 0 ? `pick ${isRelaySubEvent(x) ? 'teams' : `${who}s`}` : `${n}/${total} entered`}
+              </span>
+            </button>
+          );
+        })}
+        <button type="button" role="tab" aria-selected={picking} onClick={() => setPicking((v) => !v)} data-qa="race-add-tab"
+          className={cn('flex shrink-0 items-center gap-1.5 rounded-xl border border-dashed px-3 py-2 text-sm font-semibold transition',
+            picking ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-200' : 'border-slate-300 text-slate-500 hover:border-brand-400 hover:text-brand-600 dark:border-slate-600 dark:text-slate-400')}>
+          <Plus className="h-4 w-4" /> Add {nounLower}
+        </button>
+      </div>
+
+      {picking ? picker : (
+        <section className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800" data-qa="race-card" role="tabpanel">
+          <header className="space-y-2 bg-slate-50 px-3 py-2.5 dark:bg-slate-800/50">
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-0">
+                <span className="block truncate text-base font-semibold text-slate-800 dark:text-slate-100">{se.label}</span>
+                {relay && <span className="block text-[11px] text-slate-500 dark:text-slate-400">One time per institute · {legs} swimmers each</span>}
+              </span>
+              <span className="flex shrink-0 items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                {done}/{rows.length} entered
+                <button type="button" onClick={() => setChoosingFor(choosing ? null : current)} data-qa="lineup-toggle"
+                  className="ml-1 rounded-md px-2 py-1 font-semibold text-brand-600 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-500/10">
+                  {relay ? 'Teams' : `Choose ${who}s`}
+                </button>
+                <button type="button" onClick={() => onToggle(current)} aria-label={`Remove ${se.label}`} title={`Remove ${se.label}`}
+                  className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10">
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+              <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${rows.length ? (done / rows.length) * 100 : 0}%` }} />
+            </div>
+          </header>
+          {choosing && chooser}
+          {field.length === 0 ? (
+            <p className="px-3 py-4 text-sm text-slate-400 dark:text-slate-500">No registered entrants yet.</p>
+          ) : rows.length === 0 ? (
+            <p className="px-3 py-4 text-sm text-slate-500 dark:text-slate-400">Pick the {pickWord} in this {nounLower} above - only they get a time box.</p>
+          ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {rows.map((p) => {
+                const rank = ranks.get(p.id);
+                const members = relay ? membersOf(p) : [];
+                return (
+                  <div key={p.id} className="px-3 py-2.5" data-qa="race-row">
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 sm:flex-nowrap">
+                      <span className="flex min-w-0 basis-full items-center gap-2.5 sm:flex-1 sm:basis-auto">
+                        <span className={cn('grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-bold tabular-nums',
+                          rank ? medal(rank) : 'border border-dashed border-slate-300 text-slate-300 dark:border-slate-600 dark:text-slate-600')}
+                          title={rank ? `Placed ${ordinal(rank)}` : 'No time yet'} data-qa="race-rank">
+                          {rank ?? '-'}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium text-slate-700 dark:text-slate-200" title={p.name}>{relay ? (p.org ?? p.name) : (p.name || 'Unnamed')}</span>
+                          {relay ? (
+                            <button type="button" onClick={() => setMembersFor(membersFor === p.id ? null : p.id)} data-qa="relay-members"
+                              className="block max-w-full truncate text-left text-[11px] text-brand-600 hover:underline dark:text-brand-300">
+                              {members.length ? members.map(nameOf).join(', ') : `Add who swam (up to ${legs})`}
+                            </button>
+                          ) : p.org && <span className="block truncate text-[11px] text-slate-400 dark:text-slate-500">{p.org}</span>}
+                        </span>
+                      </span>
+                      <div className="flex w-full items-start gap-1.5 sm:w-auto sm:shrink-0">
+                        <div className="min-w-0 flex-1 sm:w-32 sm:flex-none">
+                          <MarkInput
+                            value={p.marks[current] ?? null} isTime={meta.isTime} disabled={!!resultStatusOf(p, current)}
+                            placeholder={meta.isTime ? undefined : placeholderFor(meta.unit)}
+                            onChange={(n) => onMark(p.id, current, n)} ariaLabel={`${p.name || who} ${se.label}`}
+                          />
+                        </div>
+                        <StatusSelect value={resultStatusOf(p, current)} onChange={(st) => onStatus(p.id, current, st)}
+                          ariaLabel={`${p.name || who} ${se.label} status`} />
+                      </div>
+                    </div>
+                    {relay && membersFor === p.id && (
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-50 p-2 dark:bg-slate-800/60" data-qa="relay-member-picker">
+                        <span className="w-full text-[11px] text-slate-500 dark:text-slate-400">Who swam for {p.org} ({members.length}/{legs})</span>
+                        {swimmersOf(p).length === 0 ? <span className="text-xs text-slate-400">No swimmers on this institute's squad.</span> : swimmersOf(p).map((m) => {
+                          const inIt = members.includes(m.id);
+                          return (
+                            <button key={m.id} type="button" onClick={() => toggleMember(p, m.id)} aria-pressed={inIt} data-qa="relay-member-pill"
+                              className={cn('rounded-full border px-2.5 py-1 text-xs font-medium transition',
+                                inIt ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300')}>
+                              {inIt ? '✓ ' : ''}{m.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
+const pluralOf = (w: string) => (/[^aeiou]y$/i.test(w) ? `${w.slice(0, -1)}ies` : /s$/i.test(w) ? w : `${w}s`);
 
 // Numeric/time mark cell. Keeps the raw string the official typed (so mid-entry values
 // like "1:0" aren't reformatted under the cursor) and emits the parsed number upward;

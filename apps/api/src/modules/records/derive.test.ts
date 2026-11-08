@@ -276,6 +276,45 @@ describe('ranking events · medals per competitor (J4-E1-S3 + J4-E4-S1)', () => 
     ]);
   });
 
+  // Whole-sport relay: one row per institute, the swimmers who swam it ticked beside it.
+  const RELAY_FIXTURE = {
+    ...EVENT_FIXTURE,
+    discipline_name: null,
+    format_config: {
+      scoring: {
+        fixtureType: 'event', scoringMode: 'detailed',
+        event: {
+          subEvents: [{ key: 'relay4', label: "Men's 4x25m Freestyle Relay", kind: 'relay' }],
+          result: { resultType: 'time', winnerIs: 'min', unit: 's', aggregate: 'medals', medalPoints: [5, 3, 1] },
+        },
+      },
+    },
+    live_state: {
+      event: {
+        participants: [
+          { id: 'c1', name: 'Fast Swimmer', orgId: 'o1', marks: {} },
+          { id: 'c3', name: 'Third Swimmer', orgId: 'o2', marks: {} },
+          { id: 'relay:o1', name: 'O1 relay', orgId: 'o1', marks: { relay4: 61.2 } },
+          { id: 'relay:o2', name: 'O2 relay', orgId: 'o2', marks: { relay4: 60.1 } },
+        ],
+        relayMembers: { relay4: { 'relay:o1': ['c1'], 'relay:o2': ['c3'] } },
+      },
+    },
+  };
+
+  it('gives every swimmer of a relay the team medal, and the relay row to nobody', () => {
+    const { achievements } = deriveRecords(input(RELAY_FIXTURE, { participants: COMPETITORS }));
+    expect(achievements.map((a) => ({ u: a.user_id, m: a.medal, t: a.title.split(',')[0] }))).toEqual([
+      { u: 'su3', m: 'gold', t: "Gold - Men's 4x25m Freestyle Relay" },
+      { u: 'su1', m: 'silver', t: "Silver - Men's 4x25m Freestyle Relay" },
+    ]);
+  });
+
+  it('credits nobody for a relay whose swimmers were not ticked', () => {
+    const fx = { ...RELAY_FIXTURE, live_state: { event: { ...RELAY_FIXTURE.live_state.event, relayMembers: {} } } };
+    expect(deriveRecords(input(fx, { participants: COMPETITORS })).achievements).toEqual([]);
+  });
+
   it('awards a medal only to competitors matched to an account', () => {
     const { achievements } = deriveRecords(input(EVENT_FIXTURE, { participants: COMPETITORS }));
     // c2 took silver but matched no account - no achievement, and nothing invented.

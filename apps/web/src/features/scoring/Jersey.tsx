@@ -46,7 +46,7 @@ export function JerseyInput({ value, onChange, label, title, disabled }: {
 }) {
   const filled = value != null;
   return (
-    <span className="group relative inline-grid h-9 w-11 flex-none place-items-center" title={title}>
+    <span className="group relative inline-grid h-8 w-10 flex-none place-items-center" title={title}>
       <svg viewBox="0 0 24 20" aria-hidden
         className={cn('absolute inset-0 h-full w-full transition-colors',
           filled
@@ -65,7 +65,7 @@ export function JerseyInput({ value, onChange, label, title, disabled }: {
         aria-label={label}
         data-qa="sheet-jersey"
         // Sits on the chest, below the collar; spinners hidden so three digits fit.
-        className={cn('relative z-10 mt-1.5 w-full bg-transparent text-center font-mono text-[11px] font-bold tabular-nums outline-none',
+        className={cn('relative z-10 mt-1 w-full bg-transparent text-center font-mono text-[10.5px] font-bold tabular-nums outline-none',
           '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
           'placeholder:font-semibold placeholder:text-slate-400 dark:placeholder:text-slate-500',
           filled ? 'text-white dark:text-slate-900' : 'text-slate-700 dark:text-slate-200',

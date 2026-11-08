@@ -7,7 +7,7 @@
 import type { EventSpec } from '@semp/shared';
 import {
   aggregateEvent, placementPoints, rankSubEvent,
-  resultStatusOf,
+  resultStatusOf, RELAY_ROW_PREFIX,
   type AggRow, type EventOrgContribution, type EventScoringOpts, type EventState, type ParticipantResult, type ResultStatus,
 } from '@semp/shared';
 
@@ -21,14 +21,170 @@ export function hasResultIn(p: ParticipantResult, cat?: string | null): boolean 
   return !!cat && (typeof p.marks[cat] === 'number' || !!resultStatusOf(p, cat));
 }
 
+/**
+ * The sub-events on screen: the ones the scorer chose, then any other with a result in it,
+ * so nothing already typed is hidden. Unknown keys (an event since removed) are dropped.
+ */
+export function chosenEvents(state: EventState, keys: string[]): string[] {
+  const known = new Set(keys);
+  const picked = (state.events ?? []).filter((k, i, a) => known.has(k) && a.indexOf(k) === i);
+  const withResults = keys.filter((k) => !picked.includes(k) && state.participants.some((p) => hasResultIn(p, k)));
+  return [...picked, ...withResults];
+}
+
+/** Add a sub-event to the screen, or take it off along with every mark and status in it. */
+export function toggleEvent(state: EventState, keys: string[], key: string): EventState {
+  const on = chosenEvents(state, keys);
+  if (!on.includes(key)) return { ...state, events: [...on, key] };
+  return {
+    ...state,
+    events: on.filter((k) => k !== key),
+    participants: state.participants.map((p) => {
+      const { [key]: _m, ...marks } = p.marks;
+      const { [key]: _s, ...statuses } = p.statuses ?? {};
+      return { ...p, marks, ...(p.statuses ? { statuses } : {}) };
+    }),
+  };
+}
+
+// ---- Who is in each race (whole-sport swimming) -----------------------------------------
+// A race's lineup is the rows that get a time box. No lineup stored = everyone eligible
+// (old matches, and fields of one swimmer per institute). A relay race's rows are one per
+// institute, kept beside the swimmers with RELAY_ROW_PREFIX ids.
+
+export { RELAY_ROW_PREFIX };
+export const isRelayRow = (p: Pick<ParticipantResult, 'id'>): boolean => p.id.startsWith(RELAY_ROW_PREFIX);
+
+/** Legs in a relay from its label ("4x25m ..." -> 4); 4 when the label does not say. */
+export function relayLegs(label: string): number {
+  const m = /(\d+)\s*x\s*\d+/i.exec(label);
+  return m ? Number(m[1]) : 4;
+}
+
+/** One relay row per institute among the swimmers, added once and kept. */
+export function withRelayRows(state: EventState): EventState {
+  const have = new Set(state.participants.filter(isRelayRow).map((p) => p.orgId ?? p.org));
+  const add: ParticipantResult[] = [];
+  for (const p of state.participants) {
+    if (isRelayRow(p)) continue;
+    const k = p.orgId ?? p.org;
+    if (!k || have.has(k)) continue;
+    have.add(k);
+    add.push({ id: `${RELAY_ROW_PREFIX}${k}`, name: `${p.org ?? 'Institute'} relay`, phone: null, org: p.org ?? null, orgId: p.orgId ?? null, category: null, marks: {} });
+  }
+  return add.length ? { ...state, participants: [...state.participants, ...add] } : state;
+}
+
+/** The rows a race can hold: institutes for a relay, swimmers otherwise. */
+export function raceField(state: EventState, relay: boolean): ParticipantResult[] {
+  return state.participants.filter((p) => isRelayRow(p) === relay);
+}
+
+/** True when some institute has more than one swimmer - then each race needs its swimmers picked. */
+export function needsLineups(state: EventState): boolean {
+  const seen = new Set<string>();
+  for (const p of raceField(state, false)) {
+    const k = p.orgId ?? p.org ?? p.id;
+    if (seen.has(k)) return true;
+    seen.add(k);
+  }
+  return false;
+}
+
+/**
+ * Ids in this race: its stored lineup plus anyone already with a result. With no stored lineup,
+ * the whole field - unless an institute has several swimmers, then only those with a result
+ * (a race picked before lineups existed must not suddenly list every swimmer).
+ */
+export function lineupOf(state: EventState, key: string, relay: boolean, exclusive = false): string[] {
+  const field = raceField(state, relay);
+  // One class per competitor (powerlifting): the class they are in is their own `category`.
+  if (exclusive) return field.filter((p) => p.category === key || hasResultIn(p, key)).map((p) => p.id);
+  const stored = state.lineups?.[key];
+  if (!stored) return (relay || !needsLineups(state) ? field : field.filter((p) => hasResultIn(p, key))).map((p) => p.id);
+  const ids = new Set(stored);
+  return field.filter((p) => ids.has(p.id) || hasResultIn(p, key)).map((p) => p.id);
+}
+
+const clearIn = (p: ParticipantResult, key: string): ParticipantResult => {
+  const { [key]: _m, ...marks } = p.marks;
+  const { [key]: _s, ...statuses } = p.statuses ?? {};
+  return { ...p, marks, ...(p.statuses ? { statuses } : {}) };
+};
+
+/** Put a row in a race or take it out; out also clears its result there (and relay swimmers). */
+export function setInLineup(state: EventState, key: string, relay: boolean, id: string, on: boolean, exclusive = false): EventState {
+  if (exclusive) {
+    // In: this class becomes theirs, and any result in their old class goes. Out: no class.
+    return {
+      ...state,
+      participants: state.participants.map((p) => {
+        if (p.id !== id) return p;
+        const old = p.category && p.category !== key ? p.category : null;
+        const cleared = old ? clearIn(p, old) : p;
+        return on ? { ...cleared, category: key } : { ...clearIn(p, key), category: null };
+      }),
+    };
+  }
+  const now = lineupOf(state, key, relay);
+  const next = on ? (now.includes(id) ? now : [...now, id]) : now.filter((x) => x !== id);
+  const { [id]: _gone, ...restMembers } = state.relayMembers?.[key] ?? {};
+  return {
+    ...state,
+    lineups: { ...(state.lineups ?? {}), [key]: next },
+    ...(on || !state.relayMembers?.[key] ? {} : { relayMembers: { ...state.relayMembers, [key]: restMembers } }),
+    participants: on ? state.participants : state.participants.map((p) => (p.id === id ? clearIn(p, key) : p)),
+  };
+}
+
+/** The swimmers who swam one institute's relay leg list, capped at the legs. */
+export function setRelayMembers(state: EventState, key: string, rowId: string, ids: string[], legs: number): EventState {
+  const unique = ids.filter((x, i) => ids.indexOf(x) === i).slice(0, legs);
+  return { ...state, relayMembers: { ...(state.relayMembers ?? {}), [key]: { ...(state.relayMembers?.[key] ?? {}), [rowId]: unique } } };
+}
+
+/**
+ * Add a race (relay rows created when it is a relay; an empty lineup when swimmers must be
+ * picked) or remove it with every result, lineup and relay list in it.
+ */
+export function toggleRace(state: EventState, keys: string[], key: string, relay: boolean, exclusive = false): EventState {
+  const adding = !chosenEvents(state, keys).includes(key);
+  if (!adding) {
+    const next = toggleEvent(state, keys, key);
+    const { [key]: _l, ...lineups } = next.lineups ?? {};
+    const { [key]: _r, ...relayMembers } = next.relayMembers ?? {};
+    return {
+      ...next,
+      ...(next.lineups ? { lineups } : {}),
+      ...(next.relayMembers ? { relayMembers } : {}),
+      // A removed class frees its competitors for another.
+      ...(exclusive ? { participants: next.participants.map((p) => (p.category === key ? { ...p, category: null } : p)) } : {}),
+    };
+  }
+  if (exclusive) return toggleEvent(state, keys, key);
+  const base = relay ? withRelayRows(state) : state;
+  const next = toggleEvent(base, keys, key);
+  return !relay && needsLineups(next) ? { ...next, lineups: { ...(next.lineups ?? {}), [key]: [] } } : next;
+}
+
 /** One-screen categories: the class picker moves only competitors without a result; the rest keep theirs. */
 export function moveUnplacedTo(state: EventState, cat: string): EventState {
-  return { participants: state.participants.map((p) => (hasResultIn(p, p.category) ? p : { ...p, category: cat, marks: {} })) };
+  return { ...state, participants: state.participants.map((p) => (hasResultIn(p, p.category) ? p : { ...p, category: cat, marks: {} })) };
 }
 
 export function hydrateEvent(raw: any): EventState {
   const ps = Array.isArray(raw?.participants) ? raw.participants : [];
+  const events = Array.isArray(raw?.events) ? raw.events.filter((k: unknown): k is string => typeof k === 'string') : null;
+  const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+  const lineups = raw?.lineups && typeof raw.lineups === 'object'
+    ? Object.fromEntries(Object.entries(raw.lineups as Record<string, unknown>).map(([k, v]) => [k, strings(v)])) : null;
+  const relayMembers = raw?.relayMembers && typeof raw.relayMembers === 'object'
+    ? Object.fromEntries(Object.entries(raw.relayMembers as Record<string, unknown>).map(([k, v]) => [k,
+      v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([r, ids]) => [r, strings(ids)])) : {}])) : null;
   return {
+    ...(events ? { events } : {}),
+    ...(lineups ? { lineups } : {}),
+    ...(relayMembers ? { relayMembers } : {}),
     participants: ps.map((p: any, i: number) => ({
       id: typeof p?.id === 'string' ? p.id : `p${i}`,
       name: typeof p?.name === 'string' ? p.name : '',
